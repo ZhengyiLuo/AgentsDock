@@ -101,6 +101,25 @@ class CodexSubagentConfigTests(unittest.TestCase):
             "max_concurrent_threads_per_session": 23}}, source="fixture"),
             {"agents": {"max_concurrent_threads_per_session": 23}})
 
+    def test_chat_limit_set_and_clear_preserve_private_and_server_defaults(self):
+        self.write_settings({"thread_config": {"agents": {
+            "max_concurrent_threads_per_session": 12, "enabled": False,
+        }}})
+        original = {"agents": {"max_threads": 20, "default_subagent_model": "child-model"}}
+        session = {"id": "fixture", "subagent_limit": 3, "codex_config_overrides": original}
+        expected = {**self.transport, "agents.enabled": False,
+                    "agents.default_subagent_model": "child-model"}
+        self.assertEqual(self.params(session)["config"], {
+            **expected, "agents.max_concurrent_threads_per_session": 3})
+        session["subagent_limit"] = None
+        self.assertEqual(self.params(session)["config"], {
+            **expected, "agents.max_concurrent_threads_per_session": 20})
+        self.write_settings({})
+        self.assertEqual(self.params(session)["config"], {
+            **self.transport, "agents.default_subagent_model": "child-model",
+            "agents.max_concurrent_threads_per_session": 20})
+        self.assertEqual(original, {"agents": {"max_threads": 20, "default_subagent_model": "child-model"}})
+
     def test_invalid_limits_do_not_restore_hidden_default(self):
         for invalid in (True, False, 0, -1, "8", None):
             with self.subTest(invalid=invalid):

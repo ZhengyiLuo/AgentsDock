@@ -1,5 +1,31 @@
 # Development and release log
 
+## 2026-09-19 — Supplied reasoning and per-chat limits — 1.0.4-beta.9
+
+- Retain Codex's explicitly supplied plaintext in a distinct reasoning event,
+  separate from summaries sharing the same native item ID. Negotiate its
+  transient stream independently for older clients, preserve chronological
+  anchors, and retain partial text on interruption. Never inspect or decode
+  encrypted reasoning.
+- Add strictly validated optional per-chat native concurrency limits.
+  Preserve existing private and server configuration when clearing the new
+  override. Scope Codex settings to its thread and Claude settings to its
+  process; never modify shared provider credentials or configuration.
+- Apply Claude changes only when its provider can restart while idle, keeping
+  tracked background agents alive. Report Codex's native loaded-thread reset
+  limitation explicitly and track pending application without restarting a
+  shared process or inventing a default limit.
+- Verify a real authenticated Claude turn: one child runs at a configured
+  limit of one, additional Agent attempts receive native limit rejection,
+  and the turn completes. Verify Codex native admission with deterministic
+  Responses: limits of one and two admit exactly those child counts and
+  preserve sibling configuration. A separate authenticated Codex turn
+  verifies the live provider boundary. Normal auth/config files remain intact.
+- Exercise per-chat saving, clearing, busy-state preservation, fork/config
+  inheritance, stale process markers and save-during-start races. Test
+  summary/plaintext streaming, native completion, WebSocket negotiation,
+  semantic paging and interruption through isolated production harnesses.
+
 ## 2026-09-19 — Live thinking summaries — 1.0.4-beta.8
 
 - Add live Codex summary snapshots with section ordering, revision fencing,

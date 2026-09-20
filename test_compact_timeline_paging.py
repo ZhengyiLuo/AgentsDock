@@ -9,6 +9,28 @@ import agent_server
 
 
 class CompactTimelinePagingTests(unittest.IsolatedAsyncioTestCase):
+    def test_plaintext_is_retained_in_trace_without_displacing_summary_preview(self):
+        for scheduled in (False, True):
+            with self.subTest(scheduled=scheduled):
+                metadata = {"run_id": "channel-run"}
+                if scheduled:
+                    metadata.update(job_id="job-channel", job_title="Check", purpose="scheduled_job")
+                self.write_events([
+                    self.event(1, "turn_started", prompt="Question", **metadata),
+                    self.event(2, "reasoning_summary", phase="summary", text="Public summary", **metadata),
+                    self.event(3, "reasoning_text", phase="reasoning", text="Provider plaintext", **metadata),
+                    self.event(4, "assistant_text", text="Answer", **metadata),
+                    self.event(5, "turn_finished", result_text="Answer", **metadata),
+                ])
+                agent_server.TIMELINE_INDEX_CACHE.clear()
+                page = agent_server.read_semantic_timeline_page(self.session_id, limit=2, tail=True)
+                if not scheduled:
+                    self.assertTrue(any(event["type"] == "reasoning_summary" for event in page["events"]))
+                self.assertFalse(any(event["type"] == "reasoning_text" for event in page["events"]))
+                trace = agent_server.read_indexed_run_trace(self.session_id, "channel-run", anchor_seq=5)
+                self.assertEqual([event["type"] for event in trace["events"]], ["reasoning_summary", "reasoning_text"])
+                self.assertEqual(agent_server.timeline_index_event_text(trace["events"][1]), "")
+
     def setUp(self) -> None:
         self.temporary = tempfile.TemporaryDirectory()
         self.previous_state_dir = agent_server.STATE_DIR

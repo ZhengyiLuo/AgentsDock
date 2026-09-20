@@ -766,6 +766,7 @@ class ForkSessionFallbackTests(unittest.IsolatedAsyncioTestCase):
             "folder": "General",
             "cwd": "/tmp",
             "backend": agent_server.BACKEND_CLAUDE,
+            "subagent_limit": 3,
         }
         child = {
             "id": child_id,
@@ -777,8 +778,9 @@ class ForkSessionFallbackTests(unittest.IsolatedAsyncioTestCase):
         }
         sessions = {parent_id: parent}
 
-        async def create_child(*_args, **kwargs) -> dict:
+        async def create_child(request, **kwargs) -> dict:
             self.assertTrue(kwargs["initializing_fork"])
+            self.assertEqual(request.subagent_limit, parent["subagent_limit"])
             sessions[child_id] = child
             return child
 

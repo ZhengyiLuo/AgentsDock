@@ -5,8 +5,10 @@ import asyncio
 from contextlib import suppress
 import copy
 import json
+import re
 from pathlib import Path
 import tempfile
+import threading
 from types import SimpleNamespace
 from typing import Any, Literal
 import unittest
@@ -21,6 +23,8 @@ import test_codex_subagent_config_isolated as config_fixture
 
 SOURCE = Path(__file__).with_name("agent_server.py")
 FUNCTIONS = {"preview_session_runtime_update", "session_backend_locked", "public_session",
+    "session_subagent_limit_control", "validate_session_subagent_limit",
+    "record_codex_subagent_limit_application",
     "create_session", "update_session", "ensure_backend_update_allowed", "codex_runtime_settings", "_fork_session_locked"}
 MODELS = {"CreateSessionRequest", "UpdateSessionRequest"}
 tree = ast.parse(SOURCE.read_text())
@@ -43,7 +47,11 @@ def make_namespace(root: Path):
     """Reusable native UI fixture: real routes/store methods, synthetic helpers."""
     locks = {}
     ns = {"Any": Any, "Literal": Literal, "BaseModel": BaseModel, "Field": Field,
-        "Path": Path, "asyncio": asyncio, "suppress": suppress, "uuid": uuid, "json": json,
+        "Path": Path, "asyncio": asyncio, "suppress": suppress, "uuid": uuid, "json": json, "re": re,
+        "RUNTIME_DIAGNOSTICS": {"claude": {"version": "2.1.277"}},
+        "RUNTIME_DIAGNOSTICS_LOCK": threading.RLock(),
+        "SERVER_INSTANCE_ID": "owned-server-instance",
+        "existing_codex_app_server_manager": lambda session: None,
         "HTTPException": HTTPException, "codex_provider": codex_provider,
         "MAX_SESSION_SYSTEM_PROMPT_CHARS": 10000, "DEFAULT_BACKEND": "codex",
         "BACKEND_CODEX": "codex", "BACKEND_CLAUDE": "claude", "BACKEND_CURSOR": "cursor",

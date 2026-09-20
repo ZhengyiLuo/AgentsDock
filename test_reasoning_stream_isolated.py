@@ -74,6 +74,14 @@ class ReasoningSummaryStreamTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(item["text_truncated"])
         self.assertEqual(self.ns["reasoning_summary_stream_item"]("chat", "run", "thought")["text"], text)
 
+    async def test_large_plaintext_does_not_displace_compact_summary_from_snapshot(self):
+        await self.ns["update_reasoning_summary_stream"]("chat", "run", "thought", {"delta": "x" * 1_000_001}, phase="reasoning")
+        await self.ns["update_reasoning_summary_stream"]("chat", "run", "thought", {"delta": "Summary"})
+        items = self.ns["reasoning_summary_stream_snapshot"]("chat")["items"]
+        self.assertEqual((items[0]["phase"], items[0]["text"]), ("summary", "Summary"))
+        self.assertEqual(sum(len(item["text"]) for item in items), 1_000_000)
+        self.assertTrue(items[1]["text_truncated"])
+
     async def test_partial_summary_is_retained_once_on_interruption(self):
         await self.ns["update_reasoning_summary_stream"]("chat", "run", "thought", {"delta": "Already visible"})
         completed = set()
@@ -112,3 +120,26 @@ class ReasoningSummaryStreamTests(unittest.IsolatedAsyncioTestCase):
         self.ns["logger"].exception.assert_called_once()
         self.assertFalse(self.ns["REASONING_SUMMARY_STREAMS"])
         self.assertFalse(self.ns["REASONING_SUMMARY_STREAM_PENDING"])
+
+    async def test_plaintext_and_summary_share_native_item_without_replacing_or_deduplicating_each_other(self):
+        update = self.ns["update_reasoning_summary_stream"]
+        await update("chat", "run", "thought", {"delta": "Summary"})
+        self.ns["EVENT_SEQ_CACHE"]["chat"] = 11
+        await update("chat", "run", "thought", {"contentIndex": 1, "delta": "Second section"}, phase="reasoning")
+        await update("chat", "run", "thought", {"contentIndex": 0, "delta": "First section"}, phase="reasoning")
+        snapshot = self.ns["reasoning_summary_stream_snapshot"]("chat")
+        self.assertEqual([(item["phase"], item["text"], item["after_seq"]) for item in snapshot["items"]], [
+            ("summary", "Summary", 10), ("reasoning", "First section\nSecond section", 11)])
+        completed = set()
+        await self.ns["persist_reasoning_summary"]("chat", {
+            "run_id": "run", "item_id": "thought", "phase": "summary", "text": "Final summary"}, completed)
+        self.assertEqual(len(self.ns["reasoning_summary_stream_snapshot"]("chat")["items"]), 1)
+        await self.ns["finish_reasoning_summary_stream"]("chat", "run", completed)
+        await self.ns["finish_reasoning_summary_stream"]("chat", "run", completed)
+        events = [call.args[2] for call in self.ns["append_event"].await_args_list]
+        self.assertEqual(len(events), 2)
+        self.assertEqual([call.args[1] for call in self.ns["append_event"].await_args_list], ["reasoning_summary", "reasoning_text"])
+        self.assertEqual(events[1]["phase"], "reasoning")
+        self.assertEqual(events[1]["text"], "First section\nSecond section")
+        self.assertTrue(events[1]["partial"])
+        self.assertEqual(completed, {"thought", ("reasoning", "thought")})

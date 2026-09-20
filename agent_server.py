@@ -621,12 +621,15 @@ def codex_session_config_overrides(sess: dict[str, Any]) -> dict[str, Any]:
     """Sanitized per-chat Codex config overrides (``codex_config_overrides``)."""
 
     raw = sess.get("codex_config_overrides") if isinstance(sess, dict) else None
-    if raw is None:
-        return {}
-    return sanitize_codex_thread_config(
+    clean = sanitize_codex_thread_config(
         raw,
         source=f"session {str(sess.get('id') or '') or '<unknown>'}",
-    )
+    ) if raw is not None else {}
+    if _codex_config_positive_int(sess.get("subagent_limit")):
+        agents = dict(clean.get("agents") or {})
+        agents["max_concurrent_threads_per_session"] = sess["subagent_limit"]
+        clean["agents"] = agents
+    return clean
 
 
 def codex_effective_thread_config(sess: dict[str, Any]) -> dict[str, Any]:
@@ -5139,7 +5142,7 @@ async def publish_turn_code_diff(
 EVENT_SEQ_CACHE: dict[str, int] = {}
 EVENT_SEQ_LOCK = asyncio.Lock()
 EVENT_SEQ_REPAIR_LOCKS: dict[str, asyncio.Lock] = {}
-REASONING_SUMMARY_STREAMS: dict[str, dict[tuple[str, str], dict[str, Any]]] = {}
+REASONING_SUMMARY_STREAMS: dict[str, dict[tuple[str, str, str], dict[str, Any]]] = {}
 REASONING_SUMMARY_STREAM_REVISION = 0
 REASONING_SUMMARY_STREAM_PENDING: dict[str, asyncio.Task[Any]] = {}
 REASONING_SUMMARY_STREAM_LAST_SENT: dict[str, float] = {}
@@ -6094,6 +6097,7 @@ class CreateSessionRequest(BaseModel):
     codex_provider: Literal["default", "custom"] | None = None
     model: str | None = None
     effort: str | None = None
+    subagent_limit: int | None = Field(default=None, strict=True, ge=1)
     system_prompt: str | None = Field(default=None, max_length=MAX_SESSION_SYSTEM_PROMPT_CHARS)
     pinned: bool | None = None
     archived: bool | None = None
@@ -6161,6 +6165,7 @@ class UpdateSessionRequest(BaseModel):
     codex_provider: Literal["default", "custom"] | None = None
     model: str | None = None
     effort: str | None = None
+    subagent_limit: int | None = Field(default=None, strict=True, ge=1)
     system_prompt: str | None = Field(default=None, max_length=MAX_SESSION_SYSTEM_PROMPT_CHARS)
     pinned: bool | None = None
     archived: bool | None = None
@@ -10208,6 +10213,7 @@ class SessionStore:
         backend = (req.backend or DEFAULT_BACKEND).lower()
         if backend not in VALID_BACKENDS:
             raise HTTPException(status_code=400, detail=f"backend must be one of {sorted(VALID_BACKENDS)}")
+        validate_session_subagent_limit({"backend": backend}, req.subagent_limit)
         runtime_source = {"backend": backend}
         if initializing_fork and parent_id and req.codex_provider == "custom":
             parent = self.sessions.get(parent_id) or {}
@@ -10262,6 +10268,7 @@ class SessionStore:
             "codex_provider_revision": runtime.get("codex_provider_revision"),
             "model": model,
             "effort": effort,
+            "subagent_limit": req.subagent_limit,
             "system_prompt": clean_session_system_prompt(req.system_prompt),
             "session_id": active_provider_id,
             "claude_session_id": claude_session_id,
@@ -10313,6 +10320,11 @@ class SessionStore:
             "created_at": now,
             "updated_at": now,
         }
+        if initializing_fork and parent_id:
+            parent = self.sessions.get(parent_id) or {}
+            if isinstance(parent.get("codex_config_overrides"), dict):
+                sess["codex_config_overrides"] = sanitize_codex_thread_config(
+                    parent["codex_config_overrides"], source=f"session {parent_id}")
         if initializing_fork or initializing_import:
             # Persist the staging marker so a server crash can discard this
             # session instead of exposing a half-written timeline.
@@ -10362,7 +10374,9 @@ class SessionStore:
             sess = self.sessions.get(sid)
             if not sess:
                 raise HTTPException(status_code=404, detail="session not found")
-            previous_provider_runtime = dict(sess) if "codex_provider" in patch else None
+            if "subagent_limit" in patch:
+                validate_session_subagent_limit({**sess, "backend": patch.get("backend") or sess.get("backend")}, patch["subagent_limit"])
+            previous_provider_runtime = dict(sess) if {"codex_provider", "subagent_limit"}.intersection(patch) else None
             missing_policy = object()
             previous_provider_jobs_access = sess.get(
                 "provider_jobs_access",
@@ -10473,6 +10487,14 @@ class SessionStore:
                         detail="codex_permission_profile must be at most 240 characters",
                     )
                 sess["codex_permission_profile"] = profile or None
+            if "subagent_limit" in patch:
+                sess.pop("_codex_subagent_limit_reset_pending", None)
+                if patch["subagent_limit"] is None and sess.get("backend") == BACKEND_CODEX:
+                    inherited = codex_effective_thread_config({**sess, "subagent_limit": None}).get("agents", {}).get("max_concurrent_threads_per_session")
+                    applied = sess.get("_codex_subagent_limit_applied") or {}
+                    if applied.get("process") and not _codex_config_positive_int(inherited):
+                        sess["_codex_subagent_limit_reset_pending"] = applied["process"]
+                sess["subagent_limit"] = patch["subagent_limit"]
             if "system_prompt" in patch:
                 sess["system_prompt"] = clean_session_system_prompt(patch["system_prompt"])
             for key in ("model", "effort"):
@@ -13086,6 +13108,7 @@ class SubscriberHub:
         # closed. This makes admission bounded without disturbing ordering.
         self._reservations: dict[str, set[WebSocket]] = {}
         self._reasoning_subscribers: set[WebSocket] = set()
+        self._reasoning_text_subscribers: set[WebSocket] = set()
         self._lock = asyncio.Lock()
 
     def _connection_count_locked(self) -> int:
@@ -13128,6 +13151,7 @@ class SubscriberHub:
     async def unsubscribe(self, sid: str, ws: WebSocket) -> None:
         async with self._lock:
             self._reasoning_subscribers.discard(ws)
+            self._reasoning_text_subscribers.discard(ws)
             subs = self._subscribers.get(sid)
             if subs:
                 subs.discard(ws)
@@ -13140,7 +13164,7 @@ class SubscriberHub:
                     self._reservations.pop(sid, None)
 
     async def register_accepted(
-        self, sid: str, ws: WebSocket, *, reasoning_stream: bool = False,
+        self, sid: str, ws: WebSocket, *, reasoning_stream: bool = False, reasoning_text: bool = False,
     ) -> bool:
         """Activate a reserved socket after it has completed catch-up."""
 
@@ -13166,6 +13190,8 @@ class SubscriberHub:
             self._subscribers.setdefault(sid, set()).add(ws)
             if reasoning_stream:
                 self._reasoning_subscribers.add(ws)
+                if reasoning_text:
+                    self._reasoning_text_subscribers.add(ws)
             return True
 
     async def broadcast(self, sid: str, event: dict[str, Any]) -> None:
@@ -13181,8 +13207,12 @@ class SubscriberHub:
 
         async def send(ws: WebSocket) -> WebSocket | None:
             try:
+                packet = event
+                if transient and ws not in self._reasoning_text_subscribers:
+                    packet = {**event, "items": [item for item in event.get("items", [])
+                        if item.get("phase") != "reasoning"]}
                 await asyncio.wait_for(
-                    ws.send_json(event),
+                    ws.send_json(packet),
                     timeout=WEBSOCKET_SEND_TIMEOUT_SECONDS,
                 )
                 return None
@@ -13217,6 +13247,7 @@ class SubscriberHub:
                 for ws in releasable:
                     current.discard(ws)
                     self._reasoning_subscribers.discard(ws)
+                    self._reasoning_text_subscribers.discard(ws)
                 if not current:
                     self._subscribers.pop(sid, None)
 
@@ -25638,6 +25669,7 @@ RESTART_ORPHAN_ACTIVITY_TYPES = {
     "provider_session",
     "assistant_text",
     "reasoning_summary",
+    "reasoning_text",
     "tool_started",
     "tool_finished",
     "artifact_created",
@@ -29815,6 +29847,7 @@ async def send_event_catchup(
 COMPACT_TIMELINE_HIDDEN_TYPES = {
     "raw_event",
     "reasoning_summary",
+    "reasoning_text",
     "tool_started",
     "tool_finished",
     "process_started",
@@ -31318,7 +31351,7 @@ TIMELINE_INDEX_CODEX_COMPACTION_TYPES = {
     "codex_compaction_completed",
 }
 TIMELINE_INDEX_TRACE_TYPES = {
-    "reasoning_summary", "tool_started", "tool_finished", "process_started", "provider_session",
+    "reasoning_summary", "reasoning_text", "tool_started", "tool_finished", "process_started", "provider_session",
     "cwd_fallback", "history_imported", "backend_changed", "artifact_error", "session_created",
     "idle_warning",
 }
@@ -31881,6 +31914,8 @@ def compact_timeline_index_text(value: Any, limit: int = 240) -> str:
 
 
 def timeline_index_event_text(event: dict[str, Any]) -> str:
+    if event.get("type") == "reasoning_text":
+        return ""
     for field in ("result_text", "text", "prompt", "digest", "message", "error", "output"):
         text = compact_timeline_index_text(event.get(field))
         if text:
@@ -33291,7 +33326,7 @@ def _build_timeline_index_locked(session_id: str) -> dict[str, Any]:
                 record = ensure_record(key, "trace", event)
                 if event_type == "tool_started":
                     record["tool_count"] += 1
-                elif event_type == "reasoning_summary":
+                elif event_type in {"reasoning_summary", "reasoning_text"}:
                     record["thought_count"] += 1
                 text = timeline_index_event_text(event)
                 if text and not record.get("trace_preview"):
@@ -33670,6 +33705,7 @@ def read_scheduled_job_runs(
 
 RUN_TRACE_EVENT_TYPES = {
     "reasoning_summary",
+    "reasoning_text",
     "tool_started",
     "tool_finished",
     "code_diff",
@@ -33892,7 +33928,7 @@ def add_semantic_job_event(
         state["latest_run_seq"] = seq
     if run_id == state.get("latest_run_id"):
         event_type = str(event.get("type") or "")
-        if event_type == "reasoning_summary":
+        if event_type == "reasoning_summary" or (event_type == "reasoning_text" and state["latest_run_reasoning"] is None):
             state["latest_run_reasoning"] = event
         elif event_type in {"tool_started", "tool_finished"}:
             state["latest_run_tool"] = event
@@ -34165,8 +34201,9 @@ def semantic_timeline_ordinary_candidates(
         secondary_event = ordered[0]
     secondary_candidates = [secondary_event] if secondary_event is not None else []
     trace_anchor = next(
-        (event for event in reversed(ordered) if semantic_timeline_event_is_trace_anchor(event)),
-        None,
+        (event for event in reversed(ordered) if semantic_timeline_event_is_trace_anchor(event)
+            and event.get("type") != "reasoning_text"),
+        next((event for event in reversed(ordered) if semantic_timeline_event_is_trace_anchor(event)), None),
     )
     primary_id = semantic_timeline_event_identity(latest_display)
     secondary_by_id = {
@@ -48966,6 +49003,7 @@ FORK_HISTORY_EVENT_TYPES = {
     "turn_steered",
     "assistant_text",
     "reasoning_summary",
+    "reasoning_text",
     "tool_started",
     "tool_finished",
     "turn_finished",
@@ -49754,6 +49792,52 @@ async def rollover_codex_provider_session(
     return fresh_session, memory
 
 
+def session_subagent_limit_control(sess: dict[str, Any]) -> dict[str, Any]:
+    """Describe native application timing without probing or changing a provider."""
+    backend = str(sess.get("backend") or DEFAULT_BACKEND).lower()
+    reason = None
+    if backend == BACKEND_CODEX:
+        if CODEX_TRANSPORT == CODEX_TRANSPORT_EXEC:
+            reason = "unsupported_transport"
+        applies_to = "new_or_reloaded_threads"
+        message = "Applies to new or reloaded Codex threads. Reload provider when this chat is idle; saving does not interrupt current work."
+        pending = sess.get("_codex_subagent_limit_reset_pending")
+        if sess.get("subagent_limit") is None and isinstance(pending, list) and len(pending) == 3 and pending[0] == SERVER_INSTANCE_ID:
+            manager = existing_codex_app_server_manager(sess)
+            inherited = codex_effective_thread_config(sess).get("agents", {}).get("max_concurrent_threads_per_session")
+            if manager is not None and manager.ready and pending[1:] == [getattr(manager, "_subagent_limit_instance", None), manager.generation] and not _codex_config_positive_int(inherited):
+                applies_to = "next_provider_process_start"
+                message = "The saved override is cleared. This loaded Codex process can retain its previous limit until a fresh provider process starts; Reload provider alone cannot clear the native default. Current work is not interrupted."
+    elif backend == BACKEND_CLAUDE:
+        with RUNTIME_DIAGNOSTICS_LOCK:
+            version = str((RUNTIME_DIAGNOSTICS.get(BACKEND_CLAUDE) or {}).get("version") or "")
+        match = re.search(r"\b(\d+)\.(\d+)\.(\d+)\b", version)
+        if not match:
+            reason = "claude_version_unknown"
+        elif tuple(map(int, match.groups())) < (2, 1, 217):
+            reason = "claude_version_unsupported"
+        applies_to = "next_idle_provider_start"
+        message = "Applies when this chat next starts an idle Claude provider process. Current work keeps its setting. Claude native exceptions may exceed this value."
+    else:
+        reason = "unsupported_backend"
+        applies_to = "new_or_reloaded_threads"
+        message = "This provider does not support a per-chat subagent limit."
+    if reason and backend == BACKEND_CLAUDE:
+        message = "Per-chat subagent limits require a detected Claude Code version of 2.1.217 or newer. Refresh provider status after updating Claude."
+    return {"supported": reason is None, "scope": "chat", "mode": "native_concurrent",
+            "applies_to": applies_to, "reason": reason, "message": message}
+
+
+def validate_session_subagent_limit(sess: dict[str, Any], value: Any) -> None:
+    if value is None:
+        return
+    if not _codex_config_positive_int(value):
+        raise HTTPException(status_code=422, detail="subagent_limit must be a positive whole number or null")
+    control = session_subagent_limit_control(sess)
+    if not control["supported"]:
+        raise HTTPException(status_code=409, detail=control["message"])
+
+
 def public_session(sess: dict[str, Any], *, summary: bool = False) -> dict[str, Any]:
     detail_fields = () if summary else (
         "system_prompt", "session_id", "claude_session_id", "codex_thread_id",
@@ -49779,6 +49863,8 @@ def public_session(sess: dict[str, Any], *, summary: bool = False) -> dict[str, 
             "last_read_agent_event_seq", "last_read_agent_event_at", "manual_unread",
         )
     }
+    public["subagent_limit"] = sess.get("subagent_limit") if _codex_config_positive_int(sess.get("subagent_limit")) else None
+    public["subagent_limit_control"] = session_subagent_limit_control(sess)
     # Provider ids are intentionally omitted from summary responses, but the
     # UI still needs the authoritative first-turn backend fence.
     public["backend_locked"] = session_backend_locked(sess)
@@ -54831,7 +54917,7 @@ async def consume_codex_native_turn(
     assistant_deltas: dict[str, list[str]] = {}
     reasoning_summary_deltas: dict[str, list[str]] = {}
     plan_deltas: dict[str, list[str]] = {}
-    completed_reasoning_items: set[str] = set()
+    completed_reasoning_items: set[str | tuple[str, str]] = set()
     terminal_status = "completed"
     terminal_error: str | None = None
     schedule_queue = True
@@ -55128,6 +55214,12 @@ async def consume_codex_native_turn(
                     str(params.get("delta") or "")
                 )
                 continue
+            if method == "item/reasoning/textDelta" and item_id:
+                if ("reasoning", item_id) not in completed_reasoning_items:
+                    await update_reasoning_summary_stream(session_id, operation_id, item_id, params, {
+                        "provider_turn_id": turn_id, "purpose": f"codex_{operation}",
+                    }, "reasoning")
+                continue
             if method in {"item/reasoning/summaryTextDelta", "item/reasoning/summaryPartAdded"} and item_id:
                 if item_id in completed_reasoning_items:
                     continue
@@ -55192,6 +55284,20 @@ async def consume_codex_native_turn(
                             },
                         )
                 elif item_type in {"reasoning", "plan"}:
+                    if item_type == "reasoning":
+                        plaintext_identity = ("reasoning", item_id)
+                        if plaintext_identity not in completed_reasoning_items:
+                            plaintext_stream = reasoning_summary_stream_item(session_id, operation_id, item_id, "reasoning")
+                            plaintext = codex_app_server_reasoning_plaintext(item) or plaintext_stream.get("text")
+                            if plaintext:
+                                await persist_reasoning_summary(session_id, {
+                                    "run_id": operation_id, "provider_turn_id": turn_id,
+                                    "item_id": item_id, "phase": "reasoning", "text": plaintext,
+                                    **({"reasoning_after_seq": plaintext_stream["after_seq"]} if plaintext_stream else {}),
+                                    "purpose": f"codex_{operation}",
+                                }, completed_reasoning_items)
+                            completed_reasoning_items.add(plaintext_identity)
+                            await clear_reasoning_summary_stream(session_id, operation_id, item_id, "reasoning")
                     streamed = {}
                     if item_type == "reasoning":
                         if item_id in completed_reasoning_items:
@@ -57612,6 +57718,8 @@ async def ensure_codex_app_server_thread(
     expected_run_id: str | None = None,
 ) -> tuple[str, str]:
     """Load/create and lease a provider thread, applying changed policy once."""
+    native_settings = {**sess, "codex_config_overrides": sanitize_codex_thread_config(
+        sess.get("codex_config_overrides") or {}, source=f"session {session_id}")}
     provider_id = str(session_provider_id(sess) or "")
     original_provider_id = provider_id
     had_provider_id = bool(provider_id)
@@ -57632,7 +57740,7 @@ async def ensure_codex_app_server_thread(
             provider_id = await manager.start_thread(
                 {
                     **codex_thread_params(
-                        sess,
+                        native_settings,
                         cwd,
                         developer_instructions=instructions,
                     ),
@@ -57652,7 +57760,7 @@ async def ensure_codex_app_server_thread(
                 provider_id,
                 {
                     **codex_thread_params(
-                        sess,
+                        native_settings,
                         cwd,
                         developer_instructions=instructions,
                     ),
@@ -57662,7 +57770,7 @@ async def ensure_codex_app_server_thread(
         elif not already_loaded:
             resume_params = {
                 **codex_thread_params(
-                    sess,
+                    native_settings,
                     cwd,
                     developer_instructions=(
                         instructions if policy_changed else None
@@ -57671,6 +57779,9 @@ async def ensure_codex_app_server_thread(
                 "excludeTurns": True,
             }
             provider_id = await manager.resume_thread(provider_id, resume_params)
+
+        if not already_loaded or policy_changed:
+            await record_codex_subagent_limit_application(manager, session_id, native_settings)
 
         await reconcile_codex_thread_goal(
             manager,
@@ -57743,6 +57854,46 @@ async def ensure_codex_app_server_thread(
             with suppress(Exception):
                 await unpin_codex_app_server_thread(manager, provider_id)
         raise
+
+
+async def record_codex_subagent_limit_application(
+    manager: CodexAppServerManager, session_id: str, requested: dict[str, Any],
+) -> None:
+    """Track only this setting's application; never retire a shared process."""
+    if not any(key in requested for key in (
+        "_codex_subagent_limit_applied", "_codex_subagent_limit_reset_pending",
+    )) and not _codex_config_positive_int(requested.get("subagent_limit")):
+        return
+    manager_identity = getattr(manager, "_subagent_limit_instance", None)
+    if manager_identity is None:
+        manager_identity = uuid.uuid4().hex
+        manager._subagent_limit_instance = manager_identity
+    process = [SERVER_INSTANCE_ID, manager_identity, manager.generation]
+    inherited = codex_effective_thread_config({**requested, "subagent_limit": None}).get("agents", {}).get("max_concurrent_threads_per_session")
+    async with STORE._lock:
+        current = STORE.sessions.get(session_id)
+        if current is None:
+            return
+        before = (current.get("_codex_subagent_limit_applied"), current.get("_codex_subagent_limit_reset_pending"))
+        pending = current.get("_codex_subagent_limit_reset_pending")
+        applied = current.get("_codex_subagent_limit_applied") or {}
+        if not _codex_config_positive_int(requested.get("subagent_limit")) and (
+            applied.get("process") != process or _codex_config_positive_int(inherited)
+        ):
+            current.pop("_codex_subagent_limit_applied", None)
+        if pending and (pending != process or _codex_config_positive_int(inherited)):
+            current.pop("_codex_subagent_limit_reset_pending", None)
+            current.pop("_codex_subagent_limit_applied", None)
+        limit = requested.get("subagent_limit")
+        if _codex_config_positive_int(limit):
+            current["_codex_subagent_limit_applied"] = {"process": process, "limit": limit}
+            # Saving null while start/resume awaited cannot change the captured
+            # native request. Preserve that pending reset instead of claiming it applied.
+            if current.get("subagent_limit") is None and not _codex_config_positive_int(inherited):
+                current["_codex_subagent_limit_reset_pending"] = process
+        after = (current.get("_codex_subagent_limit_applied"), current.get("_codex_subagent_limit_reset_pending"))
+        if before != after:
+            await STORE.save()
 
 
 async def start_standalone_codex_app_server_thread(
@@ -57850,6 +58001,13 @@ def build_claude_cmd(
         cmd.extend(["--model", str(sess["model"])])
     if sess.get("effort"):
         cmd.extend(["--effort", str(sess["effort"])])
+    subagent_limit = sess.get("subagent_limit")
+    if type(subagent_limit) is int and subagent_limit > 0:
+        # Flag settings override inherited user/project env without writing
+        # shared Claude settings or changing another chat's process.
+        cmd.extend(["--settings", json.dumps({"env": {
+            "CLAUDE_CODE_MAX_CONCURRENT_SUBAGENTS": str(subagent_limit),
+        }}, separators=(",", ":"))])
     if no_session_persistence and not provider_id:
         cmd.append("--no-session-persistence")
     if provider_id:
@@ -57906,6 +58064,9 @@ def claude_sdk_configuration_key(
         "thinking": {"type": "adaptive", "display": "summarized"},
         "agentsdock_provider_tool": 1,
     }
+    subagent_limit = sess.get("subagent_limit")
+    if type(subagent_limit) is int and subagent_limit > 0:
+        payload["subagent_limit"] = subagent_limit
     return hashlib.sha256(
         json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()
     ).hexdigest()
@@ -57937,6 +58098,18 @@ def build_claude_sdk_options(
         ):
             env[inherited_name] = ""
     env["AGENTSDOCK_CHAT_ID"] = session_id
+    subagent_limit = sess.get("subagent_limit")
+    subagent_settings: dict[str, Any] = {}
+    if type(subagent_limit) is int and subagent_limit > 0:
+        subagent_env = {
+            "CLAUDE_CODE_MAX_CONCURRENT_SUBAGENTS": str(subagent_limit),
+        }
+        env.update(subagent_env)
+        # Native settings env wins over inherited process env. Keep the
+        # explicit chat override in its process-only flag-settings layer too.
+        subagent_settings["settings"] = json.dumps(
+            {"env": subagent_env}, separators=(",", ":"),
+        )
     cli_path = claude_sdk_cli_path(env)
     system_prompt = session_system_prompt(session_id, sess, manifest_path)
     provider_id = resolve_claude_resume_provider(sess, cwd)[0]
@@ -58071,6 +58244,7 @@ def build_claude_sdk_options(
         include_partial_messages=False,
         max_buffer_size=PROCESS_STREAM_LIMIT,
         extra_args=extra_args,
+        **subagent_settings,
         stderr=lambda line: logger.warning(
             "Claude SDK stderr session=%s: %s",
             session_id,
@@ -58651,7 +58825,11 @@ def reasoning_summary_stream_snapshot(session_id: str) -> dict[str, Any]:
     REASONING_SUMMARY_STREAM_REVISION += 1
     remaining = 1_000_000
     items = []
-    for state in REASONING_SUMMARY_STREAMS.get(session_id, {}).values():
+    # Keep summaries available to compact/older clients when plaintext consumes
+    # the shared packet budget; chronology still uses each item's after_seq.
+    states = sorted(REASONING_SUMMARY_STREAMS.get(session_id, {}).values(),
+        key=lambda state: state["item"].get("phase") == "reasoning")
+    for state in states:
         item = dict(state["item"])
         if not item["text"].strip():
             continue
@@ -58695,9 +58873,12 @@ async def flush_reasoning_summary_stream(session_id: str, delay: float) -> None:
 async def update_reasoning_summary_stream(
     session_id: str, run_id: str, item_id: str, params: dict[str, Any],
     metadata: dict[str, Any] | None = None,
+    phase: str = "summary",
 ) -> None:
-    """Publish only native summary sections, retaining their first arrival order."""
-    index = params.get("summaryIndex", 0)
+    """Keep provider-exposed summary and plaintext reasoning channels distinct."""
+    if phase not in {"summary", "reasoning"}:
+        return
+    index = params.get("contentIndex" if phase == "reasoning" else "summaryIndex", 0)
     delta = params.get("delta", "")
     if not run_id or not item_id or not isinstance(index, int) or isinstance(index, bool) or not 0 <= index < 1024:
         return
@@ -58707,7 +58888,7 @@ async def update_reasoning_summary_stream(
         if session_id in DELETING_SESSIONS or session_id in DELETED_SESSION_TOMBSTONES:
             return
         streams = REASONING_SUMMARY_STREAMS.setdefault(session_id, {})
-        state = streams.get((run_id, item_id))
+        state = streams.get((run_id, item_id, phase))
         first = state is None or not state["item"]["text"].strip()
         if state is None:
             after_seq = EVENT_SEQ_CACHE.get(session_id)
@@ -58715,10 +58896,10 @@ async def update_reasoning_summary_stream(
                 after_seq = await asyncio.to_thread(last_event_seq_from_file, events_path(session_id))
             state = {"parts": {}, "item": {
                 **dict(metadata or {}), "run_id": run_id, "item_id": item_id,
-                "backend": BACKEND_CODEX, "phase": "summary", "text": "",
+                "backend": BACKEND_CODEX, "phase": phase, "text": "",
                 "ts": now_iso(), "after_seq": after_seq,
             }}
-            streams[(run_id, item_id)] = state
+            streams[(run_id, item_id, phase)] = state
         parts = state["parts"]
         parts[index] = parts.get(index, "") + delta
         state["item"]["text"] = "\n".join(parts[index] for index in sorted(parts))
@@ -58736,17 +58917,17 @@ async def update_reasoning_summary_stream(
     await broadcast_reasoning_summary_stream(session_id, packet)
 
 
-def reasoning_summary_stream_item(session_id: str, run_id: str, item_id: str) -> dict[str, Any]:
-    state = REASONING_SUMMARY_STREAMS.get(session_id, {}).get((run_id, item_id))
+def reasoning_summary_stream_item(session_id: str, run_id: str, item_id: str, phase: str = "summary") -> dict[str, Any]:
+    state = REASONING_SUMMARY_STREAMS.get(session_id, {}).get((run_id, item_id, phase))
     return dict(state["item"]) if state else {}
 
 
-async def clear_reasoning_summary_stream(session_id: str, run_id: str, item_id: str | None = None) -> None:
+async def clear_reasoning_summary_stream(session_id: str, run_id: str, item_id: str | None = None, phase: str = "summary") -> None:
     async with event_delivery_lock(session_id):
         streams = REASONING_SUMMARY_STREAMS.get(session_id)
         if not streams:
             return
-        removed = [key for key in streams if key[0] == run_id and (item_id is None or key[1] == item_id)]
+        removed = [key for key in streams if key[0] == run_id and (item_id is None or (key[1] == item_id and key[2] == phase))]
         if not removed:
             return
         for key in removed:
@@ -58764,14 +58945,15 @@ async def clear_reasoning_summary_stream(session_id: str, run_id: str, item_id: 
 
 
 async def persist_reasoning_summary(
-    session_id: str, payload: dict[str, Any], completed_item_ids: set[str],
+    session_id: str, payload: dict[str, Any], completed_item_ids: set[str | tuple[str, str]],
 ) -> None:
     # Join the append and identity update together: cancellation after the
     # ledger write must not make the finalizer append the item a second time.
     async def commit() -> None:
-        await append_event(session_id, "reasoning_summary", payload)
-        completed_item_ids.add(payload["item_id"])
-        await clear_reasoning_summary_stream(session_id, payload["run_id"], payload["item_id"])
+        await append_event(session_id, "reasoning_text" if payload.get("phase") == "reasoning" else "reasoning_summary", payload)
+        phase = payload.get("phase", "summary")
+        completed_item_ids.add(("reasoning", payload["item_id"]) if phase == "reasoning" else payload["item_id"])
+        await clear_reasoning_summary_stream(session_id, payload["run_id"], payload["item_id"], phase)
     task = asyncio.create_task(commit())
     try:
         await asyncio.shield(task)
@@ -58781,15 +58963,16 @@ async def persist_reasoning_summary(
 
 
 async def finish_reasoning_summary_stream(
-    session_id: str, run_id: str, completed_item_ids: set[str],
+    session_id: str, run_id: str, completed_item_ids: set[str | tuple[str, str]],
 ) -> None:
-    """Keep summaries already shown when interruption omits item/completed."""
-    items = [dict(state["item"]) for (owner, _), state in
+    """Keep exposed text already received when interruption omits item/completed."""
+    items = [dict(state["item"]) for (owner, _, _), state in
              REASONING_SUMMARY_STREAMS.get(session_id, {}).items() if owner == run_id]
     try:
         for item in items:
             item_id = item["item_id"]
-            if item_id in completed_item_ids or not item["text"].strip():
+            identity = ("reasoning", item_id) if item.get("phase") == "reasoning" else item_id
+            if identity in completed_item_ids or not item["text"].strip():
                 continue
             payload = {key: value for key, value in item.items() if key not in {"ts", "after_seq"}}
             payload.update(partial=True, reasoning_after_seq=item["after_seq"])
@@ -58803,11 +58986,7 @@ async def finish_reasoning_summary_stream(
 
 
 def codex_app_server_reasoning_summary(payload: dict[str, Any]) -> str:
-    """Extract only app-server's user-visible completed reasoning summary.
-
-    ``reasoning.text`` and ``item/reasoning/textDelta`` can contain raw model
-    reasoning. They are never a persistence fallback for AgentsDock.
-    """
+    """Extract the summary channel without substituting plaintext reasoning."""
     summary = payload.get("summary")
     if not isinstance(summary, list):
         return ""
@@ -58820,6 +58999,20 @@ def codex_app_server_reasoning_summary(payload: dict[str, Any]) -> str:
         elif isinstance(item, str) and item.strip():
             parts.append(item.strip())
     return "\n".join(parts).strip()
+
+
+def codex_app_server_reasoning_plaintext(payload: dict[str, Any]) -> str:
+    """Read only plaintext explicitly exposed by the provider; never encrypted data."""
+    value = payload.get("text")
+    if isinstance(value, str):
+        return value.strip()
+    if isinstance(value, list):
+        return "\n".join(part.strip() for part in value if isinstance(part, str) and part.strip())
+    content = payload.get("content")
+    if isinstance(content, list):
+        return "\n".join(part["text"].strip() for part in content if isinstance(part, dict)
+            and part.get("type") == "reasoning_text" and isinstance(part.get("text"), str) and part["text"].strip())
+    return ""
 
 
 def codex_exec_agent_message(event: dict[str, Any]) -> tuple[str, str] | None:
@@ -59131,6 +59324,8 @@ async def bind_forked_codex_thread(
     expected_goal: dict[str, Any] | None = None,
 ) -> tuple[str, str]:
     """Bind a native fork to its child chat's policy before exposing it."""
+    native_settings = {**sess, "codex_config_overrides": sanitize_codex_thread_config(
+        sess.get("codex_config_overrides") or {}, source=f"session {session_id}")}
     cwd = existing_cwd(str(sess.get("cwd") or DEFAULT_CWD))
     manager = await codex_app_server_manager(sess)
     instructions = codex_thread_instructions(session_id, sess)
@@ -59144,7 +59339,7 @@ async def bind_forked_codex_thread(
             thread_id,
             {
                 **codex_thread_params(
-                    sess,
+                    native_settings,
                     cwd,
                     developer_instructions=instructions,
                 ),
@@ -59182,6 +59377,7 @@ async def bind_forked_codex_thread(
             require_goal_support=require_goal_support,
             expected_goal=expected_goal,
         )
+        await record_codex_subagent_limit_application(manager, session_id, native_settings)
         await touch_codex_app_server_thread(manager, bound_thread_id)
         return bound_thread_id, instruction_hash
     except Exception:
@@ -65522,7 +65718,7 @@ async def run_codex_app_server(
     seen_text: set[str] = set()
     seen_reasoning: set[str] = set()
     emitted_final_item_ids: set[str] = set()
-    emitted_reasoning_item_ids: set[str] = set()
+    emitted_reasoning_item_ids: set[str | tuple[str, str]] = set()
     reasoning_stream_run_ids = {current_run_id}
     assistant_deltas: dict[str, list[str]] = {}
     reasoning_summary_deltas: dict[str, list[str]] = {}
@@ -65598,8 +65794,9 @@ async def run_codex_app_server(
         text = str(value or "").strip()
         if not text:
             return
+        reasoning_identity = ("reasoning", item_id) if phase == "reasoning" else item_id
         if item_id:
-            if item_id in emitted_reasoning_item_ids:
+            if reasoning_identity in emitted_reasoning_item_ids:
                 return
         elif text in seen_reasoning:
             return
@@ -65615,12 +65812,12 @@ async def run_codex_app_server(
             payload["item_id"] = item_id
         if reasoning_after_seq is not None:
             payload["reasoning_after_seq"] = reasoning_after_seq
-        if phase == "summary" and item_id:
+        if phase in {"summary", "reasoning"} and item_id:
             await persist_reasoning_summary(session_id, payload, emitted_reasoning_item_ids)
         else:
             await append_event(session_id, "reasoning_summary", payload)
             if item_id:
-                emitted_reasoning_item_ids.add(item_id)
+                emitted_reasoning_item_ids.add(reasoning_identity)
 
     async def flush_pending_unknown(*, final: bool) -> None:
         nonlocal pending_unknown_message, pending_unknown_item_id
@@ -65638,6 +65835,27 @@ async def run_codex_app_server(
                 phase="commentary",
                 item_id=item_id,
             )
+
+    async def emit_completed_reasoning(item: dict[str, Any], item_id: str) -> None:
+        # One native completion owns both channels. Finish their authoritative
+        # writes even if cancellation arrives between the two app events.
+        async def commit() -> None:
+            summary_stream = reasoning_summary_stream_item(session_id, current_run_id, item_id)
+            plaintext_stream = reasoning_summary_stream_item(session_id, current_run_id, item_id, "reasoning")
+            buffered = reasoning_summary_deltas.pop(item_id, [])
+            summary = codex_app_server_reasoning_summary(item) or summary_stream.get("text") or "".join(buffered)
+            plaintext = codex_app_server_reasoning_plaintext(item) or plaintext_stream.get("text")
+            for phase, text, streamed in (("summary", summary, summary_stream), ("reasoning", plaintext, plaintext_stream)):
+                await emit_reasoning(text, phase=phase, item_id=item_id,
+                    reasoning_after_seq=streamed.get("after_seq"))
+                emitted_reasoning_item_ids.add(("reasoning", item_id) if phase == "reasoning" else item_id)
+                await clear_reasoning_summary_stream(session_id, current_run_id, item_id, phase)
+        task = asyncio.create_task(commit())
+        try:
+            await asyncio.shield(task)
+        except asyncio.CancelledError:
+            await join_task_despite_caller_cancellation(task)
+            raise
 
     async def emit_tool_started(tool: dict[str, Any]) -> None:
         tool_id = str(tool.get("id") or "")
@@ -66490,11 +66708,6 @@ async def run_codex_app_server(
             pending_unknown_message = ""
             pending_unknown_item_id = ""
 
-        if method == "item/reasoning/textDelta":
-            # Raw model reasoning is transient provider data and must never be
-            # persisted into the AgentsDock timeline.
-            return False
-
         if method != "turn/completed" and delivery_unknown:
             return False
 
@@ -66505,6 +66718,7 @@ async def run_codex_app_server(
             "item/agentMessage/delta",
             "item/reasoning/summaryTextDelta",
             "item/reasoning/summaryPartAdded",
+            "item/reasoning/textDelta",
             "item/plan/delta",
             "item/commandExecution/outputDelta",
             "item/fileChange/outputDelta",
@@ -66520,6 +66734,10 @@ async def run_codex_app_server(
             assistant_deltas.setdefault(item_id, []).append(
                 str(params.get("delta") or "")
             )
+            return False
+        if method == "item/reasoning/textDelta" and item_id:
+            if ("reasoning", item_id) not in emitted_reasoning_item_ids:
+                await update_reasoning_summary_stream(session_id, current_run_id, item_id, params, current_metadata(), "reasoning")
             return False
         if method in {"item/reasoning/summaryTextDelta", "item/reasoning/summaryPartAdded"} and item_id:
             if item_id in emitted_reasoning_item_ids:
@@ -66579,20 +66797,7 @@ async def run_codex_app_server(
                     pending_unknown_item_id = item_id
             elif item_type == "reasoning":
                 await flush_pending_unknown(final=False)
-                streamed = reasoning_summary_stream_item(session_id, current_run_id, item_id)
-                buffered = reasoning_summary_deltas.pop(
-                    str(item.get("id") or ""),
-                    [],
-                )
-                reasoning = (
-                    codex_app_server_reasoning_summary(item)
-                    or streamed.get("text")
-                    or "".join(buffered)
-                )
-                await emit_reasoning(reasoning, phase="summary", item_id=item_id,
-                    reasoning_after_seq=streamed.get("after_seq"))
-                emitted_reasoning_item_ids.add(item_id)
-                await clear_reasoning_summary_stream(session_id, current_run_id, item_id)
+                await emit_completed_reasoning(item, item_id)
             elif item_type == "plan":
                 await flush_pending_unknown(final=False)
                 buffered = plan_deltas.pop(
@@ -76740,6 +76945,7 @@ async def health() -> dict[str, Any]:
             and bool(tmux["available"])
         ),
         "capabilities": {
+            "subagent_limit_v1": {"version": 1, "backends": ["codex", "claude"]},
             "side_questions": side_questions.capability(),
             "codex_auth_v1": codex_auth.capability(available=bool(AGENT_TOKEN) and CODEX_TRANSPORT != CODEX_TRANSPORT_EXEC),
             "codex_provider_v1": {"available": bool(AGENT_TOKEN) and CODEX_TRANSPORT != CODEX_TRANSPORT_EXEC, "wire_api": "responses", "per_chat": True, "per_chat_models": True, "model_discovery": True, "model_compatibility": True},
@@ -84951,6 +85157,7 @@ async def _fork_session_locked(
             codex_provider=codex_provider.session_choice(parent.get("codex_provider")),
             model=parent.get("model"),
             effort=parent.get("effort"),
+            subagent_limit=parent.get("subagent_limit"),
             system_prompt=parent.get("system_prompt"),
             claude_permission_mode=effective_claude_permission_mode(parent),
             cursor_permission_mode=effective_cursor_permission_mode(parent),
@@ -90518,6 +90725,7 @@ async def session_events(
     after: int = 0,
     visible: bool | None = None,
     reasoning_stream: bool = False,
+    reasoning_text: bool = False,
 ) -> None:
     selected_subprotocol = websocket_endpoint_subprotocol(
         ws,
@@ -90582,9 +90790,12 @@ async def session_events(
                 )
                 if cursor >= gap_boundary:
                     activated = await HUB.register_accepted(session_id, ws, **(
-                        {"reasoning_stream": True} if reasoning_stream else {}))
+                        {"reasoning_stream": True, **({"reasoning_text": True} if reasoning_text else {})} if reasoning_stream else {}))
                     if activated and reasoning_stream:
                         reasoning_snapshot = reasoning_summary_stream_snapshot(session_id)
+                        if not reasoning_text:
+                            reasoning_snapshot["items"] = [item for item in reasoning_snapshot["items"]
+                                if item.get("phase") != "reasoning"]
             if cursor >= gap_boundary:
                 if not activated:
                     # This should be unreachable after a successful

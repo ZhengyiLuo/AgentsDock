@@ -26,7 +26,7 @@ NAMES = {
     "requeue_native_steer_after_safe_rejection", "native_steer_requeue_event_payload",
     "join_task_despite_caller_cancellation", "concise_error_message",
     "is_codex_reconnect_notice", "is_codex_app_server_retry_notice",
-    "codex_reasoning_text", "codex_app_server_reasoning_summary",
+    "codex_reasoning_text", "codex_app_server_reasoning_summary", "codex_app_server_reasoning_plaintext",
     "persist_reasoning_summary",
     "session_lifecycle_lock",
 }

@@ -31,20 +31,26 @@ class FakeWebSocket:
 class EventWebSocketCatchupTests(unittest.IsolatedAsyncioTestCase):
     async def test_live_summary_is_opt_in_and_does_not_wake_share_projection(self) -> None:
         hub = agent_server.SubscriberHub()
-        legacy, opted = FakeWebSocket(), FakeWebSocket()
+        legacy, opted, plaintext = FakeWebSocket(), FakeWebSocket(), FakeWebSocket()
         await hub.register_accepted("chat", legacy)
         await hub.register_accepted("chat", opted, reasoning_stream=True)
+        await hub.register_accepted("chat", plaintext, reasoning_stream=True, reasoning_text=True)
         with patch.object(agent_server.INTERACTIVE_CHAT_LIVE, "notify") as notify:
-            await hub.broadcast("chat", {"type": "reasoning_summary_stream", "items": []})
+            await hub.broadcast("chat", {"type": "reasoning_summary_stream", "items": [
+                {"phase": "summary", "text": "Summary"}, {"phase": "reasoning", "text": "Plaintext"}]})
             notify.assert_not_called()
             self.assertFalse(legacy.events)
             self.assertEqual(len(opted.events), 1)
+            self.assertEqual([item["phase"] for item in opted.events[0]["items"]], ["summary"])
+            self.assertEqual([item["phase"] for item in plaintext.events[0]["items"]], ["summary", "reasoning"])
             await hub.broadcast("chat", {"type": "reasoning_summary", "seq": 1})
             notify.assert_called_once()
             self.assertEqual(len(legacy.events), 1)
             self.assertEqual(len(opted.events), 2)
         await hub.unsubscribe("chat", opted)
+        await hub.unsubscribe("chat", plaintext)
         self.assertFalse(hub._reasoning_subscribers)
+        self.assertFalse(hub._reasoning_text_subscribers)
 
     async def test_reconnect_receives_live_summary_without_advancing_durable_cursor(self) -> None:
         session_id = "summary-reconnect"
@@ -63,12 +69,17 @@ class EventWebSocketCatchupTests(unittest.IsolatedAsyncioTestCase):
                 "ts": "2026-09-20T00:00:00Z", "run_id": "run", "prompt": "Question"}
             (Path(root) / "events.jsonl").write_text(json.dumps(event) + "\n")
             await agent_server.update_reasoning_summary_stream(session_id, "run", "thought", {"delta": "Visible while thinking"})
+            await agent_server.update_reasoning_summary_stream(session_id, "run", "thought", {"delta": "Provider plaintext"}, phase="reasoning")
             await agent_server.session_events(session_id, socket, after=0, reasoning_stream=True)
             self.assertEqual([packet["type"] for packet in socket.events], ["turn_started", "reasoning_summary_stream"])
             live = socket.events[-1]
             self.assertNotIn("seq", live)
             self.assertEqual(live["items"][0]["after_seq"], 1)
             self.assertEqual(live["items"][0]["text"], "Visible while thinking")
+            self.assertEqual(len(live["items"]), 1)
+            opted = FakeWebSocket()
+            await agent_server.session_events(session_id, opted, after=1, reasoning_stream=True, reasoning_text=True)
+            self.assertEqual([item["phase"] for item in opted.events[-1]["items"]], ["summary", "reasoning"])
             self.assertEqual(agent_server.EVENT_SEQ_CACHE[session_id], 1)
             await agent_server.clear_reasoning_summary_stream(session_id, "run")
             reopened = FakeWebSocket()
