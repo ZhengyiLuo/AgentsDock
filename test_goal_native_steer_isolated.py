@@ -27,6 +27,7 @@ NAMES = {
     "join_task_despite_caller_cancellation", "concise_error_message",
     "is_codex_reconnect_notice", "is_codex_app_server_retry_notice",
     "codex_reasoning_text", "codex_app_server_reasoning_summary",
+    "persist_reasoning_summary",
     "session_lifecycle_lock",
 }
 TREE = ast.parse(SOURCE.read_text(encoding="utf-8"), filename=str(SOURCE))
@@ -109,6 +110,13 @@ class NativeGoalSteerTests(unittest.IsolatedAsyncioTestCase):
             "codex_app_server_tool": lambda item: None,
             "project_codex_notification": Mock(),
             "append_event": append_event, "append_durable_event_batch": append_batch,
+            # These goal/child lifecycle fixtures do not host a live summary
+            # registry. Retain the real completed-summary commit above while
+            # isolating the unrelated transient transport and finalizer.
+            "update_reasoning_summary_stream": AsyncMock(),
+            "reasoning_summary_stream_item": lambda *args: {},
+            "clear_reasoning_summary_stream": AsyncMock(),
+            "finish_reasoning_summary_stream": AsyncMock(),
             "claim_codex_control_terminal_publication": AsyncMock(return_value=False),
             "stop_codex_goal_resume": AsyncMock(), "release_codex_control_thread": AsyncMock(),
             "finish_codex_control_terminal_publication": AsyncMock(),
