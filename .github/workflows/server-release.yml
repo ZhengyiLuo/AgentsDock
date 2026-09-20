@@ -36,9 +36,6 @@ jobs:
       - uses: astral-sh/setup-uv@v6
         with:
           python-version: "3.13"
-      - name: Diagnose isolated Mail reconnect
-        if: matrix.shard == 5
-        run: uv run --python 3.13 python -m unittest -v test_team_mail_pipeline_tls_isolated.MailPipelineTLSAcceptanceTests.test_committed_recipient_mail_crosses_real_tls_runtime_and_local_socket
       - name: Lock and test assigned cases
         run: |
           uv lock --check

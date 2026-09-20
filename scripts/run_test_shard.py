@@ -55,6 +55,9 @@ def main() -> int:
     selected_cases = cases[args.index::args.count]
     print(f'Shard {args.index + 1}/{args.count}: {len(selected_cases)}/{len(cases)} test cases', flush=True)
     suite = unittest.TestSuite(selected_cases)
+    # Let unittest release each completed case and its fixture graph. Keeping
+    # the discovery copies alive defeats TestSuite's normal cleanup.
+    del discovered, cases, selected_cases
     result = unittest.TextTestRunner(verbosity=2).run(suite)
     return 0 if result.wasSuccessful() else 1
 

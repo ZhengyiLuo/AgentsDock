@@ -14,11 +14,8 @@ from contextlib import closing
 import json
 from pathlib import Path
 import socket
-import sys
 import tempfile
-import threading
 import time
-import traceback
 import unittest
 from unittest import mock
 from urllib.parse import urlencode
@@ -83,22 +80,6 @@ class MailPipelineTLSAcceptanceTests(unittest.IsolatedAsyncioTestCase):
             server_instance_id="isolated-mail-pipeline", mail_hints_enabled=True)
         self.addCleanup(self.runtime.shutdown)
         self.client = self.runtime.client
-        def time_operation(owner, name):
-            operation = getattr(owner, name)
-            def measured(*args, **kwargs):
-                started = time.monotonic()
-                try:
-                    return operation(*args, **kwargs)
-                finally:
-                    elapsed = time.monotonic() - started
-                    if elapsed >= 1:
-                        print("Slow Mail setup operation:", name, elapsed,
-                              threading.current_thread().name, flush=True)
-            self.enterContext(mock.patch.object(owner, name, new=measured))
-        for name in ("_connect", "_prepare_mail_hint_request", "_pinned_context"):
-            time_operation(self.client, name)
-        for name in ("team_realms", "_require_active_proxy_connection"):
-            time_operation(self.runtime, name)
         self.connection_id = str(uuid.uuid4())
         row = {**self.tls.row, "connection_id": self.connection_id, "status": "approved",
             "pairing_id": self.tls.peer.pairing_id, "pairing_request_id": str(uuid.uuid4()),
@@ -121,7 +102,6 @@ class MailPipelineTLSAcceptanceTests(unittest.IsolatedAsyncioTestCase):
         frames, closed = [], []
         incoming, outgoing = asyncio.Queue(), asyncio.Queue()
         await incoming.put(json.dumps({"version": 1, "team_id": self.team, "previous_cursor": previous}))
-        runtime, gateway = self.runtime, self.tls.gateway
 
         class Socket:
             query_params = {}
@@ -135,19 +115,7 @@ class MailPipelineTLSAcceptanceTests(unittest.IsolatedAsyncioTestCase):
                 frame = json.loads(raw)
                 frames.append(frame)
                 await outgoing.put(frame)
-            async def close(self, code):
-                closed.append(code)
-                feed = runtime._mail_hints.member
-                watcher = gateway._mail_watcher
-                print("Mail pipeline socket closed:", json.dumps({
-                    "code": code, "frames": len(frames), "reconnect": previous is not None,
-                    "feed": None if feed is None else {"ready": feed.ready.is_set(),
-                        "closed": feed.closed, "close_code": feed.close_code,
-                        "thread_alive": feed.thread.is_alive()},
-                    "watcher": None if watcher is None else {"closed": watcher._closed,
-                        "thread_alive": watcher._thread.is_alive(), "entries": len(watcher._entries)},
-                    "pending": runtime._mail_hints.pending, "leases": len(runtime._mail_hints.leases),
-                }), flush=True)
+            async def close(self, code): closed.append(code)
 
         task = asyncio.create_task(serve_team_mail_hints(Socket(), self.runtime,
             server_identity="peer_tls_fixture", authorized=lambda: True, protocols=[MAIL_WEBSOCKET_PROTOCOL]))
@@ -215,25 +183,7 @@ class MailPipelineTLSAcceptanceTests(unittest.IsolatedAsyncioTestCase):
             self.tls.assert_settled()
             offline = self.commit()
             reopened, outgoing, disconnect = await self.connect_socket(retained)
-            try:
-                restored = await asyncio.wait_for(outgoing.get(), 5)
-            except TimeoutError:
-                feed = self.runtime._mail_hints.member
-                watcher = self.tls.gateway._mail_watcher
-                print("Mail reconnect timeout:", {
-                    "feed": None if feed is None else (feed.ready.is_set(), feed.closed, feed.close_code),
-                    "watcher": (watcher._closed, watcher._thread.is_alive(), len(watcher._entries)),
-                    "pending": self.runtime._mail_hints.pending,
-                    "leases": len(self.runtime._mail_hints.leases),
-                }, flush=True)
-                stacks = sys._current_frames()
-                for thread in threading.enumerate():
-                    if thread.name.startswith("agentsdock-") and thread.ident in stacks:
-                        print("Mail diagnostic thread:", thread.name, flush=True)
-                        traceback.print_stack(stacks[thread.ident])
-                for task in asyncio.all_tasks():
-                    task.print_stack()
-                raise
+            restored = await asyncio.wait_for(outgoing.get(), 5)
             self.assert_frame(restored, "snapshot", offline)
             self.assertFalse(restored["cursor"]["reset"])
             self.assertNotEqual(restored["stream_id"], snapshot["stream_id"])

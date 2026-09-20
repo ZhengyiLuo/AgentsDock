@@ -19,6 +19,9 @@
   arrives corrected; the job card, latest output, Previous runs and genuine
   user messages remain correct after reopening. Provider proof timing and the
   initial HTTP page use controlled fixtures; no scheduled command is executed.
+- Release discovery copies no longer retain every completed test case and
+  its fixture graph for the entire shard. Restore unittest's normal cleanup
+  without changing test selection, assertions or deadlines.
 
 ## 2026-09-19 — AgentsServer 1.0.4-beta.5 accepted
 
