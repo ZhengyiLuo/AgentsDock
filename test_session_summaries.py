@@ -47,6 +47,8 @@ class SessionSummaryTests(unittest.TestCase):
             for index in range(182)
         ]
         summaries = [public_session(session, summary=True) for session in raw_sessions]
+        self.assertTrue(all("subagent_limit" not in session for session in summaries))
+        self.assertTrue(all(session["subagent_limit_control"] == {"supported": True} for session in summaries))
         full_sessions = [public_session(session) for session in raw_sessions]
         # Match the compact UTF-8 response body returned by the session route.
         summary_bytes = len(JSONResponse({"sessions": summaries}).body)

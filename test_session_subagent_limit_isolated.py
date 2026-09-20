@@ -11,6 +11,7 @@ import unittest
 from unittest.mock import AsyncMock
 
 from fastapi import FastAPI, HTTPException
+from fastapi.responses import JSONResponse
 from fastapi.testclient import TestClient
 
 from test_codex_provider_sessions_isolated import make_namespace
@@ -45,13 +46,31 @@ class SessionSubagentLimitTests(unittest.IsolatedAsyncioTestCase):
                     public = self.ns["public_session"](selected, summary=summary)
                     self.assertEqual(public["subagent_limit"], 5)
                     self.assertTrue(public["subagent_limit_control"]["supported"])
-                    self.assertEqual(public["subagent_limit_control"]["scope"], "chat")
+                    if not summary:
+                        self.assertEqual(public["subagent_limit_control"]["scope"], "chat")
                 cleared = await self.update(selected["id"], subagent_limit=None)
                 self.assertIsNone(cleared["subagent_limit"])
                 persisted = json.loads((self.root / "sessions.json").read_text())
                 self.assertIsNone(persisted[selected["id"]]["subagent_limit"])
                 self.assertEqual(persisted[selected["id"]]["codex_config_overrides"], siblings)
                 self.assertEqual(persisted[other["id"]]["subagent_limit"], 8)
+
+    async def test_default_creation_is_sparse_and_clear_keeps_summary_tombstone(self):
+        session = await self.create()
+        self.assertNotIn("subagent_limit", session)
+        summary = self.ns["public_session"](session, summary=True)
+        self.assertNotIn("subagent_limit", summary)
+        self.assertEqual(summary["subagent_limit_control"], {"supported": True})
+        self.assertIsNone(self.ns["public_session"](session)["subagent_limit"])
+        default_control_payload = len(JSONResponse({"sessions": [summary] * 182}).body)
+        # Other full creation fields are unrelated to this contract. Its new
+        # per-row default metadata stays under the existing list's 52-byte headroom.
+        baseline = {key: value for key, value in summary.items() if key != "subagent_limit_control"}
+        self.assertLess(default_control_payload - len(JSONResponse({"sessions": [baseline] * 182}).body), 52 * 182)
+        await self.update(session["id"], subagent_limit=3)
+        await self.update(session["id"], subagent_limit=None)
+        self.assertIsNone(self.ns["public_session"](session, summary=True)["subagent_limit"])
+        self.assertIn("subagent_limit", json.loads((self.root / "sessions.json").read_text())[session["id"]])
 
     async def test_invalid_request_values_fail_before_create_or_update_mutation(self):
         session = await self.create(title="Original", subagent_limit=3)

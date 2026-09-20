@@ -10268,7 +10268,6 @@ class SessionStore:
             "codex_provider_revision": runtime.get("codex_provider_revision"),
             "model": model,
             "effort": effort,
-            "subagent_limit": req.subagent_limit,
             "system_prompt": clean_session_system_prompt(req.system_prompt),
             "session_id": active_provider_id,
             "claude_session_id": claude_session_id,
@@ -10320,6 +10319,8 @@ class SessionStore:
             "created_at": now,
             "updated_at": now,
         }
+        if req.subagent_limit is not None:
+            sess["subagent_limit"] = req.subagent_limit
         if initializing_fork and parent_id:
             parent = self.sessions.get(parent_id) or {}
             if isinstance(parent.get("codex_config_overrides"), dict):
@@ -49863,8 +49864,19 @@ def public_session(sess: dict[str, Any], *, summary: bool = False) -> dict[str, 
             "last_read_agent_event_seq", "last_read_agent_event_at", "manual_unread",
         )
     }
-    public["subagent_limit"] = sess.get("subagent_limit") if _codex_config_positive_int(sess.get("subagent_limit")) else None
-    public["subagent_limit_control"] = session_subagent_limit_control(sess)
+    # Omit only never-configured defaults from high-volume lists. A stored null
+    # is a clear tombstone and must survive summary/cache merges.
+    if not summary or "subagent_limit" in sess:
+        public["subagent_limit"] = sess.get("subagent_limit") if _codex_config_positive_int(sess.get("subagent_limit")) else None
+    control = session_subagent_limit_control(sess)
+    if summary:
+        public["subagent_limit_control"] = {"supported": control["supported"]}
+        if control["applies_to"] != "new_or_reloaded_threads":
+            public["subagent_limit_control"]["applies_to"] = control["applies_to"]
+        if not control["supported"]:
+            public["subagent_limit_control"].update(reason=control["reason"], message=control["message"])
+    else:
+        public["subagent_limit_control"] = control
     # Provider ids are intentionally omitted from summary responses, but the
     # UI still needs the authoritative first-turn backend fence.
     public["backend_locked"] = session_backend_locked(sess)
