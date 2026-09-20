@@ -59022,8 +59022,12 @@ def codex_app_server_reasoning_plaintext(payload: dict[str, Any]) -> str:
         return "\n".join(part.strip() for part in value if isinstance(part, str) and part.strip())
     content = payload.get("content")
     if isinstance(content, list):
-        return "\n".join(part["text"].strip() for part in content if isinstance(part, dict)
-            and part.get("type") == "reasoning_text" and isinstance(part.get("text"), str) and part["text"].strip())
+        # App-server's completed ThreadItem uses content: string[]. Retain
+        # Responses-style reasoning_text blocks for older compatibility paths.
+        parts = [part if isinstance(part, str) else part.get("text", "")
+            if isinstance(part, dict) and part.get("type") == "reasoning_text" else ""
+            for part in content]
+        return "\n".join(part.strip() for part in parts if isinstance(part, str) and part.strip())
     return ""
 
 

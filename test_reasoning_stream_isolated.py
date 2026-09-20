@@ -8,6 +8,38 @@ import unittest
 from unittest.mock import AsyncMock, Mock
 
 
+class ReasoningPlaintextExtractionTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        tree = ast.parse(Path(__file__).with_name("agent_server.py").read_text())
+        node = next(node for node in tree.body if isinstance(node, ast.FunctionDef)
+            and node.name == "codex_app_server_reasoning_plaintext")
+        namespace = {"Any": Any}
+        exec(compile(ast.Module(body=[node], type_ignores=[]), "<reasoning-plaintext>", "exec"), namespace)
+        cls.extract = staticmethod(namespace["codex_app_server_reasoning_plaintext"])
+
+    def test_native_completed_content_string_array_preserves_all_sections(self):
+        # Native ItemCompletedNotification / ReasoningThreadItem schema:
+        # content and summary are independently exposed arrays of strings.
+        self.assertEqual(self.extract({"type": "reasoning", "id": "native-completed",
+            "summary": ["Short summary"], "content": ["First full section.", "Second full section."],
+            "encrypted_content": "must-not-be-read"}), "First full section.\nSecond full section.")
+
+    def test_existing_plaintext_forms_and_responses_blocks_remain_supported(self):
+        for payload, expected in [
+            ({"text": "Legacy text"}, "Legacy text"),
+            ({"text": ["First", "Second"]}, "First\nSecond"),
+            ({"content": [{"type": "reasoning_text", "text": "Responses block"}]}, "Responses block"),
+        ]:
+            with self.subTest(payload=payload):
+                self.assertEqual(self.extract(payload), expected)
+
+    def test_summary_encrypted_and_non_reasoning_blocks_are_not_plaintext(self):
+        self.assertEqual(self.extract({"summary": ["Summary only"], "encrypted_content": "must-not-be-read",
+            "content": [{"type": "output_text", "text": "Not reasoning"},
+                {"type": "reasoning_text", "text": None}, None, 42]}), "")
+
+
 class ReasoningSummaryStreamTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
         names = {"reasoning_summary_stream_snapshot", "broadcast_reasoning_summary_stream",

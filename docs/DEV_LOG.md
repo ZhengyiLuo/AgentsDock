@@ -1,5 +1,24 @@
 # Development and release log
 
+## 2026-09-19 — Completed Codex plaintext preservation — source only
+
+- Read native completed reasoning `content` arrays of strings, while retaining
+  compatibility with previously supported plaintext forms. Preserve all
+  sections separately from summaries. Authoritative completion replaces
+  earlier deltas; summaries and encrypted fields are not treated as plaintext.
+- Correct completion fixtures to use the native notification schema. Pass
+  101 focused runner, stream and parser tests, including completion without
+  plaintext deltas and revised final text.
+- Verify controlled Responses through actual sandboxed Codex, the production
+  server, authenticated WebSocket, desktop service, preload and timeline in
+  isolated offscreen Electron. Both native completed items contain string
+  arrays; no plaintext deltas occur, and both full texts persist and appear
+  after using the actual Settings toggle. Native tool execution completes;
+  the renderer reports no errors. This checks transport and display, not
+  external-model summary length or native GUI parity.
+- Availability: committed source correction only. No release version change
+  or running-server deployment is included in this check.
+
 ## 2026-09-19 — Supplied reasoning and per-chat limits — 1.0.4-beta.9
 
 - Retain Codex's explicitly supplied plaintext in a distinct reasoning event,

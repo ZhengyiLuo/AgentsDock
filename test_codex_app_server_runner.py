@@ -3844,7 +3844,7 @@ class CodexAppServerRunnerTests(unittest.IsolatedAsyncioTestCase):
                 turn.feed(delta("Second section", 1))
                 await wait_for_text("First section\\nSecond section")
                 completed = reasoning_item("thinking", "Authoritative revised summary")
-                completed["params"]["item"]["text"] = ["Authoritative plaintext section"]
+                completed["params"]["item"]["content"] = ["Authoritative plaintext section"]
                 turn.feed(completed)
                 turn.feed(completed)
                 turn.feed(delta("Late replay must not reopen the summary"))
@@ -3930,7 +3930,7 @@ class CodexAppServerRunnerTests(unittest.IsolatedAsyncioTestCase):
                     "item": {
                         "id": "raw-only",
                         "type": "reasoning",
-                        "text": ["Authoritative provider-supplied plaintext."],
+                        "content": ["Authoritative provider-supplied plaintext."],
                         "encrypted_content": "encrypted-data-must-never-be-decoded-or-persisted",
                     },
                 },
@@ -3963,8 +3963,8 @@ class CodexAppServerRunnerTests(unittest.IsolatedAsyncioTestCase):
                     "item": {
                         "id": "safe-summary",
                         "type": "reasoning",
-                        "text": ["Provider reasoning section one.", "Provider reasoning section two."],
-                        "summary": [{"text": "Safe completed summary."}],
+                        "content": ["Provider reasoning section one.", "Provider reasoning section two."],
+                        "summary": ["Safe completed summary."],
                     },
                 },
             },
