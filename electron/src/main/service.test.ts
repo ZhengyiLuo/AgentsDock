@@ -38,6 +38,7 @@ const electronHarness = vi.hoisted(() => ({
   showOpenDialog: vi.fn(),
   showSaveDialog: vi.fn(),
   shellOpenExternal: vi.fn(),
+  shellOpenPath: vi.fn(),
   notifications: [] as Array<{
     options: { title: string; body: string; silent: boolean }
     shown: boolean
@@ -67,7 +68,10 @@ vi.mock('electron', () => ({
     show() { this.record.shown = true }
   },
   safeStorage: {},
-  shell: { openExternal: (...args: unknown[]) => electronHarness.shellOpenExternal(...args) }
+  shell: {
+    openExternal: (...args: unknown[]) => electronHarness.shellOpenExternal(...args),
+    openPath: (...args: unknown[]) => electronHarness.shellOpenPath(...args)
+  }
 }))
 
 import { LocalCache, TIMELINE_PAGING_SCHEMA_VERSION } from './persistence'
@@ -251,6 +255,49 @@ afterEach(() => {
   electronHarness.showOpenDialog.mockReset()
   electronHarness.showSaveDialog.mockReset()
   electronHarness.shellOpenExternal.mockReset()
+  electronHarness.shellOpenPath.mockReset()
+})
+
+describe('opening artifact files externally', () => {
+  const file = { id: 'artifact-a', filename: 'artifact.bin', content_type: 'application/octet-stream' }
+  const localPath = '/synthetic/artifact.bin'
+
+  function harness() {
+    const service = Object.create(AppService.prototype) as AppService
+    const ensureLocalFile = vi.fn().mockResolvedValue(localPath)
+    Object.assign(service, { ensureLocalFile })
+    return { service, ensureLocalFile }
+  }
+
+  it('resolves when the operating system opens the downloaded file', async () => {
+    const { service, ensureLocalFile } = harness()
+    electronHarness.shellOpenPath.mockResolvedValue('')
+
+    await expect(service.openFile('chat-a', file)).resolves.toBeUndefined()
+
+    expect(ensureLocalFile).toHaveBeenCalledWith('chat-a', file)
+    expect(electronHarness.shellOpenPath).toHaveBeenCalledExactlyOnceWith(localPath)
+  })
+
+  it('rejects with the operating system error when opening the file fails', async () => {
+    const { service } = harness()
+    const message = 'No application is registered to open this file.'
+    electronHarness.shellOpenPath.mockResolvedValue(message)
+
+    await expect(service.openFile('chat-a', file)).rejects.toThrow(message)
+
+    expect(electronHarness.shellOpenPath).toHaveBeenCalledExactlyOnceWith(localPath)
+  })
+
+  it('does not invoke the operating system when downloading the file fails', async () => {
+    const { service, ensureLocalFile } = harness()
+    const error = new Error('Artifact download failed.')
+    ensureLocalFile.mockRejectedValue(error)
+
+    await expect(service.openFile('chat-a', file)).rejects.toBe(error)
+
+    expect(electronHarness.shellOpenPath).not.toHaveBeenCalled()
+  })
 })
 
 describe('session summary merging', () => {
