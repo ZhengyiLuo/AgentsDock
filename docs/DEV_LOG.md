@@ -1,5 +1,20 @@
 # Public development log
 
+## 2026-09-20 — Side chat button spacing — 1.0.4-beta.15 local acceptance
+
+- Accept signed local Apple silicon macOS app **1.0.4-beta.15 / 1189** from
+  `d3e4877a6b83eae994e4ee910d0e998808465850`. Verify bundle audit, Developer ID
+  signature, runtime entitlements, version/build and isolated startup. All 88
+  compiled files in the package match the tested production output.
+- Reproduce overlapping controls in beta.14, then exercise native offscreen
+  scrolling and clicks in the corrected source and exact packaged renderer.
+  At normal and narrow widths, Side chat sits 30 pixels lower with a clear gap
+  beneath Jump to latest. Both controls work, and the popup opens above the
+  unobscured composer. The controlled timeline uses production preload/IPC and
+  native HTTP; provider execution is outside this layout-only acceptance.
+- Availability: signed local `.app` with automatic updates disabled, not a
+  notarized public release. No server update is required.
+
 ## 2026-09-20 — Side chat button spacing — source correction
 
 - Lower the Side chat button into the folder row above the message composer,
