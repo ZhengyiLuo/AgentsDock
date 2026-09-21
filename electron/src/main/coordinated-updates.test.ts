@@ -1,5 +1,5 @@
 // @vitest-environment node
-import { generateKeyPairSync, sign } from 'node:crypto'
+import { createPublicKey, generateKeyPairSync, sign } from 'node:crypto'
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { describe, expect, it, vi } from 'vitest'
@@ -51,7 +51,14 @@ function fixture(ids = ['a']) {
 
 describe('signed coordinated release contract', () => {
   it('shares the server release trust root', () => {
-    expect(SERVER_RELEASE_PUBLIC_KEY).toBe(readFileSync(resolve(process.cwd(), '../server/release-public-key.pem'), 'utf8'))
+    const keyDer = (pem: string) => createPublicKey(pem).export({ format: 'der', type: 'spki' })
+    const serverPem = readFileSync(resolve(process.cwd(), '../server/release-public-key.pem'), 'utf8')
+    const appKey = keyDer(SERVER_RELEASE_PUBLIC_KEY)
+    expect(keyDer(serverPem)).toEqual(appKey)
+    for (const newline of ['\n', '\r\n']) {
+      expect(keyDer(serverPem.replace(/\r?\n/g, newline))).toEqual(appKey)
+    }
+    expect(keyDer(publicKey)).not.toEqual(appKey)
   })
   it('authenticates exact bytes, target version and compatibility before enrollment', () => {
     expect(verifyPairedRelease(signed(), '1.2.0-beta.2', publicKey).minimum_server_api_contract).toBe(8)
