@@ -1,5 +1,25 @@
 # Public development log
 
+## 2026-09-20 — Side chat popup and Claude agents — 1.0.4-beta.12 local acceptance
+
+- Accept the local Apple silicon macOS app **1.0.4-beta.12 / 1186** from
+  `a83a18e85e0b6207f5583e317dc00f902076912b`, including the popup and Claude
+  subagent corrections described below. Pass 381 service/projector checks,
+  100 focused popup checks, TypeScript validation and production compilation.
+- Verify Developer ID signing, bundle audit, hardened-runtime entitlements,
+  exact version/build and clean startup with isolated user data. All 88
+  packaged compiled files are identical to the accepted production output.
+- Exercise the exact packaged renderer and preload in native offscreen
+  Electron through production bootstrap, store, IPC and read-only HTTP:
+  opening/reopening Claude agents, opening the popup, retained drafts, direct
+  Clear and Escape. The harness compiles the service from the same committed
+  source and suppresses read receipts. The signed main binary is checked
+  separately at startup. Real Claude side-question acceptance precedes packaging.
+- Availability: signed local `.app` with automatic updates disabled. This is
+  not a notarized public release, cross-platform acceptance or server deployment.
+  Claude subagent visibility works with the existing server; the separate side
+  question configuration correction still requires a server update.
+
 ## 2026-09-20 — Claude subagent refresh — source acceptance
 
 - Fetch authoritative subagent state when opening Claude chats, as already
