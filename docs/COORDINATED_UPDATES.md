@@ -121,7 +121,7 @@ signed legacy bridge, including runtime file contents and executable permissions
 This permits packaged-app acceptance before npm publication while preventing an
 app update from reaching users before both server paths work.
 
-The private publisher integration also requires an explicit unused native build
+The public native publisher also requires an explicit unused native build
 number. Check its CI run floor before dispatch; old run-number arithmetic could
 reuse numbers already assigned to local desktop builds. A server npm version
 must advance the previously installed server version; the old beta.9 QA tarball
@@ -151,10 +151,20 @@ Once the package exists, configure its trusted publisher with GitHub owner
 `ZhengyiLuo`, repository `AgentsDock`, workflow filename `server-npm-publish.yml`,
 and environment `npm-release`. Permit the `npm publish` action, since stage-only
 permission does not authorize this workflow's direct publication. Configure
-required reviewers and allowed `main`/`release/*` branches for that GitHub
-environment. The canonical public publishing job receives neither a signing key
+allowed `main`/`release/*` branches for that GitHub environment, following the
+existing desktop release environment's branch restrictions. The canonical
+public publishing job receives neither a signing key
 nor an npm token. Transitional signing uses the existing standalone server secret;
-moving it to private desktop automation is not required for this release.
+moving it is not required for the transitional server signing step. Desktop
+signing and publication run in the public AgentsDock repository, as described
+in [Direct desktop releases](DIRECT_RELEASES.md).
+
+The workflow file must also exist on the repository's default branch for manual
+dispatch to work. If the default and maintained release branches have diverged,
+register only the reviewed workflow on the default branch; do not replace its
+application source. Dispatch on the reviewed release branch with the matching
+source SHA. The first package publication still uses the accepted archive and
+interactive npm authentication before trusted publishing can be configured.
 
 The workflow uses GitHub-hosted Node 24 and requires npm 11.5.1 or later. Confirm
 OIDC authorization and provenance in its first real run. See the
@@ -196,3 +206,14 @@ record results for these scenarios on disposable macOS and Linux accounts/hosts:
 
 Platform acceptance, npm registry round-trip verification and native publication
 remain release gates even when source tests pass.
+
+New macOS activation journals bind recorded device coordinates to persistent
+volume UUIDs. A real interrupted installer, orderly reboot with device-number
+change, installer retry and second reboot verify restoration of the previous
+runtime and service with preserved identity/token/synthetic data. Older journals
+without saved volume proof remain usable when their device coordinates match;
+they require manual recovery if those coordinates changed. Specialized interrupted
+Team Hub reactivation has a separate unmigrated journal and remains unsupported
+after remount. Do not discard those journals or replace their rollback baseline
+to force an update through. These limits are separate from upgrading a healthy
+older server to the new installer.

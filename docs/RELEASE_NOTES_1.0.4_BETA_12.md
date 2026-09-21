@@ -8,7 +8,8 @@ server distribution checks must pass before these notes accompany a release.
 Update AgentsDock once to request the matching server release for your saved
 servers. Busy servers wait for work to finish; offline servers continue when they
 reconnect. Settings shows each server's progress and offers an explicit retry
-after failure. A server's stable or beta channel is preserved.
+after failure. Automatic chat-title requests also finish before the server
+restarts. A server's stable or beta channel is preserved.
 
 ## Server installation through npm
 
@@ -30,3 +31,8 @@ Failed candidate health checks restore the previous server runtime. If a first
 installation fails before creating state or a service, installation can retry over
 its empty leftover folders. Existing installations, configuration, chat data and
 registered services remain protected from the fresh installer.
+
+New macOS update journals retain filesystem identity across reboot, allowing an
+interrupted installation to restore the previous server when the installer is
+run again. Older interrupted journals without that identity record may still
+need manual recovery after a filesystem remount.

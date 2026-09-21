@@ -1,0 +1,639 @@
+name: Prepare direct desktop release
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: SemVer version, without a leading v
+        required: true
+        type: string
+      build_number:
+        description: "Explicit native build reservation: exactly 1185 + public workflow run number"
+        required: true
+        type: string
+      source_sha:
+        description: Full reviewed commit SHA in ZhengyiLuo/AgentsDock
+        required: true
+        type: string
+      source_ref:
+        description: Public source branch containing the commit (main or release/*)
+        required: true
+        type: string
+      track:
+        description: Stable or opt-in beta update channel
+        required: true
+        default: stable
+        type: choice
+        options:
+          - stable
+          - beta
+      release_notes:
+        description: Short release notes for the draft
+        required: true
+        type: string
+      coordinated_manifest_base64:
+        description: Optional exact signed npm descriptor bytes as single-line base64 (requires signature)
+        required: false
+        default: ''
+        type: string
+      coordinated_signature_base64:
+        description: Optional raw 64-byte Ed25519 signature as single-line base64 (requires descriptor)
+        required: false
+        default: ''
+        type: string
+      allow_unsigned_windows:
+        description: Explicitly allow an unsigned Windows installer (stable normally fails closed)
+        required: true
+        default: false
+        type: boolean
+
+concurrency:
+  group: agentsdock-direct-release
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  validate-request:
+    if: github.event_name == 'workflow_dispatch' && github.repository == 'ZhengyiLuo/AgentsDock' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/release/'))
+    environment: direct-production
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    outputs:
+      coordinated_updates: ${{ steps.coordinated.outputs.coordinated_updates }}
+      build_number: ${{ steps.build-number.outputs.build_number }}
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+        with:
+          persist-credentials: false
+
+      - name: Require the canonical manual trusted release line
+        run: |
+          test "$GITHUB_EVENT_NAME" = workflow_dispatch
+          test "$GITHUB_REPOSITORY" = ZhengyiLuo/AgentsDock
+          [[ "$GITHUB_REF" = refs/heads/main || "$GITHUB_REF" = refs/heads/release/* ]] || { echo "Release workflow requires main or release/*." >&2; exit 1; }
+          git check-ref-format "$GITHUB_REF"
+
+      - id: build-number
+        name: Validate the explicit native build reservation
+        env:
+          REQUESTED_BUILD: ${{ inputs.build_number }}
+          WORKFLOW_RUN: ${{ github.run_number }}
+        run: node scripts/validate_desktop_build_number.mjs "$REQUESTED_BUILD" "$WORKFLOW_RUN" >> "$GITHUB_OUTPUT"
+
+      - name: Validate the explicit public source pin
+        env:
+          SOURCE_SHA: ${{ inputs.source_sha }}
+          SOURCE_REF: ${{ inputs.source_ref }}
+        run: |
+          [[ "$SOURCE_SHA" =~ ^[0-9a-f]{40}$ ]] || { echo "A full lowercase source SHA is required." >&2; exit 1; }
+          [[ "$SOURCE_REF" =~ ^(main|release/[A-Za-z0-9][A-Za-z0-9._/-]*)$ ]] || { echo "Source must be main or a reviewed release branch." >&2; exit 1; }
+          git check-ref-format "refs/heads/$SOURCE_REF"
+
+      - name: Check out the pinned public source for ancestry verification
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+        with:
+          repository: ZhengyiLuo/AgentsDock
+          ref: ${{ inputs.source_sha }}
+          fetch-depth: 0
+          persist-credentials: false
+          path: release-source
+
+      - name: Require the public pin on the reviewed source branch
+        working-directory: release-source
+        env:
+          SOURCE_SHA: ${{ inputs.source_sha }}
+          SOURCE_REF: ${{ inputs.source_ref }}
+        run: |
+          test "$(git rev-parse HEAD)" = "$SOURCE_SHA"
+          git fetch --no-tags origin "refs/heads/$SOURCE_REF:refs/remotes/origin/reviewed-release"
+          git merge-base --is-ancestor "$SOURCE_SHA" refs/remotes/origin/reviewed-release
+
+      - name: Verify the release orchestration helpers
+        run: node --test scripts/tests/direct-release-mirror.test.mjs scripts/tests/coordinated-release.test.mjs scripts/tests/published-server-paths.test.mjs scripts/tests/validate_desktop_build_number.test.mjs scripts/tests/npm-candidate-release.test.mjs
+
+      - id: coordinated
+        name: Validate optional signed server descriptor for native staging
+        env:
+          RELEASE_VERSION: ${{ inputs.version }}
+          RELEASE_TRACK: ${{ inputs.track }}
+          SOURCE_SHA: ${{ inputs.source_sha }}
+          COORDINATED_MANIFEST_BASE64: ${{ inputs.coordinated_manifest_base64 }}
+          COORDINATED_SIGNATURE_BASE64: ${{ inputs.coordinated_signature_base64 }}
+        run: |
+          if [[ -n "$COORDINATED_MANIFEST_BASE64" || -n "$COORDINATED_SIGNATURE_BASE64" ]]; then
+            cmp server/release-public-key.pem release-source/server/release-public-key.pem
+            test -f release-source/scripts/prepare_electron_coordinated_config.mjs
+            test -f release-source/scripts/verify_coordinated_resources.mjs
+          fi
+          node scripts/coordinated-release.mjs prepare "$RUNNER_TEMP/coordinated-release" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: ${{ steps.coordinated.outputs.coordinated_updates == 'true' }}
+        with:
+          name: AgentsDock-${{ inputs.version }}-coordinated-descriptor
+          path: ${{ runner.temp }}/coordinated-release/*
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Require a version newer than every public desktop release
+        env:
+          GH_TOKEN: ${{ secrets.AGENTSDOCK_RELEASE_TOKEN }}
+          RELEASE_VERSION: ${{ inputs.version }}
+          RELEASE_TRACK: ${{ inputs.track }}
+        run: |
+          for repository in ZhengyiLuo/AgentsDock ZhengyiLuo/AgentsDock-Releases; do
+            test "$(gh api "repos/$repository" --jq '.permissions.push')" = true || { echo "Release token requires Contents write access to $repository." >&2; exit 1; }
+          done
+          gh api --paginate "repos/ZhengyiLuo/AgentsDock/releases?per_page=100" > "$RUNNER_TEMP/primary-releases.json"
+          gh api --paginate "repos/ZhengyiLuo/AgentsDock-Releases/releases?per_page=100" > "$RUNNER_TEMP/legacy-releases.json"
+          jq -s 'add' "$RUNNER_TEMP/primary-releases.json" "$RUNNER_TEMP/legacy-releases.json" > "$RUNNER_TEMP/public-releases.json"
+          node scripts/validate_electron_release_version.mjs "$RELEASE_VERSION" "$RELEASE_TRACK" "$RUNNER_TEMP/public-releases.json"
+
+  build-macos:
+    if: github.event_name == 'workflow_dispatch' && github.repository == 'ZhengyiLuo/AgentsDock' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/release/'))
+    needs: validate-request
+    environment: direct-production
+    runs-on: macos-15
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+        with:
+          repository: ZhengyiLuo/AgentsDock
+          ref: ${{ inputs.source_sha }}
+          persist-credentials: false
+
+      - uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v6
+        with:
+          version: 11.9.0
+          run_install: false
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        with:
+          node-version: 24
+          cache: pnpm
+          cache-dependency-path: electron/pnpm-lock.yaml
+
+      - name: Install dependencies
+        working-directory: electron
+        run: pnpm install --frozen-lockfile
+
+      - name: Import Developer ID certificate
+        env:
+          CERTIFICATE_P12_BASE64: ${{ secrets.MACOS_CERTIFICATE_P12_BASE64 }}
+          CERTIFICATE_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
+        run: |
+          umask 077
+          CERTIFICATE_PATH="$RUNNER_TEMP/agentsdock-release.p12"
+          KEYCHAIN_PATH="$RUNNER_TEMP/agentsdock-signing.keychain-db"
+          KEYCHAIN_PASSWORD="$(openssl rand -hex 24)"
+          printf '%s' "$CERTIFICATE_P12_BASE64" | openssl base64 -d -A -out "$CERTIFICATE_PATH"
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN_PATH"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security import "$CERTIFICATE_PATH" -P "$CERTIFICATE_PASSWORD" -A -t cert -f pkcs12 -k "$KEYCHAIN_PATH"
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security list-keychains -d user -s "$KEYCHAIN_PATH" login.keychain-db
+
+      - name: Stamp release version
+        working-directory: electron
+        env:
+          RELEASE_VERSION: ${{ inputs.version }}
+          RELEASE_TRACK: ${{ inputs.track }}
+          BUILD_NUMBER: ${{ needs.validate-request.outputs.build_number }}
+        run: |
+          if [[ "$RELEASE_TRACK" = stable && ! "$RELEASE_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "Stable versions must use x.y.z SemVer without a leading v." >&2
+            exit 1
+          fi
+          if [[ "$RELEASE_TRACK" = beta && ! "$RELEASE_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+-beta\.[1-9][0-9]*$ ]]; then
+            echo "Beta versions must use x.y.z-beta.N SemVer without a leading v." >&2
+            exit 1
+          fi
+          node -e "const fs=require('fs'); const p=require('./package.json'); p.version=process.env.RELEASE_VERSION; const n=Number(process.env.BUILD_NUMBER);if(!Number.isSafeInteger(n)||n<1186)throw new Error('Invalid reserved build number');p.build.buildVersion=String(n);p.releaseBuildNumber=String(n); p.build.publish[0].channel=process.env.RELEASE_TRACK==='beta'?'beta':'latest'; fs.writeFileSync('package.json', JSON.stringify(p, null, 2)+'\n')"
+          echo "AGENTSDOCK_EXPECTED_BUILD_NUMBER=${BUILD_NUMBER}" >> "$GITHUB_ENV"
+
+      - name: Write App Store Connect key
+        env:
+          APPLE_API_KEY_P8_BASE64: ${{ secrets.APPLE_API_KEY_P8_BASE64 }}
+          APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
+        run: |
+          umask 077
+          mkdir -p "$RUNNER_TEMP/agentsdock-private-keys"
+          printf '%s' "$APPLE_API_KEY_P8_BASE64" | openssl base64 -d -A -out "$RUNNER_TEMP/agentsdock-private-keys/AuthKey_${APPLE_API_KEY_ID}.p8"
+
+      - uses: actions/download-artifact@018cc2cf5baa6db3ef3c5f8a56943fffe632ef53 # v6
+        if: ${{ needs.validate-request.outputs.coordinated_updates == 'true' }}
+        with:
+          name: AgentsDock-${{ inputs.version }}-coordinated-descriptor
+          path: ${{ runner.temp }}/coordinated-release
+
+      - name: Bind verified coordinated descriptor to this native build
+        if: ${{ needs.validate-request.outputs.coordinated_updates == 'true' }}
+        run: |
+          echo "AGENTSDOCK_COORDINATED_MANIFEST=$RUNNER_TEMP/coordinated-release/agents-server-npm-manifest.json" >> "$GITHUB_ENV"
+          echo "AGENTSDOCK_COORDINATED_SIGNATURE=$RUNNER_TEMP/coordinated-release/agents-server-npm-manifest.sig" >> "$GITHUB_ENV"
+
+      - name: Build, sign, notarize, and verify macOS
+        env:
+          AGENTSDOCK_RELEASE_TRACK: ${{ inputs.track }}
+          APPLE_API_KEY: ${{ runner.temp }}/agentsdock-private-keys/AuthKey_${{ secrets.APPLE_API_KEY_ID }}.p8
+          APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
+          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+        run: ./scripts/build_electron_release.sh
+
+      - name: Remove temporary Apple signing credentials
+        if: ${{ always() }}
+        run: |
+          CLEANUP_STATUS=0
+          KEYCHAIN_PATH="$RUNNER_TEMP/agentsdock-signing.keychain-db"
+          if [[ -f "$KEYCHAIN_PATH" ]]; then security delete-keychain "$KEYCHAIN_PATH" || CLEANUP_STATUS=$?; fi
+          rm -f "$KEYCHAIN_PATH" "$RUNNER_TEMP/agentsdock-release.p12" || CLEANUP_STATUS=$?
+          rm -rf "$RUNNER_TEMP/agentsdock-private-keys" || CLEANUP_STATUS=$?
+          exit "$CLEANUP_STATUS"
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: AgentsDock-${{ inputs.version }}-macos-verified
+          path: |
+            electron/dist-release/AgentsDock-*
+            electron/dist-release/*-mac.yml
+          if-no-files-found: error
+          retention-days: 14
+
+  build-linux-x64:
+    if: github.event_name == 'workflow_dispatch' && github.repository == 'ZhengyiLuo/AgentsDock' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/release/'))
+    needs: validate-request
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+        with:
+          repository: ZhengyiLuo/AgentsDock
+          ref: ${{ inputs.source_sha }}
+          persist-credentials: false
+
+      - uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v6
+        with:
+          version: 11.9.0
+          run_install: false
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        with:
+          node-version: 24
+          cache: pnpm
+          cache-dependency-path: electron/pnpm-lock.yaml
+
+      - name: Install dependencies and Linux smoke-test runtime
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y xvfb
+          cd electron
+          pnpm install --frozen-lockfile
+
+      - name: Stamp release version
+        working-directory: electron
+        env:
+          RELEASE_VERSION: ${{ inputs.version }}
+          RELEASE_TRACK: ${{ inputs.track }}
+          BUILD_NUMBER: ${{ needs.validate-request.outputs.build_number }}
+        run: |
+          if [[ "$RELEASE_TRACK" = stable && ! "$RELEASE_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "Stable versions must use x.y.z SemVer without a leading v." >&2
+            exit 1
+          fi
+          if [[ "$RELEASE_TRACK" = beta && ! "$RELEASE_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+-beta\.[1-9][0-9]*$ ]]; then
+            echo "Beta versions must use x.y.z-beta.N SemVer without a leading v." >&2
+            exit 1
+          fi
+          node -e "const fs=require('fs'); const p=require('./package.json'); p.version=process.env.RELEASE_VERSION; const n=Number(process.env.BUILD_NUMBER);if(!Number.isSafeInteger(n)||n<1186)throw new Error('Invalid reserved build number');p.build.buildVersion=String(n);p.releaseBuildNumber=String(n); p.build.publish[0].channel=process.env.RELEASE_TRACK==='beta'?'beta':'latest'; fs.writeFileSync('package.json', JSON.stringify(p, null, 2)+'\n')"
+          echo "AGENTSDOCK_EXPECTED_BUILD_NUMBER=${BUILD_NUMBER}" >> "$GITHUB_ENV"
+
+      - uses: actions/download-artifact@018cc2cf5baa6db3ef3c5f8a56943fffe632ef53 # v6
+        if: ${{ needs.validate-request.outputs.coordinated_updates == 'true' }}
+        with:
+          name: AgentsDock-${{ inputs.version }}-coordinated-descriptor
+          path: ${{ runner.temp }}/coordinated-release
+
+      - name: Bind verified coordinated descriptor to this native build
+        if: ${{ needs.validate-request.outputs.coordinated_updates == 'true' }}
+        run: |
+          echo "AGENTSDOCK_COORDINATED_MANIFEST=$RUNNER_TEMP/coordinated-release/agents-server-npm-manifest.json" >> "$GITHUB_ENV"
+          echo "AGENTSDOCK_COORDINATED_SIGNATURE=$RUNNER_TEMP/coordinated-release/agents-server-npm-manifest.sig" >> "$GITHUB_ENV"
+
+      - name: Build Linux x64
+        env:
+          AGENTSDOCK_LINUX_ARCH: x64
+          AGENTSDOCK_RELEASE_TRACK: ${{ inputs.track }}
+        run: ./scripts/build_electron_linux.sh
+
+      - name: Verify Linux x64
+        run: ./scripts/verify_electron_linux.sh dist/linux "${{ inputs.version }}" "${{ inputs.track }}" x64
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: AgentsDock-${{ inputs.version }}-linux-x64-verified
+          path: |
+            dist/linux/AgentsDock-*
+            dist/linux/*-linux.yml
+          if-no-files-found: error
+          retention-days: 14
+
+  build-linux-arm64:
+    if: github.event_name == 'workflow_dispatch' && github.repository == 'ZhengyiLuo/AgentsDock' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/release/'))
+    needs: validate-request
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+        with:
+          repository: ZhengyiLuo/AgentsDock
+          ref: ${{ inputs.source_sha }}
+          persist-credentials: false
+
+      - uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v6
+        with:
+          version: 11.9.0
+          run_install: false
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        with:
+          node-version: 24
+          cache: pnpm
+          cache-dependency-path: electron/pnpm-lock.yaml
+
+      - name: Install dependencies and Linux smoke-test runtime
+        run: |
+          test "$(uname -m)" = aarch64
+          sudo apt-get update
+          sudo apt-get install -y xvfb
+          cd electron
+          pnpm install --frozen-lockfile
+
+      - name: Stamp release version
+        working-directory: electron
+        env:
+          RELEASE_VERSION: ${{ inputs.version }}
+          RELEASE_TRACK: ${{ inputs.track }}
+          BUILD_NUMBER: ${{ needs.validate-request.outputs.build_number }}
+        run: |
+          if [[ "$RELEASE_TRACK" = stable && ! "$RELEASE_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "Stable versions must use x.y.z SemVer without a leading v." >&2
+            exit 1
+          fi
+          if [[ "$RELEASE_TRACK" = beta && ! "$RELEASE_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+-beta\.[1-9][0-9]*$ ]]; then
+            echo "Beta versions must use x.y.z-beta.N SemVer without a leading v." >&2
+            exit 1
+          fi
+          node -e "const fs=require('fs'); const p=require('./package.json'); p.version=process.env.RELEASE_VERSION; const n=Number(process.env.BUILD_NUMBER);if(!Number.isSafeInteger(n)||n<1186)throw new Error('Invalid reserved build number');p.build.buildVersion=String(n);p.releaseBuildNumber=String(n); p.build.publish[0].channel=process.env.RELEASE_TRACK==='beta'?'beta':'latest'; fs.writeFileSync('package.json', JSON.stringify(p, null, 2)+'\n')"
+          echo "AGENTSDOCK_EXPECTED_BUILD_NUMBER=${BUILD_NUMBER}" >> "$GITHUB_ENV"
+
+      - uses: actions/download-artifact@018cc2cf5baa6db3ef3c5f8a56943fffe632ef53 # v6
+        if: ${{ needs.validate-request.outputs.coordinated_updates == 'true' }}
+        with:
+          name: AgentsDock-${{ inputs.version }}-coordinated-descriptor
+          path: ${{ runner.temp }}/coordinated-release
+
+      - name: Bind verified coordinated descriptor to this native build
+        if: ${{ needs.validate-request.outputs.coordinated_updates == 'true' }}
+        run: |
+          echo "AGENTSDOCK_COORDINATED_MANIFEST=$RUNNER_TEMP/coordinated-release/agents-server-npm-manifest.json" >> "$GITHUB_ENV"
+          echo "AGENTSDOCK_COORDINATED_SIGNATURE=$RUNNER_TEMP/coordinated-release/agents-server-npm-manifest.sig" >> "$GITHUB_ENV"
+
+      - name: Build Linux arm64
+        env:
+          AGENTSDOCK_LINUX_ARCH: arm64
+          AGENTSDOCK_RELEASE_TRACK: ${{ inputs.track }}
+        run: ./scripts/build_electron_linux.sh
+
+      - name: Verify Linux arm64
+        run: ./scripts/verify_electron_linux.sh dist/linux "${{ inputs.version }}" "${{ inputs.track }}" arm64
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: AgentsDock-${{ inputs.version }}-linux-arm64-verified
+          path: |
+            dist/linux/AgentsDock-*
+            dist/linux/*-linux-arm64.yml
+          if-no-files-found: error
+          retention-days: 14
+
+  build-windows-x64:
+    if: github.event_name == 'workflow_dispatch' && github.repository == 'ZhengyiLuo/AgentsDock' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/release/'))
+    needs: validate-request
+    environment: direct-production
+    runs-on: windows-2025
+    timeout-minutes: 40
+    outputs:
+      signing_policy: ${{ steps.windows-signing.outputs.signing_policy }}
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+        with:
+          repository: ZhengyiLuo/AgentsDock
+          ref: ${{ inputs.source_sha }}
+          persist-credentials: false
+
+      - uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v6
+        with:
+          version: 11.9.0
+          run_install: false
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        with:
+          node-version: 24
+          cache: pnpm
+          cache-dependency-path: electron/pnpm-lock.yaml
+
+      - name: Install dependencies
+        working-directory: electron
+        run: pnpm install --frozen-lockfile
+
+      - name: Stamp release version
+        working-directory: electron
+        env:
+          RELEASE_VERSION: ${{ inputs.version }}
+          RELEASE_TRACK: ${{ inputs.track }}
+          BUILD_NUMBER: ${{ needs.validate-request.outputs.build_number }}
+        shell: pwsh
+        run: |
+          if ($env:RELEASE_TRACK -eq 'stable' -and $env:RELEASE_VERSION -notmatch '^\d+\.\d+\.\d+$') {
+            throw 'Stable versions must use x.y.z SemVer without a leading v.'
+          }
+          if ($env:RELEASE_TRACK -eq 'beta' -and $env:RELEASE_VERSION -notmatch '^\d+\.\d+\.\d+-beta\.[1-9]\d*$') {
+            throw 'Beta versions must use x.y.z-beta.N SemVer without a leading v.'
+          }
+          node -e "const fs=require('fs'); const p=require('./package.json'); p.version=process.env.RELEASE_VERSION; const n=Number(process.env.BUILD_NUMBER);if(!Number.isSafeInteger(n)||n<1186)throw new Error('Invalid reserved build number');p.build.buildVersion=String(n);p.releaseBuildNumber=String(n); p.build.publish[0].channel=process.env.RELEASE_TRACK==='beta'?'beta':'latest'; fs.writeFileSync('package.json', JSON.stringify(p, null, 2)+'\n')"
+          "AGENTSDOCK_EXPECTED_BUILD_NUMBER=$env:BUILD_NUMBER" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
+      - id: windows-signing
+        name: Configure Windows signing policy
+        env:
+          RELEASE_TRACK: ${{ inputs.track }}
+          ALLOW_UNSIGNED_WINDOWS: ${{ inputs.allow_unsigned_windows }}
+          WINDOWS_CERTIFICATE_PFX_BASE64: ${{ secrets.WINDOWS_CERTIFICATE_PFX_BASE64 }}
+          WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
+        shell: pwsh
+        run: |
+          $HasCertificate = -not [string]::IsNullOrWhiteSpace($env:WINDOWS_CERTIFICATE_PFX_BASE64)
+          $HasPassword = -not [string]::IsNullOrWhiteSpace($env:WINDOWS_CERTIFICATE_PASSWORD)
+          if ($HasCertificate -ne $HasPassword) {
+            throw 'Configure both WINDOWS_CERTIFICATE_PFX_BASE64 and WINDOWS_CERTIFICATE_PASSWORD, or neither.'
+          }
+          $UnsignedStableApproved = $env:RELEASE_TRACK -eq 'stable' -and $env:ALLOW_UNSIGNED_WINDOWS -eq 'true'
+          if ($env:RELEASE_TRACK -eq 'stable' -and -not $HasCertificate -and -not $UnsignedStableApproved) {
+            throw 'Stable Windows releases require Authenticode unless allow_unsigned_windows is explicitly approved.'
+          }
+          if ($HasCertificate) {
+            $CertificatePath = Join-Path $env:RUNNER_TEMP 'agentsdock-windows-release.pfx'
+            [System.IO.File]::WriteAllBytes($CertificatePath, [Convert]::FromBase64String($env:WINDOWS_CERTIFICATE_PFX_BASE64))
+            "CSC_LINK=$CertificatePath" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+            "CSC_KEY_PASSWORD=$($env:WINDOWS_CERTIFICATE_PASSWORD)" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+            'AGENTSDOCK_WINDOWS_SIGNING_POLICY=require-signed' | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+            'signing_policy=require-signed' | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+          } else {
+            'CSC_IDENTITY_AUTO_DISCOVERY=false' | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+            'AGENTSDOCK_WINDOWS_SIGNING_POLICY=allow-unsigned' | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+            'signing_policy=allow-unsigned' | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+          }
+
+      - uses: actions/download-artifact@018cc2cf5baa6db3ef3c5f8a56943fffe632ef53 # v6
+        if: ${{ needs.validate-request.outputs.coordinated_updates == 'true' }}
+        with:
+          name: AgentsDock-${{ inputs.version }}-coordinated-descriptor
+          path: ${{ runner.temp }}/coordinated-release
+
+      - name: Bind verified coordinated descriptor to this native build
+        if: ${{ needs.validate-request.outputs.coordinated_updates == 'true' }}
+        shell: pwsh
+        run: |
+          "AGENTSDOCK_COORDINATED_MANIFEST=$env:RUNNER_TEMP/coordinated-release/agents-server-npm-manifest.json" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "AGENTSDOCK_COORDINATED_SIGNATURE=$env:RUNNER_TEMP/coordinated-release/agents-server-npm-manifest.sig" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
+      - name: Build Windows x64
+        env:
+          AGENTSDOCK_WINDOWS_ARCH: x64
+          AGENTSDOCK_RELEASE_TRACK: ${{ inputs.track }}
+        shell: pwsh
+        run: ./scripts/build_electron_windows.ps1
+
+      - name: Verify Windows x64
+        env:
+          WINDOWS_EXPECTED_PUBLISHER: ${{ secrets.WINDOWS_EXPECTED_PUBLISHER }}
+        shell: pwsh
+        run: ./scripts/verify_electron_windows.ps1 dist/windows "${{ inputs.version }}" "${{ inputs.track }}" x64 "$env:AGENTSDOCK_WINDOWS_SIGNING_POLICY" "$env:WINDOWS_EXPECTED_PUBLISHER"
+
+      - name: Remove temporary Windows signing certificate
+        if: ${{ always() }}
+        shell: pwsh
+        run: |
+          $CertificatePath = Join-Path $env:RUNNER_TEMP 'agentsdock-windows-release.pfx'
+          if (Test-Path -LiteralPath $CertificatePath) { Remove-Item -LiteralPath $CertificatePath -Force }
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: AgentsDock-${{ inputs.version }}-windows-x64-verified
+          path: |
+            dist/windows/AgentsDock-*-win-x64.exe
+            dist/windows/AgentsDock-*-win-x64.exe.blockmap
+            dist/windows/latest.yml
+            dist/windows/beta.yml
+          if-no-files-found: error
+          retention-days: 14
+
+  create-draft:
+    if: github.event_name == 'workflow_dispatch' && github.repository == 'ZhengyiLuo/AgentsDock' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/release/'))
+    needs:
+      - validate-request
+      - build-macos
+      - build-linux-x64
+      - build-linux-arm64
+      - build-windows-x64
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    environment: direct-production
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+        with:
+          persist-credentials: false
+
+      - uses: actions/download-artifact@018cc2cf5baa6db3ef3c5f8a56943fffe632ef53 # v6
+        with:
+          name: AgentsDock-${{ inputs.version }}-macos-verified
+          path: release
+
+      - uses: actions/download-artifact@018cc2cf5baa6db3ef3c5f8a56943fffe632ef53 # v6
+        with:
+          name: AgentsDock-${{ inputs.version }}-linux-x64-verified
+          path: release
+
+      - uses: actions/download-artifact@018cc2cf5baa6db3ef3c5f8a56943fffe632ef53 # v6
+        with:
+          name: AgentsDock-${{ inputs.version }}-linux-arm64-verified
+          path: release
+
+      - uses: actions/download-artifact@018cc2cf5baa6db3ef3c5f8a56943fffe632ef53 # v6
+        with:
+          name: AgentsDock-${{ inputs.version }}-windows-x64-verified
+          path: release
+
+      - uses: actions/download-artifact@018cc2cf5baa6db3ef3c5f8a56943fffe632ef53 # v6
+        if: ${{ needs.validate-request.outputs.coordinated_updates == 'true' }}
+        with:
+          name: AgentsDock-${{ inputs.version }}-coordinated-descriptor
+          path: release
+
+      - name: Seal the exact cross-platform asset set
+        env:
+          RELEASE_VERSION: ${{ inputs.version }}
+          RELEASE_TRACK: ${{ inputs.track }}
+          COORDINATED_UPDATES: ${{ needs.validate-request.outputs.coordinated_updates }}
+        run: |
+          node --input-type=module <<'NODE'
+          import { expectedAssets } from './scripts/direct-release-mirror.mjs'
+          import { createHash } from 'node:crypto'
+          import { createReadStream, lstatSync, readdirSync, writeFileSync } from 'node:fs'
+          const names = expectedAssets(process.env.RELEASE_VERSION, process.env.RELEASE_TRACK, process.env.COORDINATED_UPDATES === 'true').filter(name => name !== 'SHA256SUMS')
+          if (JSON.stringify(readdirSync('release').sort()) !== JSON.stringify(names)) throw new Error('Release asset set is not exact')
+          const lines = []
+          for (const name of names) {
+            const path = `release/${name}`
+            if (!lstatSync(path).isFile()) throw new Error('Release assets must be regular files')
+            const hash = createHash('sha256')
+            for await (const chunk of createReadStream(path)) hash.update(chunk)
+            lines.push(`${hash.digest('hex')}  ${name}`)
+          }
+          writeFileSync('release/SHA256SUMS', `${lines.join('\n')}\n`, { flag: 'wx' })
+          NODE
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: AgentsDock-${{ inputs.version }}-verified
+          path: release/*
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Create reviewed GitHub draft
+        env:
+          GH_TOKEN: ${{ secrets.AGENTSDOCK_RELEASE_TOKEN }}
+          RELEASE_VERSION: ${{ inputs.version }}
+          RELEASE_TRACK: ${{ inputs.track }}
+          RELEASE_NOTES: ${{ inputs.release_notes }}
+          COORDINATED_UPDATES: ${{ needs.validate-request.outputs.coordinated_updates }}
+          SOURCE_SHA: ${{ inputs.source_sha }}
+          SOURCE_REF: ${{ inputs.source_ref }}
+          WINDOWS_SIGNING_POLICY: ${{ needs.build-windows-x64.outputs.signing_policy }}
+        run: |
+          if [[ "$WINDOWS_SIGNING_POLICY" = require-signed ]]; then
+            WINDOWS_SIGNING=signed
+          elif [[ "$WINDOWS_SIGNING_POLICY" = allow-unsigned ]]; then
+            WINDOWS_SIGNING=unsigned
+          else
+            echo "Windows signing policy output is missing or invalid." >&2
+            exit 1
+          fi
+          node scripts/direct-release-mirror.mjs stage \
+            --version "$RELEASE_VERSION" --track "$RELEASE_TRACK" \
+            --source-sha "$SOURCE_SHA" --source-ref "$SOURCE_REF" \
+            --windows-signing "$WINDOWS_SIGNING" --notes "$RELEASE_NOTES" \
+            --coordinated-updates "$COORDINATED_UPDATES" --assets release

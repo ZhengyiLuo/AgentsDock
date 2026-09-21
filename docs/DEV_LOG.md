@@ -1,5 +1,57 @@
 # Public development log
 
+## 2026-09-20 — Current server integration and transition signing — candidate follow-up
+
+- Merge the six newer commits from the maintained standalone release branch,
+  preserving automatic Codex/Cursor chat titles and the shared-chat Cursor fix.
+  Preserve the updated shared-browser bundle. The earlier `8a52b14` archives
+  below are historical QA artifacts and are superseded for release preparation.
+- Include automatic title requests in update and restart blockers. Prevent new
+  optional title requests after update admission closes, and allow unstarted
+  queued requests to retry on a later turn. Verify an actual disposable provider
+  subprocess delays update advancement and that shutdown reaps its process group.
+- Pass 291 targeted title, provider-background, update and restart tests. Pass
+  another 189 focused provider-isolation, storage, shared-chat, terminal and
+  packaging checks, plus 33 Node publication/staging/CLI checks. Reproduce the
+  terminal cancellation regression with a single-worker executor.
+- Make npm packaging work in both the combined repository and standalone
+  compatibility export. Select legal notices from the checkout boundary, reject
+  unrelated parent files and retain exact canonical license copies in the export.
+  Nine packaging tests include real offline npm archives in both layouts.
+- Include the license and notice in both published server distributions and
+  installed runtimes. Pass 16 focused packaging/manifest tests, including actual
+  npm and legacy archive comparison of the legal files and their permissions.
+- Reproduce macOS device-number changes across reboot breaking interrupted
+  activation recovery. New journals bind their filesystem coordinates to a
+  persistent volume UUID while retaining inode, ownership, content and live race
+  checks. Negotiate the new guard-path option with older recovery helpers.
+  Pass 75 activation/UUID tests and 17 installer recovery tests. In a disposable
+  macOS VM, interrupt the real installer, reboot across an actual device-number
+  change and verify unchanged installer retry restores the previous runtime,
+  exact service plist, identity, token and six synthetic state/history files.
+  A second orderly reboot retains that rollback and starts the restored service.
+  Legacy journals without saved volume proof still require manual recovery if
+  their device numbers changed; specialized interrupted Hub reactivation after
+  remount remains unsupported. Do not describe those boundaries as accepted.
+- Prepare transitional signing through the standalone repository's existing
+  release secret. Its prepare-only workflow can produce both signed server
+  distributions after all server test shards pass, without publishing them or
+  moving the private key. Publication and native acceptance remain separate.
+- Move desktop signing and publication automation into public AgentsDock.
+  Keep signing credentials in the branch-restricted `direct-production`
+  environment and npm OIDC in `npm-release`; ordinary CI and fork pull requests
+  receive neither. Rebase the public workflow's native build counter above 1185
+  and retain exact source, signature, immutable-asset and server-runtime checks.
+  Preserve the private repository's history and retire its release workflows
+  when the public pipeline becomes the active publisher. Secret values must be
+  supplied again from their original source; they have not been copied or logged.
+- Pass 60 release-orchestration tests, parse both public native workflows and
+  check all 50 shell steps. Verify manual/canonical/trusted-branch guards on all
+  13 jobs and the release environment on all seven jobs that use secrets.
+- Availability: committed source candidate. Updated packaged migration and
+  recovery verification are in progress; no public release or production service
+  has changed.
+
 ## 2026-09-20 — npm publication and native migration validation — beta.12 candidate
 
 - Reserve `1.0.4-beta.12` for the coordinated candidate. Do not publish the
