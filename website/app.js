@@ -73,3 +73,18 @@ async function loadAndroidRelease() {
 
 loadRelease()
 loadAndroidRelease()
+
+
+// Live star count for the hero GitHub chip (falls back to the number in the HTML).
+;(async () => {
+  const els = document.querySelectorAll('[data-gh-stars]')
+  if (!els.length) return
+  try {
+    const res = await fetch('https://api.github.com/repos/ZhengyiLuo/AgentsDock', { cache: 'no-store' })
+    if (!res.ok) return
+    const { stargazers_count: n } = await res.json()
+    if (typeof n !== 'number') return
+    const text = n >= 1000 ? (n / 1000).toFixed(n >= 10000 ? 0 : 1).replace(/\.0$/, '') + 'k' : String(n)
+    els.forEach(el => { el.textContent = text })
+  } catch {}
+})()
