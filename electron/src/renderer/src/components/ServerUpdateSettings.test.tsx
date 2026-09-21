@@ -1,7 +1,7 @@
-import { act, cleanup, fireEvent, render as renderView, screen, waitFor } from '@testing-library/react'
+import { act, cleanup, fireEvent, render as renderView, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { AgentsDockAPI } from '@shared/ipc'
-import type { ServerUpdateStatus } from '@shared/types'
+import type { AppUpdateStatus, ServerUpdateStatus } from '@shared/types'
 import { useAppStore } from '../store/app-store'
 import { SettingsDialog } from './Dialogs'
 import { serverUpdateIntentKey } from '../lib/server-update-intent'
@@ -100,6 +100,10 @@ function render(ui: Parameters<typeof renderView>[0]) {
 }
 
 function installBridge(serverUpdates: Partial<AgentsDockAPI['serverUpdates']>) {
+  // This suite exercises legacy manual server controls before coordinated enrollment.
+  const appUpdateStatus: AppUpdateStatus = {
+    state: 'not-available', channel: 'direct', track: 'stable', currentVersion: '1.0.0'
+  }
   Object.defineProperty(window, 'agentsDock', {
     configurable: true,
     value: {
@@ -111,14 +115,29 @@ function installBridge(serverUpdates: Partial<AgentsDockAPI['serverUpdates']>) {
         ...serverUpdates
       },
       updates: {
-        status: vi.fn().mockResolvedValue(null),
-        check: vi.fn(),
+        status: vi.fn().mockResolvedValue(appUpdateStatus),
+        check: vi.fn().mockResolvedValue(appUpdateStatus),
         install: vi.fn(),
         setTrack: vi.fn()
       },
       events: { on: vi.fn().mockReturnValue(() => undefined) }
     } as unknown as AgentsDockAPI
   })
+}
+
+function serverUpdateSurface() {
+  const panel = document.querySelector('.app-settings-server-updates')
+  expect(panel).not.toBeNull()
+  return within(panel as HTMLElement)
+}
+
+function serverUpdateChannel() {
+  return within(serverUpdateSurface().getByRole('group', { name: 'Server update channel' }))
+}
+
+async function findServerUpdateChannelButton(name: 'Stable' | 'Beta') {
+  const group = await screen.findByRole('group', { name: 'Server update channel' })
+  return within(group).findByRole('button', { name })
 }
 
 describe('SettingsDialog server updates', () => {
@@ -422,6 +441,7 @@ describe('SettingsDialog server updates', () => {
     showSettings()
     useAppStore.setState(state => ({ profiles: state.profiles.map(profile => ({ ...profile, serverIdentity: 'test-server' })) }))
     render(<SettingsDialog />)
+    await act(async () => { await Promise.resolve() })
     await act(async () => { vi.advanceTimersByTime(1_500); await Promise.resolve() })
     expect(status).toHaveBeenCalledOnce()
     act(() => useAppStore.setState(state => ({ modals: { ...state.modals, appSettings: false } })))
@@ -645,8 +665,8 @@ describe('SettingsDialog server updates', () => {
 
     render(<SettingsDialog />)
     await waitFor(() => expect(check).toHaveBeenCalledWith('stable'))
-    expect(screen.getByText('This is the latest one.')).toBeInTheDocument()
-    const betaButton = await screen.findByRole('button', { name: 'Beta' })
+    expect(serverUpdateSurface().getByText('This is the latest one.')).toBeInTheDocument()
+    const betaButton = await findServerUpdateChannelButton('Beta')
     fireEvent.click(betaButton)
 
     await waitFor(() => expect(check).toHaveBeenCalledWith('beta'))
@@ -685,14 +705,14 @@ describe('SettingsDialog server updates', () => {
 
     render(<SettingsDialog />)
     await waitFor(() => expect(check).toHaveBeenCalledTimes(1))
-    expect(screen.getByText('This is the latest one.')).toBeInTheDocument()
+    expect(serverUpdateSurface().getByText('This is the latest one.')).toBeInTheDocument()
 
     fireEvent.click(screen.getByRole('button', { name: 'Check server' }))
 
     await waitFor(() => expect(check).toHaveBeenNthCalledWith(2, 'stable'))
     expect(await screen.findByRole('button', { name: 'Install 0.1.19' })).toBeEnabled()
     expect(screen.getByText(/Checked \d{1,2}:\d{2}:\d{2}/)).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: 'Stable' })).toHaveClass('active')
+    expect(serverUpdateChannel().getByRole('button', { name: 'Stable' })).toHaveClass('active')
   })
 
   it('switches to a current Beta without starting or offering an update', async () => {
@@ -719,11 +739,11 @@ describe('SettingsDialog server updates', () => {
 
     render(<SettingsDialog />)
     await waitFor(() => expect(check).toHaveBeenCalledWith('stable'))
-    fireEvent.click(screen.getByRole('button', { name: 'Beta' }))
+    fireEvent.click(serverUpdateChannel().getByRole('button', { name: 'Beta' }))
 
     await waitFor(() => expect(check).toHaveBeenCalledWith('beta'))
-    expect(screen.getByRole('button', { name: 'Beta' })).toHaveClass('active')
-    expect(screen.getByText('This is the latest one.')).toBeInTheDocument()
+    expect(serverUpdateChannel().getByRole('button', { name: 'Beta' })).toHaveClass('active')
+    expect(serverUpdateSurface().getByText('This is the latest one.')).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: 'Install 0.1.19-beta.8' })).not.toBeInTheDocument()
     expect(start).not.toHaveBeenCalled()
   })
@@ -745,13 +765,13 @@ describe('SettingsDialog server updates', () => {
 
     render(<SettingsDialog />)
     await waitFor(() => expect(check).toHaveBeenCalledTimes(1))
-    fireEvent.click(screen.getByRole('button', { name: 'Beta' }))
+    fireEvent.click(serverUpdateChannel().getByRole('button', { name: 'Beta' }))
 
     await waitFor(() => expect(useAppStore.getState().error).toBe('Beta release service is unavailable.'))
-    expect(screen.getByRole('button', { name: 'Stable' })).toHaveClass('active')
-    expect(screen.getByRole('button', { name: 'Beta' })).not.toHaveClass('active')
+    expect(serverUpdateChannel().getByRole('button', { name: 'Stable' })).toHaveClass('active')
+    expect(serverUpdateChannel().getByRole('button', { name: 'Beta' })).not.toHaveClass('active')
     expect(screen.getByRole('button', { name: 'Check server' })).toBeEnabled()
-    expect(screen.getByText('This is the latest one.')).toBeInTheDocument()
+    expect(serverUpdateSurface().getByText('This is the latest one.')).toBeInTheDocument()
   })
 
   it('keeps known status and shows an inline warning when the automatic release check fails', async () => {
@@ -774,7 +794,7 @@ describe('SettingsDialog server updates', () => {
     expect(warning).toHaveClass('server-update-warning')
     expect(check).toHaveBeenCalledOnce()
     expect(check).toHaveBeenCalledWith('stable')
-    expect(screen.getByRole('button', { name: 'Stable' })).toHaveClass('active')
+    expect(serverUpdateChannel().getByRole('button', { name: 'Stable' })).toHaveClass('active')
     expect(screen.getByRole('button', { name: 'Check server' })).toBeEnabled()
     expect(useAppStore.getState().error).toBeNull()
   })
@@ -1024,7 +1044,8 @@ describe('SettingsDialog server updates', () => {
 
     try {
       render(<SettingsDialog />)
-      const beta = await screen.findByRole('button', { name: 'Beta' })
+      await waitFor(() => expect(check).toHaveBeenCalledWith('stable'))
+      const beta = await findServerUpdateChannelButton('Beta')
       await waitFor(() => expect(beta).toBeEnabled())
       fireEvent.click(beta)
 
@@ -1057,8 +1078,8 @@ describe('SettingsDialog server updates', () => {
 
     try {
       render(<SettingsDialog />)
-      const stableButton = await screen.findByRole('button', { name: 'Stable' })
-      await waitFor(() => expect(screen.getByRole('button', { name: 'Beta' })).toHaveClass('active'))
+      const stableButton = await findServerUpdateChannelButton('Stable')
+      await waitFor(() => expect(serverUpdateChannel().getByRole('button', { name: 'Beta' })).toHaveClass('active'))
       fireEvent.click(stableButton)
       await waitFor(() => expect(check).toHaveBeenCalledWith('stable'))
       await waitFor(() => expect(setup).toHaveBeenCalledOnce())
@@ -1088,6 +1109,7 @@ describe('SettingsDialog server updates', () => {
 
     try {
       render(<SettingsDialog />)
+      await act(async () => { await Promise.resolve() })
       fireEvent.click(await screen.findByRole('button', { name: 'Check server' }))
 
       await waitFor(() => expect(check).toHaveBeenCalledWith('beta'))
@@ -1147,7 +1169,7 @@ describe('SettingsDialog server updates', () => {
 
     expect(screen.getByText('0.1.19-beta.8')).toBeInTheDocument()
     expect(screen.queryByText('0.1.18')).not.toBeInTheDocument()
-    expect(screen.getByRole('button', { name: 'Beta' })).toHaveClass('active')
+    expect(serverUpdateChannel().getByRole('button', { name: 'Beta' })).toHaveClass('active')
   })
 
   it('loads fresh status after reopening while the previous view was polling an active update', async () => {
@@ -1188,7 +1210,7 @@ describe('SettingsDialog server updates', () => {
     })
 
     expect(status).toHaveBeenCalledTimes(2)
-    expect(screen.getByText('This is the latest one.')).toBeInTheDocument()
+    expect(serverUpdateSurface().getByText('This is the latest one.')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Check server' })).toBeEnabled()
   })
 
@@ -1202,8 +1224,8 @@ describe('SettingsDialog server updates', () => {
 
     render(<SettingsDialog />)
 
-    expect(await screen.findByRole('button', { name: 'Stable' })).toBeDisabled()
-    expect(screen.getByRole('button', { name: 'Beta' })).toBeDisabled()
+    await waitFor(() => expect(serverUpdateChannel().getByRole('button', { name: 'Stable' })).toBeDisabled())
+    expect(serverUpdateChannel().getByRole('button', { name: 'Beta' })).toBeDisabled()
   })
 
   it('keeps channel recovery clickable when the initial update status fails', async () => {
@@ -1227,13 +1249,13 @@ describe('SettingsDialog server updates', () => {
 
     render(<SettingsDialog />)
 
-    const beta = await screen.findByRole('button', { name: 'Beta' })
+    const beta = await findServerUpdateChannelButton('Beta')
     await waitFor(() => expect(beta).toBeEnabled())
     expect(beta).toHaveClass('active')
     expect(screen.getByText(/Choose a channel or Check server to retry/)).toBeInTheDocument()
 
     fireEvent.click(beta)
     await waitFor(() => expect(check).toHaveBeenCalledWith('beta'))
-    expect(screen.getByText('This is the latest one.')).toBeInTheDocument()
+    expect(serverUpdateSurface().getByText('This is the latest one.')).toBeInTheDocument()
   })
 })

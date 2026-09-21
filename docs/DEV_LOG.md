@@ -1,5 +1,43 @@
 # Public development log
 
+## 2026-09-20 — Revised beta.12 package and public release validation
+
+- Build the revised server package from clean committed source `751c1e0`.
+  Its SHA-256 is
+  `bc69cb8817d3f085330306a463f61b0353186193b2357600f1613f56288995ea`.
+  The standalone export preserves upstream history and all 88 runtime files;
+  packaging that export through npm produces the identical archive.
+- Pass native macOS fresh-install retry over the exact failed candidate's empty
+  folders without cleanup. Refuse another install without changing the running
+  process, identity, token or synthetic provider files. Pass candidate activation
+  and forced incompatible-API rollback with the exact prior runtime and plist.
+- Pass the app-driven Linux update and rollback through the production renderer,
+  preload, IPC, coordinator, systemd service and detached installer. Verify all
+  88 installed runtime files, identity, token and six synthetic state/history
+  files. The failed update remains paused after repeated health refreshes, and
+  the isolated HTTPS registry records only the two intended package downloads.
+  Inspect dark and light layouts, including the minimum supported window width.
+- These results cover disposable native services and controlled app-replacement,
+  signing-key and distribution endpoints. Production-signed app replacement,
+  public registry transport and live provider work are not established by them.
+- Exercise the complete legacy bridge route from an old managed server without
+  npm update support. The production app checks and starts a signed legacy
+  update; the old detached updater installs the paired runtime and reconnects
+  with npm update capability. The app marks the equal-version bridge current
+  without a redundant npm download. Discovery and signing endpoints are controlled
+  within the disposable guest; no public legacy release was published.
+- Correct source CI to use runner paths in step environment variables and run
+  for maintained release branches. All eight public server test shards pass.
+  Update legacy release assertions for protected public workflows and reviewed
+  source-branch ancestry; retain release identity and mirroring checks.
+- Correct settings test fixtures to provide the required typed app-update status,
+  settle initial loading and distinguish app controls from server controls.
+  Pass 4,630 Electron tests with five existing skips, eight script tests and type
+  checking. Retain all server operation and recovery assertions.
+- No released app build or public npm version is accepted by this entry.
+  Native signing credentials still need to be supplied to the public release
+  environment, and signed publication checks remain pending.
+
 ## 2026-09-20 — Current server integration and transition signing — candidate follow-up
 
 - Merge the six newer commits from the maintained standalone release branch,

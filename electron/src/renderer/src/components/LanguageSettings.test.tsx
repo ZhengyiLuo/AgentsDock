@@ -1,6 +1,7 @@
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { localeOptions } from '@shared/locales'
+import type { AppUpdateStatus } from '@shared/types'
 import { disposeLanguage, initializeLanguage, LANGUAGE_STORAGE_KEY, setLanguagePreference } from '../lib/i18n'
 import { useAppStore } from '../store/app-store'
 import { AppSettingsDialog } from './Dialogs'
@@ -20,6 +21,7 @@ afterEach(() => {
 
 it('changes Settings > General language live and persists the selection without reopening settings', async () => {
   const save = vi.fn(async preference => ({ preference, systemLocale: 'en-US' }))
+  const updateStatus: AppUpdateStatus = { state: 'not-available', channel: 'direct', track: 'stable', currentVersion: '0.2.0' }
   Object.defineProperty(window, 'agentsDock', {
     configurable: true,
     value: {
@@ -27,7 +29,10 @@ it('changes Settings > General language live and persists the selection without 
         get: vi.fn().mockResolvedValue({ preference: 'en', systemLocale: 'en-US' }),
         set: save
       },
-      updates: { check: vi.fn().mockResolvedValue({ state: 'not-available', channel: 'direct', track: 'stable', currentVersion: '0.2.0' }) },
+      updates: {
+        status: vi.fn().mockResolvedValue(updateStatus),
+        check: vi.fn().mockResolvedValue(updateStatus)
+      },
       events: { on: vi.fn().mockReturnValue(() => undefined) }
     }
   })
