@@ -48,6 +48,16 @@
 - Pass 60 release-orchestration tests, parse both public native workflows and
   check all 50 shell steps. Verify manual/canonical/trusted-branch guards on all
   13 jobs and the release environment on all seven jobs that use secrets.
+- Reject the packaged `d9c1f50` candidate after a pristine macOS install exposes
+  a missing LaunchAgents parent during volume binding. Bind a safe existing
+  ancestor until publication creates and verifies the destination directory.
+  Pass 77 activation tests, including missing-parent recovery checks.
+- Allow retry after that failure without deleting the empty configuration and
+  state/admin directories it leaves behind. Both launcher and locked installer
+  reject existing data, credentials, links, locks and registered services;
+  fresh installation creates no legacy migration alias. Pass 12 CLI tests,
+  14 installer admission tests and two actual installer regressions from a
+  clean source snapshot. Exact-package macOS retry acceptance remains pending.
 - Availability: committed source candidate. Updated packaged migration and
   recovery verification are in progress; no public release or production service
   has changed.
