@@ -3,12 +3,12 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <meta name="description" content="AgentsDock support — setup help, troubleshooting, system requirements, and how to reach us about the AgentsDock apps for macOS, iOS, iPadOS, and Linux." />
+    <meta name="description" content="AgentsDock support — setup help, troubleshooting, system requirements, and how to reach us about the AgentsDock clients for macOS, Windows, Linux, iPhone, iPad, and Android." />
     <!-- Social preview (Open Graph / Twitter) -->
     <meta property="og:type" content="website" />
     <meta property="og:site_name" content="AgentsDock" />
     <meta property="og:title" content="Support · AgentsDock" />
-    <meta property="og:description" content="AgentsDock support — setup help, troubleshooting, system requirements, and how to reach us about the AgentsDock apps for macOS, iOS, iPadOS, and Linux." />
+    <meta property="og:description" content="AgentsDock support — setup help, troubleshooting, system requirements, and how to reach us about the AgentsDock clients for macOS, Windows, Linux, iPhone, iPad, and Android." />
     <meta property="og:url" content="https://agentsdock.net/support.html" />
     <meta property="og:image" content="https://agentsdock.net/assets/og-card.png?v=82a3bdda" />
     <meta property="og:image:width" content="1200" />
@@ -16,7 +16,7 @@
     <meta property="og:image:alt" content="AgentsDock — an IDE designed for agentic AI research" />
     <meta name="twitter:card" content="summary_large_image" />
     <meta name="twitter:title" content="Support · AgentsDock" />
-    <meta name="twitter:description" content="AgentsDock support — setup help, troubleshooting, system requirements, and how to reach us about the AgentsDock apps for macOS, iOS, iPadOS, and Linux." />
+    <meta name="twitter:description" content="AgentsDock support — setup help, troubleshooting, system requirements, and how to reach us about the AgentsDock clients for macOS, Windows, Linux, iPhone, iPad, and Android." />
     <meta name="twitter:image" content="https://agentsdock.net/assets/og-card.png?v=82a3bdda" />
     <meta name="theme-color" content="#0d1013" />
     <meta name="robots" content="index,follow" />
@@ -37,7 +37,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Instrument+Sans:wght@400;500;600;700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
-    <link rel="stylesheet" href="./styles.css?v=8f252944" />
+    <link rel="stylesheet" href="./styles.css?v=58e2a74b" />
   </head>
   <body>
     <header class="site-header">
@@ -70,7 +70,7 @@
         <h1>AgentsDock Support</h1>
         <p class="legal-meta">Last updated: July 20, 2026</p>
 
-        <p class="legal-lead">AgentsDock is a self-hosted workspace for Claude Code and Codex. The app on your Mac, iPhone, or iPad is the control surface; the work runs on an AgentsDock server you install on a machine you own. Below is how to get set up, fix the most common problems, and reach us.</p>
+        <p class="legal-lead">AgentsDock is a self-hosted workspace for provider CLIs such as Claude Code, Codex, and Cursor. The client app is the control surface; the work runs on an AgentsDock server you install on a machine you own. Below is how to get set up, fix the most common problems, and reach us.</p>
 
         <h2 id="contact">Contact us</h2>
         <p>The fastest way to get help — and to reach the team and other users directly — is our Discord:</p>
@@ -86,14 +86,15 @@
           <li><strong>Mac:</strong> macOS 14 or later, Apple silicon.</li>
           <li><strong>Windows:</strong> Windows 10 or later, x64.</li>
           <li><strong>Linux:</strong> x86_64 and ARM64, distributed as an AppImage.</li>
+          <li><strong>Android:</strong> Android client builds are supported.</li>
         </ul>
-        <p><strong>What you need:</strong> a <strong>server</strong> to connect to — a macOS or Linux machine you control, with the Claude Code and/or Codex CLI authenticated. <code>tmux</code> is optional, only for the in-app terminal. The app is the control surface; the work runs on your server.</p>
+        <p><strong>What you need:</strong> a <strong>server</strong> to connect to — a macOS or Linux machine you control, with the provider CLIs you plan to use authenticated. <code>tmux</code> is optional, only for the in-app terminal. The app is the control surface; the work runs on your server.</p>
 
         <h2 id="getting-started">Getting started</h2>
         <p>The app needs a server to talk to. Install one on any machine you own:</p>
         <ul>
           <li>Clone the server repository and run its installer: <code>git clone https://github.com/ZhengyiLuo/AgentsServer.git</code>, then <code>cd AgentsServer</code> and <code>./install.sh</code>.</li>
-          <li>The server listens on port <code>7850</code>. Sign the Claude Code and Codex CLIs in on that machine.</li>
+          <li>The server listens on port <code>7850</code>. Sign in to the provider CLIs you want to use on that machine.</li>
           <li>Open the app and connect to the server with its address and access token.</li>
         </ul>
         <p>For the full walkthrough — including Tailscale — see the <a href="./setup.html">Setup guide</a>.</p>
@@ -104,13 +105,13 @@
         <p>Confirm the server is running and reachable by opening the same URL in a browser on the same device. Check that you included the port, that the device is on the same network (or the same Tailscale network), and that any firewall allows the connection. A URL that works on your desktop will not work on your phone unless both can route to that address.</p>
 
         <h3>It says my access token is invalid</h3>
-        <p>When server authentication is enabled, the same token is required for API calls, uploads, live traces, and file previews. On the Mac app the token is shown in the right inspector under Security; on iPhone and iPad it is in the sidebar server card. Copy it exactly, with no surrounding whitespace.</p>
+        <p>When server authentication is enabled, the same token is required for API calls, uploads, live traces, and file previews. In the app, copy it exactly from the server settings or security area, with no surrounding whitespace.</p>
 
         <h3>My terminal session disappeared</h3>
         <p>Each chat owns a persistent <code>tmux</code> session on your server. Disconnecting the app detaches the client but leaves shells and long-running processes alive, so reopening the Terminal tab should reattach. If the tab will not open, verify <code>tmux</code> is installed on the server. Note that closing the final terminal tab intentionally ends that chat's tmux session.</p>
 
         <h3>An agent isn't responding</h3>
-        <p>AgentsDock runs the Claude Code and Codex CLIs on your server using your own credentials. Confirm the relevant CLI is installed and authenticated on the server, and that the account has remaining quota with the model provider. AgentsDock does not proxy model requests, so provider-side errors surface directly in the chat.</p>
+        <p>AgentsDock runs provider CLIs on your server. Confirm the relevant CLI is installed and authenticated on the server, and that the provider account has remaining quota. Provider-side errors surface directly in the chat.</p>
 
         <h3>Media or files won't preview</h3>
         <p>File and video previews are fetched from your server and require the same access token as the rest of the API. If previews fail while chat works, re-enter the token and confirm the server has enough free disk space.</p>
@@ -138,7 +139,7 @@
     <script>
       // Highlight the current section in the sidebar as you scroll.
       (function () {
-        var links = Array.prototype.slice.call(document.querySelectorAll('.docs-nav a'));
+        var links = Array.prototype.slice.call(document.querySelectorAll('.docs-nav a[href^="#"]'));
         var map = {};
         links.forEach(function (a) { map[a.getAttribute('href').slice(1)] = a; });
         var targets = links.map(function (a) { return document.getElementById(a.getAttribute('href').slice(1)); }).filter(Boolean);

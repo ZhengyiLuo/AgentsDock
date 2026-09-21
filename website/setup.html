@@ -3,12 +3,12 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <meta name="description" content="AgentsDock documentation — set up the AgentsServer on a remote machine and connect your devices, plus a tour of key features: terminal access, scheduled jobs, dispatch between chats, and file editing." />
+    <meta name="description" content="AgentsDock documentation — set up the AgentsServer on a remote machine, sign in the provider CLIs you use, and connect from macOS, Windows, Linux, iPhone, iPad, or Android clients." />
     <!-- Social preview (Open Graph / Twitter) -->
     <meta property="og:type" content="website" />
     <meta property="og:site_name" content="AgentsDock" />
     <meta property="og:title" content="Documentation · AgentsDock" />
-    <meta property="og:description" content="AgentsDock documentation — set up the AgentsServer on a remote machine and connect your devices, plus a tour of key features: terminal access, scheduled jobs, dispatch between chats, and file editing." />
+    <meta property="og:description" content="AgentsDock documentation — set up the AgentsServer on a remote machine, sign in the provider CLIs you use, and connect from macOS, Windows, Linux, iPhone, iPad, or Android clients." />
     <meta property="og:url" content="https://agentsdock.net/setup.html" />
     <meta property="og:image" content="https://agentsdock.net/assets/og-card.png?v=82a3bdda" />
     <meta property="og:image:width" content="1200" />
@@ -16,7 +16,7 @@
     <meta property="og:image:alt" content="AgentsDock — an IDE designed for agentic AI research" />
     <meta name="twitter:card" content="summary_large_image" />
     <meta name="twitter:title" content="Documentation · AgentsDock" />
-    <meta name="twitter:description" content="AgentsDock documentation — set up the AgentsServer on a remote machine and connect your devices, plus a tour of key features: terminal access, scheduled jobs, dispatch between chats, and file editing." />
+    <meta name="twitter:description" content="AgentsDock documentation — set up the AgentsServer on a remote machine, sign in the provider CLIs you use, and connect from macOS, Windows, Linux, iPhone, iPad, or Android clients." />
     <meta name="twitter:image" content="https://agentsdock.net/assets/og-card.png?v=82a3bdda" />
     <meta name="theme-color" content="#0d1013" />
     <meta name="robots" content="index,follow" />
@@ -34,14 +34,14 @@
     </script>
     <script src="./analytics.js" defer></script>
     <script src="./site-nav.js?v=92294063" defer></script>
-    <script src="./docs-nav.js?v=1eafff8c" defer></script>
+    <script src="./docs-nav.js?v=3a6f9d2c" defer></script>
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Instrument+Sans:wght@400;500;600;700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
     <link rel="alternate" hreflang="en" href="https://agentsdock.net/setup.html" />
     <link rel="alternate" hreflang="zh-CN" href="https://agentsdock.net/zh/setup.html" />
     <link rel="alternate" hreflang="x-default" href="https://agentsdock.net/setup.html" />
-    <link rel="stylesheet" href="./styles.css?v=8f252944" />
+    <link rel="stylesheet" href="./styles.css?v=58e2a74b" />
   </head>
   <body>
     <header class="site-header">
@@ -71,7 +71,7 @@
             <a href="#part-device">Part 2 · Connect your device</a>
             <a href="#troubleshoot">Not connecting?</a>
           </span>
-          <a class="docs-nav-link" href="./iphone.html">Install on iPhone &amp; iPad</a>
+          <a class="docs-nav-link" href="./iphone.html">Client install</a>
           <a class="docs-nav-link" href="./first-chat.html">Start your first chat</a>
           <p class="docs-nav-label">Guides</p>
           <a class="docs-nav-link" href="./features.html">Key features</a>
@@ -93,14 +93,17 @@
         <h1>Setup guide</h1>
         <p class="legal-meta">Last updated: August 2, 2026 · about 15 minutes</p>
 
-        <p class="legal-lead">AgentsDock has two halves. The <strong>AgentsServer</strong> runs the real work on a remote machine you own; the <strong>app</strong> on your Mac, iPhone, or iPad is your window into it. Set up the remote once, then connect as many devices as you like.</p>
+        <ul class="docs-intro-list">
+          <li><strong>AgentsServer</strong> runs the real work on a remote machine you own.</li>
+          <li><strong>AgentsDock clients</strong> run on your devices and connect to that server. Set up the remote once, then connect as many devices as you like.</li>
+        </ul>
 
         <h2 id="prereqs">Before you start</h2>
         <ul>
           <li>A <strong>remote machine</strong> you control — a macOS or Linux computer that stays on — to run the server. <code>tmux</code> is optional, only needed for the in-app terminal.</li>
           <li>A <strong>Tailscale</strong> account <em>(optional)</em> — only needed to reach the remote from <strong>outside its local network</strong>. On the same Wi&#8209;Fi you can use the machine's local IP address; Tailscale is what lets you connect securely from anywhere else.</li>
-          <li>Your <strong>Claude Code</strong> and/or <strong>Codex</strong> accounts, to sign the CLIs in on the remote.</li>
-          <li>A <strong>Mac, iPhone, or iPad</strong> to run the app.</li>
+          <li>Any provider CLI you plan to use — <strong>Claude Code</strong>, <strong>Codex</strong>, or <strong>Cursor</strong> — installed on the remote.</li>
+          <li>A device that can run an <strong>AgentsDock client</strong>: macOS, Windows, Linux, iPhone, iPad, or Android.</li>
         </ul>
         <div class="guide-note">
           <p>AgentsDock is fully self-hosted. Your chats, files, and API keys stay on your remote machine — the app is just a window into it.</p>
@@ -120,8 +123,8 @@ cd AgentsServer
         <p class="legal-meta">Every server command — update, restart, logs, uninstall — is on <a href="./server.html">Manage your server</a>.</p>
         <p><a class="quickstart-docs" href="https://github.com/ZhengyiLuo/AgentsServer" target="_blank" rel="noopener">View the AgentsServer repository on GitHub <span aria-hidden="true">&rarr;</span></a></p>
 
-        <h3 class="docs-step" id="remote-cli"><span class="step-n">2</span>Sign in to Claude Code and Codex on the remote</h3>
-        <p>AgentsDock runs the Claude Code and Codex CLIs <strong>on the remote, using your own accounts</strong> — it never proxies or sees your model requests. So the CLIs must be installed and signed in <em>on the remote machine</em>, not on your phone or laptop. Run each CLI you plan to use once and complete its sign-in. If a CLI isn't signed in, AgentsDock shows that backend as unavailable.</p>
+        <h3 class="docs-step" id="remote-cli"><span class="step-n">2</span>Sign in to provider CLIs on the remote</h3>
+        <p>Install and sign in to whichever provider CLIs you want AgentsDock to use on the remote: <a href="https://code.claude.com/docs" target="_blank" rel="noopener">Claude Code</a>, <a href="https://developers.openai.com/codex/cli" target="_blank" rel="noopener">Codex</a>, or <a href="https://cursor.com/docs/cli/reference/authentication" target="_blank" rel="noopener">Cursor</a>. Use that provider's normal login flow, such as browser sign-in or API-key configuration. If the app still shows a backend as unavailable, click <strong>Recheck CLIs</strong> in Settings.</p>
 
         <h3 class="docs-step" id="remote-tailscale"><span class="step-n">3</span>Install Tailscale on the remote <span class="docs-step-opt">optional</span></h3>
         <p><strong>Only needed to reach the remote from outside its local network.</strong> If your devices are on the same Wi&#8209;Fi as the remote, you can skip this and use the machine's local IP address in Part 2.</p>
@@ -134,10 +137,10 @@ cd AgentsServer
         </figure>
 
         <h2 class="docs-part" id="part-device"><span class="docs-part-label">Part 2</span>Connect from your device</h2>
-        <p>Repeat this on any Mac, iPhone, or iPad you want to use.</p>
+        <p>Repeat this on any device you want to use as an AgentsDock client.</p>
 
-        <h3 class="docs-step" id="device-app"><span class="step-n">1</span>Download AgentsDock</h3>
-        <p><a href="./index.html#downloads">Get the app</a> for macOS, iPhone, or iPad — the platforms available today — and open it.</p>
+        <h3 class="docs-step" id="device-app"><span class="step-n">1</span>Download the AgentsDock client</h3>
+        <p><a href="./index.html#downloads">Download the client</a> for your platform — macOS, Windows, Linux, iPhone, iPad, or Android — and open it.</p>
 
         <h3 class="docs-step" id="device-tailscale"><span class="step-n">2</span>Install Tailscale on the device <span class="docs-step-opt">optional</span></h3>
         <p>Only needed if you installed Tailscale on the remote. Install it on this device too and sign in with the <strong>same account</strong>, so both are on the same private network and the app can reach the server. On the same local network, skip this and use the remote's local IP.</p>
@@ -147,14 +150,14 @@ cd AgentsServer
         <pre><code>ad_tok_9f3b7c2e••••••••••••••••••••   (sample)</code></pre>
         <p>This token lives on <strong>your server machine</strong> — the remote you set up in Part 1, <em>not</em> the device you're connecting from. To get it again, run this on the remote:</p>
         <pre><code>./install.sh --show-token</code></pre>
-        <p>Click <strong>Test connection</strong> to confirm the app can reach the server, then <strong>Add &amp; switch</strong>. You're connected: start a chat, pick Claude Code or Codex, and point it at a working directory on your remote.</p>
+        <p>Click <strong>Test connection</strong> to confirm the app can reach the server, then <strong>Add &amp; switch</strong>. You're connected: start a chat, pick a provider, and point it at a working directory on your remote.</p>
         <figure class="docs-shot">
           <img src="./assets/setup-token.png" alt="AgentsDock connection form on macOS with the Access token field, a Test connection button, and Add and switch" loading="lazy" />
           <figcaption>Paste your access token into the <strong>Access token</strong> field, then click <strong>Test connection</strong> to verify before you save.</figcaption>
         </figure>
         <figure class="docs-shot">
-          <img src="./assets/setup-connection.png" alt="AgentsDock Settings on macOS showing a connected Mac Mini server and a Runtimes & prerequisites panel with tmux, Claude Code, and Codex status" loading="lazy" />
-          <figcaption>Once connected, the app's Settings let you monitor the connection and check that tmux, Claude Code, and Codex are ready on the server.</figcaption>
+          <img src="./assets/setup-connection.png" alt="AgentsDock Settings on macOS showing a connected Mac Mini server and a Runtimes & prerequisites panel with tmux and provider CLI status" loading="lazy" />
+          <figcaption>Once connected, the app's Settings let you monitor the connection and check that tmux and your provider CLIs are ready on the server.</figcaption>
         </figure>
         <p>Connected to more than one machine? Add each one the same way — open the server menu at the top of the sidebar and choose <strong>Add Server</strong>. From then on you can switch between servers from that menu at any time.</p>
         <figure class="docs-shot">
@@ -191,7 +194,7 @@ cd AgentsServer
     <script>
       // Highlight the current section in the sidebar as you scroll.
       (function () {
-        var links = Array.prototype.slice.call(document.querySelectorAll('.docs-nav a'));
+        var links = Array.prototype.slice.call(document.querySelectorAll('.docs-nav a[href^="#"]'));
         var map = {};
         links.forEach(function (a) { map[a.getAttribute('href').slice(1)] = a; });
         var targets = links.map(function (a) { return document.getElementById(a.getAttribute('href').slice(1)); }).filter(Boolean);

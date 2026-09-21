@@ -34,14 +34,14 @@
     </script>
     <script src="./analytics.js" defer></script>
     <script src="./site-nav.js?v=92294063" defer></script>
-    <script src="./docs-nav.js?v=1eafff8c" defer></script>
+    <script src="./docs-nav.js?v=3a6f9d2c" defer></script>
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Instrument+Sans:wght@400;500;600;700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
     <link rel="alternate" hreflang="en" href="https://agentsdock.net/shortcuts.html" />
     <link rel="alternate" hreflang="zh-CN" href="https://agentsdock.net/zh/shortcuts.html" />
     <link rel="alternate" hreflang="x-default" href="https://agentsdock.net/shortcuts.html" />
-    <link rel="stylesheet" href="./styles.css?v=8f252944" />
+    <link rel="stylesheet" href="./styles.css?v=58e2a74b" />
   </head>
   <body>
     <header class="site-header">
@@ -65,7 +65,7 @@
           </div>
           <p class="docs-nav-label">Getting started</p>
           <a class="docs-nav-link" href="./setup.html">Setup guide</a>
-          <a class="docs-nav-link" href="./iphone.html">Install on iPhone &amp; iPad</a>
+          <a class="docs-nav-link" href="./iphone.html">Client install</a>
           <a class="docs-nav-link" href="./first-chat.html">Start your first chat</a>
           <p class="docs-nav-label">Guides</p>
           <a class="docs-nav-link" href="./features.html">Key features</a>
@@ -163,7 +163,7 @@
     <script>
       // Highlight the current section in the sidebar as you scroll.
       (function () {
-        var links = Array.prototype.slice.call(document.querySelectorAll('.docs-nav a'));
+        var links = Array.prototype.slice.call(document.querySelectorAll('.docs-nav a[href^="#"]'));
         var map = {};
         links.forEach(function (a) { map[a.getAttribute('href').slice(1)] = a; });
         var targets = links.map(function (a) { return document.getElementById(a.getAttribute('href').slice(1)); }).filter(Boolean);

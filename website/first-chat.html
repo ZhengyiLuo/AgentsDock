@@ -3,12 +3,12 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <meta name="description" content="How to start your first conversation with an agent in AgentsDock — make sure your server is connected, then click New chat and pick Claude Code or Codex." />
+    <meta name="description" content="How to start your first conversation with an agent in AgentsDock — confirm your server is connected, create a chat, check the working directory, and switch providers." />
     <!-- Social preview (Open Graph / Twitter) -->
     <meta property="og:type" content="website" />
     <meta property="og:site_name" content="AgentsDock" />
     <meta property="og:title" content="Start your first chat · AgentsDock" />
-    <meta property="og:description" content="How to start your first conversation with an agent in AgentsDock — connect to your server, then click New chat." />
+    <meta property="og:description" content="How to start your first conversation with an agent in AgentsDock — connect to your server, create a chat, check the working directory, and switch providers." />
     <meta property="og:url" content="https://agentsdock.net/first-chat.html" />
     <meta property="og:image" content="https://agentsdock.net/assets/og-card.png?v=82a3bdda" />
     <meta property="og:image:width" content="1200" />
@@ -16,7 +16,7 @@
     <meta property="og:image:alt" content="AgentsDock — an IDE designed for agentic AI research" />
     <meta name="twitter:card" content="summary_large_image" />
     <meta name="twitter:title" content="Start your first chat · AgentsDock" />
-    <meta name="twitter:description" content="Connect to your server, then click New chat to start a conversation with Claude Code or Codex." />
+    <meta name="twitter:description" content="Connect to your server, create a chat, check the working directory, and switch providers." />
     <meta name="twitter:image" content="https://agentsdock.net/assets/og-card.png?v=82a3bdda" />
     <meta name="theme-color" content="#0d1013" />
     <meta name="robots" content="index,follow" />
@@ -34,14 +34,14 @@
     </script>
     <script src="./analytics.js" defer></script>
     <script src="./site-nav.js?v=92294063" defer></script>
-    <script src="./docs-nav.js?v=1eafff8c" defer></script>
+    <script src="./docs-nav.js?v=3a6f9d2c" defer></script>
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Instrument+Sans:wght@400;500;600;700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
     <link rel="alternate" hreflang="en" href="https://agentsdock.net/first-chat.html" />
     <link rel="alternate" hreflang="zh-CN" href="https://agentsdock.net/zh/first-chat.html" />
     <link rel="alternate" hreflang="x-default" href="https://agentsdock.net/first-chat.html" />
-    <link rel="stylesheet" href="./styles.css?v=8f252944" />
+    <link rel="stylesheet" href="./styles.css?v=58e2a74b" />
   </head>
   <body>
     <header class="site-header">
@@ -65,7 +65,7 @@
           </div>
           <p class="docs-nav-label">Getting started</p>
           <a class="docs-nav-link" href="./setup.html">Setup guide</a>
-          <a class="docs-nav-link" href="./iphone.html">Install on iPhone &amp; iPad</a>
+          <a class="docs-nav-link" href="./iphone.html">Client install</a>
           <a class="docs-nav-link current" href="./first-chat.html">Start your first chat</a>
           <span class="docs-nav-subs">
             <a href="#connect">Check you're connected</a>
@@ -107,15 +107,15 @@
         <h2 id="new-chat">Start a chat</h2>
         <p>Click the <strong>+</strong> button at the top of the sidebar — the <strong>New chat</strong> button — or press <code>⌘N</code>.</p>
         <figure class="docs-shot">
-          <video autoplay muted loop playsinline preload="metadata" poster="./assets/feature-agents-poster.jpg">
-            <source src="./assets/feature-agents.mp4" type="video/mp4" />
+          <video autoplay muted loop playsinline preload="metadata" poster="./assets/first-chat-new-chat-poster.jpg">
+            <source src="./assets/first-chat-new-chat.mp4" type="video/mp4" />
           </video>
-          <figcaption>Click <strong>+</strong> to start a new chat and pick an agent.</figcaption>
+          <figcaption>New chat starts with the previous chat's working directory selected. Use the provider picker in the lower-left corner to switch agent providers.</figcaption>
         </figure>
-        <p>In the dialog, choose:</p>
+        <p>Before you send the first message, check two things:</p>
         <ul>
-          <li>a <strong>backend</strong> — <strong>Claude Code</strong> or <strong>Codex</strong>, running on your remote under your own account;</li>
-          <li>a <strong>working directory</strong> — the folder on your remote the agent will work in.</li>
+          <li>the <strong>working directory</strong> — AgentsDock defaults to the previous chat's folder, and you can change it to another folder on the remote;</li>
+          <li>the <strong>agent provider</strong> — use the picker in the lower-left corner to switch between providers available on that server, such as Claude Code, Codex, or Cursor.</li>
         </ul>
         <p>Then type your first message and press <code>Enter</code> to send. That's it — the agent runs on your server in that directory, and the chat keeps its own persistent terminal you can attach to from any device, anytime.</p>
 
@@ -139,7 +139,7 @@
     <script>
       // Highlight the current section in the sidebar as you scroll.
       (function () {
-        var links = Array.prototype.slice.call(document.querySelectorAll('.docs-nav a'));
+        var links = Array.prototype.slice.call(document.querySelectorAll('.docs-nav a[href^="#"]'));
         var map = {};
         links.forEach(function (a) { map[a.getAttribute('href').slice(1)] = a; });
         var targets = links.map(function (a) { return document.getElementById(a.getAttribute('href').slice(1)); }).filter(Boolean);

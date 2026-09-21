@@ -3,12 +3,12 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <meta name="description" content="如何搭建 AgentsServer 并从 Mac、iPhone 或 iPad 连接 AgentsDock：安装服务器、登录 Claude Code 和 Codex、获取访问令牌、通过 Tailscale 连接。" />
+    <meta name="description" content="如何搭建 AgentsServer，在远程机器上登录要使用的提供方 CLI，并从 macOS、Windows、Linux、iPhone、iPad 或 Android 客户端连接 AgentsDock。" />
     <!-- Social preview (Open Graph / Twitter) -->
     <meta property="og:type" content="website" />
     <meta property="og:site_name" content="AgentsDock" />
     <meta property="og:title" content="搭建指南 · AgentsDock" />
-    <meta property="og:description" content="如何搭建 AgentsServer 并从 Mac、iPhone 或 iPad 连接 AgentsDock：安装服务器、登录 Claude Code 和 Codex、获取访问令牌、通过 Tailscale 连接。" />
+    <meta property="og:description" content="如何搭建 AgentsServer，在远程机器上登录要使用的提供方 CLI，并从 macOS、Windows、Linux、iPhone、iPad 或 Android 客户端连接 AgentsDock。" />
     <meta property="og:url" content="https://agentsdock.net/zh/setup.html" />
     <meta property="og:image" content="https://agentsdock.net/assets/og-card.png?v=82a3bdda" />
     <meta property="og:image:width" content="1200" />
@@ -16,7 +16,7 @@
     <meta property="og:image:alt" content="AgentsDock — an IDE designed for agentic AI research" />
     <meta name="twitter:card" content="summary_large_image" />
     <meta name="twitter:title" content="搭建指南 · AgentsDock" />
-    <meta name="twitter:description" content="如何搭建 AgentsServer 并从 Mac、iPhone 或 iPad 连接 AgentsDock：安装服务器、登录 Claude Code 和 Codex、获取访问令牌、通过 Tailscale 连接。" />
+    <meta name="twitter:description" content="如何搭建 AgentsServer，在远程机器上登录要使用的提供方 CLI，并从 macOS、Windows、Linux、iPhone、iPad 或 Android 客户端连接 AgentsDock。" />
     <meta name="twitter:image" content="https://agentsdock.net/assets/og-card.png?v=82a3bdda" />
     <meta name="theme-color" content="#0d1013" />
     <meta name="robots" content="index,follow" />
@@ -34,7 +34,7 @@
     </script>
     <script src="../analytics.js" defer></script>
     <script src="../site-nav.js?v=92294063" defer></script>
-    <script src="../docs-nav.js?v=1eafff8c" defer></script>
+    <script src="../docs-nav.js?v=3a6f9d2c" defer></script>
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Instrument+Sans:wght@400;500;600;700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
@@ -42,7 +42,7 @@
     <link rel="alternate" hreflang="zh-CN" href="https://agentsdock.net/zh/setup.html" />
     <link rel="alternate" hreflang="x-default" href="https://agentsdock.net/setup.html" />
     <meta property="og:locale" content="zh_CN" />
-    <link rel="stylesheet" href="../styles.css?v=8f252944" />
+    <link rel="stylesheet" href="../styles.css?v=58e2a74b" />
   </head>
   <body>
     <header class="site-header">
@@ -72,7 +72,7 @@
             <a href="#part-device">第 2 部分 · 连接你的设备</a>
             <a href="#troubleshoot">连不上？</a>
           </span>
-          <a class="docs-nav-link" href="./iphone.html">在 iPhone 和 iPad 上安装</a>
+          <a class="docs-nav-link" href="./iphone.html">客户端安装</a>
           <a class="docs-nav-link" href="./first-chat.html">开始第一个会话</a>
           <p class="docs-nav-label">指南</p>
           <a class="docs-nav-link" href="./features.html">主要功能</a>
@@ -94,14 +94,17 @@
         <h1>搭建指南</h1>
         <p class="legal-meta">最后更新：2026 年 8 月 2 日 · 约需 15 分钟</p>
 
-        <p class="legal-lead">AgentsDock 由两部分组成：<strong>AgentsServer</strong> 在你自己的远程机器上真正执行工作；Mac、iPhone 或 iPad 上的<strong>应用</strong>则是你查看和操作它的窗口。远程机器只需搭建一次，之后想连多少台设备都可以。</p>
+        <ul class="docs-intro-list">
+          <li><strong>AgentsServer</strong> 在你自己的远程机器上执行实际工作。</li>
+          <li><strong>AgentsDock 客户端</strong>运行在你的设备上并连接到这台服务器；远程机器搭建一次，之后想连多少设备都可以。</li>
+        </ul>
 
         <h2 id="prereqs">开始之前</h2>
         <ul>
           <li>一台由你掌控、保持开机的远程机器（macOS 或 Linux）来运行服务器。<code>tmux</code> 是可选的，只有应用内终端需要它。</li>
           <li>一个 <a href="https://tailscale.com/download" target="_blank" rel="noopener">Tailscale</a> 账号（可选）——仅在需要从局域网之外访问远程机器时才用得到。在同一 Wi‑Fi 下可以直接用机器的局域网 IP；Tailscale 让你能从其他任何地方安全连接。</li>
-          <li>你的 Claude Code 和/或 Codex 账号，用于在远程机器上登录对应的命令行工具。</li>
-          <li>一台用来运行应用的 Mac、iPhone 或 iPad。</li>
+          <li>你计划使用的提供方 CLI（<strong>Claude Code</strong>、<strong>Codex</strong> 或 <strong>Cursor</strong>）已安装在远程机器上。</li>
+          <li>一台能运行 <strong>AgentsDock 客户端</strong>的设备：macOS、Windows、Linux、iPhone、iPad 或 Android。</li>
         </ul>
         <div class="guide-note">
           <p>AgentsDock 是完全自托管的。你的会话、文件和 API 密钥都留在你的远程机器上——应用只是一个查看窗口。</p>
@@ -121,8 +124,8 @@ cd AgentsServer
         <p class="legal-meta">所有服务器命令——更新、重启、日志、卸载——都在<a href="./server.html">管理服务器</a>页面。</p>
         <p><a class="quickstart-docs" href="https://github.com/ZhengyiLuo/AgentsServer" target="_blank" rel="noopener">在 GitHub 上查看 AgentsServer 仓库 <span aria-hidden="true">&rarr;</span></a></p>
 
-        <h3 class="docs-step" id="remote-cli"><span class="step-n">2</span>在远程机器上登录 Claude Code 和 Codex</h3>
-        <p>AgentsDock 在远程机器上用你自己的账号运行 Claude Code 和 Codex 命令行工具——它从不代理、也看不到你的模型请求。因此这些工具必须安装并登录在远程机器上，而不是你的手机或笔记本上。把你打算使用的每个工具运行一次并完成登录。若某个工具未登录，AgentsDock 会将该后端显示为不可用。</p>
+        <h3 class="docs-step" id="remote-cli"><span class="step-n">2</span>在远程机器上登录提供方 CLI</h3>
+        <p>安装并登录你要让 AgentsDock 使用的提供方 CLI：<a href="https://code.claude.com/docs" target="_blank" rel="noopener">Claude Code</a>、<a href="https://developers.openai.com/codex/cli" target="_blank" rel="noopener">Codex</a> 或 <a href="https://cursor.com/docs/cli/reference/authentication" target="_blank" rel="noopener">Cursor</a>。按提供方支持的正常方式登录即可，例如浏览器登录或配置 API key。若应用仍显示某个后端不可用，请在设置里点击 <strong>Recheck CLIs</strong> 重新检查。</p>
 
         <h3 class="docs-step" id="remote-tailscale"><span class="step-n">3</span>在远程机器上安装 Tailscale <span class="docs-step-opt">可选</span></h3>
         <p>仅在需要从局域网之外访问远程机器时才需要。如果你的设备和远程机器在同一 Wi‑Fi 下，可以跳过这一步，在第 2 部分直接使用机器的局域网 IP。</p>
@@ -135,10 +138,10 @@ cd AgentsServer
         </figure>
 
         <h2 class="docs-part" id="part-device"><span class="docs-part-label">第 2 部分</span>从你的设备连接</h2>
-        <p>在你想使用的每台 Mac、iPhone 或 iPad 上重复以下步骤。</p>
+        <p>在你想作为 AgentsDock 客户端使用的每台设备上重复以下步骤。</p>
 
-        <h3 class="docs-step" id="device-app"><span class="step-n">1</span>下载 AgentsDock</h3>
-        <p><a href="../index.html#downloads">获取应用</a>（macOS、iPhone 或 iPad——当前支持的平台）并打开。</p>
+        <h3 class="docs-step" id="device-app"><span class="step-n">1</span>下载 AgentsDock 客户端</h3>
+        <p>到<a href="../index.html#downloads">下载区</a>选择你的平台（macOS、Windows、Linux、iPhone、iPad 或 Android），下载并打开客户端。</p>
 
         <h3 class="docs-step" id="device-tailscale"><span class="step-n">2</span>在设备上安装 Tailscale <span class="docs-step-opt">可选</span></h3>
         <p>仅当你在远程机器上安装了 Tailscale 时才需要。在这台设备上也安装它并用同一账号登录，这样两端就在同一个私有网络里，应用才能连到服务器。若在同一局域网内，跳过这一步，直接用远程机器的局域网 IP。</p>
@@ -148,14 +151,14 @@ cd AgentsServer
         <pre><code>ad_tok_9f3b7c2e••••••••••••••••••••   (sample)</code></pre>
         <p>这个令牌存放在你的服务器机器上——也就是第 1 部分搭建的远程机器，而不是你正在用来连接的设备。想再次获取，在远程机器上运行：</p>
         <pre><code>./install.sh --show-token</code></pre>
-        <p>点击<strong>测试连接（Test connection）</strong>确认应用能连到服务器，再点<strong>添加并切换（Add &amp; switch）</strong>。连接成功后：新建一个会话，选择 Claude Code 或 Codex，并指定远程机器上的一个工作目录。</p>
+        <p>点击<strong>测试连接（Test connection）</strong>确认应用能连到服务器，再点<strong>添加并切换（Add &amp; switch）</strong>。连接成功后：新建一个会话，选择一个提供方，并指定远程机器上的一个工作目录。</p>
         <figure class="docs-shot">
           <img src="../assets/setup-token.png" alt="AgentsDock connection form on macOS with the Access token field, a Test connection button, and Add and switch" loading="lazy" />
           <figcaption>把访问令牌粘贴到<strong>访问令牌</strong>字段，保存前先点击<strong>测试连接</strong>验证。</figcaption>
         </figure>
         <figure class="docs-shot">
-          <img src="../assets/setup-connection.png" alt="AgentsDock Settings on macOS showing a connected Mac Mini server and a Runtimes & prerequisites panel with tmux, Claude Code, and Codex status" loading="lazy" />
-          <figcaption>连接后，应用的<strong>设置</strong>页可以监控连接状态，并检查服务器上的 tmux、Claude Code 和 Codex 是否就绪。</figcaption>
+          <img src="../assets/setup-connection.png" alt="AgentsDock Settings on macOS showing a connected Mac Mini server and a Runtimes & prerequisites panel with tmux and provider CLI status" loading="lazy" />
+          <figcaption>连接后，应用的<strong>设置</strong>页可以监控连接状态，并检查服务器上的 tmux 和提供方 CLI 是否就绪。</figcaption>
         </figure>
         <p>要连接不止一台机器？用同样的方法逐个添加——打开侧边栏顶部的服务器菜单，选择 <strong>Add Server</strong>。之后你随时可以在该菜单里切换服务器。</p>
         <figure class="docs-shot">
@@ -192,7 +195,7 @@ cd AgentsServer
     <script>
       // Highlight the current section in the sidebar as you scroll.
       (function () {
-        var links = Array.prototype.slice.call(document.querySelectorAll('.docs-nav a'));
+        var links = Array.prototype.slice.call(document.querySelectorAll('.docs-nav a[href^="#"]'));
         var map = {};
         links.forEach(function (a) { map[a.getAttribute('href').slice(1)] = a; });
         var targets = links.map(function (a) { return document.getElementById(a.getAttribute('href').slice(1)); }).filter(Boolean);

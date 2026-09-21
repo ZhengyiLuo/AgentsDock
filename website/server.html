@@ -34,14 +34,14 @@
     </script>
     <script src="./analytics.js" defer></script>
     <script src="./site-nav.js?v=92294063" defer></script>
-    <script src="./docs-nav.js?v=1eafff8c" defer></script>
+    <script src="./docs-nav.js?v=3a6f9d2c" defer></script>
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Instrument+Sans:wght@400;500;600;700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
     <link rel="alternate" hreflang="en" href="https://agentsdock.net/server.html" />
     <link rel="alternate" hreflang="zh-CN" href="https://agentsdock.net/zh/server.html" />
     <link rel="alternate" hreflang="x-default" href="https://agentsdock.net/server.html" />
-    <link rel="stylesheet" href="./styles.css?v=8f252944" />
+    <link rel="stylesheet" href="./styles.css?v=58e2a74b" />
   </head>
   <body>
     <header class="site-header">
@@ -65,7 +65,7 @@
           </div>
           <p class="docs-nav-label">Getting started</p>
           <a class="docs-nav-link" href="./setup.html">Setup guide</a>
-          <a class="docs-nav-link" href="./iphone.html">Install on iPhone &amp; iPad</a>
+          <a class="docs-nav-link" href="./iphone.html">Client install</a>
           <a class="docs-nav-link" href="./first-chat.html">Start your first chat</a>
           <p class="docs-nav-label">Guides</p>
           <a class="docs-nav-link" href="./features.html">Key features</a>
@@ -104,7 +104,7 @@
         </div>
 
         <h2 id="install">Install &amp; update</h2>
-        <p>First install — clone the repo and run the installer as the user who runs Claude Code or Codex:</p>
+        <p>First install — clone the repo and run the installer:</p>
 <pre>git clone https://github.com/ZhengyiLuo/AgentsServer.git
 cd AgentsServer
 ./install.sh</pre>
@@ -121,7 +121,7 @@ cd AgentsServer
           <li><code>--non-interactive</code> — no prompts; for scripted or SSH-driven runs.</li>
           <li><code>--show-token</code> — print the access token and exit (see below).</li>
         </ul>
-        <p>Requirements: macOS (Apple silicon) or Linux, a preinstalled <code>uv</code> (<code>brew install uv</code> on macOS), and Claude Code and/or Codex installed and signed in. <code>tmux</code> is optional — it powers the in-app terminal and managed updates.</p>
+        <p>Requirements: macOS (Apple silicon) or Linux, a preinstalled <code>uv</code> (<code>brew install uv</code> on macOS), and whichever provider CLIs you plan to use installed and signed in. <code>tmux</code> is optional — it powers the in-app terminal and managed updates.</p>
 
         <h2 id="token">Show your access token</h2>
         <p>The installer prints the token once when it finishes. To see it again at any time, run this on the server — it only reads the existing configuration and changes nothing:</p>
@@ -133,7 +133,7 @@ cd AgentsServer
 <pre>curl http://127.0.0.1:7850/api/health</pre>
         <p>If the server requires a token (the default after <code>install.sh</code>), pass it as a bearer header:</p>
 <pre>curl -H 'Authorization: Bearer YOUR_TOKEN' http://127.0.0.1:7850/api/health</pre>
-        <p>The response includes whether Claude Code, Codex, and <code>tmux</code> are available. Inside the app, <strong>Settings</strong> shows the same runtime checks and a <strong>Restart server</strong> button.</p>
+        <p>The response includes whether <code>tmux</code> and your provider CLIs are available. Inside the app, <strong>Settings</strong> shows the same runtime checks and a <strong>Restart server</strong> button.</p>
 
         <h2 id="service">Start, stop, restart, and logs</h2>
         <p>The installer registers AgentsServer as a user-level service that starts at login. Manage it with your platform's service manager.</p>
@@ -213,7 +213,7 @@ uv run python agent_server.py serve --bind 0.0.0.0 --port 7850</pre>
     <script>
       // Highlight the current section in the sidebar as you scroll.
       (function () {
-        var links = Array.prototype.slice.call(document.querySelectorAll('.docs-nav a'));
+        var links = Array.prototype.slice.call(document.querySelectorAll('.docs-nav a[href^="#"]'));
         var map = {};
         links.forEach(function (a) { map[a.getAttribute('href').slice(1)] = a; });
         var targets = links.map(function (a) { return document.getElementById(a.getAttribute('href').slice(1)); }).filter(Boolean);

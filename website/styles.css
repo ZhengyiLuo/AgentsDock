@@ -645,6 +645,8 @@ a { color: inherit; }
 .legal a:hover { color: var(--blue-2); text-decoration: underline; }
 .legal code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .88em; color: var(--blue-2); background: var(--accent-soft); padding: 1px 6px; border-radius: 5px; }
 .legal .legal-lead { font-size: 18px; color: var(--muted-2); line-height: 1.65; margin-bottom: 32px; }
+.legal .docs-intro-list { margin: 0 0 32px; padding-left: 22px; }
+.legal .docs-intro-list li { color: var(--muted-2); font-size: 18px; line-height: 1.65; margin-bottom: 10px; }
 /* Setup-guide extras */
 .legal pre { margin: 0 0 20px; padding: 16px 18px; border: 1px solid var(--line); border-radius: 10px; background: #090b0f; overflow-x: auto; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 13.5px; line-height: 1.75; color: #d3dbe6; }
 .legal pre code { background: none; color: inherit; padding: 0; font-size: inherit; }
@@ -652,22 +654,46 @@ a { color: inherit; }
 .guide-note { margin: 0 0 24px; padding: 14px 18px; border-left: 3px solid var(--blue); border-radius: 0 8px 8px 0; background: var(--accent-soft); }
 .guide-note p { margin: 0; color: var(--muted-2); }
 
-/* ── Docs layout (setup guide): sticky sidebar TOC + wide content ── */
-.docs { max-width: 1440px; margin: 0 auto; padding: 132px max(5vw, 22px) 96px; display: grid; grid-template-columns: 248px minmax(0, 1fr); gap: 72px; align-items: start; }
-.docs-nav { position: sticky; top: 96px; align-self: start; }
+/* ── Docs layout: fixed left directory + wide content ── */
+.docs {
+  --docs-rail-width: clamp(232px, 20vw, 280px);
+  --docs-rail-gap: clamp(36px, 5vw, 72px);
+  --docs-page-pad: clamp(22px, 4vw, 72px);
+  width: 100%;
+  max-width: none;
+  margin: 0;
+  padding: 132px var(--docs-page-pad) 96px calc(var(--docs-rail-width) + var(--docs-rail-gap));
+  display: block;
+}
+.docs-nav {
+  position: fixed;
+  inset: 64px auto 0 0;
+  z-index: 10;
+  width: var(--docs-rail-width);
+  padding: 28px 22px 36px;
+  overflow-y: auto;
+  border-right: 1px solid rgba(255,255,255,.08);
+  background: rgba(13,16,19,.96);
+  backdrop-filter: blur(18px);
+  scrollbar-color: rgba(154,164,178,.45) transparent;
+}
 .docs-nav nav { display: flex; flex-direction: column; gap: 1px; }
-/* Small uppercase category label above each group of pages. */
-.docs-nav-label { margin: 26px 0 6px; padding: 0 10px; font-family: var(--display); font-size: 11px; font-weight: 700; letter-spacing: .09em; text-transform: uppercase; color: #6b7583; }
+.docs-nav-title { margin: 0 0 18px; padding: 0 10px; font-family: var(--display); font-size: 15px; font-weight: 700; color: var(--text); }
+/* Category labels use the same rhythm as page links; color carries the hierarchy. */
+.docs-nav-label { margin: 18px 0 1px; padding: 7px 10px; font-family: inherit; font-size: 13px; font-weight: 400; letter-spacing: 0; text-transform: none; line-height: 1.35; color: #727d8a; }
 .docs-nav-label:first-child { margin-top: 0; }
 /* Top-level page links — clean rows, tinted pill for the current page. */
-.docs-nav-link { display: block; padding: 7px 10px; border-radius: 7px; color: var(--muted); text-decoration: none; font-size: 14px; line-height: 1.35; transition: color .15s ease, background-color .15s ease; }
-.docs-nav-link:hover { color: var(--text); background: rgba(255,255,255,.045); }
-.docs-nav-link.current { color: var(--blue); background: var(--accent-soft); font-weight: 600; }
+.docs-nav-link,
+.docs-nav nav > a { display: block; padding: 7px 10px; border-radius: 7px; color: #99a3af; text-decoration: none; font-size: 13px; line-height: 1.35; transition: color .15s ease, background-color .15s ease; }
+.docs-nav-link:hover,
+.docs-nav nav > a:hover { color: var(--text); background: rgba(255,255,255,.045); }
+.docs-nav-link.current,
+.docs-nav nav > a.active { color: #cfd6df; background: rgba(255,255,255,.055); font-weight: 500; }
 /* On-this-page anchors for the current page, nested under it with a thin rail. */
 .docs-nav-subs { display: flex; flex-direction: column; margin: 3px 0 4px 22px; padding-left: 0; border-left: 1px solid var(--line); }
 .docs-nav-subs a { margin-left: -1px; padding: 6px 0 6px 14px; border-left: 2px solid transparent; color: var(--muted); text-decoration: none; font-size: 13px; line-height: 1.3; transition: color .15s ease, border-color .15s ease; }
 .docs-nav-subs a:hover { color: var(--text); }
-.docs-nav-subs a.active { color: var(--blue); border-left-color: var(--blue); }
+.docs-nav-subs a.active { color: #c9d0da; border-left-color: rgba(201,208,218,.64); }
 /* Mobile docs directory toggle — hidden on desktop, revealed ≤900px (see media query). */
 .docs-menu-toggle { display: none; }
 /* Docs-only language switch (EN / 中文) at the top of the sidebar. */
@@ -677,9 +703,8 @@ a { color: inherit; }
 .docs-lang-link:not(.is-current):hover { color: var(--text); border-color: var(--line); }
 .docs-menu-row { display: none; }
 
-/* Reuse the .legal prose styles but drop its narrow-column container box —
-   the content fills the full width of the docs grid column. */
-.docs .legal { max-width: none; min-width: 0; margin: 0; padding: 0; }
+/* Reuse the .legal prose styles but drop its standalone page padding. */
+.docs .legal { max-width: 960px; min-width: 0; margin: 0; padding: 0; }
 .docs .legal h2 { scroll-margin-top: 88px; }
 /* Two-part dividers and their numbered sub-steps. */
 .docs-part { margin: 64px 0 6px; padding-top: 36px; border-top: 1px solid var(--line); font-size: 30px; scroll-margin-top: 88px; }
@@ -721,7 +746,7 @@ a { color: inherit; }
 }
 
 @media (max-width: 900px) {
-  .docs { grid-template-columns: minmax(0, 1fr); gap: 0; padding: 96px max(6vw, 22px) 80px; }
+  .docs { display: block; padding: 96px max(6vw, 22px) 80px; }
 
   /* Collapsible directory button — sits just under the fixed 64px header. */
   .docs-menu-toggle {
@@ -742,10 +767,21 @@ a { color: inherit; }
   .docs-menu-toggle.is-open .docs-menu-chev { transform: rotate(180deg); }
 
   /* Sidebar becomes the expandable panel (collapsed by default on mobile). */
-  .docs-nav { display: none; position: static; top: auto; margin: 0 0 30px; }
+  .docs-nav {
+    display: none;
+    position: static;
+    inset: auto;
+    width: auto;
+    margin: 0 0 30px;
+    padding: 0;
+    overflow: visible;
+    border-right: 0;
+    background: transparent;
+    backdrop-filter: none;
+  }
   .docs-nav.is-open { display: block; animation: docsNavIn .18s ease; }
   .docs-nav-label:first-child { margin-top: 4px; }
-  .docs-nav-link { padding: 11px 12px; font-size: 15px; }
+  .docs-nav-link, .docs-nav nav > a { padding: 11px 12px; font-size: 15px; }
   .docs-nav-subs a { padding: 10px 0 10px 14px; font-size: 14px; }
 }
 @keyframes docsNavIn { from { opacity: 0; transform: translateY(-4px); } to { opacity: 1; transform: none; } }

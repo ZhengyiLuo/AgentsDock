@@ -34,7 +34,7 @@
     </script>
     <script src="../analytics.js" defer></script>
     <script src="../site-nav.js?v=92294063" defer></script>
-    <script src="../docs-nav.js?v=1eafff8c" defer></script>
+    <script src="../docs-nav.js?v=3a6f9d2c" defer></script>
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Instrument+Sans:wght@400;500;600;700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
@@ -42,7 +42,7 @@
     <link rel="alternate" hreflang="zh-CN" href="https://agentsdock.net/zh/advanced-install.html" />
     <link rel="alternate" hreflang="x-default" href="https://agentsdock.net/advanced-install.html" />
     <meta property="og:locale" content="zh_CN" />
-    <link rel="stylesheet" href="../styles.css?v=8f252944" />
+    <link rel="stylesheet" href="../styles.css?v=58e2a74b" />
   </head>
   <body>
     <header class="site-header">
@@ -66,7 +66,7 @@
           </div>
           <p class="docs-nav-label">入门</p>
           <a class="docs-nav-link" href="./setup.html">搭建指南</a>
-          <a class="docs-nav-link" href="./iphone.html">在 iPhone 和 iPad 上安装</a>
+          <a class="docs-nav-link" href="./iphone.html">客户端安装</a>
           <a class="docs-nav-link" href="./first-chat.html">开始第一个会话</a>
           <p class="docs-nav-label">指南</p>
           <a class="docs-nav-link" href="./features.html">主要功能</a>
@@ -104,7 +104,7 @@
         <ul>
           <li><strong>主机：</strong>Linux，或 Apple 芯片的 macOS。不支持 Intel macOS；安装脚本会在做任何更改前停止。</li>
           <li><strong><code>uv</code></strong> 预装在 <code>PATH</code> 中（macOS 上 <code>brew install uv</code>；Linux 上用发行版的包管理器）。它负责准备隔离的 Python 3.10+ 运行时。安装脚本从不下载引导脚本。</li>
-          <li><strong>Claude Code 和/或 Codex</strong> 已在主机上安装并登录，且与运行服务器的是同一个用户账号。</li>
+          <li>你计划使用的提供方 CLI（<strong>Claude Code</strong>、<strong>Codex</strong> 或 <strong>Cursor</strong>）已在主机上安装并登录，且与运行服务器的是同一个用户账号。</li>
           <li><strong>tmux</strong>（可选）——启用应用内终端、实时窗格查看和应用内托管更新。装有 Homebrew 的 macOS 上，安装脚本会询问是否代为安装；否则打印安装命令并继续。</li>
           <li><strong>Tailscale</strong>（可选）——让其他设备无需暴露端口即可访问服务器。</li>
           <li>可用的用户服务会话：<code>launchctl</code>（macOS）或 <code>systemctl --user</code>（Linux）。全程不使用 <code>sudo</code>。</li>
@@ -245,7 +245,7 @@ systemctl --user status agents-server.service --no-pager -l</pre>
     <script>
       // Highlight the current section in the sidebar as you scroll.
       (function () {
-        var links = Array.prototype.slice.call(document.querySelectorAll('.docs-nav a'));
+        var links = Array.prototype.slice.call(document.querySelectorAll('.docs-nav a[href^="#"]'));
         var map = {};
         links.forEach(function (a) { map[a.getAttribute('href').slice(1)] = a; });
         var targets = links.map(function (a) { return document.getElementById(a.getAttribute('href').slice(1)); }).filter(Boolean);

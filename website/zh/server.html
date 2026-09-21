@@ -34,7 +34,7 @@
     </script>
     <script src="../analytics.js" defer></script>
     <script src="../site-nav.js?v=92294063" defer></script>
-    <script src="../docs-nav.js?v=1eafff8c" defer></script>
+    <script src="../docs-nav.js?v=3a6f9d2c" defer></script>
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Instrument+Sans:wght@400;500;600;700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
@@ -42,7 +42,7 @@
     <link rel="alternate" hreflang="zh-CN" href="https://agentsdock.net/zh/server.html" />
     <link rel="alternate" hreflang="x-default" href="https://agentsdock.net/server.html" />
     <meta property="og:locale" content="zh_CN" />
-    <link rel="stylesheet" href="../styles.css?v=8f252944" />
+    <link rel="stylesheet" href="../styles.css?v=58e2a74b" />
   </head>
   <body>
     <header class="site-header">
@@ -66,7 +66,7 @@
           </div>
           <p class="docs-nav-label">入门</p>
           <a class="docs-nav-link" href="./setup.html">搭建指南</a>
-          <a class="docs-nav-link" href="./iphone.html">在 iPhone 和 iPad 上安装</a>
+          <a class="docs-nav-link" href="./iphone.html">客户端安装</a>
           <a class="docs-nav-link" href="./first-chat.html">开始第一个会话</a>
           <p class="docs-nav-label">指南</p>
           <a class="docs-nav-link" href="./features.html">主要功能</a>
@@ -105,7 +105,7 @@
         </div>
 
         <h2 id="install">安装与更新</h2>
-        <p>首次安装——以运行 Claude Code 或 Codex 的那个用户身份，克隆仓库并运行安装脚本：</p>
+        <p>首次安装——克隆仓库并运行安装脚本：</p>
 <pre>git clone https://github.com/ZhengyiLuo/AgentsServer.git
 cd AgentsServer
 ./install.sh</pre>
@@ -122,7 +122,7 @@ cd AgentsServer
           <li><code>--non-interactive</code>——不出现任何提示；用于脚本化或通过 SSH 驱动的运行。</li>
           <li><code>--show-token</code>——打印访问令牌并退出（见下文）。</li>
         </ul>
-        <p>要求：macOS（Apple 芯片）或 Linux，预装 <code>uv</code>（macOS 上 <code>brew install uv</code>），以及已安装并登录的 Claude Code 和/或 Codex。<code>tmux</code> 可选——它支撑应用内终端和托管更新。</p>
+        <p>要求：macOS（Apple 芯片）或 Linux，预装 <code>uv</code>（macOS 上 <code>brew install uv</code>），以及你计划使用的提供方 CLI 已安装并登录。<code>tmux</code> 可选——它支撑应用内终端和托管更新。</p>
 
         <h2 id="token">查看你的访问令牌</h2>
         <p>安装脚本结束时会打印一次令牌。之后随时想再看，在服务器上运行下面的命令——它只读取现有配置，不做任何更改：</p>
@@ -134,7 +134,7 @@ cd AgentsServer
 <pre>curl http://127.0.0.1:7850/api/health</pre>
         <p>如果服务器要求令牌（运行 <code>install.sh</code> 后默认如此），以 bearer 请求头传入：</p>
 <pre>curl -H 'Authorization: Bearer YOUR_TOKEN' http://127.0.0.1:7850/api/health</pre>
-        <p>响应会包含 Claude Code、Codex 和 <code>tmux</code> 是否可用。在应用里，<strong>设置</strong>页显示同样的运行时检查，以及一个<strong>重启服务器（Restart server）</strong>按钮。</p>
+        <p>响应会包含 <code>tmux</code> 和你的提供方 CLI 是否可用。在应用里，<strong>设置</strong>页显示同样的运行时检查，以及一个<strong>重启服务器（Restart server）</strong>按钮。</p>
 
         <h2 id="service">启动、停止、重启与日志</h2>
         <p>安装脚本会把 AgentsServer 注册为登录时自动启动的用户级服务。用你平台的服务管理器来管理它。</p>
@@ -214,7 +214,7 @@ uv run python agent_server.py serve --bind 0.0.0.0 --port 7850</pre>
     <script>
       // Highlight the current section in the sidebar as you scroll.
       (function () {
-        var links = Array.prototype.slice.call(document.querySelectorAll('.docs-nav a'));
+        var links = Array.prototype.slice.call(document.querySelectorAll('.docs-nav a[href^="#"]'));
         var map = {};
         links.forEach(function (a) { map[a.getAttribute('href').slice(1)] = a; });
         var targets = links.map(function (a) { return document.getElementById(a.getAttribute('href').slice(1)); }).filter(Boolean);

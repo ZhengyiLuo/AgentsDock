@@ -34,7 +34,7 @@
     </script>
     <script src="../analytics.js" defer></script>
     <script src="../site-nav.js?v=92294063" defer></script>
-    <script src="../docs-nav.js?v=1eafff8c" defer></script>
+    <script src="../docs-nav.js?v=3a6f9d2c" defer></script>
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Instrument+Sans:wght@400;500;600;700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
@@ -42,7 +42,7 @@
     <link rel="alternate" hreflang="zh-CN" href="https://agentsdock.net/zh/update.html" />
     <link rel="alternate" hreflang="x-default" href="https://agentsdock.net/update.html" />
     <meta property="og:locale" content="zh_CN" />
-    <link rel="stylesheet" href="../styles.css?v=8f252944" />
+    <link rel="stylesheet" href="../styles.css?v=58e2a74b" />
   </head>
   <body>
     <header class="site-header">
@@ -66,7 +66,7 @@
           </div>
           <p class="docs-nav-label">入门</p>
           <a class="docs-nav-link" href="./setup.html">搭建指南</a>
-          <a class="docs-nav-link" href="./iphone.html">在 iPhone 和 iPad 上安装</a>
+          <a class="docs-nav-link" href="./iphone.html">客户端安装</a>
           <a class="docs-nav-link" href="./first-chat.html">开始第一个会话</a>
           <p class="docs-nav-label">指南</p>
           <a class="docs-nav-link" href="./features.html">主要功能</a>
@@ -103,7 +103,7 @@
         </figure>
 
         <h2 id="both">应用和服务器一起更新</h2>
-        <p>AgentsDock 由两部分组成——<strong>应用</strong>（Mac、iPhone 或 iPad 上的客户端）和 <strong>AgentsServer</strong>（运行在你的远程机器上）。两者在同一面板里各自显示版本号，各有自己的<strong>检查</strong>和更新控件。</p>
+        <p>AgentsDock 由两部分组成——<strong>应用</strong>（你设备上的客户端）和 <strong>AgentsServer</strong>（运行在你的远程机器上）。两者在同一面板里各自显示版本号，各有自己的<strong>检查</strong>和更新控件。</p>
         <p>更新时，<strong>请把两端同时升到最新版本</strong>。应用和服务器保持版本一致可以避免不匹配——功能和修复往往两边一起发布。远程机器用<strong>将服务器更新到 Beta（Update server to Beta）</strong>/<strong>安装或更新 AgentsServer（Install or update AgentsServer）</strong>，应用则用<strong>重启以更新（Restart to update）</strong>。</p>
 
         <h2 id="channels">稳定版与测试版</h2>
@@ -132,7 +132,7 @@
     <script>
       // Highlight the current section in the sidebar as you scroll.
       (function () {
-        var links = Array.prototype.slice.call(document.querySelectorAll('.docs-nav a'));
+        var links = Array.prototype.slice.call(document.querySelectorAll('.docs-nav a[href^="#"]'));
         var map = {};
         links.forEach(function (a) { map[a.getAttribute('href').slice(1)] = a; });
         var targets = links.map(function (a) { return document.getElementById(a.getAttribute('href').slice(1)); }).filter(Boolean);

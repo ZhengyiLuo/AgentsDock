@@ -3,12 +3,12 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <meta name="description" content="如何在 AgentsDock 中与 agent 开始第一段对话——确认服务器已连接，点击新建会话，选择 Claude Code 或 Codex。" />
+    <meta name="description" content="如何在 AgentsDock 中开始第一个会话：确认服务器已连接，创建会话，检查默认沿用的工作目录，并切换 agent provider。" />
     <!-- Social preview (Open Graph / Twitter) -->
     <meta property="og:type" content="website" />
     <meta property="og:site_name" content="AgentsDock" />
     <meta property="og:title" content="开始第一个会话 · AgentsDock" />
-    <meta property="og:description" content="如何在 AgentsDock 中与 agent 开始第一段对话——确认服务器已连接，点击新建会话，选择 Claude Code 或 Codex。" />
+    <meta property="og:description" content="如何在 AgentsDock 中开始第一个会话：确认服务器已连接，创建会话，检查默认沿用的工作目录，并切换 agent provider。" />
     <meta property="og:url" content="https://agentsdock.net/zh/first-chat.html" />
     <meta property="og:image" content="https://agentsdock.net/assets/og-card.png?v=82a3bdda" />
     <meta property="og:image:width" content="1200" />
@@ -16,7 +16,7 @@
     <meta property="og:image:alt" content="AgentsDock — an IDE designed for agentic AI research" />
     <meta name="twitter:card" content="summary_large_image" />
     <meta name="twitter:title" content="开始第一个会话 · AgentsDock" />
-    <meta name="twitter:description" content="如何在 AgentsDock 中与 agent 开始第一段对话——确认服务器已连接，点击新建会话，选择 Claude Code 或 Codex。" />
+    <meta name="twitter:description" content="如何在 AgentsDock 中开始第一个会话：确认服务器已连接，创建会话，检查默认沿用的工作目录，并切换 agent provider。" />
     <meta name="twitter:image" content="https://agentsdock.net/assets/og-card.png?v=82a3bdda" />
     <meta name="theme-color" content="#0d1013" />
     <meta name="robots" content="index,follow" />
@@ -34,7 +34,7 @@
     </script>
     <script src="../analytics.js" defer></script>
     <script src="../site-nav.js?v=92294063" defer></script>
-    <script src="../docs-nav.js?v=1eafff8c" defer></script>
+    <script src="../docs-nav.js?v=3a6f9d2c" defer></script>
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Instrument+Sans:wght@400;500;600;700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
@@ -42,7 +42,7 @@
     <link rel="alternate" hreflang="zh-CN" href="https://agentsdock.net/zh/first-chat.html" />
     <link rel="alternate" hreflang="x-default" href="https://agentsdock.net/first-chat.html" />
     <meta property="og:locale" content="zh_CN" />
-    <link rel="stylesheet" href="../styles.css?v=8f252944" />
+    <link rel="stylesheet" href="../styles.css?v=58e2a74b" />
   </head>
   <body>
     <header class="site-header">
@@ -66,7 +66,7 @@
           </div>
           <p class="docs-nav-label">入门</p>
           <a class="docs-nav-link" href="./setup.html">搭建指南</a>
-          <a class="docs-nav-link" href="./iphone.html">在 iPhone 和 iPad 上安装</a>
+          <a class="docs-nav-link" href="./iphone.html">客户端安装</a>
           <a class="docs-nav-link current" href="./first-chat.html">开始第一个会话</a>
           <span class="docs-nav-subs">
             <a href="#connect">确认已连接</a>
@@ -108,15 +108,15 @@
         <h2 id="new-chat">开始会话</h2>
         <p>点击侧边栏顶部的 <strong>+</strong> 按钮——即<strong>新建会话（New chat）</strong>——或按 <code>⌘N</code>。</p>
         <figure class="docs-shot">
-          <video autoplay muted loop playsinline preload="metadata" poster="../assets/feature-agents-poster.jpg">
-            <source src="../assets/feature-agents.mp4" type="video/mp4" />
+          <video autoplay muted loop playsinline preload="metadata" poster="../assets/first-chat-new-chat-poster.jpg">
+            <source src="../assets/first-chat-new-chat.mp4" type="video/mp4" />
           </video>
-          <figcaption>点击 <strong>+</strong> 新建会话并选择一个 agent。</figcaption>
+          <figcaption>新建会话会默认选中上一个会话的工作目录。左下角的 provider 切换器可以切换不同的 agent provider。</figcaption>
         </figure>
-        <p>在弹出的对话框中选择：</p>
+        <p>发送第一条消息前，检查两件事：</p>
         <ul>
-          <li>一个<strong>后端</strong>——Claude Code 或 Codex，用你自己的账号在远程机器上运行；</li>
-          <li>一个<strong>工作目录</strong>——远程机器上 agent 将在其中工作的文件夹。</li>
+          <li><strong>工作目录</strong>——AgentsDock 会默认沿用上一个会话的文件夹；如果这次要在别的项目里工作，可以改成远程机器上的其他目录。</li>
+          <li><strong>agent provider</strong>——用左下角的切换器，在这台服务器可用的 Claude Code、Codex、Cursor 等 provider 之间切换。</li>
         </ul>
         <p>然后输入第一条消息，按 <code>Enter</code> 发送。就这么简单——agent 在你服务器上的那个目录里运行，而这个会话拥有自己的持久终端，你随时可以从任何设备接入。</p>
 
@@ -140,7 +140,7 @@
     <script>
       // Highlight the current section in the sidebar as you scroll.
       (function () {
-        var links = Array.prototype.slice.call(document.querySelectorAll('.docs-nav a'));
+        var links = Array.prototype.slice.call(document.querySelectorAll('.docs-nav a[href^="#"]'));
         var map = {};
         links.forEach(function (a) { map[a.getAttribute('href').slice(1)] = a; });
         var targets = links.map(function (a) { return document.getElementById(a.getAttribute('href').slice(1)); }).filter(Boolean);

@@ -34,14 +34,14 @@
     </script>
     <script src="./analytics.js" defer></script>
     <script src="./site-nav.js?v=92294063" defer></script>
-    <script src="./docs-nav.js?v=1eafff8c" defer></script>
+    <script src="./docs-nav.js?v=3a6f9d2c" defer></script>
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Instrument+Sans:wght@400;500;600;700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
     <link rel="alternate" hreflang="en" href="https://agentsdock.net/advanced-install.html" />
     <link rel="alternate" hreflang="zh-CN" href="https://agentsdock.net/zh/advanced-install.html" />
     <link rel="alternate" hreflang="x-default" href="https://agentsdock.net/advanced-install.html" />
-    <link rel="stylesheet" href="./styles.css?v=8f252944" />
+    <link rel="stylesheet" href="./styles.css?v=58e2a74b" />
   </head>
   <body>
     <header class="site-header">
@@ -65,7 +65,7 @@
           </div>
           <p class="docs-nav-label">Getting started</p>
           <a class="docs-nav-link" href="./setup.html">Setup guide</a>
-          <a class="docs-nav-link" href="./iphone.html">Install on iPhone &amp; iPad</a>
+          <a class="docs-nav-link" href="./iphone.html">Client install</a>
           <a class="docs-nav-link" href="./first-chat.html">Start your first chat</a>
           <p class="docs-nav-label">Guides</p>
           <a class="docs-nav-link" href="./features.html">Key features</a>
@@ -103,7 +103,7 @@
         <ul>
           <li><strong>Host:</strong> Linux, or Apple-silicon macOS. Intel macOS is not supported; the installer stops before changing anything.</li>
           <li><strong><code>uv</code></strong> preinstalled on <code>PATH</code> (<code>brew install uv</code> on macOS; your distro's package manager on Linux). It provisions the isolated Python 3.10+ runtime. The installer never downloads a bootstrap script.</li>
-          <li><strong>Claude Code and/or Codex</strong> installed and signed in on the host, in the same user account that runs the server.</li>
+          <li>Any provider CLIs you plan to use — <strong>Claude Code</strong>, <strong>Codex</strong>, or <strong>Cursor</strong> — installed and signed in on the host, in the same user account that runs the server.</li>
           <li><strong>tmux</strong> (optional) — enables the in-app terminal, live pane inspection, and in-app managed updates. On macOS with Homebrew, the installer offers to install it; otherwise it prints the command and continues.</li>
           <li><strong>Tailscale</strong> (optional) — for reaching the server from other devices without exposing the port.</li>
           <li>A working user service session: <code>launchctl</code> (macOS) or <code>systemctl --user</code> (Linux). No <code>sudo</code> is ever used.</li>
@@ -244,7 +244,7 @@ systemctl --user status agents-server.service --no-pager -l</pre>
     <script>
       // Highlight the current section in the sidebar as you scroll.
       (function () {
-        var links = Array.prototype.slice.call(document.querySelectorAll('.docs-nav a'));
+        var links = Array.prototype.slice.call(document.querySelectorAll('.docs-nav a[href^="#"]'));
         var map = {};
         links.forEach(function (a) { map[a.getAttribute('href').slice(1)] = a; });
         var targets = links.map(function (a) { return document.getElementById(a.getAttribute('href').slice(1)); }).filter(Boolean);
