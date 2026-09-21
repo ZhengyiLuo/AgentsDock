@@ -106,9 +106,13 @@ workflow/source commit, candidate draft and accepted manifest SHA-256. It verifi
 the existing release-key signature, package identity, archive hashes and channel;
 publishes that tarball through npm OIDC; then downloads and verifies registry
 bytes. It refuses immutable-version mismatches and backward dist-tag movement.
-The npm candidate draft is separate from the native desktop draft, which verifies
-npm availability and retains its own exact asset contract. This avoids making
-the first npm publication depend on a desktop draft that already requires npm.
+The npm candidate draft is separate from the native desktop draft. Native build
+and draft staging validate the signed metadata and packaged resources before
+either server distribution needs to be public. Final desktop publication verifies
+that npm serves the exact signed tarball and AgentsServer serves the matching
+signed legacy bridge, including runtime file contents and executable permissions.
+This permits packaged-app acceptance before npm publication while preventing an
+app update from reaching users before both server paths work.
 
 The private publisher integration also requires an explicit unused native build
 number. Check its CI run floor before dispatch; old run-number arithmetic could
@@ -161,7 +165,11 @@ it does not prove active-provider work or the complete published-artifact update
 journey. Separate macOS VMs exercise launchd activation and rollback, exact
 service-plist restoration, preserved identity/token/synthetic files and fresh
 offline npx installation. Their dependencies are preloaded after guest network
-failure; online bootstrap is not claimed. Before release,
+failure; online bootstrap is not claimed. A third pristine VM reproduces an
+actual first-install dependency timeout and retries using the exact committed
+beta.12 npm tarball without removing the leftover folders. It then verifies
+that another installation attempt preserves the installed process and state.
+Before release,
 record results for these scenarios on disposable macOS and Linux accounts/hosts:
 
 | Scenario | Required result |

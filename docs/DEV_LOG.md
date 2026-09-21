@@ -39,6 +39,21 @@
   npm CLI, plus five actual npm packaging tests and nine installer admission
   tests. Preserve explicit unsupported-boundary notes instead of treating
   a dry run or simulated app replacement as an accepted public release.
+- Prepare the exact beta.12 npm archive from committed source `8a52b14` in a
+  clean detached checkout. Its SHA-256 is
+  `ce392cf842774eb55fcd889a36e5c875d18e7a70551a77163744413fd9252241`.
+  On a third pristine macOS VM, reproduce the actual failed first install and
+  retry with this unchanged archive through npx, without removing the leftover
+  folders. Verify beta.12/API 28 activation, then refuse repeated installation
+  while preserving the running process, identity, token and provider sentinels.
+- Keep native build/draft staging possible before registry publication.
+  Final release verification requires both the signed npm package and matching
+  legacy bridge to be public, with identical runtime files and executable bits.
+- Verify the compatibility export preserves the standalone repository's ancestry
+  and exact server tree. Build the beta.12 legacy archive from that export and
+  compare it with the committed npm archive: all 85 runtime files and their
+  executable permissions match. Both manifests remain unsigned until production
+  signing; these local archives have not been made available to installed users.
 - Availability: committed source candidate after focused validation. Registry
   publication, trusted-publisher execution and the complete signed native
   release remain pending. Production services and CLI credentials are untouched.
