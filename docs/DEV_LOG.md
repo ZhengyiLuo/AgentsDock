@@ -1,5 +1,23 @@
 # Public development log
 
+## 2026-09-20 — Claude subagent refresh — source acceptance
+
+- Fetch authoritative subagent state when opening Claude chats, as already
+  done for Codex. Seed live tracking from that state and retain progress and
+  completion in the local cache, including native `task_updated` messages.
+- Exclude explicitly identified background shell and workflow tasks from the
+  agent list. Reject older snapshots and replayed events after newer activity
+  so reopening cannot roll an agent's status backward.
+- Reproduce the missing snapshot request in isolated native offscreen Electron.
+  Verify the corrected full app through production preload, IPC and native
+  read-only HTTP: cold-open a real Claude chat, inspect its active and historical
+  agents, open details, navigate away and reopen. The authoritative state and
+  agent activity persist; background shell tasks do not flood the list.
+- This read-only check does not launch a new provider agent. Focused service
+  checks cover progress, both completion formats and stale-event races.
+- Availability: source correction using the existing server API. No server
+  update is required for this subagent visibility fix.
+
 ## 2026-09-20 — Side chat popup — source candidate
 
 - Move Side chat to a single button beside the composer. Open the conversation
@@ -12,10 +30,17 @@
   input focus, Escape and outside-click dismissal, reopening drafts and answers,
   direct Clear, pending request retention and cancellation, split-pane isolation,
   dark/light themes, narrow layout and Chinese text. Requests cross production
-  preload, IPC and native HTTP into a controlled server; these checks do not
-  establish real-provider acceptance.
-- Availability: source candidate. Paired native Claude acceptance is still in
-  progress. No published build or live server is changed.
+  preload, IPC and native HTTP. Also exercise real native Claude through an
+  isolated production server: ask about a fact present only in a completed tool
+  result, ask a contextual follow-up, close/reopen and clear the popup. The
+  running parent stays active, and side requests do not alter its transcript.
+  The test bootstrap uses a seeded native profile; full server-picker setup is
+  outside this check.
+- The paired server correction preserves the connected Claude parent when
+  saved effort settings change for a future turn. Existing servers require
+  that correction to avoid the related side-question configuration conflict.
+- Availability: source candidate. No published build or live production server
+  is changed by this acceptance.
 
 ## 2026-09-20 — Compact running command blocks — 1.0.4-beta.11 local acceptance
 

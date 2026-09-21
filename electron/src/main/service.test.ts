@@ -3960,6 +3960,88 @@ describe('split-chat timeline subscriptions', () => {
 })
 
 describe('subagent lifecycle hydration', () => {
+  it.each(['task_notification', 'task_updated'])('reopens a running Claude agent and persists progress and %s completion', async subtype => {
+    const session: Session = { id: 'chat', title: 'Chat', backend: 'claude' }
+    let agent: Event = {
+      seq: 7, id: 'subagent:chat:run-1:child-1', session_id: session.id,
+      run_id: 'run-1', type: 'subagent_state', backend: 'claude',
+      ts: '2026-09-20T12:00:00Z', subagent_id: 'child-1',
+      subagent_tool_id: 'agent-tool', subagent_name: 'Review the renderer',
+      subagent_status: 'running'
+    }
+    let onEvent: (event: Event) => void = () => { throw new Error('Timeline stream did not start.') }
+    const client = fakeClient({
+      sessionPage: async () => ({ session, events: [], has_more: false, latest_seq: 7 }),
+      subagents: async () => ({
+        session_id: session.id,
+        subagents: [agent, ...['local_bash', 'local_workflow'].map(kind => ({
+          ...agent, id: `subagent:${kind}`, subagent_id: kind, subagent_kind: kind
+        }))], count: 3,
+        active_count: agent.subagent_status === 'running' ? 1 : 0, latest_seq: agent.seq
+      }),
+      stream: (_sessionId, _after, receiveEvent) => {
+        onEvent = receiveEvent
+        return vi.fn()
+      }
+    })
+    const { service, cache } = createProfileService({ 'http://a.test:7850': [client] })
+    Object.assign(service, { validatedGeneration: 1 })
+
+    await service.openTimeline(session.id, true)
+    await settleBackgroundWork()
+    expect(client.subagents).toHaveBeenCalledOnce()
+    expect(cache.snapshot('profile:a', session.id)?.events).toEqual([agent])
+
+    const childEvent = (seq: number, raw: object): Event => ({
+      seq, id: `raw-${seq}`, session_id: session.id, run_id: 'run-1',
+      backend: 'claude', type: 'raw_event', ts: `2026-09-20T12:00:${seq}Z`,
+      raw: JSON.stringify({ type: 'system', task_id: 'child-1', ...raw })
+    })
+    const flush = () => (service as unknown as { flushEventCache(): void }).flushEventCache()
+    onEvent(childEvent(6, { subtype: 'task_started', task_type: 'local_agent', description: 'Old start' }))
+    onEvent(childEvent(6, { subtype: 'task_progress', description: 'Old progress' }))
+    onEvent(childEvent(6, { subtype: 'task_notification', status: 'completed', summary: 'Old completion' }))
+    onEvent(childEvent(6, {
+      type: 'assistant', parent_tool_use_id: 'agent-tool',
+      message: { content: [{ type: 'text', text: 'Old child activity' }] }
+    }))
+    flush()
+    expect(cache.snapshot('profile:a', session.id)?.events).toEqual([agent])
+    onEvent(childEvent(8, { subtype: 'task_progress', description: 'Checking timeline updates' }))
+    flush()
+    expect(cache.snapshot('profile:a', session.id)?.events).toEqual([
+      expect.objectContaining({ id: agent.id, subagent_status: 'running', subagent_activity: 'Checking timeline updates' })
+    ])
+    // An older snapshot arriving after live progress cannot regress the cache
+    // or the projector's activity log.
+    const internals = service as unknown as {
+      scope: unknown
+      timelineSubscriptions: Map<string, { lease: number }>
+      refreshSubagentSnapshot(scope: unknown, sessionId: string, lease: number): Promise<void>
+    }
+    await internals.refreshSubagentSnapshot(internals.scope, session.id, internals.timelineSubscriptions.get(session.id)!.lease)
+    expect(cache.snapshot('profile:a', session.id)?.events[0]).toMatchObject({ seq: 8, subagent_activity: 'Checking timeline updates' })
+    onEvent(childEvent(9, {
+      subtype,
+      ...(subtype === 'task_updated'
+        ? { patch: { status: 'completed', summary: 'Review complete' } }
+        : { status: 'completed', summary: 'Review complete' })
+    }))
+    flush()
+    expect(cache.snapshot('profile:a', session.id)?.events).toEqual([
+      expect.objectContaining({ id: agent.id, subagent_status: 'completed', subagent_summary: 'Review complete' })
+    ])
+    expect(cache.snapshot('profile:a', session.id)?.events[0].subagent_log?.map(entry => entry.text))
+      .toEqual(['Checking timeline updates', 'Review complete'])
+    agent = cache.snapshot('profile:a', session.id)!.events[0]
+
+    service.unsubscribeTimeline(session.id)
+    await service.openTimeline(session.id, true)
+    await settleBackgroundWork()
+    expect(client.subagents).toHaveBeenCalledTimes(3)
+    expect(cache.snapshot('profile:a', session.id)?.events).toEqual([agent])
+  })
+
   it('deduplicates concurrent snapshot requests and tolerates an older server', async () => {
     const response = deferred<SubagentSnapshot>()
     const client = fakeClient({ subagents: async () => response.promise })

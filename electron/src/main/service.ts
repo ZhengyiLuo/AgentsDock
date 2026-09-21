@@ -3217,7 +3217,10 @@ export class AppService {
       if (!this.isCurrentTimeline(scope, sessionId, lease)) return
       const subagentState = this.subagentProjector.project(event)
       if (event.type === 'raw_event') {
-        if (subagentState) this.emitAgentEvent(scope, subagentState)
+        if (subagentState) {
+          this.emitAgentEvent(scope, subagentState)
+          this.enqueueEventCache(scope, subagentState)
+        }
         return
       }
       this.emitAgentEvent(scope, event)
@@ -5490,7 +5493,7 @@ export class AppService {
     lease: number
   ): Promise<void> {
     const session = this.cache.snapshot(scope.namespace, sessionId)?.session
-    if (session?.backend !== 'codex') return
+    if (session?.backend !== 'codex' && session?.backend !== 'claude') return
     const subagents = await this.fetchSubagentSnapshot(scope, sessionId)
     if (!subagents || !this.isCurrentTimeline(scope, sessionId, lease)) return
     const persistable = persistableSubagentSnapshotEvents(subagents, sessionId)
@@ -5500,8 +5503,14 @@ export class AppService {
       sessionId,
       dropped: persistable.dropped
     })
-    if (!persistable.events.length) return
-    this.cache.putEvents(scope.namespace, sessionId, persistable.events)
+    const events = persistable.events.filter(event => event.backend !== 'claude' || (
+      event.subagent_kind !== 'local_bash'
+      && event.subagent_kind !== 'local_workflow'
+      && this.subagentProjector.project(event) !== null
+    ))
+    if (!events.length) return
+    this.flushEventCache()
+    this.cache.putEvents(scope.namespace, sessionId, events)
     const snapshot = this.cache.snapshot(scope.namespace, sessionId)
     if (!snapshot || !this.isCurrentTimeline(scope, sessionId, lease)) return
     this.emit('server:timeline', {
