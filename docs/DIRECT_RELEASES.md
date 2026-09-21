@@ -95,6 +95,23 @@ Reserve its native build number explicitly; the first public run starts above
 the last accepted local build, 1185, and every later run increments the number.
 Never reuse the old private counter formula or a previously accepted build.
 
+When macOS signing is performed locally, dispatch the same preparation workflow
+with `artifacts_only=true`. It retains the source ancestry, release version,
+build reservation, and signed descriptor checks, then uploads verified Linux
+x64/arm64 and unsigned Windows artifacts. It skips macOS, release-write access
+checks, and draft creation; it does not read Windows signing credentials. Public
+release-history reads use the job's read-only GitHub token. Set
+`allow_unsigned_windows=true` for the approved unsigned distribution policy.
+This mode consumes the same workflow build reservation as a full preparation.
+
+Build macOS locally from the same committed source, version, build number and
+signed server descriptor using `scripts/build_electron_release.sh`. It uses the
+existing Developer ID keychain identity and App Store Connect key, verifies the
+universal notarized ZIP and DMG, and never publishes. Assemble those exact files
+with the downloaded platform artifacts and descriptor, then seal the complete
+asset set before the normal draft and publication verification. Artifact-only
+success does not establish macOS acceptance or authorize publication.
+
 Add the existing credentials directly to the public repository's
 [`direct-production` environment](https://github.com/ZhengyiLuo/AgentsDock/settings/environments).
 GitHub's secret API returns metadata, not stored secret values, so the originals

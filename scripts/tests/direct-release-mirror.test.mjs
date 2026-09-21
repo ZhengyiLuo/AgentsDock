@@ -5,6 +5,7 @@ import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symli
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { test } from 'node:test'
+import { runInNewContext } from 'node:vm'
 import { signedFixture } from './coordinated-release-fixture.mjs'
 import { COORDINATED_ASSETS } from '../coordinated-release.mjs'
 import { expectedAssets, GitHubClient, releaseIdentity, releaseTag, ReleaseMirror, REPOSITORIES, verifyAssets } from '../direct-release-mirror.mjs'
@@ -446,6 +447,55 @@ test('actual workflow entry guards reject forks, pull requests, feature branches
       assert.equal(result.status === 0, accepted, `${name}: ${event} ${repository} ${ref}`)
     }
   }
+})
+
+test('artifact-only workflow preserves validation and builds portable assets without release or signing credentials', () => {
+  const workflow = readFileSync(new URL('../../.github/workflows/direct-desktop-release-draft.yml', import.meta.url), 'utf8')
+  const sections = Object.fromEntries(workflow.split(/^  (?=[a-z][a-z0-9-]+:\n)/m)
+    .filter(section => /^[-a-z0-9]+:\n/.test(section) && /^    runs-on:/m.test(section))
+    .map(section => [section.split(':')[0], section]))
+  const evaluate = (expression, artifactsOnly, overrides = {}) => runInNewContext(
+    expression.replace(/^\$\{\{\s*|\s*\}\}$/g, ''), {
+      github: { event_name: 'workflow_dispatch', repository: 'ZhengyiLuo/AgentsDock', ref: 'refs/heads/release/1.0.4-beta.12', token: 'read-only-job-token', ...overrides },
+      inputs: { artifacts_only: artifactsOnly },
+      secrets: { AGENTSDOCK_RELEASE_TOKEN: 'write-token', WINDOWS_CERTIFICATE_PFX_BASE64: 'pfx', WINDOWS_CERTIFICATE_PASSWORD: 'password', WINDOWS_EXPECTED_PUBLISHER: 'publisher' },
+      startsWith: (value, prefix) => value.startsWith(prefix)
+    })
+  assert.match(workflow, /      artifacts_only:\n(?:.*\n){2}        default: false\n        type: boolean/)
+  for (const artifactsOnly of [true, false]) {
+    for (const [name, section] of Object.entries(sections)) {
+      const guard = section.match(/^    if: (.+)$/m)[1]
+      const shouldRun = !artifactsOnly || !['build-macos', 'create-draft'].includes(name)
+      assert.equal(evaluate(guard, artifactsOnly), shouldRun, name)
+      assert.equal(evaluate(guard, artifactsOnly, { repository: 'fork/AgentsDock' }), false)
+      assert.equal(evaluate(guard, artifactsOnly, { event_name: 'pull_request' }), false)
+    }
+  }
+  const validation = sections['validate-request']
+  const writePermission = validation.split('      - name: Require release-write access for draft creation\n')[1].split('\n      - ')[0]
+  const writeGuard = writePermission.match(/^        if: (.+)$/m)[1]
+  assert.equal(evaluate(writeGuard, true), false)
+  assert.equal(evaluate(writeGuard, false), true)
+  const versionCheck = validation.split('      - name: Require a version newer than every public desktop release\n')[1]
+  assert.doesNotMatch(versionCheck, /^        if:/m)
+  const historyCredential = versionCheck.match(/^          GH_TOKEN: (.+)$/m)[1]
+  assert.equal(evaluate(historyCredential, true), 'read-only-job-token')
+  assert.equal(evaluate(historyCredential, false), 'write-token')
+  for (const name of ['WINDOWS_CERTIFICATE_PFX_BASE64', 'WINDOWS_CERTIFICATE_PASSWORD', 'WINDOWS_EXPECTED_PUBLISHER']) {
+    const expression = sections['build-windows-x64'].match(new RegExp(`^          ${name}: (.+)$`, 'm'))[1]
+    assert.equal(evaluate(expression, true), '', `artifact mode exposed ${name}`)
+    assert.notEqual(evaluate(expression, false), '')
+  }
+  for (const name of ['build-linux-x64', 'build-linux-arm64', 'build-windows-x64']) {
+    assert.match(sections[name], /needs: validate-request/)
+    assert.match(sections[name], /AGENTSDOCK_EXPECTED_BUILD_NUMBER/)
+    assert.match(sections[name], /coordinated_updates == 'true'/)
+    assert.match(sections[name], /Verify (?:Linux|Windows)/)
+    assert.match(sections[name], /actions\/upload-artifact@/)
+  }
+  assert.match(validation, /validate_desktop_build_number\.mjs/)
+  assert.match(validation, /git merge-base --is-ancestor/)
+  assert.match(validation, /node scripts\/coordinated-release\.mjs prepare/)
 })
 
 test('temporary Apple credentials are owner-only, loaded after dependencies and removed even if keychain cleanup fails', t => {

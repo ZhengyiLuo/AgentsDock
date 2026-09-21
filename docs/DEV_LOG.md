@@ -26,10 +26,25 @@
   independent native owner restores the previous installation and reports a
   failed, retryable update without an HTTP trigger. Native testing exposed and
   fixed directory permissions, generated-cache validation and recovery ownership.
-- A subsequent review requires native acceptance to be repeated with credentials
-  pinned to the connected native process before transmission and with runtime
-  durability checked before service shutdown. Reboot and final packaged-release
-  acceptance remain pending. These results do not establish simultaneous
+- Repeat native acceptance with credentials pinned to the connected process
+  before transmission and runtime durability checked before service shutdown.
+  An abrupt macOS VM shutdown during activation restores the previous release
+  automatically after reboot, retaining identity, credentials and saved state.
+  Correct enablement parsing for both launchd output formats found during testing.
+- Exercise the production renderer, preload, native transport and coordinator in
+  an isolated offscreen Electron app against an installed Linux server. Add and
+  authenticate it through the UI, request the signed npm candidate, and verify
+  automatic reconnection, both updated components, released admission and the
+  Up to date result. Registry, signing key, version enrollment and credential
+  storage are controlled QA boundaries; no app binary replacement is asserted.
+- Repeat a genuine beta.9 migration after a prior rollback, then abruptly stop
+  the Linux VM after the old service is disabled. After reboot, the independent
+  systemd owner automatically restores beta.9, retains identity, credentials and
+  saved state, and retires its recovery job without an HTTP recovery trigger.
+  Cover carried-over legacy intent and pre-arm retry failures with regressions.
+- Fix the Linux lock-inode reuse and closed-transport races exposed by the full
+  CI suite; rerun their regressions on both Linux and macOS. Final signed-package
+  acceptance remains pending. These results do not establish simultaneous
   execution generations. No release has been published or deployed by this entry.
 
 ## 2026-09-21 — Verify both server components before update completion
