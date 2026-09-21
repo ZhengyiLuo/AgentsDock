@@ -1,5 +1,25 @@
 # Public development log
 
+## 2026-09-21 — Resume live chat updates during input — source acceptance
+
+- Resume requested chat subscriptions immediately after the server is healthy,
+  before waiting for the foreground input pause used by background session/job
+  metadata. Preserve scope and subscription ownership; hidden chats stay closed.
+- Pass six focused service checks, TypeScript validation, production compilation
+  and compiled-entry verification. The regression fails on the old ordering.
+- Exercise actual offscreen Electron with production service, packaged renderer
+  and preload, native sidebar clicks and typing, and an isolated real server.
+  Synthetic histories contain 5,000 and 300 events; normal cached switches are
+  already fast and are not reported as a reproduced stall.
+- Inject one HTTP health failure and a 700 ms healthy response delay. On the
+  old service, selected-chat recovery waits 8.93 seconds, including three seconds
+  after typing stops. The correction recovers in 732 ms during continuous input;
+  an independent repeat records 729 ms, preserves all 49 typed characters, and
+  leaves background metadata deferred. No provider turn is part of this check.
+- Availability: accepted source correction for the coordinated desktop release.
+  A separate compatible server optimization avoids redundant full-history fork
+  scans on timeline refreshes. Production apps and servers remain unchanged.
+
 ## 2026-09-20 — Side chat scroll memory — 1.0.4-beta.16 local acceptance
 
 - Accept signed local Apple silicon macOS app **1.0.4-beta.16 / 1190** from

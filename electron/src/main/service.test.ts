@@ -574,11 +574,12 @@ describe('background refresh failures', () => {
     }
   })
 
-  it('publishes reconnect health before deferring the fetched session apply', async () => {
+  it('restores requested live streams during input while deferring session metadata', async () => {
     vi.useFakeTimers()
     let service: AppService | null = null
     try {
       const fetchedSessions = deferred<Session[]>()
+      const cachedSession = emptyTimelinePage('chat').session
       let healthRequest = 0
       let sessionRequest = 0
       const active = fakeClient({
@@ -586,22 +587,33 @@ describe('background refresh failures', () => {
           if (++healthRequest === 1) throw new Error('offline')
           return { ok: true }
         },
-        sessions: () => ++sessionRequest === 1 ? Promise.resolve([]) : fetchedSessions.promise
+        sessions: () => ++sessionRequest === 1 ? Promise.resolve([]) : fetchedSessions.promise,
+        sessionPage: async sessionId => emptyTimelinePage(sessionId),
+        stream: (_sessionId, _after, _onEvent, onState) => {
+          onState(true)
+          return vi.fn()
+        }
       })
       const inactive = fakeClient()
       const created = createProfileService({
         'http://a.test:7850': [active],
         'http://b.test:7850': [inactive]
-      })
+      }, cache => cache.putSessions('profile:a', [cachedSession]))
       service = created.service
       const { listeners, window } = addInteractiveWindow(service)
       service.start()
       await settleImmediateRefresh()
+      await service.subscribeTimeline('chat', 0)
+      await service.subscribeTimeline('hidden-chat', 0)
+      await settleImmediateRefresh()
+      expect(active.sessionPage).not.toHaveBeenCalled()
+      expect(active.stream).not.toHaveBeenCalled()
       window.webContents.send.mockClear()
       const putSessions = vi.spyOn(created.cache, 'putSessions')
 
       await vi.advanceTimersByTimeAsync(30_000)
       listeners.get('before-input-event')?.({}, { type: 'keyDown' })
+      service.unsubscribeTimeline('hidden-chat')
       fetchedSessions.resolve([{ id: 'chat', title: 'Recovered', backend: 'codex' }])
       await settleImmediateRefresh()
 
@@ -609,8 +621,27 @@ describe('background refresh failures', () => {
         'server:connection',
         expect.objectContaining({ connected: true })
       ])
+      expect(active.sessionPage).toHaveBeenCalledOnce()
+      expect(active.sessionPage.mock.calls[0][0]).toBe('chat')
+      expect(active.stream).toHaveBeenCalledOnce()
+      expect(active.stream.mock.calls[0][0]).toBe('chat')
+      expect(window.webContents.send).toHaveBeenCalledWith('server:sync',
+        expect.objectContaining({ sessionId: 'chat', state: 'live' }))
       expect(putSessions).not.toHaveBeenCalled()
-      expect((await service.bootstrap()).sessions).toEqual([])
+      expect(window.webContents.send).not.toHaveBeenCalledWith('server:sessions', expect.anything())
+      expect((await service.bootstrap()).sessions).toEqual([cachedSession])
+
+      for (let index = 0; index < 6; index += 1) {
+        await vi.advanceTimersByTimeAsync(500)
+        listeners.get('before-input-event')?.({}, { type: 'char' })
+      }
+      expect(putSessions).not.toHaveBeenCalled()
+      expect(active.stream).toHaveBeenCalledOnce()
+      await vi.advanceTimersByTimeAsync(2_999)
+      expect(putSessions).not.toHaveBeenCalled()
+      await vi.advanceTimersByTimeAsync(1)
+      expect(putSessions).toHaveBeenCalledOnce()
+      expect(window.webContents.send.mock.calls.filter(([channel]) => channel === 'server:sessions')).toHaveLength(1)
     } finally {
       service?.stop()
       vi.useRealTimers()

@@ -5008,12 +5008,8 @@ export class AppService {
     }
     const namespaceWasAdopted = activeScope !== scope
     if (!this.isCurrentScope(activeScope)) return
-    if (
-      deferApplyDuringInteraction
-      && Date.now() - this.lastForegroundInteractionAt < FOREGROUND_INTERACTION_QUIET_MS
-      && !await this.waitForForegroundQuiet(activeScope)
-    ) return
-    if (!this.isCurrentScope(activeScope)) return
+    // Already-requested chats need live recovery as soon as health is valid,
+    // even while background session/job metadata waits for an input pause.
     if (!namespaceWasAdopted) {
       for (const [sessionId, subscription] of [...this.timelineSubscriptions]) {
         if (subscription.connected || subscription.initializing) continue
@@ -5023,6 +5019,12 @@ export class AppService {
         queueMicrotask(() => void this.reconcileTimelineAndStream(activeScope, sessionId, cachedLast, lease))
       }
     }
+    if (
+      deferApplyDuringInteraction
+      && Date.now() - this.lastForegroundInteractionAt < FOREGROUND_INTERACTION_QUIET_MS
+      && !await this.waitForForegroundQuiet(activeScope)
+    ) return
+    if (!this.isCurrentScope(activeScope)) return
 
     if (sessions.status === 'fulfilled') {
       const mergedSessions = mergePolledSessionSummaries(this.sessions, sessions.value)
