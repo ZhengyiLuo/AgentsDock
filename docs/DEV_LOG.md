@@ -1,5 +1,19 @@
 # Public development log
 
+## 2026-09-20 — Compact popup — 1.0.4-beta.13 local acceptance
+
+- Accept the signed local Apple silicon macOS app **1.0.4-beta.13 / 1187** from
+  `c3aab200f66c5b36526b899b8e087658c543711a`. Verify bundle audit, Developer ID
+  signature, runtime entitlements, version/build and clean isolated startup.
+  All 88 packaged compiled files match the tested production output.
+- Exercise the exact packaged renderer, preload and CSS in native offscreen
+  Electron with keyboard focus enabled. Verify compact empty presentation,
+  growing drafts, long-answer scrolling, Clear, help, close/reopen and Escape
+  in dark/light themes and a narrow window. The controlled server and service
+  harness preserve the boundary described below; no model provider runs.
+- Availability: signed local `.app` with automatic updates disabled, not a
+  notarized public release. No server update is required for this layout change.
+
 ## 2026-09-20 — Compact Side chat popup — source acceptance
 
 - Size the popup to its content instead of reserving a full-height empty panel.
