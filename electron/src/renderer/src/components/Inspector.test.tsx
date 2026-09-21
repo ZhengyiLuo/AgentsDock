@@ -220,6 +220,7 @@ describe('Inspector', () => {
     fireEvent.click(screen.getByText('Media & files'))
 
     await waitFor(() => expect(mediaURL).toHaveBeenCalledWith('profile-a', 0, 'chat-1', 'same-file'))
+    expect(screen.queryByTitle('Find in chat')).not.toBeInTheDocument()
     act(() => useAppStore.setState({ activeProfileId: 'profile-b' }))
     await waitFor(() => expect(mediaURL).toHaveBeenCalledWith('profile-b', 0, 'chat-1', 'same-file'))
   })
@@ -299,6 +300,7 @@ describe('Inspector', () => {
       sessionId: 'chat-1',
       file: artifactFile
     })
+    expect(screen.queryByTitle('Find in chat')).not.toBeInTheDocument()
     expect(screen.getAllByTitle('Open in Editor')).toHaveLength(2)
     expect(openExternally).not.toHaveBeenCalled()
 
