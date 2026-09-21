@@ -904,19 +904,19 @@ export class AgentServerClient {
         ? normalizeCursorPermissionMode(input.cursor_permission_mode)
         : null,
       provider_session_id: providerId,
-      // Cursor can resume provider context by ID, but AgentsServer cannot
-      // import Cursor's prior transcript into the local timeline.
+      // Keep legacy manual-ID resume compatible. Cursor text-snapshot import
+      // uses the capability-gated local picker and bulk endpoint instead.
       import_history: Boolean(providerId) && input.backend !== 'cursor'
     })
     return response.session
   }
 
-  async listLocalSessions(limit = LOCAL_SESSION_IMPORT_HARD_LIST_LIMIT): Promise<LocalSessionCandidate[]> {
+  async listLocalSessions(limit = LOCAL_SESSION_IMPORT_HARD_LIST_LIMIT, includeCursor = false): Promise<LocalSessionCandidate[]> {
     if (!Number.isInteger(limit) || limit < 1 || limit > LOCAL_SESSION_IMPORT_HARD_LIST_LIMIT) {
       throw new Error('Import Chat local session limit is invalid.')
     }
     const response = await this.get<unknown>(
-      `/api/local-sessions?limit=${limit}`,
+      `/api/local-sessions?limit=${limit}${includeCursor ? '&include_cursor=true' : ''}`,
       this.configuration,
       DEFAULT_REQUEST_TIMEOUT_MS,
       LOCAL_SESSION_LIST_RESPONSE_MAX_BYTES

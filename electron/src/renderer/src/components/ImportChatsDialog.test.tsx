@@ -113,6 +113,35 @@ describe('ImportChatsDialog', () => {
     expect(listLocal).toHaveBeenCalledTimes(1)
   })
 
+  it('resumes a discovered Cursor CLI session with its original workspace and explains the snapshot limit', async () => {
+    const candidate: LocalSessionCandidate = {
+      provider_session_id: 'cursor-native', backend: 'cursor', label: 'Cursor native title',
+      updated_at: '2026-09-20T00:00:00Z', cwd: '/work/cursor'
+    }
+    useAppStore.setState({ health: { ...supportedHealth, capabilities: {
+      ...supportedHealth.capabilities,
+      local_session_import_cursor_v1: { available: true, version: 1, history_mode: 'initial_text_snapshot' }
+    } } })
+    const listLocal = vi.fn().mockResolvedValue([candidate])
+    const bulkImport = vi.fn().mockResolvedValue([{
+      provider_session_id: 'cursor-native', backend: 'cursor', session_id: 'imported-cursor', ok: true, imported: 2
+    }])
+    const selectSession = vi.fn().mockResolvedValue(undefined)
+    Object.defineProperty(window, 'agentsDock', { configurable: true,
+      value: { sessions: { listLocal, bulkImport } } as unknown as AgentsDockAPI })
+    useAppStore.setState({ refreshSessions: vi.fn().mockResolvedValue(undefined), selectSession })
+    const user = userEvent.setup()
+    render(<ImportChatsDialog />)
+    await screen.findByText('Cursor native title')
+    expect(screen.getByText(/Cursor imports a text snapshot/)).toBeInTheDocument()
+    await user.type(screen.getByRole('textbox', { name: 'Session ID' }), 'cursor-native')
+    await user.click(screen.getByRole('button', { name: 'Resume' }))
+    await waitFor(() => expect(bulkImport).toHaveBeenCalledWith([{
+      provider_session_id: 'cursor-native', backend: 'cursor', cwd: '/work/cursor'
+    }]))
+    await waitFor(() => expect(selectSession).toHaveBeenCalledWith('imported-cursor'))
+  })
+
   it('resumes a discovered session ID inline with its original agent and working directory', async () => {
     const candidate = folderedCandidates[1]
     const listLocal = vi.fn().mockResolvedValue([candidate])

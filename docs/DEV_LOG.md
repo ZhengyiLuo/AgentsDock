@@ -1,5 +1,23 @@
 # Public development log
 
+## 2026-09-20 — Cursor CLI local import (local implementation)
+
+- Opt into Cursor local discovery only when the server advertises its dedicated
+  initial-text-snapshot capability. Keep old servers on the Claude/Codex request
+  and reject unsupported Cursor bulk imports before mutation.
+- Accept Cursor candidates and results through the shared validators, IPC,
+  profile-scoped service and authenticated transport. Explain the CLI-only text
+  snapshot limitation in English and Chinese; do not imply historical tool replay
+  or subsequent native-history synchronization.
+- Verify 566 focused import/client/service/UI tests, TypeScript and production
+  compilation. In an isolated offscreen native Electron app, exercise Resume,
+  folder expansion and detected-ID import through production IPC/HTTP to a real
+  server. Use a disposable Cursor CLI profile and an actual model: native start,
+  visible imported user/assistant text, app reopen, then contextual continuation
+  with the original provider ID/workspace and successful durable terminal result.
+  This is source-app acceptance, not installed-package or mobile acceptance.
+- No public release, installation, mobile changes or production profile mutation.
+
 ## 2026-09-20 — Compact running command blocks — 1.0.4-beta.11 local acceptance
 
 - Keep the active Codex tool inside its compact command group. Update the
