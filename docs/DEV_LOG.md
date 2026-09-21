@@ -1,5 +1,25 @@
 # Public development log
 
+## 2026-09-21 — Publish coordinated desktop/server beta.12
+
+- Publish direct desktop `1.0.4-beta.12` build `1189` on the public AgentsDock
+  repository and its compatibility release mirror, with the accepted artifacts
+  from source `2741c05a0772849f6da82f944789060b77ecb91d` unchanged.
+- Publish `@agentsdock/server@1.0.4-beta.12` to the npm beta channel and the
+  signed standalone migration bridge to AgentsServer. Verify the public npm
+  archive against its signed size, SHA-256 and SHA-512 integrity, then verify
+  all 106 runtime files and modes against the public legacy archive before
+  exposing either desktop release. Both desktop mirrors retain the accepted
+  checksum manifest and signed paired-server descriptor.
+- Configure npm trusted publishing for the public repository's protected
+  `server-npm-publish.yml` workflow and `npm-release` environment. Existing
+  installations retain the signed legacy migration path; the packaged app
+  requests its matching server automatically after updating.
+- macOS is signed and notarized; Windows remains unsigned. Initial migration
+  and execution-runtime replacement wait for idle. Running native goals on old
+  servers can retain execution ownership between replies, so a final reply
+  alone does not guarantee an idle migration window.
+
 ## 2026-09-21 — Accepted desktop beta.12 build 1189 candidate
 
 - Accept the direct desktop 1.0.4-beta.12 build 1189 from committed source
