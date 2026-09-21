@@ -59,6 +59,10 @@ concurrency:
 permissions:
   contents: read
 
+env:
+  # Bound test concurrency so native packaging runners do not starve UI timers.
+  VITEST_MAX_WORKERS: "4"
+
 jobs:
   validate-request:
     if: github.event_name == 'workflow_dispatch' && github.repository == 'ZhengyiLuo/AgentsDock' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/release/'))
