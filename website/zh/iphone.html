@@ -3,12 +3,12 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <meta name="description" content="安装 iPhone、iPad 和 Android 版 AgentsDock 客户端。iPhone 和 iPad 从 App Store 安装；Android 目前通过 GitHub 下载 APK。" />
+    <meta name="description" content="在 macOS、Windows、Linux、iPhone、iPad 或 Android 上安装 AgentsDock 客户端，然后连接到你的 AgentsServer。" />
     <!-- Social preview (Open Graph / Twitter) -->
     <meta property="og:type" content="website" />
     <meta property="og:site_name" content="AgentsDock" />
     <meta property="og:title" content="客户端安装 · AgentsDock" />
-    <meta property="og:description" content="安装 iPhone、iPad 和 Android 版 AgentsDock 客户端。iPhone 和 iPad 从 App Store 安装；Android 目前通过 GitHub 下载 APK。" />
+    <meta property="og:description" content="在 macOS、Windows、Linux、iPhone、iPad 或 Android 上安装 AgentsDock 客户端，然后连接到你的 AgentsServer。" />
     <meta property="og:url" content="https://agentsdock.net/zh/iphone.html" />
     <meta property="og:image" content="https://agentsdock.net/assets/og-card.png?v=82a3bdda" />
     <meta property="og:image:width" content="1200" />
@@ -16,7 +16,7 @@
     <meta property="og:image:alt" content="AgentsDock — an IDE designed for agentic AI research" />
     <meta name="twitter:card" content="summary_large_image" />
     <meta name="twitter:title" content="客户端安装 · AgentsDock" />
-    <meta name="twitter:description" content="安装 iPhone、iPad 和 Android 版 AgentsDock 客户端。iPhone 和 iPad 从 App Store 安装；Android 目前通过 GitHub 下载 APK。" />
+    <meta name="twitter:description" content="在 macOS、Windows、Linux、iPhone、iPad 或 Android 上安装 AgentsDock 客户端，然后连接到你的 AgentsServer。" />
     <meta name="twitter:image" content="https://agentsdock.net/assets/og-card.png?v=82a3bdda" />
     <meta name="theme-color" content="#0d1013" />
     <meta name="robots" content="index,follow" />
@@ -34,7 +34,7 @@
     </script>
     <script src="../analytics.js" defer></script>
     <script src="../site-nav.js?v=92294063" defer></script>
-    <script src="../docs-nav.js?v=3a6f9d2c" defer></script>
+    <script src="../docs-nav.js?v=24c62877" defer></script>
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Instrument+Sans:wght@400;500;600;700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
@@ -42,7 +42,7 @@
     <link rel="alternate" hreflang="zh-CN" href="https://agentsdock.net/zh/iphone.html" />
     <link rel="alternate" hreflang="x-default" href="https://agentsdock.net/iphone.html" />
     <meta property="og:locale" content="zh_CN" />
-    <link rel="stylesheet" href="../styles.css?v=58e2a74b" />
+    <link rel="stylesheet" href="../styles.css?v=42e266d2" />
   </head>
   <body>
     <header class="site-header">
@@ -68,8 +68,12 @@
           <a class="docs-nav-link" href="./setup.html">搭建指南</a>
           <a class="docs-nav-link current" href="./iphone.html">客户端安装</a>
           <span class="docs-nav-subs">
+            <a href="#macos">Mac 桌面应用</a>
+            <a href="#windows">Windows 桌面应用</a>
+            <a href="#linux">Linux 桌面应用</a>
             <a href="#ios">iPhone 和 iPad</a>
             <a href="#android">Android</a>
+            <a href="#next">下一步</a>
           </span>
           <a class="docs-nav-link" href="./first-chat.html">开始第一个会话</a>
           <p class="docs-nav-label">指南</p>
@@ -90,27 +94,40 @@
       <article class="legal docs-body">
         <p class="section-kicker">文档</p>
         <h1>客户端安装</h1>
-        <p class="legal-lead">选择适合你设备的移动客户端，安装后连接到你的 AgentsServer。iPhone 和 iPad 从 App Store 安装；Android 目前通过 GitHub release 下载已签名 APK。</p>
+        <p class="legal-lead">在支持的设备上安装 AgentsDock 客户端，然后连接到你的 AgentsServer。客户端是进入服务器的窗口；会话和 agent 工作会在你搭好的远程机器上运行。</p>
 
-        <h3 class="docs-step" id="ios"><span class="step-n">1</span>iPhone 和 iPad</h3>
+        <h3 class="docs-step" id="macos"><span class="step-n">1</span>Mac 桌面应用</h3>
+        <p>下载 macOS <code>.dmg</code>，打开后按提示把 AgentsDock 放到 Applications，然后从 Applications 或 Launchpad 打开。</p>
+        <p><a class="quickstart-docs" data-dl="macos" href="https://github.com/ZhengyiLuo/AgentsDock/releases/download/v1.0.0/AgentsDock-1.0.0-mac-universal.dmg" target="_blank" rel="noopener">下载 macOS 版 <span aria-hidden="true">&rarr;</span></a></p>
+        <p class="legal-meta">需要 macOS 14 或更高版本。当前桌面构建同时支持 Apple silicon 和 Intel Mac。</p>
+
+        <h3 class="docs-step" id="windows"><span class="step-n">2</span>Windows 桌面应用</h3>
+        <p>下载 Windows <code>.exe</code> 安装包，运行安装器，安装完成后打开 AgentsDock。</p>
+        <p><a class="quickstart-docs" data-dl="windows" href="https://github.com/ZhengyiLuo/AgentsDock/releases/download/v1.0.0/AgentsDock-1.0.0-win-x64.exe" target="_blank" rel="noopener">下载 Windows 版 <span aria-hidden="true">&rarr;</span></a></p>
+        <p class="legal-meta">需要 Windows 10 或更高版本，x64 架构。</p>
+
+        <h3 class="docs-step" id="linux"><span class="step-n">3</span>Linux 桌面应用</h3>
+        <p>根据机器选择 x86_64 或 ARM64 的 AppImage。下载后如果系统没有自动赋予执行权限，可以先运行下面的命令，再双击或从命令行启动。</p>
+        <pre>chmod +x AgentsDock-*.AppImage
+./AgentsDock-*.AppImage</pre>
+        <p>
+          <a class="quickstart-docs" data-dl="linux" href="https://github.com/ZhengyiLuo/AgentsDock/releases/download/v1.0.0/AgentsDock-1.0.0-linux-x86_64.AppImage" target="_blank" rel="noopener">下载 Linux x86_64 <span aria-hidden="true">&rarr;</span></a>
+          <a class="quickstart-docs" data-dl="linux-arm64" href="https://github.com/ZhengyiLuo/AgentsDock/releases/download/v1.0.0/AgentsDock-1.0.0-linux-arm64.AppImage" target="_blank" rel="noopener">下载 Linux ARM64 <span aria-hidden="true">&rarr;</span></a>
+        </p>
+        <p class="legal-meta">大多数 Intel/AMD 电脑选择 x86_64；ARM Linux 机器选择 ARM64。</p>
+
+        <h3 class="docs-step" id="ios"><span class="step-n">4</span>iPhone 和 iPad</h3>
         <p>在你的 iPhone 或 iPad 上，从 App Store 下载 AgentsDock 并打开。</p>
         <p><a class="quickstart-docs" href="https://apps.apple.com/us/app/agentsdock/id6769275751" target="_blank" rel="noopener">在 App Store 下载 AgentsDock <span aria-hidden="true">&rarr;</span></a></p>
         <p class="legal-meta">需要 iOS / iPadOS 16.4 或更高版本。</p>
 
-        <figure class="docs-shot narrow">
-          <video autoplay muted loop playsinline preload="metadata" poster="../assets/iphone-overview-poster.jpg">
-            <source src="../assets/iphone-overview.mp4" type="video/mp4" />
-          </video>
-          <figcaption>这就是 AgentsDock 在 iPhone 上的样子。</figcaption>
-        </figure>
-
-        <h3 class="docs-step" id="android"><span class="step-n">2</span>Android</h3>
-        <p>Android 目前通过 APK 分发。打开 Android release 页面，下载 APK 资源，在 Android 设备上安装，然后打开 AgentsDock。</p>
+        <h3 class="docs-step" id="android"><span class="step-n">5</span>Android</h3>
+        <p>Android 目前通过 APK 分发。打开 Android release 页面，下载 APK 资源；如果系统提示，允许从浏览器或文件管理器安装，然后打开 AgentsDock。</p>
         <p><a class="quickstart-docs" href="https://github.com/ZhengyiLuo/AgentsDock-Releases/releases/tag/android-v0.1.1-beta.7" target="_blank" rel="noopener">打开 Android APK release 页面 <span aria-hidden="true">&rarr;</span></a></p>
         <p class="legal-meta">当前 Android APK：<a href="https://github.com/ZhengyiLuo/AgentsDock-Releases/releases/download/android-v0.1.1-beta.7/AgentsDock-0.1.1-android-arm64-beta.7.apk" target="_blank" rel="noopener">AgentsDock 0.1.1 beta.7 arm64</a>。发布页包含构建信息、SHA-256 校验值和验证说明。</p>
 
-        <h3 class="docs-step" id="next"><span class="step-n">3</span>连接到你的服务器</h3>
-        <p>安装客户端后，添加你的服务器并开始会话。第一次用？先按<a href="./setup.html">搭建指南</a>把服务器跑起来，再<a href="./first-chat.html">开始第一个会话</a>。</p>
+        <h3 class="docs-step" id="next"><span class="step-n">6</span>连接到你的服务器</h3>
+        <p>安装客户端后，添加服务器地址和访问 token。第一次用？先按<a href="./setup.html">搭建指南</a>把服务器跑起来，再<a href="./first-chat.html">开始第一个会话</a>。</p>
       </article>
     </main>
 
@@ -126,6 +143,7 @@
       </div>
     </footer>
 
+    <script src="../app.js?v=6e1cc7d9" type="module"></script>
     <script>
       // Highlight the current section in the sidebar as you scroll.
       (function () {

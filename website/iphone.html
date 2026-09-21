@@ -3,12 +3,12 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <meta name="description" content="Install AgentsDock clients for iPhone, iPad, and Android. iPhone and iPad use the App Store; Android is currently distributed as a GitHub APK download." />
+    <meta name="description" content="Install the AgentsDock client on macOS, Windows, Linux, iPhone, iPad, or Android, then connect it to your AgentsServer." />
     <!-- Social preview (Open Graph / Twitter) -->
     <meta property="og:type" content="website" />
     <meta property="og:site_name" content="AgentsDock" />
     <meta property="og:title" content="Client install · AgentsDock" />
-    <meta property="og:description" content="Install AgentsDock clients for iPhone, iPad, and Android. iPhone and iPad use the App Store; Android is currently distributed as a GitHub APK download." />
+    <meta property="og:description" content="Install the AgentsDock client on macOS, Windows, Linux, iPhone, iPad, or Android, then connect it to your AgentsServer." />
     <meta property="og:url" content="https://agentsdock.net/iphone.html" />
     <meta property="og:image" content="https://agentsdock.net/assets/og-card.png?v=82a3bdda" />
     <meta property="og:image:width" content="1200" />
@@ -16,7 +16,7 @@
     <meta property="og:image:alt" content="AgentsDock — an IDE designed for agentic AI research" />
     <meta name="twitter:card" content="summary_large_image" />
     <meta name="twitter:title" content="Client install · AgentsDock" />
-    <meta name="twitter:description" content="Install AgentsDock clients for iPhone, iPad, and Android. iPhone and iPad use the App Store; Android is currently distributed as a GitHub APK download." />
+    <meta name="twitter:description" content="Install the AgentsDock client on macOS, Windows, Linux, iPhone, iPad, or Android, then connect it to your AgentsServer." />
     <meta name="twitter:image" content="https://agentsdock.net/assets/og-card.png?v=82a3bdda" />
     <meta name="theme-color" content="#0d1013" />
     <meta name="robots" content="index,follow" />
@@ -34,14 +34,14 @@
     </script>
     <script src="./analytics.js" defer></script>
     <script src="./site-nav.js?v=92294063" defer></script>
-    <script src="./docs-nav.js?v=3a6f9d2c" defer></script>
+    <script src="./docs-nav.js?v=24c62877" defer></script>
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Instrument+Sans:wght@400;500;600;700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
     <link rel="alternate" hreflang="en" href="https://agentsdock.net/iphone.html" />
     <link rel="alternate" hreflang="zh-CN" href="https://agentsdock.net/zh/iphone.html" />
     <link rel="alternate" hreflang="x-default" href="https://agentsdock.net/iphone.html" />
-    <link rel="stylesheet" href="./styles.css?v=58e2a74b" />
+    <link rel="stylesheet" href="./styles.css?v=42e266d2" />
   </head>
   <body>
     <header class="site-header">
@@ -67,8 +67,12 @@
           <a class="docs-nav-link" href="./setup.html">Setup guide</a>
           <a class="docs-nav-link current" href="./iphone.html">Client install</a>
           <span class="docs-nav-subs">
+            <a href="#macos">Mac desktop app</a>
+            <a href="#windows">Windows desktop app</a>
+            <a href="#linux">Linux desktop app</a>
             <a href="#ios">iPhone &amp; iPad</a>
             <a href="#android">Android</a>
+            <a href="#next">Next step</a>
           </span>
           <a class="docs-nav-link" href="./first-chat.html">Start your first chat</a>
           <p class="docs-nav-label">Guides</p>
@@ -89,27 +93,40 @@
       <article class="legal docs-body">
         <p class="section-kicker">Docs</p>
         <h1>Client install</h1>
-        <p class="legal-lead">Install the mobile client that matches your device, then connect it to your AgentsServer. iPhone and iPad use the App Store; Android is currently available as a signed APK from GitHub releases.</p>
+        <p class="legal-lead">Install AgentsDock on any supported client device, then connect it to your AgentsServer. The client is your window into the server; chats and agent work run on the remote machine you set up.</p>
 
-        <h3 class="docs-step" id="ios"><span class="step-n">1</span>iPhone &amp; iPad</h3>
+        <h3 class="docs-step" id="macos"><span class="step-n">1</span>Mac desktop app</h3>
+        <p>Download the macOS <code>.dmg</code>, open it, and move AgentsDock to Applications if prompted. Then open AgentsDock from Applications or Launchpad.</p>
+        <p><a class="quickstart-docs" data-dl="macos" href="https://github.com/ZhengyiLuo/AgentsDock/releases/download/v1.0.0/AgentsDock-1.0.0-mac-universal.dmg" target="_blank" rel="noopener">Download for macOS <span aria-hidden="true">&rarr;</span></a></p>
+        <p class="legal-meta">Requires macOS 14 or later. The current desktop build is universal for Apple silicon and Intel Macs.</p>
+
+        <h3 class="docs-step" id="windows"><span class="step-n">2</span>Windows desktop app</h3>
+        <p>Download the Windows <code>.exe</code> installer, run it, then open AgentsDock after installation finishes.</p>
+        <p><a class="quickstart-docs" data-dl="windows" href="https://github.com/ZhengyiLuo/AgentsDock/releases/download/v1.0.0/AgentsDock-1.0.0-win-x64.exe" target="_blank" rel="noopener">Download for Windows <span aria-hidden="true">&rarr;</span></a></p>
+        <p class="legal-meta">Requires Windows 10 or later on x64.</p>
+
+        <h3 class="docs-step" id="linux"><span class="step-n">3</span>Linux desktop app</h3>
+        <p>Download the AppImage for your machine, make it executable if your desktop does not do that automatically, then launch it.</p>
+        <pre>chmod +x AgentsDock-*.AppImage
+./AgentsDock-*.AppImage</pre>
+        <p>
+          <a class="quickstart-docs" data-dl="linux" href="https://github.com/ZhengyiLuo/AgentsDock/releases/download/v1.0.0/AgentsDock-1.0.0-linux-x86_64.AppImage" target="_blank" rel="noopener">Download Linux x86_64 <span aria-hidden="true">&rarr;</span></a>
+          <a class="quickstart-docs" data-dl="linux-arm64" href="https://github.com/ZhengyiLuo/AgentsDock/releases/download/v1.0.0/AgentsDock-1.0.0-linux-arm64.AppImage" target="_blank" rel="noopener">Download Linux ARM64 <span aria-hidden="true">&rarr;</span></a>
+        </p>
+        <p class="legal-meta">Use x86_64 for most Intel/AMD PCs and ARM64 for ARM Linux machines.</p>
+
+        <h3 class="docs-step" id="ios"><span class="step-n">4</span>iPhone &amp; iPad</h3>
         <p>On your iPhone or iPad, download AgentsDock from the App Store and open it.</p>
         <p><a class="quickstart-docs" href="https://apps.apple.com/us/app/agentsdock/id6769275751" target="_blank" rel="noopener">Download AgentsDock on the App Store <span aria-hidden="true">&rarr;</span></a></p>
         <p class="legal-meta">Requires iOS / iPadOS 16.4 or later.</p>
 
-        <figure class="docs-shot narrow">
-          <video autoplay muted loop playsinline preload="metadata" poster="./assets/iphone-overview-poster.jpg">
-            <source src="./assets/iphone-overview.mp4" type="video/mp4" />
-          </video>
-          <figcaption>Here's what AgentsDock looks like on iPhone.</figcaption>
-        </figure>
-
-        <h3 class="docs-step" id="android"><span class="step-n">2</span>Android</h3>
-        <p>Android is currently distributed as an APK download. Open the Android release page, download the APK asset, install it on your Android device, then open AgentsDock.</p>
+        <h3 class="docs-step" id="android"><span class="step-n">5</span>Android</h3>
+        <p>Android is currently distributed as an APK download. Open the Android release page, download the APK asset, allow installation from your browser or file manager if Android asks, then open AgentsDock.</p>
         <p><a class="quickstart-docs" href="https://github.com/ZhengyiLuo/AgentsDock-Releases/releases/tag/android-v0.1.1-beta.7" target="_blank" rel="noopener">Open the Android APK release page <span aria-hidden="true">&rarr;</span></a></p>
         <p class="legal-meta">Current Android APK: <a href="https://github.com/ZhengyiLuo/AgentsDock-Releases/releases/download/android-v0.1.1-beta.7/AgentsDock-0.1.1-android-arm64-beta.7.apk" target="_blank" rel="noopener">AgentsDock 0.1.1 beta.7 arm64</a>. The release page includes build details, SHA-256 checksums, and validation notes.</p>
 
-        <h3 class="docs-step" id="next"><span class="step-n">3</span>Connect to your server</h3>
-        <p>After installing the client, add your server and start chatting. New here? Follow the <a href="./setup.html">Setup guide</a> to get a server running, then <a href="./first-chat.html">start your first chat</a>.</p>
+        <h3 class="docs-step" id="next"><span class="step-n">6</span>Connect to your server</h3>
+        <p>After installing the client, add your server address and access token. New here? Follow the <a href="./setup.html">Setup guide</a> to get a server running, then <a href="./first-chat.html">start your first chat</a>.</p>
       </article>
     </main>
 
@@ -125,6 +142,7 @@
       </div>
     </footer>
 
+    <script src="./app.js?v=6e1cc7d9" type="module"></script>
     <script>
       // Highlight the current section in the sidebar as you scroll.
       (function () {
