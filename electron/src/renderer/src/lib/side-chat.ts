@@ -21,6 +21,10 @@ export interface SideChatSnapshot {
   historyOmitted: boolean
   error: string | null
 }
+export interface SideChatScrollPosition {
+  scrollTop: number
+  atBottom: boolean
+}
 const emptySnapshot = (): SideChatSnapshot => ({ sideChatId: crypto.randomUUID(), draft: '', exchanges: [], pending: null, contextNote: '', historyOmitted: false, error: null })
 
 export function sideChatHistory(exchanges: SideChatExchange[], maxItems = SIDE_QUESTION_MAX_HISTORY_ITEMS,
@@ -44,6 +48,7 @@ export class SideChatController {
   private listeners = new Map<string, Set<() => void>>()
   private requests = new Map<string, { scope: SideQuestionScope; sessionId: string; requestId: string }>()
   private detailsOffsets = new Map<string, number>()
+  private historyPositions = new Map<string, SideChatScrollPosition>()
   private epoch = 0
   private key(scope: SideQuestionScope, sessionId: string): string { return JSON.stringify([sideQuestionOwnerKey(scope), sessionId]) }
 
@@ -68,6 +73,15 @@ export class SideChatController {
   setDraft(scope: SideQuestionScope, sessionId: string, draft: string): void { this.update(scope, sessionId, state => ({ ...state, draft })) }
   detailsScroll(scope: SideQuestionScope, sessionId: string): number { return this.detailsOffsets.get(this.key(scope, sessionId)) ?? 0 }
   saveDetailsScroll(scope: SideQuestionScope, sessionId: string, offset: number): void { this.detailsOffsets.set(this.key(scope, sessionId), offset) }
+  historyScroll(scope: SideQuestionScope, sessionId: string): SideChatScrollPosition | undefined {
+    return this.historyPositions.get(this.key(scope, sessionId))
+  }
+  saveHistoryScroll(scope: SideQuestionScope, sessionId: string, sideChatId: string, position: SideChatScrollPosition): void {
+    const key = this.key(scope, sessionId)
+    // A closing view must not restore the position of a cleared conversation.
+    if (this.snapshots.get(key)?.sideChatId !== sideChatId) return
+    this.historyPositions.set(key, position)
+  }
   private current(scope: SideQuestionScope): boolean {
     const state = useAppStore.getState()
     return state.activeProfileId === scope.profileId && state.profileGeneration === scope.profileGeneration && !state.switchingProfileId
@@ -126,6 +140,7 @@ export class SideChatController {
     const sideChatId = this.snapshot(scope, sessionId).sideChatId
     void this.cancel(scope, sessionId)
     void window.agentsDock.sideQuestions?.close?.(scope, sessionId, sideChatId).catch(() => undefined)
+    this.historyPositions.delete(this.key(scope, sessionId))
     this.update(scope, sessionId, () => emptySnapshot())
   }
   reconcileProfiles(profiles: PublicServerProfile[]): void {
@@ -137,6 +152,7 @@ export class SideChatController {
       this.snapshots.delete(key)
       this.scopes.delete(key)
       this.detailsOffsets.delete(key)
+      this.historyPositions.delete(key)
     }
   }
   reset(): void {
@@ -150,6 +166,7 @@ export class SideChatController {
     this.snapshots.clear()
     this.scopes.clear()
     this.detailsOffsets.clear()
+    this.historyPositions.clear()
     for (const request of requests) void window.agentsDock.sideQuestions?.cancel(request.scope, request.sessionId, request.requestId).catch(() => undefined)
     for (const listeners of this.listeners.values()) for (const listener of listeners) listener()
   }

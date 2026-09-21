@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useId, useRef, useSyncExternalStore } from 'react'
-import { ArrowUp, Info, LoaderCircle, Square } from 'lucide-react'
+import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState, useSyncExternalStore } from 'react'
+import { ArrowDown, ArrowUp, Info, LoaderCircle, Square } from 'lucide-react'
 import { t } from '@shared/i18n'
 import { sideQuestionLimit, sideQuestionsAvailable, type SideQuestionScope } from '@shared/side-questions'
 import type { Session } from '@shared/types'
@@ -22,6 +22,8 @@ export function SideQuestionPanel({ session, scope, controller, active = true, f
   const textarea = useRef<HTMLTextAreaElement | null>(null)
   const history = useRef<HTMLDivElement | null>(null)
   const stickToBottom = useRef(true)
+  const restoringScroll = useRef(false)
+  const [showLatest, setShowLatest] = useState(false)
   const inputId = useId()
   const supported = !window.agentsDock.sharedChat && Boolean(window.agentsDock.sideQuestions) && sideQuestionsAvailable(health, session.backend)
   const ready = supported && connected && !switchingProfileId && Boolean(scope.profileId)
@@ -33,10 +35,47 @@ export function SideQuestionPanel({ session, scope, controller, active = true, f
     if (!autoFocus) textarea.current?.closest('.side-chat-composer')?.scrollIntoView({ block: 'nearest' })
     onFocusHandled?.()
   }, [active, focusVersion, session.id, scope.profileId, scope.profileGeneration, ready, autoFocus, onFocusHandled])
-  useEffect(() => {
+  useLayoutEffect(() => {
     const element = history.current
-    if (element && active && stickToBottom.current) element.scrollTop = element.scrollHeight
+    if (!element || !active) return
+    const saved = controller.historyScroll(scope, session.id)
+    stickToBottom.current = saved?.atBottom ?? true
+    restoringScroll.current = true
+    const restore = () => { element.scrollTop = stickToBottom.current ? element.scrollHeight : saved?.scrollTop ?? 0 }
+    restore()
+    setShowLatest(!stickToBottom.current)
+    // The popup's available height is measured after its children first mount.
+    const frame = requestAnimationFrame(() => {
+      restore()
+      restoringScroll.current = false
+    })
+    return () => { cancelAnimationFrame(frame); restoringScroll.current = false }
+  }, [active, controller, scope.profileId, scope.profileGeneration, scope.serverIdentity, session.id, snapshot.sideChatId])
+  useLayoutEffect(() => {
+    const element = history.current
+    if (!element || !active) return
+    const followLatest = () => {
+      if (stickToBottom.current) element.scrollTop = element.scrollHeight
+    }
+    followLatest()
+    const observer = new ResizeObserver(followLatest)
+    observer.observe(element)
+    for (const exchange of element.children) observer.observe(exchange)
+    return () => observer.disconnect()
   }, [active, snapshot.exchanges])
+  const jumpToLatest = () => {
+    stickToBottom.current = true
+    setShowLatest(false)
+    if (history.current) history.current.scrollTop = history.current.scrollHeight
+    controller.saveHistoryScroll(scope, session.id, snapshot.sideChatId, {
+      scrollTop: history.current?.scrollTop ?? 0, atBottom: true
+    })
+  }
+  const send = () => {
+    if (!ready || !length || length > limit || snapshot.pending) return
+    jumpToLatest()
+    void controller.send(scope, session)
+  }
 
   return <section className="side-chat" aria-label={t('sideChat.title')} data-session-id={session.id}>
     <details className="side-chat-context">
@@ -44,7 +83,15 @@ export function SideQuestionPanel({ session, scope, controller, active = true, f
       <p>{t('sideQuestion.context')}{snapshot.contextNote && <><br />{snapshot.contextNote}</>}</p>
     </details>
     <div className="side-chat-history" hidden={!snapshot.exchanges.length} ref={history} role="log" aria-label={t('sideChat.messages')} aria-live="polite"
-      onScroll={event => { const element = event.currentTarget; stickToBottom.current = element.scrollHeight - element.scrollTop - element.clientHeight < 48 }}>
+      onScroll={event => {
+        if (restoringScroll.current || !active) return
+        const element = event.currentTarget
+        stickToBottom.current = element.scrollHeight - element.scrollTop - element.clientHeight < 48
+        setShowLatest(!stickToBottom.current)
+        controller.saveHistoryScroll(scope, session.id, snapshot.sideChatId, {
+          scrollTop: element.scrollTop, atBottom: stickToBottom.current
+        })
+      }}>
       {snapshot.exchanges.map(exchange => <div className="side-chat-exchange" key={exchange.id}>
         <div className="side-chat-user">{exchange.question}</div>
         {exchange.answer && <div className="side-chat-assistant"><MarkdownContent text={exchange.answer} fold={false} /></div>}
@@ -54,18 +101,20 @@ export function SideQuestionPanel({ session, scope, controller, active = true, f
       </div>)}
     </div>
     <div className="side-chat-bottom">
+      {showLatest && <button type="button" className="icon-button side-chat-jump" aria-label={t('timeline.ui.jumpToLatest')}
+        title={t('timeline.ui.jumpToLatest')} onClick={jumpToLatest}><ArrowDown size={14} /></button>}
       {!supported && <p className="side-chat-note" role="status">{t('sideQuestion.unsupported')}</p>}
       {supported && !ready && <p className="side-chat-note" role="status">{t('sideQuestion.connect')}</p>}
       {snapshot.historyOmitted && <p className="side-chat-note">{t('sideChat.historyOmitted')}</p>}
       {snapshot.error && <p className="side-chat-error" role="alert">{sideQuestionError(snapshot.error)}</p>}
       {length > limit && <p className="side-chat-error" role="status">{t('sideQuestion.limit', { count: length, limit })}</p>}
-      {supported && <form className="side-chat-composer" onSubmit={event => { event.preventDefault(); stickToBottom.current = true; void controller.send(scope, session) }}>
+      {supported && <form className="side-chat-composer" onSubmit={event => { event.preventDefault(); send() }}>
         <label className="visually-hidden" htmlFor={inputId}>{t('sideChat.message')}</label>
         <textarea id={inputId} ref={textarea} value={snapshot.draft} rows={1} disabled={!ready}
           placeholder={t('sideChat.placeholder')} onChange={event => controller.setDraft(scope, session.id, event.target.value)}
           onKeyDown={event => {
             if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) {
-              event.preventDefault(); stickToBottom.current = true; void controller.send(scope, session)
+              event.preventDefault(); send()
             }
           }} />
         <div className="side-chat-composer-actions">

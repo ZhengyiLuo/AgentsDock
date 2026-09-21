@@ -1,5 +1,22 @@
 # Public development log
 
+## 2026-09-20 — Remember Side chat reading position — source acceptance
+
+- Restore each Side chat's reading position across closing/reopening and chat
+  switches. Keep positions scoped to their server and parent chat, and reset
+  them when the side conversation is cleared or its server is removed.
+- Open new conversations at the bottom. Follow replies while already at the
+  bottom; preserve the reading position while scrolled up and offer a compact
+  Jump to latest control. Restore after the popup measures its available space.
+- Pass 38 focused component/controller/layout checks, TypeScript validation
+  and production compilation. In native offscreen Electron, exercise actual
+  scrolling, close/reopen, delayed replies while reading older text, replies
+  arriving while closed, Jump to latest and independent positions in two chats.
+  The controlled server exercises production preload/IPC/native HTTP. Provider
+  execution and server-picker transitions are outside this acceptance; a
+  focused ownership check covers server identity changes and revisits.
+- Availability: source correction. No server change is needed for scroll state.
+
 ## 2026-09-20 — Side chat button spacing — 1.0.4-beta.15 local acceptance
 
 - Accept signed local Apple silicon macOS app **1.0.4-beta.15 / 1189** from
