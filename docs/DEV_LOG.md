@@ -1,5 +1,33 @@
 # Public development log
 
+## 2026-09-21 — Accepted desktop beta.12 build 1189 candidate
+
+- Accept the direct desktop 1.0.4-beta.12 build 1189 from committed source
+  `2741c05a0772849f6da82f944789060b77ecb91d`. Native workflow
+  `35661716190` passes Linux x64, Linux arm64 and Windows x64 build and package
+  verification. Windows remains unsigned. The local universal Mac release
+  passes 4,646 tests, type checking, compilation, Developer ID signing, Apple
+  notarization and stapling, Gatekeeper, mounted-DMG/ZIP parity, updater metadata
+  and blockmap checks, and an isolated startup. Five existing tests are skipped.
+- Retain all release checks. Fix two asynchronous UI tests to wait for their
+  rendered result or effect callback, compare signing keys independently of
+  checkout line endings, and cap release test concurrency at four workers.
+- Bind the app to signed npm descriptor SHA-256
+  `18a4bc7c54dc749b93235bda4e0c3247123e03d85d7b2e2dc525087b7014b5b5`.
+  The npm archive is byte-identical to the server candidate that passed all
+  eight CI shards (4,971 cases), real Codex and Claude foreground/subagent
+  gateway-loss checks, and native Linux/macOS migration and recovery checks.
+  Both signed distributions contain the same 106 runtime files and modes.
+- Verify the production-signed legacy archive with the original trust key on
+  native Linux and macOS. Preserve identity, credentials and saved state through
+  forward migration, updater/installer loss and automatic rollback. An abrupt
+  macOS VM power loss at the durable activation boundary recovers automatically
+  after reboot without an HTTP recovery trigger or manual repair.
+- This records accepted build artifacts before desktop upload. Packaged one-click
+  app replacement with automatic server migration, public publication and the
+  live Studio upgrade are still pending. Execution-runtime replacement waits
+  for idle; simultaneous execution generations are not claimed.
+
 ## 2026-09-21 — Prepare updates during work and recover interrupted activation
 
 - Stage and verify server dependencies while agents continue working. Preserve
