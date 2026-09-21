@@ -1,5 +1,24 @@
 # Public development log
 
+## 2026-09-21 — Clarify the bridge to npm updates
+
+- Document the first coordinated release as a bridge delivered through the
+  existing desktop feeds and signed standalone server updater. Existing managed
+  users update the app; they do not run the fresh npm installer over their data.
+- Separate the accepted beta.8-app/beta.9-server journey from older unsupported
+  installations, pre-1.0 feed migrations and custom-path macOS prerequisites.
+  Preserve stable/beta channels and retain legacy downloads during transition.
+- Correct the migration guide and beta.12 release notes to reflect publication.
+  Check the instructions against the shipped coordinator, updater, original
+  one-click acceptance and public-distribution verification. No runtime or
+  released artifact changes accompany this documentation update.
+- Replay the released beta.29 updater contract in an isolated fixture. Its
+  macOS runner lacks the new installer's admitted ownership proof, and its
+  latest-only selection prevents using the old API to pin an intermediate
+  release. The Linux managed-update environment passes this admission check;
+  neither result establishes a complete native beta.29 migration. Keep that
+  older starting point outside the accepted automatic-migration claim.
+
 ## 2026-09-21 — Publish coordinated desktop/server beta.12
 
 - Publish direct desktop `1.0.4-beta.12` build `1189` on the public AgentsDock

@@ -1,16 +1,27 @@
-# AgentsDock 1.0.4-beta.12 — draft release notes
+# AgentsDock 1.0.4-beta.12 — release notes
 
-Status: candidate; not published. Signed native-package acceptance and the public
-server distribution checks must pass before these notes accompany a release.
+Published September 21, 2026, as direct desktop build 1189, with the matching
+public npm package and signed legacy server bridge. Native-package acceptance
+and public server distribution verification passed before desktop publication.
 
 ## App and server updates together
 
 Update AgentsDock once to request the matching server release for your saved
-servers. Servers download and prepare the update while agents work, then wait
-for work to finish before changing the execution runtime. Offline servers
+servers. After the first legacy migration, servers can download and prepare
+later updates while agents work, then wait for work to finish before changing
+the execution runtime. The initial beta.9 migration waits for idle before its
+old updater starts downloading and preparing the bridge. Offline servers
 continue when they reconnect. Settings shows each server's progress and offers an explicit retry
 after failure. Automatic chat-title requests also finish before the server
 restarts. A server's stable or beta channel is preserved.
+
+This release bridges existing managed installations to npm updates. Update the
+app using its current update control; after relaunch, it migrates a supported
+legacy server through the existing signed server updater. No separate npm login
+or server reinstallation is required. The complete one-click journey was tested
+from desktop beta.8 and server beta.9. Older unsupported installations and
+pre-1.0 desktop feed migrations have separate prerequisites; see
+[the upgrade paths](COORDINATED_UPDATES.md#how-existing-users-reach-npm-updates).
 
 ## Server installation through npm
 
