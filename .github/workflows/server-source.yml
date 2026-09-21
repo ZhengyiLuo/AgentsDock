@@ -3,7 +3,7 @@ name: Verify server source
 on:
   pull_request:
   push:
-    branches: [main, release/1.0]
+    branches: [main, 'release/**']
   workflow_dispatch:
 
 permissions:
@@ -27,11 +27,7 @@ jobs:
         working-directory: server
     env:
       PYTHONDONTWRITEBYTECODE: '1'
-      AGENTS_SERVER_CONFIG_DIR: ${{ runner.temp }}/agentsdock-config
-      AGENTSDOCK_STATE_DIR: ${{ runner.temp }}/agentsdock-state
       AGENTSDOCK_TEAM_HUB_MODE: disabled
-      CODEX_SESSIONS_ROOT: ${{ runner.temp }}/codex-sessions
-      CLAUDE_PROJECTS_ROOT: ${{ runner.temp }}/claude-projects
     steps:
       - uses: actions/checkout@v4
         with:
@@ -40,6 +36,11 @@ jobs:
         with:
           python-version: '3.13'
       - name: Verify dependency lock and test
+        env:
+          AGENTS_SERVER_CONFIG_DIR: ${{ runner.temp }}/agentsdock-config
+          AGENTSDOCK_STATE_DIR: ${{ runner.temp }}/agentsdock-state
+          CODEX_SESSIONS_ROOT: ${{ runner.temp }}/codex-sessions
+          CLAUDE_PROJECTS_ROOT: ${{ runner.temp }}/claude-projects
         run: |
           uv lock --check
           ulimit -s 65536
