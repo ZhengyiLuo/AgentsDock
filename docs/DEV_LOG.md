@@ -1,5 +1,23 @@
 # Public development log
 
+## 2026-09-20 — Side chat copying — 1.0.4-beta.14 local acceptance
+
+- Accept signed local Apple silicon macOS app **1.0.4-beta.14 / 1188** from
+  `3a6905319b229aaa08f1e3012af09c2d08756ef3`. Verify bundle audit, Developer ID
+  signature, runtime entitlements, version/build and isolated startup. All 88
+  packaged compiled files match the tested production output.
+- Reproduce disabled selection in beta.13. In the corrected source and exact
+  beta.14 packaged renderer/preload, use native offscreen mouse dragging to
+  select user messages, assistant prose and inline code. Native copy commands
+  produce the exact selected text; paste inserts it into the composer while
+  the popup remains open. Restore the original clipboard after verification.
+- Keyboard verification uses Meta+C/Meta+V with Chromium native edit commands;
+  the hidden window does not exercise macOS global menu accelerators. The
+  production menu retains its standard copy/paste roles. The controlled server
+  exercises production native transport; no model-provider execution changes.
+- Availability: signed local `.app` with automatic updates disabled, not a
+  notarized public release. No server update is required.
+
 ## 2026-09-20 — Side chat text selection — source correction
 
 - Restore normal text selection in Side chat history so user messages,
@@ -7,7 +25,7 @@
   The popup no longer inherits the app chrome's selection-disabled style.
 - Pass 27 existing component/theme checks, TypeScript validation and production
   compilation. Native clipboard and packaged-app acceptance are recorded
-  separately below when completed. No server change is required.
+  above. No server change is required.
 
 ## 2026-09-20 — Compact popup — 1.0.4-beta.13 local acceptance
 
