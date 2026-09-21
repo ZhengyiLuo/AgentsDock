@@ -96,8 +96,15 @@ then reconciles the saved server profiles from the bundled signed descriptor.
 
 The manual `server-npm-publish.yml` workflow has separate `prepare` and `publish`
 operations. Preparation produces unsigned artifacts without a signing secret.
-The protected private signer creates the exact tarball and signed descriptor;
-explicit staging creates a separate draft `npm-candidate-vVERSION` containing
+During the transition, the standalone repository's existing `server-release.yml`
+can prepare both server distributions with `prepare_only=true` and the reviewed
+`npm_source_sha`, `npm_source_ref` and matching `npm_version`. Its reusable
+`server-npm-candidate.yml` checks canonical ancestry and the existing public key,
+then creates and signs the exact npm tarball descriptor with the signing secret
+already held by that repository. All server test shards must pass first. The
+signer uploads an Actions artifact only; it does not publish either distribution.
+This keeps the private key in its existing location. Explicit staging creates
+a separate draft `npm-candidate-vVERSION` containing
 only `server-VERSION.tgz`, `agents-server-npm-manifest.json` and its `.sig`.
 It never publishes npm or a desktop release. Signing is not acceptance.
 
@@ -145,8 +152,9 @@ Once the package exists, configure its trusted publisher with GitHub owner
 and environment `npm-release`. Permit the `npm publish` action, since stage-only
 permission does not authorize this workflow's direct publication. Configure
 required reviewers and allowed `main`/`release/*` branches for that GitHub
-environment. The private signing environment separately needs the existing
-server release key; no signing key or npm token belongs in the public job.
+environment. The canonical public publishing job receives neither a signing key
+nor an npm token. Transitional signing uses the existing standalone server secret;
+moving it to private desktop automation is not required for this release.
 
 The workflow uses GitHub-hosted Node 24 and requires npm 11.5.1 or later. Confirm
 OIDC authorization and provenance in its first real run. See the
