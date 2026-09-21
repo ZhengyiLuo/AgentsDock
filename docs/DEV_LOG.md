@@ -1,5 +1,13 @@
 # Public development log
 
+## 2026-09-20 — Side chat button spacing — source correction
+
+- Lower the Side chat button into the folder row above the message composer,
+  separating it from the timeline's jump-to-latest arrow. Reserve room beside
+  the folder control and keep the button clickable above the composer layer.
+- Pass 30 existing component/layout checks, TypeScript validation and
+  production compilation. No server change is required.
+
 ## 2026-09-20 — Side chat copying — 1.0.4-beta.14 local acceptance
 
 - Accept signed local Apple silicon macOS app **1.0.4-beta.14 / 1188** from
