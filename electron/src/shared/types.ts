@@ -1707,6 +1707,22 @@ export interface HealthCapabilities {
   [key: string]: SideQuestionsCapability | ServerCapability | ServerRestartCapability | TeamHubV1Capability | TeamHubHostControlCapability | LocalSessionImportCapability | SessionForkCompletedPrefixCapability | AgentEmergencyAlertsCapability | TeamMailHintsCapability | TeamActivityHintsCapability | AgentTeamMailCapability | AgentTeamMessagesCapability | TeamBulletinAliasCapability | TeamAllServersAliasCapability | PinnedItemsCapability | JsonValue | undefined
 }
 
+export type ServerComponentHealth = {
+  protocol: number
+  instance_id: string
+  pid: number
+  version: string
+}
+
+export type ExecutionServiceHealth = ServerComponentHealth & {
+  worker_upgrade_policy: 'when_idle'
+  rolling_worker_upgrade: boolean
+}
+
+export type GatewayHealth = ServerComponentHealth & {
+  restart_preserves_execution: boolean
+}
+
 export interface Health {
   ok: boolean
   state_dir?: string
@@ -1715,6 +1731,9 @@ export interface Health {
   /** Opaque boot identifier. A successful managed restart must change it. */
   server_instance_id?: string
   server_version?: string
+  /** Separate component versions; server_version still describes execution. */
+  gateway?: GatewayHealth
+  execution_service?: ExecutionServiceHealth
   api_contract_version?: number
   active?: string[]
   active_sessions?: string[]
@@ -1918,6 +1937,8 @@ export interface ServerUpdateStatus {
   /** Pending reservations can be cancelled until the detached updater starts. */
   cancelable?: boolean
   pending_at?: string
+  /** Preparation keeps phase pending and allows existing and manual work. */
+  preparation_phase?: 'checking' | 'downloading' | 'staging' | 'ready'
   blocker_counts?: ServerUpdateBlockerCounts
   message?: string
   /** Stable public failure code for actionable managed-update recovery. */
@@ -1943,6 +1964,8 @@ export interface CoordinatedServerUpdate {
   message: string
   apiContractVersion?: number
   serverInstanceId?: string
+  gatewayVersion?: string
+  executionVersion?: string
   operationId?: string
   scheduleId?: string
   activationBlocked?: boolean

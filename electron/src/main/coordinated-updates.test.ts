@@ -20,6 +20,14 @@ function health(id = 'a', overrides: Partial<Health> = {}): Health {
     server_version: '1.1.0-beta.1', api_contract_version: 28,
     capabilities: { server_updates: { available: true, version: 11 }, server_update_ensure_v1: { available: true, version: 1 } }, ...overrides }
 }
+function splitHealth(executionVersion: string, gatewayVersion: string): Health {
+  return health('a', {
+    server_version: executionVersion,
+    gateway: { protocol: 1, instance_id: 'gateway-boot', pid: 101, version: gatewayVersion, restart_preserves_execution: true },
+    execution_service: { protocol: 1, instance_id: 'execution-boot', pid: 102, version: executionVersion,
+      worker_upgrade_policy: 'when_idle', rolling_worker_upgrade: false }
+  })
+}
 function fixture(ids = ['a']) {
   const profiles: CoordinatedProfile[] = ids.map((id, index) => ({ id, name: `Server ${id}`, serverIdentity: `server-${id}`, active: index === 0 }))
   const clients = Object.fromEntries(ids.map(id => [id, {
@@ -72,6 +80,71 @@ describe('signed coordinated release contract', () => {
 })
 
 describe('coordinated app/server reconciliation (mocked server boundary)', () => {
+  it('keeps the bundled update pending when only the gateway reaches the paired version', async () => {
+    const f = fixture()
+    f.clients.a.health.mockResolvedValue(splitHealth('1.1.0-beta.1', '1.2.0-beta.2'))
+    await f.manager.prepare('1.2.0-beta.2')
+    expect(f.manager.status()[0]).toMatchObject({ phase: 'pending', gatewayVersion: '1.2.0-beta.2', executionVersion: '1.1.0-beta.1' })
+    expect(f.clients.a.ensureServerUpdate).toHaveBeenCalledOnce()
+  })
+  it('waits for the gateway when execution reaches the paired version first, without replacing the same runtime again', async () => {
+    const f = fixture()
+    f.clients.a.health.mockResolvedValue(splitHealth('1.2.0-beta.2', '1.1.0-beta.1'))
+    expect(await f.manager.prepare('1.2.0-beta.2')).toBe(true)
+    expect(f.manager.status()[0]).toMatchObject({ phase: 'pending', gatewayVersion: '1.1.0-beta.1', executionVersion: '1.2.0-beta.2' })
+    expect(f.clients.a.ensureServerUpdate).not.toHaveBeenCalled()
+    expect(f.clients.a.startServerUpdate).not.toHaveBeenCalled()
+  })
+  it('reconciles a gateway version change without requiring the execution boot or update status to change', async () => {
+    const f = fixture()
+    const previous = splitHealth('1.2.0-beta.2', '1.1.0-beta.1')
+    f.clients.a.health.mockResolvedValue(previous)
+    await f.manager.prepare('1.2.0-beta.2')
+    f.manager.serverReachable('a', previous)
+    await f.manager.reconcileAll()
+    expect(f.manager.status()[0].phase).toBe('pending')
+    const completed = splitHealth('1.2.0-beta.2', '1.2.0-beta.2')
+    f.clients.a.health.mockResolvedValue(completed)
+    f.manager.serverReachable('a', completed)
+    await vi.waitFor(() => expect(f.manager.status()[0]).toMatchObject({ phase: 'current', gatewayVersion: '1.2.0-beta.2' }))
+    expect(f.clients.a.ensureServerUpdate).not.toHaveBeenCalled()
+  })
+  it.each([
+    { execution_service: undefined },
+    { gateway: undefined },
+    { gateway: null },
+    { server_version: '1.3.0-beta.1' },
+    { gateway: { protocol: 2, instance_id: 'gateway-boot', version: '1.2.0-beta.2' } }
+  ])('rejects inconsistent or incomplete component health before automatic mutations: %j', async override => {
+    const f = fixture()
+    f.clients.a.health.mockResolvedValue({ ...splitHealth('1.2.0-beta.2', '1.2.0-beta.2'), ...override } as Health)
+    expect(await f.manager.prepare('1.2.0-beta.2')).toBe(false)
+    expect(f.manager.status()[0]).toMatchObject({ phase: 'blocked', activationBlocked: true })
+    expect(f.clients.a.ensureServerUpdate).not.toHaveBeenCalled()
+    expect(f.clients.a.startServerUpdate).not.toHaveBeenCalled()
+  })
+  it('retains a failed operation while the gateway is behind, and clears it only after both components recover', async () => {
+    const f = fixture()
+    await f.manager.prepare('1.2.0-beta.2')
+    f.clients.a.health.mockResolvedValue(splitHealth('1.2.0-beta.2', '1.1.0-beta.1'))
+    f.clients.a.serverUpdateStatus.mockResolvedValue({ phase: 'failed', current_version: '1.2.0-beta.2',
+      target_version: '1.2.0-beta.2', schedule_id: 'schedule-a', server_identity: 'server-a', server_instance_id: 'boot-a' })
+    await f.manager.reconcileAll()
+    expect(f.manager.status()[0]).toMatchObject({ phase: 'failed', paused: true })
+    f.clients.a.health.mockResolvedValue(splitHealth('1.2.0-beta.2', '1.2.0-beta.2'))
+    await f.manager.reconcileAll()
+    expect(f.manager.status()[0]).toMatchObject({ phase: 'current', paused: false })
+    expect(f.clients.a.ensureServerUpdate).toHaveBeenCalledOnce()
+  })
+  it('does not accept a complete operation receipt while authenticated component health still shows an old gateway', async () => {
+    const f = fixture()
+    f.clients.a.health.mockResolvedValue(splitHealth('1.2.0-beta.2', '1.1.0-beta.1'))
+    f.clients.a.serverUpdateStatus.mockResolvedValue({ phase: 'complete', current_version: '1.2.0-beta.2',
+      installed_version: '1.2.0-beta.2', server_identity: 'server-a', server_instance_id: 'boot-a' })
+    await f.manager.prepare('1.2.0-beta.2')
+    expect(f.manager.status()[0]).toMatchObject({ phase: 'blocked', message: 'The server update is incomplete. Reconnect to check recovery.' })
+    expect(f.clients.a.ensureServerUpdate).not.toHaveBeenCalled()
+  })
   it('queues compatible busy servers independently and persists identity-bound operation receipts', async () => {
     const f = fixture(['a', 'b'])
     expect(await f.manager.prepare('1.2.0-beta.2')).toBe(true)

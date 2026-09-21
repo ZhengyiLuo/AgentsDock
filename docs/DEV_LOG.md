@@ -1,5 +1,27 @@
 # Public development log
 
+## 2026-09-21 — Verify both server components before update completion
+
+- Keep a coordinated update incomplete until both the gateway and execution
+  runtime report the paired release. Reject inconsistent component health,
+  retain failed-operation recovery, and observe gateway changes independently
+  of the execution process's boot identity. Existing single-process servers
+  retain their compatibility path.
+- Pass focused coordinator, update and restart settings regressions, TypeScript
+  checking and production compilation. Exercise the current production renderer,
+  preload, service, native transport and coordinator in an isolated offscreen
+  Electron window against real worker and gateway processes from the committed
+  execution foundation, with controlled release version files and a QA signing
+  key. Add and authenticate the isolated server through the UI, open Updates,
+  verify the incomplete result, replace only the gateway, and explicitly refresh.
+  Verify the same worker and server boot, both current component versions and
+  the resulting Up to date row. All owned processes exit and no model turn runs.
+- The QA harness substitutes credential storage and release enrollment. This
+  establishes component-status handling, not installed migration, app binary
+  replacement, automatic reconnect-only behavior or production signing. The
+  installer and runtime migration integration remains in development; this
+  change is source only and no release has been accepted or deployed.
+
 ## 2026-09-21 — Persistent execution foundation (source only)
 
 - Separate the public gateway from the process owning chats, provider transports,

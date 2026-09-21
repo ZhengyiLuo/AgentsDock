@@ -10,6 +10,22 @@ const MAX_MANIFEST_BYTES = 8 * 1024
 const RELEASE_VERSION = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-beta\.([1-9]\d*))?$/
 const ACTIVE_PHASES = new Set(['pending', 'starting', 'checking', 'downloading', 'verifying', 'installing', 'restarting'])
 
+class ComponentHealthError extends Error {}
+
+function componentVersions(health: Health): { executionVersion: string; gatewayVersion: string } | null {
+  if (health.gateway === undefined && health.execution_service === undefined) return null
+  const gateway = health.gateway, execution = health.execution_service
+  if (!gateway || !execution || gateway.protocol !== 1 || execution.protocol !== 1
+    || typeof gateway.instance_id !== 'string' || !gateway.instance_id
+    || typeof execution.instance_id !== 'string' || !execution.instance_id
+    || typeof gateway.version !== 'string' || !RELEASE_VERSION.test(gateway.version)
+    || typeof execution.version !== 'string' || !RELEASE_VERSION.test(execution.version)
+    || execution.version !== health.server_version) {
+    throw new ComponentHealthError('The server returned inconsistent update information. Reconnect to verify the update.')
+  }
+  return { executionVersion: execution.version, gatewayVersion: gateway.version }
+}
+
 export interface SignedServerRelease {
   manifest_base64: string
   signature_base64: string
@@ -113,7 +129,8 @@ export class CoordinatedUpdateManager {
 
   serverReachable(profileId: string, health: Health): void {
     if (!this.plan) return
-    const observation = JSON.stringify([health.server_identity, health.server_instance_id, health.server_version, health.server_update])
+    const observation = JSON.stringify([health.server_identity, health.server_instance_id, health.server_version,
+      health.api_contract_version, health.gateway, health.execution_service, health.server_update])
     if (this.observations.get(profileId) === observation) return
     this.observations.set(profileId, observation)
     if (this.inFlight.has(profileId)) {
@@ -212,11 +229,15 @@ export class CoordinatedUpdateManager {
         return
       }
       const target = updateTarget(health)
+      const components = componentVersions(health)
       patch({ apiContractVersion: health.api_contract_version, serverInstanceId: health.server_instance_id,
+        gatewayVersion: components?.gatewayVersion, executionVersion: components?.executionVersion,
         activationBlocked: previousReceipt?.activationBlocked === true || health.api_contract_version === undefined || health.api_contract_version < manifest.minimum_server_api_contract
           || health.api_contract_version > manifest.api_contract_version })
       const currentVersion = health.server_version ?? ''
-      if (compareReleaseVersions(currentVersion, manifest.version) >= 0) {
+      const executionCurrent = compareReleaseVersions(currentVersion, manifest.version) >= 0
+      const gatewayCurrent = !components || compareReleaseVersions(components.gatewayVersion, manifest.version) >= 0
+      if (executionCurrent && gatewayCurrent) {
         patch({ phase: health.api_contract_version === manifest.api_contract_version ? 'current' : 'blocked', paused: false,
           activationBlocked: health.api_contract_version !== manifest.api_contract_version,
           message: health.api_contract_version === manifest.api_contract_version
@@ -227,10 +248,12 @@ export class CoordinatedUpdateManager {
       if (previousReceipt?.paused) return
       const capability = health.capabilities?.server_update_ensure_v1
       let status: ServerUpdateStatus
+      let observedStatus: ServerUpdateStatus | undefined
       let operationOwned = false
       if (previousReceipt && (previousReceipt.operationOwned || previousReceipt.operationTargetVersion === manifest.version)
         && (previousReceipt.operationId || previousReceipt.scheduleId) && target) {
         const observed = await connection.client.serverUpdateStatus(target)
+        observedStatus = observed
         connection.assertCurrent()
         if (observed.server_identity !== target.expected_server_identity || observed.server_instance_id !== target.expected_server_instance_id) {
           patch({ phase: 'blocked', activationBlocked: true, message: 'Update status belongs to another server instance.' })
@@ -245,6 +268,26 @@ export class CoordinatedUpdateManager {
             message: failedOwnTarget ? 'The server update failed. Retry when ready.' : 'The server update was canceled. Retry when ready.' })
           return
         }
+      }
+      if (executionCurrent && !gatewayCurrent) {
+        // Execution can become healthy before the gateway finishes activation.
+        // Retain the existing operation; never treat half an update as current
+        // or start another replacement of the same execution runtime.
+        const observed = observedStatus ?? await connection.client.serverUpdateStatus(target)
+        connection.assertCurrent()
+        if (!target || observed.server_identity !== target.expected_server_identity
+          || observed.server_instance_id !== target.expected_server_instance_id) {
+          patch({ phase: 'blocked', activationBlocked: true, message: 'Update status belongs to another server instance.' })
+          return
+        }
+        const active = ACTIVE_PHASES.has(observed.phase)
+        patch({ phase: observed.phase === 'failed' ? 'failed' : active ? 'pending' : 'blocked',
+          paused: observed.phase === 'failed',
+          activationBlocked: health.api_contract_version !== manifest.api_contract_version,
+          message: observed.phase === 'failed' ? 'The server update failed before all components were ready. Retry when ready.'
+            : active ? observed.message || 'Finishing the server update; waiting for verified reconnection.'
+              : 'The server update is incomplete. Reconnect to check recovery.' })
+        return
       }
       if (capability && typeof capability === 'object' && !Array.isArray(capability)) {
         if (!('available' in capability) || capability.available !== true || !target) {
@@ -283,10 +326,10 @@ export class CoordinatedUpdateManager {
           && previousReceipt.operationTargetVersion === (status.target_version ?? manifest.version)),
         message: status.message || 'Server update accepted; waiting for verified reconnection.' })
     } catch (error) {
-      if (previousReceipt?.paused) return
+      if (previousReceipt?.paused && !(error instanceof ComponentHealthError)) return
       const message = error instanceof Error ? error.message : String(error)
-      patch({ phase: error instanceof ServerError || /channel|identity|legacy|managed|signed/i.test(message) ? 'blocked' : 'offline',
-        ...(/channel|identity/i.test(message) ? { activationBlocked: true } : {}), message })
+      patch({ phase: error instanceof ServerError || error instanceof ComponentHealthError || /channel|identity|legacy|managed|signed/i.test(message) ? 'blocked' : 'offline',
+        ...(error instanceof ComponentHealthError || /channel|identity/i.test(message) ? { activationBlocked: true } : {}), message })
     } finally {
       clearTimeout(timeout)
       connection?.client.dispose()
