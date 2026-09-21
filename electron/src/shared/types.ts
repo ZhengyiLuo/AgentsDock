@@ -1717,6 +1717,8 @@ export type ServerComponentHealth = {
 export type ExecutionServiceHealth = ServerComponentHealth & {
   worker_upgrade_policy: 'when_idle'
   rolling_worker_upgrade: boolean
+  /** A healthy candidate can still be held until its installer commits. */
+  maintenance_held?: boolean
 }
 
 export type GatewayHealth = ServerComponentHealth & {

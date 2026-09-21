@@ -20,7 +20,8 @@ function componentVersions(health: Health): { executionVersion: string; gatewayV
     || typeof execution.instance_id !== 'string' || !execution.instance_id
     || typeof gateway.version !== 'string' || !RELEASE_VERSION.test(gateway.version)
     || typeof execution.version !== 'string' || !RELEASE_VERSION.test(execution.version)
-    || execution.version !== health.server_version) {
+    || execution.version !== health.server_version
+    || (execution.maintenance_held !== undefined && typeof execution.maintenance_held !== 'boolean')) {
     throw new ComponentHealthError('The server returned inconsistent update information. Reconnect to verify the update.')
   }
   return { executionVersion: execution.version, gatewayVersion: gateway.version }
@@ -237,7 +238,12 @@ export class CoordinatedUpdateManager {
       const currentVersion = health.server_version ?? ''
       const executionCurrent = compareReleaseVersions(currentVersion, manifest.version) >= 0
       const gatewayCurrent = !components || compareReleaseVersions(components.gatewayVersion, manifest.version) >= 0
-      if (executionCurrent && gatewayCurrent) {
+      const updateReceipt = health.server_update
+      const activeTarget = updateReceipt && typeof updateReceipt === 'object' && !Array.isArray(updateReceipt)
+        && updateReceipt.target_version === manifest.version && typeof updateReceipt.phase === 'string'
+        && ACTIVE_PHASES.has(updateReceipt.phase)
+      const activationPending = health.execution_service?.maintenance_held === true || activeTarget
+      if (executionCurrent && gatewayCurrent && !activationPending) {
         patch({ phase: health.api_contract_version === manifest.api_contract_version ? 'current' : 'blocked', paused: false,
           activationBlocked: health.api_contract_version !== manifest.api_contract_version,
           message: health.api_contract_version === manifest.api_contract_version
@@ -259,7 +265,7 @@ export class CoordinatedUpdateManager {
           patch({ phase: 'blocked', activationBlocked: true, message: 'Update status belongs to another server instance.' })
           return
         }
-        const failedOwnTarget = observed.phase === 'failed' && (observed.target_version === previousReceipt.operationTargetVersion
+        const failedOwnTarget = (observed.phase === 'failed' || ['server_update_recovery_failed', 'server_update_recovery_launch_failed'].includes(observed.error_code ?? '')) && (observed.target_version === previousReceipt.operationTargetVersion
           || Boolean(observed.update_id && observed.update_id === previousReceipt.operationId)
           || Boolean(observed.schedule_id && observed.schedule_id === previousReceipt.scheduleId))
         const canceledOwnReservation = ['idle', 'available', 'current'].includes(observed.phase)
@@ -269,7 +275,9 @@ export class CoordinatedUpdateManager {
           return
         }
       }
-      if (executionCurrent && !gatewayCurrent) {
+      const canRecoverActivation = capability && typeof capability === 'object' && !Array.isArray(capability)
+        && 'activation_recovery' in capability && capability.activation_recovery === true
+      if (executionCurrent && (!gatewayCurrent || activationPending) && !canRecoverActivation) {
         // Execution can become healthy before the gateway finishes activation.
         // Retain the existing operation; never treat half an update as current
         // or start another replacement of the same execution runtime.
@@ -316,8 +324,10 @@ export class CoordinatedUpdateManager {
         patch({ phase: 'blocked', activationBlocked: true, message: 'Update response belongs to another server instance. Reconnect to reconcile it.' })
         return
       }
-      patch({ phase: status.phase === 'pending' ? 'pending' : status.phase === 'failed' ? 'failed'
+      const recoveryFailed = ['server_update_recovery_failed', 'server_update_recovery_launch_failed'].includes(status.error_code ?? '')
+      patch({ phase: recoveryFailed ? 'failed' : status.phase === 'pending' ? 'pending' : status.phase === 'failed' ? 'failed'
         : ACTIVE_PHASES.has(status.phase) ? 'updating' : 'pending',
+        ...(recoveryFailed ? { paused: true } : {}),
         activationBlocked: health.api_contract_version === undefined || health.api_contract_version < manifest.minimum_server_api_contract
           || health.api_contract_version > manifest.api_contract_version,
         operationId: status.update_id ?? undefined, scheduleId: status.schedule_id ?? undefined,

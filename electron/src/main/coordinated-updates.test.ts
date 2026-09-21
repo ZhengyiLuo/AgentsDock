@@ -95,6 +95,32 @@ describe('coordinated app/server reconciliation (mocked server boundary)', () =>
     expect(f.clients.a.ensureServerUpdate).not.toHaveBeenCalled()
     expect(f.clients.a.startServerUpdate).not.toHaveBeenCalled()
   })
+  it('resumes a partial activation through the recovery-capable ensure contract', async () => {
+    const f = fixture()
+    const partial = splitHealth('1.2.0-beta.2', '1.1.0-beta.1')
+    partial.capabilities = { server_update_ensure_v1: { available: true, version: 1, activation_recovery: true } }
+    f.clients.a.health.mockResolvedValue(partial)
+    f.clients.a.ensureServerUpdate.mockResolvedValue({ phase: 'restarting', current_version: '1.2.0-beta.2',
+      target_version: '1.2.0-beta.2', server_identity: 'server-a', server_instance_id: 'boot-a', update_id: 'original-operation' })
+    await f.manager.prepare('1.2.0-beta.2')
+    expect(f.clients.a.ensureServerUpdate).toHaveBeenCalledOnce()
+    expect(f.clients.a.startServerUpdate).not.toHaveBeenCalled()
+    expect(f.manager.status()[0]).toMatchObject({ phase: 'updating', operationId: 'original-operation' })
+  })
+  it('shows failed recovery while the server keeps legacy work safely drained, and permits retry', async () => {
+    const f = fixture()
+    const partial = splitHealth('1.2.0-beta.2', '1.1.0-beta.1')
+    partial.capabilities = { server_update_ensure_v1: { available: true, version: 1, activation_recovery: true } }
+    f.clients.a.health.mockResolvedValue(partial)
+    f.clients.a.ensureServerUpdate.mockResolvedValueOnce({ phase: 'installing', current_version: '1.2.0-beta.2',
+      target_version: '1.2.0-beta.2', server_identity: 'server-a', server_instance_id: 'boot-a',
+      update_id: 'original-operation', error_code: 'server_update_recovery_failed', retryable: true })
+    await f.manager.prepare('1.2.0-beta.2')
+    expect(f.manager.status()[0]).toMatchObject({ phase: 'failed', paused: true })
+    await f.manager.retry('a')
+    expect(f.clients.a.ensureServerUpdate).toHaveBeenCalledTimes(2)
+    expect(f.manager.status()[0].paused).not.toBe(true)
+  })
   it('reconciles a gateway version change without requiring the execution boot or update status to change', async () => {
     const f = fixture()
     const previous = splitHealth('1.2.0-beta.2', '1.1.0-beta.1')
@@ -143,6 +169,30 @@ describe('coordinated app/server reconciliation (mocked server boundary)', () =>
       installed_version: '1.2.0-beta.2', server_identity: 'server-a', server_instance_id: 'boot-a' })
     await f.manager.prepare('1.2.0-beta.2')
     expect(f.manager.status()[0]).toMatchObject({ phase: 'blocked', message: 'The server update is incomplete. Reconnect to check recovery.' })
+    expect(f.clients.a.ensureServerUpdate).not.toHaveBeenCalled()
+  })
+  it('keeps a healthy candidate pending until the installer releases its admission hold', async () => {
+    const f = fixture()
+    const held = splitHealth('1.2.0-beta.2', '1.2.0-beta.2')
+    held.execution_service!.maintenance_held = true
+    f.clients.a.health.mockResolvedValue(held)
+    await f.manager.prepare('1.2.0-beta.2')
+    f.manager.serverReachable('a', held)
+    await f.manager.reconcileAll()
+    expect(f.manager.status()[0].phase).toBe('pending')
+    const released = structuredClone(held)
+    released.execution_service!.maintenance_held = false
+    f.clients.a.health.mockResolvedValue(released)
+    f.manager.serverReachable('a', released)
+    await vi.waitFor(() => expect(f.manager.status()[0].phase).toBe('current'))
+    expect(f.clients.a.ensureServerUpdate).not.toHaveBeenCalled()
+  })
+  it('keeps a matching operation pending when new health arrives before its installer finishes', async () => {
+    const f = fixture()
+    f.clients.a.health.mockResolvedValue(health('a', { server_version: '1.2.0-beta.2',
+      server_update: { phase: 'installing', target_version: '1.2.0-beta.2' } }))
+    await f.manager.prepare('1.2.0-beta.2')
+    expect(f.manager.status()[0].phase).toBe('pending')
     expect(f.clients.a.ensureServerUpdate).not.toHaveBeenCalled()
   })
   it('queues compatible busy servers independently and persists identity-bound operation receipts', async () => {
