@@ -1,5 +1,21 @@
 # Public development log
 
+## 2026-09-20 — Compact Side chat popup — source acceptance
+
+- Size the popup to its content instead of reserving a full-height empty panel.
+  Start with a single-line composer and grow it with the draft. Keep long
+  conversations scrollable within the existing maximum popup height.
+- Remove the duplicate input focus outline, manual resize grip and repeated
+  explanatory text. Keep one subtle composer focus treatment, a circular Send
+  button and direct Clear/Close icons. Expand context help inline when requested.
+- Pass 27 existing component/theme checks and TypeScript validation. Exercise
+  native offscreen Electron with production CSS ordering and keyboard focus:
+  empty and long drafts, long-answer wheel scrolling, Clear shrinking the popup,
+  context help, close/reopen and Escape, dark/light themes and a narrow window.
+  Requests use production preload, IPC and native HTTP into a controlled local
+  server; provider execution is unchanged and outside this visual acceptance.
+- Availability: source correction; no server change is required.
+
 ## 2026-09-20 — Side chat popup and Claude agents — 1.0.4-beta.12 local acceptance
 
 - Accept the local Apple silicon macOS app **1.0.4-beta.12 / 1186** from

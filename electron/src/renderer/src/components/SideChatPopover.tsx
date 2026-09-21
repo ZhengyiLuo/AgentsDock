@@ -1,5 +1,5 @@
 import * as Popover from '@radix-ui/react-popover'
-import { MessageCircleQuestion, X } from 'lucide-react'
+import { MessageCircleQuestion, Trash2, X } from 'lucide-react'
 import { useId, useRef } from 'react'
 import { t } from '@shared/i18n'
 import type { SideQuestionScope } from '@shared/side-questions'
@@ -33,7 +33,8 @@ export function SideChatPopover({ session, scope, controller, open, focusVersion
           }}>
           <header className="side-chat-heading">
             <h3 id={titleId}><MessageCircleQuestion size={16} />{t('sideChat.title')}</h3>
-            <button type="button" className="quiet-button" onClick={() => controller.clear(scope, session.id)}>{t('sideChat.clear')}</button>
+            <button type="button" className="icon-button" aria-label={t('sideChat.clear')} title={t('sideChat.clear')}
+              onClick={() => controller.clear(scope, session.id)}><Trash2 size={15} /></button>
             <Popover.Close asChild><button type="button" className="icon-button" aria-label={t('sideChat.close')} title={t('sideChat.close')}><X size={16} /></button></Popover.Close>
           </header>
           <SideQuestionPanel session={session} scope={scope} controller={controller} focusVersion={focusVersion} />

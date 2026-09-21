@@ -39,14 +39,12 @@ export function SideQuestionPanel({ session, scope, controller, active = true, f
   }, [active, snapshot.exchanges])
 
   return <section className="side-chat" aria-label={t('sideChat.title')} data-session-id={session.id}>
-    <div className="side-chat-context"><span>{t('sideChat.about', { title: session.title })}</span>
-      <details><summary aria-label={t('sideChat.contextInfo')}><Info size={13} /></summary>
-        <p>{t('sideQuestion.context')}{snapshot.contextNote && <><br />{snapshot.contextNote}</>}</p>
-      </details>
-    </div>
-    <div className="side-chat-history" ref={history} role="log" aria-label={t('sideChat.messages')} aria-live="polite"
+    <details className="side-chat-context">
+      <summary aria-label={t('sideChat.contextInfo')}><span>{t('sideChat.about', { title: session.title })}</span><Info size={13} /></summary>
+      <p>{t('sideQuestion.context')}{snapshot.contextNote && <><br />{snapshot.contextNote}</>}</p>
+    </details>
+    <div className="side-chat-history" hidden={!snapshot.exchanges.length} ref={history} role="log" aria-label={t('sideChat.messages')} aria-live="polite"
       onScroll={event => { const element = event.currentTarget; stickToBottom.current = element.scrollHeight - element.scrollTop - element.clientHeight < 48 }}>
-      {!snapshot.exchanges.length && <p className="side-chat-empty">{t('sideChat.empty')}</p>}
       {snapshot.exchanges.map(exchange => <div className="side-chat-exchange" key={exchange.id}>
         <div className="side-chat-user">{exchange.question}</div>
         {exchange.answer && <div className="side-chat-assistant"><MarkdownContent text={exchange.answer} fold={false} /></div>}
@@ -60,9 +58,10 @@ export function SideQuestionPanel({ session, scope, controller, active = true, f
       {supported && !ready && <p className="side-chat-note" role="status">{t('sideQuestion.connect')}</p>}
       {snapshot.historyOmitted && <p className="side-chat-note">{t('sideChat.historyOmitted')}</p>}
       {snapshot.error && <p className="side-chat-error" role="alert">{sideQuestionError(snapshot.error)}</p>}
+      {length > limit && <p className="side-chat-error" role="status">{t('sideQuestion.limit', { count: length, limit })}</p>}
       {supported && <form className="side-chat-composer" onSubmit={event => { event.preventDefault(); stickToBottom.current = true; void controller.send(scope, session) }}>
         <label className="visually-hidden" htmlFor={inputId}>{t('sideChat.message')}</label>
-        <textarea id={inputId} ref={textarea} value={snapshot.draft} rows={3} disabled={!ready}
+        <textarea id={inputId} ref={textarea} value={snapshot.draft} rows={1} disabled={!ready}
           placeholder={t('sideChat.placeholder')} onChange={event => controller.setDraft(scope, session.id, event.target.value)}
           onKeyDown={event => {
             if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) {
@@ -70,7 +69,6 @@ export function SideQuestionPanel({ session, scope, controller, active = true, f
             }
           }} />
         <div className="side-chat-composer-actions">
-          <span className={length > limit ? 'side-chat-error' : 'side-chat-count'}>{length > limit ? t('sideQuestion.limit', { count: length, limit }) : ''}</span>
           {snapshot.pending
             ? <button type="button" className="side-chat-send" aria-label={t('sideChat.cancel')} title={t('sideChat.cancel')}
               onClick={() => { void controller.cancel(scope, session.id) }}><Square size={12} fill="currentColor" /></button>
@@ -78,7 +76,6 @@ export function SideQuestionPanel({ session, scope, controller, active = true, f
               disabled={!ready || !length || length > limit}><ArrowUp size={16} /></button>}
         </div>
       </form>}
-      <p className="side-chat-note side-chat-footnote">{t('sideChat.footnote')}</p>
     </div>
   </section>
 }
