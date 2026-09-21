@@ -10,7 +10,8 @@ const runtimeCustomProperties = new Set([
   '--workspace-editor-width',
   '--workspace-explorer-width',
   '--workspace-markdown-source-percent',
-  '--radix-dropdown-menu-content-transform-origin'
+  '--radix-dropdown-menu-content-transform-origin',
+  '--radix-popover-content-available-height'
 ])
 
 const designSystemCustomProperties = [

@@ -96,32 +96,8 @@ describe('ChatHeader', () => {
     const { container } = render(<ChatHeader sidebarVisible={false} onSidebarToggle={() => undefined} onTerminalToggle={() => undefined} />)
 
     expect(container.querySelector('.header-actions > :first-child')).toBe(screen.getByRole('button', { name: 'Chat actions' }))
-    expect(screen.getByRole('button', { name: 'Show chat list' })).toBeInTheDocument()
-  })
-
-  it('opens side chat for the displayed pane in one click without mounting a dialog', async () => {
-    const session = { id: 'chat', title: 'Chat', backend: 'codex' as const }
-    const displayed = { id: 'other', title: 'Other', backend: 'claude' as const }
-    useAppStore.setState({ sessions: [session, displayed], selectedSessionId: session.id, activeProfileId: 'profile', profileGeneration: 7 })
-    const open = vi.fn()
-    window.addEventListener('agentsdock:open-side-chat', open)
-    try {
-      render(<ChatHeader session={displayed} focused={false} />)
-      await userEvent.setup().click(screen.getByRole('button', { name: 'Side chat' }))
-      expect(open).toHaveBeenCalledOnce()
-      expect((open.mock.calls[0][0] as CustomEvent).detail).toEqual({ sessionId: displayed.id, profileId: 'profile', profileGeneration: 7 })
-      expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
-    } finally {
-      window.removeEventListener('agentsdock:open-side-chat', open)
-    }
-  })
-
-  it.each(['cursor', 'shared-guest'] as const)('omits the side-question entry for %s', kind => {
-    const session = { id: 'chat', title: 'Chat', backend: kind === 'cursor' ? 'cursor' as const : 'claude' as const }
-    if (kind === 'shared-guest') Object.defineProperty(window.agentsDock, 'sharedChat', { value: true })
-    useAppStore.setState({ sessions: [session], selectedSessionId: session.id })
-    render(<ChatHeader />)
     expect(screen.queryByRole('button', { name: 'Side chat' })).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Show chat list' })).toBeInTheDocument()
   })
 
   it.each(['running', 'admitting'] as const)('forks a %s chat through its completed prefix on a capable server', async state => {

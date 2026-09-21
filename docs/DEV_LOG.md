@@ -1,5 +1,22 @@
 # Public development log
 
+## 2026-09-20 — Side chat popup — source candidate
+
+- Move Side chat to a single button beside the composer. Open the conversation
+  in a floating popup without changing the main chat width, including split
+  chat panes. Keep Clear and Close directly accessible in its header.
+- Preserve side conversations, pending answers and drafts when the popup is
+  dismissed. Retain the existing per-chat and per-server ownership rules.
+- Pass 100 focused checks, TypeScript validation and production compilation.
+  Exercise the full app in isolated native offscreen Electron: popup placement,
+  input focus, Escape and outside-click dismissal, reopening drafts and answers,
+  direct Clear, pending request retention and cancellation, split-pane isolation,
+  dark/light themes, narrow layout and Chinese text. Requests cross production
+  preload, IPC and native HTTP into a controlled server; these checks do not
+  establish real-provider acceptance.
+- Availability: source candidate. Paired native Claude acceptance is still in
+  progress. No published build or live server is changed.
+
 ## 2026-09-20 — Compact running command blocks — 1.0.4-beta.11 local acceptance
 
 - Keep the active Codex tool inside its compact command group. Update the

@@ -3,7 +3,7 @@ import { t } from '@shared/i18n'
 import { useLocale } from '../lib/i18n'
 import { useEffect, useMemo, useState } from 'react'
 import * as DropdownMenu from '@radix-ui/react-dropdown-menu'
-import { Archive, ArchiveRestore, ArrowLeftRight, Check, ChevronRight, Columns2, Copy, Folder, GitFork, LoaderCircle, MessageCircleQuestion, MoreHorizontal, PanelLeft, PanelRight, PanelRightClose, Pin, RefreshCw, SquareTerminal, Trash2, X } from 'lucide-react'
+import { Archive, ArchiveRestore, ArrowLeftRight, Check, ChevronRight, Columns2, Copy, Folder, GitFork, LoaderCircle, MoreHorizontal, PanelLeft, PanelRight, PanelRightClose, Pin, RefreshCw, SquareTerminal, Trash2, X } from 'lucide-react'
 import type { Session } from '@shared/types'
 import { completedPrefixForkAvailable } from '@shared/session-fork'
 import { backendLabel, shortId } from '../lib/format'
@@ -168,11 +168,6 @@ export function ChatHeader({
         </DropdownMenu.Content></DropdownMenu.Portal></DropdownMenu.Root>
         {sidebarButton}
         <ScheduledJobsPopover session={session} />
-        {!window.agentsDock.sharedChat && (session.backend === 'codex' || session.backend === 'claude') && <button type="button"
-          className="quiet-button side-chat-open" title={t('sideChat.title')} aria-label={t('sideChat.title')}
-          onClick={() => window.dispatchEvent(new CustomEvent('agentsdock:open-side-chat', { detail: {
-            sessionId: session.id, profileId, profileGeneration
-          } }))}><MessageCircleQuestion size={14} /><span>{t('sideChat.title')}</span></button>}
         {onSwapPanes && <button className="icon-button" title={t("ui.ChatHeader.ChatHeader.swap_chat_panes_7129f59")} aria-label={t("ui.ChatHeader.ChatHeader.swap_chat_panes_7129f59")} onClick={onSwapPanes}><ArrowLeftRight size={15} /></button>}
         {focused && onTerminalToggle && <ShortcutTooltip shortcut="toggleTerminal" label={terminalOpen ? t("ui.ChatHeader.ChatHeader.close_terminal_panel_48e963f") : t("ui.ChatHeader.ChatHeader.open_terminal_panel_3284242")}><button
           className={`icon-button terminal-toggle${terminalOpen ? ' active' : ''}`}

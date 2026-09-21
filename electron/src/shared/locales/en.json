@@ -31,6 +31,7 @@
   "sideChat.footnote": "Only in this side chat · not sent to the main agent",
   "sideChat.hide": "Hide panel",
   "sideChat.actions": "Side chat actions",
+  "sideChat.close": "Close side chat",
   "sideChat.clear": "Clear side chat",
   "sideChat.historyOmitted": "Some earlier side messages are outside the context limit.",
   "sideChat.historyUnsupported": "Update AgentsServer to continue this side chat with its previous messages.",

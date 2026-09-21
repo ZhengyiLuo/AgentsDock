@@ -31,6 +31,7 @@
   "sideChat.footnote": "仅在侧边对话中使用 · 不发送给主 Agent",
   "sideChat.hide": "隐藏面板",
   "sideChat.actions": "侧边对话操作",
+  "sideChat.close": "关闭侧边对话",
   "sideChat.clear": "清空侧边对话",
   "sideChat.historyOmitted": "部分较早的侧边消息已超出上下文限制。",
   "sideChat.historyUnsupported": "请更新 AgentsServer，以携带之前的消息继续侧边对话。",
