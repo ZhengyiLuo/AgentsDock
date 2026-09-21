@@ -1,5 +1,19 @@
 # Public development log
 
+## 2026-09-20 — Side chat scroll memory — 1.0.4-beta.16 local acceptance
+
+- Accept signed local Apple silicon macOS app **1.0.4-beta.16 / 1190** from
+  `9451baae691a2f9ad93bbef8e05b60c3e1a38a12`. Verify bundle audit, Developer ID
+  signature, runtime entitlements, exact version/build and isolated startup.
+  All 88 compiled files in the package match the tested production output.
+- Exercise the exact packaged renderer/preload with native offscreen mouse
+  input. Verify exact scroll restoration after reopening, stable reading
+  position when replies arrive, bottom following after a reply arrives while
+  closed, Jump to latest and independent positions across two chats. The
+  controlled server and unchanged provider boundary are described below.
+- Availability: signed local `.app` with automatic updates disabled, not a
+  notarized public release. This scroll correction needs no server update.
+
 ## 2026-09-20 — Remember Side chat reading position — source acceptance
 
 - Restore each Side chat's reading position across closing/reopening and chat
