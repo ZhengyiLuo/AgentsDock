@@ -21,7 +21,7 @@
 .side-chat-context summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: var(--radius-compact); }
 .side-chat-context summary::-webkit-details-marker { display: none; }
 .side-chat-context p { margin: var(--space-4) 0 0; line-height: var(--line-height-relaxed); }
-.side-chat-history { flex: 1 1 auto; min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding: var(--space-4) var(--space-7); }
+.side-chat-history { flex: 1 1 auto; min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding: var(--space-4) var(--space-7); user-select: text; }
 .side-chat-history[hidden] { display: none; }
 .side-chat-exchange { margin-bottom: var(--space-8); font-size: var(--text-size-ui); line-height: var(--line-height-relaxed); }
 .side-chat-exchange:last-child { margin-bottom: var(--space-4); }

@@ -1,5 +1,14 @@
 # Public development log
 
+## 2026-09-20 — Side chat text selection — source correction
+
+- Restore normal text selection in Side chat history so user messages,
+  assistant replies and inline code can be copied with the native shortcut.
+  The popup no longer inherits the app chrome's selection-disabled style.
+- Pass 27 existing component/theme checks, TypeScript validation and production
+  compilation. Native clipboard and packaged-app acceptance are recorded
+  separately below when completed. No server change is required.
+
 ## 2026-09-20 — Compact popup — 1.0.4-beta.13 local acceptance
 
 - Accept the signed local Apple silicon macOS app **1.0.4-beta.13 / 1187** from
