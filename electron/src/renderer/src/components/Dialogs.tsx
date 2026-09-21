@@ -1228,7 +1228,8 @@ export function SettingsDialog() {
   const restartAfterUpdateRetryTimerRef = useRef<number | null>(null)
   const restartDecisionRef = useRef(false)
   const serverUpdateOperationsRef = useRef<Set<Promise<void>>>(new Set())
-  const updateSurfaceOpen = (open || appSettingsOpen) && legacyServerUpdatesVisible
+  const settingsOpen = open || appSettingsOpen
+  const updateSurfaceOpen = settingsOpen && legacyServerUpdatesVisible
   const serverUpdateScopeId = activeProfileId || ''
   const updateBindingIdentity = activeProfile?.serverIdentity || health?.server_identity || ''
   const submittedUpdateKey = serverUpdateIntentKey(serverUpdateScopeId, updateBindingIdentity, activeProfileServerUrl || '')
@@ -1538,12 +1539,12 @@ export function SettingsDialog() {
     }
   }, [])
   useEffect(() => {
-    if (updateSurfaceOpen) {
+    if (settingsOpen) {
       closeRestartConfirmation()
       closeUpdateNowConfirmation()
       setRestartNotice(null)
     }
-  }, [updateSurfaceOpen])
+  }, [settingsOpen])
   useEffect(() => {
     restartInspectionRef.current += 1
     updateNowInspectionRef.current += 1

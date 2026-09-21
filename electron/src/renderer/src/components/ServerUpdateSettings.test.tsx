@@ -1249,13 +1249,13 @@ describe('SettingsDialog server updates', () => {
 
     render(<SettingsDialog />)
 
+    expect(await screen.findByText(/Choose a channel or Check server to retry/)).toBeInTheDocument()
     const beta = await findServerUpdateChannelButton('Beta')
     await waitFor(() => expect(beta).toBeEnabled())
     expect(beta).toHaveClass('active')
-    expect(screen.getByText(/Choose a channel or Check server to retry/)).toBeInTheDocument()
 
     fireEvent.click(beta)
     await waitFor(() => expect(check).toHaveBeenCalledWith('beta'))
-    expect(serverUpdateSurface().getByText('This is the latest one.')).toBeInTheDocument()
+    expect(await serverUpdateSurface().findByText('This is the latest one.')).toBeInTheDocument()
   })
 })

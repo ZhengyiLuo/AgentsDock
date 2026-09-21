@@ -34,6 +34,10 @@
   settle initial loading and distinguish app controls from server controls.
   Pass 4,630 Electron tests with five existing skips, eight script tests and type
   checking. Retain all server operation and recovery assertions.
+- Reproduce delayed app-update status dismissing an already open server restart
+  confirmation or clearing a restart error. Reset these controls when Settings
+  opens, preserving user actions while status finishes loading. Keep server
+  polling and profile/boot checks unchanged; add regressions for both cases.
 - No released app build or public npm version is accepted by this entry.
   Native signing credentials still need to be supplied to the public release
   environment, and signed publication checks remain pending.

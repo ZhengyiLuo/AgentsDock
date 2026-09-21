@@ -32,6 +32,8 @@ installation fails before creating state or a service, installation can retry ov
 its empty leftover folders. Existing installations, configuration, chat data and
 registered services remain protected from the fresh installer.
 
+Restart confirmations and errors stay visible while update information loads.
+
 New macOS update journals retain filesystem identity across reboot, allowing an
 interrupted installation to restore the previous server when the installer is
 run again. Older interrupted journals without that identity record may still
