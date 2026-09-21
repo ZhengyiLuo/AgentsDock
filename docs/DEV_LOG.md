@@ -1,5 +1,37 @@
 # Public development log
 
+## 2026-09-21 — Prepare updates during work and recover interrupted activation
+
+- Stage and verify server dependencies while agents continue working. Preserve
+  the existing pending-update protocol for older clients, then acquire the exact
+  idle execution hold before activating the prepared candidate.
+- Extend the existing installer transaction to both native services, retaining
+  configuration, previous runtime and state recovery. Bind automatic recovery
+  to the admitted candidate and journal. Register an independent native recovery
+  job before stopping the main services, so recovery also runs while the app
+  cannot connect. Join that owner through the existing update action. Keep
+  incomplete recovery fenced and distinguish verified rollback from successful
+  installation.
+- Require both component versions and released execution admission before
+  reporting completion. Exercise the coordinator and existing updater endpoints,
+  exact transaction recovery, failed launch, stale ownership and rollback results.
+- Verify one real Codex turn and one real Claude turn while actual dependency
+  preparation and receipt validation run. Each original foreground command and
+  provider stays alive and completes exactly once, with ordered event delivery;
+  execution admission remains open. These isolated tests do not activate an
+  installed release or establish signed delivery acceptance.
+- Real fresh installations and migration from the released legacy updater have
+  passed on disposable Linux systemd and macOS launchd hosts. A Linux fault test
+  kills the updater and installer after service shutdown, then verifies that the
+  independent native owner restores the previous installation and reports a
+  failed, retryable update without an HTTP trigger. Native testing exposed and
+  fixed directory permissions, generated-cache validation and recovery ownership.
+- A subsequent review requires native acceptance to be repeated with credentials
+  pinned to the connected native process before transmission and with runtime
+  durability checked before service shutdown. Reboot and final packaged-release
+  acceptance remain pending. These results do not establish simultaneous
+  execution generations. No release has been published or deployed by this entry.
+
 ## 2026-09-21 — Verify both server components before update completion
 
 - Keep a coordinated update incomplete until both the gateway and execution

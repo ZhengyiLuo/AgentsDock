@@ -6,10 +6,10 @@ state. Replacing the gateway must leave the execution process untouched. Clients
 reconnect and resume the existing event history; accepted commands are never
 automatically replayed by the gateway.
 
-This is an explicit development entry point, not the default installation or an
-accepted production migration. The existing installer and coordinated npm updater
-still use their established activation path. Rolling multiple execution
-generations is not implemented.
+The candidate installer now selects this layout by default and the coordinated
+updater stages dependencies while existing work continues. Installed migration
+and recovery acceptance is still in progress; this is not an accepted production
+release. Rolling multiple execution generations is not implemented.
 
 ```text
 AgentsDock clients
@@ -60,6 +60,31 @@ execution owner -- provider subprocesses -- tools / subagents
   launchd or user systemd. It does not replace the production installer's state,
   Team Hub or secure-peer rollback machinery. A running legacy server without
   the maintenance protocol is not directly migrated by this controller.
+- `server/execution_activation.py` integrates the paired jobs with the main
+  installer's state, Team Hub and secure-peer recovery transaction. A legacy
+  service must prove its exact admitted idle update before it is stopped.
+- `server/update_preparation.py` downloads and stages the signed candidate
+  without changing the active release, service configuration or admission.
+  `server/execution_preparation.py` seals the prepared source and dependencies
+  in a receipt that is checked again before activation. Pending updates retain
+  the existing older-client contract.
+- `server/update_handoff.py` transfers the exact worker's sealed idle hold to
+  the detached installer. Failed attempts retain an identifiable retry path;
+  cleanup cannot release another operation's hold.
+- `server/update_recovery.py` binds interrupted activation to the accepted
+  update, source directory identity, API version and retained installer journal.
+  Verified rollback remains a failed, retryable update, rather than successful
+  installation. Completion requires both native component versions and released
+  execution admission, including during same-version repair.
+- `server/execution_recovery.py` registers an independent native recovery owner
+  before either main service stops. Its retained standard-library bootstrap can
+  resume the exact journal without an HTTP connection or candidate dependencies.
+  `server/execution_recovery_status.py` settles only the matching abandoned
+  update after verified commit or rollback; a live updater retains settlement.
+- `server/execution_http.py` verifies the connected TCP socket belongs to the
+  expected native process and rechecks that process's role before transmitting
+  credentials. A stale callback receipt or reused public port cannot authorize
+  an authenticated probe to an unrelated listener.
 
 Existing execution is still one state-owning process. Replacing that process
 requires idle handover; the current health contract reports
@@ -78,17 +103,18 @@ environment. It makes one model turn per selected provider with the existing
 login and retains private local evidence. A fixture result must not be labeled
 provider acceptance.
 
-Before enabling this layout in the ordinary one-update workflow:
+Release acceptance still requires:
 
-1. Integrate both service lifecycles into the existing signed installer
-   transaction. Preserve old-service idle handover, original credentials,
-   server identity, state migration snapshots, Team Hub and secure-peer rollback.
-2. Preserve worker runtime/dependencies while any process still owns them.
-   Installer pruning and uninstall must understand both services and retained
-   releases, including recovery after interruption or reboot.
-3. Make the npm/app update coordinator distinguish gateway activation from
-   execution activation. A pending execution upgrade is not a completed bundled
-   update. Old and new clients need a compatible contract during that interval.
+1. Complete installed old-service migration and interrupted-activation coverage
+   on both native service managers. Preserve original credentials, server
+   identity, state migration snapshots, Team Hub and secure-peer rollback.
+2. Verify automatic recovery when neither main service is available, including
+   process loss and reboot between service shutdown and candidate startup.
+   Preserve worker runtime/dependencies while any process still owns them;
+   pruning and uninstall must respect both jobs and retained releases.
+3. Exercise the npm/app coordinator across real prepared activation, failure and
+   retry. A pending execution upgrade is not a completed bundled update. Old and
+   new clients need a compatible contract during that interval.
 4. For new turns to use a new execution generation while older turns continue,
    extract provider actors from the shared mutable application store. Add
    generation ownership, durable event/callback routing, approval ownership and
@@ -100,3 +126,11 @@ Before enabling this layout in the ordinary one-update workflow:
 
 The public update remains one user action. These internal component stages must
 not create another routine manual server-update step.
+
+Older macOS releases did not record the configuration directory in their managed
+service. Default-path installations retain the automatic migration path. A custom
+installation from those releases needs one explicit migration with its original
+`AGENTS_SERVER_INSTALL_DIR`, `AGENTS_SERVER_CONFIG_DIR` and `AGENTSDOCK_STATE_DIR`
+values. The installer refuses a known path mismatch before staging; it does not
+guess an unknown configuration path. New split services record all three roots
+for subsequent updates.

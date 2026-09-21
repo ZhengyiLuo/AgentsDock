@@ -6,8 +6,9 @@ server distribution checks must pass before these notes accompany a release.
 ## App and server updates together
 
 Update AgentsDock once to request the matching server release for your saved
-servers. Busy servers wait for work to finish; offline servers continue when they
-reconnect. Settings shows each server's progress and offers an explicit retry
+servers. Servers download and prepare the update while agents work, then wait
+for work to finish before changing the execution runtime. Offline servers
+continue when they reconnect. Settings shows each server's progress and offers an explicit retry
 after failure. Automatic chat-title requests also finish before the server
 restarts. A server's stable or beta channel is preserved.
 
@@ -25,6 +26,12 @@ updater, preserving installation paths and server identity. Old signed server
 downloads remain available during the transition; very old unmanaged servers may
 need the guided installer once.
 
+Older macOS servers installed in custom directories need one migration with the
+original installation, configuration and state directory settings. Those releases
+did not retain all three paths in their service configuration. Default-directory
+installations migrate automatically; new installations retain those paths for
+future updates.
+
 ## Recovery
 
 Failed candidate health checks restore the previous server runtime. If a first
@@ -34,7 +41,16 @@ registered services remain protected from the fresh installer.
 
 Restart confirmations and errors stay visible while update information loads.
 
-New macOS update journals retain filesystem identity across reboot, allowing an
-interrupted installation to restore the previous server when the installer is
-run again. Older interrupted journals without that identity record may still
-need manual recovery after a filesystem remount.
+An independent recovery service is registered before stopping the server. It
+can restore an interrupted update even while the app cannot connect. A verified
+rollback is reported as a failed update with a retry option. Both the gateway
+and execution runtime must reach the requested release and reopen admission
+before Settings reports success.
+
+New macOS update journals retain filesystem identity across reboot. Older
+interrupted journals without that record may still need manual recovery after
+a filesystem remount.
+
+The gateway can restart while existing agents continue. Replacing the execution
+runtime still waits for idle; this release does not run old and new execution
+runtimes simultaneously.
