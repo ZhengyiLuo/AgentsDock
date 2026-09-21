@@ -1,5 +1,53 @@
 # Public development log
 
+## 2026-09-21 — Persistent execution foundation (source only)
+
+- Separate the public gateway from the process owning chats, provider transports,
+  pending approvals and tool execution. Preserve authenticated request semantics,
+  event ordering and private provider callbacks during gateway replacement.
+- Give gateway and execution independent process/release identities. Keep the
+  actual execution version visible while an older runtime remains active.
+  Retirement requires an idle worker and a durable admission hold; an API
+  restart does not close provider managers or cancel accepted commands.
+- Complete one disposable real turn each with Codex and Claude. Their foreground
+  tools survive both graceful and forced gateway termination, then the original
+  turns complete without duplicate execution. Reconnected WebSockets receive
+  the complete ordered event sequence. Check both CLI logins remain valid.
+- Verify separate native subagent runs for both providers: one child continues
+  through both gateway replacement modes and completes its tool once. Claude's
+  unanswered tool approval retains its request identity through another restart
+  and resolves once after reconnect.
+- Lock chat state before loading it or sweeping provider children, across both
+  maintained entry points. Test both startup orders with actual processes: a
+  competing server is refused while the incumbent and its registered controlled
+  child remain intact. Retain ownership through shutdown stragglers.
+- Start a copied production runtime through a real pending activation journal.
+  Verify recovered queued turns and due jobs reach their admission checks and
+  remain deferred, with no provider launch. Reject an incorrect release of the
+  admission hold; permit a normal zero-turn mutation after the exact release.
+- Add transport, admission, recovery, controlled subprocess and production
+  application regressions. Verify existing managed-service proof and pending
+  update admission behavior in isolated state. Package the seven execution modules
+  in both server distributions and retain explicit single-service installer
+  protection for experimental split installations.
+- Exercise real launchd and user systemd replacement with controlled application
+  and child-process fixtures: gateway upgrade, failed gateway rollback, busy
+  worker refusal and exactly one approved side effect. Retain the worker and
+  chat identities. Fix systemd working-directory rendering and exact file-mode
+  restoration exposed by these native tests; restore the disposable baseline.
+- Exercise the existing built desktop through an isolated offscreen Electron
+  window with production renderer, preload, IPC and server transport. Connect a
+  server, create a Claude chat without a turn, navigate owned history and use
+  explicit reconnect after both gateway replacements. Keep selected chat and
+  final text. Credential storage is substituted in this QA harness; this does
+  not establish automatic reconnect-only or packaged-feature-build acceptance.
+- These changes do not yet enable rolling execution generations or the normal
+  npm/app migration path. The application routes still live in the retained
+  execution process. Native service fixtures and desktop checks do not establish
+  production state/Team Hub migration. No release build is accepted, published
+  or deployed by this entry.
+  See [the implementation boundary](PERSISTENT_EXECUTION.md).
+
 ## 2026-09-20 — Revised beta.12 package and public release validation
 
 - Build the revised server package from clean committed source `751c1e0`.
