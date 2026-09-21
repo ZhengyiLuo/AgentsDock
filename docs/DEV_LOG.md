@@ -31,6 +31,17 @@
   retain the same saved profile, server identity and credential, with both
   components current and execution admission released. Discovery uses a private
   HTTPS fixture; public release propagation remains a separate publication check.
+- Close the populated-data acceptance gap before publication. A genuine Linux
+  beta.9 Hub host survives an interrupted signed upgrade, automatic rollback and
+  retry with its saved chat/events, Hub records, approved peer, keys, provider
+  paths and credential files preserved. A separate joined-server migration keeps
+  its active mutual-TLS connection and content access without pairing again.
+  The Mac host migration preserves both Codex and Claude histories, Hub messages,
+  board content and peer authority; existing peer credentials authenticate saved
+  reads and new writes. Provider credential contents are synthetic preservation
+  fixtures, while Hub/peer authentication runs against the actual native services.
+  Verify retired bootstrap authority remains retired; a revoked proof file is
+  not required to survive snapshot recovery. These checks need no product edits.
 - This records accepted build artifacts before desktop upload. Public publication
   and the live Studio upgrade are still pending. Execution-runtime replacement
   waits for idle; simultaneous execution generations are not claimed.
