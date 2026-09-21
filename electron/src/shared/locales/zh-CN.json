@@ -1544,6 +1544,8 @@
   "ui.Dialogs.FolderDialog.folder_name_14d34ed": "文件夹名称",
   "ui.Dialogs.FolderDialog.new_folder_cf28f49": "新建文件夹",
   "ui.Dialogs.ImportChatsDialog.bring_in_your_local_claude_code_and_codex__0ffcba9": "导入本机上的 Claude Code 和 Codex 历史记录。",
+  "ui.Dialogs.ImportChatsDialog.supported_cli_history": "选择本机上的 Claude Code、Codex 和 Cursor CLI 会话。",
+  "ui.Dialogs.ImportChatsDialog.cursor_snapshot_history": "导入本机上的 Claude Code、Codex 和 Cursor CLI 会话。Cursor 仅导入历史文字快照，不同步历史工具记录及之后在原生客户端中的更改。",
   "ui.Dialogs.ImportChatsDialog.choose_the_matching_agent_b4392a9": "选择匹配的 Agent：",
   "ui.Dialogs.ImportChatsDialog.close_7d9eb7a": "关闭",
   "ui.Dialogs.ImportChatsDialog.collapse_all_25f7b37": "全部折叠",
