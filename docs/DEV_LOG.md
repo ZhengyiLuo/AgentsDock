@@ -23,10 +23,17 @@
   forward migration, updater/installer loss and automatic rollback. An abrupt
   macOS VM power loss at the durable activation boundary recovers automatically
   after reboot without an HTTP recovery trigger or manual repair.
-- This records accepted build artifacts before desktop upload. Packaged one-click
-  app replacement with automatic server migration, public publication and the
-  live Studio upgrade are still pending. Execution-runtime replacement waits
-  for idle; simultaneous execution generations are not claimed.
+- Verify one real update click in the unchanged published beta.8 app: Squirrel
+  replaces it with the exact build 1189 ZIP and relaunches it automatically.
+  The new packaged coordinator migrates the genuine beta.9 server to beta.12
+  without a separate server-update click. Check the installed signature,
+  executable, application archive and descriptor against the accepted package;
+  retain the same saved profile, server identity and credential, with both
+  components current and execution admission released. Discovery uses a private
+  HTTPS fixture; public release propagation remains a separate publication check.
+- This records accepted build artifacts before desktop upload. Public publication
+  and the live Studio upgrade are still pending. Execution-runtime replacement
+  waits for idle; simultaneous execution generations are not claimed.
 
 ## 2026-09-21 — Prepare updates during work and recover interrupted activation
 
