@@ -665,7 +665,7 @@ describe('SettingsDialog server updates', () => {
 
     render(<SettingsDialog />)
     await waitFor(() => expect(check).toHaveBeenCalledWith('stable'))
-    expect(serverUpdateSurface().getByText('This is the latest one.')).toBeInTheDocument()
+    expect(await serverUpdateSurface().findByText('This is the latest one.')).toBeInTheDocument()
     const betaButton = await findServerUpdateChannelButton('Beta')
     fireEvent.click(betaButton)
 
@@ -704,13 +704,18 @@ describe('SettingsDialog server updates', () => {
     showSettings()
 
     render(<SettingsDialog />)
-    await waitFor(() => expect(check).toHaveBeenCalledTimes(1))
-    expect(serverUpdateSurface().getByText('This is the latest one.')).toBeInTheDocument()
+    // The IPC call starts before its response commits to the panel. Wait for
+    // the displayed result and usable control before requesting another check.
+    await waitFor(() => {
+      expect(check).toHaveBeenCalledTimes(1)
+      expect(serverUpdateSurface().getByText('This is the latest one.')).toBeInTheDocument()
+      expect(screen.getByRole('button', { name: 'Check server' })).toBeEnabled()
+    })
 
     fireEvent.click(screen.getByRole('button', { name: 'Check server' }))
 
     await waitFor(() => expect(check).toHaveBeenNthCalledWith(2, 'stable'))
-    expect(await screen.findByRole('button', { name: 'Install 0.1.19' })).toBeEnabled()
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Install 0.1.19' })).toBeEnabled())
     expect(screen.getByText(/Checked \d{1,2}:\d{2}:\d{2}/)).toBeInTheDocument()
     expect(serverUpdateChannel().getByRole('button', { name: 'Stable' })).toHaveClass('active')
   })

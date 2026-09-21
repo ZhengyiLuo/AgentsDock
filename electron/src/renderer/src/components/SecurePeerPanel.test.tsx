@@ -492,7 +492,8 @@ describe('SecurePeerPanel', () => {
     expect(within(requests).getAllByText('Test member')).toHaveLength(1)
     expect(screen.queryByText(/Expired requests/)).not.toBeInTheDocument()
     expect(screen.queryByText(/Invalid Date/)).not.toBeInTheDocument()
-    expect(pendingCount).toHaveBeenLastCalledWith(1)
+    // This callback is published by an effect after the approval row commits.
+    await waitFor(() => expect(pendingCount).toHaveBeenLastCalledWith(1))
     fireEvent.click(screen.getByRole('checkbox', { name: 'The six words match.' }))
     expect(screen.getByRole('button', { name: 'Approve' })).toBeEnabled()
     expect(teamHub.approveSecurePeerPairing).not.toHaveBeenCalled()
