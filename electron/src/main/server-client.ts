@@ -441,6 +441,16 @@ export class AgentServerClient {
       SERVER_UPDATE_REQUEST_TIMEOUT_MS
     ).then(normalizeServerUpdateStatus)
   }
+  async ensureServerUpdate(
+    envelope: { manifest_base64: string; signature_base64: string },
+    target: ServerUpdateTarget
+  ): Promise<ServerUpdateStatus> {
+    return this.privilegedNativeRequest<ServerUpdateStatus>(
+      '/api/admin/update/ensure',
+      { method: 'POST', body: JSON.stringify({ ...envelope, ...target }) },
+      SERVER_UPDATE_REQUEST_TIMEOUT_MS
+    ).then(normalizeServerUpdateStatus)
+  }
   async cancelServerUpdate(scheduleId: string, target?: ServerUpdateTarget): Promise<ServerUpdateStatus> {
     return this.privilegedNativeRequest<ServerUpdateStatus>(
       '/api/admin/update/cancel',
@@ -3071,6 +3081,7 @@ function isPrivilegedNativeControlTarget(
   return !target.search && method === 'POST' && (
     path === '/api/admin/update/check'
     || path === '/api/admin/update/start'
+    || path === '/api/admin/update/ensure'
     || path === '/api/admin/update/cancel'
     || path === '/api/admin/team-hub/host/enable'
     || path === '/api/admin/team-hub/host/disable'

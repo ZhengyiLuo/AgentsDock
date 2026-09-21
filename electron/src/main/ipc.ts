@@ -201,6 +201,7 @@ export function registerIpc(
   handle('updates:status', () => updater.status())
   handle('updates:check', () => updater.check(true))
   handle('updates:install', () => updater.install())
+  handle('updates:retry-servers', profileId => updater.retryServers(profileId))
   handle('updates:set-track', track => updater.setTrack(track))
   handle('settings:get', () => service.publicSettings())
   handle('settings:apply', settings => service.applySettings(settings))

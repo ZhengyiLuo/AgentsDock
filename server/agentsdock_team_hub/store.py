@@ -19,6 +19,7 @@ import sqlite3
 import stat
 import tempfile
 import time
+import unicodedata
 import uuid
 from datetime import datetime, timezone
 from typing import Any, Callable
@@ -56,6 +57,8 @@ from .auth import (
     redeem_invitation,
 )
 from .database import LATEST_SCHEMA_VERSION, MIGRATIONS, open_database
+from .mail_hints import MailArrival, MailHintBroker, MailHintSubscription
+from .notification_hints import BulletinChange, NotificationBroker, NotificationCursor
 from .security import (
     ACCESS_TOKEN_TTL_SECONDS,
     BOOTSTRAP_PROOF_TTL_SECONDS,
@@ -92,11 +95,18 @@ MAX_NETWORK_PAGE_RESPONSE_BYTES = 1_900_000
 # JSON request limit; attachment bytes never travel through JSON or SQLite.
 MAX_TEAM_MESSAGE_BODY_BYTES = 49_152
 MAX_TEAM_MESSAGE_RECIPIENTS = 16
+MAX_TEAM_MESSAGE_SERVER_RECIPIENTS = 1024
 MAX_TEAM_MESSAGE_ATTACHMENTS = 16
 MAX_TEAM_MESSAGE_ATTACHMENT_BYTES = 2 * 1024 * 1024 * 1024
 MAX_TEAM_MESSAGE_TITLE_CHARS = 160
 MAX_TEAM_MESSAGE_PREVIEW_CHARS = 280
+MAX_TEAM_MESSAGE_SEARCH_CHARS = 200
+MAX_TEAM_MESSAGE_SEARCH_SECONDS = 1.0
 MAX_TEAM_MESSAGE_REVISIONS = 200
+MAX_TEAM_MAIL_THREAD_PAGE_ITEMS = 25
+MAX_TEAM_MAIL_THREAD_ITEMS = 2048
+MAX_TEAM_MAIL_THREAD_ANCESTORS = 128
+MAX_TEAM_MAIL_THREAD_RESPONSE_BYTES = 1_500_000
 TEAM_MESSAGE_PROVENANCE_KEYS = ("via", "backend", "chat_id", "run_id")
 DEFAULT_TEAM_ATTACHMENT_MAX_BYTES = 512 * 1024 * 1024
 DEFAULT_TEAM_ATTACHMENT_QUOTA_BYTES = 50 * 1024 * 1024 * 1024
@@ -391,6 +401,9 @@ class HubStore:
     ) -> None:
         self.data_dir = Path(os.path.abspath(os.path.expanduser(os.fspath(data_dir))))
         self.database_path = self.data_dir / "team-hub.sqlite3"
+        # Passive in-process prerequisite only: no stream, worker, or polling.
+        self.mail_hint_broker = MailHintBroker()
+        self.notification_broker = NotificationBroker()
         self.signing_key_path = self.data_dir / "access-token-signing.key"
         self.bootstrap_proof_path = self.data_dir / "bootstrap-owner.proof"
         self.maintenance_fence_path = self.data_dir / "maintenance-fence.json"
@@ -3211,6 +3224,23 @@ class HubStore:
                     # Sibling object: clients that parse team_network_v1 with
                     # an exact key list keep working unchanged.
                     "team_messages_v1": self.team_messages_capability(),
+                    "team_message_search_v1": {
+                        "available": self._team_message_search_available(connection),
+                        "version": 1,
+                        "fields": ["subject", "body", "sender"],
+                        "max_query_chars": MAX_TEAM_MESSAGE_SEARCH_CHARS,
+                    },
+                    "team_all_servers_alias_v1": self.team_all_servers_capability(),
+                    "team_mail_subjects_v1": {
+                        "available": True,
+                        "version": 1,
+                        "max_subject_chars": MAX_TEAM_MESSAGE_TITLE_CHARS,
+                    },
+                    "team_mailbox_state_v1": {"available": True, "version": 1, "address_kinds": ["server"]},
+                    "team_mail_threads_v1": {"available": True, "version": 1,
+                        "max_page_items": MAX_TEAM_MAIL_THREAD_PAGE_ITEMS,
+                        "max_thread_items": MAX_TEAM_MAIL_THREAD_ITEMS},
+                    "team_host_content_deletion_v1": {"available": True, "version": 1},
                 },
             }
         finally:
@@ -6047,6 +6077,10 @@ class HubStore:
                         str(row["team_id"]),
                         timestamp,
                     )
+                    connection.execute(
+                        "UPDATE principals SET display_name=?,updated_at=? WHERE id='service_managed_network_owner'",
+                        (label, timestamp),
+                    )
         except BaseException:
             self.managed_host_display_name = previous
             raise
@@ -6286,23 +6320,8 @@ class HubStore:
                             409,
                         )
                     node_id = str(node["id"])
-                    if node["display_name"] != label:
-                        connection.execute(
-                            """
-                            UPDATE nodes
-                            SET display_name=?
-                            WHERE id=?
-                            """,
-                            (label, node_id),
-                        )
-                        connection.execute(
-                            """
-                            UPDATE principals SET display_name=?,updated_at=?
-                            WHERE id=?
-                            """,
-                            (label, timestamp, node["principal_id"]),
-                        )
-                        changed = True
+                    # Pairing labels are immutable trust history. A live node
+                    # may have been explicitly renamed since approval.
                 binding = connection.execute(
                     """
                     SELECT peer_id,node_id,service_principal_id,
@@ -6798,6 +6817,76 @@ class HubStore:
             "refresh_expires_at": _iso8601(refresh_expires_at),
             **self._session_public(connection, session),
         }
+
+    def bootstrap_managed_network(self, network_name: str) -> None:
+        """Create one shared network under the authenticated parent operator.
+
+        This is process-local only: public Hub credentials and secure peers
+        cannot invoke it. No human identity or login credential is created.
+        """
+        name = _bounded_text(network_name, "network_name", 1, 160)
+        timestamp = _now()
+        owner_id = "service_managed_network_owner"
+        connection = self.connect()
+        try:
+            with _write_transaction(connection):
+                binding = connection.execute(
+                    "SELECT server_identity,hub_id FROM managed_host_bindings WHERE singleton=1"
+                ).fetchone()
+                if (
+                    self.managed_host_identity is None
+                    or binding is None
+                    or binding["server_identity"] != self.managed_host_identity
+                    or binding["hub_id"] != self.hub_id
+                ):
+                    raise HubError("bootstrap_unavailable", "Managed host creation is unavailable", 403)
+                teams = connection.execute(
+                    "SELECT id,kind,display_name,created_by_principal_id FROM teams"
+                ).fetchall()
+                if teams:
+                    if (
+                        len(teams) == 1
+                        and teams[0]["kind"] == "shared"
+                        and teams[0]["created_by_principal_id"] == owner_id
+                        and teams[0]["display_name"] == name
+                    ):
+                        self._validate_owner_invariants(connection)
+                        return
+                    raise HubError("network_already_exists", "This server already hosts a Team Network", 409)
+                if not self._globally_empty(connection):
+                    raise HubError("bootstrap_unavailable", "Existing Hub state requires recovery", 409)
+                team_id = _id("team")
+                connection.execute(
+                    "INSERT INTO principals(id,kind,display_name,created_at,updated_at) VALUES (?,'service',?,?,?)",
+                    (owner_id, self.managed_host_display_name, timestamp, timestamp),
+                )
+                connection.execute(
+                    "INSERT INTO service_accounts(principal_id,service_identifier,created_at) VALUES (?,?,?)",
+                    (owner_id, "agentsdock.team-hub.managed-network-owner", timestamp),
+                )
+                connection.execute(
+                    """INSERT INTO teams(id,kind,slug,display_name,created_by_principal_id,created_at,updated_at)
+                       VALUES (?,'shared',?,?,?,?,?)""",
+                    (team_id, f"network-{team_id[-24:]}", name, owner_id, timestamp, timestamp),
+                )
+                connection.execute(
+                    """INSERT INTO memberships(id,team_id,principal_id,role,status,created_at,updated_at)
+                       VALUES (?,?,?,'owner','active',?,?)""",
+                    (_id("membership"), team_id, owner_id, timestamp, timestamp),
+                )
+                self._ensure_managed_host_node(connection, team_id, timestamp)
+                self._local_control_principal(connection, team_id, timestamp)
+                self._managed_server_principal(connection, team_id, timestamp)
+                self._ensure_network_board(connection, team_id, owner_id, timestamp)
+                connection.execute(
+                    "UPDATE bootstrap_claims SET revoked_at=? WHERE consumed_at IS NULL AND revoked_at IS NULL",
+                    (timestamp,),
+                )
+                self._audit(connection, team_id, owner_id, "team.bootstrap", "team", team_id,
+                            "succeeded", {"authentication": "managed_server"}, timestamp)
+                self._validate_owner_invariants(connection)
+        finally:
+            connection.close()
 
     def bootstrap(
         self,
@@ -9165,6 +9254,27 @@ class HubStore:
             "status": row["status"],
         }
 
+    def rename_network_server(self, claims: AccessClaims, team_id: str, display_name: str) -> dict[str, Any]:
+        """Let an authenticated paired server rename only its own directory node."""
+        label = _bounded_text(display_name, "display_name", 1, 160)
+        if label != display_name or len(label.encode("utf-8")) > 160 or any(unicodedata.category(character) == "Cc" for character in label):
+            raise HubError("invalid_request", "Server name is invalid", 422)
+        timestamp = _now()
+        connection = self.connect()
+        try:
+            with _write_transaction(connection):
+                self._require_network_scope(connection, claims, team_id, write=True)
+                node = self._bound_network_node(connection, claims, team_id)
+                if node["display_name"] != label:
+                    connection.execute("UPDATE nodes SET display_name=? WHERE id=?", (label, node["node_id"]))
+                    connection.execute("UPDATE principals SET display_name=?,updated_at=? WHERE id=?",
+                                       (label, timestamp, node["principal_id"]))
+                    self._audit(connection, team_id, claims.principal_id, "network.server.rename", "node",
+                                node["node_id"], "succeeded", {}, timestamp)
+                return {"server": {"id": node["node_id"], "server_identity": node["server_identity"], "display_name": label}}
+        finally:
+            connection.close()
+
     def get_network(
         self,
         claims: AccessClaims,
@@ -9200,19 +9310,6 @@ class HubStore:
             ).fetchone()
             if team is None:
                 raise HubError("not_found", "Resource not found", 404)
-            owner = connection.execute(
-                """
-                SELECT p.display_name
-                FROM memberships AS m
-                JOIN principals AS p ON p.id=m.principal_id
-                WHERE m.team_id=? AND m.role='owner' AND m.status='active'
-                  AND p.kind='human' AND p.status='active'
-                """,
-                (team_id,),
-            ).fetchone()
-            if owner is None:
-                raise RuntimeError("Team Network owner is unavailable")
-            host_recipient_display_name = str(owner["display_name"])
             owned_node_id: str | None = None
             if claims.auth_kind in NETWORK_AUTOMATION_AUTH_KINDS:
                 owned_node_id = str(
@@ -9293,12 +9390,7 @@ class HubStore:
                     "id": row["id"],
                     "server_identity": row["server_identity"],
                     "display_name": row["display_name"],
-                    "recipient_display_name": (
-                        host_recipient_display_name
-                        if self.managed_host_identity is not None
-                        and row["server_identity"] == self.managed_host_identity
-                        else row["display_name"]
-                    ),
+                    "recipient_display_name": row["display_name"],
                     "status": row["status"],
                     "is_host": bool(
                         self.managed_host_identity is not None
@@ -9363,6 +9455,58 @@ class HubStore:
             raise
         finally:
             connection.close()
+
+    def _network_server_mail_route_lifecycle(
+        self, connection: sqlite3.Connection, team_id: str, server_id: str
+    ) -> str | None:
+        """Identify the current trusted inbox incarnation, not its mutable name.
+
+        Call under the caller's read/write transaction. This is an identity
+        precondition, not a credential, and does not grant network access.
+        """
+        node = connection.execute(
+            """SELECT n.id,n.principal_id,n.server_identity,n.enrolled_at
+               FROM nodes AS n JOIN principals AS p ON p.id=n.principal_id
+               WHERE n.team_id=? AND n.id=? AND n.status IN ('active','offline')
+                 AND p.status='active'""",
+            (team_id, server_id),
+        ).fetchone()
+        if node is None:
+            return None
+        identity: dict[str, Any] = {
+            "version": 1, "team_id": team_id, "node_id": str(node["id"]),
+            "principal_id": str(node["principal_id"]),
+            "server_identity": str(node["server_identity"]),
+            "enrolled_at": int(node["enrolled_at"]),
+        }
+        if self.managed_host_identity is not None and node["server_identity"] == self.managed_host_identity:
+            identity["kind"] = "host"
+        elif connection.execute(
+            "SELECT 1 FROM network_peer_bindings WHERE team_id=? AND node_id=? LIMIT 1",
+            (team_id, server_id),
+        ).fetchone() is not None:
+            peer = connection.execute(
+                """SELECT b.peer_id,b.service_principal_id,b.created_at
+                   FROM network_peer_bindings AS b
+                   JOIN principals AS p ON p.id=b.service_principal_id
+                   JOIN service_accounts AS s ON s.principal_id=p.id
+                   JOIN memberships AS m ON m.team_id=b.team_id AND m.principal_id=p.id
+                   WHERE b.team_id=? AND b.node_id=? AND b.peer_server_identity=?
+                     AND b.status='active' AND p.kind='service' AND p.status='active'
+                     AND s.service_identifier='agentsdock.secure-peer.' || b.peer_id
+                     AND m.role='automation' AND m.status='active'""",
+                (team_id, server_id, node["server_identity"]),
+            ).fetchone()
+            if peer is None:
+                return None
+            identity.update({
+                "kind": "peer", "peer_id": str(peer["peer_id"]),
+                "service_principal_id": str(peer["service_principal_id"]),
+                "created_at": int(peer["created_at"]),
+            })
+        else:
+            identity["kind"] = "legacy"
+        return canonical_fingerprint(identity).hex()
 
     def get_network_server(
         self,
@@ -9440,30 +9584,18 @@ class HubStore:
                 self.managed_host_identity is not None
                 and row["server_identity"] == self.managed_host_identity
             )
-            recipient_display_name = str(row["display_name"])
-            if is_host:
-                owner = connection.execute(
-                    """
-                    SELECT p.display_name
-                    FROM memberships AS m
-                    JOIN principals AS p ON p.id=m.principal_id
-                    WHERE m.team_id=? AND m.role='owner' AND m.status='active'
-                      AND p.kind='human' AND p.status='active'
-                    """,
-                    (team_id,),
-                ).fetchone()
-                if owner is None:
-                    raise RuntimeError("Team Network owner is unavailable")
-                recipient_display_name = str(owner["display_name"])
             result = {
                 "server": {
                     "id": str(row["id"]),
                     "server_identity": str(row["server_identity"]),
                     "display_name": str(row["display_name"]),
-                    "recipient_display_name": recipient_display_name,
+                    "recipient_display_name": str(row["display_name"]),
                     "status": str(row["status"]),
                     "is_host": is_host,
                     "owned_by_caller": row["id"] == owned_node_id,
+                    "mail_route_lifecycle_id": self._network_server_mail_route_lifecycle(
+                        connection, team_id, str(row["id"])
+                    ),
                 }
             }
             connection.execute("COMMIT")
@@ -10103,7 +10235,8 @@ class HubStore:
                 if row is None:
                     raise HubError("not_found", "Resource not found", 404)
                 if (
-                    not self._network_source_author_matches(
+                    not self._network_host_operator_can_moderate(claims, team_id, str(membership["role"]))
+                    and not self._network_source_author_matches(
                         connection,
                         claims,
                         team_id,
@@ -11631,7 +11764,57 @@ class HubStore:
             },
         }
 
+    @staticmethod
+    def team_all_servers_capability() -> dict[str, Any]:
+        return {
+            "available": True,
+            "version": 1,
+            "mention": "@@all",
+            "recipient_kind": "all_servers",
+            "max_recipients_per_message": MAX_TEAM_MESSAGE_SERVER_RECIPIENTS,
+        }
+
     # -- validation helpers -------------------------------------------------
+
+    @staticmethod
+    def _team_message_search_available(connection: sqlite3.Connection) -> bool:
+        try:
+            # Prepare an indexed, zero-result lookup in each required virtual
+            # table. Missing FTS support/indexes must not advertise a scan fallback.
+            for table in ("team_message_search", "team_message_sender_nodes", "team_message_sender_principals"):
+                connection.execute(f"SELECT rowid FROM {table} WHERE {table} MATCH ? LIMIT 0", ('"probe"',))
+            return True
+        except sqlite3.OperationalError:
+            return False
+
+    @staticmethod
+    def _team_message_search_expression(value: Any) -> str | None:
+        if value is None:
+            return None
+        if (
+            not isinstance(value, str)
+            or not 1 <= len(value) <= MAX_TEAM_MESSAGE_SEARCH_CHARS
+            or not value.strip()
+            or any(unicodedata.category(char) in {"Cc", "Cs"} for char in value)
+        ):
+            raise HubError("invalid_request", "Search must be 1–200 characters without control characters", 422)
+        # User syntax is never FTS syntax: punctuation separates literal words,
+        # and every word is quoted before the one server-owned prefix operator.
+        words = re.findall(r"[^\W_]+", unicodedata.normalize("NFC", value), re.UNICODE)
+        return " AND ".join('"' + word.replace('"', '""') + '"*' for word in words)
+
+    @staticmethod
+    def _team_mail_subject(value: Any) -> str | None:
+        if value is None:
+            return None
+        if not isinstance(value, str) or any(
+            unicodedata.category(char) in {"Cc", "Cs", "Zl", "Zp"} for char in value
+        ):
+            raise HubError("invalid_request", "Mail subject must be a single line without control characters", 422)
+        subject = value.strip()
+        if not 1 <= len(subject) <= MAX_TEAM_MESSAGE_TITLE_CHARS:
+            raise HubError("invalid_request", "Mail subject must be between 1 and 160 characters", 422)
+        return subject
 
     @staticmethod
     def _team_text(
@@ -11878,6 +12061,24 @@ class HubStore:
             return "teamspace.write" in claims.scopes
         return membership_role in {"owner", "admin", "member"}
 
+    @staticmethod
+    def _network_host_operator_can_moderate(
+        claims: AccessClaims, team_id: str, membership_role: str,
+    ) -> bool:
+        """Only after _require_network_scope validates the live host session.
+
+        The authenticated Host desktop actor is distinct from local-agent
+        mail, paired servers and ordinary human members running on the host.
+        Moderation does not confer authorship, editing or extra visibility.
+        """
+        return (
+            claims.auth_kind == "managed_server"
+            and claims.principal_id == MANAGED_SERVER_PRINCIPAL_ID
+            and claims.team_id == team_id
+            and membership_role == "automation"
+            and "teamspace.write" in claims.scopes
+        )
+
     # -- projections --------------------------------------------------------
 
     @staticmethod
@@ -12027,6 +12228,8 @@ class HubStore:
         *,
         include_body: bool,
         include_revision: bool = False,
+        include_mail_subject: bool = False,
+        include_mailbox_state: bool = False,
         owned: list[tuple[str, str]] | None = None,
         delivery_address: tuple[str, str] | None = None,
     ) -> dict[str, Any]:
@@ -12041,7 +12244,9 @@ class HubStore:
             # Old pre-V2 writers could persist a title on an ordinary message.
             # Keep the wire contract strict so one legacy row cannot poison a
             # client's entire inbox/feed response.
-            "title": row["title"] if row["kind"] == "skill" else None,
+            "title": row["title"] if row["kind"] == "skill" else (
+                row["mail_subject"] if include_mail_subject else None
+            ),
             "body_format": row["current_body_format"],
             "body_bytes": int(row["body_bytes"]),
             "body_sha256": bytes(row["current_body_sha256"]).hex(),
@@ -12061,6 +12266,8 @@ class HubStore:
             "provenance": self._team_provenance_public(row["provenance_json"]),
             "created_at": _iso8601(row["created_at"]),
         }
+        if row["destination"] == "all_servers":
+            item["destination"] = "all_servers"
         if include_revision:
             item["revision"] = {
                 "version": int(row["message_version"]),
@@ -12094,7 +12301,20 @@ class HubStore:
                     and recipient["id"] == delivery_id
                 ]
             item["delivery"] = mine[0] if mine else None
+            if include_mailbox_state and row["kind"] == "message" and item["delivery"] is not None:
+                delivery = item["delivery"]
+                recipient = next((entry for entry in recipient_rows
+                    if entry["recipient_kind"] == "server" and entry["recipient_node_id"] == delivery["id"]
+                    and delivery["kind"] == "server" and entry["dismissed_at"] is None), None)
+                if recipient is not None:
+                    item["mailbox_state"] = self._team_mailbox_state_public(recipient)
         return item
+
+    @staticmethod
+    def _team_mailbox_state_public(recipient: sqlite3.Row) -> dict[str, Any]:
+        return {"address_kind": "server", "address_id": recipient["recipient_node_id"],
+            "unread": bool(recipient["inbox_unread"]) if recipient["inbox_unread"] is not None else recipient["state"] != "read",
+            "version": int(recipient["mailbox_state_version"])}
 
     @staticmethod
     def _team_message_revision_public(
@@ -12192,11 +12412,10 @@ class HubStore:
         kind = request.get("kind")
         if kind not in {"message", "skill"}:
             raise HubError("invalid_request", "Message kind is invalid", 422)
-        title = self._team_text(
-            request.get("title"), "title", 1, MAX_TEAM_MESSAGE_TITLE_CHARS, allow_none=True
+        title = (
+            self._team_mail_subject(request.get("title")) if kind == "message" else
+            self._team_text(request.get("title"), "title", 1, MAX_TEAM_MESSAGE_TITLE_CHARS, allow_none=True)
         )
-        if kind == "message" and title is not None:
-            raise HubError("invalid_request", "Only skill posts carry a title", 422)
         body, body_format, body_digest, body_bytes = self._team_body(request)
         provenance_json = self._team_provenance(request.get("provenance"))
         idempotency_key = self._team_idempotency_key(request)
@@ -12210,19 +12429,35 @@ class HubStore:
         ):
             raise HubError("invalid_request", "Message recipients are invalid", 422)
         requested: list[tuple[str, str | None]] = []
+        recipient_lifecycles: dict[str, str | None] = {}
         for entry in raw_recipients:
-            if not isinstance(entry, dict) or entry.get("kind") not in {"server", "human", "all"}:
+            if not isinstance(entry, dict) or entry.get("kind") not in {"server", "human", "all", "all_servers"}:
                 raise HubError("invalid_request", "Message recipients are invalid", 422)
             recipient_kind = str(entry["kind"])
             recipient_id = entry.get("id")
-            if recipient_kind == "all":
-                if recipient_id not in (None, "all"):
+            if recipient_kind in {"all", "all_servers"}:
+                if recipient_id not in (None, recipient_kind):
                     raise HubError("invalid_request", "Message recipients are invalid", 422)
                 recipient_id = None
             elif not isinstance(recipient_id, str) or not 1 <= len(recipient_id) <= 240:
                 raise HubError("invalid_request", "Message recipients are invalid", 422)
+            lifecycle = entry.get("mail_route_lifecycle_id")
+            if lifecycle is not None and (
+                recipient_kind != "server" or not isinstance(lifecycle, str)
+                or re.fullmatch(r"[0-9a-f]{64}", lifecycle) is None
+            ):
+                raise HubError("invalid_request", "Mail route identity is invalid", 422)
+            if recipient_kind == "server":
+                if recipient_id in recipient_lifecycles and recipient_lifecycles[recipient_id] != lifecycle:
+                    raise HubError("invalid_request", "Conflicting mail route identities", 422)
+                recipient_lifecycles[str(recipient_id)] = lifecycle
             if (recipient_kind, recipient_id) not in requested:
                 requested.append((recipient_kind, recipient_id))
+        all_servers = ("all_servers", None) in requested
+        if all_servers and (kind != "message" or requested != [("all_servers", None)]):
+            raise HubError(
+                "invalid_request", "All-server mail must be a message with only the all_servers recipient", 422
+            )
         raw_attachments = request.get("attachment_ids") or []
         if (
             not isinstance(raw_attachments, list)
@@ -12281,6 +12516,9 @@ class HubStore:
                     else None
                 ),
                 "provenance": provenance_json,
+                **({"mail_route_lifecycles": sorted(
+                    (key, value) for key, value in recipient_lifecycles.items() if value is not None
+                )} if any(value is not None for value in recipient_lifecycles.values()) else {}),
             }
         )
         connection = self.connect()
@@ -12300,6 +12538,43 @@ class HubStore:
                 sender_kind, sender_node_id = self._team_sender(connection, claims, team_id)
                 resolved: list[tuple[str, str | None, str | None]] = []
                 for recipient_kind, recipient_id in requested:
+                    if recipient_kind == "all_servers":
+                        # Freeze the current server mailboxes in this transaction.
+                        # Presence is not trust: offline members still receive mail;
+                        # retired secure-peer bindings do not. Match the roster's
+                        # exact active-binding rule, including legacy/host nodes.
+                        server_rows = connection.execute(
+                            """
+                            SELECT n.id FROM nodes AS n
+                            WHERE n.team_id=? AND n.status<>'revoked'
+                              AND (
+                                n.server_identity=?
+                                OR NOT EXISTS (
+                                    SELECT 1 FROM network_peer_bindings AS history
+                                    WHERE history.team_id=n.team_id AND history.node_id=n.id
+                                )
+                                OR EXISTS (
+                                    SELECT 1 FROM network_peer_bindings AS live
+                                    JOIN principals AS p ON p.id=live.service_principal_id
+                                    JOIN service_accounts AS s ON s.principal_id=p.id
+                                    JOIN memberships AS m ON m.team_id=live.team_id AND m.principal_id=p.id
+                                    WHERE live.team_id=n.team_id AND live.node_id=n.id
+                                      AND live.peer_server_identity=n.server_identity
+                                      AND live.status='active' AND p.kind='service' AND p.status='active'
+                                      AND s.service_identifier='agentsdock.secure-peer.' || live.peer_id
+                                      AND m.role='automation' AND m.status='active'
+                                )
+                              )
+                            ORDER BY n.id LIMIT ?
+                            """,
+                            (team_id, self.managed_host_identity, MAX_TEAM_MESSAGE_SERVER_RECIPIENTS + 1),
+                        ).fetchall()
+                        if not server_rows:
+                            raise HubError("recipient_unavailable", "No Team Network server inboxes are available", 404)
+                        if len(server_rows) > MAX_TEAM_MESSAGE_SERVER_RECIPIENTS:
+                            raise HubError("recipient_limit", "Team Network server inbox limit exceeded", 413)
+                        resolved.extend(("server", str(row["id"]), None) for row in server_rows)
+                        continue
                     if recipient_kind == "all":
                         resolved.append(("all", None, None))
                         continue
@@ -12316,6 +12591,15 @@ class HubStore:
                                 "recipient_unavailable",
                                 "Team Network server recipient is unavailable",
                                 404,
+                            )
+                        expected_lifecycle = recipient_lifecycles.get(str(recipient_id))
+                        if expected_lifecycle is not None and expected_lifecycle != self._network_server_mail_route_lifecycle(
+                            connection, team_id, str(recipient_id)
+                        ):
+                            raise HubError(
+                                "mail_route_changed",
+                                "The recipient changed or left the team. Select its @@ mention again to grant a new route.",
+                                409,
                             )
                         resolved.append(("server", str(found["id"]), None))
                         continue
@@ -12480,14 +12764,15 @@ class HubStore:
                         id,team_id,kind,title,body_format,body,body_sha256,
                         sender_kind,sender_principal_id,sender_node_id,provenance_json,
                         in_reply_to_message_id,skill_id,skill_version,
-                        attachment_count,attachment_bytes,idempotency_key,created_at
-                    ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                        attachment_count,attachment_bytes,idempotency_key,created_at,destination,
+                        mail_subject
+                    ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
                     """,
                     (
                         message_id,
                         team_id,
                         kind,
-                        title,
+                        title if kind == "skill" else None,
                         body_format,
                         body,
                         body_digest,
@@ -12506,6 +12791,8 @@ class HubStore:
                             )
                         ).digest(),
                         timestamp,
+                        "all_servers" if all_servers else None,
+                        title if kind == "message" else None,
                     ),
                 )
                 for recipient_kind, node_id, principal_id in resolved:
@@ -12563,8 +12850,12 @@ class HubStore:
                 ).fetchone()
                 assert row is not None
                 response = {
-                    "message": self._team_message_public(connection, row, include_body=True)
+                    "message": self._team_message_public(
+                        connection, row, include_body=True, include_mail_subject=title is not None
+                    )
                 }
+                if len(canonical_json(response)) > MAX_NETWORK_PAGE_RESPONSE_BYTES:
+                    raise HubError("recipient_limit", "Message recipient response exceeds the size limit", 413)
                 self._idempotency_store(
                     connection,
                     team_id,
@@ -12608,11 +12899,233 @@ class HubStore:
                         "team.skill.versioned",
                         timestamp,
                     )
-                return response
+                is_bulletin = any(recipient[0] == "all" for recipient in resolved)
+            # The write context has committed before publishing. Idempotent
+            # early returns and rolled-back transactions never reach this hook.
+            if kind == "message":
+                self._publish_team_mail_arrival(
+                    team_id, int(row["queue_ordinal"]), message_id, resolved
+                )
+            if is_bulletin:
+                self._publish_team_bulletin_head(connection, team_id)
+            return response
         except sqlite3.IntegrityError as exc:
             raise HubError("conflict", "Team message conflicts with existing data", 409) from exc
         finally:
             connection.close()
+
+    def _publish_team_mail_arrival(
+        self,
+        team_id: str,
+        sequence: int,
+        message_id: str,
+        resolved: list[tuple[str, str | None, str | None]],
+    ) -> None:
+        """Best-effort memory-only hints; failures cannot undo committed mail."""
+        for recipient_kind, node_id, _ in resolved:
+            if recipient_kind != "server" or node_id is None:
+                continue
+            try:
+                self.mail_hint_broker.publish(MailArrival(team_id, node_id, sequence, message_id))
+            except Exception:
+                # A healthy-looking idle stream must not silently miss mail.
+                # Retire it so its owner reconnects to the durable watermark.
+                with suppress(Exception):
+                    self.mail_hint_broker.invalidate(team_id, node_id)
+            try:
+                self.notification_broker.publish_mail(MailArrival(team_id, node_id, sequence, message_id))
+            except Exception:
+                with suppress(Exception):
+                    self.notification_broker.invalidate(team_id, node_id)
+
+    def _publish_team_bulletin_head(
+        self, connection: sqlite3.Connection, team_id: str, *, message_id: str | None = None,
+    ) -> None:
+        # Called only after commit. Even hint preparation must not turn a
+        # successful content mutation into an apparent send failure. Reading a
+        # concurrent newer head is safe: hints coalesce, they are not receipts.
+        try:
+            if message_id is not None and connection.execute(
+                """SELECT 1 FROM team_message_recipients
+                   WHERE team_id=? AND message_id=? AND recipient_kind='all'""",
+                (team_id, message_id),
+            ).fetchone() is None:
+                return
+            change = self._team_bulletin_change(connection, team_id)
+            self.notification_broker.publish_bulletin(change)
+        except Exception:
+            with suppress(Exception):
+                self.notification_broker.invalidate(team_id)
+
+    @staticmethod
+    def _team_bulletin_change(connection: sqlite3.Connection, team_id: str) -> BulletinChange:
+        row = connection.execute(
+            """SELECT sequence,id,message_id,change_kind,message_version FROM team_bulletin_changes
+               WHERE team_id=? ORDER BY sequence DESC LIMIT 1""",
+            (team_id,),
+        ).fetchone()
+        if row is None:
+            return BulletinChange(team_id)
+        try:
+            return BulletinChange(team_id, int(row["sequence"]), str(row["id"]),
+                                  str(row["message_id"]), str(row["change_kind"]), int(row["message_version"]))
+        except ValueError as exc:
+            raise HubError("bulletin_cursor_unavailable", "Bulletin change cursor is unavailable", 409) from exc
+
+    @staticmethod
+    def _team_bulletin_anchor_matches(connection: sqlite3.Connection, anchor: BulletinChange) -> bool:
+        if anchor.through_sequence == 0:
+            return True
+        return connection.execute(
+            """SELECT 1 FROM team_bulletin_changes WHERE team_id=? AND sequence=? AND id=?
+               AND message_id=? AND change_kind=? AND message_version=?""",
+            (anchor.team_id, anchor.through_sequence, anchor.change_id, anchor.message_id,
+             anchor.change_kind, anchor.message_version),
+        ).fetchone() is not None
+
+    @staticmethod
+    def _team_mail_arrival(
+        connection: sqlite3.Connection, team_id: str, recipient_server_id: str
+    ) -> MailArrival:
+        row = connection.execute(
+            """SELECT through_sequence,arrival_id FROM team_mail_arrivals
+               WHERE team_id=? AND recipient_node_id=?""",
+            (team_id, recipient_server_id),
+        ).fetchone()
+        try:
+            return MailArrival(
+                team_id, recipient_server_id,
+                int(row["through_sequence"]) if row is not None else 0,
+                str(row["arrival_id"]) if row is not None else None,
+            )
+        except ValueError as exc:
+            # SQLite integers can exceed JavaScript's exact integer domain.
+            # Never expose a lossy cursor, and do not prevent ordinary mail.
+            raise HubError("mail_cursor_unavailable", "Mail arrival cursor is unavailable", 409) from exc
+
+    @staticmethod
+    def _team_mail_anchor_matches(connection: sqlite3.Connection, anchor: MailArrival) -> bool:
+        if anchor.through_sequence == 0:
+            return True
+        # Deliberately ignore receipt/unread/dismissal/deletion state. Original
+        # message and recipient identities are immutable, including soft deletes.
+        return connection.execute(
+            """SELECT 1 FROM team_messages AS m
+               JOIN team_message_recipients AS r
+                 ON r.team_id=m.team_id AND r.message_id=m.id
+               WHERE m.queue_ordinal=? AND m.id=? AND m.team_id=? AND m.kind='message'
+                 AND r.recipient_kind='server' AND r.recipient_node_id=?""",
+            (anchor.through_sequence, anchor.arrival_id, anchor.team_id, anchor.recipient_server_id),
+        ).fetchone() is not None
+
+    def team_mail_arrival_snapshot(
+        self, claims: AccessClaims, team_id: str, *, previous_cursor: dict[str, Any] | None = None
+    ) -> dict[str, Any]:
+        """One authenticated scalar snapshot; not an Inbox fetch or unread count.
+
+        The exact client anchor detects restore/reuse even when the restored
+        mailbox has advanced past its old maximum. Realm/connection authority
+        belongs to the future transport wrapper, not to supplied cursor fields.
+        """
+        try:
+            previous = MailArrival.from_dict(previous_cursor) if previous_cursor is not None else None
+        except ValueError as exc:
+            raise HubError("invalid_request", "Mail arrival cursor is invalid", 422) from exc
+        connection = self.connect()
+        try:
+            connection.execute("BEGIN")
+            self._require_network_scope(connection, claims, team_id, write=False)
+            node = self._caller_network_node(connection, claims, team_id)
+            recipient = str(node["node_id"])
+            if previous is not None and previous.mailbox != (team_id, recipient):
+                raise HubError("forbidden", "Mail arrival cursor belongs to another mailbox", 403)
+            latest = self._team_mail_arrival(connection, team_id, recipient)
+            reset = previous is None or (
+                previous.through_sequence > latest.through_sequence
+                or not self._team_mail_anchor_matches(connection, previous)
+            )
+            response = latest.as_dict(reset=reset)
+            connection.execute("COMMIT")
+            return response
+        except BaseException:
+            if connection.in_transaction:
+                connection.execute("ROLLBACK")
+            raise
+        finally:
+            connection.close()
+
+    def subscribe_team_mail_arrivals(
+        self, claims: AccessClaims, team_id: str, *, previous_cursor: dict[str, Any] | None = None
+    ) -> tuple[MailHintSubscription, dict[str, Any]]:
+        """Bind first, subscribe, then read a *fresh* authenticated snapshot.
+
+        Reusing the identity lookup's SQLite snapshot would lose a commit
+        between that lookup and subscription. The second read also rechecks
+        membership/binding; every future transport send needs its own fence.
+        """
+        bound = self.team_mail_arrival_snapshot(claims, team_id, previous_cursor=previous_cursor)
+        subscription = self.mail_hint_broker.subscribe(team_id, bound["recipient_server_id"])
+        try:
+            snapshot = self.team_mail_arrival_snapshot(claims, team_id, previous_cursor=previous_cursor)
+            if snapshot["recipient_server_id"] != bound["recipient_server_id"]:
+                raise HubError("forbidden", "Mail mailbox binding changed", 403)
+            return subscription, snapshot
+        except BaseException:
+            subscription.close()
+            raise
+
+    def team_notification_snapshot(
+        self, claims: AccessClaims, team_id: str, *, previous_cursor: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """Read two authenticated indexed heads, never an Inbox/feed or count."""
+        try:
+            previous = NotificationCursor.from_dict(previous_cursor) if previous_cursor is not None else None
+        except ValueError as exc:
+            raise HubError("invalid_request", "Notification cursor is invalid", 422) from exc
+        connection = self.connect()
+        try:
+            connection.execute("BEGIN")
+            self._require_network_scope(connection, claims, team_id, write=False)
+            recipient = str(self._caller_network_node(connection, claims, team_id)["node_id"])
+            if previous is not None and previous.mailbox != (team_id, recipient):
+                raise HubError("forbidden", "Notification cursor belongs to another mailbox", 403)
+            mail = self._team_mail_arrival(connection, team_id, recipient)
+            bulletin = self._team_bulletin_change(connection, team_id)
+            mail_reset = previous is None or (
+                previous.mail.through_sequence > mail.through_sequence
+                or not self._team_mail_anchor_matches(connection, previous.mail)
+            )
+            bulletin_reset = previous is None or (
+                previous.bulletin.through_sequence > bulletin.through_sequence
+                or not self._team_bulletin_anchor_matches(connection, previous.bulletin)
+            )
+            response = NotificationCursor(mail, bulletin, mail_reset, bulletin_reset).as_dict()
+            connection.execute("COMMIT")
+            return response
+        except BaseException:
+            if connection.in_transaction:
+                connection.execute("ROLLBACK")
+            raise
+        finally:
+            connection.close()
+
+    def subscribe_team_notifications(
+        self, claims: AccessClaims, team_id: str, *, previous_cursor: dict[str, Any] | None = None,
+    ):
+        bound = NotificationCursor.from_dict(self.team_notification_snapshot(
+            claims, team_id, previous_cursor=previous_cursor,
+        ))
+        subscription = self.notification_broker.subscribe(team_id, bound.recipient_server_id)
+        try:
+            snapshot = self.team_notification_snapshot(claims, team_id, previous_cursor=previous_cursor)
+            cursor = NotificationCursor.from_dict(snapshot)
+            if cursor.mailbox != bound.mailbox:
+                raise HubError("forbidden", "Notification mailbox binding changed", 403)
+            subscription.seed(cursor)
+            return subscription, snapshot
+        except BaseException:
+            subscription.close()
+            raise
 
     def list_team_messages(
         self,
@@ -12629,6 +13142,11 @@ class HubStore:
         after_sequence: int = 0,
         limit: int = 50,
         include_revision: bool = False,
+        include_mail_subject: bool = False,
+        include_mailbox_state: bool = False,
+        include_mailbox_coverage: bool = False,
+        after_arrival_id: str | None = None,
+        q: str | None = None,
     ) -> dict[str, Any]:
         if box not in {"inbox", "feed", "sent"}:
             raise HubError("invalid_request", "Message box is invalid", 422)
@@ -12641,6 +13159,7 @@ class HubStore:
         if (from_kind is None) != (from_id is None):
             raise HubError("invalid_request", "Sender filter is invalid", 422)
         since_epoch = self._team_since(since)
+        search_expression = self._team_message_search_expression(q)
         connection = self.connect()
         try:
             connection.execute("BEGIN")
@@ -12682,8 +13201,9 @@ class HubStore:
                     f" AND r.recipient_kind=? AND r.{column}=?"
                 )
                 params = [address_kind, address_id, *params]
+                where.append("r.dismissed_at IS NULL")
                 if unread:
-                    where.append("r.state<>'read'")
+                    where.append("COALESCE(r.inbox_unread,r.state<>'read')=1" if include_mailbox_state and address_kind == "server" else "r.state<>'read'")
             else:
                 if claims.auth_kind in NETWORK_AUTOMATION_AUTH_KINDS:
                     server_ids = [identity for kind, identity in owned if kind == "server"]
@@ -12701,14 +13221,54 @@ class HubStore:
             if since_epoch is not None:
                 where.append("m.created_at>=?")
                 params.append(since_epoch)
-            rows = connection.execute(
-                self._team_message_select()
-                + joins
-                + " WHERE "
-                + " AND ".join(where)
-                + " ORDER BY m.queue_ordinal ASC LIMIT ?",
-                (*params, limit + 1),
-            ).fetchall()
+            if q is not None:
+                if not self._team_message_search_available(connection):
+                    raise HubError("search_unavailable", "Indexed Team Messages search is unavailable", 503)
+                if not search_expression:
+                    # Punctuation-only input is an empty search, never an
+                    # accidental unfiltered mailbox read or coverage proof.
+                    where.append("0")
+                else:
+                    scoped_expression = 'scope:"' + team_id.replace('"', '""') + '" AND {subject body}: (' + search_expression + ')'
+                    where.append("""m.queue_ordinal IN (
+                        SELECT rowid FROM team_message_search WHERE team_message_search MATCH ?
+                        UNION
+                        SELECT sent.queue_ordinal FROM team_messages AS sent
+                        WHERE sent.team_id=? AND sent.sender_kind='server'
+                          AND sent.sender_node_id IN (
+                            SELECT n.id FROM team_message_sender_nodes
+                            JOIN nodes AS n ON n.rowid=team_message_sender_nodes.rowid
+                            WHERE team_message_sender_nodes MATCH ? AND n.team_id=?
+                          )
+                        UNION
+                        SELECT sent.queue_ordinal FROM team_messages AS sent
+                        WHERE sent.team_id=? AND sent.sender_kind='human'
+                          AND sent.sender_principal_id IN (
+                            SELECT p.id FROM team_message_sender_principals
+                            JOIN principals AS p ON p.rowid=team_message_sender_principals.rowid
+                            WHERE team_message_sender_principals MATCH ?
+                          )
+                    )""")
+                    params.extend((scoped_expression, team_id, search_expression, team_id, team_id, search_expression))
+            search_deadline = time.monotonic() + MAX_TEAM_MESSAGE_SEARCH_SECONDS if q is not None else None
+            if search_deadline is not None:
+                connection.set_progress_handler(lambda: int(time.monotonic() >= search_deadline), 1000)
+            try:
+                rows = connection.execute(
+                    self._team_message_select()
+                    + joins
+                    + " WHERE "
+                    + " AND ".join(where)
+                    + " ORDER BY m.queue_ordinal ASC LIMIT ?",
+                    (*params, limit + 1),
+                ).fetchall()
+            except sqlite3.OperationalError as exc:
+                if search_deadline is not None and "interrupted" in str(exc).lower():
+                    raise HubError("search_too_broad", "Search exceeded its work limit; use more specific words", 503) from exc
+                raise
+            finally:
+                if search_deadline is not None:
+                    connection.set_progress_handler(None, 0)
             visible = rows[:limit]
             messages = [
                 self._team_message_public(
@@ -12716,6 +13276,8 @@ class HubStore:
                     row,
                     include_body=False,
                     include_revision=include_revision,
+                    include_mail_subject=include_mail_subject,
+                    include_mailbox_state=include_mailbox_state,
                     owned=owned if box == "inbox" else None,
                     delivery_address=(str(address_kind), str(address_id))
                     if box == "inbox"
@@ -12734,6 +13296,38 @@ class HubStore:
                 ),
                 "has_more": len(rows) > limit,
             }
+            # Coverage is opt-in and store-only until a negotiated transport is
+            # implemented. Filtered/foreign/stale-prefix pages are never proof
+            # that the recipient reviewed the entire arrival prefix.
+            coverage_latest: MailArrival | None = None
+            if (
+                include_mailbox_coverage and box == "inbox" and address_kind == "server"
+                and not unread and from_kind is None and since_epoch is None and q is None
+            ):
+                try:
+                    anchor = MailArrival(team_id, str(address_id), after_sequence, after_arrival_id)
+                except ValueError:
+                    anchor = None
+                if anchor is not None and self._team_mail_anchor_matches(connection, anchor):
+                    coverage_latest = self._team_mail_arrival(connection, team_id, str(address_id))
+
+            def apply_coverage() -> None:
+                if coverage_latest is not None:
+                    covered = (
+                        MailArrival(team_id, str(address_id), messages[-1]["sequence"], messages[-1]["id"])
+                        if response["has_more"] and messages else coverage_latest
+                    )
+                    response["mailbox_coverage"] = covered.as_dict()
+
+            apply_coverage()
+            # Expanded all-server mail can make an ordinary page larger than
+            # the peer transport. Preserve the cursor, returning a shorter
+            # complete page instead of omitting any recipients or messages.
+            while len(messages) > 1 and len(canonical_json(response)) > MAX_NETWORK_PAGE_RESPONSE_BYTES:
+                messages.pop()
+                response["next_after_sequence"] = messages[-1]["sequence"]
+                response["has_more"] = True
+                apply_coverage()
             if len(canonical_json(response)) > MAX_NETWORK_PAGE_RESPONSE_BYTES:
                 raise HubError(
                     "invalid_request", "Message page exceeds the response limit; lower limit", 422
@@ -12754,6 +13348,8 @@ class HubStore:
         message_id: str,
         *,
         include_revision: bool = False,
+        include_mail_subject: bool = False,
+        include_mailbox_state: bool = False,
     ) -> dict[str, Any]:
         connection = self.connect()
         try:
@@ -12785,9 +13381,118 @@ class HubStore:
                     row,
                     include_body=True,
                     include_revision=include_revision,
+                    include_mail_subject=include_mail_subject,
+                    include_mailbox_state=include_mailbox_state,
                     owned=owned,
                 )
             }
+            connection.execute("COMMIT")
+            return response
+        except BaseException:
+            if connection.in_transaction:
+                connection.execute("ROLLBACK")
+            raise
+        finally:
+            connection.close()
+
+    def get_team_message_thread(
+        self,
+        claims: AccessClaims,
+        team_id: str,
+        message_id: str,
+        *,
+        after_sequence: int = 0,
+        limit: int = 25,
+    ) -> dict[str, Any]:
+        """Read a bounded, currently visible parent-linked conversation.
+
+        Traversal reads identity/ownership metadata only, using the parent
+        index. Unreadable/deleted parents and branches are not traversed. The
+        graph budget includes hidden child observations, so even a broadcast
+        with many private replies cannot cause an unbounded mailbox scan.
+        ``truncated`` is not a continuation cursor or a claim of completeness.
+        """
+        if type(limit) is not int or not 1 <= limit <= MAX_TEAM_MAIL_THREAD_PAGE_ITEMS:
+            raise HubError("invalid_request", "Thread page limit is invalid", 422)
+        if type(after_sequence) is not int or not 0 <= after_sequence <= MAX_SQLITE_SIGNED_INTEGER:
+            raise HubError("invalid_request", "Thread page cursor is invalid", 422)
+        metadata_select = """SELECT id,team_id,kind,queue_ordinal,in_reply_to_message_id,
+            sender_kind,sender_principal_id,sender_node_id FROM team_messages"""
+        connection = self.connect()
+        try:
+            connection.execute("BEGIN")
+            membership = self._require_network_scope(connection, claims, team_id, write=False)
+            owned = self._team_owned_addresses(connection, claims, team_id, str(membership["role"]))
+
+            def ordinary_mail(row: sqlite3.Row) -> bool:
+                return row["kind"] == "message" and connection.execute("""
+                    SELECT 1 FROM team_message_recipients
+                    WHERE team_id=? AND message_id=? AND recipient_kind='all' LIMIT 1
+                    """, (team_id, row["id"])).fetchone() is None
+
+            def readable(identity: str) -> sqlite3.Row | None:
+                row = connection.execute(metadata_select + " WHERE team_id=? AND id=?",
+                    (team_id, identity)).fetchone()
+                return row if row is not None and ordinary_mail(row) and self._team_message_visible(connection, claims, row, owned) else None
+
+            root = readable(message_id)
+            if root is None:
+                raise HubError("not_found", "Resource not found", 404)
+            ancestors = {str(root["id"])}
+            truncated = False
+            while root["in_reply_to_message_id"] is not None:
+                parent_id = str(root["in_reply_to_message_id"])
+                if parent_id in ancestors or len(ancestors) >= MAX_TEAM_MAIL_THREAD_ANCESTORS:
+                    truncated = True
+                    break
+                parent = readable(parent_id)
+                if parent is None:
+                    truncated = True
+                    break
+                ancestors.add(parent_id)
+                root = parent
+
+            graph = [root]
+            seen = {str(root["id"])}
+            observed = 1
+            for parent in graph:
+                children = connection.execute(metadata_select + """
+                    WHERE team_id=? AND in_reply_to_message_id=?
+                    ORDER BY queue_ordinal ASC LIMIT ?""",
+                    (team_id, parent["id"], MAX_TEAM_MAIL_THREAD_ITEMS - observed + 1)).fetchall()
+                for child in children:
+                    if observed >= MAX_TEAM_MAIL_THREAD_ITEMS:
+                        truncated = True
+                        break
+                    observed += 1
+                    identity = str(child["id"])
+                    if identity in seen:
+                        truncated = True
+                        continue
+                    seen.add(identity)
+                    if ordinary_mail(child) and self._team_message_visible(connection, claims, child, owned):
+                        graph.append(child)
+                if observed >= MAX_TEAM_MAIL_THREAD_ITEMS and truncated:
+                    break
+            ordered = sorted((row for row in graph if int(row["queue_ordinal"]) > after_sequence),
+                key=lambda row: int(row["queue_ordinal"]))
+            page_ids = [str(row["id"]) for row in ordered[:limit]]
+            rows = connection.execute(self._team_message_select()
+                + " WHERE m.team_id=? AND m.id IN (" + ",".join("?" for _ in page_ids)
+                + ") ORDER BY m.queue_ordinal ASC", (team_id, *page_ids)).fetchall() if page_ids else []
+            messages = [self._team_message_public(connection, row, include_body=True,
+                include_revision=True, include_mail_subject=True, include_mailbox_state=True,
+                owned=owned) for row in rows]
+            response = {"team_id": team_id, "anchor_message_id": message_id,
+                "root_message_id": str(root["id"]), "messages": messages,
+                "next_after_sequence": messages[-1]["sequence"] if messages else after_sequence,
+                "has_more": len(ordered) > len(messages), "truncated": truncated}
+            while len(messages) > 1 and len(canonical_json(response)) > MAX_TEAM_MAIL_THREAD_RESPONSE_BYTES:
+                messages.pop()
+                response["next_after_sequence"] = messages[-1]["sequence"]
+                response["has_more"] = True
+            if len(canonical_json(response)) > MAX_TEAM_MAIL_THREAD_RESPONSE_BYTES:
+                raise HubError("invalid_request", "Thread message exceeds the response limit", 422)
             connection.execute("COMMIT")
             return response
         except BaseException:
@@ -12802,9 +13507,12 @@ class HubStore:
         claims: AccessClaims,
         team_id: str,
         message_id: str,
+        *,
+        version: int | None = None,
     ) -> dict[str, Any]:
         """Return immutable revision summaries for one visible Team Message."""
-
+        if version is not None and (type(version) is not int or not 1 <= version <= 200):
+            raise HubError("invalid_request", "Message version is invalid", 422)
         connection = self.connect()
         try:
             connection.execute("BEGIN")
@@ -12839,8 +13547,9 @@ class HubStore:
             response = {
                 "message_id": message_id,
                 "versions": [
-                    self._team_message_revision_public(item, include_body=False)
+                    self._team_message_revision_public(item, include_body=version is not None)
                     for item in revision_rows
+                    if version is None or int(item["revision_version"]) == version
                 ],
             }
             connection.execute("COMMIT")
@@ -12858,6 +13567,8 @@ class HubStore:
         team_id: str,
         message_id: str,
         request: dict[str, Any],
+        *,
+        include_mail_subject: bool = False,
     ) -> dict[str, Any]:
         """Append an author-only body revision to a broadcast Team Message."""
 
@@ -12889,7 +13600,9 @@ class HubStore:
                     fingerprint,
                 )
                 if cached is not None:
-                    return cached
+                    return self._team_revision_response_subject(
+                        connection, team_id, message_id, cached, include_mail_subject
+                    )
                 row = connection.execute(
                     self._team_message_select()
                     + """
@@ -13021,11 +13734,34 @@ class HubStore:
                     "team.message.revised",
                     timestamp,
                 )
-                return response
+                response = self._team_revision_response_subject(
+                    connection, team_id, message_id, response, include_mail_subject
+                )
+            self._publish_team_bulletin_head(connection, team_id)
+            return response
         except sqlite3.IntegrityError as exc:
             raise HubError("conflict", "Team message revision conflicts", 409) from exc
         finally:
             connection.close()
+
+    @staticmethod
+    def _team_revision_response_subject(
+        connection: sqlite3.Connection,
+        team_id: str,
+        message_id: str,
+        response: dict[str, Any],
+        include_mail_subject: bool,
+    ) -> dict[str, Any]:
+        # Cache the legacy-compatible mutation response; negotiate its immutable
+        # subject on each reply, including idempotent retries from old readers.
+        subject = None
+        if include_mail_subject:
+            row = connection.execute(
+                "SELECT mail_subject FROM team_messages WHERE team_id=? AND id=? AND kind='message'",
+                (team_id, message_id),
+            ).fetchone()
+            subject = row["mail_subject"] if row is not None else None
+        return {**response, "message": {**response["message"], "title": subject}}
 
     def delete_team_message(
         self,
@@ -13034,7 +13770,11 @@ class HubStore:
         message_id: str,
         request: dict[str, Any],
     ) -> dict[str, Any]:
-        """Soft-delete one ordinary Team Message without mutating its source."""
+        """Hide a Team Message announcement without mutating its source.
+
+        A poster or authenticated Host operator may remove an announcement.
+        Library versions and archive state remain independent and intact.
+        """
 
         timestamp = _now()
         idempotency_key = self._team_idempotency_key(request)
@@ -13067,8 +13807,19 @@ class HubStore:
                 ).fetchone()
                 if row is None:
                     raise HubError("not_found", "Resource not found", 404)
-                if (
-                    not self._network_source_author_matches(
+                host_moderator = self._network_host_operator_can_moderate(
+                    claims, team_id, str(membership["role"]),
+                )
+                if row["kind"] == "skill":
+                    if not host_moderator and not self._team_message_author_matches(
+                        connection, claims, team_id, row
+                    ):
+                        raise HubError(
+                            "forbidden", "Only the poster or Host operator can delete this announcement", 403
+                        )
+                elif (
+                    not host_moderator
+                    and not self._network_source_author_matches(
                         connection,
                         claims,
                         team_id,
@@ -13082,12 +13833,6 @@ class HubStore:
                     and membership["role"] not in {"owner", "admin"}
                 ):
                     raise HubError("forbidden", "Operation is not permitted", 403)
-                if row["kind"] != "message":
-                    raise HubError(
-                        "skill_archive_required",
-                        "Archive this skill in the Skills library instead",
-                        409,
-                    )
                 existing = connection.execute(
                     """
                     SELECT id FROM network_content_deletions
@@ -13148,7 +13893,9 @@ class HubStore:
                         "team.message.deleted",
                         timestamp,
                     )
-                return response
+            if inserted:
+                self._publish_team_bulletin_head(connection, team_id, message_id=message_id)
+            return response
         finally:
             connection.close()
 
@@ -13216,7 +13963,7 @@ class HubStore:
                 d.resource_kind='message' AND EXISTS (
                     SELECT 1 FROM team_messages AS m
                     WHERE m.team_id=d.team_id AND m.id=d.resource_id
-                      AND m.kind='message'
+                      AND m.kind IN ('message', 'skill')
                       AND (
                         {' OR '.join(sender_visibility)}
                         OR EXISTS (
@@ -13282,6 +14029,102 @@ class HubStore:
         finally:
             connection.close()
 
+    def dismiss_team_message(
+        self,
+        claims: AccessClaims,
+        team_id: str,
+        message_id: str,
+        request: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Remove a message from one owned inbox without changing other copies."""
+        timestamp = _now()
+        address = (request.get("address_kind"), request.get("address_id"))
+        key = self._team_idempotency_key(request)
+        fingerprint = canonical_fingerprint({"message_id": message_id, "address": address})
+        connection = self.connect()
+        try:
+            with _write_transaction(connection):
+                membership = self._require_network_scope(connection, claims, team_id, write=False)
+                owned = self._team_owned_addresses(connection, claims, team_id, str(membership["role"]))
+                if address not in owned:
+                    raise HubError("forbidden", "This mailbox is not owned by the caller", 403)
+                cached = self._idempotency_lookup(connection, team_id, claims.principal_id,
+                    "team.message.dismiss", key, fingerprint)
+                if cached is not None:
+                    return cached
+                recipient = next((row for row in self._team_message_recipients(connection, team_id, message_id)
+                    if (row["recipient_kind"], row["recipient_node_id"] or row["recipient_principal_id"]) == address), None)
+                if recipient is None:
+                    raise HubError("not_found", "Message is not in this mailbox", 404)
+                connection.execute("UPDATE team_message_recipients SET dismissed_at=COALESCE(dismissed_at,?) WHERE id=?",
+                    (timestamp, recipient["id"]))
+                response = {"dismissed": True, "message_id": message_id,
+                    "address": {"kind": address[0], "id": address[1]}}
+                self._idempotency_store(connection, team_id, claims.principal_id,
+                    "team.message.dismiss", key, fingerprint, "team_message_recipient", recipient["id"], response, timestamp)
+                return response
+        finally:
+            connection.close()
+
+    def set_team_message_mailbox_state(
+        self, claims: AccessClaims, team_id: str, message_id: str, request: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Compare-and-set one server inbox's attention; never rewind receipts."""
+        address = (request.get("address_kind"), request.get("address_id"))
+        unread = request.get("unread")
+        expected = request.get("expected_version")
+        if address[0] != "server" or not isinstance(address[1], str) or type(unread) is not bool \
+                or type(expected) is not int or not 0 <= expected < 9_007_199_254_740_991:
+            raise HubError("invalid_request", "Server mailbox state is invalid", 422)
+        key = self._team_idempotency_key(request)
+        fingerprint = canonical_fingerprint({"message_id": message_id, "address": address,
+            "unread": unread, "expected_version": expected})
+        timestamp = _now()
+        connection = self.connect()
+        try:
+            with _write_transaction(connection):
+                membership = self._require_network_scope(connection, claims, team_id, write=False)
+                owned = self._team_owned_addresses(connection, claims, team_id, str(membership["role"]))
+                if address not in owned:
+                    raise HubError("forbidden", "This mailbox is not owned by the caller", 403)
+                message = connection.execute("""SELECT m.kind FROM team_messages AS m
+                    WHERE m.team_id=? AND m.id=? AND NOT EXISTS (
+                        SELECT 1 FROM network_content_deletions AS d
+                        WHERE d.team_id=m.team_id AND d.resource_kind='message' AND d.resource_id=m.id)
+                    """, (team_id, message_id)).fetchone()
+                recipient = next((row for row in self._team_message_recipients(connection, team_id, message_id)
+                    if row["recipient_kind"] == "server" and row["recipient_node_id"] == address[1]
+                    and row["dismissed_at"] is None), None)
+                if message is None or message["kind"] != "message" or recipient is None:
+                    raise HubError("not_found", "Message is not in this mailbox", 404)
+                cached = self._idempotency_lookup(connection, team_id, claims.principal_id,
+                    "team.message.mailbox_state", key, fingerprint)
+                if cached is not None:
+                    return cached
+                if int(recipient["mailbox_state_version"]) != expected:
+                    raise HubError("mailbox_state_conflict", "Mailbox state changed. Refresh the mailbox and try again.", 409)
+                connection.execute("""UPDATE team_message_recipients
+                    SET inbox_unread=?,mailbox_state_version=mailbox_state_version+1 WHERE id=?""",
+                    (int(unread), recipient["id"]))
+                if not unread and recipient["state"] != "read":
+                    connection.execute("""UPDATE team_message_recipients SET state='read',
+                        delivered_at=COALESCE(delivered_at,?),read_at=COALESCE(read_at,?) WHERE id=?""",
+                        (timestamp, timestamp, recipient["id"]))
+                    self._outbox(connection, team_id, "team_message_recipient", recipient["id"], "team.message.read", timestamp)
+                updated = next(row for row in self._team_message_recipients(connection, team_id, message_id)
+                    if row["id"] == recipient["id"])
+                response = {"message_id": message_id, "mailbox_state": self._team_mailbox_state_public(updated),
+                    "recipients": [self._team_recipient_public(updated)]}
+                self._idempotency_store(connection, team_id, claims.principal_id, "team.message.mailbox_state",
+                    key, fingerprint, "team_message_recipient", recipient["id"], response, timestamp)
+                self._audit(connection, team_id, claims.principal_id, "team.message.mailbox_state",
+                    "team_message_recipient", recipient["id"], "succeeded", {"unread": unread, "version": expected + 1}, timestamp)
+                self._outbox(connection, team_id, "team_mailbox_state", f"{recipient['id']}:{expected + 1}",
+                    "team.mailbox.state.changed", timestamp)
+                return response
+        finally:
+            connection.close()
+
     def record_team_message_receipt(
         self,
         claims: AccessClaims,
@@ -13293,9 +14136,13 @@ class HubStore:
         state = request.get("state")
         if state not in {"delivered", "read"}:
             raise HubError("invalid_request", "Receipt state is invalid", 422)
+        address = (request.get("address_kind"), request.get("address_id"))
+        if (address[0] is None) != (address[1] is None):
+            raise HubError("invalid_request", "Receipt mailbox requires kind and id", 422)
         idempotency_key = self._team_idempotency_key(request)
         fingerprint = canonical_fingerprint(
-            {"team_id": team_id, "message_id": message_id, "state": state}
+            {"team_id": team_id, "message_id": message_id, "state": state,
+             **({"address": address} if address[0] is not None else {})}
         )
         connection = self.connect()
         try:
@@ -13331,6 +14178,10 @@ class HubStore:
                         str(recipient["recipient_node_id"] or recipient["recipient_principal_id"]),
                     )
                     in owned
+                    and (address[0] is None or (
+                        recipient["recipient_kind"],
+                        recipient["recipient_node_id"] or recipient["recipient_principal_id"],
+                    ) == address)
                 ]
                 if not rows:
                     raise HubError("forbidden", "This message is not addressed to the caller", 403)

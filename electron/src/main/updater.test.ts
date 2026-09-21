@@ -99,6 +99,61 @@ describe('AppUpdateManager', () => {
     expect(defaultAppUpdateTrack('0.2.6')).toBe('stable')
   })
 
+  it('coordinates only the final refreshed app version and joins duplicate Update actions', async () => {
+    Object.defineProperty(process, 'platform', { configurable: true, value: 'linux' })
+    let release!: (value: boolean) => void
+    const prepareInstall = vi.fn(() => new Promise<boolean>(resolve => { release = resolve }))
+    const manager = createManager({ prepareInstall })
+    mocks.emit('update-downloaded', { version: '1.2.4' })
+    mocks.autoUpdater.checkForUpdates.mockImplementation(async () => {
+      mocks.emit('update-downloaded', { version: '1.2.5' })
+      return null
+    })
+    const first = manager.install()
+    const second = manager.install()
+    expect(first).toBe(second)
+    await vi.waitFor(() => expect(prepareInstall).toHaveBeenCalledWith('1.2.5'))
+    expect(mocks.autoUpdater.quitAndInstall).not.toHaveBeenCalled()
+    release(true)
+    expect(await first).toBe(true)
+    expect(prepareInstall).toHaveBeenCalledOnce()
+    expect(mocks.autoUpdater.quitAndInstall).toHaveBeenCalledOnce()
+  })
+
+  it('retains a working app for an incompatible server and resumes the same user update intent', async () => {
+    Object.defineProperty(process, 'platform', { configurable: true, value: 'linux' })
+    const prepareInstall = vi.fn().mockResolvedValueOnce(false).mockResolvedValue(true)
+    const manager = createManager({ prepareInstall })
+    mocks.emit('update-downloaded', { version: '1.2.4' })
+    expect(await manager.install()).toBe(false)
+    expect(manager.status()).toMatchObject({ state: 'downloaded', availableVersion: '1.2.4' })
+    expect(mocks.autoUpdater.quitAndInstall).not.toHaveBeenCalled()
+    manager.resumeCoordinatedInstall()
+    await vi.waitFor(() => expect(mocks.autoUpdater.quitAndInstall).toHaveBeenCalledOnce())
+    expect(prepareInstall).toHaveBeenNthCalledWith(2, '1.2.4')
+  })
+
+  it('refuses a changed app artifact after paired preparation and leaves a retryable download', async () => {
+    Object.defineProperty(process, 'platform', { configurable: true, value: 'linux' })
+    const manager = createManager({ prepareInstall: async () => {
+      mocks.emit('update-downloaded', { version: '1.2.6' })
+      return true
+    } })
+    mocks.emit('update-downloaded', { version: '1.2.4' })
+    expect(await manager.install()).toBe(false)
+    expect(mocks.autoUpdater.quitAndInstall).not.toHaveBeenCalled()
+    expect(manager.status()).toMatchObject({ state: 'downloaded', availableVersion: '1.2.6' })
+  })
+
+  it('does not quit after a missing or invalid paired release descriptor', async () => {
+    Object.defineProperty(process, 'platform', { configurable: true, value: 'linux' })
+    const manager = createManager({ prepareInstall: async () => { throw new Error('Paired server release signature is invalid.') } })
+    mocks.emit('update-downloaded', { version: '1.2.4' })
+    expect(await manager.install()).toBe(false)
+    expect(mocks.autoUpdater.quitAndInstall).not.toHaveBeenCalled()
+    expect(manager.status().message).toContain('signature is invalid')
+  })
+
   it('configures explicit direct updates without installing on ordinary quit', () => {
     const manager = createManager()
 

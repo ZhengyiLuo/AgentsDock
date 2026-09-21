@@ -2319,6 +2319,36 @@ describe('AgentServerClient live stream', () => {
     }
   })
 
+  it('carries paired signed bytes and identity fences through the actual native HTTP transport', async () => {
+    // Actual Node HTTP client/socket; the endpoint here is a bounded fake server,
+    // not acceptance of the production server's signature/admission/installer.
+    const calls: Array<{ headers: IncomingMessage['headers']; body: string; url: string }> = []
+    const envelope = { manifest_base64: Buffer.from('{"schema":2}').toString('base64'), signature_base64: Buffer.alloc(64, 1).toString('base64') }
+    const target = { expected_server_identity: 'server-a', expected_server_instance_id: 'boot-a' }
+    await withLocalHTTPServer(async (request, response) => {
+      calls.push({ headers: request.headers, body: await incomingBody(request), url: request.url ?? '' })
+      response.setHeader('Content-Type', 'application/json')
+      response.statusCode = calls.length === 1 ? 200 : 409
+      response.end(JSON.stringify(calls.length === 1
+        ? { phase: 'pending', current_version: '1.1.0', server_identity: 'server-a', server_instance_id: 'boot-a', schedule_id: 'durable-schedule' }
+        : { detail: 'server_update_channel_conflict' }))
+    }, async baseURL => {
+      const client = new AgentServerClient(baseURL, 'fixture-token')
+      expect(await client.ensureServerUpdate(envelope, target)).toMatchObject({ phase: 'pending', schedule_id: 'durable-schedule' })
+      await expect(client.ensureServerUpdate(envelope, target)).rejects.toMatchObject({ status: 409 })
+      client.dispose()
+    })
+    expect(calls).toHaveLength(2)
+    for (const call of calls) {
+      expect(call.url).toBe('/api/admin/update/ensure')
+      expect(JSON.parse(call.body)).toEqual({ ...envelope, ...target })
+      expect(call.headers['x-agentsdock-token']).toBe('fixture-token')
+      expect(call.headers.origin).toBeUndefined()
+      expect(call.headers['sec-fetch-mode']).toBeUndefined()
+      expect(call.headers.authorization).toBeUndefined()
+    }
+  })
+
   it('enables Team Hub hosting through the exact privileged native route and body', async () => {
     const calls: Array<{ method: string; url: string; headers: IncomingMessage['headers']; body: string }> = []
     const receipt = {

@@ -1934,6 +1934,22 @@ export interface ServerUpdateStatus {
 export type AppUpdateState = 'disabled' | 'idle' | 'checking' | 'available' | 'downloading' | 'downloaded' | 'installing' | 'not-available' | 'error'
 export type AppUpdateChannel = 'development' | 'direct' | 'app-store'
 export type AppUpdateTrack = 'stable' | 'beta'
+export interface CoordinatedServerUpdate {
+  profileId: string
+  name: string
+  serverIdentity: string | null
+  targetVersion: string
+  phase: 'checking' | 'pending' | 'updating' | 'current' | 'offline' | 'blocked' | 'failed'
+  message: string
+  apiContractVersion?: number
+  serverInstanceId?: string
+  operationId?: string
+  scheduleId?: string
+  activationBlocked?: boolean
+  operationTargetVersion?: string
+  operationOwned?: boolean
+  paused?: boolean
+}
 export interface AppUpdateStatus {
   state: AppUpdateState
   channel: AppUpdateChannel
@@ -1944,6 +1960,8 @@ export interface AppUpdateStatus {
   message?: string
   checkedAt?: string
   downloadedAt?: string
+  serverUpdates?: CoordinatedServerUpdate[]
+  serverUpdateMessage?: string
 }
 
 export interface TimelinePage {

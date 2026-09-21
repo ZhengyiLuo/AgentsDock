@@ -23,9 +23,14 @@
   the prerelease number. Promote to stable only after validation.
 - Mobile changes require a separately scoped mobile task. Do not perform mobile
   builds or uploads as an incidental part of desktop or server work.
-- The embedded `server/` directory is a frozen compatibility fixture, not the
-  deployable AgentsServer source. Server deployment is a separate action in the
-  standalone repository and requires explicit authorization.
+- The `server/` directory is the maintained AgentsServer source, imported with
+  its history. Keep server-only installation self-contained. The standalone
+  repository remains a compatibility export and legacy download destination;
+  do not develop independent changes there. Deployment still requires explicit
+  authorization, and update tests must use isolated state and services.
+- Coordinated desktop/server releases share a public version and pin signed
+  server package metadata. Preserve the legacy signed update path until the
+  migration bridge has been validated against supported old installations.
 - Record public-facing changes and accepted releases in `docs/DEV_LOG.md`.
   Never add private transcripts, credentials, host inventories, local paths,
   or internal incident reports. Review screenshots and recordings before inclusion.

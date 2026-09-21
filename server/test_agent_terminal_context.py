@@ -90,7 +90,14 @@ class AgentTerminalContextTests(unittest.TestCase):
         self.assertEqual(first_prompt, second_prompt)
         self.assertNotIn("Current jobs for this chat", first_prompt)
         self.assertNotIn("turn-start snapshot", first_prompt)
-        self.assertLess(len(first_prompt), 2_400)
+        # The static provider-authority and delivery guidance now lives here
+        # once per session instead of being appended to every turn's prompt,
+        # so the prelude is larger but still bounded and byte-stable.
+        self.assertIn(
+            agent_server.PROVIDER_THREAD_INSTRUCTION_ADDENDUM.strip(),
+            first_prompt,
+        )
+        self.assertLess(len(first_prompt), 12_000)
 
     def test_claude_transcript_suppression_flag_only_affects_fresh_command(self) -> None:
         standalone = agent_server.build_claude_cmd(
@@ -141,6 +148,45 @@ class AgentTerminalContextTests(unittest.TestCase):
 
         probe.assert_called_once_with([agent_server.CLAUDE_BIN, "--help"])
 
+    def test_authority_bearing_fallback_commands_disable_provider_subagents(self) -> None:
+        claude = agent_server.build_claude_cmd(
+            "sess-123",
+            {"id": "sess-123", "backend": "claude"},
+            Path("/tmp/manifest.json"),
+            disable_provider_subagents=True,
+        )
+        codex = agent_server.build_codex_cmd(
+            "sess-123",
+            {"id": "sess-123", "backend": "codex"},
+            "Exact user prompt.",
+            Path("/tmp/manifest.json"),
+            disable_provider_subagents=True,
+        )
+        ordinary_claude = agent_server.build_claude_cmd(
+            "sess-123",
+            {"id": "sess-123", "backend": "claude"},
+            Path("/tmp/manifest.json"),
+        )
+        ordinary_codex = agent_server.build_codex_cmd(
+            "sess-123",
+            {"id": "sess-123", "backend": "codex"},
+            "Exact user prompt.",
+            Path("/tmp/manifest.json"),
+        )
+
+        self.assertIn("Agent", claude)
+        self.assertIn("Task", claude)
+        self.assertNotIn("Agent", ordinary_claude)
+        self.assertNotIn("Task", ordinary_claude)
+        self.assertIn("agents.enabled=false", codex)
+        self.assertIn("agents.max_concurrent_threads_per_session=1", codex)
+        self.assertNotIn("agents.enabled=false", ordinary_codex)
+        self.assertNotIn(
+            "agents.max_concurrent_threads_per_session=1",
+            ordinary_codex,
+        )
+        self.assertEqual(codex[-1], "Exact user prompt.")
+
     def test_legacy_system_prompt_format_contract_remains_usable(self) -> None:
         legacy = agent_server.SYSTEM_PROMPT.format(
             manifest_path="/tmp/legacy-run.json",
@@ -161,7 +207,8 @@ class AgentTerminalContextTests(unittest.TestCase):
         developer_prompt = codex_developer_instructions(command)
 
         self.assertIn("`zd_sess_123`", developer_prompt)
-        self.assertIn("current turn's provider-authority block", developer_prompt)
+        self.assertIn("run-bound AgentsDock provider tool", developer_prompt)
+        self.assertNotIn("provider-authority block", developer_prompt)
         self.assertNotIn("--chat-id sess-123", developer_prompt)
         self.assertIn("manifests/current.json", developer_prompt)
         self.assertEqual(command[-1], "Inspect the terminal state.")
@@ -463,7 +510,8 @@ class AgentTerminalContextTests(unittest.TestCase):
             compact = " ".join(prompt.split())
             self.assertIn("Publish user-facing files", compact)
             self.assertIn('"files":["/absolute/path.ext"', compact)
-            self.assertIn("exact `--authority-file` command", compact)
+            self.assertIn("AgentsDock provider tool", compact)
+            self.assertNotIn("`--authority-file` command", compact)
             self.assertIn("playable `.mp4`/`.mov` videos", compact)
             self.assertIn("successful JSON receipt", compact)
             self.assertIn("submitted for attachment", compact)

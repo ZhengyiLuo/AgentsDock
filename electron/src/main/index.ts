@@ -1,6 +1,7 @@
 import { app, BrowserWindow, clipboard, dialog, Menu, net, powerMonitor, protocol, session, shell, type MenuItemConstructorOptions } from 'electron'
 import { join } from 'node:path'
 import { writeFile } from 'node:fs/promises'
+import { readFileSync } from 'node:fs'
 import { registerIpc } from './ipc'
 import { appLog } from './logger'
 import { reportStorageError } from './storage-health'
@@ -11,6 +12,7 @@ import { localizeNativeMenu } from './native-menu'
 import { t } from '../shared/i18n'
 import type { ServerSetupManager } from './server-setup'
 import { AppUpdateManager } from './updater'
+import { CoordinatedUpdateManager, fetchPairedServerRelease, fileCoordinatedUpdateStore, type SignedServerRelease } from './coordinated-updates'
 import { installWindowCloseFlush } from './window-close'
 import { parseMediaURL } from '../shared/media-url'
 import { shortcutAccelerator } from '../shared/shortcuts'
@@ -48,6 +50,8 @@ if (!app.requestSingleInstanceLock()) {
   let serverSetup: ServerSetupManager | null = null
   let teamHub: LazyTeamHubService | null = null
   let language: LanguageSettings | null = null
+  let coordinatedUpdates: CoordinatedUpdateManager | null = null
+  let coordinatedEnrollment = false
   const securePeerDeepLinks = new SecurePeerDeepLinkRouter()
   const showMainWindow = (): void => {
     if (!mainWindow || mainWindow.isDestroyed()) return
@@ -78,6 +82,12 @@ if (!app.requestSingleInstanceLock()) {
     for (const window of BrowserWindow.getAllWindows()) {
       if (!window.isDestroyed()) window.webContents.send('app:update', status)
     }
+  }, {
+    retryServers: async profileId => { await coordinatedUpdates?.retry(profileId) },
+    prepareInstall: version => {
+      if (!coordinatedUpdates) throw new Error('Coordinated updates are not initialized yet.')
+      return coordinatedUpdates.prepareEnrolled(version, coordinatedEnrollment)
+    }
   })
 
   app.whenReady().then(() => {
@@ -91,6 +101,8 @@ if (!app.requestSingleInstanceLock()) {
       appLog('main', 'application ready', { version: app.getVersion(), electron: process.versions.electron })
       appLog('main', 'constructing app service')
       service = new AppService({
+        onServerReachable: (profileId, health) => coordinatedUpdates?.serverReachable(profileId, health),
+        onServerUnavailable: profileId => coordinatedUpdates?.serverUnavailable(profileId),
         removeTeamHubProfile: profileId => {
           const currentTeamHub = teamHub
           if (!currentTeamHub) throw new Error('Teamspace profile cleanup is not available yet.')
@@ -98,6 +110,17 @@ if (!app.requestSingleInstanceLock()) {
         }
       })
       const appService = service
+      coordinatedUpdates = new CoordinatedUpdateManager({
+        profiles: () => appService.coordinatedUpdateProfiles(),
+        connect: profile => appService.coordinatedUpdateConnection(profile),
+        load: version => fetchPairedServerRelease(version, net.fetch.bind(net)),
+        store: fileCoordinatedUpdateStore(join(app.getPath('userData'), 'coordinated-updates.json')),
+        onError: error => updater.setServerUpdateError(errorDetails(error).message),
+        publish: records => {
+          updater.setServerUpdates(records)
+          if (coordinatedUpdates?.canActivate()) updater.resumeCoordinatedInstall()
+        }
+      })
       teamHub = new LazyTeamHubService(() => new TeamHubService({
         discovery: {
           currentScope: () => appService.teamHubServerScope(),
@@ -181,6 +204,27 @@ if (!app.requestSingleInstanceLock()) {
       service.addWindow(mainWindow)
       service.start()
       updater.start()
+      // Old releases have no paired assets. Enrollment starts with an explicit
+      // update intent or a release bundle, never a speculative startup fetch.
+      const resumeCoordinatedUpdates = async (): Promise<void> => {
+        let bundledRelease: SignedServerRelease | undefined
+        const pairedRoot = join(process.resourcesPath, 'coordinated-release')
+        const packagedMetadata = app.isPackaged
+          ? JSON.parse(readFileSync(join(app.getAppPath(), 'package.json'), 'utf8')) as { agentsDock?: { coordinatedUpdates?: boolean } }
+          : null
+        coordinatedEnrollment = packagedMetadata?.agentsDock?.coordinatedUpdates === true
+        if (coordinatedEnrollment) {
+          bundledRelease = {
+            manifest_base64: readFileSync(join(pairedRoot, 'agents-server-npm-manifest.json')).toString('base64'),
+            signature_base64: readFileSync(join(pairedRoot, 'agents-server-npm-manifest.sig')).toString('base64')
+          }
+        }
+        await coordinatedUpdates!.resume(bundledRelease, app.getVersion())
+      }
+      void resumeCoordinatedUpdates().catch(error => {
+        appLog('updater', 'could not resume coordinated updates', errorDetails(error))
+        updater.setServerUpdateError(`Could not resume server updates: ${errorDetails(error).message}`)
+      })
       appLog('main', 'window created and background services started')
     } catch (error) {
       const details = errorDetails(error)

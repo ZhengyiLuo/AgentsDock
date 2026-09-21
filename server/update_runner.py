@@ -4,6 +4,8 @@
 from __future__ import annotations
 
 import argparse
+import base64
+import binascii
 from contextlib import contextmanager
 import fcntl
 import hashlib
@@ -18,7 +20,7 @@ import tarfile
 import tempfile
 import time
 import urllib.request
-from urllib.error import HTTPError
+from urllib.error import HTTPError, URLError
 from pathlib import Path
 from typing import Any, Callable
 
@@ -33,6 +35,8 @@ RELEASES_PAGE_URL = f"https://github.com/{RELEASE_REPOSITORY}/releases"
 MAX_METADATA_BYTES = 1_000_000
 MAX_ARCHIVE_BYTES = 200 * 1024 * 1024
 SERVER_IDLE_CHECK_TIMEOUT_SECONDS = 10.0
+SERVER_STARTUP_READINESS_TIMEOUT_SECONDS = 45.0
+SERVER_STARTUP_READINESS_POLL_SECONDS = 1.0
 VERSION_PATTERN = re.compile(r"^[0-9]+\.[0-9]+\.[0-9]+(?:[-+][A-Za-z0-9.-]+)?$")
 # The standalone installer allows dependency synchronization to run for up to
 # 1,200 seconds. Keep this enclosing budget comfortably above that so the
@@ -49,6 +53,7 @@ INSTALLER_TERMINATION_POLL_SECONDS = 10.0
 INSTALLER_LOG_TAIL_BYTES = 64 * 1024
 INSTALLER_LOG_TAIL_LINES = 12
 INSTALLER_ERROR_MAX_CHARS = 4_000
+INSTALLER_LOG_MAX_BYTES = 1024 * 1024
 INSTALLER_ENVIRONMENT_SELECTORS = (
     "AGENTSDOCK_AGENT_TOKEN",
     "AGENTSDOCK_EXPECTED_SERVICE_CGROUP",
@@ -69,6 +74,9 @@ INSTALLER_ENVIRONMENT_SELECTORS = (
     "ZENITHDOCK_AGENT_TOKEN",
 )
 RELEASE_TRACKS = {"stable", "beta"}
+NPM_PACKAGE_NAME = "@agentsdock/server"
+NPM_REGISTRY_BASE = "https://registry.npmjs.org/@agentsdock/server/-/"
+MAX_NPM_MANIFEST_BYTES = 8_192
 RUNNER_OWNED_ACTIVE_PHASES = {
     "starting",
     "checking",
@@ -173,14 +181,33 @@ def update_status(
         return _update_status_unlocked(path, current, **changes)
 
 
-def installer_log_tail(log_path: Path) -> str:
+def trim_installer_log(log_path: Path, limit: int = INSTALLER_LOG_MAX_BYTES) -> None:
+    """Retain bounded history between attempts, while no installer is writing."""
+    try:
+        with log_path.open("r+b") as log:
+            log.seek(0, os.SEEK_END)
+            if log.tell() <= limit:
+                return
+            log.seek(-limit, os.SEEK_END)
+            tail = log.read(limit)
+            # Do not retain an unclassifiable partial secret line.
+            tail = tail.partition(b"\n")[2]
+            log.seek(0)
+            log.write(tail)
+            log.truncate()
+    except FileNotFoundError:
+        pass
+
+
+def installer_log_tail(log_path: Path, *, start_offset: int = 0) -> str:
     """Read a bounded diagnostic tail without loading a large install log."""
     try:
         with log_path.open("rb") as stream:
             stream.seek(0, os.SEEK_END)
             size = stream.tell()
-            truncated = size > INSTALLER_LOG_TAIL_BYTES
-            stream.seek(max(0, size - INSTALLER_LOG_TAIL_BYTES))
+            start = max(start_offset, size - INSTALLER_LOG_TAIL_BYTES)
+            truncated = start > start_offset
+            stream.seek(start)
             content = stream.read(INSTALLER_LOG_TAIL_BYTES)
     except OSError:
         return ""
@@ -273,7 +300,18 @@ def run_installer(
     on_started: Callable[[], None] | None = None,
 ) -> None:
     """Run the installer with live logging and a durable status heartbeat."""
+    if expected_update_id is not None:
+        update_status(
+            status_path,
+            expected_update_id=expected_update_id,
+            heartbeat_at=utc_now(),
+        )
     log_path.parent.mkdir(parents=True, exist_ok=True)
+    header = (
+        f"\n--- AgentsServer update {expected_update_id or 'manual'} "
+        f"to {version} at {utc_now()} ---\n"
+    ).encode()
+    trim_installer_log(log_path, INSTALLER_LOG_MAX_BYTES - len(header))
     started = time.monotonic()
     deadline = started + timeout_seconds
     environment = installer_environment()
@@ -281,8 +319,11 @@ def run_installer(
         environment["AGENTSDOCK_MANAGED_UPDATE_ID"] = managed_update_id
     if expected_service_cgroup is not None:
         environment["AGENTSDOCK_EXPECTED_SERVICE_CGROUP"] = expected_service_cgroup
-    with log_path.open("wb") as log:
+    with log_path.open("ab") as log:
         os.chmod(log_path, 0o600)
+        log.write(header)
+        log.flush()
+        attempt_start = log.tell()
         process = subprocess.Popen(
             command,
             cwd=cwd,
@@ -312,7 +353,8 @@ def run_installer(
 
                 terminate_installer(process, on_wait=report_protected_recovery)
                 log.flush()
-                tail = installer_log_tail(log_path)
+                tail = installer_log_tail(log_path, start_offset=attempt_start)
+                trim_installer_log(log_path)
                 detail = f": {tail}" if tail else ""
                 raise RuntimeError(
                     f"installer timed out after {timeout_seconds:g} seconds{detail}"
@@ -333,11 +375,14 @@ def run_installer(
                     )
                 except UpdateOwnershipLostError:
                     terminate_installer(process)
+                    log.flush()
+                    trim_installer_log(log_path)
                     raise
         log.flush()
 
+    tail = installer_log_tail(log_path, start_offset=attempt_start) if returncode else ""
+    trim_installer_log(log_path)
     if returncode != 0:
-        tail = installer_log_tail(log_path)
         raise RuntimeError(
             f"installer failed ({returncode}): {tail or 'no output; inspect server-update.log'}"
         )
@@ -391,10 +436,16 @@ def server_work_snapshot(
     timeout: float = SERVER_IDLE_CHECK_TIMEOUT_SECONDS,
     require_cgroup_safe: bool = False,
     require_verified_service_cgroup: bool = False,
+    expected_server_identity: str | None = None,
 ) -> tuple[int, int]:
     """Read the live workload immediately before invoking the installer."""
 
     health = server_health_snapshot(port, token=token, timeout=timeout)
+    if (
+        expected_server_identity is not None
+        and health.get("server_identity") != expected_server_identity
+    ):
+        raise RuntimeError("AgentsServer stable identity changed before restart")
 
     active = health.get("active")
     raw_active_count = health.get("active_count")
@@ -464,12 +515,21 @@ def assert_post_update_identity(
     expected_team_hub_transport: str | None = None,
     expected_team_hub_url: str | None = None,
     expected_team_hub_direct_ip_url: str | None = None,
+    expected_server_version: str | None = None,
+    expected_api_contract_version: int | None = None,
 ) -> None:
     """Fence a replacement by stable server and managed Hub identities."""
 
     health = server_health_snapshot(port, token=token)
     if str(health.get("server_identity") or "") != expected_server_identity:
         raise RuntimeError("updated AgentsServer stable identity does not match")
+    if expected_server_version is not None and health.get("server_version") != expected_server_version:
+        raise RuntimeError("updated AgentsServer version does not match the signed release")
+    if expected_api_contract_version is not None and (
+        type(health.get("api_contract_version")) is not int
+        or health["api_contract_version"] != expected_api_contract_version
+    ):
+        raise RuntimeError("updated AgentsServer API contract does not match the signed release")
     capabilities = health.get("capabilities")
     secure_peer_capability = (
         capabilities.get("secure_peer_v1")
@@ -600,6 +660,8 @@ def assert_server_idle(
     *,
     token: str | None = None,
     require_verified_service_cgroup: bool = False,
+    expected_server_identity: str | None = None,
+    timeout: float = SERVER_IDLE_CHECK_TIMEOUT_SECONDS,
 ) -> None:
     """Fail closed if work appeared after the update was accepted."""
 
@@ -609,6 +671,8 @@ def assert_server_idle(
             token=token,
             require_cgroup_safe=True,
             require_verified_service_cgroup=require_verified_service_cgroup,
+            expected_server_identity=expected_server_identity,
+            timeout=timeout,
         )
     except Exception as exc:
         raise RuntimeError(
@@ -629,6 +693,77 @@ def assert_server_idle(
             + " and ".join(parts)
             + "; retry the update after work finishes"
         )
+
+
+def transient_server_readiness_error(error: BaseException | None) -> bool:
+    """Recognize unavailable transport, never failed authentication or proof."""
+    if isinstance(error, HTTPError):
+        return error.code == 503
+    if isinstance(error, URLError):
+        error = error.reason
+    return isinstance(error, (
+        ConnectionRefusedError,
+        ConnectionResetError,
+        ConnectionAbortedError,
+        TimeoutError,
+    ))
+
+
+def wait_for_server_idle(
+    port: int,
+    *,
+    status_path: Path,
+    expected_update_id: str,
+    expected_server_identity: str,
+    token: str | None = None,
+    require_verified_service_cgroup: bool = False,
+    timeout_seconds: float = SERVER_STARTUP_READINESS_TIMEOUT_SECONDS,
+) -> None:
+    """Allow a forced-update startup to finish opening its native listener.
+
+    The replacement process advances its reserved update during lifespan,
+    before HTTP startup completes. Keep the exact update alive while transport
+    becomes ready, but never retry a response that fails the idle/safety proof.
+    """
+    deadline = time.monotonic() + timeout_seconds
+    last_error: RuntimeError | None = None
+    while True:
+        # This CAS also stops a cancelled/finalized or superseded updater.
+        update_status(
+            status_path,
+            expected_update_id=expected_update_id,
+            heartbeat_at=utc_now(),
+            message="Waiting for AgentsServer startup before checking installation safety.",
+        )
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            raise RuntimeError(
+                f"AgentsServer startup readiness timed out after {timeout_seconds:g} seconds"
+            ) from last_error
+        try:
+            assert_server_idle(
+                port,
+                token=token,
+                require_verified_service_cgroup=require_verified_service_cgroup,
+                expected_server_identity=expected_server_identity,
+                timeout=min(SERVER_IDLE_CHECK_TIMEOUT_SECONDS, remaining),
+            )
+        except RuntimeError as exc:
+            if not transient_server_readiness_error(exc.__cause__):
+                raise
+            last_error = exc
+            remaining = deadline - time.monotonic()
+            if remaining > 0:
+                time.sleep(min(SERVER_STARTUP_READINESS_POLL_SECONDS, remaining))
+        else:
+            # Ownership can change while the health request is in flight.
+            update_status(
+                status_path,
+                expected_update_id=expected_update_id,
+                heartbeat_at=utc_now(),
+                message="AgentsServer startup, identity, and idle checks passed.",
+            )
+            return
 
 
 def consume_auth_token_file(path: str | None) -> str:
@@ -804,6 +939,7 @@ def verify_manifest(
     *,
     expected_version: str | None = None,
     track: str = "stable",
+    allow_npm: bool = False,
 ) -> dict[str, Any]:
     track = normalized_release_track(track)
     key = serialization.load_pem_public_key(public_key_path.read_bytes())
@@ -829,16 +965,96 @@ def verify_manifest(
     archive = manifest.get("archive")
     if not isinstance(archive, dict):
         raise RuntimeError("release manifest is missing archive metadata")
-    expected_name = f"agents-server-{version}.tar.gz"
+    schema = manifest.get("schema", 1)
+    if type(schema) is not int or schema not in ({1, 2} if allow_npm else {1}):
+        raise RuntimeError("release manifest schema is not supported")
+    if schema == 2:
+        npm = manifest.get("npm")
+        if (manifest.get("distribution") != "npm" or manifest.get("track") != actual_track
+                or not isinstance(npm, dict)
+                or npm.get("name") != NPM_PACKAGE_NAME or npm.get("version") != version
+                or "+" in version):
+            raise RuntimeError("release npm package identity is not trusted")
+        integrity = npm.get("integrity")
+        try:
+            digest = base64.b64decode(integrity[7:], validate=True) if isinstance(integrity, str) and integrity.startswith("sha512-") else b""
+        except (ValueError, binascii.Error):
+            digest = b""
+        if len(digest) != 64 or integrity != "sha512-" + base64.b64encode(digest).decode("ascii"):
+            raise RuntimeError("release npm integrity is invalid")
+        size = archive.get("size")
+        if type(size) is not int or not 1 <= size <= MAX_ARCHIVE_BYTES:
+            raise RuntimeError("release npm archive size is invalid")
+        if type(manifest.get("api_contract_version")) is not int or manifest["api_contract_version"] < 1:
+            raise RuntimeError("release API contract is invalid")
+        expected_name = f"server-{version}.tgz"
+        expected_prefix = NPM_REGISTRY_BASE
+    else:
+        expected_name = f"agents-server-{version}.tar.gz"
+        expected_prefix = f"{RELEASE_BASE}/download/v{version}/"
     archive_name = str(archive.get("name") or "")
     archive_url = str(archive.get("url") or "")
     archive_sha = str(archive.get("sha256") or "").lower()
-    expected_prefix = f"{RELEASE_BASE}/download/v{version}/"
     if archive_name != expected_name or archive_url != expected_prefix + expected_name:
         raise RuntimeError("release archive location is not trusted")
     if not re.fullmatch(r"[0-9a-f]{64}", archive_sha):
         raise RuntimeError("release archive checksum is invalid")
     return manifest
+
+
+def verify_npm_release_envelope(
+    envelope: Any, public_key_path: Path, *, expected_version: str | None = None,
+) -> dict[str, Any]:
+    """Verify original publisher-signed bytes, never unsigned registry metadata."""
+    if not isinstance(envelope, dict) or set(envelope) != {"manifest_base64", "signature_base64"}:
+        raise RuntimeError("signed npm release envelope is invalid")
+    encoded = envelope.get("manifest_base64")
+    signature = envelope.get("signature_base64")
+    if (not isinstance(encoded, str) or not 1 <= len(encoded) <= ((MAX_NPM_MANIFEST_BYTES + 2) // 3) * 4
+            or not isinstance(signature, str) or len(signature) != 88):
+        raise RuntimeError("signed npm release envelope exceeds its bounds")
+    try:
+        payload = base64.b64decode(encoded, validate=True)
+        signature_bytes = base64.b64decode(signature, validate=True)
+        candidate = json.loads(payload)
+    except (ValueError, binascii.Error, UnicodeError) as exc:
+        raise RuntimeError("signed npm release envelope is invalid") from exc
+    if len(payload) > MAX_NPM_MANIFEST_BYTES or len(signature_bytes) != 64 or not isinstance(candidate, dict):
+        raise RuntimeError("signed npm release envelope is invalid")
+    manifest = verify_manifest(
+        payload, signature_bytes, public_key_path, expected_version=expected_version,
+        track=str(candidate.get("track") or ""), allow_npm=True,
+    )
+    if manifest.get("schema") != 2 or manifest.get("distribution") != "npm":
+        raise RuntimeError("a signed npm release descriptor is required")
+    return manifest
+
+
+def verify_npm_archive(content: bytes, manifest: dict[str, Any]) -> None:
+    """Check both publisher-bound hashes and exact size before extraction."""
+    if (len(content) != manifest["archive"]["size"]
+            or hashlib.sha256(content).hexdigest() != manifest["archive"]["sha256"].lower()
+            or "sha512-" + base64.b64encode(hashlib.sha512(content).digest()).decode("ascii") != manifest["npm"]["integrity"]):
+        raise RuntimeError("npm archive does not match the signed release descriptor")
+
+
+def download_npm_archive(manifest: dict[str, Any]) -> bytes:
+    """Fetch the exact signed registry location without following redirects."""
+    class NoRedirect(urllib.request.HTTPRedirectHandler):
+        def redirect_request(self, req, fp, code, msg, headers, newurl):
+            raise RuntimeError("npm release archive redirects are not allowed")
+
+    request = urllib.request.Request(manifest["archive"]["url"], headers={"User-Agent": "AgentsServer-Updater/1"})
+    size = manifest["archive"]["size"]
+    with urllib.request.build_opener(NoRedirect()).open(request, timeout=120.0) as response:
+        if response.geturl() != manifest["archive"]["url"]:
+            raise RuntimeError("npm release archive location changed")
+        declared = response.headers.get("Content-Length")
+        if declared is not None and int(declared) != size:
+            raise RuntimeError("npm release archive size changed")
+        content = response.read(size + 1)
+    verify_npm_archive(content, manifest)
+    return content
 
 
 def check_release(
@@ -942,7 +1158,7 @@ def release_transition_allowed(current: str, target: str, track: str = "stable")
     )
 
 
-def safe_extract(archive_path: Path, destination: Path) -> Path:
+def safe_extract(archive_path: Path, destination: Path, *, npm_manifest: dict[str, Any] | None = None) -> Path:
     destination = destination.resolve()
     with tarfile.open(archive_path, "r:gz") as archive:
         members = archive.getmembers()
@@ -952,7 +1168,24 @@ def safe_extract(archive_path: Path, destination: Path) -> Path:
                 raise RuntimeError("release archive contains an unsafe path")
             if member.issym() or member.islnk():
                 raise RuntimeError("release archive must not contain links")
+            if npm_manifest is not None and not (member.isfile() or member.isdir()):
+                raise RuntimeError("npm release archive contains a special file")
+        if npm_manifest is not None:
+            if (len(members) > 4096 or sum(member.size for member in members) > 1024 * 1024 * 1024
+                    or len({member.name for member in members}) != len(members)):
+                raise RuntimeError("npm release archive exceeds its extraction bounds")
         archive.extractall(destination, members=members, filter="data")
+    if npm_manifest is not None:
+        if {entry.name for entry in destination.iterdir()} != {"package"}:
+            raise RuntimeError("npm release archive has an invalid layout")
+        package = destination / "package"
+        metadata = json.loads((package / "package.json").read_text())
+        source = package / "server"
+        if (metadata.get("name") != NPM_PACKAGE_NAME or metadata.get("version") != npm_manifest["version"]
+                or not (source / "install.sh").is_file()
+                or (source / "VERSION").read_text().strip() != npm_manifest["version"]):
+            raise RuntimeError("npm release archive payload identity does not match")
+        return source
     roots = [entry for entry in destination.iterdir() if entry.is_dir()]
     if len(roots) != 1 or not (roots[0] / "install.sh").is_file():
         raise RuntimeError("release archive has an invalid layout")
@@ -1160,12 +1393,21 @@ def run_update(args: argparse.Namespace) -> None:
         and bool(current_version)
         and version_is_prerelease(current_version)
     )
-    manifest = check_release(
-        public_key,
-        track,
-        expected_version=expected_version,
-        require_latest=require_latest,
-    )
+    if getattr(args, "npm_descriptor", False):
+        with server_update_status_lock(status_path):
+            admitted = _read_status_unlocked(status_path)
+        if admitted.get("update_id") != update_id or admitted.get("phase") not in RUNNER_OWNED_ACTIVE_PHASES:
+            raise RuntimeError("signed npm release is not owned by this update")
+        manifest = verify_npm_release_envelope(admitted.get("_npm_release"), public_key, expected_version=expected_version)
+        if manifest["track"] != track or release_track(current_version) != track:
+            raise RuntimeError("automatic npm updates cannot change release channels")
+    else:
+        manifest = check_release(
+            public_key,
+            track,
+            expected_version=expected_version,
+            require_latest=require_latest,
+        )
     version = str(manifest["version"])
     if expected_version and version != expected_version:
         raise RuntimeError(
@@ -1188,7 +1430,8 @@ def run_update(args: argparse.Namespace) -> None:
             target_version=version,
             message=f"Downloading AgentsServer {version}.",
         )
-        archive_bytes = download_bytes(str(manifest["archive"]["url"]), MAX_ARCHIVE_BYTES, timeout=120.0)
+        archive_bytes = (download_npm_archive(manifest) if manifest.get("schema") == 2 else
+                         download_bytes(str(manifest["archive"]["url"]), MAX_ARCHIVE_BYTES, timeout=120.0))
         digest = hashlib.sha256(archive_bytes).hexdigest()
         if digest != manifest["archive"]["sha256"]:
             raise RuntimeError("release archive checksum does not match the signed manifest")
@@ -1200,7 +1443,8 @@ def run_update(args: argparse.Namespace) -> None:
             phase="verifying",
             message="Signature and archive checksum verified.",
         )
-        source = safe_extract(archive_path, root / "extracted")
+        source = (safe_extract(archive_path, root / "extracted", npm_manifest=manifest)
+                  if manifest.get("schema") == 2 else safe_extract(archive_path, root / "extracted"))
         install = source / "install.sh"
         install.chmod(0o755)
         command = [
@@ -1211,6 +1455,8 @@ def run_update(args: argparse.Namespace) -> None:
             "--bind", args.bind,
             "--expected-server-identity", expected_server_identity,
         ]
+        if manifest.get("schema") == 2:
+            command.extend(["--expected-api-contract", str(manifest["api_contract_version"])])
         if expected_team_hub_id is not None:
             command.extend(
                 [
@@ -1250,8 +1496,11 @@ def run_update(args: argparse.Namespace) -> None:
                     expected_team_hub_direct_ip_url or "",
                 ]
             )
-        assert_server_idle(
+        wait_for_server_idle(
             args.port,
+            status_path=status_path,
+            expected_update_id=update_id,
+            expected_server_identity=expected_server_identity,
             token=auth_token,
             require_verified_service_cgroup=expected_service_cgroup is not None,
         )
@@ -1282,6 +1531,11 @@ def run_update(args: argparse.Namespace) -> None:
             "expected_server_identity": expected_server_identity,
             "expected_team_hub_id": expected_team_hub_id,
         }
+        if manifest.get("schema") == 2:
+            identity_arguments.update(
+                expected_server_version=version,
+                expected_api_contract_version=manifest["api_contract_version"],
+            )
         if expected_team_hub_transport is not None and not repair_failed_team_hub_host:
             identity_arguments["expected_team_hub_transport"] = (
                 expected_team_hub_transport
@@ -1338,6 +1592,7 @@ def main() -> int:
     parser.add_argument("--expected-version")
     parser.add_argument("--current-version")
     parser.add_argument("--track", choices=sorted(RELEASE_TRACKS), default="stable")
+    parser.add_argument("--npm-descriptor", action="store_true")
     parser.add_argument("--auth-token-file")
     parser.add_argument("--expected-server-identity", required=True)
     parser.add_argument("--update-id", required=True)

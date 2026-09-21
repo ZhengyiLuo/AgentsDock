@@ -7,7 +7,7 @@ import sys
 import tarfile
 import tempfile
 import unittest
-from urllib.error import HTTPError
+from urllib.error import HTTPError, URLError
 from pathlib import Path
 from unittest.mock import patch
 
@@ -18,6 +18,21 @@ import update_runner
 
 
 class UpdateRunnerTests(unittest.TestCase):
+    @staticmethod
+    def idle_health():
+        return {
+            "ok": True,
+            "server_identity": "server-test-identity",
+            "active_count": 0,
+            "queued": {},
+            "update_blocking_queued_count": 0,
+            "update_service_cgroup": {
+                "safe": True,
+                "unknown_descendant_count": 0,
+                "inspection": "verified",
+            },
+        }
+
     @staticmethod
     def secure_peer_capability(*, state_available: bool = True):
         return {
@@ -175,6 +190,78 @@ class UpdateRunnerTests(unittest.TestCase):
             {"1.3.0-beta.2"},
         )
 
+    def test_one_zero_beta_bridge_preserves_numeric_ordering_and_track_selection(self):
+        releases = [
+            self.release("0.1.25"),
+            self.release("0.1.26-beta.66"),
+            self.release("1.0.0-beta.1"),
+            self.release("1.0.0"),
+            self.release("1.0.0-beta.2", draft=True),
+            self.release("2.0.0-beta.1", prerelease=False),
+        ]
+        self.assertEqual(
+            update_runner.release_candidates(releases, "beta"),
+            ["1.0.0-beta.1", "0.1.26-beta.66"],
+        )
+        self.assertEqual(
+            update_runner.stable_release_candidates(releases),
+            ["1.0.0", "0.1.25"],
+        )
+        for current in ("0.1.25", "0.1.26-beta.46", "0.1.26-beta.66"):
+            with self.subTest(current=current):
+                self.assertTrue(update_runner.release_transition_allowed(
+                    current, "1.0.0-beta.1", "beta",
+                ))
+                self.assertFalse(update_runner.release_transition_allowed(
+                    current, "1.0.0-beta.1", "stable",
+                ))
+        self.assertFalse(update_runner.release_transition_allowed(
+            "1.0.0-beta.1", "0.1.26-beta.66", "beta",
+        ))
+        self.assertLess(
+            update_runner.version_key("1.0.0-beta.1"),
+            update_runner.version_key("1.0.0"),
+        )
+        page = b'<a href="/ZhengyiLuo/AgentsServer/releases/tag/v1.0.0-beta.1">beta</a>'
+        self.assertEqual(update_runner.release_versions_from_html(page, "beta"), {"1.0.0-beta.1"})
+        self.assertEqual(update_runner.release_versions_from_html(page, "stable"), set())
+
+    def test_one_zero_beta_bridge_uses_signed_immutable_release_assets(self):
+        version = "1.0.0-beta.1"
+        private, payload, signature = self.signed_manifest(version, track="beta", prerelease=True)
+        assets = {
+            update_runner.RELEASES_API_URL: json.dumps([
+                self.release("0.1.26-beta.66"), self.release(version), self.release("0.1.25"),
+            ]).encode(),
+            update_runner.release_manifest_url(version): payload,
+            update_runner.release_signature_url(version): signature,
+        }
+        seen = []
+
+        def download(url, _limit, timeout=30.0):
+            seen.append(url)
+            return assets[url]
+
+        with tempfile.TemporaryDirectory() as temporary:
+            public_path = Path(temporary) / "public.pem"
+            public_path.write_bytes(private.public_key().public_bytes(
+                serialization.Encoding.PEM, serialization.PublicFormat.SubjectPublicKeyInfo,
+            ))
+            with patch.object(update_runner, "download_bytes", side_effect=download):
+                manifest = update_runner.check_release(public_path, track="beta")
+            with self.assertRaisesRegex(RuntimeError, "requested stable track"):
+                update_runner.verify_manifest(payload, signature, public_path, track="stable")
+            with self.assertRaisesRegex(RuntimeError, "immutable release tag"):
+                update_runner.verify_manifest(
+                    payload, signature, public_path, track="beta", expected_version="1.0.0-beta.2",
+                )
+        self.assertEqual(manifest["version"], version)
+        self.assertEqual(seen, [
+            update_runner.RELEASES_API_URL,
+            update_runner.release_manifest_url(version),
+            update_runner.release_signature_url(version),
+        ])
+
     def test_signed_stable_release_uses_only_versioned_asset_urls(self):
         private, payload, signature = self.signed_manifest("1.2.3")
         releases = json.dumps([
@@ -234,6 +321,93 @@ class UpdateRunnerTests(unittest.TestCase):
 
         self.assertEqual(manifest["version"], "1.3.0-beta.2")
         self.assertFalse(any("/v1.2.3/" in url for url in seen))
+
+    def test_pinned_release_uses_exact_immutable_assets_without_latest_discovery(self):
+        private, payload, signature = self.signed_manifest("1.3.0-beta.1")
+        assets = {
+            update_runner.release_manifest_url("1.3.0-beta.1"): payload,
+            update_runner.release_signature_url("1.3.0-beta.1"): signature,
+        }
+        seen: list[str] = []
+
+        def download(url, _limit, timeout=30.0):
+            seen.append(url)
+            return assets[url]
+
+        with tempfile.TemporaryDirectory() as temporary:
+            public_path = Path(temporary) / "public.pem"
+            public_path.write_bytes(private.public_key().public_bytes(
+                serialization.Encoding.PEM,
+                serialization.PublicFormat.SubjectPublicKeyInfo,
+            ))
+            with patch.object(update_runner, "download_bytes", side_effect=download):
+                manifest = update_runner.check_release(
+                    public_path,
+                    "beta",
+                    expected_version="1.3.0-beta.1",
+                )
+
+        self.assertEqual(manifest["version"], "1.3.0-beta.1")
+        self.assertEqual(
+            seen,
+            [
+                update_runner.release_manifest_url("1.3.0-beta.1"),
+                update_runner.release_signature_url("1.3.0-beta.1"),
+            ],
+        )
+        self.assertNotIn(update_runner.RELEASES_API_URL, seen)
+
+    def test_pinned_release_must_match_requested_track_before_download(self):
+        with patch.object(update_runner, "download_bytes") as download:
+            with self.assertRaisesRegex(RuntimeError, "requested stable track"):
+                update_runner.check_release(
+                    Path("unused-key.pem"),
+                    "stable",
+                    expected_version="1.3.0-beta.1",
+                )
+        download.assert_not_called()
+
+    def test_beta_channel_exit_rejects_a_pinned_older_stable_release(self):
+        private, latest_payload, latest_signature = self.signed_manifest("1.2.4")
+        releases = json.dumps([
+            self.release("1.2.4"),
+            self.release("1.0.0"),
+        ]).encode()
+        assets = {
+            update_runner.RELEASES_API_URL: releases,
+            update_runner.release_manifest_url("1.2.4"): latest_payload,
+            update_runner.release_signature_url("1.2.4"): latest_signature,
+        }
+        seen: list[str] = []
+
+        def download(url, _limit, timeout=30.0):
+            seen.append(url)
+            return assets[url]
+
+        with tempfile.TemporaryDirectory() as temporary:
+            public_path = Path(temporary) / "public.pem"
+            public_path.write_bytes(private.public_key().public_bytes(
+                serialization.Encoding.PEM,
+                serialization.PublicFormat.SubjectPublicKeyInfo,
+            ))
+            with patch.object(update_runner, "download_bytes", side_effect=download):
+                with self.assertRaisesRegex(RuntimeError, "no longer the latest"):
+                    update_runner.check_release(
+                        public_path,
+                        "stable",
+                        expected_version="1.0.0",
+                        require_latest=True,
+                    )
+
+        self.assertEqual(
+            seen,
+            [
+                update_runner.RELEASES_API_URL,
+                update_runner.release_manifest_url("1.2.4"),
+                update_runner.release_signature_url("1.2.4"),
+            ],
+        )
+        self.assertNotIn(update_runner.release_manifest_url("1.0.0"), seen)
 
     def test_safe_extract_rejects_path_traversal(self):
         with tempfile.TemporaryDirectory() as temporary:
@@ -325,7 +499,8 @@ class UpdateRunnerTests(unittest.TestCase):
                 heartbeat_seconds=0.02,
             )
 
-            self.assertEqual(log_path.read_text().splitlines(), ["started", "finished"])
+            self.assertEqual(log_path.read_text().splitlines()[-2:], ["started", "finished"])
+            self.assertIn("AgentsServer update manual to 1.2.3 at", log_path.read_text())
             self.assertEqual(os.stat(log_path).st_mode & 0o777, 0o600)
             status = json.loads(status_path.read_text())
             self.assertEqual(status["phase"], "installing")
@@ -349,6 +524,69 @@ class UpdateRunnerTests(unittest.TestCase):
                     timeout_seconds=2,
                     heartbeat_seconds=0.02,
                 )
+
+    def test_installer_retry_preserves_previous_attempt_without_reusing_its_error(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            status_path = root / "server-update.json"
+            log_path = root / "server-update.log"
+            attempts = [
+                ("first-attempt", "print('first diagnostic', flush=True); raise SystemExit(7)", 7),
+                ("second-attempt", "print('second attempt succeeded', flush=True)", 0),
+                ("silent-attempt", "raise SystemExit(9)", 9),
+            ]
+            for update_id, script, code in attempts:
+                update_runner.update_status(status_path, phase="installing", update_id=update_id)
+                kwargs = dict(
+                    cwd=root,
+                    status_path=status_path,
+                    log_path=log_path,
+                    version="1.2.4",
+                    expected_update_id=update_id,
+                    timeout_seconds=2,
+                    heartbeat_seconds=0.02,
+                )
+                if code:
+                    with self.assertRaises(RuntimeError) as raised:
+                        update_runner.run_installer([sys.executable, "-c", script], **kwargs)
+                    if code == 9:
+                        self.assertIn("no output; inspect server-update.log", str(raised.exception))
+                        self.assertNotIn("first diagnostic", str(raised.exception))
+                        self.assertNotIn("second attempt succeeded", str(raised.exception))
+                else:
+                    update_runner.run_installer([sys.executable, "-c", script], **kwargs)
+            history = log_path.read_text()
+            self.assertIn("first diagnostic", history)
+            self.assertIn("second attempt succeeded", history)
+            for update_id, _script, _code in attempts:
+                self.assertIn(f"AgentsServer update {update_id} to 1.2.4 at", history)
+
+    def test_installer_bounds_retained_history_and_completed_output(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            log_path = root / "server-update.log"
+            log_path.write_text("old record\n" * update_runner.INSTALLER_LOG_MAX_BYTES + "previous diagnostic\n")
+            update_runner.run_installer(
+                [sys.executable, "-c", "print('current diagnostic', flush=True)"],
+                cwd=root,
+                status_path=root / "server-update.json",
+                log_path=log_path,
+                version="1.2.4",
+                timeout_seconds=2,
+            )
+            self.assertLessEqual(log_path.stat().st_size, update_runner.INSTALLER_LOG_MAX_BYTES)
+            self.assertIn("previous diagnostic", log_path.read_text())
+            self.assertIn("current diagnostic", log_path.read_text())
+            update_runner.run_installer(
+                [sys.executable, "-c", f"print('x' * {update_runner.INSTALLER_LOG_MAX_BYTES}); print('latest diagnostic')"],
+                cwd=root,
+                status_path=root / "server-update.json",
+                log_path=log_path,
+                version="1.2.4",
+                timeout_seconds=2,
+            )
+            self.assertLessEqual(log_path.stat().st_size, update_runner.INSTALLER_LOG_MAX_BYTES)
+            self.assertIn("latest diagnostic", log_path.read_text())
 
     def test_installer_failure_redacts_setup_and_bearer_secrets_from_status_tail(self):
         with tempfile.TemporaryDirectory() as temporary:
@@ -553,7 +791,7 @@ class UpdateRunnerTests(unittest.TestCase):
         self.assertFalse(update_runner.release_transition_allowed("1.3.0", "1.4.0-beta.1", "stable"))
         self.assertFalse(update_runner.release_transition_allowed("1.2.3", "1.2.3", "stable"))
 
-    def test_successful_update_records_default_stable_track(self):
+    def test_successful_update_waits_for_startup_and_records_default_stable_track(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             archive_buffer = io.BytesIO()
@@ -594,25 +832,30 @@ class UpdateRunnerTests(unittest.TestCase):
             with patch.object(update_runner, "check_release", return_value=manifest), \
                  patch.object(update_runner, "download_bytes", return_value=archive_bytes), \
                  patch.object(update_runner, "update_status", side_effect=record_status), \
-                 patch.object(update_runner, "assert_server_idle") as idle_check, \
+                 patch.object(update_runner.urllib.request, "urlopen", side_effect=[
+                     URLError(ConnectionRefusedError("native listener is not ready")),
+                     io.BytesIO(json.dumps(self.idle_health()).encode()),
+                 ]) as health_request, \
+                 patch.object(update_runner.time, "sleep") as sleep, \
                  patch.object(update_runner, "assert_post_update_identity") as identity_check, \
                  patch.object(update_runner, "run_installer") as install:
                 update_runner.run_update(args)
 
         self.assertEqual(statuses[-1]["phase"], "complete")
+        self.assertEqual(statuses[0]["phase"], "checking")
+        self.assertEqual(statuses[0]["runner_pid"], os.getpid())
+        self.assertTrue(statuses[0]["heartbeat_at"])
         self.assertEqual(statuses[-1]["installed_version"], "1.2.4")
         self.assertFalse(statuses[-1]["update_available"])
         self.assertEqual(statuses[-1]["track"], "stable")
         self.assertIsNone(statuses[-1]["heartbeat_at"])
+        self.assertIsNone(statuses[-1]["runner_pid"])
         self.assertIsNone(statuses[-1]["elapsed_seconds"])
         self.assertIsNone(statuses[-1]["error_code"])
         self.assertIsNone(statuses[-1]["error_action"])
         self.assertIsNone(statuses[-1]["retryable"])
-        idle_check.assert_called_once_with(
-            7850,
-            token="",
-            require_verified_service_cgroup=True,
-        )
+        self.assertEqual(health_request.call_count, 2)
+        sleep.assert_called_once_with(1.0)
         install.assert_called_once()
         install_command = install.call_args.args[0]
         self.assertNotIn("--managed-update-id", install_command)
@@ -646,7 +889,7 @@ class UpdateRunnerTests(unittest.TestCase):
                     "host_server_identity": "server-test-identity",
                     "transport": "tailscale_serve",
                     "hub_url": (
-                        "https://atlas.example.ts.net:8444/api/team-hub"
+                        "https://sonic.example.ts.net:8444/api/team-hub"
                     ),
                 }
             },
@@ -663,7 +906,7 @@ class UpdateRunnerTests(unittest.TestCase):
                 expected_team_hub_id="hub_test12345678",
                 expected_team_hub_transport="tailscale_serve",
                 expected_team_hub_url=(
-                    "https://atlas.example.ts.net:8444/api/team-hub"
+                    "https://sonic.example.ts.net:8444/api/team-hub"
                 ),
             )
             with self.assertRaisesRegex(RuntimeError, "changed its Team Hub transport"):
@@ -679,8 +922,8 @@ class UpdateRunnerTests(unittest.TestCase):
                 )
 
     def test_post_update_identity_binds_exact_direct_route_set_and_order(self):
-        serve_url = "https://atlas.example.ts.net:8444/api/team-hub"
-        direct_url = "http://100.64.0.1:7850/api/team-hub"
+        serve_url = "https://sonic.example.ts.net:8444/api/team-hub"
+        direct_url = "http://100.73.184.23:7850/api/team-hub"
         capability = {
             "available": True,
             "designated_host": True,
@@ -726,6 +969,46 @@ class UpdateRunnerTests(unittest.TestCase):
                     expected_team_hub_transport="tailscale_serve",
                     expected_team_hub_url=serve_url,
                     expected_team_hub_direct_ip_url=direct_url,
+                )
+
+    def test_repaired_team_hub_identity_requires_exact_host_and_routes(self):
+        health = {
+            "server_identity": "server-test-identity",
+            "capabilities": {
+                "team_hub_v1": {
+                    "available": True,
+                    "designated_host": True,
+                    "version": 1,
+                    "base_path": "/api/team-hub",
+                    "hub_id": "hub_repaired_12345678",
+                    "host_server_identity": "server-test-identity",
+                    "transport": "loopback",
+                    "hub_url": None,
+                    "routes": [{"transport": "loopback", "hub_url": None}],
+                }
+            },
+        }
+        with patch.object(update_runner, "server_health_snapshot", return_value=health):
+            self.assertEqual(
+                update_runner.assert_repaired_team_hub_identity(
+                    7850,
+                    token="secret",
+                    expected_server_identity="server-test-identity",
+                    expected_team_hub_transport="loopback",
+                    expected_team_hub_url=None,
+                    expected_team_hub_direct_ip_url="",
+                ),
+                "hub_repaired_12345678",
+            )
+            health["capabilities"]["team_hub_v1"]["routes"] = []
+            with self.assertRaisesRegex(RuntimeError, "routes changed"):
+                update_runner.assert_repaired_team_hub_identity(
+                    7850,
+                    token="secret",
+                    expected_server_identity="server-test-identity",
+                    expected_team_hub_transport="loopback",
+                    expected_team_hub_url=None,
+                    expected_team_hub_direct_ip_url="",
                 )
 
     def test_post_update_identity_rejects_quarantined_secure_peer_state(self):
@@ -808,7 +1091,127 @@ class UpdateRunnerTests(unittest.TestCase):
             expected_team_hub_direct_ip_url="",
         )
 
-    def test_detached_runner_allows_explicit_beta_to_latest_stable_switch(self):
+    def test_failed_hub_repair_requires_exact_admitted_status_ownership(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            status_path = root / "server-update.json"
+            status_path.write_text(
+                json.dumps(
+                    {
+                        "phase": "starting",
+                        "update_id": "different-update",
+                        "team_hub_repair_mode": "failed_start",
+                        "team_hub_host_server_identity": "server-test-identity",
+                        "team_hub_transport": "loopback",
+                        "team_hub_url": None,
+                        "team_hub_direct_ip_url": "",
+                        "team_hub_routes": [
+                            {"transport": "loopback", "hub_url": None}
+                        ],
+                    }
+                )
+            )
+            args = argparse.Namespace(
+                status_file=str(status_path),
+                public_key=str(root / "release-public-key.pem"),
+                port=7850,
+                bind="127.0.0.1",
+                expected_version="1.2.4",
+                current_version="1.2.3",
+                expected_server_identity="server-test-identity",
+                update_id="repair-update-12345678",
+                repair_failed_team_hub_host=True,
+                expected_team_hub_transport="loopback",
+                expected_team_hub_url="",
+                expected_team_hub_direct_ip_url="",
+            )
+            with patch.object(update_runner, "check_release") as release_check:
+                with self.assertRaisesRegex(RuntimeError, "exact admitted update"):
+                    update_runner.run_update(args)
+            release_check.assert_not_called()
+
+    def test_owned_failed_hub_repair_is_forwarded_and_reverified(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            archive_buffer = io.BytesIO()
+            with tarfile.open(fileobj=archive_buffer, mode="w:gz") as archive:
+                installer = b"#!/bin/sh\nexit 0\n"
+                entry = tarfile.TarInfo("agents-server-1.2.4/install.sh")
+                entry.mode = 0o755
+                entry.size = len(installer)
+                archive.addfile(entry, io.BytesIO(installer))
+            archive_bytes = archive_buffer.getvalue()
+            manifest = {
+                "version": "1.2.4",
+                "archive": {
+                    "name": "agents-server-1.2.4.tar.gz",
+                    "url": "https://example.invalid/agents-server-1.2.4.tar.gz",
+                    "sha256": hashlib.sha256(archive_bytes).hexdigest(),
+                },
+            }
+            update_id = "repair-update-12345678"
+            status_path = root / "server-update.json"
+            status_path.write_text(
+                json.dumps(
+                    {
+                        "phase": "starting",
+                        "update_id": update_id,
+                        "team_hub_repair_mode": "failed_start",
+                        "team_hub_host_server_identity": "server-test-identity",
+                        "team_hub_transport": "loopback",
+                        "team_hub_url": None,
+                        "team_hub_direct_ip_url": "",
+                        "team_hub_routes": [
+                            {"transport": "loopback", "hub_url": None}
+                        ],
+                    }
+                )
+            )
+            args = argparse.Namespace(
+                status_file=str(status_path),
+                public_key=str(root / "release-public-key.pem"),
+                port=7850,
+                bind="127.0.0.1",
+                expected_version="1.2.4",
+                current_version="1.2.3",
+                expected_server_identity="server-test-identity",
+                update_id=update_id,
+                repair_failed_team_hub_host=True,
+                expected_team_hub_transport="loopback",
+                expected_team_hub_url="",
+                expected_team_hub_direct_ip_url="",
+            )
+            with patch.object(update_runner, "check_release", return_value=manifest), \
+                 patch.object(update_runner, "download_bytes", return_value=archive_bytes), \
+                 patch.object(update_runner, "update_status", side_effect=lambda _path, **changes: changes), \
+                 patch.object(update_runner, "assert_server_idle"), \
+                 patch.object(update_runner, "assert_post_update_identity") as identity_check, \
+                 patch.object(update_runner, "assert_repaired_team_hub_identity") as repair_check, \
+                 patch.object(update_runner, "run_installer") as install:
+                update_runner.run_update(args)
+
+        command = install.call_args.args[0]
+        self.assertIn("--repair-failed-team-hub-host", command)
+        managed_index = command.index("--managed-update-id")
+        self.assertEqual(command[managed_index + 1], update_id)
+        self.assertIsNone(install.call_args.kwargs["expected_service_cgroup"])
+        self.assertEqual(install.call_args.kwargs["managed_update_id"], update_id)
+        identity_check.assert_called_once_with(
+            7850,
+            token="",
+            expected_server_identity="server-test-identity",
+            expected_team_hub_id=None,
+        )
+        repair_check.assert_called_once_with(
+            7850,
+            token="",
+            expected_server_identity="server-test-identity",
+            expected_team_hub_transport="loopback",
+            expected_team_hub_url=None,
+            expected_team_hub_direct_ip_url="",
+        )
+
+    def test_detached_runner_allows_explicit_beta_to_pinned_stable_switch(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             legacy_installer_ran = root / "legacy-installer-ran"
@@ -859,11 +1262,18 @@ class UpdateRunnerTests(unittest.TestCase):
                 update_runner.run_update(args)
             legacy_installer_completed = legacy_installer_ran.is_file()
 
-        check.assert_called_once_with(Path(args.public_key).resolve(), "stable")
+        check.assert_called_once_with(
+            Path(args.public_key).resolve(),
+            "stable",
+            expected_version="1.2.4",
+            require_latest=True,
+        )
         idle_check.assert_called_once_with(
             7850,
             token="",
             require_verified_service_cgroup=False,
+            expected_server_identity="server-test-identity",
+            timeout=update_runner.SERVER_IDLE_CHECK_TIMEOUT_SECONDS,
         )
         self.assertTrue(legacy_installer_completed)
         identity_check.assert_called_once()
@@ -883,6 +1293,132 @@ class UpdateRunnerTests(unittest.TestCase):
                 "2 active agent runs and 3 queued turns",
             ):
                 update_runner.assert_server_idle(7850, token="one-time-token")
+
+    def test_startup_readiness_does_not_retry_failed_safety_checks(self):
+        cases = [
+            ({"server_identity": "another-server"}, "stable identity changed"),
+            ({"ok": False}, "not healthy"),
+            ({"active_count": 1}, "1 active agent run"),
+            ({"update_blocking_queued_count": 2}, "2 queued turns"),
+            ({"active_count": True}, "invalid active count"),
+            ({"update_service_cgroup": {"safe": False, "unknown_descendant_count": 1}}, "nonempty service cgroup"),
+            ({"update_service_cgroup": {"safe": True, "unknown_descendant_count": 0}}, "verified systemd"),
+            (b"not JSON", "invalid JSON"),
+            (URLError(PermissionError("permission denied")), "permission denied"),
+            *( (HTTPError("http://127.0.0.1:7850/api/health", code, "Rejected", {}, None), str(code))
+               for code in (401, 403, 404, 500) ),
+        ]
+        for response, message in cases:
+            with self.subTest(message=message), tempfile.TemporaryDirectory() as temporary:
+                status_path = Path(temporary) / "server-update.json"
+                update_runner.update_status(status_path, phase="verifying", update_id="update-readiness")
+                if isinstance(response, dict):
+                    response = io.BytesIO(json.dumps({**self.idle_health(), **response}).encode())
+                elif isinstance(response, bytes):
+                    response = io.BytesIO(response)
+                with patch.object(update_runner.urllib.request, "urlopen", side_effect=[
+                    URLError(ConnectionRefusedError("starting")), response,
+                ]) as probe, patch.object(update_runner.time, "sleep") as sleep:
+                    with self.assertRaisesRegex(RuntimeError, message):
+                        update_runner.wait_for_server_idle(
+                            7850,
+                            status_path=status_path,
+                            expected_update_id="update-readiness",
+                            expected_server_identity="server-test-identity",
+                            require_verified_service_cgroup=True,
+                        )
+                self.assertEqual(probe.call_count, 2)
+                sleep.assert_called_once_with(1.0)
+
+    def test_startup_readiness_timeout_bounds_probes_and_waits(self):
+        clock = [0.0]
+        with tempfile.TemporaryDirectory() as temporary:
+            status_path = Path(temporary) / "server-update.json"
+            update_runner.update_status(status_path, phase="verifying", update_id="update-readiness")
+            with patch.object(update_runner.urllib.request, "urlopen", side_effect=URLError(
+                ConnectionRefusedError("starting")
+            )) as probe, patch.object(update_runner.time, "monotonic", side_effect=lambda: clock[0]), \
+                 patch.object(update_runner.time, "sleep", side_effect=lambda delay: clock.__setitem__(0, clock[0] + delay)):
+                with self.assertRaisesRegex(RuntimeError, "readiness timed out after 2.5 seconds"):
+                    update_runner.wait_for_server_idle(
+                        7850,
+                        status_path=status_path,
+                        expected_update_id="update-readiness",
+                        expected_server_identity="server-test-identity",
+                        timeout_seconds=2.5,
+                    )
+            status = json.loads(status_path.read_text())
+        self.assertEqual(clock[0], 2.5)
+        self.assertEqual([call.kwargs["timeout"] for call in probe.call_args_list], [2.5, 1.5, 0.5])
+        self.assertEqual(status["phase"], "verifying")
+        self.assertTrue(status["heartbeat_at"])
+
+    def test_startup_readiness_retries_service_unavailable_and_transport_timeouts(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            status_path = Path(temporary) / "server-update.json"
+            update_runner.update_status(status_path, phase="verifying", update_id="update-readiness")
+            with patch.object(update_runner.urllib.request, "urlopen", side_effect=[
+                HTTPError("http://127.0.0.1:7850/api/health", 503, "Starting", {}, None),
+                URLError(TimeoutError("starting")),
+                ConnectionResetError("starting"),
+                io.BytesIO(json.dumps(self.idle_health()).encode()),
+            ]) as probe, patch.object(update_runner.time, "sleep") as sleep:
+                update_runner.wait_for_server_idle(
+                    7850,
+                    status_path=status_path,
+                    expected_update_id="update-readiness",
+                    expected_server_identity="server-test-identity",
+                    token="one-time-token",
+                )
+        self.assertEqual(probe.call_count, 4)
+        self.assertEqual(sleep.call_count, 3)
+        for call in probe.call_args_list:
+            self.assertEqual(call.args[0].get_header("Authorization"), "Bearer one-time-token")
+
+    def test_startup_readiness_stops_when_ownership_changes_during_probe_or_wait(self):
+        for during in ("probe", "wait"):
+            for replacement in ({"update_id": "new-update"}, {"phase": "failed"}):
+                with self.subTest(during=during, replacement=replacement), tempfile.TemporaryDirectory() as temporary:
+                    status_path = Path(temporary) / "server-update.json"
+                    update_runner.update_status(status_path, phase="verifying", update_id="update-readiness")
+                    changed = {}
+
+                    def replace_owner(*_args):
+                        changed.update(update_runner.update_status(status_path, **replacement))
+
+                    def probe_response(*_args, **_kwargs):
+                        if during == "wait":
+                            raise URLError(ConnectionRefusedError("starting"))
+                        replace_owner()
+                        return io.BytesIO(json.dumps(self.idle_health()).encode())
+
+                    with patch.object(update_runner.urllib.request, "urlopen", side_effect=probe_response) as probe, \
+                         patch.object(update_runner.time, "sleep", side_effect=replace_owner):
+                        with self.assertRaises(update_runner.UpdateOwnershipLostError):
+                            update_runner.wait_for_server_idle(
+                                7850,
+                                status_path=status_path,
+                                expected_update_id="update-readiness",
+                                expected_server_identity="server-test-identity",
+                            )
+                    self.assertEqual(probe.call_count, 1)
+                    self.assertEqual(json.loads(status_path.read_text()), changed)
+
+    def test_startup_readiness_does_not_swallow_cancellation(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            status_path = Path(temporary) / "server-update.json"
+            update_runner.update_status(status_path, phase="verifying", update_id="update-readiness")
+            with patch.object(update_runner.urllib.request, "urlopen", side_effect=URLError(
+                ConnectionRefusedError("starting")
+            )) as probe, patch.object(update_runner.time, "sleep", side_effect=KeyboardInterrupt):
+                with self.assertRaises(KeyboardInterrupt):
+                    update_runner.wait_for_server_idle(
+                        7850,
+                        status_path=status_path,
+                        expected_update_id="update-readiness",
+                        expected_server_identity="server-test-identity",
+                    )
+            self.assertEqual(probe.call_count, 1)
 
     def test_pre_restart_idle_check_ignores_server_declared_durable_queue(self):
         payload = json.dumps({
@@ -1017,7 +1553,7 @@ class UpdateRunnerTests(unittest.TestCase):
         self.assertEqual(token, "secret")
         self.assertFalse(path.exists())
 
-    def test_termination_grace_allows_masked_installer_recovery_to_finish(self):
+    def test_termination_never_force_kills_masked_installer_recovery(self):
         class RecoveringInstaller:
             pid = 424242
 
@@ -1029,24 +1565,91 @@ class UpdateRunnerTests(unittest.TestCase):
 
             def wait(self, timeout=None):
                 self.wait_timeouts.append(timeout)
+                if len(self.wait_timeouts) <= 3:
+                    raise update_runner.subprocess.TimeoutExpired(
+                        "install.sh",
+                        timeout,
+                    )
                 return 0
 
             def terminate(self):
-                self.fail("terminate fallback must not be used")
+                raise AssertionError("terminate fallback must not be used")
 
             def kill(self):
-                self.fail("SIGKILL fallback must not be used")
+                raise AssertionError("SIGKILL fallback must not be used")
 
         process = RecoveringInstaller()
+        observed_waits = []
         with patch.object(update_runner.os, "killpg") as kill_group:
-            update_runner.terminate_installer(process)
+            update_runner.terminate_installer(
+                process,
+                on_wait=lambda: observed_waits.append(True),
+            )
 
         self.assertEqual(
             process.wait_timeouts,
-            [update_runner.INSTALLER_TERMINATION_GRACE_SECONDS],
+            [update_runner.INSTALLER_TERMINATION_POLL_SECONDS] * 4,
         )
-        self.assertGreaterEqual(update_runner.INSTALLER_TERMINATION_GRACE_SECONDS, 180)
+        self.assertEqual(observed_waits, [True] * 4)
         kill_group.assert_called_once_with(process.pid, update_runner.signal.SIGTERM)
+        self.assertFalse(any(
+            call.args == (process.pid, update_runner.signal.SIGKILL)
+            for call in kill_group.call_args_list
+        ))
+
+    def test_timeout_heartbeats_while_waiting_for_protected_rollback(self):
+        class RecoveringInstaller:
+            pid = 424242
+
+            def __init__(self):
+                self.wait_calls = 0
+
+            def poll(self):
+                return None
+
+            def wait(self, timeout=None):
+                self.wait_calls += 1
+                if self.wait_calls <= 2:
+                    raise update_runner.subprocess.TimeoutExpired(
+                        "install.sh",
+                        timeout,
+                    )
+                return 0
+
+            def terminate(self):
+                raise AssertionError("terminate fallback must not be used")
+
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            status_path = root / "server-update.json"
+            update_runner.update_status(
+                status_path,
+                phase="installing",
+                update_id="update-protected-rollback",
+            )
+            process = RecoveringInstaller()
+            with patch.object(update_runner.subprocess, "Popen", return_value=process), \
+                    patch.object(update_runner.os, "killpg") as kill_group:
+                with self.assertRaisesRegex(RuntimeError, "timed out after 0 seconds"):
+                    update_runner.run_installer(
+                        ["install.sh"],
+                        cwd=root,
+                        status_path=status_path,
+                        log_path=root / "server-update.log",
+                        version="1.2.3",
+                        expected_update_id="update-protected-rollback",
+                        timeout_seconds=0,
+                    )
+
+            status = json.loads(status_path.read_text())
+            self.assertEqual(status["phase"], "installing")
+            self.assertIn("waiting for its protected rollback", status["message"])
+            self.assertTrue(status["heartbeat_at"])
+            self.assertGreaterEqual(status["elapsed_seconds"], 1)
+            kill_group.assert_called_once_with(
+                process.pid,
+                update_runner.signal.SIGTERM,
+            )
 
 
 if __name__ == "__main__":

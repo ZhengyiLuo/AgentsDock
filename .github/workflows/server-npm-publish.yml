@@ -1,0 +1,144 @@
+name: Prepare or publish reviewed npm server release
+
+# Manual only. Descriptor signing and native/migration acceptance happen between
+# prepare and publish. This workflow never creates or publishes a GitHub release.
+on:
+  workflow_dispatch:
+    inputs:
+      operation:
+        description: Prepare unsigned bytes, or publish an accepted signed candidate
+        type: choice
+        options: [prepare, publish]
+        default: prepare
+        required: true
+      source_sha:
+        description: Full reviewed commit SHA; publish must run at this exact commit
+        type: string
+        required: true
+      source_ref:
+        description: Reviewed source branch (main or release/*)
+        type: string
+        required: true
+        default: main
+      candidate_tag:
+        description: Publish only; separate draft npm-candidate-vVERSION with three signed bundle assets
+        type: string
+      accepted_manifest_sha256:
+        description: Publish only; SHA-256 of the exact descriptor accepted with the native app
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: agentsdock-npm-server-release
+  cancel-in-progress: false
+
+jobs:
+  prepare:
+    if: inputs.operation == 'prepare'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      PYTHONDONTWRITEBYTECODE: "1"
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+        with:
+          ref: ${{ inputs.source_sha }}
+          persist-credentials: false
+          fetch-depth: 0
+      - name: Verify reviewed source pin
+        env:
+          SOURCE_SHA: ${{ inputs.source_sha }}
+          SOURCE_REF: ${{ inputs.source_ref }}
+        shell: bash
+        run: |
+          [[ "$SOURCE_SHA" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$SOURCE_REF" == main || "$SOURCE_REF" =~ ^release/[A-Za-z0-9][A-Za-z0-9._/-]*$ ]]
+          git check-ref-format "refs/heads/$SOURCE_REF"
+          test "$(git rev-parse HEAD)" = "$SOURCE_SHA"
+          git fetch --no-tags origin "refs/heads/$SOURCE_REF:refs/remotes/origin/npm-reviewed"
+          git merge-base --is-ancestor "$SOURCE_SHA" refs/remotes/origin/npm-reviewed
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        with:
+          node-version: 24
+          package-manager-cache: false
+      - name: Verify CLI and actual offline npm packaging
+        run: |
+          node --test server/npm/cli.test.cjs scripts/tests/stage_coordinated_release.test.mjs scripts/tests/verify_npm_publication.test.mjs
+          python3 -m unittest discover -s server -p test_npm_release_package.py
+      - name: Prepare exact unsigned payload for signing and acceptance
+        run: python3 server/scripts/package_npm_release.py --output dist/npm-server --require-clean-source
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: unsigned-npm-server-${{ inputs.source_sha }}
+          path: dist/npm-server/*
+          if-no-files-found: error
+          retention-days: 14
+
+  publish:
+    if: inputs.operation == 'publish' && github.repository == 'ZhengyiLuo/AgentsDock'
+    runs-on: ubuntu-latest
+    # Restrict this environment to main/release/* branches, and configure this
+    # exact environment in the npm trusted publisher.
+    environment: npm-release
+    permissions:
+      contents: read
+      id-token: write
+    timeout-minutes: 15
+    env:
+      PYTHONDONTWRITEBYTECODE: "1"
+      SOURCE_SHA: ${{ inputs.source_sha }}
+      SOURCE_REF: ${{ inputs.source_ref }}
+      CANDIDATE_TAG: ${{ inputs.candidate_tag }}
+      ACCEPTED_MANIFEST_SHA256: ${{ inputs.accepted_manifest_sha256 }}
+    steps:
+      - name: Require the reviewed workflow and source commit
+        env:
+          WORKFLOW_REF: ${{ github.ref }}
+          WORKFLOW_SHA: ${{ github.sha }}
+        shell: bash
+        run: |
+          [[ "$SOURCE_SHA" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$SOURCE_REF" == main || "$SOURCE_REF" =~ ^release/[A-Za-z0-9][A-Za-z0-9._/-]*$ ]]
+          git check-ref-format "refs/heads/$SOURCE_REF"
+          test "$WORKFLOW_REF" = "refs/heads/$SOURCE_REF"
+          test "$WORKFLOW_SHA" = "$SOURCE_SHA"
+          [[ "$ACCEPTED_MANIFEST_SHA256" =~ ^[0-9a-f]{64}$ ]]
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+        with:
+          ref: ${{ inputs.source_sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        with:
+          node-version: 24
+          registry-url: https://registry.npmjs.org
+          package-manager-cache: false
+      - name: Check OIDC-capable npm and focused publication guards
+        run: |
+          node -e 'const v=require("node:child_process").execFileSync("npm",["--version"],{encoding:"utf8"}).trim().split(".").map(Number);if(v[0]<11||(v[0]===11&&(v[1]<5||(v[1]===5&&v[2]<1))))throw Error("npm >=11.5.1 is required")'
+          node --test server/npm/cli.test.cjs scripts/tests/stage_coordinated_release.test.mjs scripts/tests/verify_npm_publication.test.mjs
+          python3 -m unittest discover -s server -p test_npm_release_package.py
+      - name: Download the accepted signed bundle from its separate draft
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          version="$(cat server/VERSION)"
+          [[ "$version" =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-beta\.[1-9][0-9]*)?$ ]]
+          test "$CANDIDATE_TAG" = "npm-candidate-v$version"
+          mkdir -p "$RUNNER_TEMP/npm-candidate"
+          gh release view "$CANDIDATE_TAG" --repo "$GITHUB_REPOSITORY" --json tagName,isDraft,assets > "$RUNNER_TEMP/npm-candidate-release.json"
+          gh release download "$CANDIDATE_TAG" --repo "$GITHUB_REPOSITORY" --dir "$RUNNER_TEMP/npm-candidate" --pattern agents-server-npm-manifest.json --pattern agents-server-npm-manifest.sig --pattern "server-$version.tgz"
+      - name: Verify acceptance pin, signature, exact payload and registry preconditions
+        id: candidate
+        run: node scripts/verify_npm_publication.mjs preflight "$RUNNER_TEMP/npm-candidate" "$SOURCE_SHA" "$ACCEPTED_MANIFEST_SHA256" "$RUNNER_TEMP/npm-candidate-release.json"
+      - name: Publish the verified tarball with npm trusted publishing
+        if: steps.candidate.outputs.publish == 'true'
+        env:
+          ARCHIVE: ${{ steps.candidate.outputs.archive }}
+          DIST_TAG: ${{ steps.candidate.outputs.dist_tag }}
+        # Do not unpack, repack, rebuild, or execute package lifecycle scripts.
+        run: npm publish "$ARCHIVE" --ignore-scripts --access public --tag "$DIST_TAG" --registry https://registry.npmjs.org/
+      - name: Verify the public registry metadata and exact downloaded bytes
+        run: node scripts/verify_npm_publication.mjs verify "$RUNNER_TEMP/npm-candidate" "$SOURCE_SHA" "$ACCEPTED_MANIFEST_SHA256" "$RUNNER_TEMP/npm-candidate-release.json"

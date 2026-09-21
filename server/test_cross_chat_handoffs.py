@@ -1374,19 +1374,24 @@ class CrossChatStoreTests(unittest.IsolatedAsyncioTestCase):
             ["delivery", "normal"],
         )
 
-    async def test_force_send_cannot_overtake_delivery(self) -> None:
+    async def test_force_send_overtakes_pending_delivery_without_removing_it(self) -> None:
         agent_server.QUEUED_TURNS["target"] = deque([
             {"queued_id": "delivery", "purpose": "cross_chat_handoff_delivery"},
-            {"queued_id": "normal", "purpose": None},
+            {"queued_id": "normal", "purpose": None, "prompt": "Send this now"},
         ])
-        with patch.object(agent_server, "managed_server_update_blocker", return_value=None):
-            with self.assertRaises(HTTPException) as raised:
-                await agent_server._run_queued_turn_now_once("target", "normal")
-        self.assertEqual(raised.exception.status_code, 409)
+        # The mocked waiter cannot clear its steering fence after admission.
+        with patch.object(agent_server, "STEERING_SESSIONS", set()), \
+                patch.object(agent_server, "managed_server_update_admission_blocker", return_value=None), \
+                patch.object(agent_server, "stop_turn", new_callable=AsyncMock, return_value={"stopped": False}), \
+                patch.object(agent_server, "append_durable_event", new_callable=AsyncMock), \
+                patch.object(agent_server, "schedule_steered_turn_slot_waiter"):
+            result = await agent_server._run_queued_turn_now_once("target", "normal")
+        self.assertTrue(result["ok"])
         self.assertEqual(
             [item["queued_id"] for item in agent_server.QUEUED_TURNS["target"]],
-            ["delivery", "normal"],
+            ["delivery"],
         )
+        self.assertEqual(agent_server.RUN_NOW_TURNS["target"]["queued_id"], "normal")
 
     async def test_explicit_stop_never_hides_and_pauses_internal_delivery(self) -> None:
         delivery = {
@@ -2523,7 +2528,10 @@ class CrossChatStoreTests(unittest.IsolatedAsyncioTestCase):
                     queue_if_busy=False,
                 )
 
-        ensure_runtime.assert_awaited_once_with(agent_server.BACKEND_CURSOR)
+        ensure_runtime.assert_awaited_once_with(
+            agent_server.BACKEND_CURSOR,
+            session=agent_server.STORE.sessions["target"],
+        )
         self.assertNotIn("target", agent_server.BUSY_SESSIONS)
 
     def test_target_delivery_capabilities_require_native_or_ready_runtimes(self) -> None:
@@ -4989,6 +4997,43 @@ class CrossChatStoreTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(durable_leg["status"], "cancelled")
         self.assertEqual(durable_leg["error_code"], "cancelled_by_user")
 
+    async def test_stop_exchange_cleanup_is_noop_before_ledger_initialization(
+        self,
+    ) -> None:
+        uninitialized = agent_server.CrossChatStore(
+            self.root / "uninitialized-cross-chat.sqlite3"
+        )
+        with patch.object(agent_server, "CROSS_CHAT", uninitialized):
+            cancelled = (
+                await agent_server.cancel_cross_chat_exchanges_for_stopped_source_run(
+                    "run_without_lifespan"
+                )
+            )
+
+        self.assertEqual(cancelled, 0)
+        self.assertFalse(uninitialized.path.exists())
+
+    async def test_stop_exchange_cleanup_propagates_initialized_ledger_failure(
+        self,
+    ) -> None:
+        query = AsyncMock(
+            side_effect=agent_server.sqlite3.OperationalError("ledger unavailable")
+        )
+        with patch.object(
+            agent_server.CROSS_CHAT,
+            "exchanges_for_authorization_run",
+            query,
+        ):
+            with self.assertRaisesRegex(
+                agent_server.sqlite3.OperationalError,
+                "ledger unavailable",
+            ):
+                await agent_server.cancel_cross_chat_exchanges_for_stopped_source_run(
+                    "run_initialized_ledger_failure"
+                )
+
+        query.assert_awaited_once_with("run_initialized_ledger_failure")
+
     async def test_stopped_terminal_repairs_exchange_cancel_if_stop_path_was_lost(
         self,
     ) -> None:
@@ -5311,7 +5356,7 @@ class CrossChatStoreTests(unittest.IsolatedAsyncioTestCase):
             capability["agent_routes"]["client_capability"],
             agent_server.AGENT_CROSS_CHAT_ROUTES_CLIENT_CAPABILITY,
         )
-        self.assertEqual(capability["agent_routes"]["max_routes_per_chat"], 16)
+        self.assertIsNone(capability["agent_routes"]["max_routes_per_chat"])
         self.assertFalse(capability["agent_routes"]["transcript_access"])
         self.assertEqual(capability["agent_routes"]["policy"], "default_deny")
         self.assertTrue(capability["agent_routes"]["same_server_only"])
@@ -6307,6 +6352,199 @@ class CrossChatStoreTests(unittest.IsolatedAsyncioTestCase):
         durable = await agent_server.CROSS_CHAT.get_exchange(exchange["id"])
         self.assertEqual(durable["status"], "completed")
 
+    async def test_completed_live_answer_is_not_blocked_by_disconnect_cleanup(self) -> None:
+        exchange, inbound, waiter = await self.create_live_waiter(
+            "exchange_live_cleanup_answer", "run_live_cleanup_answer",
+        )
+        started = asyncio.Event()
+        cancelled = asyncio.Event()
+        release = asyncio.Event()
+        watcher_finished = asyncio.Event()
+
+        class CancellationResistantRequest:
+            async def receive(self) -> dict:
+                started.set()
+                try:
+                    try:
+                        await release.wait()
+                    except asyncio.CancelledError:
+                        # Model a disconnect transport swallowing cancellation.
+                        # A saved reply must not depend on its acknowledgement.
+                        cancelled.set()
+                        await release.wait()
+                    return {"type": "http.disconnect"}
+                finally:
+                    watcher_finished.set()
+
+            async def is_disconnected(self) -> bool:
+                await self.receive()
+                return True
+
+        live_get = asyncio.create_task(agent_server.await_cross_chat_live_waiter(
+            exchange, waiter, timeout_seconds=10,
+            request=CancellationResistantRequest(),
+        ))
+        try:
+            await asyncio.wait_for(started.wait(), timeout=1)
+            await self.deliver_terminal_live_answer(
+                exchange, inbound, waiter, body="Already saved; return it now",
+            )
+            await asyncio.wait_for(cancelled.wait(), timeout=1)
+            done, _pending = await asyncio.wait({live_get}, timeout=0.5)
+            self.assertIn(live_get, done, "saved answer hung in watcher cleanup")
+            self.assertEqual(live_get.result()["body"], "Already saved; return it now")
+            self.assertEqual(waiter["observers"], set())
+            self.assertIs(
+                agent_server.CROSS_CHAT_LIVE_RESPONSE_WAITERS[
+                    (exchange["id"], inbound["id"])
+                ], waiter,
+            )
+            replay = await agent_server.await_cross_chat_live_waiter(
+                exchange, waiter, timeout_seconds=1,
+            )
+            self.assertEqual(replay, live_get.result())
+        finally:
+            release.set()
+            await asyncio.gather(live_get, return_exceptions=True)
+            await asyncio.wait_for(watcher_finished.wait(), timeout=1)
+
+    async def test_live_cleanup_preserves_heartbeat_and_caller_cancellation(self) -> None:
+        for outcome in ("heartbeat", "cancel", "cancel_after_answer"):
+            with self.subTest(outcome=outcome):
+                exchange, inbound, waiter = await self.create_live_waiter(
+                    f"exchange_cleanup_{outcome}", f"run_cleanup_{outcome}",
+                )
+                started = asyncio.Event()
+                cancellation_seen = asyncio.Event()
+                release = asyncio.Event()
+                watcher_finished = asyncio.Event()
+
+                class CancellationResistantRequest:
+                    async def receive(self) -> dict:
+                        started.set()
+                        try:
+                            try:
+                                await release.wait()
+                            except asyncio.CancelledError:
+                                cancellation_seen.set()
+                                await release.wait()
+                            return {"type": "http.disconnect"}
+                        finally:
+                            watcher_finished.set()
+
+                with patch.object(
+                    agent_server, "cross_chat_live_heartbeat_seconds",
+                    return_value=0.01 if outcome == "heartbeat" else 10,
+                ):
+                    live_get = asyncio.create_task(
+                        agent_server.await_cross_chat_live_waiter(
+                            exchange, waiter, timeout_seconds=10,
+                            request=CancellationResistantRequest(),
+                        )
+                    )
+                    try:
+                        await asyncio.wait_for(started.wait(), timeout=1)
+                        if outcome == "cancel_after_answer":
+                            await self.deliver_terminal_live_answer(
+                                exchange, inbound, waiter, body="Saved before disconnect",
+                            )
+                        elif outcome == "cancel":
+                            live_get.cancel()
+                        await asyncio.wait_for(cancellation_seen.wait(), timeout=1)
+                        if outcome == "cancel_after_answer":
+                            live_get.cancel()
+                        done, _pending = await asyncio.wait({live_get}, timeout=0.5)
+                        self.assertIn(live_get, done, "watcher cleanup did not settle")
+                        if outcome == "heartbeat":
+                            self.assertTrue(live_get.result()["pending"])
+                        else:
+                            self.assertTrue(live_get.cancelled())
+                        self.assertEqual(waiter["observers"], set())
+                        self.assertFalse(waiter["future"].cancelled())
+                        self.assertIn(
+                            (exchange["id"], inbound["id"]),
+                            agent_server.CROSS_CHAT_LIVE_RESPONSE_WAITERS,
+                        )
+                    finally:
+                        release.set()
+                        await asyncio.gather(live_get, return_exceptions=True)
+                        await asyncio.wait_for(watcher_finished.wait(), timeout=1)
+
+                if not waiter["future"].done():
+                    await self.deliver_terminal_live_answer(
+                        exchange, inbound, waiter, body="Saved after disconnect",
+                    )
+                # All outcomes preserve the shared answer for the exact retry.
+                replay = await agent_server.await_cross_chat_live_waiter(
+                    exchange, waiter, timeout_seconds=1,
+                )
+                self.assertIn("Saved", replay["body"])
+
+    async def test_live_get_uses_asgi_disconnect_event_and_completed_replay_skips_it(self) -> None:
+        exchange, inbound, waiter = await self.create_live_waiter(
+            "exchange_asgi_disconnect", "run_asgi_disconnect",
+        )
+        messages = asyncio.Queue()
+        messages.put_nowait({"type": "http.request", "body": b"", "more_body": False})
+        listening = asyncio.Event()
+        receives = 0
+
+        async def receive() -> dict:
+            nonlocal receives
+            receives += 1
+            if receives == 2:
+                listening.set()
+            return await messages.get()
+
+        request = Request({"type": "http", "method": "GET"}, receive=receive)
+        with patch.object(request, "is_disconnected", AsyncMock()) as poll:
+            live_get = asyncio.create_task(agent_server.await_cross_chat_live_waiter(
+                exchange, waiter, timeout_seconds=10, request=request,
+            ))
+            try:
+                await asyncio.wait_for(listening.wait(), timeout=1)
+                await self.deliver_terminal_live_answer(
+                    exchange, inbound, waiter, body="ASGI reply",
+                )
+                # If both events are ready, the completed answer wins.
+                messages.put_nowait({"type": "http.disconnect"})
+                result = await asyncio.wait_for(live_get, timeout=1)
+                self.assertEqual(result["body"], "ASGI reply")
+                replay = await agent_server.await_cross_chat_live_waiter(
+                    exchange, waiter, timeout_seconds=1, request=request,
+                )
+                self.assertEqual(replay, result)
+                self.assertEqual(receives, 2)
+                poll.assert_not_awaited()
+                self.assertEqual(waiter["observers"], set())
+            finally:
+                if not live_get.done():
+                    live_get.cancel()
+                await asyncio.gather(live_get, return_exceptions=True)
+
+    async def test_live_receive_failure_is_not_a_pending_heartbeat(self) -> None:
+        exchange, inbound, waiter = await self.create_live_waiter(
+            "exchange_receive_failure", "run_receive_failure",
+        )
+        request = Request(
+            {"type": "http", "method": "GET"},
+            receive=AsyncMock(side_effect=ConnectionError("transport unavailable")),
+        )
+        with self.assertRaises(HTTPException) as raised:
+            await agent_server.await_cross_chat_live_waiter(
+                exchange, waiter, timeout_seconds=1, request=request,
+            )
+        self.assertEqual(raised.exception.status_code, 503)
+        self.assertEqual(waiter["observers"], set())
+        self.assertFalse(waiter["future"].done())
+        await self.deliver_terminal_live_answer(
+            exchange, inbound, waiter, body="Recovered from transport error",
+        )
+        result = await agent_server.await_cross_chat_live_waiter(
+            exchange, waiter, timeout_seconds=1, request=request,
+        )
+        self.assertEqual(result["body"], "Recovered from transport error")
+
     async def test_disconnected_get_does_not_downgrade_attached_retry(self) -> None:
         exchange, inbound, waiter = await self.create_live_waiter(
             "exchange_live_get_retry",
@@ -6315,9 +6553,9 @@ class CrossChatStoreTests(unittest.IsolatedAsyncioTestCase):
         disconnect_seen = asyncio.Event()
 
         class DisconnectedRequest:
-            async def is_disconnected(self) -> bool:
+            async def receive(self) -> dict:
                 disconnect_seen.set()
-                return True
+                return {"type": "http.disconnect"}
 
         disconnected_get = asyncio.create_task(
             agent_server.await_cross_chat_live_waiter(
@@ -7865,7 +8103,7 @@ class CrossChatStoreTests(unittest.IsolatedAsyncioTestCase):
     async def test_real_queue_round_trip_survives_source_turnover_and_only_cancel_stops_target(
         self,
     ) -> None:
-        """Exercise a source-to-target round trip through real queue owners.
+        """Exercise the Newton -> SuperSONIC incident through real queue owners.
 
         This deliberately does not stub ``start_turn_durably``, ``enqueue_turn``,
         ``start_next_queued_turn``, ``_start_turn_locked``, or either exchange
@@ -8233,14 +8471,14 @@ class CrossChatStoreTests(unittest.IsolatedAsyncioTestCase):
                 agent_server.STORE.sessions["target"]["backend"] = (
                     agent_server.BACKEND_CLAUDE
                 )
-                # TargetApp is occupied, so the authenticated Source Ask must
+                # SuperSONIC is occupied, so the authenticated Newton Ask must
                 # cross the actual durable target-queue admission boundary.
                 target_predecessor = "run_target_predecessor"
                 agent_server.BUSY_SESSIONS.add("target")
                 agent_server.CURRENT_TURNS["target"] = {
                     "run_id": target_predecessor,
                 }
-                source_run = "run_source_ask"
+                source_run = "run_newton_ask"
                 exchange_id, source_token, ask_task = await issue_ask(
                     source_run,
                     "real-queue-source-turnover",
@@ -8281,10 +8519,10 @@ class CrossChatStoreTests(unittest.IsolatedAsyncioTestCase):
                 )
                 pending_tasks.add(live_wait)
 
-                # A new Source turn replaces the old source owner. The actual
+                # A new Newton turn replaces the old source owner. The actual
                 # terminal hook revokes its capability and must only detach the
-                # HTTP waiter; the accepted TargetApp queue row remains owned.
-                source_successor = "run_source_successor"
+                # HTTP waiter; the accepted SuperSONIC queue row remains owned.
+                source_successor = "run_newton_successor"
                 agent_server.BUSY_SESSIONS.add("source")
                 agent_server.CURRENT_TURNS["source"] = {
                     "run_id": source_successor,
@@ -8292,7 +8530,7 @@ class CrossChatStoreTests(unittest.IsolatedAsyncioTestCase):
                 await agent_server.finalize_cross_chat_terminal({
                     "type": "turn_finished",
                     "run_id": source_run,
-                    "result_text": "Source moved on to another user turn.",
+                    "result_text": "Newton moved on to another user turn.",
                     "exit_code": 0,
                 })
                 receipt = await asyncio.wait_for(live_wait, timeout=1)
@@ -8327,14 +8565,14 @@ class CrossChatStoreTests(unittest.IsolatedAsyncioTestCase):
                     target_run_id,
                 )
                 await provider_answers["target"].put(
-                    "TargetApp completed the requested handoff."
+                    "SuperSONIC completed the requested handoff."
                 )
 
                 # Target terminalization creates the automatic return leg and
-                # real start_turn_durably queues it behind Source's successor.
+                # real start_turn_durably queues it behind Newton's successor.
                 await wait_until(
                     lambda: bool(agent_server.QUEUED_TURNS.get("source")),
-                    message="automatic reply never reached Source's queue",
+                    message="automatic reply never reached Newton's queue",
                 )
                 queued_reply = agent_server.QUEUED_TURNS["source"][0]
                 reply_leg_id = str(
@@ -8352,7 +8590,7 @@ class CrossChatStoreTests(unittest.IsolatedAsyncioTestCase):
                 )
                 self.assertTrue(queued_reply["_durable"])
                 self.assertEqual(reply_leg["body"], (
-                    "TargetApp completed the requested handoff."
+                    "SuperSONIC completed the requested handoff."
                 ))
 
                 # Deliver the persisted reply through the same queue promoter.
@@ -8373,7 +8611,7 @@ class CrossChatStoreTests(unittest.IsolatedAsyncioTestCase):
                 )
                 self.assertEqual(source_reply_handle.interrupt_calls, 0)
                 await provider_answers["source"].put(
-                    "Source received the returned answer."
+                    "Newton received the returned answer."
                 )
                 exchange = await wait_for_exchange_status(
                     exchange_id,
@@ -8417,7 +8655,7 @@ class CrossChatStoreTests(unittest.IsolatedAsyncioTestCase):
                 # A second live Ask starts immediately. Source turnover again
                 # leaves it running; only explicit exchange Cancel interrupts
                 # the exact fake provider owner through production stop_turn.
-                cancel_source_run = "run_source_cancel_case"
+                cancel_source_run = "run_newton_cancel_case"
                 (
                     cancel_exchange_id,
                     cancel_source_token,
@@ -8444,7 +8682,7 @@ class CrossChatStoreTests(unittest.IsolatedAsyncioTestCase):
                 await agent_server.finalize_cross_chat_terminal({
                     "type": "turn_finished",
                     "run_id": cancel_source_run,
-                    "result_text": "Source moved on again.",
+                    "result_text": "Newton moved on again.",
                     "exit_code": 0,
                 })
                 cancel_receipt = await asyncio.wait_for(

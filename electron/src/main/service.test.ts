@@ -6523,6 +6523,21 @@ describe('workspace file scope safety', () => {
 })
 
 describe('managed server updates', () => {
+  it('opens independent profile-owned update connections and rejects changed profile authority', async () => {
+    const active = fakeClient(), updateClient = fakeClient()
+    const { service, settings } = createProfileService({ 'http://a.test:7850': [active, updateClient] })
+    settings.setProfileServerIdentity('a', 'server-a')
+    const profile = service.coordinatedUpdateProfiles().find(candidate => candidate.id === 'a')!
+    expect(profile).toMatchObject({ serverIdentity: 'server-a', active: true })
+    const connection = await service.coordinatedUpdateConnection(profile)
+    expect(connection.client).toBe(updateClient)
+    expect(connection.loopback).toBe(false)
+    expect(() => connection.assertCurrent()).not.toThrow()
+    settings.updateProfile('a', { serverUrl: 'http://different.test:7850' })
+    expect(() => connection.assertCurrent()).toThrow()
+    connection.client.dispose()
+    expect(active.dispose).not.toHaveBeenCalled()
+  })
   function prepare(
     client: ReturnType<typeof fakeClient>,
     capabilityVersion = 9,

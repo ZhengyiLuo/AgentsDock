@@ -2,9 +2,10 @@
 
 The canonical source, desktop releases, and update feed are
 [ZhengyiLuo/AgentsDock](https://github.com/ZhengyiLuo/AgentsDock/releases).
-Signing and publication continue in private automation that checks out an
-explicit, reviewed commit from this public repository. Public CI verifies
-source; it does not have signing credentials or publish releases.
+Signing and publication run in this public repository using separate manually
+dispatched preparation and publication workflows. Release jobs check out an
+explicit, reviewed source commit. Ordinary source CI has no signing credentials
+and does not publish releases.
 
 The [legacy release feed](https://github.com/ZhengyiLuo/AgentsDock-Releases/releases)
 remains available for installed desktop clients and Android. Do not rename,
@@ -64,13 +65,70 @@ release identity. Unsigned installers must be clearly labeled and can show
 Windows security warnings. This does not relax macOS signing, notarization,
 checksum verification, or source identity checks.
 
-The private publication workflow accepts a separately pinned public migration
+The publication workflow accepts a separately pinned public migration
 QA commit. Stable `1.0.0` requires that pin and runs two disposable macOS jobs
 after the matching signed packages are public: legacy Stable `0.2.12` → stable
 `1.0.0`, and bridge `1.0.0-beta.2` → stable `1.0.0` with the Beta subscription
 retained. The earlier legacy Beta → bridge acceptance remains a separate
 journey; older beta-only updaters are not expected to skip the bridge. Report
 post-publication migration acceptance separately from packaging/signing gates.
+
+## Public release automation
+
+`direct-desktop-release-draft.yml` builds and verifies the pinned native assets
+before creating a draft. `direct-desktop-release-publish.yml` rechecks the exact
+draft, source identity and signatures before publishing the canonical release
+and its legacy mirror. Coordinated releases also require the exact npm archive
+and matching signed legacy server bridge to be available, with identical runtime
+contents and executable permissions.
+
+Both workflows are manual, restricted to the canonical repository and reviewed
+`main` or `release/*` branches. Jobs using signing credentials or the release
+token use the `direct-production` environment with matching branch restrictions.
+Fork pull requests do not run these release jobs. The workflow definitions must
+exist on the default branch for manual dispatch, while a dispatch can select the
+reviewed release branch. Registering the workflows does not replace application
+source on a diverged default branch.
+
+The public workflow has a separate run counter from the former private workflow.
+Reserve its native build number explicitly; the first public run starts above
+the last accepted local build, 1185, and every later run increments the number.
+Never reuse the old private counter formula or a previously accepted build.
+
+Add the existing credentials directly to the public repository's
+[`direct-production` environment](https://github.com/ZhengyiLuo/AgentsDock/settings/environments).
+GitHub's secret API returns metadata, not stored secret values, so the originals
+must be supplied again. Do not put them in source, chat, release assets or logs.
+
+| Secret | Value |
+| --- | --- |
+| `MACOS_CERTIFICATE_P12_BASE64` | Base64 Developer ID Application certificate and private key export |
+| `MACOS_CERTIFICATE_PASSWORD` | Password protecting that P12 export |
+| `APPLE_API_KEY_P8_BASE64` | Base64 App Store Connect API private key |
+| `APPLE_API_KEY_ID` | ID of that API key |
+| `APPLE_API_ISSUER` | App Store Connect issuer ID |
+| `AGENTSDOCK_RELEASE_TOKEN` | Fine-grained token with Contents write access to AgentsDock and AgentsDock-Releases |
+
+For file-backed values, the CLI can send encoded bytes directly without printing
+them or placing the value in command history:
+
+```sh
+base64 < /path/to/developer-id.p12 | gh secret set MACOS_CERTIFICATE_P12_BASE64 --repo ZhengyiLuo/AgentsDock --env direct-production
+base64 < /path/to/AuthKey.p8 | gh secret set APPLE_API_KEY_P8_BASE64 --repo ZhengyiLuo/AgentsDock --env direct-production
+```
+
+For the other values, use `gh secret set NAME --repo ZhengyiLuo/AgentsDock
+--env direct-production` and its interactive prompt, or the environment's secret
+editor. The native workflow needs no npm token or server signing key. Optional
+Windows signing secrets remain separate; the existing explicitly unsigned
+preview policy still applies when they are absent.
+
+Preserve the former private repository's history and artifacts. At the first
+public native build, stop dispatching its preparation workflow: concurrency and
+build counters are separate between repositories, so the old pipeline could
+reuse a build number. Disable the old native workflows as part of cutover and
+use only the public publisher thereafter. Do not publish the same candidate
+through both pipelines.
 
 ## Local verification
 

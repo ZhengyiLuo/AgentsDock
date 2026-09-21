@@ -30,6 +30,8 @@ const TRACK_BLOCKING_STATES = new Set<AppUpdateStatus['state']>([
 export interface AppUpdateLifecycle {
   beforeInstall?: () => void
   installFailed?: () => void
+  prepareInstall?: (version: string) => Promise<boolean>
+  retryServers?: (profileId: string) => Promise<void>
 }
 
 export interface AppUpdateTrackStore {
@@ -49,6 +51,23 @@ export class AppUpdateManager {
   private track: AppUpdateTrack = 'stable'
   private betaFeedOverridden = false
   private developmentChecksEnabled = false
+  private installInFlight: Promise<boolean> | null = null
+  private coordinatedInstallWaiting = false
+
+  setServerUpdates(serverUpdates: NonNullable<AppUpdateStatus['serverUpdates']>): void {
+    this.set({ serverUpdates, serverUpdateMessage: undefined })
+  }
+
+  setServerUpdateError(message: string): void { this.set({ serverUpdateMessage: message }) }
+
+  resumeCoordinatedInstall(): void {
+    if (this.coordinatedInstallWaiting && !this.installInFlight) void this.install()
+  }
+
+  async retryServers(profileId: string): Promise<AppUpdateStatus> {
+    await this.lifecycle.retryServers?.(profileId)
+    return this.status()
+  }
 
   constructor(
     private readonly publish: (status: AppUpdateStatus) => void,
@@ -230,7 +249,16 @@ export class AppUpdateManager {
     return this.check(true)
   }
 
-  async install(): Promise<boolean> {
+  install(): Promise<boolean> {
+    if (this.installInFlight) return this.installInFlight
+    const task = this.performInstall().finally(() => {
+      if (this.installInFlight === task) this.installInFlight = null
+    })
+    this.installInFlight = task
+    return task
+  }
+
+  private async performInstall(): Promise<boolean> {
     if (this.value.state !== 'downloaded') return false
 
     // A beta can be superseded after it has already been downloaded. Refresh
@@ -239,7 +267,9 @@ export class AppUpdateManager {
     await this.performCheck(true)
     if (this.value.state !== 'downloaded') return false
 
-    appLog('updater', 'installing downloaded update', { version: this.value.availableVersion })
+    const pinnedVersion = this.value.availableVersion
+    if (!pinnedVersion) return false
+    appLog('updater', 'installing downloaded update', { version: pinnedVersion })
     this.set({
       state: 'installing',
       message: process.platform === 'darwin'
@@ -247,12 +277,27 @@ export class AppUpdateManager {
         : `Restarting into AgentsDock ${this.value.availableVersion ?? 'update'}…`
     })
     try {
+      if (this.lifecycle.prepareInstall && !await this.lifecycle.prepareInstall(pinnedVersion)) {
+        this.coordinatedInstallWaiting = true
+        const blocked = this.value.serverUpdates?.find(server => server.activationBlocked && server.phase === 'blocked')
+        this.set({ state: 'downloaded', message: blocked
+          ? `${blocked.name}: ${blocked.message} The downloaded app remains ready; AgentsDock will continue when the server is compatible.`
+          : 'The server update is queued. AgentsDock will restart automatically when the server is compatible; this app remains usable while waiting.' })
+        return false
+      }
+      this.coordinatedInstallWaiting = false
+      if (this.status().availableVersion !== pinnedVersion || this.status().state !== 'installing') {
+        throw new Error('The downloaded app changed while preparing its paired server update. Try Update AgentsDock again.')
+      }
       if (process.platform === 'darwin') {
         const downloadedAt = Date.parse(this.value.downloadedAt ?? '')
         const elapsed = Number.isFinite(downloadedAt) ? Math.max(0, Date.now() - downloadedAt) : 0
         const remaining = Math.max(0, MAC_INSTALL_SETTLE_MS - elapsed)
         if (remaining > 0) await delay(remaining)
         this.set({ message: `Restarting into AgentsDock ${this.value.availableVersion ?? 'update'}…` })
+      }
+      if (this.status().availableVersion !== pinnedVersion || this.status().state !== 'installing') {
+        throw new Error('The downloaded app changed before restart. Try Update AgentsDock again.')
       }
       this.lifecycle.beforeInstall?.()
       autoUpdater.quitAndInstall(false, true)
@@ -353,6 +398,8 @@ export class AppUpdateManager {
     this.manualCheck = false
     this.set({
       ...ready,
+      serverUpdates: this.value.serverUpdates,
+      serverUpdateMessage: this.value.serverUpdateMessage,
       state: 'downloaded',
       message: message ?? `AgentsDock ${ready.availableVersion ?? 'update'} is ready to install.`,
       checkedAt: now()

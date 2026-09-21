@@ -1,5 +1,224 @@
 # Public development log
 
+## 2026-09-20 — Revised beta.12 package and public release validation
+
+- Build the revised server package from clean committed source `751c1e0`.
+  Its SHA-256 is
+  `bc69cb8817d3f085330306a463f61b0353186193b2357600f1613f56288995ea`.
+  The standalone export preserves upstream history and all 88 runtime files;
+  packaging that export through npm produces the identical archive.
+- Pass native macOS fresh-install retry over the exact failed candidate's empty
+  folders without cleanup. Refuse another install without changing the running
+  process, identity, token or synthetic provider files. Pass candidate activation
+  and forced incompatible-API rollback with the exact prior runtime and plist.
+- Pass the app-driven Linux update and rollback through the production renderer,
+  preload, IPC, coordinator, systemd service and detached installer. Verify all
+  88 installed runtime files, identity, token and six synthetic state/history
+  files. The failed update remains paused after repeated health refreshes, and
+  the isolated HTTPS registry records only the two intended package downloads.
+  Inspect dark and light layouts, including the minimum supported window width.
+- These results cover disposable native services and controlled app-replacement,
+  signing-key and distribution endpoints. Production-signed app replacement,
+  public registry transport and live provider work are not established by them.
+- Exercise the complete legacy bridge route from an old managed server without
+  npm update support. The production app checks and starts a signed legacy
+  update; the old detached updater installs the paired runtime and reconnects
+  with npm update capability. The app marks the equal-version bridge current
+  without a redundant npm download. Discovery and signing endpoints are controlled
+  within the disposable guest; no public legacy release was published.
+- Correct source CI to use runner paths in step environment variables and run
+  for maintained release branches. All eight public server test shards pass.
+  Update legacy release assertions for protected public workflows and reviewed
+  source-branch ancestry; retain release identity and mirroring checks.
+- Correct settings test fixtures to provide the required typed app-update status,
+  settle initial loading and distinguish app controls from server controls.
+  Pass 4,630 Electron tests with five existing skips, eight script tests and type
+  checking. Retain all server operation and recovery assertions.
+- Reproduce delayed app-update status dismissing an already open server restart
+  confirmation or clearing a restart error. Reset these controls when Settings
+  opens, preserving user actions while status finishes loading. Keep server
+  polling and profile/boot checks unchanged; add regressions for both cases.
+- No released app build or public npm version is accepted by this entry.
+  Native signing credentials still need to be supplied to the public release
+  environment, and signed publication checks remain pending.
+
+## 2026-09-20 — Current server integration and transition signing — candidate follow-up
+
+- Merge the six newer commits from the maintained standalone release branch,
+  preserving automatic Codex/Cursor chat titles and the shared-chat Cursor fix.
+  Preserve the updated shared-browser bundle. The earlier `8a52b14` archives
+  below are historical QA artifacts and are superseded for release preparation.
+- Include automatic title requests in update and restart blockers. Prevent new
+  optional title requests after update admission closes, and allow unstarted
+  queued requests to retry on a later turn. Verify an actual disposable provider
+  subprocess delays update advancement and that shutdown reaps its process group.
+- Pass 291 targeted title, provider-background, update and restart tests. Pass
+  another 189 focused provider-isolation, storage, shared-chat, terminal and
+  packaging checks, plus 33 Node publication/staging/CLI checks. Reproduce the
+  terminal cancellation regression with a single-worker executor.
+- Make npm packaging work in both the combined repository and standalone
+  compatibility export. Select legal notices from the checkout boundary, reject
+  unrelated parent files and retain exact canonical license copies in the export.
+  Nine packaging tests include real offline npm archives in both layouts.
+- Include the license and notice in both published server distributions and
+  installed runtimes. Pass 16 focused packaging/manifest tests, including actual
+  npm and legacy archive comparison of the legal files and their permissions.
+- Reproduce macOS device-number changes across reboot breaking interrupted
+  activation recovery. New journals bind their filesystem coordinates to a
+  persistent volume UUID while retaining inode, ownership, content and live race
+  checks. Negotiate the new guard-path option with older recovery helpers.
+  Pass 75 activation/UUID tests and 17 installer recovery tests. In a disposable
+  macOS VM, interrupt the real installer, reboot across an actual device-number
+  change and verify unchanged installer retry restores the previous runtime,
+  exact service plist, identity, token and six synthetic state/history files.
+  A second orderly reboot retains that rollback and starts the restored service.
+  Legacy journals without saved volume proof still require manual recovery if
+  their device numbers changed; specialized interrupted Hub reactivation after
+  remount remains unsupported. Do not describe those boundaries as accepted.
+- Prepare transitional signing through the standalone repository's existing
+  release secret. Its prepare-only workflow can produce both signed server
+  distributions after all server test shards pass, without publishing them or
+  moving the private key. Publication and native acceptance remain separate.
+- Move desktop signing and publication automation into public AgentsDock.
+  Keep signing credentials in the branch-restricted `direct-production`
+  environment and npm OIDC in `npm-release`; ordinary CI and fork pull requests
+  receive neither. Rebase the public workflow's native build counter above 1185
+  and retain exact source, signature, immutable-asset and server-runtime checks.
+  Preserve the private repository's history and retire its release workflows
+  when the public pipeline becomes the active publisher. Secret values must be
+  supplied again from their original source; they have not been copied or logged.
+- Pass 60 release-orchestration tests, parse both public native workflows and
+  check all 50 shell steps. Verify manual/canonical/trusted-branch guards on all
+  13 jobs and the release environment on all seven jobs that use secrets.
+- Reject the packaged `d9c1f50` candidate after a pristine macOS install exposes
+  a missing LaunchAgents parent during volume binding. Bind a safe existing
+  ancestor until publication creates and verifies the destination directory.
+  Pass 77 activation tests, including missing-parent recovery checks.
+- Allow retry after that failure without deleting the empty configuration and
+  state/admin directories it leaves behind. Both launcher and locked installer
+  reject existing data, credentials, links, locks and registered services;
+  fresh installation creates no legacy migration alias. Pass 12 CLI tests,
+  14 installer admission tests and two actual installer regressions from a
+  clean source snapshot. Exact-package macOS retry acceptance remains pending.
+- Availability: committed source candidate. Updated packaged migration and
+  recovery verification are in progress; no public release or production service
+  has changed.
+
+## 2026-09-20 — npm publication and native migration validation — beta.12 candidate
+
+- Reserve `1.0.4-beta.12` for the coordinated candidate. Do not publish the
+  earlier beta.9 QA package under an already-used server release version.
+- Add manual unsigned preparation and protected OIDC publication of an exact
+  signed npm candidate. Verify reviewed source, accepted descriptor hash,
+  signature, package identity, immutable version, channel and registry bytes.
+  Keep private signing separate; inspecting or signing a candidate does not
+  establish native acceptance or publish a desktop release.
+- Reproduce a failed fresh installation leaving only empty runtime folders.
+  Allow the npm launcher to retry only safely owned empty scaffolding, while
+  retaining rejection of state, configuration, files, links, releases, locks
+  and registered services. Delete no existing data and retain the installer's
+  repeated admission check under its lock.
+- Exercise Update through the actual production renderer, preload, IPC,
+  service, coordinator and native HTTP in isolated offscreen Electron against
+  a disposable Linux systemd service. Verify the detached updater downloads a
+  signed HTTPS archive, validates it, activates the candidate and reconnects
+  with the same identity and token. Preserve six synthetic state/history files.
+- Send an intentionally incompatible signed API contract through the same
+  desktop path. Observe candidate activation, rejection and real rollback to
+  the prior runtime. Verify the UI pauses with an explicit retry action and
+  repeated health refreshes do not download or install it again. Preserve an
+  independent offline profile and inspect light/dark minimum-width layouts.
+- Separately exercise real macOS launchd in disposable virtual machines:
+  legacy installer to candidate, wrong-API health rejection and restoration of
+  the previous runtime and exact service plist. Verify identity, token and
+  six synthetic provider/configuration/history files remain unchanged. Fresh
+  installation through actual offline npx succeeds; a second installation is
+  refused without changing the running service.
+- Test boundaries: ephemeral signing key and guest-only HTTPS registry for
+  Linux; controlled app download/replacement; synthetic provider data rather
+  than live model work. macOS dependency caches are preloaded after guest
+  outbound network failure. These tests do not establish public npm transport,
+  production-signed packaged-app acceptance or actual app replacement.
+- Pass 33 focused Node tests covering publication, packaged metadata and the
+  npm CLI, plus five actual npm packaging tests and nine installer admission
+  tests. Preserve explicit unsupported-boundary notes instead of treating
+  a dry run or simulated app replacement as an accepted public release.
+- Prepare the exact beta.12 npm archive from committed source `8a52b14` in a
+  clean detached checkout. Its SHA-256 is
+  `ce392cf842774eb55fcd889a36e5c875d18e7a70551a77163744413fd9252241`.
+  On a third pristine macOS VM, reproduce the actual failed first install and
+  retry with this unchanged archive through npx, without removing the leftover
+  folders. Verify beta.12/API 28 activation, then refuse repeated installation
+  while preserving the running process, identity, token and provider sentinels.
+- Keep native build/draft staging possible before registry publication.
+  Final release verification requires both the signed npm package and matching
+  legacy bridge to be public, with identical runtime files and executable bits.
+- Verify the compatibility export preserves the standalone repository's ancestry
+  and exact server tree. Build the beta.12 legacy archive from that export and
+  compare it with the committed npm archive: all 85 runtime files and their
+  executable permissions match. Both manifests remain unsigned until production
+  signing; these local archives have not been made available to installed users.
+- Availability: committed source candidate after focused validation. Registry
+  publication, trusted-publisher execution and the complete signed native
+  release remain pending. Production services and CLI credentials are untouched.
+
+## 2026-09-20 — Coordinated npm updates — source candidate
+
+- Import the maintained server under `server/` with its complete history.
+  Retire the frozen snapshot and its legacy Swift server-text assertions.
+  Verify that the initial subtree export reproduces the original standalone
+  commit; require subsequent compatibility exports to preserve ancestry and
+  exact contents. Keep legacy signed downloads available during migration.
+- Prepare `@agentsdock/server` from the exact runtime allowlist, with no npm
+  installation hooks. Stage a separate signed descriptor tying the app's
+  public version to an immutable npm archive, integrity hashes and API contract.
+  Keep source package metadata private and publication disabled in preparation.
+- Add authenticated, identity-bound reconciliation through the existing managed
+  updater. Persist signed bytes across queued work and restart, queue while busy,
+  and validate candidate identity, version and API before activation commits.
+  Fresh npm installation refuses existing state and services, including a
+  repeated check under the installer lock.
+- Add desktop coordination with durable per-server receipts, independent offline
+  recovery, explicit enrollment, exact downloaded app version pinning and a
+  compatibility gate before restart. Ordinary unenrolled builds keep the existing
+  update behavior. The app and server retain their native packaging formats.
+  Failed or canceled owned attempts stay paused until an explicit scoped retry;
+  enrolled releases keep legacy controls under Advanced server recovery.
+- Pass 233 focused server checks, including real HTTP authentication and
+  identity guards, signed metadata, queued-work recovery, installer protection
+  and candidate health rejection. Verify actual offline npm packing, CLI native
+  transport, exact payload bytes and executable permissions, paired artifact
+  staging and Git export rejection on divergent history.
+- Pass 722 affected desktop tests, TypeScript validation and production
+  compilation. Exercise the production renderer, preload, IPC, profile service,
+  updater, coordinator and native HTTP against an isolated production FastAPI
+  server in native offscreen Electron. Click Update, reopen a second process,
+  preserve the queued receipt, display an independent offline profile, pause on
+  failure/cancellation and retry explicitly. Verify dark/light minimum-width
+  layouts and no automatic legacy release lookup. Feed/download, signing key,
+  provider work, server activation and app quit are controlled test boundaries;
+  simulated completion is not recorded as a real managed update.
+- Separately exercise the real installer in a disposable Ubuntu systemd VM:
+  legacy beta.9 to guest-stamped beta.12, then a deliberately incompatible
+  beta.13 candidate rolls back to beta.12. Authenticated health verifies exact
+  version and API, stable identity and preserved token. Six synthetic provider,
+  configuration and history/state files remain byte-identical. This validates
+  Linux service activation and rollback, not real provider sessions or the full
+  registry-to-app update journey.
+- Install the committed local npm tarball through actual offline `npx` in a
+  second disposable Linux user account. Verify its independent real systemd
+  service, identity and token; a second fresh-install attempt is refused and
+  both services remain unchanged. Package retrieval from the public registry
+  and same-user multiple-server installation are not claimed by this test.
+- Compile the legacy Swift guardrail executable successfully. Its unchanged
+  React mobile source-text assertion still fails before later checks; this is
+  not recorded as a passing full Swift guardrail run.
+- Availability: source candidate only. macOS launchd migration and rollback,
+  active real-provider work and retained live chat data, registry publication,
+  the complete coordinated upgrade and packaged native acceptance remain
+  required before a coordinated release. No production service or published
+  release is changed by this source work.
+
 ## 2026-09-20 — Compact running command blocks — 1.0.4-beta.11 local acceptance
 
 - Keep the active Codex tool inside its compact command group. Update the

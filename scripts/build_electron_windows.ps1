@@ -15,6 +15,8 @@ $ExpectedOutputRoot = [System.IO.Path]::GetFullPath((Join-Path $Root 'dist'))
 $IconSource = Join-Path $Root 'Sources\ZenithDockIOS\Resources\Assets.xcassets\AppIcon.appiconset\AppIcon-1024.png'
 $IconOutput = Join-Path $Project 'build\AgentsDock.png'
 $Architecture = if ($env:AGENTSDOCK_WINDOWS_ARCH) { $env:AGENTSDOCK_WINDOWS_ARCH } else { 'x64' }
+$CoordinatedStage = $null
+$CoordinatedConfigArguments = @()
 
 if ($Architecture -ne 'x64') {
   throw "Unsupported Windows architecture: $Architecture (expected x64)"
@@ -42,6 +44,13 @@ Copy-Item -LiteralPath $IconSource -Destination $IconOutput -Force
 
 Push-Location $Project
 try {
+  if ($env:AGENTSDOCK_COORDINATED_MANIFEST -or $env:AGENTSDOCK_COORDINATED_SIGNATURE) {
+    New-Item -ItemType Directory -Force -Path $ExpectedOutputRoot | Out-Null
+    $CoordinatedStage = Join-Path $ExpectedOutputRoot ('.coordinated-windows-' + [Guid]::NewGuid().ToString('N'))
+    New-Item -ItemType Directory -Path $CoordinatedStage | Out-Null
+    Invoke-Checked node (Join-Path $Root 'scripts\prepare_electron_coordinated_config.mjs') $Project $CoordinatedStage
+    $CoordinatedConfigArguments = @('--config', (Join-Path $CoordinatedStage 'electron-builder.json'))
+  }
   if (-not (Test-Path -LiteralPath (Join-Path $Project 'node_modules') -PathType Container)) {
     Invoke-Checked pnpm install --frozen-lockfile
   }
@@ -64,7 +73,7 @@ try {
     }
     New-Item -ItemType Directory -Force -Path $Output | Out-Null
 
-    & pnpm exec electron-builder --win nsis --x64 --publish never "--config.directories.output=$Output"
+    & pnpm exec electron-builder --win nsis --x64 --publish never @CoordinatedConfigArguments "--config.directories.output=$Output"
     $BuilderExitCode = $LASTEXITCODE
     if ($BuilderExitCode -eq 0) {
       break
@@ -78,6 +87,9 @@ try {
     Start-Sleep -Seconds $DelaySeconds
   }
 } finally {
+  if ($CoordinatedStage -and (Test-Path -LiteralPath $CoordinatedStage)) {
+    Remove-Item -LiteralPath $CoordinatedStage -Recurse -Force
+  }
   Pop-Location
 }
 

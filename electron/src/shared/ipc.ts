@@ -330,6 +330,7 @@ export interface AgentsDockAPI {
     status(): Promise<AppUpdateStatus>
     check(): Promise<AppUpdateStatus>
     install(): Promise<boolean>
+    retryServers(profileId: string): Promise<AppUpdateStatus>
     setTrack(track: AppUpdateTrack): Promise<AppUpdateStatus>
   }
   settings: {

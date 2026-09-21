@@ -22,7 +22,7 @@ __pycache__/
 .env.*
 
 # Local dependencies, credentials, and private development state
-node_modules/
+node_modules
 .venv/
 .test-state/
 .claude/
