@@ -142,18 +142,10 @@
     '<svg class="docs-menu-chev" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg>';
   btn.querySelector('.docs-menu-current').textContent = current;
 
-  // Mobile row: the directory button plus (on docs pages) a language switch link.
+  // Mobile row holding the directory button (the language switch lives in the site header).
   var row = document.createElement('div');
   row.className = 'docs-menu-row';
   row.appendChild(btn);
-  var langHref = aside.getAttribute('data-lang-href');
-  if (langHref) {
-    var lang = document.createElement('a');
-    lang.className = 'docs-menu-lang';
-    lang.href = langHref;
-    lang.textContent = aside.getAttribute('data-lang-label') || 'EN';
-    row.appendChild(lang);
-  }
   nav.parentNode.insertBefore(row, nav);
 
   function setOpen(open) {

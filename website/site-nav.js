@@ -30,3 +30,19 @@
     if (header.classList.contains('nav-open') && !header.contains(e.target)) setOpen(false);
   });
 })();
+
+// Header language switcher (docs pages): a globe button that opens a small menu.
+(function () {
+  var sw = document.querySelector('.lang-switch');
+  if (!sw) return;
+  var btn = sw.querySelector('.lang-switch-btn');
+  var menu = sw.querySelector('.lang-switch-menu');
+  if (!btn || !menu) return;
+  function setOpen(open) {
+    menu.hidden = !open;
+    btn.setAttribute('aria-expanded', String(open));
+  }
+  btn.addEventListener('click', function () { setOpen(menu.hidden); });
+  document.addEventListener('click', function (e) { if (!menu.hidden && !sw.contains(e.target)) setOpen(false); });
+  document.addEventListener('keydown', function (e) { if (e.key === 'Escape' && !menu.hidden) { setOpen(false); btn.focus(); } });
+})();
