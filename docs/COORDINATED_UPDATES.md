@@ -1,9 +1,13 @@
 # Coordinated app and server updates
 
-Implementation status: source candidate. Isolated Linux installer activation,
-rollback and fresh installation through an offline npm tarball have been exercised;
-complete coordinated migration acceptance,
-npm publication and the first coordinated native release have not occurred. Existing
+Implementation status: source candidate for `1.0.4-beta.12`. Isolated Linux
+installer activation, rollback and fresh installation through an offline npm
+tarball have been exercised. A native offscreen desktop additionally drives the
+real managed Linux updater through signed HTTPS download, activation, failure
+and rollback using a disposable registry and signing key. Complete coordinated
+migration acceptance, npm publication and the first coordinated native release
+have not occurred. Separate disposable macOS VMs also verify real launchd
+migration, wrong-API rollback and fresh offline npx installation. Existing
 installations continue using the existing release channel until that release is
 accepted and published.
 
@@ -51,11 +55,20 @@ The running service never points into an npm global directory or disposable npx
 cache. The npm package has no install hooks. Fresh `install` refuses existing
 state and services, with a repeated check under the installer lock. Existing
 servers use the managed updater, rather than rerunning fresh installation.
+If dependency setup fails before creating state or a service, a retry may reuse
+only safely owned empty installation folders. It never removes old data to make
+a fresh installation proceed.
 
 Older clients retain their existing update/status protocol. Do not delete the
 standalone download channel, rotate the release key, change provider homes, or
 silently change service names as part of this migration. Independent same-host
 services and provider-directory migration require their separate instance design.
+
+Automatic bridging requires a supported managed updater. Legacy remote servers
+without identity-fenced update capability need the guided installer; very old
+unmanaged installations cannot safely use automatic migration. An older desktop
+without coordination support installs the new desktop first; its first launch
+then reconciles the saved server profiles from the bundled signed descriptor.
 
 ## Release artifacts and ordering
 
@@ -81,10 +94,27 @@ services and provider-directory migration require their separate instance design
    app assets only after both server paths are usable. Keep a release manifest
    recording source commits, hashes, versions and compatibility limits.
 
-The current manual `server-npm-publish.yml` workflow **prepares and signs** the
-package; it does not publish. The private native publisher must also accept the
-two extra descriptor assets before this release can be exposed. Its existing
-fixed asset allowlist is not satisfied by adding files only to a local build.
+The manual `server-npm-publish.yml` workflow has separate `prepare` and `publish`
+operations. Preparation produces unsigned artifacts without a signing secret.
+The protected private signer creates the exact tarball and signed descriptor;
+explicit staging creates a separate draft `npm-candidate-vVERSION` containing
+only `server-VERSION.tgz`, `agents-server-npm-manifest.json` and its `.sig`.
+It never publishes npm or a desktop release. Signing is not acceptance.
+
+After acceptance, the public publish operation requires the exact reviewed
+workflow/source commit, candidate draft and accepted manifest SHA-256. It verifies
+the existing release-key signature, package identity, archive hashes and channel;
+publishes that tarball through npm OIDC; then downloads and verifies registry
+bytes. It refuses immutable-version mismatches and backward dist-tag movement.
+The npm candidate draft is separate from the native desktop draft, which verifies
+npm availability and retains its own exact asset contract. This avoids making
+the first npm publication depend on a desktop draft that already requires npm.
+
+The private publisher integration also requires an explicit unused native build
+number. Check its CI run floor before dispatch; old run-number arithmetic could
+reuse numbers already assigned to local desktop builds. A server npm version
+must advance the previously installed server version; the old beta.9 QA tarball
+is not a releasable migration candidate.
 
 ## npm account setup and first publication
 
@@ -95,19 +125,43 @@ by publishing the accepted exact tarball with public access and the correct
 `beta` or `latest` tag. These are release steps after acceptance, not prerequisites
 for local implementation or tests.
 
-Once the package exists, configure its trusted publisher for the actual GitHub
-repository, publishing workflow filename and protected npm release environment.
-Enable an explicit publish job using a compatible Node/npm version and GitHub
-OIDC rather than storing a long-lived npm token. Confirm organization permissions
-and provenance in that first workflow run. A private signing job may prepare
-artifacts separately; only reviewed, verified bytes reach the public publisher.
+Before that first interactive publication, run the read-only candidate inspection
+against the downloaded signed bundle and its draft metadata:
+
+```sh
+node scripts/verify_npm_publication.mjs inspect \
+  CANDIDATE_DIRECTORY REVIEWED_SOURCE_SHA ACCEPTED_MANIFEST_SHA256 DRAFT_RELEASE_JSON
+```
+
+Publish the inspected archive only after native and migration acceptance. Keep
+its exact bytes; do not repack or rebuild between signing and publication.
+
+Once the package exists, configure its trusted publisher with GitHub owner
+`ZhengyiLuo`, repository `AgentsDock`, workflow filename `server-npm-publish.yml`,
+and environment `npm-release`. Permit the `npm publish` action, since stage-only
+permission does not authorize this workflow's direct publication. Configure
+required reviewers and allowed `main`/`release/*` branches for that GitHub
+environment. The private signing environment separately needs the existing
+server release key; no signing key or npm token belongs in the public job.
+
+The workflow uses GitHub-hosted Node 24 and requires npm 11.5.1 or later. Confirm
+OIDC authorization and provenance in its first real run. See the
+[npm trusted-publishing requirements](https://docs.npmjs.com/trusted-publishers/).
+Account login, source code and dry runs do not establish publication acceptance.
 
 ## Required migration acceptance
 
 Local unit and isolated HTTP/UI tests cover protocol behavior. A disposable
 Linux VM additionally exercises real systemd activation and rollback with
-synthetic preserved files; this does not prove active-provider or macOS launchd
-recovery, or the complete published-artifact update journey. Before release,
+synthetic preserved files. The desktop-driven managed test verifies actual
+detached updater execution, HTTPS archive verification, successful reconnection
+and a failed candidate returning to the previous release without automatic retry.
+Its registry, signing key and app replacement are controlled test boundaries;
+it does not prove active-provider work or the complete published-artifact update
+journey. Separate macOS VMs exercise launchd activation and rollback, exact
+service-plist restoration, preserved identity/token/synthetic files and fresh
+offline npx installation. Their dependencies are preloaded after guest network
+failure; online bootstrap is not claimed. Before release,
 record results for these scenarios on disposable macOS and Linux accounts/hosts:
 
 | Scenario | Required result |

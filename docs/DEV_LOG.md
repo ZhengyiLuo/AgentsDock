@@ -1,5 +1,48 @@
 # Public development log
 
+## 2026-09-20 — npm publication and native migration validation — beta.12 candidate
+
+- Reserve `1.0.4-beta.12` for the coordinated candidate. Do not publish the
+  earlier beta.9 QA package under an already-used server release version.
+- Add manual unsigned preparation and protected OIDC publication of an exact
+  signed npm candidate. Verify reviewed source, accepted descriptor hash,
+  signature, package identity, immutable version, channel and registry bytes.
+  Keep private signing separate; inspecting or signing a candidate does not
+  establish native acceptance or publish a desktop release.
+- Reproduce a failed fresh installation leaving only empty runtime folders.
+  Allow the npm launcher to retry only safely owned empty scaffolding, while
+  retaining rejection of state, configuration, files, links, releases, locks
+  and registered services. Delete no existing data and retain the installer's
+  repeated admission check under its lock.
+- Exercise Update through the actual production renderer, preload, IPC,
+  service, coordinator and native HTTP in isolated offscreen Electron against
+  a disposable Linux systemd service. Verify the detached updater downloads a
+  signed HTTPS archive, validates it, activates the candidate and reconnects
+  with the same identity and token. Preserve six synthetic state/history files.
+- Send an intentionally incompatible signed API contract through the same
+  desktop path. Observe candidate activation, rejection and real rollback to
+  the prior runtime. Verify the UI pauses with an explicit retry action and
+  repeated health refreshes do not download or install it again. Preserve an
+  independent offline profile and inspect light/dark minimum-width layouts.
+- Separately exercise real macOS launchd in disposable virtual machines:
+  legacy installer to candidate, wrong-API health rejection and restoration of
+  the previous runtime and exact service plist. Verify identity, token and
+  six synthetic provider/configuration/history files remain unchanged. Fresh
+  installation through actual offline npx succeeds; a second installation is
+  refused without changing the running service.
+- Test boundaries: ephemeral signing key and guest-only HTTPS registry for
+  Linux; controlled app download/replacement; synthetic provider data rather
+  than live model work. macOS dependency caches are preloaded after guest
+  outbound network failure. These tests do not establish public npm transport,
+  production-signed packaged-app acceptance or actual app replacement.
+- Pass 33 focused Node tests covering publication, packaged metadata and the
+  npm CLI, plus five actual npm packaging tests and nine installer admission
+  tests. Preserve explicit unsupported-boundary notes instead of treating
+  a dry run or simulated app replacement as an accepted public release.
+- Availability: committed source candidate after focused validation. Registry
+  publication, trusted-publisher execution and the complete signed native
+  release remain pending. Production services and CLI credentials are untouched.
+
 ## 2026-09-20 — Coordinated npm updates — source candidate
 
 - Import the maintained server under `server/` with its complete history.
