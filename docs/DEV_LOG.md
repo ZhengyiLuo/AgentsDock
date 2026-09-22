@@ -1,5 +1,28 @@
 # Public development log
 
+## 2026-09-22 — Accept native legacy server update recovery
+
+- Exercise the corrected desktop Settings through real UI interaction, production
+  IPC and authenticated HTTP against original 0.1.25 installations with 0755
+  and 0750 installation roots. Both install the unchanged, publicly downloaded,
+  production-signed 1.0.3 archive through the original server updater.
+- “Install when idle” waits while a disposable chat runs, then submits exactly
+  one request using the old server's supported fields. Server identity, access
+  token and existing chats survive; all 82 shipped runtime files match the
+  verified archive. A protocol fixture supplies the busy chat lifecycle; this
+  verifies update behavior, not live model inference.
+- The 0750 installation is an actual managed Team Hub host. Its original owner,
+  team, membership, message, device session, refresh credential and managed host
+  binding survive. The existing access token can read the old message and post
+  a new one after migration, and the maintenance fence is cleared.
+- An installer failure before takeover preserves the old server and Hub data,
+  clears its exact maintenance fence, and leaves a usable retry path. The retry
+  completes through the native app. A release-check rate limit also leaves the
+  incumbent server healthy.
+- These are isolated native source-app acceptance runs. Signed desktop package
+  replacement and release verification remain separate, pending checks; this
+  entry does not record publication or a production server deployment.
+
 ## 2026-09-22 — Restore updates for existing servers
 
 - Restore manual server updates in Settings → Updates when the desktop release
@@ -44,8 +67,13 @@
 - Validate focused setup/resolver checks, TypeScript and the production desktop
   compilation. Live public metadata checks select the published releases;
   no server version is inferred from an app-only release.
-- Native SSH installation acceptance is pending on the disposable test host.
-  This source change does not publish a release or change installed clients.
+- Native Electron guided SSH setup completes against a disposable macOS server:
+  the production renderer selects published Stable 1.0.3, verifies and installs
+  the real archive, reconnects, and displays both saved chats. Server identity,
+  access token, saved histories, protected files and release trust key remain
+  unchanged. This checks an existing 1.0.3 server with Team Network hosting
+  disabled; it does not certify Team Network reactivation or the packaged
+  application updater. This source change does not itself publish a release.
 
 ## 2026-09-22 — Publish app-only 1.0.6-beta.1 (1196)
 
