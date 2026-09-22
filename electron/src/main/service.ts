@@ -134,7 +134,7 @@ import type {
 } from '../shared/types'
 import { updateQueuedTurns } from '../shared/queue'
 import { runtimeCatalogHasSelectableModels } from '../shared/runtime-catalog'
-import { incompleteLeadingRunId } from '../shared/semantic-timeline'
+import { incompleteLeadingRunId, isNativeGoalSteerEvent } from '../shared/semantic-timeline'
 import { normalizeServerURL } from '../shared/server-url'
 import { isLoopbackHostname, normalizeDirectIPTeamHubURL, normalizeTailscaleServeTeamHubURL } from '../shared/team-hub-url'
 import { agentFileBelongsToSession, isolateSessionEvent } from '../shared/session-files'
@@ -5596,7 +5596,7 @@ export class AppService {
     let files: Map<string, AgentFile> | null = null
 
     for (const event of events) {
-      if (QUEUE_CACHE_EVENT_TYPES.has(event.type) || event.positions) {
+      if (QUEUE_CACHE_EVENT_TYPES.has(event.type) || isNativeGoalSteerEvent(event) || event.positions) {
         if (!queued) {
           queued = this.cache.queuedTurns(scope.namespace, sessionId)
           nextQueued = queued

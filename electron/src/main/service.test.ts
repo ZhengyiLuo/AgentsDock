@@ -5578,6 +5578,64 @@ describe('timeline-driven jobs refresh', () => {
 })
 
 describe('streamed event cache batching', () => {
+  it.each(['batch', 'shutdown'] as const)('persists native goal queue consumption through %s flush and cold reopen', async flush => {
+    const { settings, directory } = profileSettings()
+    const cachePath = join(directory, 'goal-queue.sqlite')
+    let cache = new LocalCache(cachePath)
+    let receiveEvent: (event: Event) => void = () => { throw new Error('Timeline stream did not start.') }
+    const client = fakeClient({ stream: (_sessionId, _after, receive) => {
+      receiveEvent = receive
+      return vi.fn()
+    } })
+    let service = new AppService({ settings, cache, clientFactory: () => client as unknown as AgentServerClient })
+    cleanup.push(() => { service.stop(); cache.close() })
+    cache.putSession('profile:a', { id: 'chat', title: 'Goal', backend: 'codex' })
+    const accepted = { queued_id: 'delivered', session_id: 'chat', prompt: 'Already delivered follow-up', file_ids: [], position: 1 }
+    const waiting = { queued_id: 'waiting', session_id: 'chat', prompt: 'Still waiting', file_ids: [], position: 2 }
+    cache.putQueuedTurns('profile:a', 'chat', [accepted, waiting])
+    const internals = service as unknown as {
+      scope: { profileId: string; generation: number; namespace: string; client: AgentServerClient }
+      validatedGeneration: number | null
+      timelineSubscriptions: Map<string, { lease: number; stop: (() => void) | null; connected: boolean }>
+      activateTimelineStream(scope: typeof internals.scope, sessionId: string, after: number, lease: number): void
+    }
+    internals.validatedGeneration = internals.scope.generation
+    internals.timelineSubscriptions.set('chat', { lease: 1, stop: null, connected: false })
+    internals.activateTimelineStream(internals.scope, 'chat', 0, 1)
+    const steer: Event = {
+      id: 'accepted-steer', seq: 2, session_id: 'chat', type: 'turn_steered',
+      ts: '2026-09-21T23:57:15Z', queued_id: accepted.queued_id, run_id: 'native-goal-owner',
+      backend: 'codex', purpose: 'codex_goal_resume', native_steer: true, native_goal_steer: true,
+      provider_user_authored: true, prompt: accepted.prompt
+    }
+
+    vi.useFakeTimers()
+    try {
+      receiveEvent({ ...steer, id: 'promoted', seq: 1, type: 'turn_queue_run_now' })
+      receiveEvent(steer)
+      // A lookalike event without the native acceptance proof cannot consume
+      // another queued message.
+      receiveEvent({ ...steer, id: 'unproven', seq: 3, queued_id: waiting.queued_id, native_goal_steer: false })
+      if (flush === 'batch') await vi.advanceTimersByTimeAsync(50)
+      else service.stop()
+      expect(cache.queuedTurns('profile:a', 'chat')).toEqual([waiting])
+      expect(cache.snapshot('profile:a', 'chat')?.events).toContainEqual(expect.objectContaining({ id: steer.id }))
+    } finally {
+      vi.useRealTimers()
+    }
+
+    service.stop()
+    cache.close()
+    cache = new LocalCache(cachePath)
+    const coldClient = fakeClient()
+    service = new AppService({ settings, cache, clientFactory: () => coldClient as unknown as AgentServerClient })
+    expect((await service.bootstrap()).sessions.map(session => session.id)).toEqual(['chat'])
+    expect(service.cachedTimeline('chat')?.queuedTurns).toEqual([waiting])
+    expect((await service.openTimeline('chat')).queuedTurns).toEqual([waiting])
+    // The cold view must be correct before any server response can repair it.
+    expect(coldClient.sessionPage).not.toHaveBeenCalled()
+  })
+
   it('waits for the event cache batching window before persisting', async () => {
     vi.useFakeTimers()
     try {

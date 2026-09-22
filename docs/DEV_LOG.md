@@ -1,5 +1,53 @@
 # Public development log
 
+## 2026-09-21 — Withdraw 1.0.4 from stable feeds and repair migration and queue recovery
+
+- Withdraw the canonical desktop and standalone server 1.0.4 releases to
+  drafts. Return both stable desktop feeds to 1.0.3. The immutable legacy
+  mirror is marked withdrawn and prerelease; its direct downloads remain
+  available pending removal. The npm package remains published while registry
+  authentication for the withdrawal warning is pending. These actions do not
+  change already installed applications or servers.
+- Correct the acceptance scope recorded below: the previous macOS 1.0.3
+  migration fixture created its installation under umask `077`, so its root
+  was already private. It missed the normal existing-installation case with a
+  `0755` root. Release validation now explicitly requires legacy `0755` and
+  `0750` permissions, early failure with a live incumbent, and recovery after
+  an older failed installer has already deleted its candidate stage.
+- Tighten a safely owned legacy installation root to `0700` under its exact
+  installation lock. When activation fails before taking over services,
+  preserve the running incumbent and Hub database, retire only the owned
+  maintenance fence, and verify authenticated health before retiring recovery
+  state. Keep the strict ownership, original-link, configuration and native
+  recovery-service checks intact. Preserve the staged runtime while an
+  activation journal remains unfinished, including the crash window before
+  the installer receives its transaction ID; clean it only after settlement.
+- Consume durably acknowledged native-goal follow-ups during server queue
+  recovery and in the desktop's persisted queue cache. Retain uncertain
+  deliveries as paused and preserve ordinary queued work. A consumed follow-up
+  must not become a new request after a server restart or chat reopening.
+- Reproduce the queue failure through an isolated native offscreen Electron
+  app and real server transport, then verify no replay after the fix. A separate
+  genuine Codex goal accepts a typed follow-up, survives server restart without
+  replay, and resumes the same provider thread with a successful authenticated
+  helper read and visible final answer. Recreate the desktop service and reopen
+  the window to check persisted state. Controlled-provider and genuine-provider
+  evidence remain separate.
+- Verify the frozen installer source on disposable native macOS installations:
+  reproduce the published failure, recover its stranded transaction without a
+  retained candidate, inject a fresh failure before service takeover, and retry
+  the same archive successfully. Preserve the incumbent PID and Hub database
+  inode during rollback, then verify paired services, all 107 installed runtime
+  files, existing identity/history/authority, and an existing mutual-TLS peer's
+  new write and read. This lane uses authenticated server APIs and native
+  services with a guest-only QA signing key; it does not establish final
+  production-signature or app update UI acceptance. A subsequent stage-retention
+  guard passes its focused cleanup regressions; its additional native failure
+  window remains under validation.
+- Availability: source corrections under validation. This entry does not
+  accept a replacement release; final signed-package migration and desktop
+  relaunch acceptance remain required before publication.
+
 ## 2026-09-21 — Publish stable 1.0.4 build 1193
 
 - Publish and verify `@agentsdock/server@1.0.4` on npm `latest`, retaining
