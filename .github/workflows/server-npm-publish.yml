@@ -12,9 +12,14 @@ on:
         default: prepare
         required: true
       source_sha:
-        description: Full reviewed commit SHA; publish must run at this exact commit
+        description: Full accepted product source SHA; verification scripts and payload stay pinned here
         type: string
         required: true
+      workflow_sha:
+        description: Publish only; reviewed workflow commit SHA (defaults to source_sha)
+        type: string
+        required: false
+        default: ''
       source_ref:
         description: Reviewed source branch (main or release/*)
         type: string
@@ -83,13 +88,15 @@ jobs:
     # exact environment in the npm trusted publisher.
     environment: npm-release
     permissions:
-      contents: read
+      # GitHub requires write access to read the private accepted release draft.
+      contents: write
       id-token: write
     timeout-minutes: 15
     env:
       PYTHONDONTWRITEBYTECODE: "1"
       SOURCE_SHA: ${{ inputs.source_sha }}
       SOURCE_REF: ${{ inputs.source_ref }}
+      REVIEWED_WORKFLOW_SHA: ${{ inputs.workflow_sha || inputs.source_sha }}
       CANDIDATE_TAG: ${{ inputs.candidate_tag }}
       ACCEPTED_MANIFEST_SHA256: ${{ inputs.accepted_manifest_sha256 }}
     steps:
@@ -99,16 +106,27 @@ jobs:
           WORKFLOW_SHA: ${{ github.sha }}
         shell: bash
         run: |
-          [[ "$SOURCE_SHA" =~ ^[0-9a-f]{40}$ ]]
-          [[ "$SOURCE_REF" == main || "$SOURCE_REF" =~ ^release/[A-Za-z0-9][A-Za-z0-9._/-]*$ ]]
+          [[ "$SOURCE_SHA" =~ ^[0-9a-f]{40}$ ]] || exit 1
+          [[ "$REVIEWED_WORKFLOW_SHA" =~ ^[0-9a-f]{40}$ ]] || exit 1
+          [[ "$SOURCE_REF" == main || "$SOURCE_REF" =~ ^release/[A-Za-z0-9][A-Za-z0-9._/-]*$ ]] || exit 1
           git check-ref-format "refs/heads/$SOURCE_REF"
           test "$WORKFLOW_REF" = "refs/heads/$SOURCE_REF"
-          test "$WORKFLOW_SHA" = "$SOURCE_SHA"
-          [[ "$ACCEPTED_MANIFEST_SHA256" =~ ^[0-9a-f]{64}$ ]]
+          test "$WORKFLOW_SHA" = "$REVIEWED_WORKFLOW_SHA"
+          [[ "$ACCEPTED_MANIFEST_SHA256" =~ ^[0-9a-f]{64}$ ]] || exit 1
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
         with:
           ref: ${{ inputs.source_sha }}
           persist-credentials: false
+          fetch-depth: 0
+      - name: Bind accepted product source to the reviewed publishing workflow
+        shell: bash
+        run: |
+          test "$(git rev-parse HEAD)" = "$SOURCE_SHA"
+          git fetch --no-tags origin "refs/heads/$SOURCE_REF:refs/remotes/origin/npm-reviewed"
+          git cat-file -e "$SOURCE_SHA^{commit}"
+          git cat-file -e "$REVIEWED_WORKFLOW_SHA^{commit}"
+          git merge-base --is-ancestor "$SOURCE_SHA" "$REVIEWED_WORKFLOW_SHA"
+          git merge-base --is-ancestor "$REVIEWED_WORKFLOW_SHA" refs/remotes/origin/npm-reviewed
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
         with:
           node-version: 24
