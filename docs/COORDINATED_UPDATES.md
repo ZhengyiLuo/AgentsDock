@@ -1,11 +1,9 @@
 # Coordinated app and server updates
 
-Stable rollout target: **1.0.4**, starting from the published **1.0.3 stable app
-and server**. Stable publication remains gated on the exact packaged stable
-upgrade journey. A beta bridge does not migrate stable users: the bridge must
-be available through the existing stable desktop feeds and signed standalone
-server channel, with the matching npm version on `latest`, before the stable
-desktop update is exposed.
+Stable **1.0.4 build 1193** has passed the exact packaged upgrade journey from
+the published **1.0.3 stable app and server**. The matching npm version on
+`latest`, signed standalone bridge and both existing stable desktop feeds are
+published and verified. Stable users remain on Stable throughout this migration.
 
 For that journey, the user selects **Update AgentsDock** once in 1.0.3. After
 installing and relaunching, 1.0.4 performs the supported server migration and
@@ -50,11 +48,12 @@ for fresh installations and deliberately refuses existing managed state.
 
 | Starting point | Upgrade path and evidence |
 | --- | --- |
-| Stable desktop 1.0.3 with managed server 1.0.3 | Target: one app-update action to stable 1.0.4, followed by automatic stable server migration. Exact stable package and native journey acceptance are required before publication. |
+| Stable desktop 1.0.3 with managed server 1.0.3 | Available with accepted build 1193: one app-update action to stable 1.0.4, followed by automatic stable server migration. |
+| Original managed macOS server 0.1.26-beta.29 | Accepted native migration, candidate failure, rollback and same-byte retry to stable 1.0.4 after explicit operator selection of Stable. This does not establish its historical desktop/feed path or automatic beta-to-stable promotion. |
 | Desktop beta.8 with managed server beta.9 | Direct update to beta.12; the complete native one-click journey is accepted. |
-| Another compatible 1.x app and managed legacy server | Use the existing app feed and signed server bridge; eligibility depends on the server's advertised update capability. The beta.8/beta.9 acceptance is not proof for every historical version. |
+| Another compatible 1.x app and managed legacy server | Use the existing app feed and signed server bridge; eligibility depends on the server's advertised update capability. The accepted starting pairs are not proof for every historical version. |
 | A pre-1.0 desktop with an old feed implementation | Follow the earlier [1.0 feed migration](DIRECT_RELEASES.md#migration-to-10) first when required. Retain those historical bridge releases; do not assume these clients can skip directly to beta.12. |
-| Another stable-channel installation | Remain on stable. The bridge must be published through both old stable channels and npm after its own acceptance; beta.12 does not enroll stable servers into beta or prove every older stable migration. |
+| Another stable-channel installation | Remain on Stable. The bridge uses both existing stable channels and npm; the accepted 1.0.3 starting pair does not prove every older stable migration. |
 | Very old, unmanaged or unsupported remote server | Requires a separately validated legacy upgrade path before automatic coordination. Do not run the fresh npm installer over its existing state. |
 | Older macOS service with custom paths | Preserve the original installation, configuration and state directories during the one-time migration; older services may not record all three paths. |
 
@@ -72,16 +71,16 @@ that authority information even when their advertised capability passes the
 app's check. Do not turn these capability thresholds into a promised minimum
 release version without validating that release's full installer path.
 
-A contract-level replay confirms one older boundary: the released macOS
-`0.1.26-beta.29` runner lacks the ownership proof required by the new installer.
-It is rejected before service shutdown or runtime/configuration activation,
-although download and dependency staging may already have occurred. Its Linux
-runner passes this particular check through the managed-update environment; that
-is not a complete Linux migration test. The old runner also insists on the
-latest release, so requesting retained beta.9 through its existing update API
-does not create an intermediate upgrade path. Older macOS installations need a
-separately validated, controlled migration; no automatic path for that starting
-version is claimed.
+The original signed macOS `0.1.26-beta.29` server now passes the native signed
+migration, rollback and retry boundary. When its status omits the runner process
+ID, the installer proves the actual updater's executable, kernel arguments,
+ancestry and tmux ownership, alongside authenticated identity and idle admission.
+It retains these checks when rollback leaves a dead candidate receipt. The test
+explicitly selects Stable before requesting 1.0.4; app updates do not change a
+server's release channel. This native server result does not establish every
+historical desktop/feed combination or custom-directory installation. The old
+runner's latest-only behavior also remains; requesting a retained intermediate
+version through that API is not a supported shortcut.
 
 Keep both desktop feeds and the standalone server bridge available while
 supported clients still need them. Publish a bridge on each supported release
@@ -107,12 +106,17 @@ idle; a disconnected server resumes reconciliation when it reconnects. Settings
 shows progress per server. Scheduling or downloading never means installed.
 An owned update that fails or is canceled stays paused across app restarts.
 Retry is explicit and scoped to the selected server. Legacy controls live under
-Advanced server recovery for enrolled releases.
+Advanced server recovery for enrolled releases. Opening recovery preserves a
+failed operation. After a coordinated Retry, an already expanded recovery panel
+refreshes authoritative status automatically, without a new release check.
+Legacy servers that omit update progress from health are observed through the
+app's existing health callbacks while the owned operation is active.
 
 For later updates from an already coordinated desktop, an active server known
 to be outside the signed compatibility interval keeps the working app open.
 This protection is absent from the first update by an old desktop without the
-coordinator; the accepted beta.8/beta.9 starting pair has sufficient API overlap.
+coordinator; the accepted beta.8/beta.9 and stable 1.0.3 starting pairs have
+sufficient API overlap.
 Legacy servers within the supported interval can finish queued work while the
 app updates. An equal or newer server satisfies a
 release only with the supported API contract; reconciliation never downgrades a
@@ -157,8 +161,9 @@ then reconciles the saved server profiles from the bundled signed descriptor.
 
 ## Release artifacts and ordering
 
-1. Choose the next unused release version within the current beta line. Commit
-   and verify the source before building. Server `VERSION` and the staged native
+1. Choose an unused version on the intended channel. Keep a beta line's base
+   version fixed, and promote it to stable only after validation. Commit and
+   verify the source before building. Server `VERSION` and the staged native
    app's public version must match.
 2. Use `server/scripts/package_npm_release.py` to create the exact npm tarball
    and descriptor. Sign the original descriptor bytes with the existing server
@@ -174,10 +179,11 @@ then reconciles the saved server profiles from the bundled signed descriptor.
    the enrollment helper.
 4. Accept migration and rollback on disposable real service hosts. Verify the
    staged native app and its actual update interaction, signing and updater feed.
-5. Publish the verified exact tarball, verify it from npm, and make the signed
-   legacy bridge available before exposing the app update. Publish the paired
-   app assets only after both server paths are usable. Keep a release manifest
-   recording source commits, hashes, versions and compatibility limits.
+5. Publish the verified exact tarball and verify npm's archive and channel tag
+   (`latest` for stable). Then publish and verify the matching signed standalone
+   bridge. Expose the paired app assets on both existing desktop feeds only
+   after both server paths are usable. Keep a release manifest recording source
+   commits, hashes, versions and compatibility limits.
 
 The manual `server-npm-publish.yml` workflow has separate `prepare` and `publish`
 operations. Preparation produces unsigned artifacts without a signing secret.
@@ -193,11 +199,37 @@ a separate draft `npm-candidate-vVERSION` containing
 only `server-VERSION.tgz`, `agents-server-npm-manifest.json` and its `.sig`.
 It never publishes npm or a desktop release. Signing is not acceptance.
 
-After acceptance, the public publish operation requires the exact reviewed
-workflow/source commit, candidate draft and accepted manifest SHA-256. It verifies
-the existing release-key signature, package identity, archive hashes and channel;
-publishes that tarball through npm OIDC; then downloads and verifies registry
-bytes. It refuses immutable-version mismatches and backward dist-tag movement.
+Publication pins the reviewed workflow revision separately from the accepted
+product-source revision. `source_sha` identifies the source recorded in the signed
+descriptor and accepted packages. Optional `workflow_sha` identifies the reviewed
+publishing code and defaults to `source_sha`. The dispatched commit must equal
+that workflow pin, on the authorized `source_ref` branch (`main` or `release/*`).
+The job checks out `source_sha`, proves it is an ancestor of the reviewed workflow
+commit, and proves that workflow commit is an ancestor of the freshly fetched
+branch. A workflow correction does not change the accepted product pin or permit
+rebuilding the accepted archive.
+
+Only the publish job receives `contents: write` to read its private candidate
+draft, together with `id-token: write` for npm trusted publishing. It does not
+create or publish GitHub releases. The job verifies the accepted descriptor hash,
+existing release-key signature, source pin, package identity, archive hashes and
+channel; publishes that exact tarball through npm OIDC; then downloads and verifies
+registry bytes. It refuses immutable-version mismatches and backward tag movement.
+
+npm can acknowledge publication before serving the version and archive publicly.
+Future runs retry only the unchanged read-only registry verifier, at most 61
+attempts with 10-second gaps and an 11-minute step limit. Exhaustion still fails,
+and all exact-byte and channel requirements remain enforced. This visibility
+wait never retries `npm publish`. A later full job retry first checks the registry;
+an already published exact version skips publication and proceeds to verification.
+
+Stable 1.0.4 was published from workflow revision `52ff3e3` with accepted product
+source `b3bf411`. Its first attempt published once but failed immediate readback
+while npm processed the package. Its second attempt skipped publication and
+passed exact public verification. The bounded wait is a subsequent workflow-only
+improvement, not part of the accepted packages or that completed publication.
+npm provenance identifies the publishing revision; the original signed descriptor
+and exact tarball bind the accepted product source.
 The npm candidate draft is separate from the native desktop draft. Native build
 and draft staging validate the signed metadata and packaged resources before
 either server distribution needs to be public. Final desktop publication verifies
@@ -247,33 +279,52 @@ in [Direct desktop releases](DIRECT_RELEASES.md).
 The workflow file must also exist on the repository's default branch for manual
 dispatch to work. If the default and maintained release branches have diverged,
 register only the reviewed workflow on the default branch; do not replace its
-application source. Dispatch on the reviewed release branch with the matching
-source SHA. The first package publication still uses the accepted archive and
-interactive npm authentication before trusted publishing can be configured.
+application source. Dispatch on the authorized release branch with the exact
+reviewed `workflow_sha`, accepted `source_sha` and signed manifest hash. The
+existing package uses trusted publishing; interactive authentication is only a
+bootstrap step for a package that has not yet configured its trusted publisher.
 
 The workflow uses GitHub-hosted Node 24 and requires npm 11.5.1 or later. Confirm
 OIDC authorization and provenance in its first real run. See the
 [npm trusted-publishing requirements](https://docs.npmjs.com/trusted-publishers/).
 Account login, source code and dry runs do not establish publication acceptance.
 
-## Required migration acceptance
+## Acceptance scope and release checks
 
-Local unit and isolated HTTP/UI tests cover protocol behavior. A disposable
-Linux VM additionally exercises real systemd activation and rollback with
-synthetic preserved files. The desktop-driven managed test verifies actual
-detached updater execution, HTTPS archive verification, successful reconnection
-and a failed candidate returning to the previous release without automatic retry.
-Its registry, signing key and app replacement are controlled test boundaries;
-it does not prove active-provider work or the complete published-artifact update
-journey. Separate macOS VMs exercise launchd activation and rollback, exact
-service-plist restoration, preserved identity/token/synthetic files and fresh
-offline npx installation. Their dependencies are preloaded after guest network
-failure; online bootstrap is not claimed. A third pristine VM reproduces an
-actual first-install dependency timeout and retries using the exact committed
-beta.12 npm tarball without removing the leftover folders. It then verifies
-that another installation attempt preserves the installed process and state.
-Before release,
-record results for these scenarios on disposable macOS and Linux accounts/hosts:
+Build 1193 accepts the exact signed 1.0.4 runtime on native launchd and systemd.
+The final candidate starts, encounters an induced activation failure, rolls back
+automatically and then succeeds through an explicit retry of the same bytes.
+Both platforms preserve populated chats/events, synthetic provider and terminal
+credential/configuration files, Hub records and authority, and an established
+mutual-TLS peer. Existing peer credentials authenticate saved reads and new
+writes. All 107 runtime files and modes match between signed archives and source.
+Installed bytes remain exact; installed permissions follow the signed installer,
+including Linux `agent_server.py` normalization from mode `0644` to `0755`.
+
+The actual packaged Mac journey starts with unchanged stable 1.0.3 app/server
+artifacts. One Update action replaces and automatically relaunches the signed
+app, whose coordinator completes the server migration. A separate archive-only
+503 leaves the original server PID and boot unchanged: normal health callbacks
+observe the failure, recovery opening/reopening preserves it, and one coordinated
+Retry succeeds with Advanced recovery continuously open. Both status rows update
+without Check or reopening Settings. No separate server-update action is used.
+
+These journeys use isolated HTTPS discovery serving the exact signed packages.
+Native app relaunch drops process-only TLS overrides, exposing a fixture
+certificate error in the desktop feed check. Native migration and data acceptance
+are complete, but private discovery does not establish public feed propagation.
+Separate public checks now verify npm's exact archive, the matching standalone
+bridge and both stable desktop feeds; private discovery alone establishes none
+of those public-delivery results.
+
+Earlier beta.12 acceptance retains its own source scope: real Codex/Claude tools,
+subagents and approvals across gateway loss, native process-loss/reboot recovery,
+and fresh npm installation including a dependency-timeout retry. The eight tested
+execution/provider modules are byte-identical in this release; no new provider
+turns are claimed by the synthetic credential-preservation fixtures. Earlier
+fresh-install fixtures with preloaded dependencies do not prove online bootstrap.
+
+Continue recording these scenarios at their actual source and platform boundary:
 
 | Scenario | Required result |
 | --- | --- |

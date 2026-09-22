@@ -1,5 +1,95 @@
 # Public development log
 
+## 2026-09-21 — Publish stable 1.0.4 build 1193
+
+- Publish and verify `@agentsdock/server@1.0.4` on npm `latest`, retaining
+  `1.0.4-beta.12` on `beta`. Verify the exact signed tarball's size, SHA-256 and
+  SHA-512 integrity from the public registry. Publish and verify the matching
+  signed standalone bridge, then the unchanged desktop build 1193 on both
+  existing stable feeds. Keep accepted product source
+  `b3bf411c8feea751285a7c9b4e397ec526a61e30`, standalone export
+  `8664a9399f2c282aea7a113771506e2528e6d559`, descriptor and artifact seal unchanged.
+- Preserve publication run `35681737578`, which stopped at private candidate
+  draft lookup before npm preflight, OIDC authentication or publication. Correct
+  only the publish job's draft-access permission and explicit workflow/source
+  pins. The publishing revision is
+  `52ff3e3a0ee33b1c7106d5924fcf31bfdb01debf`; the accepted product source remains
+  b3bf411. No product rebuild or repacking accompanies this workflow correction.
+- In corrected run `35682355490`, attempt 1 successfully publishes through npm
+  OIDC, then fails immediate readback while npm processes the package. Preserve
+  that result. Once independent exact-byte registry verification passes,
+  attempt 2 completes with preflight `publish=false`, npm publication skipped,
+  and the unchanged public verifier passing. The package is published once.
+- Add a follow-up visibility wait for future runs: retry only the unchanged
+  read-only registry verifier, at most 61 attempts with 10-second gaps and an
+  11-minute step limit. Exhaustion still fails; signature, source, archive and
+  channel requirements remain intact. This polling correction changes no
+  accepted product artifact and was not used by the successful publication run.
+  The follow-up workflow commits are `5f1b503` and `2281c02`.
+- npm provenance identifies the publishing workflow revision. The original
+  signed descriptor and unchanged tarball identify the accepted product source.
+  Check the public attestation's subject digest and workflow/run identity;
+  independent full Sigstore trust-chain verification is outside this receipt.
+- Existing stable 1.0.3 users retain one app-update action, followed by automatic
+  server migration. Initial migration and execution replacement wait for idle.
+  macOS is signed and notarized; Windows installers remain unsigned.
+
+## 2026-09-21 — Accept stable 1.0.4 build 1193
+
+- Accept desktop build 1193 from source
+  `b3bf411c8feea751285a7c9b4e397ec526a61e30`, paired with standalone export
+  `8664a9399f2c282aea7a113771506e2528e6d559` and signed npm descriptor SHA-256
+  `851055682343f7cd97cca1f0341f0b18ffb8ce841807bd0a18409c9300855618`.
+  Verify both original signatures and all 107 runtime files and modes against
+  the committed source and both server archives.
+- Canonical and standalone server suites each pass 4,995 tests with six existing
+  skips across all eight shards. Native workflow `35679650749` passes Linux x64
+  and arm64 with 4,656 tests and five skips each, and Windows x64 with 4,620 tests
+  and 11 skips; all stock package verifiers pass. Windows remains unsigned.
+  The universal Mac release passes 4,656 tests with five skips on its first
+  attempt using four workers and unchanged timeouts, then type checking,
+  compilation, Developer ID signing, notarization and stapling, Gatekeeper,
+  mounted-DMG/ZIP parity, updater metadata checks and isolated startup.
+- Verify the exact signed candidate on native macOS and Linux, including a
+  positively observed candidate worker, induced activation failure, automatic
+  rollback and explicit retry of the same archive. Begin from a preserved dead
+  candidate receipt, retain it through rollback, and verify retry without manual
+  cleanup. Preserve identity, credentials, chats/events, synthetic provider and
+  terminal credential/configuration files, Hub authority/messages and an existing
+  mutual-TLS peer; authenticate preserved content and new peer reads/writes.
+  Installed permissions follow the signed installer, including its Linux
+  `agent_server.py` normalization from mode `0644` to `0755`.
+- The macOS native server gate starts with the original signed
+  `0.1.26-beta.29` runtime and explicitly selects Stable for this test. It accepts
+  that native migration route, including rollback and retry; it does not promote
+  beta users automatically or establish every historical desktop/feed path.
+  The Linux gate starts with the original stable 1.0.3 managed server.
+- Verify one actual Update action in the unchanged stable 1.0.3 desktop with
+  its genuine 1.0.3 server. The signed app replaces and relaunches itself, then
+  migrates the server automatically. Both components reach 1.0.4, admission is
+  released, and populated data and the existing peer remain usable.
+- Verify a separate archive-only HTTP 503 failure before the old server stops.
+  Its PID and boot identity remain unchanged. Normal health callbacks observe
+  the failed operation despite absent legacy health progress; opening and
+  reopening recovery preserves the failure. One explicit coordinated Retry
+  succeeds with Advanced recovery continuously open, updating both status rows
+  without Check or reopening Settings.
+- Deliver these exact signed packages through an isolated HTTPS discovery
+  fixture. After native app relaunch drops process-only TLS overrides, a feed
+  check exposes the fixture certificate boundary. These results do not establish
+  public feed propagation, which remains a separate publication check.
+- Retain earlier real Codex/Claude gateway-loss evidence separately: the eight
+  tested execution/provider modules are byte-identical, but these migration
+  checks make no new model calls. Earlier process-loss/reboot and fresh-install
+  proofs retain their original source scope. Execution replacement waits for
+  idle; simultaneous execution generations and live-turn survival through
+  execution-process death or reboot are not claimed.
+- Seal the 16 distribution assets with SHA256SUMS SHA-256
+  `e945a6bf07d256e517291774188f282260ee4ce83c0c7c82371b86b118443b89`.
+  Availability: published and verified, with the exact accepted artifacts
+  unchanged. Verify npm `latest`, then the signed standalone bridge, before
+  exposing both existing stable desktop feeds, as recorded above.
+
 ## 2026-09-21 — Correct retry after a failed split-runtime migration
 
 - Classify the installed runtime before authorizing shutdown or seeding recovery.

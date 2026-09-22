@@ -6,10 +6,13 @@ state. Replacing the gateway must leave the execution process untouched. Clients
 reconnect and resume the existing event history; accepted commands are never
 automatically replayed by the gateway.
 
-The candidate installer now selects this layout by default and the coordinated
-updater stages dependencies while existing work continues. Installed migration
-and recovery acceptance is still in progress; this is not an accepted production
-release. Rolling multiple execution generations is not implemented.
+Stable 1.0.4 build 1193 passes native migration, rollback/retry, populated-data
+preservation and actual packaged-app healthy and failure/recovery paths.
+The matching npm package, signed standalone bridge and both stable desktop feeds
+are published and verified. The installer selects this layout by default and the
+coordinated updater stages dependencies while existing work continues. Replacing
+the execution runtime still waits for idle; simultaneous execution generations
+are not implemented.
 
 ```text
 AgentsDock clients
@@ -63,6 +66,10 @@ execution owner -- provider subprocesses -- tools / subagents
 - `server/execution_activation.py` integrates the paired jobs with the main
   installer's state, Team Hub and secure-peer recovery transaction. A legacy
   service must prove its exact admitted idle update before it is stopped.
+  `server/execution_legacy_runner.py` proves older macOS updater ownership when
+  status omits its process ID. After rollback, a leftover candidate receipt is
+  classified under its worker lock with authenticated legacy health and proof
+  that the candidate process is gone; it never authorizes a stale callback.
 - `server/update_preparation.py` downloads and stages the signed candidate
   without changing the active release, service configuration or admission.
   `server/execution_preparation.py` seals the prepared source and dependencies
@@ -103,26 +110,37 @@ environment. It makes one model turn per selected provider with the existing
 login and retains private local evidence. A fixture result must not be labeled
 provider acceptance.
 
-Release acceptance still requires:
+The current signed release passes native candidate-start failure, automatic
+rollback and same-byte retry on macOS and Linux, including a retained dead
+candidate receipt and normal retry without cleanup. It preserves chats/events,
+synthetic provider/terminal credential files, Hub authority/messages and an
+existing mutual-TLS peer, with authenticated reads and new writes afterward.
+The macOS original beta.29 server gate explicitly selects Stable; it establishes
+that native server route, not automatic channel promotion or every older app.
 
-1. Complete installed old-service migration and interrupted-activation coverage
-   on both native service managers. Preserve original credentials, server
-   identity, state migration snapshots, Team Hub and secure-peer rollback.
-2. Verify automatic recovery when neither main service is available, including
-   process loss and reboot between service shutdown and candidate startup.
-   Preserve worker runtime/dependencies while any process still owns them;
-   pruning and uninstall must respect both jobs and retained releases.
-3. Exercise the npm/app coordinator across real prepared activation, failure and
-   retry. A pending execution upgrade is not a completed bundled update. Old and
-   new clients need a compatible contract during that interval.
-4. For new turns to use a new execution generation while older turns continue,
-   extract provider actors from the shared mutable application store. Add
-   generation ownership, durable event/callback routing, approval ownership and
-   compatible state contracts before allowing simultaneous generations.
-5. Exercise the installed native app against disposable launchd/systemd
-   installations: active tools, native subagents, approval waits, reconnection,
-   failed candidate, rollback, recovery and legacy migration. Verify the exact
-   packaged commit after signing/packaging before enabling or releasing it.
+The exact packaged stable 1.0.3-to-1.0.4 journey passes with one Update action.
+A separate pre-stop archive failure preserves the old PID and boot while normal
+health callbacks observe the failed operation. Opening recovery preserves that
+failure; one explicit coordinated Retry updates both the primary and continuously
+expanded recovery status without Check or reopening Settings. Both components
+must reach the target and release the maintenance hold before completion.
+These packages use isolated discovery for migration acceptance. Separate public
+delivery verification is recorded in [Coordinated updates](COORDINATED_UPDATES.md).
+
+Retained real Codex/Claude evidence covers tools, subagents and approvals across
+gateway loss. Its eight execution/provider modules are byte-identical in this
+release, but the current migration fixtures make no new model calls. Earlier
+native process-loss and reboot recovery proofs remain scoped to their recorded
+source; they are not new final-build tests. Restoring an interrupted installer
+after reboot does not establish live-turn survival through execution-process
+death, reboot or machine loss. Pruning and uninstall must continue to preserve
+any runtime or dependencies still owned by a process or recovery transaction.
+
+For new turns to use a new execution generation while older turns continue,
+provider actors still need to be extracted from the shared mutable application
+store. Generation ownership, durable event/callback routing, approval ownership
+and compatible state contracts are prerequisites for simultaneous generations.
+The current release does not implement that architecture.
 
 The public update remains one user action. These internal component stages must
 not create another routine manual server-update step.
