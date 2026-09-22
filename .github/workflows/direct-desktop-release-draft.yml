@@ -440,6 +440,9 @@ jobs:
     environment: direct-production
     runs-on: windows-2025
     timeout-minutes: 40
+    env:
+      # Serialize disk-heavy suites on hosted Windows to avoid I/O contention.
+      VITEST_MAX_WORKERS: "1"
     outputs:
       signing_policy: ${{ steps.windows-signing.outputs.signing_policy }}
     steps:

@@ -1,5 +1,14 @@
 # Public development log
 
+## 2026-09-22 — Bound Windows release test concurrency
+
+- Run the Windows release tests with one worker after concurrent disk-heavy
+  suites exceeded their existing deadlines on hosted Windows. Settings suites
+  that previously completed in about one second took about one minute during
+  the affected run.
+- Retain every assertion and timeout. Product behavior and other platform
+  jobs are unchanged; acceptance requires a fresh complete release build.
+
 ## 2026-09-22 — Accept native legacy server update recovery
 
 - Exercise the corrected desktop Settings through real UI interaction, production
