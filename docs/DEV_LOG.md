@@ -1,5 +1,16 @@
 # Public development log
 
+## 2026-09-22 — Publish desktop 1.0.6, build 1201
+
+- Publish the accepted desktop package as stable 1.0.6 in the public source
+  repository and desktop release mirror, with the same 14 verified assets.
+- Verify public download links, checksum manifests, Stable updater metadata
+  and Beta discovery of the stable release. Authenticated release metadata
+  checks confirm the source pin after anonymous API requests hit GitHub's
+  rate limit. Withdrawn 1.0.4 and 1.0.5 releases remain absent.
+- Keep server/npm publication unchanged; stable AgentsServer remains 1.0.3.
+  Stop the owned acceptance VMs and forwards after preserving their evidence.
+
 ## 2026-09-22 — Validate desktop 1.0.6, build 1201
 
 - Build committed source `564f38a64a9e748f810de64668e860a4c7badcca` as
