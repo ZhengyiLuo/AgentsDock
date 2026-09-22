@@ -1,5 +1,16 @@
 # Public development log
 
+## 2026-09-22 — Prepare coordinated 1.0.6-beta.1
+
+- Prepare an opt-in desktop beta and matching server package containing the
+  update-blocking, Team Hub recovery, release-request and Settings repairs below.
+- Preserve stable 1.0.3 availability. Verify unchanged 1.0.3 and withdrawn 1.0.5
+  clients against the exact signed beta package, including an existing server
+  with retained rollback state. Verify direct desktop replacement for any old
+  updater whose installed gate prevents self-update.
+- This entry records preparation only. Native package acceptance and registry
+  availability must be established before beta publication.
+
 ## 2026-09-22 — Repair update blocking after withdrawing 1.0.4 and 1.0.5
 
 - Post-withdrawal checks found both public desktop repositories and the
