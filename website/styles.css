@@ -191,11 +191,13 @@ a { color: inherit; }
 .quote-marquee:hover .quote-track, .quote-marquee:focus-within .quote-track { animation-play-state: paused; }
 .quote-group { display: flex; align-items: stretch; gap: 12px; padding-right: 12px; }
 .quote-card { position: relative; display: flex; flex-direction: column; gap: 10px; width: clamp(264px, 22vw, 308px); min-height: 150px; padding: 14px 16px; border: 1px solid var(--line); border-radius: 10px; background: rgba(255,255,255,.012); transition: border-color .18s ease, background-color .18s ease; }
+a.quote-author--link { text-decoration: none; color: inherit; }
+a.quote-author--link:hover .quote-handle { text-decoration: none; }
 .quote-card:hover { border-color: rgba(91,157,255,.55); background: rgba(91,157,255,.06); }
 .quote-author { display: flex; align-items: center; gap: 8px; min-width: 0; }
 .quote-avatar { flex-shrink: 0; width: 28px; height: 28px; border-radius: 50%; overflow: hidden; background: var(--accent-soft); display: flex; align-items: center; justify-content: center; }
 .quote-avatar img { width: 100%; height: 100%; object-fit: cover; display: block; }
-.quote-handle { color: var(--muted); font-size: 13px; font-weight: 500; letter-spacing: -.005em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.quote-handle { color: var(--muted); text-decoration: none; font-size: 13px; font-weight: 500; letter-spacing: -.005em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .quote-card p { margin: 0; color: var(--text); font-size: 13.5px; line-height: 1.4; letter-spacing: -.003em; display: -webkit-box; -webkit-line-clamp: 6; -webkit-box-orient: vertical; overflow: hidden; }
 @keyframes quoteDrift { from { transform: translate(0); } to { transform: translate(-50%); } }
 @media (max-width: 900px) {
