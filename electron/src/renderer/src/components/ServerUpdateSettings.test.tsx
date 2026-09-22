@@ -100,9 +100,9 @@ function render(ui: Parameters<typeof renderView>[0]) {
 }
 
 function installBridge(serverUpdates: Partial<AgentsDockAPI['serverUpdates']>) {
-  // This suite exercises legacy manual server controls before coordinated enrollment.
+  // App-only releases return an empty list of coordinated server updates.
   const appUpdateStatus: AppUpdateStatus = {
-    state: 'not-available', channel: 'direct', track: 'stable', currentVersion: '1.0.0'
+    state: 'not-available', channel: 'direct', track: 'stable', currentVersion: '1.0.6', serverUpdates: []
   }
   Object.defineProperty(window, 'agentsDock', {
     configurable: true,
@@ -810,7 +810,7 @@ describe('SettingsDialog server updates', () => {
     expect(useAppStore.getState().error).toBeNull()
   })
 
-  it('routes an available Beta on a pre-v9 server to guided setup without a duplicate Beta action', async () => {
+  it('installs an available Beta on a remote v7 server through its native idle scheduler', async () => {
     const available: ServerUpdateStatus = {
       phase: 'available',
       current_version: '0.1.18',
@@ -819,7 +819,7 @@ describe('SettingsDialog server updates', () => {
       update_available: true,
       message: 'AgentsServer 0.1.19-beta.8 is available.'
     }
-    const start = vi.fn()
+    const start = vi.fn().mockResolvedValue({ ...installingStatus, track: 'beta', target_version: available.latest_version })
     installBridge({ status: vi.fn().mockResolvedValue(available), check: vi.fn(), start })
     const setup = vi.fn()
     window.addEventListener('agentsdock:server-setup', setup)
@@ -833,24 +833,24 @@ describe('SettingsDialog server updates', () => {
 
     try {
       render(<SettingsDialog />)
-      const guidedUpdate = await screen.findByRole('button', { name: 'Open guided Beta update' })
+      const install = await screen.findByRole('button', { name: `Install ${available.latest_version}` })
       expect(screen.queryByRole('button', { name: /Update server to Beta/ })).not.toBeInTheDocument()
       expect(screen.getByRole('button', { name: /Install or update AgentsServer/ })).toBeInTheDocument()
-      fireEvent.click(guidedUpdate)
+      fireEvent.click(install)
 
-      await waitFor(() => expect(setup).toHaveBeenCalledOnce())
-      expect((setup.mock.calls[0]?.[0] as CustomEvent).detail).toEqual({ intent: 'update-beta' })
-      expect(start).not.toHaveBeenCalled()
-      expect(useAppStore.getState().modals.appSettings).toBe(false)
+      await waitFor(() => expect(start).toHaveBeenCalledWith(available.latest_version, 'beta', true))
+      expect(setup).not.toHaveBeenCalled()
+      expect(useAppStore.getState().modals.appSettings).toBe(true)
     } finally {
       window.removeEventListener('agentsdock:server-setup', setup)
     }
   })
 
-  it('installs an available update directly on a legacy loopback server', async () => {
+  it.each(['http://test-server.test:7850', 'https://test-server.test', 'http://127.0.0.1:7850'])(
+    'installs an available update directly on a v3 server at %s', async serverUrl => {
     const available: ServerUpdateStatus = {
       phase: 'available',
-      current_version: '0.1.26-beta.16',
+      current_version: '0.1.25',
       latest_version: '0.1.26-beta.48',
       track: 'beta',
       update_available: true,
@@ -865,10 +865,10 @@ describe('SettingsDialog server updates', () => {
       health: state.health ? {
         ...state.health,
         server_version: available.current_version,
-        capabilities: { ...state.health.capabilities, server_updates: durableReservationServerUpdates }
+        capabilities: { ...state.health.capabilities, server_updates: queueSafeServerUpdates }
       } : state.health,
       profiles: state.profiles.map(profile => profile.id === state.activeProfileId
-        ? { ...profile, serverUrl: 'http://127.0.0.1:7850' }
+        ? { ...profile, serverUrl }
         : profile)
     }))
 
@@ -878,11 +878,40 @@ describe('SettingsDialog server updates', () => {
       expect(screen.queryByRole('button', { name: /Open guided Beta update/ })).not.toBeInTheDocument()
       fireEvent.click(install)
 
-      await waitFor(() => expect(start).toHaveBeenCalledWith(available.latest_version, 'beta', true))
+      await waitFor(() => expect(start).toHaveBeenCalledExactlyOnceWith(available.latest_version, 'beta'))
       expect(setup).not.toHaveBeenCalled()
     } finally {
       window.removeEventListener('agentsdock:server-setup', setup)
     }
+  })
+
+  it('keeps a busy remote v3 update local until work is idle, then checks and installs once', async () => {
+    const available: ServerUpdateStatus = {
+      phase: 'available', current_version: '0.1.25', latest_version: '0.1.26',
+      track: 'stable', update_available: true
+    }
+    const check = vi.fn().mockResolvedValue(available)
+    const start = vi.fn().mockResolvedValue({ ...installingStatus, target_version: available.latest_version })
+    installBridge({ status: vi.fn().mockResolvedValue(available), check, start })
+    showSettings()
+    useAppStore.setState(state => ({ health: {
+      ...state.health!, active_sessions: ['chat-1'],
+      capabilities: { ...state.health!.capabilities, server_updates: queueSafeServerUpdates }
+    } }))
+
+    render(<SettingsDialog />)
+    const install = await screen.findByRole('button', { name: 'Install latest Stable when idle' })
+    await waitFor(() => expect(install).toBeEnabled())
+    fireEvent.click(install)
+    expect(start).not.toHaveBeenCalled()
+    expect(JSON.parse(window.localStorage.getItem('agentsdock:deferred-server-updates:v1')!))
+      .toMatchObject({ 'profile-1': { version: '0.1.26', serverIdentity: 'test-server' } })
+    expect(await screen.findByRole('button', { name: 'Cancel queued update' })).toBeEnabled()
+
+    act(() => useAppStore.setState(state => ({ health: { ...state.health!, active_sessions: [] } })))
+    await waitFor(() => expect(start).toHaveBeenCalledExactlyOnceWith('0.1.26', 'stable'))
+    expect(check).toHaveBeenLastCalledWith('stable')
+    expect(window.localStorage.getItem('agentsdock:deferred-server-updates:v1')).toBeNull()
   })
 
   it('delegates a busy v9 update to the server once without creating a local retry', async () => {

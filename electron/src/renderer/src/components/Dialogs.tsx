@@ -8,7 +8,6 @@ import { ArrowRight, Check, ChevronDown, ChevronRight, CircleAlert, Clock3, Comm
 import type { AppUpdateStatus, AppUpdateTrack, Backend, BulkImportSessionItem, BulkImportSessionResult, ChatReference, ChatReferenceAction, CoordinatedServerUpdate, CreateJobInput, Health, Job, JobContextMode, JobScheduleKind, LocalSessionCandidate, ServerRestartBlockerSnapshot, ServerSetupCapabilities, ServerSetupProgress, ServerUpdateStatus, ServerUpdateTrack, Session, TeamReference, UpdateJobInput, WorkspaceProfileScope } from '@shared/types'
 import { localSessionImportKey, localSessionImportSupported } from '@shared/local-session-import'
 import { chatBackendSelection, codexCustomProviderAvailable, cursorBackendAvailable, cursorBackendUnavailableReason, runtimeCatalogOptions, runtimeEffortAfterModelChange, runtimeEffortOptions, runtimeSelectionError, selectableChatBackendChoices, selectableChatBackends, type ChatBackendChoice } from '@shared/runtime-catalog'
-import { isLoopbackHostname } from '@shared/team-hub-url'
 import { trackEvent } from '../lib/analytics'
 import { readAppearance, setAppearanceMode, type AppearanceMode } from '../lib/appearance'
 import { t, useLanguagePreference, type LanguagePreference } from '../lib/i18n'
@@ -109,7 +108,6 @@ type RestartAfterUpdateTarget = Pick<
 const SERVER_RESTART_COUNT_LIMIT = 1_000_000
 const SERVER_RESTART_REVISION_PATTERN = /^[0-9a-f]{64}$/
 const SERVER_UPDATE_SCHEDULE_ID_PATTERN = /^[0-9a-f]{32}$/
-const SCOPED_SERVER_UPDATE_CAPABILITY_VERSION = 9
 
 function readDeferredServerUpdates(): DeferredServerUpdates {
   try {
@@ -185,17 +183,10 @@ function serverSupportsPassiveUpdateReservation(health: Health | null | undefine
   return serverUpdateCapabilityVersion(health?.capabilities?.server_updates) >= 7
 }
 
-function supportsLegacyLoopbackServerUpdate(health: Health | null | undefined, serverUrl: string | null | undefined): boolean {
+function serverSupportsManagedUpdate(health: Health | null | undefined): boolean {
   const capability = health?.capabilities?.server_updates
-  const capabilityVersion = serverUpdateCapabilityVersion(capability)
-  if (capabilityVersion < 2 || capabilityVersion >= SCOPED_SERVER_UPDATE_CAPABILITY_VERSION || !serverUrl) return false
-  if (!capability || typeof capability !== 'object' || Array.isArray(capability) || (capability as { available?: unknown }).available !== true) return false
-  try {
-    const parsed = new URL(serverUrl)
-    return parsed.protocol === 'http:' && isLoopbackHostname(parsed.hostname)
-  } catch {
-    return false
-  }
+  return Boolean(capability && typeof capability === 'object' && !Array.isArray(capability)
+    && (capability as { available?: unknown }).available === true)
 }
 
 function serverUpdateStartWasAccepted(
@@ -507,14 +498,15 @@ export function AppSettingsDialog({ serverSettings, serverUpdates, onServerUpdat
   useEffect(() => {
     if (legacyServerSettingsOpen) setSection('server')
   }, [legacyServerSettingsOpen])
-  useEffect(() => {
-    // Paired updates have one owner. Opening Settings must not also run the
-    // legacy server checker or expose a competing server channel/install flow.
-    const legacy = open && update !== null && update.serverUpdates === undefined
-    onServerUpdatesVisible?.(legacy && (section === 'server' || section === 'updates'))
-    onServerReleaseChecksVisible?.(legacy && section === 'updates')
-  }, [open, section, update?.serverUpdates !== undefined, update !== null, onServerUpdatesVisible, onServerReleaseChecksVisible])
   const activeCoordinatedUpdate = update?.serverUpdates?.find(server => server.profileId === activeProfileId) || null
+  const manualServerUpdates = !update?.serverUpdates?.length || Boolean(activeProfileId && !activeCoordinatedUpdate)
+  useEffect(() => {
+    // An app-only release has no paired server operation. Keep the selected
+    // server's manual update controls independent of that app release.
+    const visible = open && update !== null && manualServerUpdates
+    onServerUpdatesVisible?.(visible && (section === 'server' || section === 'updates'))
+    onServerReleaseChecksVisible?.(visible && section === 'updates')
+  }, [open, section, update !== null, manualServerUpdates, onServerUpdatesVisible, onServerReleaseChecksVisible])
   useEffect(() => {
     onCoordinatedServerUpdate?.(activeCoordinatedUpdate)
   }, [activeCoordinatedUpdate, onCoordinatedServerUpdate])
@@ -644,7 +636,7 @@ export function AppSettingsDialog({ serverSettings, serverUpdates, onServerUpdat
               {update?.serverUpdates?.map(server => <CoordinatedServerUpdateRow key={server.profileId} server={server} onUpdate={setUpdate} />)}
               {update?.serverUpdateMessage && <p role="status">{update.serverUpdateMessage}</p>}
             </div>
-            {update?.serverUpdates === undefined && serverUpdates}
+            {manualServerUpdates && serverUpdates}
           </section>}
         </div>
       </Dialog.Content>
@@ -2017,10 +2009,7 @@ export function SettingsDialog() {
       return
     }
     const currentHealth = useAppStore.getState().health
-    if (
-      serverUpdateCapabilityVersion(currentHealth?.capabilities?.server_updates) < SCOPED_SERVER_UPDATE_CAPABILITY_VERSION
-      && !supportsLegacyLoopbackServerUpdate(currentHealth, activeProfileServerUrl)
-    ) {
+    if (!serverSupportsManagedUpdate(currentHealth)) {
       setServerUpdateBusy(false)
       openServerSetupWhenSafe(serverUpdateTrack === 'beta' ? 'update-beta' : 'setup')
       return
@@ -2135,8 +2124,7 @@ export function SettingsDialog() {
   const activeServerInstanceId = health?.server_instance_id?.trim() || null
   const serverControlBusy = restartingServer || restartInspectionBusy || updateNowInspectionBusy || Boolean(switchingProfileId)
   const serverUpdateControlsBusy = serverControlBusy || restartConfirmationOpen || updateNowConfirmationOpen
-  const guidedServerUpdateRequired = serverUpdateCapabilityVersion(health?.capabilities?.server_updates) < SCOPED_SERVER_UPDATE_CAPABILITY_VERSION
-    && !supportsLegacyLoopbackServerUpdate(health, activeProfileServerUrl)
+  const guidedServerUpdateRequired = !serverSupportsManagedUpdate(health)
   const restartDisabledReason = !restartCapability?.available
     ? restartCapability?.message || 'Managed restart is unavailable on this server.'
     : !connected

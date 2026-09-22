@@ -2090,7 +2090,10 @@ export class AppService {
     const target = this.serverUpdateTarget(scope, true)
     let status: ServerUpdateStatus
     try {
-      status = await scope.client.startServerUpdate(version, track, whenIdle, target)
+      // Older signed updaters admit only an immediate, idle-checked request.
+      // Keep their request shape intact; a busy response is returned to the UI.
+      const supportsWhenIdle = serverCapabilityVersion(this.health?.capabilities?.server_updates) >= 7
+      status = await scope.client.startServerUpdate(version, track, whenIdle && supportsWhenIdle, target)
     } catch (error) {
       // Electron IPC preserves the message but not ServerError.status. Retain
       // authoritative HTTP evidence without relabeling transport failures.
@@ -2114,7 +2117,7 @@ export class AppService {
     this.assertCurrentScope(scope)
     const capabilityVersion = serverCapabilityVersion(this.health?.capabilities?.server_updates)
     if (capabilityVersion < 9) {
-      if (required && !this.legacyLoopbackServerUpdateAllowed(scope, capabilityVersion)) {
+      if (required && !this.legacyServerUpdateAllowed(scope, capabilityVersion)) {
         throw new Error('Update or reconnect AgentsServer before starting or canceling a managed update.')
       }
       return undefined
@@ -2129,10 +2132,10 @@ export class AppService {
     }
   }
 
-  private legacyLoopbackServerUpdateAllowed(scope: ConnectionScope, capabilityVersion: number): boolean {
+  private legacyServerUpdateAllowed(scope: ConnectionScope, capabilityVersion: number): boolean {
     // v2-v8 can install signed channel releases but cannot bind the mutation
-    // to a server identity/boot. Keep that compatibility exception on the
-    // exact HTTP loopback connection captured when this scope was activated.
+    // to a server identity/boot. Use their authenticated update route on the
+    // exact connection captured when this scope was activated.
     if (capabilityVersion < 2 || capabilityVersion >= 9) return false
     const capability = this.health?.capabilities?.server_updates
     if (
@@ -2141,13 +2144,7 @@ export class AppService {
       || Array.isArray(capability)
       || (capability as { available?: unknown }).available !== true
     ) return false
-    try {
-      if (this.settings.serverUrl(scope.profileId) !== scope.serverUrl) return false
-      const serverURL = new URL(scope.serverUrl)
-      return serverURL.protocol === 'http:' && isLoopbackHostname(serverURL.hostname)
-    } catch {
-      return false
-    }
+    return this.settings.serverUrl(scope.profileId) === scope.serverUrl
   }
 
   private assertServerUpdateTarget(

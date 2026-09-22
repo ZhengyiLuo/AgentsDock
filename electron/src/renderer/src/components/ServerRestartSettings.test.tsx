@@ -179,9 +179,9 @@ function installBridge(
     health: restartHealth({ server_instance_id: 'boot-new' })
   })
 ) {
-  // This suite exercises legacy manual server controls before coordinated enrollment.
+  // App-only releases retain independent manual server controls.
   const appUpdateStatus: AppUpdateStatus = {
-    state: 'not-available', channel: 'direct', track: 'stable', currentVersion: '1.0.0'
+    state: 'not-available', channel: 'direct', track: 'stable', currentVersion: '1.0.6', serverUpdates: []
   }
   Object.defineProperty(window, 'agentsDock', {
     configurable: true,

@@ -1,0 +1,24 @@
+# AgentsDock 1.0.7
+
+Restore server updates for existing installations, including AgentsServer
+0.1.25, without requiring SSH setup or a server upgrade before installing the
+app.
+
+- Restore the server update controls in Settings → Updates, including for
+  users coming from the app-only 1.0.6 beta.
+- Allow supported older servers to use their existing authenticated updater
+  over remote connections. When an older server is busy, the app can wait for
+  idle before submitting the update; keep the app open for that waiting period.
+- Keep app installation independent of the connected server version or update
+  channel. This release does not automatically install or restart a server.
+- Give model selection more space in the composer and keep custom-provider
+  labels compact.
+
+After updating the app, open Settings → Updates and choose the available
+server update. Server 1.0.3 remains the stable server release.
+
+If an installed withdrawn 1.0.4 or 1.0.5 app blocks its own updater, replace
+it once using the desktop download. Existing connections and settings are kept.
+
+macOS packages are signed and notarized. The Windows installer is unsigned
+and may show a Windows security warning.

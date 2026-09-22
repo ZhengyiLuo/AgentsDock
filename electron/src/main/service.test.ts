@@ -6944,26 +6944,29 @@ describe('managed server updates', () => {
     expect(client.startServerUpdate).toHaveBeenCalledTimes(1)
   })
 
-  it('allows legacy update mutations only for a channel-aware HTTP loopback server', async () => {
+  it.each([
+    ['http://127.0.0.1:7850', 7],
+    ['http://a.test:7850', 8],
+    ['https://a.test:7850', 7],
+    ['http://a.test:7850', 3]
+  ] as const)('uses the authenticated legacy route on %s (capability %s)', async (serverUrl, capabilityVersion) => {
     const client = fakeClient({
       serverUpdateStatus: async () => ({ phase: 'current', current_version: '0.1.26-beta.26' }),
       startServerUpdate: async () => ({ phase: 'pending', current_version: '0.1.26-beta.26' }),
       cancelServerUpdate: async () => ({ phase: 'available', current_version: '0.1.26-beta.26' })
     })
-    const { service } = prepare(client, 7, 'http://127.0.0.1:7850')
+    const { service } = prepare(client, capabilityVersion, serverUrl)
 
     await service.serverUpdateStatus()
     await service.startServerUpdate('0.1.26-beta.48', 'beta', true)
     await service.cancelServerUpdate('44444444444444444444444444444444')
 
     expect(client.serverUpdateStatus).toHaveBeenCalledWith(undefined)
-    expect(client.startServerUpdate).toHaveBeenCalledWith('0.1.26-beta.48', 'beta', true, undefined)
+    expect(client.startServerUpdate).toHaveBeenCalledWith('0.1.26-beta.48', 'beta', capabilityVersion >= 7, undefined)
     expect(client.cancelServerUpdate).toHaveBeenCalledWith('44444444444444444444444444444444', undefined)
   })
 
   it.each([
-    ['a remote HTTP server', 'http://a.test:7850', 8],
-    ['an HTTPS loopback URL', 'https://127.0.0.1:7850', 8],
     ['a pre-channel HTTP loopback server', 'http://127.0.0.1:7850', 1]
   ])('allows legacy status reads but refuses update mutations for %s', async (_label, serverUrl, capabilityVersion) => {
     const client = fakeClient({
@@ -6980,7 +6983,7 @@ describe('managed server updates', () => {
     expect(client.cancelServerUpdate).not.toHaveBeenCalled()
   })
 
-  it('refuses a legacy update when the saved profile is changed to loopback without reconnecting', async () => {
+  it('refuses a legacy update when the saved profile is changed without reconnecting', async () => {
     const client = fakeClient()
     const { service, settings } = prepare(client, 7, 'http://a.test:7850')
     settings.updateProfile('a', { serverUrl: 'http://127.0.0.1:7850' })
@@ -6988,6 +6991,14 @@ describe('managed server updates', () => {
     await expect(service.startServerUpdate(undefined, 'beta', true)).rejects.toThrow('Update or reconnect AgentsServer')
 
     expect(client.startServerUpdate).not.toHaveBeenCalled()
+  })
+
+  it('preserves an old remote server busy rejection without claiming an idle reservation', async () => {
+    const client = fakeClient({ startServerUpdate: async () => { throw new ServerError(409, 'Active runs must finish before updating.') } })
+    const { service } = prepare(client, 3)
+    await expect(service.startServerUpdate('1.0.7', 'stable', true))
+      .rejects.toThrow('HTTP 409: Active runs must finish before updating.')
+    expect(client.startServerUpdate).toHaveBeenCalledExactlyOnceWith('1.0.7', 'stable', false, undefined)
   })
 
   it('keeps v9 loopback mutations bound to the exact server identity and boot', async () => {

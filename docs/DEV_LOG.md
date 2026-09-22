@@ -1,5 +1,19 @@
 # Public development log
 
+## 2026-09-22 — Restore updates for existing servers
+
+- Restore manual server updates in Settings → Updates when the desktop release
+  has no bundled server operation, including the app-only 1.0.6 beta.
+- Allow older servers with an authenticated update API to update over remote
+  connections. Their lack of newer request identity fields no longer removes
+  the install action or causes the desktop backend to reject it.
+- Preserve the app's existing idle-waiting flow for servers without native
+  update scheduling. Send the request format supported by those servers and
+  retain connection ownership, authentication and signed package verification.
+- Focused settings tests pass, along with update service/client/coordinator
+  checks and TypeScript. Native existing-installation acceptance and release
+  package verification are recorded separately before publication.
+
 ## 2026-09-22 — Give the composer model picker available space
 
 - Remove fixed model/effort chip width caps so the full selection can use the

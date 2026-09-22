@@ -213,7 +213,9 @@ export class CoordinatedUpdateManager {
         patch({ phase: 'blocked', message: 'Reconnect and verify this server identity before updating.' })
         return
       }
-      const target = updateTarget(health)
+      const capability = health.capabilities?.server_update_ensure_v1
+      const updateVersion = legacyUpdateCapabilityVersion(health)
+      const target = capability || updateVersion >= 9 ? updateTarget(health) : undefined
       const components = componentVersions(health)
       patch({ apiContractVersion: health.api_contract_version, serverInstanceId: health.server_instance_id,
         gatewayVersion: components?.gatewayVersion, executionVersion: components?.executionVersion })
@@ -236,16 +238,15 @@ export class CoordinatedUpdateManager {
         return
       }
       if (previousReceipt?.paused) return
-      const capability = health.capabilities?.server_update_ensure_v1
       let status: ServerUpdateStatus
       let observedStatus: ServerUpdateStatus | undefined
       let operationOwned = false
       if (previousReceipt && (previousReceipt.operationOwned || previousReceipt.operationTargetVersion === manifest.version)
-        && (previousReceipt.operationId || previousReceipt.scheduleId) && target) {
+        && (previousReceipt.operationId || previousReceipt.scheduleId)) {
         const observed = await connection.client.serverUpdateStatus(target)
         observedStatus = observed
         connection.assertCurrent()
-        if (observed.server_identity !== target.expected_server_identity || observed.server_instance_id !== target.expected_server_instance_id) {
+        if (target && (observed.server_identity !== target.expected_server_identity || observed.server_instance_id !== target.expected_server_instance_id)) {
           patch({ phase: 'blocked', message: 'Update status belongs to another server instance.' })
           return
         }
@@ -338,9 +339,9 @@ export class CoordinatedUpdateManager {
   private async bridge(connection: CoordinatedConnection, health: Health, manifest: PairedServerManifest,
     target: ServerUpdateTarget | undefined, started: () => void): Promise<ServerUpdateStatus> {
     const capability = health.capabilities?.server_updates
-    const version = capability && typeof capability === 'object' && !Array.isArray(capability) && 'version' in capability ? Number(capability.version) : 0
+    const version = legacyUpdateCapabilityVersion(health)
     if (!capability || typeof capability !== 'object' || Array.isArray(capability) || !('available' in capability) || capability.available !== true
-      || version < 2 || (version < 9 && !connection.loopback) || (version >= 9 && !target)) {
+      || version < 2 || (version >= 9 && !target)) {
       throw new Error('This legacy server needs the guided installer before automatic updates are available.')
     }
     const current = await connection.client.serverUpdateStatus(version >= 9 ? target : undefined)
@@ -350,7 +351,7 @@ export class CoordinatedUpdateManager {
     // Legacy release discovery adds a rate-limited request without changing that
     // choice; the runner verifies the selected release before installing it.
     started()
-    return connection.client.startServerUpdate(manifest.version, manifest.track, true, version >= 9 ? target : undefined)
+    return connection.client.startServerUpdate(manifest.version, manifest.track, version >= 7, version >= 9 ? target : undefined)
   }
 
   private save(): void {
@@ -365,6 +366,12 @@ function updateTarget(health: Health): ServerUpdateTarget | undefined {
     expected_server_identity: health.server_identity,
     expected_server_instance_id: health.server_instance_id
   } : undefined
+}
+
+function legacyUpdateCapabilityVersion(health: Health): number {
+  const capability = health.capabilities?.server_updates
+  return capability && typeof capability === 'object' && !Array.isArray(capability)
+    && 'version' in capability && typeof capability.version === 'number' && Number.isFinite(capability.version) ? capability.version : 0
 }
 
 function isPendingConflict(error: ServerError): boolean {

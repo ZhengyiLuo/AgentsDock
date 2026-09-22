@@ -274,7 +274,7 @@ describe('coordinated app/server reconciliation (mocked server boundary)', () =>
     await f.manager.resume(signed('1.0.5'), '1.0.5')
     expect(f.clients.a.startServerUpdate).not.toHaveBeenCalled()
   })
-  it('uses native HTTP to bridge an old ensure channel refusal to the exact bundled release', async () => {
+  it.each([3, 11])('uses native HTTP to bridge legacy capability %s to the exact bundled release', async version => {
     const defaultFetchStub = globalThis.fetch
     vi.unstubAllGlobals() // This case uses only its owned loopback HTTP listener.
     const calls: { path: string; method: string; body: Record<string, unknown>; token?: string }[] = []
@@ -285,7 +285,8 @@ describe('coordinated app/server reconciliation (mocked server boundary)', () =>
       const path = new URL(request.url!, 'http://localhost').pathname
       calls.push({ path, method: request.method!, body, token: request.headers['x-agentsdock-token'] as string })
       response.setHeader('Content-Type', 'application/json')
-      if (path === '/api/health') response.end(JSON.stringify(health('a', { server_version: '1.0.4-beta.12' })))
+      if (path === '/api/health') response.end(JSON.stringify(health('a', { server_version: '0.1.25',
+        ...(version === 3 ? { capabilities: { server_updates: { available: true, version } } } : {}) })))
       else if (path === '/api/admin/update/ensure') {
         response.statusCode = 409
         response.end(JSON.stringify({ detail: { code: 'server_update_channel_conflict',
@@ -300,17 +301,17 @@ describe('coordinated app/server reconciliation (mocked server boundary)', () =>
     const client = new AgentServerClient(`http://127.0.0.1:${address.port}`, 'owned-test-token')
     const f = fixture()
     const manager = new CoordinatedUpdateManager({ ...f.options,
-      connect: async () => ({ client, assertCurrent: () => undefined, loopback: true }) })
+      connect: async () => ({ client, assertCurrent: () => undefined, loopback: false }) })
     try {
       await manager.resume(signed('1.0.5'), '1.0.5')
       expect(manager.status()).toEqual([expect.objectContaining({ phase: 'pending' })])
       expect(calls.map(call => `${call.method} ${call.path}`)).toEqual([
-        'GET /api/health', 'POST /api/admin/update/ensure', 'GET /api/admin/update', 'POST /api/admin/update/start'
+        'GET /api/health', ...(version >= 9 ? ['POST /api/admin/update/ensure'] : []), 'GET /api/admin/update', 'POST /api/admin/update/start'
       ])
       expect(calls.every(call => call.token === 'owned-test-token')).toBe(true)
-      expect(calls[1].body).toMatchObject({ ...signed('1.0.5'), expected_server_identity: 'server-a', expected_server_instance_id: 'boot-a' })
-      expect(calls[3].body).toEqual({ version: '1.0.5', track: 'stable', when_idle: true,
-        expected_server_identity: 'server-a', expected_server_instance_id: 'boot-a' })
+      if (version >= 9) expect(calls[1].body).toMatchObject({ ...signed('1.0.5'), expected_server_identity: 'server-a', expected_server_instance_id: 'boot-a' })
+      expect(calls.at(-1)!.body).toEqual({ version: '1.0.5', track: 'stable',
+        ...(version >= 9 ? { when_idle: true, expected_server_identity: 'server-a', expected_server_instance_id: 'boot-a' } : {}) })
       expect(manager.status()[0]).toMatchObject({ phase: 'pending', operationOwned: true, operationTargetVersion: '1.0.5' })
     } finally {
       client.dispose()
@@ -463,13 +464,22 @@ describe('coordinated app/server reconciliation (mocked server boundary)', () =>
     await f.manager.reconcileAll()
     expect(f.clients.a.ensureServerUpdate).toHaveBeenCalledTimes(calls + 1)
   })
-  it('requires a scoped update route for a remote legacy server', async () => {
+  it.each([3, 8])('uses the signed update route for a remote legacy server (capability %s)', async version => {
     const f = fixture()
-    f.clients.a.health.mockResolvedValue(health('a', { server_version: '1.1.0', capabilities: { server_updates: { available: true, version: 8 } } }))
+    f.clients.a.health.mockResolvedValue(health('a', { server_version: '0.1.25', capabilities: { server_updates: { available: true, version } } }))
     f.clients.a.serverUpdateStatus.mockResolvedValue({ phase: 'current', current_version: '1.1.0', track: 'stable' })
+    f.clients.a.startServerUpdate.mockResolvedValue({ phase: 'starting', current_version: '0.1.25',
+      target_version: '1.2.0-beta.2', update_id: 'legacy-operation' })
     await f.manager.resume(signed('1.2.0-beta.2'), '1.2.0-beta.2')
-    expect(f.clients.a.startServerUpdate).not.toHaveBeenCalled()
-    expect(f.manager.status()[0].phase).toBe('blocked')
+    expect(f.clients.a.startServerUpdate).toHaveBeenCalledExactlyOnceWith('1.2.0-beta.2', 'beta', version >= 7, undefined)
+    expect(f.manager.status()[0].phase).toBe('updating')
+
+    f.clients.a.serverUpdateStatus.mockResolvedValue({ phase: 'failed', current_version: '0.1.25',
+      target_version: '1.2.0-beta.2', update_id: 'legacy-operation', message: 'Download failed.' })
+    await f.manager.reconcileAll()
+    expect(f.clients.a.serverUpdateStatus).toHaveBeenLastCalledWith(undefined)
+    expect(f.manager.status()[0]).toMatchObject({ phase: 'failed', paused: true, message: 'Download failed.' })
+    expect(f.clients.a.startServerUpdate).toHaveBeenCalledOnce()
   })
   it('reports server progress despite an old API contract and accepts verified new health', async () => {
     const f = fixture()
