@@ -1,5 +1,36 @@
 # Public development log
 
+## 2026-09-22 — Prepare coordinated 1.0.5 correction
+
+- Remove the withdrawn 1.0.4 legacy desktop mirror after preserving and
+  checksum-verifying its artifacts. Both public stable feeds remain on 1.0.3
+  until replacement validation finishes. npm 1.0.4 remains published.
+- Include the dismissible error notification, isolated concurrent downloads,
+  consumed follow-up recovery and merged sidebar version-label removal.
+- Reproduce the exact published installer failure against an existing 1.0.3
+  server with a `0755` installation root. The old API stays in `installing`
+  and rejects a new update before downloading its installer. Add an explicit
+  `npx @agentsdock/server@1.0.5 recover` command for this stranded state;
+  conditional Settings guidance names the server computer and copies the
+  pinned command. Retry remains scoped to that server profile.
+- Verify the packaged recovery command on the untouched failed installation:
+  retire only its exact unfinished transaction, preserving the running process,
+  server identity, trust key and Hub database inode. Recovery cannot start a
+  native recovery owner or restart a service, including a phase-change race.
+  Then complete ordinary authenticated API migration to paired 1.0.5 services
+  and verify all 107 installed runtime files, existing histories, credentials,
+  authority and an existing mutual-TLS peer's new write/read. Candidate delivery
+  uses an isolated QA signing key; final production artifacts remain a gate.
+- Real Codex steering, test-server restart and a fresh desktop service/window
+  retain an empty consumed queue, authenticated helper access and the visible
+  final answer. Native download overlap and failure-isolation checks pass.
+- Focused Settings/coordinator tests (88), native history tests (30), and
+  TypeScript checks pass. Correct test-only stale mailbox-text assumptions,
+  macOS temporary-path canonicalization and fixture garbage collection before
+  timed websocket assertions, without changing production deadlines.
+- This entry records source validation, not release acceptance. Final signed
+  package and desktop update/relaunch checks are required before publication.
+
 ## 2026-09-21 — Withdraw 1.0.4 from stable feeds and repair migration and queue recovery
 
 - Withdraw the canonical desktop and standalone server 1.0.4 releases to
