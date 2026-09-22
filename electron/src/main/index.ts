@@ -119,6 +119,7 @@ if (!app.requestSingleInstanceLock()) {
           activateSecurePeerPairing: (expected, input) => appService.activateSecurePeerPairing(expected, input),
           deactivateSecurePeerConnection: (expected, input) => appService.deactivateSecurePeerConnection(expected, input),
           forgetSecurePeerConnection: (expected, input) => appService.forgetSecurePeerConnection(expected, input),
+          updateSecurePeerConnectionEndpoint: (expected, input, beforeWrite) => appService.updateSecurePeerConnectionEndpoint(expected, input, beforeWrite),
           publishSecurePeerRoute: (expected, input) => appService.publishSecurePeerRoute(expected, input),
           revokeSecurePeerRoute: (expected, input) => appService.revokeSecurePeerRoute(expected, input),
           secureTeamHubProxyFetch: (expected, basePath) => appService.secureTeamHubProxyFetch(expected, basePath),

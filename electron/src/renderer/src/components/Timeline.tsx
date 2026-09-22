@@ -24,6 +24,7 @@ import { pinnedItemsForSession } from '../lib/pinned-items'
 import { OPEN_HISTORY_RESULT_EVENT } from '../lib/session-history-search'
 import { TIMELINE_VIEWPORT_LAYOUT_EVENT, type TimelineViewportLayoutDetail } from '../lib/workspace-layout'
 import { cachedTimelineProjection } from '../lib/timeline-projection-cache'
+import { overlayReasoningStream } from '../lib/timeline-reasoning-stream'
 import { omitQueuedPendingTimelineItems } from '../lib/timeline-pending-queue'
 import { profileSessionKey } from '../lib/profile-scope'
 import { localSessionImportSupported } from '@shared/local-session-import'
@@ -322,7 +323,7 @@ function TimelineSession({ profileId, profileGeneration, serverIdentity, session
     semanticProjected.current = projection.semantic
     const presented = historicalWindow || liveTurnState === false
       ? settleInactiveTimelineItems(projection.rendered)
-      : projection.rendered
+      : overlayReasoningStream(projection.rendered, projection.semantic, snapshot.reasoningStream?.items, sessionId)
     const canonical = omitQueuedPendingTimelineItems(presented, snapshot.queuedTurns, sessionId)
     const showPending = !historicalWindow
       && pendingSubmission
@@ -345,6 +346,7 @@ function TimelineSession({ profileId, profileGeneration, serverIdentity, session
     presentedActiveRunId,
     snapshot.files,
     snapshot.queuedTurns,
+    snapshot.reasoningStream,
     sessionId,
     snapshot.session.codex_thread_id,
     sourceEvents,

@@ -41,6 +41,43 @@ const trustedEvent = {
 describe('Team Hub IPC registration', () => {
   beforeEach(() => harness.handlers.clear())
 
+  it('does not register the removed shared Codex credential mutation', () => {
+    registerIpc({} as AppService, {} as AppUpdateManager)
+    expect(harness.handlers.has('codex:auth:get')).toBe(true)
+    expect(harness.handlers.has('codex:auth:api-key')).toBe(false)
+  })
+
+  it('routes side questions and exact cancellation only from trusted app renderers', async () => {
+    const askSideQuestion = vi.fn().mockResolvedValue({ answer: 'Separate answer' })
+    const cancelSideQuestion = vi.fn().mockResolvedValue({ status: 'cancelled' })
+    registerIpc({ askSideQuestion, cancelSideQuestion } as unknown as AppService, {} as AppUpdateManager)
+    const scope = { profileId: 'server-a', profileGeneration: 7 }
+    const input = { request_id: 'question-a', question: 'Why?' }
+    await harness.handlers.get('side-questions:ask')?.(trustedEvent, scope, 'chat-a', input)
+    await harness.handlers.get('side-questions:cancel')?.(trustedEvent, scope, 'chat-a', input.request_id)
+    expect(askSideQuestion).toHaveBeenCalledExactlyOnceWith(scope, 'chat-a', input)
+    expect(cancelSideQuestion).toHaveBeenCalledExactlyOnceWith(scope, 'chat-a', input.request_id)
+    expect(() => harness.handlers.get('side-questions:ask')?.({ sender: { id: 2, getURL: () => 'https://shared.example.test/chat' },
+      senderFrame: { url: 'https://shared.example.test/chat', parent: null } }, scope, 'chat-a', input)).toThrow('untrusted renderer')
+  })
+
+  it('routes member rename through exact scoped IPC and blocks untrusted frames', async () => {
+    const result = { id: 'node-1', server_identity: 'server-1', display_name: 'New name' }
+    const renameNetworkServer = vi.fn().mockResolvedValue(result)
+    registerIpc({} as AppService, {} as AppUpdateManager, new Proxy({ renameNetworkServer }, {
+      get: (target, key) => key in target ? target[key as keyof typeof target] : vi.fn()
+    }) as unknown as LazyTeamHubService)
+    const scope = { profileId: 'member', profileGeneration: 3, generation: 4, serverIdentity: 'server-1',
+      hubIdentity: 'hub-1', connectionId: 'connection-1', hostServerIdentity: 'host-1' }
+    const input = { teamId: 'team-1', serverId: 'node-1', displayName: 'New name' }
+    const handler = harness.handlers.get('team-hub:network:server:rename')!
+    await expect(handler(trustedEvent, scope, input)).resolves.toEqual(result)
+    expect(renameNetworkServer).toHaveBeenCalledExactlyOnceWith(scope, input)
+    expect(() => handler({ sender: { id: 2, getURL: () => 'https://untrusted.invalid/' },
+      senderFrame: { url: 'https://untrusted.invalid/', parent: null } }, scope, input)).toThrow('untrusted renderer')
+    expect(renameNetworkServer).toHaveBeenCalledTimes(1)
+  })
+
   it('routes Team Network role configuration with the immutable originating server scope', async () => {
     const configureServerRole = vi.fn().mockResolvedValue({ designatedHost: true })
     registerIpc({} as AppService, {} as AppUpdateManager, new Proxy({ configureServerRole }, {
@@ -369,6 +406,24 @@ describe('Team Hub IPC registration', () => {
     await harness.handlers.get('team-hub:secure-peer:approve')?.(trustedEvent, scope, input)
 
     expect(approveSecurePeerPairing).toHaveBeenCalledWith(scope, input)
+  })
+
+  it('keeps endpoint migration bound to its exact profile, instance, connection and prior address', async () => {
+    const updateSecurePeerConnectionEndpoint = vi.fn().mockResolvedValue({ version: 2 })
+    const teamHub = new Proxy({ updateSecurePeerConnectionEndpoint }, {
+      get: (target, key) => key in target ? target[key as keyof typeof target] : vi.fn()
+    }) as unknown as LazyTeamHubService
+    registerIpc({} as AppService, {} as AppUpdateManager, teamHub)
+    const scope = { profileId: 'profile-a', profileGeneration: 7, serverIdentity: 'server-local' }
+    const input = { connectionId: '09d7bb2e-3b47-4be7-89fc-2cecd90f4434', expectedServerInstanceId: 'instance-a',
+      expectedHostServerIdentity: 'host', expectedHubIdentity: 'hub', expectedRemoteEndpoint: '100.64.0.1:7851',
+      host: '100.64.0.2:7852', confirmed: true }
+    await harness.handlers.get('team-hub:secure-peer:connection:endpoint')?.(trustedEvent, scope, input)
+    expect(updateSecurePeerConnectionEndpoint).toHaveBeenCalledExactlyOnceWith(scope, input)
+    const untrusted = { sender: { id: 2, getURL: () => 'https://attacker.invalid/' },
+      senderFrame: { url: 'https://attacker.invalid/', parent: null } }
+    expect(() => harness.handlers.get('team-hub:secure-peer:connection:endpoint')?.(untrusted, scope, input)).toThrow('untrusted renderer')
+    expect(updateSecurePeerConnectionEndpoint).toHaveBeenCalledOnce()
   })
 
   it('routes the passive Team Network surface through dedicated trusted IPC only', async () => {

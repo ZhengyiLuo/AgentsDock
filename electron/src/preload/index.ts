@@ -4,6 +4,17 @@ import type { AppEventMap } from '../shared/types'
 import { buildMediaURL, buildWorkspaceMediaURL } from '../shared/media-url'
 
 const api: AgentsDockAPI = {
+  workspaceGit: {
+    status: (scope, sessionId) => ipcRenderer.invoke('workspace-git:status', scope, sessionId),
+    diff: (scope, sessionId, path, view) => ipcRenderer.invoke('workspace-git:diff', scope, sessionId, path, view),
+    conflict: (scope, sessionId, path) => ipcRenderer.invoke('workspace-git:conflict', scope, sessionId, path),
+    action: (scope, sessionId, input) => ipcRenderer.invoke('workspace-git:action', scope, sessionId, input)
+  },
+  sideQuestions: {
+    ask: (scope, sessionId, input) => ipcRenderer.invoke('side-questions:ask', scope, sessionId, input),
+    cancel: (scope, sessionId, requestId) => ipcRenderer.invoke('side-questions:cancel', scope, sessionId, requestId),
+    close: (scope, sessionId, sideChatId) => ipcRenderer.invoke('side-questions:close', scope, sessionId, sideChatId)
+  },
   chatShares: {
     preview: (scope, sessionId) => ipcRenderer.invoke('chat-shares:preview', scope, sessionId),
     list: (scope, sessionId, mode) => ipcRenderer.invoke('chat-shares:list', scope, sessionId, mode),
@@ -49,6 +60,7 @@ const api: AgentsDockAPI = {
     postMessage: (scope, input) => ipcRenderer.invoke('team-hub:message:post', scope, input),
     networkCapabilities: scope => ipcRenderer.invoke('team-hub:network:capabilities', scope),
     network: (scope, query) => ipcRenderer.invoke('team-hub:network:get', scope, query),
+    renameNetworkServer: (scope, input) => ipcRenderer.invoke('team-hub:network:server:rename', scope, input),
     registerNetworkAgent: (scope, input) => ipcRenderer.invoke('team-hub:network:agent:register', scope, input),
     bulletin: (scope, query) => ipcRenderer.invoke('team-hub:network:bulletin:list', scope, query),
     postBulletin: (scope, input) => ipcRenderer.invoke('team-hub:network:bulletin:post', scope, input),
@@ -97,6 +109,7 @@ const api: AgentsDockAPI = {
     activateSecurePeerPairing: (scope, input) => ipcRenderer.invoke('team-hub:secure-peer:activate', scope, input),
     deactivateSecurePeerConnection: (scope, input) => ipcRenderer.invoke('team-hub:secure-peer:connection:deactivate', scope, input),
     forgetSecurePeerConnection: (scope, input) => ipcRenderer.invoke('team-hub:secure-peer:connection:forget', scope, input),
+    updateSecurePeerConnectionEndpoint: (scope, input) => ipcRenderer.invoke('team-hub:secure-peer:connection:endpoint', scope, input),
     securePeers: (scope, teamId) => ipcRenderer.invoke('team-hub:secure-peer:list', scope, teamId),
     approveSecurePeerPairing: (scope, input) => ipcRenderer.invoke('team-hub:secure-peer:approve', scope, input),
     rejectSecurePeerPairing: (scope, input) => ipcRenderer.invoke('team-hub:secure-peer:reject', scope, input),
@@ -147,7 +160,7 @@ const api: AgentsDockAPI = {
     list: () => ipcRenderer.invoke('sessions:list'),
     create: input => ipcRenderer.invoke('sessions:create', input),
     resume: input => ipcRenderer.invoke('sessions:resume', input),
-    update: (sessionId, patch) => ipcRenderer.invoke('sessions:update', sessionId, patch),
+    update: (sessionId, patch, expectedScope) => ipcRenderer.invoke('sessions:update', sessionId, patch, ...(expectedScope ? [expectedScope] : [])),
     reloadProvider: sessionId => ipcRenderer.invoke('sessions:provider:reload', sessionId),
     remove: sessionId => ipcRenderer.invoke('sessions:remove', sessionId),
     fork: sessionId => ipcRenderer.invoke('sessions:fork', sessionId),
@@ -187,6 +200,13 @@ const api: AgentsDockAPI = {
   },
   codex: {
     serverGoals: () => ipcRenderer.invoke('codex:server-goals:get'),
+    auth: scope => ipcRenderer.invoke('codex:auth:get', scope),
+    provider: scope => ipcRenderer.invoke('codex:provider:get', scope),
+    providerModels: (scope, sessionId) => ipcRenderer.invoke('codex:provider:models', scope, sessionId),
+    testProvider: (scope, input) => ipcRenderer.invoke('codex:provider:test', scope, input),
+    testProviderModel: (scope, input) => ipcRenderer.invoke('codex:provider:test-model', scope, input),
+    setProvider: (scope, input) => ipcRenderer.invoke('codex:provider:set', scope, input),
+    resetProvider: scope => ipcRenderer.invoke('codex:provider:reset', scope),
     setServerGoals: enabled => ipcRenderer.invoke('codex:server-goals:set', enabled),
     serverSubagents: scope => ipcRenderer.invoke('codex:server-subagents:get', scope),
     setServerSubagents: (scope, limit) => ipcRenderer.invoke('codex:server-subagents:set', scope, limit),

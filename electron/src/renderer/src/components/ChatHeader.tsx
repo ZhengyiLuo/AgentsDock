@@ -39,6 +39,8 @@ export function ChatHeader({
   const selectedSession = useAppStore(state => state.sessions.find(candidate => candidate.id === state.selectedSessionId) ?? null)
   const session = sessionProp === undefined ? selectedSession : sessionProp
   const inspector = useAppStore(state => state.inspectorVisible)
+  const profileId = useAppStore(state => state.activeProfileId)
+  const profileGeneration = useAppStore(state => state.profileGeneration)
   const sessions = useAppStore(state => state.sessions)
   const folderOrder = useAppStore(state => state.folderOrder)
   const chatPanes = useAppStore(state => state.chatPanes)
@@ -78,7 +80,7 @@ export function ChatHeader({
     setActionsMenuOpen(false)
     setSplitMenuRequested(false)
     setSessionIdCopied(false)
-  }, [session?.id])
+  }, [session?.id, profileId, profileGeneration])
   useEffect(() => {
     const open = (event: Event) => {
       const detail = (event as CustomEvent<{ sessionId?: string }>).detail

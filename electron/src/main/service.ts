@@ -7,9 +7,12 @@ import { pipeline } from 'node:stream/promises'
 import { basename, dirname, join } from 'node:path'
 import { isImportedProviderControlMetadata, mergeProviderInterruptionEvent } from '../shared/provider-origin'
 import type { ChatShareMode, CreateChatShareInput } from '../shared/chat-shares'
+import type { WorkspaceGitAction, WorkspaceGitView } from '../shared/workspace-git'
 import { parseMailHintPageAcknowledgment, TEAM_MAIL_HINTS_ENABLED, type MailHintPageAcknowledgment, type MailHintScope } from '../shared/team-mail-hints'
 import { TeamMailHintController } from './team-mail-hint-controller'
 import { ActivityHealthProjection, type ActivityHealthRequest } from './activity-health'
+import { SideQuestionRequests } from './side-question-requests'
+import { sideQuestionLimit, sideQuestionsAvailable, validateSideQuestionInput, type SideQuestionAnswer, type SideQuestionCancellation, type SideQuestionInput, type SideQuestionScope } from '../shared/side-questions'
 import { parseBulletinHintRefresh } from '../shared/team-bulletin-hints'
 import {
   localSessionImportBatchLimit,
@@ -46,6 +49,12 @@ import type {
   CodexGoalInput,
   CodexGoalSnapshot,
   CodexGoalsConfiguration,
+  CodexAuthStatus,
+  CodexProviderConfiguration,
+  CodexProviderModels,
+  CodexProviderInput,
+  CodexProviderModelTestInput,
+  CodexProviderTestResult,
   CodexSubagentsConfiguration,
   CodexServerSettingsScope,
   CodexOperationAccepted,
@@ -161,6 +170,7 @@ import type {
   SecurePeerControlStatus,
   SecurePeerDeactivateInput,
   SecurePeerForgetConnectionInput,
+  SecurePeerUpdateEndpointInput,
   SecurePeerJoinInput,
   SecurePeerPairing,
   SecurePeerPublishRouteInput,
@@ -171,6 +181,7 @@ import type {
 } from '../shared/secure-peer'
 import {
   normalizeSecurePeerJoinTarget,
+  normalizeSecurePeerEndpoint,
   normalizeSecurePeerIPv4,
   normalizeSecurePeerPort,
   normalizeSecurePeerScopes,
@@ -178,6 +189,7 @@ import {
 } from '../shared/secure-peer'
 import {
   automaticPairingCompletionAvailable,
+  securePeerEndpointUpdateAvailable,
   parseSecurePeerControlStatus,
   parseSecurePeerHostPeerRevocation,
   parseSecurePeerHostPeers,
@@ -227,6 +239,7 @@ const SERVER_RESTART_HEALTH_TIMEOUT_MS = 3_000
 const MAX_TIMELINE_SUBSCRIPTIONS = 2
 const TRACE_DETAIL_EVENT_TYPES = new Set([
   'reasoning_summary',
+  'reasoning_text',
   'tool_started',
   'tool_finished',
   'code_diff'
@@ -353,6 +366,7 @@ export class AppService {
   private shutdownEpoch = 0
   private validatedGeneration: number | null = null
   private scope: ConnectionScope
+  private readonly sideQuestions = new SideQuestionRequests()
   private readonly clientFactory: (serverUrl: string, accessToken: string) => AgentServerClient
   private readonly serverRestartReconnectTimeoutMs: number
   private readonly serverRestartPollDelayMs: number
@@ -582,6 +596,7 @@ export class AppService {
   }
 
   stop(): void {
+    this.sideQuestions.cancelAll()
     this.profileSelectionIntent += 1
     this.shutdownEpoch += 1
     this.running = false
@@ -945,6 +960,7 @@ export class AppService {
     this.requireSecurePeerControlContext(context)
     return {
       ...parseSecurePeerControlStatus(raw, context.expected, context.serverInstanceId),
+      endpointUpdateAvailable: securePeerEndpointUpdateAvailable(this.health?.capabilities?.secure_peer_v1),
       automaticPairingCompletionAvailable: automaticPairingCompletionAvailable(this.health?.capabilities?.automatic_pairing_completion_v1)
     }
   }
@@ -1084,16 +1100,37 @@ export class AppService {
     }
     const pairingId = securePeerV4ID(input?.pairingId, 'pairing')
     if (!/^[0-9a-f]{64}$/.test(input?.expectedTranscriptHash ?? '')) throw new Error('Secure pairing transcript is invalid.')
-    const raw = await context.scope.client.securePeerPairingCompletion(pairingId, {
-      expected_server_identity: context.expected.serverIdentity,
-      expected_server_instance_id: context.serverInstanceId,
-      expected_transcript_hash: input.expectedTranscriptHash
-    }, signal)
-    signal.throwIfAborted()
-    this.requireSecurePeerControlContext(context)
-    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) throw new Error('Invalid secure pairing completion response.')
-    const receipt = raw as Record<string, unknown>
-    if (receipt.version !== 1) throw new Error('Invalid secure pairing completion response.')
+    let receipt: Record<string, unknown>
+    for (;;) {
+      signal.throwIfAborted()
+      this.requireSecurePeerControlContext(context)
+      const observationStarted = performance.now()
+      const raw = await context.scope.client.securePeerPairingCompletion(pairingId, {
+        expected_server_identity: context.expected.serverIdentity,
+        expected_server_instance_id: context.serverInstanceId,
+        expected_transcript_hash: input.expectedTranscriptHash
+      }, signal)
+      signal.throwIfAborted()
+      this.requireSecurePeerControlContext(context)
+      if (!raw || typeof raw !== 'object' || Array.isArray(raw)) throw new Error('Invalid secure pairing completion response.')
+      receipt = raw as Record<string, unknown>
+      if (receipt.version !== 1) throw new Error('Invalid secure pairing completion response.')
+      if (receipt.completion_state !== 'unavailable' || receipt.reason !== 'observation_window_elapsed') break
+      const pending = parseSecurePeerPairing(receipt.pairing, true)
+      const awaitingApproval = pending.trustState === 'pending' && ['requesting', 'pending_approval'].includes(pending.status)
+      const awaitingActivation = pending.trustState === 'approved' && ['approved', 'connected'].includes(pending.status)
+        && Boolean(pending.connectionId && pending.hubIdentity)
+      // A durable Join outlives an HTTP observation window. Renew only the
+      // same held read, never the Join or its consent. Requiring a real long
+      // hold prevents an early/unrecognized response from becoming a hot poll.
+      // Allow small clock/scheduler differences, but never an eager retry.
+      if (performance.now() - observationStarted < 590_000
+        || pending.id !== pairingId || pending.transcriptHash !== input.expectedTranscriptHash
+        || pending.direction !== 'outgoing' || (!awaitingApproval && !awaitingActivation) || pending.error
+        || !pending.completeOnApproval || (receipt.pairing as Record<string, unknown>).expires_at !== null) {
+        throw new Error('Automatic pairing completion stopped. Check the current pairing status before trying again.')
+      }
+    }
     const completed = receipt.completion_state === 'completed'
     const terminalState = receipt.completion_state === 'expired' || receipt.completion_state === 'cancelled'
       ? receipt.completion_state : null
@@ -1248,6 +1285,74 @@ export class AppService {
     this.requireSecurePeerControlContext(context)
     this.mailHints.retire()
     return parseSecurePeerControlStatus(raw, context.expected, context.serverInstanceId)
+  }
+
+  async updateSecurePeerConnectionEndpoint(
+    expected: SecurePeerProfileScope,
+    input: SecurePeerUpdateEndpointInput,
+    beforeWrite?: () => void
+  ): Promise<SecurePeerControlStatus> {
+    const context = await this.securePeerControlContext(expected)
+    if (!securePeerEndpointUpdateAvailable(this.health?.capabilities?.secure_peer_v1)) {
+      throw new Error('Update this AgentsServer to change a saved host address.')
+    }
+    if (input?.confirmed !== true) throw new Error('Confirm the saved host address change before continuing.')
+    if (input.expectedServerInstanceId !== context.serverInstanceId) throw staleProfileError()
+    const connectionId = securePeerV4ID(input.connectionId, 'connection')
+    const hostIdentity = boundedTeamHubControlField(input.expectedHostServerIdentity, 'host server identity', 240)
+    const hubIdentity = boundedTeamHubControlField(input.expectedHubIdentity, 'Hub identity', 240)
+    const previousEndpoint = normalizeSecurePeerEndpoint(input.expectedRemoteEndpoint)
+    const endpoint = normalizeSecurePeerEndpoint(input.host)
+    if (endpoint.endpoint === previousEndpoint.endpoint) throw new Error('Enter a different host address or port.')
+
+    // Read local authenticated state; recovery must not depend on the old
+    // remote endpoint being reachable or currently selected.
+    const beforeRaw = await context.scope.client.securePeerStatus()
+    this.requireSecurePeerControlContext(context)
+    const before = parseSecurePeerControlStatus(beforeRaw, context.expected, context.serverInstanceId)
+    const matching = before.pairings.filter(pairing => pairing.connectionId === connectionId)
+    const pairing = matching[0]
+    if (matching.length !== 1 || !pairing || pairing.direction !== 'outgoing' || pairing.trustState !== 'approved'
+      || pairing.hostServerIdentity !== hostIdentity || pairing.hubIdentity !== hubIdentity
+      || pairing.remoteEndpoint !== previousEndpoint.endpoint) {
+      throw new Error('The saved secure connection changed. Refresh Team Network and try again.')
+    }
+    beforeWrite?.()
+    let raw: unknown
+    try {
+      raw = await context.scope.client.updateSecurePeerConnectionEndpoint(connectionId, {
+        request_id: randomUUID(),
+        expected_server_identity: context.expected.serverIdentity,
+        expected_server_instance_id: context.serverInstanceId,
+        expected_host_server_identity: hostIdentity,
+        expected_hub_id: hubIdentity,
+        expected_host_ip: previousEndpoint.host,
+        expected_port: previousEndpoint.port,
+        host_ip: endpoint.host,
+        port: endpoint.port,
+        confirmed: true
+      })
+    } catch (error) {
+      if (error instanceof ServerError) throw error
+      // Never repeat a potentially committed migration: one status read can
+      // establish success after an interrupted response without another write.
+      this.requireSecurePeerControlContext(context)
+      try { raw = await context.scope.client.securePeerStatus() } catch { throw error }
+      this.requireSecurePeerControlContext(context)
+      const recovered = parseSecurePeerControlStatus(raw, context.expected, context.serverInstanceId)
+      if (!recovered.pairings.some(item => item.connectionId === connectionId && item.remoteEndpoint === endpoint.endpoint)) throw error
+    }
+    this.requireSecurePeerControlContext(context)
+    const result = parseSecurePeerControlStatus(raw, context.expected, context.serverInstanceId)
+    const migrated = result.pairings.filter(item => item.connectionId === connectionId)
+    if (result.activeConnectionId !== before.activeConnectionId || migrated.length !== 1
+      || migrated[0].remoteEndpoint !== endpoint.endpoint
+      || securePeerEndpointTrustKey(migrated[0]) !== securePeerEndpointTrustKey(pairing)) {
+      throw new Error('AgentsServer returned a mismatched secure host address change.')
+    }
+    if (result.activeConnectionId === connectionId) this.mailHints.retire()
+    return { ...result, endpointUpdateAvailable: true,
+      automaticPairingCompletionAvailable: automaticPairingCompletionAvailable(this.health?.capabilities?.automatic_pairing_completion_v1) }
   }
 
   async publishSecurePeerRoute(
@@ -1592,6 +1697,7 @@ export class AppService {
       // retaining confidential rows for a profile the user chose to remove.
       this.cache.removeServerNamespaces(cacheNamespaces)
       this.settings.removeProfile(profileId)
+      this.sideQuestions.cancelProfile(profileId)
     } catch (error) { throw error }
     this.invalidateProfileHealthProbe(profileId)
     this.profileHealthAccessTokens.delete(profileId)
@@ -2046,6 +2152,111 @@ export class AppService {
     })
   }
 
+  async codexAuth(expected: CodexServerSettingsScope): Promise<CodexAuthStatus> {
+    const scope = this.requireProfileScope(expected?.profileId, expected?.profileGeneration)
+    await this.ensureValidatedScope(scope)
+    this.assertCurrentScope(scope)
+    const result = await scope.client.codexAuth()
+    this.assertCurrentScope(scope)
+    return result
+  }
+
+  async codexProvider(expected: CodexServerSettingsScope): Promise<CodexProviderConfiguration> {
+    const scope = this.requireProfileScope(expected?.profileId, expected?.profileGeneration)
+    await this.ensureValidatedScope(scope)
+    this.assertCurrentScope(scope)
+    const result = await scope.client.codexProvider()
+    this.assertCurrentScope(scope)
+    return result
+  }
+
+  async testCodexProvider(expected: CodexServerSettingsScope, input: CodexProviderInput): Promise<CodexProviderTestResult> {
+    const scope = this.requireProfileScope(expected?.profileId, expected?.profileGeneration)
+    await this.ensureValidatedScope(scope)
+    this.assertCurrentScope(scope)
+    this.requireCodexProviderModels()
+    const result = await scope.client.testCodexProvider(input)
+    this.assertCurrentScope(scope)
+    return result
+  }
+
+  async codexProviderModels(expected: CodexServerSettingsScope, sessionId?: string): Promise<CodexProviderModels> {
+    const scope = this.requireProfileScope(expected?.profileId, expected?.profileGeneration)
+    await this.ensureValidatedScope(scope)
+    this.assertCurrentScope(scope)
+    this.requireCodexProviderModels()
+    const result = await scope.client.codexProviderModels(sessionId)
+    this.assertCurrentScope(scope)
+    if (sessionId) {
+      const page = await scope.client.sessionPage(sessionId, { limit: 1 })
+      this.assertCurrentScope(scope)
+      this.upsertSession(scope, page.session)
+    } else await this.refreshCodexProviderRuntime(scope)
+    this.assertCurrentScope(scope)
+    return result
+  }
+
+  async testCodexProviderModel(expected: CodexServerSettingsScope, input: CodexProviderModelTestInput): Promise<CodexProviderTestResult> {
+    const scope = this.requireProfileScope(expected?.profileId, expected?.profileGeneration)
+    await this.ensureValidatedScope(scope)
+    this.assertCurrentScope(scope)
+    if (this.health?.capabilities?.codex_provider_v1?.model_compatibility !== true) throw new Error('CODEX_PROVIDER_UPDATE')
+    const result = await scope.client.testCodexProviderModel(input)
+    this.assertCurrentScope(scope)
+    if (input.session_id) {
+      const page = await scope.client.sessionPage(input.session_id, { limit: 1 })
+      this.assertCurrentScope(scope)
+      this.upsertSession(scope, page.session)
+    } else await this.refreshCodexProviderRuntime(scope)
+    this.assertCurrentScope(scope)
+    return result
+  }
+
+  async setCodexProvider(expected: CodexServerSettingsScope, input: CodexProviderInput): Promise<CodexProviderConfiguration> {
+    const scope = this.requireProfileScope(expected?.profileId, expected?.profileGeneration)
+    await this.ensureValidatedScope(scope)
+    this.assertCurrentScope(scope)
+    // Old endpoint implementations changed the process-wide default provider.
+    // Never apply the per-chat settings UI to that incompatible contract.
+    try { this.requirePerChatCodexProvider('custom') }
+    catch { throw new Error('CODEX_PROVIDER_UPDATE') }
+    this.requireCodexProviderModels()
+    const result = await scope.client.setCodexProvider(input)
+    this.assertCurrentScope(scope)
+    await this.refreshCodexProviderRuntime(scope)
+    // Save completes independently of endpoint reachability. This one explicit
+    // discovery updates the picker when it arrives and cannot affect a new server.
+    void this.codexProviderModels(expected).catch(() => undefined)
+    return result
+  }
+
+  async resetCodexProvider(expected: CodexServerSettingsScope): Promise<CodexProviderConfiguration> {
+    const scope = this.requireProfileScope(expected?.profileId, expected?.profileGeneration)
+    await this.ensureValidatedScope(scope)
+    this.assertCurrentScope(scope)
+    const result = await scope.client.resetCodexProvider()
+    this.assertCurrentScope(scope)
+    await this.refreshCodexProviderRuntime(scope)
+    return result
+  }
+
+  private async refreshCodexProviderRuntime(scope: ConnectionScope): Promise<void> {
+    // One explicit reconciliation after Save/reset; Test and Get never refresh.
+    const preceding = this.runtimeRefreshInFlight?.get(scope.generation)
+    if (preceding) await preceding.task.catch(() => undefined)
+    this.assertCurrentScope(scope)
+    const priorCatalog = this.runtimeCatalog
+    let refreshed = false
+    try { await this.refreshRuntime(true, false, scope, true); refreshed = true }
+    catch { /* Saved configuration stays saved even if readiness is offline. */ }
+    this.assertCurrentScope(scope)
+    const diagnostic = this.runtimeCatalog?.backends.codex?.diagnostic
+    if (refreshed && this.runtimeCatalog !== priorCatalog && this.health && diagnostic) {
+      this.health = { ...this.health, runtimes: { ...this.health.runtimes, codex: diagnostic } }
+      this.emitConnection(scope, true, this.health)
+    }
+  }
+
   async codexServerSubagents(expected: CodexServerSettingsScope): Promise<CodexSubagentsConfiguration> {
     const scope = this.requireProfileScope(expected?.profileId, expected?.profileGeneration)
     await this.ensureValidatedScope(scope)
@@ -2094,6 +2305,9 @@ export class AppService {
   async createSession(input: CreateSessionInput): Promise<Session> {
     const scope = this.captureScope()
     await this.ensureValidatedScope(scope)
+    this.assertCurrentScope(scope)
+    this.requirePerChatCodexProvider(input.codex_provider)
+    this.requirePerChatSubagentLimit(input.subagent_limit)
     const session = await scope.client.createSession(input)
     this.assertCurrentScope(scope)
     this.upsertSession(scope, session)
@@ -2103,6 +2317,9 @@ export class AppService {
   async resumeSession(input: ResumeSessionInput): Promise<Session> {
     const scope = this.captureScope()
     await this.ensureValidatedScope(scope)
+    this.assertCurrentScope(scope)
+    this.requirePerChatCodexProvider(input.codex_provider)
+    this.requirePerChatSubagentLimit(input.subagent_limit)
     const session = await scope.client.createSession(input)
     this.assertCurrentScope(scope)
     this.upsertSession(scope, session)
@@ -2170,9 +2387,12 @@ export class AppService {
     return results
   }
 
-  async updateSession(sessionId: string, patch: UpdateSessionInput): Promise<Session> {
-    const scope = this.captureScope()
+  async updateSession(sessionId: string, patch: UpdateSessionInput, expectedScope?: WorkspaceProfileScope): Promise<Session> {
+    const scope = expectedScope ? this.requireWorkspaceScope(expectedScope) : this.captureScope()
     await this.ensureValidatedScope(scope)
+    this.assertCurrentScope(scope)
+    this.requirePerChatCodexProvider(patch.codex_provider)
+    this.requirePerChatSubagentLimit(patch.subagent_limit)
     const session = await scope.client.updateSession(sessionId, patch)
     this.assertCurrentScope(scope)
     if (session.archived) {
@@ -2181,6 +2401,30 @@ export class AppService {
     }
     this.upsertSession(scope, session)
     return session
+  }
+
+  private requirePerChatSubagentLimit(limit: unknown): void {
+    if (limit === undefined) return
+    if (limit !== null && (!Number.isSafeInteger(limit) || (limit as number) < 1)) {
+      throw new Error('Sub-agent limit must be a positive whole number or empty.')
+    }
+    if (this.health?.capabilities?.subagent_limit_v1?.version !== 1) {
+      throw new Error('Update AgentsServer to set a per-chat sub-agent limit.')
+    }
+  }
+
+  private requirePerChatCodexProvider(selection: unknown): void {
+    if (selection === undefined || selection === 'default') return
+    if (selection !== 'custom') throw new Error('Invalid Codex endpoint selection.')
+    const capability = this.health?.capabilities?.codex_provider_v1
+    if (!capability || typeof capability !== 'object' || Array.isArray(capability)
+      || (capability as { per_chat?: unknown }).per_chat !== true) {
+      throw new Error('Update AgentsServer to select a custom Codex endpoint for this chat.')
+    }
+  }
+
+  private requireCodexProviderModels(): void {
+    if (this.health?.capabilities?.codex_provider_v1?.per_chat_models !== true) throw new Error('CODEX_PROVIDER_UPDATE')
   }
 
   async reloadProvider(sessionId: string): Promise<ProviderReloadResult> {
@@ -2973,7 +3217,10 @@ export class AppService {
       if (!this.isCurrentTimeline(scope, sessionId, lease)) return
       const subagentState = this.subagentProjector.project(event)
       if (event.type === 'raw_event') {
-        if (subagentState) this.emitAgentEvent(scope, subagentState)
+        if (subagentState) {
+          this.emitAgentEvent(scope, subagentState)
+          this.enqueueEventCache(scope, subagentState)
+        }
         return
       }
       this.emitAgentEvent(scope, event)
@@ -2992,6 +3239,14 @@ export class AppService {
     }, event => {
       if (!this.isCurrentTimeline(scope, sessionId, lease)) return
       void this.refreshPinsFromNotice(scope, sessionId, event.revision)
+    }, snapshot => {
+      if (!this.isCurrentTimeline(scope, sessionId, lease)) return
+      this.emit('server:reasoning-stream', {
+        profileId: scope.profileId,
+        profileGeneration: scope.generation,
+        sessionId,
+        snapshot
+      })
     })
     const current = this.timelineSubscriptions.get(sessionId)
     if (current?.lease === lease) current.stop = stop
@@ -3055,6 +3310,38 @@ export class AppService {
 
   viewState(expected: WorkspaceProfileScope, sessionId: string): ViewState | null { return this.cache.viewState(this.requireWorkspaceScope(expected).namespace, sessionId) }
   saveViewState(expected: WorkspaceProfileScope, state: ViewState): void { this.cache.putViewState(this.requireWorkspaceScope(expected).namespace, state) }
+
+  async askSideQuestion(expected: SideQuestionScope, sessionId: string, input: SideQuestionInput): Promise<SideQuestionAnswer> {
+    const scope = this.requireProfileScope(expected?.profileId, expected?.profileGeneration)
+    const question = validateSideQuestionInput(input, sideQuestionLimit(this.health))
+    if (!question.side_chat_id || question.history !== undefined) throw new Error('side_question_invalid_request')
+    return this.sideQuestions.ask(expected, sessionId, question, async () => {
+      await this.ensureValidatedScope(scope)
+      this.assertCurrentScope(scope)
+      if (expected.serverIdentity !== undefined
+        && expected.serverIdentity !== (this.settings.getProfile(scope.profileId)?.serverIdentity ?? null)) throw staleProfileError()
+      const session = this.sessions.find(candidate => candidate.id === sessionId)
+      if (!session || !sideQuestionsAvailable(this.health, session.backend)) throw new Error('side_question_unsupported')
+      validateSideQuestionInput(question, sideQuestionLimit(this.health))
+      // A dedicated transport preserves native follow-ups and cancellation
+      // ownership even while another server is selected.
+      return this.clientFactory(scope.serverUrl, this.settings.accessToken(scope.profileId))
+    }, () => this.isCurrentScope(scope)).catch(error => {
+      if (error instanceof ServerError) throw new Error(`side_question_http_${error.status}: ${error.message}`)
+      if (error instanceof Error && error.name === 'TimeoutError') throw new Error('side_question_timeout')
+      throw error
+    })
+  }
+
+  cancelSideQuestion(expected: SideQuestionScope, sessionId: string, requestId: string): Promise<SideQuestionCancellation> {
+    // An old scope can cancel only its already-owned request, never a request
+    // on the newly selected server or the main conversation turn.
+    return this.sideQuestions.cancel(expected, sessionId, requestId)
+  }
+
+  closeSideChat(expected: SideQuestionScope, sessionId: string, sideChatId: string): Promise<void> {
+    return this.sideQuestions.close(expected, sessionId, sideChatId)
+  }
 
   async sendTurn(input: SendTurnInput): Promise<{ session: Session; event?: Event; queued?: boolean; queued_id?: string; position?: number }> {
     assertLocalAgentChatReferences(input.chatReferences)
@@ -3769,6 +4056,42 @@ export class AppService {
     const info = await scope.client.workspaceInfo(sessionId)
     this.assertCurrentScope(scope)
     return info
+  }
+
+  async workspaceGitStatus(expected: WorkspaceProfileScope, sessionId: string) {
+    const scope = this.requireWorkspaceScope(expected)
+    await this.ensureValidatedScope(scope)
+    this.assertCurrentScope(scope)
+    const result = await scope.client.workspaceGitStatus(sessionId)
+    this.assertCurrentScope(scope)
+    return result
+  }
+
+  async workspaceGitDiff(expected: WorkspaceProfileScope, sessionId: string, path: string, view: WorkspaceGitView) {
+    const scope = this.requireWorkspaceScope(expected)
+    await this.ensureValidatedScope(scope)
+    this.assertCurrentScope(scope)
+    const result = await scope.client.workspaceGitDiff(sessionId, path, view)
+    this.assertCurrentScope(scope)
+    return result
+  }
+
+  async workspaceGitConflict(expected: WorkspaceProfileScope, sessionId: string, path: string) {
+    const scope = this.requireWorkspaceScope(expected)
+    await this.ensureValidatedScope(scope)
+    this.assertCurrentScope(scope)
+    const result = await scope.client.workspaceGitConflict(sessionId, path)
+    this.assertCurrentScope(scope)
+    return result
+  }
+
+  async workspaceGitAction(expected: WorkspaceProfileScope, sessionId: string, input: WorkspaceGitAction) {
+    const scope = this.requireWorkspaceScope(expected)
+    await this.ensureValidatedScope(scope)
+    this.assertCurrentScope(scope)
+    const result = await scope.client.workspaceGitAction(sessionId, input)
+    this.assertCurrentScope(scope)
+    return result
   }
 
   async workspaceEntries(sessionId: string, path = '', offset = 0, limit = 500): Promise<WorkspaceEntriesPage> {
@@ -4686,12 +5009,8 @@ export class AppService {
     }
     const namespaceWasAdopted = activeScope !== scope
     if (!this.isCurrentScope(activeScope)) return
-    if (
-      deferApplyDuringInteraction
-      && Date.now() - this.lastForegroundInteractionAt < FOREGROUND_INTERACTION_QUIET_MS
-      && !await this.waitForForegroundQuiet(activeScope)
-    ) return
-    if (!this.isCurrentScope(activeScope)) return
+    // Already-requested chats need live recovery as soon as health is valid,
+    // even while background session/job metadata waits for an input pause.
     if (!namespaceWasAdopted) {
       for (const [sessionId, subscription] of [...this.timelineSubscriptions]) {
         if (subscription.connected || subscription.initializing) continue
@@ -4701,6 +5020,12 @@ export class AppService {
         queueMicrotask(() => void this.reconcileTimelineAndStream(activeScope, sessionId, cachedLast, lease))
       }
     }
+    if (
+      deferApplyDuringInteraction
+      && Date.now() - this.lastForegroundInteractionAt < FOREGROUND_INTERACTION_QUIET_MS
+      && !await this.waitForForegroundQuiet(activeScope)
+    ) return
+    if (!this.isCurrentScope(activeScope)) return
 
     if (sessions.status === 'fulfilled') {
       const mergedSessions = mergePolledSessionSummaries(this.sessions, sessions.value)
@@ -5171,7 +5496,7 @@ export class AppService {
     lease: number
   ): Promise<void> {
     const session = this.cache.snapshot(scope.namespace, sessionId)?.session
-    if (session?.backend !== 'codex') return
+    if (session?.backend !== 'codex' && session?.backend !== 'claude') return
     const subagents = await this.fetchSubagentSnapshot(scope, sessionId)
     if (!subagents || !this.isCurrentTimeline(scope, sessionId, lease)) return
     const persistable = persistableSubagentSnapshotEvents(subagents, sessionId)
@@ -5181,8 +5506,14 @@ export class AppService {
       sessionId,
       dropped: persistable.dropped
     })
-    if (!persistable.events.length) return
-    this.cache.putEvents(scope.namespace, sessionId, persistable.events)
+    const events = persistable.events.filter(event => event.backend !== 'claude' || (
+      event.subagent_kind !== 'local_bash'
+      && event.subagent_kind !== 'local_workflow'
+      && this.subagentProjector.project(event) !== null
+    ))
+    if (!events.length) return
+    this.flushEventCache()
+    this.cache.putEvents(scope.namespace, sessionId, events)
     const snapshot = this.cache.snapshot(scope.namespace, sessionId)
     if (!snapshot || !this.isCurrentTimeline(scope, sessionId, lease)) return
     this.emit('server:timeline', {
@@ -5583,6 +5914,7 @@ export class AppService {
     // The generation fence is already active. From here onward every old
     // resource is retired independently so one hostile/buggy close callback
     // cannot prevent a coherent replacement scope from being installed.
+    // Side chats own independent transports and survive ordinary navigation.
     retire(() => this.flushEventCache())
     retire(() => this.closeAllTimelineSubscriptions())
     retire(() => this.stopEmergencyStream())
@@ -5697,6 +6029,7 @@ export class AppService {
     profileId: string,
     retiredNamespaces: readonly string[]
   ): Promise<string | null> {
+    this.sideQuestions.cancelProfile(profileId)
     const namespaces = [...new Set([
       ...(this.pendingProfileAuthorityNamespaces.get(profileId) ?? []),
       ...retiredNamespaces
@@ -6074,6 +6407,7 @@ export class AppService {
       ...storedPatch,
       ...(resetServerIdentity ? { serverIdentity: null, retiredServerNamespaces: retiredNamespaces } : {})
     })
+    if (profileConnectionChanged(previous, patch)) this.sideQuestions.cancelProfile(profileId)
     if (retiredNamespaces?.length) this.pendingProfileAuthorityNamespaces.set(profileId, retiredNamespaces)
     if (patch.accessToken !== undefined) this.profileHealthAccessTokens.delete(profileId)
     return profile
@@ -6187,6 +6521,7 @@ export class AppService {
   private upsertSession(scope: ConnectionScope, session: Session): void {
     this.assertCurrentScope(scope)
     const index = this.sessions.findIndex(candidate => candidate.id === session.id)
+    if (index >= 0) session = preserveCustomProviderModels(this.sessions[index], session)
     if (index >= 0) this.sessions = this.sessions.map(candidate => candidate.id === session.id ? session : candidate)
     else this.sessions = [...this.sessions, session]
     this.cache.putSession(scope.namespace, session)
@@ -6790,6 +7125,16 @@ function parseTeamHubDiscovery(value: unknown, serverIdentity: string): TeamHubD
   }
 }
 
+function securePeerEndpointTrustKey(pairing: SecurePeerPairing): string {
+  return JSON.stringify([
+    pairing.id, pairing.direction, pairing.trustState, pairing.connectionId,
+    pairing.hostServerIdentity, pairing.hubIdentity, pairing.hostCaFingerprint,
+    pairing.peerServerIdentity, pairing.peerPublicKeyFingerprint, pairing.transcriptHash,
+    pairing.teamId, pairing.certificateFingerprint, pairing.localProxyBasePath,
+    [...pairing.grantedScopes].sort()
+  ])
+}
+
 function securePeerCapabilityUUID(value: unknown): string {
   const clean = boundedTeamHubControlField(value, 'secure connection', 64)
   if (!/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(clean)) {
@@ -7119,9 +7464,22 @@ export function mergeSessionSummaries(previous: Session[], incoming: Session[]):
   return incoming.map(summary => {
     const existing = previousById.get(summary.id)
     if (!existing) return summary
-    const merged = { ...existing, ...summary }
+    const merged = preserveCustomProviderModels(existing, { ...existing, ...summary })
     return jsonEqual(existing, merged) ? existing : merged
   })
+}
+
+function preserveCustomProviderModels(previous: Session, incoming: Session): Session {
+  const saved = previous.codex_provider_catalog
+  const summary = incoming.codex_provider_catalog
+  if (incoming.codex_provider !== 'custom' || previous.codex_provider !== 'custom' || !saved || !summary
+    || !summary.configured || saved.base_url !== summary.base_url || summary.models !== undefined) return incoming
+  return { ...incoming, codex_provider_catalog: {
+    ...summary,
+    ...(saved.models !== undefined ? { models: saved.models } : {}),
+    ...(saved.model_efforts !== undefined ? { model_efforts: saved.model_efforts } : {}),
+    ...(saved.model_capabilities !== undefined ? { model_capabilities: saved.model_capabilities } : {})
+  } }
 }
 
 export function mergePolledSessionSummaries(previous: Session[], incoming: Session[]): Session[] {

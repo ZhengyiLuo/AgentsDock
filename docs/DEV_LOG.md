@@ -1,5 +1,1070 @@
 # Public development log
 
+## 2026-09-21 — Integrate completed desktop work into main
+
+- Merge the completed desktop branch through `8d7745d` with main `33f9355`,
+  including the Side chat popup, copy and scroll behavior, provider settings,
+  reasoning controls, Claude subagent visibility and live synchronization fix.
+- Retain newer main changes for analytics privacy, optimistic send feedback,
+  shared-chat recovery, artifact-open errors, media layout and release workflows.
+  Combine live reasoning overlays with pending-send presentation.
+- Pass all 4,634 desktop tests (five intentional skips) with four workers,
+  TypeScript validation, eight compile/license checks, production compilation
+  and the compiled-entry guard.
+- Re-exercise the merged production renderer/preload in native offscreen Electron
+  with production IPC/service/native HTTP: Side chat opening and sizing, native
+  copy/paste, scroll restoration, independent chat positions, pending close/reopen,
+  cancellation and a subsequent question. Check light/dark and narrow layout;
+  restore the clipboard. These requests use a controlled loopback response
+  server; live model execution is covered by earlier feature acceptance.
+- Exercise the merged desktop and isolated real server together with synthetic
+  histories and controlled health failures: live updates recover in 727 ms
+  during continuous native typing, including an injected 700 ms server delay.
+  Preserve all 48 draft characters and retain deferred metadata application.
+- Availability: source integration. This does not create a new app package or
+  update a running server; paired server changes are integrated separately.
+
+## 2026-09-21 — Resume live chat updates during input — source acceptance
+
+- Resume requested chat subscriptions immediately after the server is healthy,
+  before waiting for the foreground input pause used by background session/job
+  metadata. Preserve scope and subscription ownership; hidden chats stay closed.
+- Pass six focused service checks, TypeScript validation, production compilation
+  and compiled-entry verification. The regression fails on the old ordering.
+- Exercise actual offscreen Electron with production service, packaged renderer
+  and preload, native sidebar clicks and typing, and an isolated real server.
+  Synthetic histories contain 5,000 and 300 events; normal cached switches are
+  already fast and are not reported as a reproduced stall.
+- Inject one HTTP health failure and a 700 ms healthy response delay. On the
+  old service, selected-chat recovery waits 8.93 seconds, including three seconds
+  after typing stops. The correction recovers in 732 ms during continuous input;
+  an independent repeat records 729 ms, preserves all 49 typed characters, and
+  leaves background metadata deferred. No provider turn is part of this check.
+- Availability: accepted source correction for the coordinated desktop release.
+  A separate compatible server optimization avoids redundant full-history fork
+  scans on timeline refreshes. Production apps and servers remain unchanged.
+
+## 2026-09-20 — Side chat scroll memory — 1.0.4-beta.16 local acceptance
+
+- Accept signed local Apple silicon macOS app **1.0.4-beta.16 / 1190** from
+  `9451baae691a2f9ad93bbef8e05b60c3e1a38a12`. Verify bundle audit, Developer ID
+  signature, runtime entitlements, exact version/build and isolated startup.
+  All 88 compiled files in the package match the tested production output.
+- Exercise the exact packaged renderer/preload with native offscreen mouse
+  input. Verify exact scroll restoration after reopening, stable reading
+  position when replies arrive, bottom following after a reply arrives while
+  closed, Jump to latest and independent positions across two chats. The
+  controlled server and unchanged provider boundary are described below.
+- Availability: signed local `.app` with automatic updates disabled, not a
+  notarized public release. This scroll correction needs no server update.
+
+## 2026-09-20 — Remember Side chat reading position — source acceptance
+
+- Restore each Side chat's reading position across closing/reopening and chat
+  switches. Keep positions scoped to their server and parent chat, and reset
+  them when the side conversation is cleared or its server is removed.
+- Open new conversations at the bottom. Follow replies while already at the
+  bottom; preserve the reading position while scrolled up and offer a compact
+  Jump to latest control. Restore after the popup measures its available space.
+- Pass 38 focused component/controller/layout checks, TypeScript validation
+  and production compilation. In native offscreen Electron, exercise actual
+  scrolling, close/reopen, delayed replies while reading older text, replies
+  arriving while closed, Jump to latest and independent positions in two chats.
+  The controlled server exercises production preload/IPC/native HTTP. Provider
+  execution and server-picker transitions are outside this acceptance; a
+  focused ownership check covers server identity changes and revisits.
+- Availability: source correction. No server change is needed for scroll state.
+
+## 2026-09-20 — Side chat button spacing — 1.0.4-beta.15 local acceptance
+
+- Accept signed local Apple silicon macOS app **1.0.4-beta.15 / 1189** from
+  `d3e4877a6b83eae994e4ee910d0e998808465850`. Verify bundle audit, Developer ID
+  signature, runtime entitlements, version/build and isolated startup. All 88
+  compiled files in the package match the tested production output.
+- Reproduce overlapping controls in beta.14, then exercise native offscreen
+  scrolling and clicks in the corrected source and exact packaged renderer.
+  At normal and narrow widths, Side chat sits 30 pixels lower with a clear gap
+  beneath Jump to latest. Both controls work, and the popup opens above the
+  unobscured composer. The controlled timeline uses production preload/IPC and
+  native HTTP; provider execution is outside this layout-only acceptance.
+- Availability: signed local `.app` with automatic updates disabled, not a
+  notarized public release. No server update is required.
+
+## 2026-09-20 — Side chat button spacing — source correction
+
+- Lower the Side chat button into the folder row above the message composer,
+  separating it from the timeline's jump-to-latest arrow. Reserve room beside
+  the folder control and keep the button clickable above the composer layer.
+- Pass 30 existing component/layout checks, TypeScript validation and
+  production compilation. No server change is required.
+
+## 2026-09-20 — Side chat copying — 1.0.4-beta.14 local acceptance
+
+- Accept signed local Apple silicon macOS app **1.0.4-beta.14 / 1188** from
+  `3a6905319b229aaa08f1e3012af09c2d08756ef3`. Verify bundle audit, Developer ID
+  signature, runtime entitlements, version/build and isolated startup. All 88
+  packaged compiled files match the tested production output.
+- Reproduce disabled selection in beta.13. In the corrected source and exact
+  beta.14 packaged renderer/preload, use native offscreen mouse dragging to
+  select user messages, assistant prose and inline code. Native copy commands
+  produce the exact selected text; paste inserts it into the composer while
+  the popup remains open. Restore the original clipboard after verification.
+- Keyboard verification uses Meta+C/Meta+V with Chromium native edit commands;
+  the hidden window does not exercise macOS global menu accelerators. The
+  production menu retains its standard copy/paste roles. The controlled server
+  exercises production native transport; no model-provider execution changes.
+- Availability: signed local `.app` with automatic updates disabled, not a
+  notarized public release. No server update is required.
+
+## 2026-09-20 — Side chat text selection — source correction
+
+- Restore normal text selection in Side chat history so user messages,
+  assistant replies and inline code can be copied with the native shortcut.
+  The popup no longer inherits the app chrome's selection-disabled style.
+- Pass 27 existing component/theme checks, TypeScript validation and production
+  compilation. Native clipboard and packaged-app acceptance are recorded
+  above. No server change is required.
+
+## 2026-09-20 — Compact popup — 1.0.4-beta.13 local acceptance
+
+- Accept the signed local Apple silicon macOS app **1.0.4-beta.13 / 1187** from
+  `c3aab200f66c5b36526b899b8e087658c543711a`. Verify bundle audit, Developer ID
+  signature, runtime entitlements, version/build and clean isolated startup.
+  All 88 packaged compiled files match the tested production output.
+- Exercise the exact packaged renderer, preload and CSS in native offscreen
+  Electron with keyboard focus enabled. Verify compact empty presentation,
+  growing drafts, long-answer scrolling, Clear, help, close/reopen and Escape
+  in dark/light themes and a narrow window. The controlled server and service
+  harness preserve the boundary described below; no model provider runs.
+- Availability: signed local `.app` with automatic updates disabled, not a
+  notarized public release. No server update is required for this layout change.
+
+## 2026-09-20 — Compact Side chat popup — source acceptance
+
+- Size the popup to its content instead of reserving a full-height empty panel.
+  Start with a single-line composer and grow it with the draft. Keep long
+  conversations scrollable within the existing maximum popup height.
+- Remove the duplicate input focus outline, manual resize grip and repeated
+  explanatory text. Keep one subtle composer focus treatment, a circular Send
+  button and direct Clear/Close icons. Expand context help inline when requested.
+- Pass 27 existing component/theme checks and TypeScript validation. Exercise
+  native offscreen Electron with production CSS ordering and keyboard focus:
+  empty and long drafts, long-answer wheel scrolling, Clear shrinking the popup,
+  context help, close/reopen and Escape, dark/light themes and a narrow window.
+  Requests use production preload, IPC and native HTTP into a controlled local
+  server; provider execution is unchanged and outside this visual acceptance.
+- Availability: source correction; no server change is required.
+
+## 2026-09-20 — Side chat popup and Claude agents — 1.0.4-beta.12 local acceptance
+
+- Accept the local Apple silicon macOS app **1.0.4-beta.12 / 1186** from
+  `a83a18e85e0b6207f5583e317dc00f902076912b`, including the popup and Claude
+  subagent corrections described below. Pass 381 service/projector checks,
+  100 focused popup checks, TypeScript validation and production compilation.
+- Verify Developer ID signing, bundle audit, hardened-runtime entitlements,
+  exact version/build and clean startup with isolated user data. All 88
+  packaged compiled files are identical to the accepted production output.
+- Exercise the exact packaged renderer and preload in native offscreen
+  Electron through production bootstrap, store, IPC and read-only HTTP:
+  opening/reopening Claude agents, opening the popup, retained drafts, direct
+  Clear and Escape. The harness compiles the service from the same committed
+  source and suppresses read receipts. The signed main binary is checked
+  separately at startup. Real Claude side-question acceptance precedes packaging.
+- Availability: signed local `.app` with automatic updates disabled. This is
+  not a notarized public release, cross-platform acceptance or server deployment.
+  Claude subagent visibility works with the existing server; the separate side
+  question configuration correction still requires a server update.
+
+## 2026-09-20 — Claude subagent refresh — source acceptance
+
+- Fetch authoritative subagent state when opening Claude chats, as already
+  done for Codex. Seed live tracking from that state and retain progress and
+  completion in the local cache, including native `task_updated` messages.
+- Exclude explicitly identified background shell and workflow tasks from the
+  agent list. Reject older snapshots and replayed events after newer activity
+  so reopening cannot roll an agent's status backward.
+- Reproduce the missing snapshot request in isolated native offscreen Electron.
+  Verify the corrected full app through production preload, IPC and native
+  read-only HTTP: cold-open a real Claude chat, inspect its active and historical
+  agents, open details, navigate away and reopen. The authoritative state and
+  agent activity persist; background shell tasks do not flood the list.
+- This read-only check does not launch a new provider agent. Focused service
+  checks cover progress, both completion formats and stale-event races.
+- Availability: source correction using the existing server API. No server
+  update is required for this subagent visibility fix.
+
+## 2026-09-20 — Side chat popup — source candidate
+
+- Move Side chat to a single button beside the composer. Open the conversation
+  in a floating popup without changing the main chat width, including split
+  chat panes. Keep Clear and Close directly accessible in its header.
+- Preserve side conversations, pending answers and drafts when the popup is
+  dismissed. Retain the existing per-chat and per-server ownership rules.
+- Pass 100 focused checks, TypeScript validation and production compilation.
+  Exercise the full app in isolated native offscreen Electron: popup placement,
+  input focus, Escape and outside-click dismissal, reopening drafts and answers,
+  direct Clear, pending request retention and cancellation, split-pane isolation,
+  dark/light themes, narrow layout and Chinese text. Requests cross production
+  preload, IPC and native HTTP. Also exercise real native Claude through an
+  isolated production server: ask about a fact present only in a completed tool
+  result, ask a contextual follow-up, close/reopen and clear the popup. The
+  running parent stays active, and side requests do not alter its transcript.
+  The test bootstrap uses a seeded native profile; full server-picker setup is
+  outside this check.
+- The paired server correction preserves the connected Claude parent when
+  saved effort settings change for a future turn. Existing servers require
+  that correction to avoid the related side-question configuration conflict.
+- Availability: source candidate. No published build or live production server
+  is changed by this acceptance.
+
+## 2026-09-20 — Compact running command blocks — 1.0.4-beta.11 local acceptance
+
+- Keep the active Codex tool inside its compact command group. Update the
+  group's single row to the latest running call and retain previous calls
+  behind its disclosure. Preserve commentary boundaries and visible reasoning
+  chronology. Only the current activity pulses.
+- Hide extra trace-history controls in compact live Codex turns. Keep manual
+  pagination in expanded live traces and explicitly opened completed history.
+- Retain live-only reasoning display and identical collapsed completed/stopped
+  history. This supersedes the undelivered beta.10 candidate, whose running
+  call could still appear beside a separate completed-command group.
+- Pass 4,598 source tests (10 skipped), 164 focused timeline checks, TypeScript
+  validation and production compilation. Verify real native Codex commands
+  separated by reasoning within one commentary block, including a delayed
+  second call: one compact pulsing row retains both calls. Confirm a later
+  commentary creates its own chronological block. Exercise the actual Settings
+  entry and switch, completion, stop, unchanged completed history, reduced
+  motion, both themes and no automatic trace requests in isolated native
+  Electron through the production server and authenticated transport.
+  Provider Responses are controlled fixtures; this is transport and display
+  acceptance against the supplied visual reference, not external-model output
+  or native GUI pixel parity.
+- Accept signed, notarized universal macOS **1.0.4-beta.11 / 1185** from
+  `494c91fd7236a430d498cb90481fc06697b5a500`. All 88 compiled files match the
+  frozen source, and the final ZIP's ASAR matches the exact packaged full-app
+  completion and interruption replays. Verify actual Sidebar → Settings
+  interaction, compact command blocks, no extra default live controls,
+  identical terminal history, reload, reduced motion and supported minimum
+  width. The packaged replay uses captured native events and offline IPC;
+  production transport was exercised separately in the source acceptance.
+- Pass Developer ID signature, Gatekeeper, stapling, universal architecture,
+  version/build, ZIP updater hashes and feed checks. The actual signed app
+  launches cleanly for ten seconds with isolated user data and is then closed.
+  Matching ZIP SHA-256:
+  `60792d4c880914d9c05c7769289532b6d9ffe93d972fce94071d2325e923f3e9`.
+- Availability: accepted local `.app` and matching ZIP. Public desktop
+  publication remains blocked by the private Actions budget. Local app
+  acceptance does not imply cross-platform or DMG installer acceptance.
+
+## 2026-09-19 — Live-only reasoning display — 1.0.4-beta.10 candidate
+
+- Apply the reasoning display preference only during an active Codex turn.
+  Collapse finished and stopped turns under both settings; changing Settings
+  leaves completed history unchanged. Explicit history expansion retains all
+  available text in chronological order, independently of the preference.
+- Group adjacent commands across hidden reasoning entries. Retain visible
+  commentary and reasoning boundaries instead of moving or dropping content.
+  Update the English and Chinese setting descriptions.
+- Exercise completion and interruption through actual sandboxed Codex, an
+  isolated production server, authenticated WebSocket, desktop service,
+  preload and timeline in native offscreen Electron. Click the real Settings
+  switch while running and after completion; verify both settings converge
+  to collapsed history, manual expansion retains text, and hidden reasoning
+  produces one command group. Check dark/light narrow layouts and no automatic
+  history requests. Responses are controlled fixtures; this validates native
+  transport and presentation, not external-model output or native GUI parity.
+- Pass 4,594 tests (10 skipped), eight build/license guard checks, TypeScript
+  validation and production compilation. Keep release verification temporary
+  extraction under the configured temporary directory, with a writable-path
+  check. This presentation change requires no server contract update.
+- Availability: source candidate; signed local package acceptance is pending.
+
+## 2026-09-19 — Codex activity and per-chat limits — 1.0.4-beta.9
+
+- Present Codex commentary and command rows inline, with one muted pulsing
+  current activity. Stop animation on completion or interruption and honor
+  reduced motion. Preserve earlier summaries under a compact disclosure.
+- Add a persistent **Show reasoning traces** switch in Settings → General.
+  Keep compact presentation by default; optionally expand summaries and
+  separately labeled plaintext supplied by Codex. Do not decode encrypted
+  content or imply that unavailable reasoning can be recovered.
+- Carry the distinct plaintext event through live transport, timeline
+  projection, completion, interruption and history. Keep transient updates
+  outside durable cache/cursors and distinguish summaries sharing an item ID.
+  Verify the previous desktop renderer ignores the new plaintext event even
+  when its trace is expanded, while continuing to display ordinary summaries.
+- Add optional Codex and Claude sub-agent limits in the chat Inspector.
+  Fence saves to the original server identity and generation, reject old
+  servers before mutation, and retain drafts after failure. Saving during
+  active work is allowed; explain each provider's application boundary.
+- Verify the actual Settings entry and toggle, native Chromium animation,
+  reduced motion, complete text expansion, persistence, and light/narrow
+  layouts in isolated offscreen Electron. Exercise limit saves and clearing
+  through production preload, IPC, HTTP authorization and server persistence;
+  preserve a sibling chat and active-work status and reject unauthenticated
+  writes. Provider execution is verified separately in the paired server.
+- Pass 4,585 source tests (10 skipped), eight build/license guard checks and
+  TypeScript validation, including scoped and unscoped preload compatibility.
+- Accept local universal macOS **1.0.4-beta.9 / 1182** from
+  `1641cb97dfba17b6c3b3807c79c0f63e4a36cca3`. Developer ID signatures,
+  notarization, Gatekeeper, DMG/ZIP parity and updater checks pass. The signed
+  executable passes its clean CI launch; all 88 packaged compiled files match
+  the frozen source. Replay the native capture through the exact packaged
+  renderer and preload, including Settings, persistence, reduced motion and
+  completion. This packaged replay uses offline fixture transport; native
+  provider and authenticated transport checks are recorded separately.
+- Verify the copied app on a second Mac: matching archive SHA-256, version,
+  build, deep signature and Gatekeeper acceptance. Preserve its existing app.
+- Correct a Linux arm64 test that checked an unread callback before its React
+  effect committed. Pass all 111 affected module tests and TypeScript checks.
+  Follow-up source `5ff80a385957722c99026084036750934fcc564f` changes only
+  test synchronization and type declarations; its 88 compiled files are
+  byte-identical to accepted build 1182.
+- Desktop publication remains blocked: the replacement prepare for build
+  1183 could not start because of the GitHub Actions budget. No desktop
+  beta.9 release was published. The local Mac acceptance does not certify
+  the incomplete cross-platform release.
+- The paired [AgentsServer beta.9](https://github.com/ZhengyiLuo/AgentsServer/releases/tag/v1.0.4-beta.9)
+  is published and independently verified. Managed updates are queued to
+  apply when active work finishes; scheduling is not deployment acceptance.
+
+## 2026-09-19 — Live thinking summaries — 1.0.4-beta.8
+
+- Display thinking summaries directly and retain expansion through completion.
+  Opening historical traces loads one bounded activity page automatically;
+  additional pages remain available without loading all history in the background.
+- Carry live summary snapshots through the native WebSocket, profile-scoped
+  service and renderer state. Keep them outside SQLite and durable read cursors,
+  replace them with authoritative completed items, and restore current snapshots
+  on reconnect. Retain interrupted summary text with a partial marker.
+- Show custom-model summary support separately from basic tool compatibility.
+- Pass 822 transport, service, state, locale and custom-provider checks, plus
+  173 timeline and projection checks and TypeScript validation.
+- Native acceptance follows controlled Responses through the real Codex
+  app-server, production server, authenticated WebSocket, desktop service,
+  preload, state and timeline. Compare rendered text and completed sections
+  exactly with native public-summary notifications. Verify live visibility,
+  summary/tool/summary order, reconnect, authoritative replacement and retention
+  after completion without persisting transient rows.
+- Stop an actual native turn that omits item completion; retain its received
+  text as a partial summary. Reopen SQLite in a fresh desktop process and
+  expand its historical trace to verify the partial marker and bounded load.
+  Inspect light/dark layouts at narrow width. Retain finite Chromium
+  ResizeObserver notifications in the evidence; geometry and warning counts
+  settle, with no application errors. This is public-summary validation,
+  not native GUI pixel parity or a claim about unavailable internal reasoning.
+- Accept desktop **1.0.4-beta.8 / 1181** from
+  `3bb296e1ea076f76f235905d3d2deb965b28e08b`. All 88 packaged compiled files
+  match the source fingerprints frozen before artifact download. Replay the
+  accepted native capture through the exact packaged full-app renderer,
+  preload and state; live/final text and chronological tool placement match.
+  This packaged replay uses offline fixture transport.
+- Universal Developer ID signatures, notarization, Gatekeeper, mounted
+  DMG/ZIP parity and updater checks pass locally; the signed executable passes
+  its clean CI launch. Preserve the previous accepted app separately.
+- Pass all four platform builds and package checks, then all four publication
+  replay checks. macOS and both Linux suites pass 4,564 tests (10 skipped);
+  Windows passes 4,528 (16 skipped). Publish the Windows installer under the
+  documented unsigned beta policy.
+- Publish after the matching signed AgentsServer **1.0.4-beta.8** is publicly
+  accepted. Verify 14 exact assets and authored notes on both desktop feeds,
+  every public asset digest and size against independently hashed held files,
+  the exact source tag, anonymous asset availability, and downloaded checksum
+  manifests/updater metadata. Release/tag metadata uses authenticated API reads.
+- Releases: [desktop beta.8](https://github.com/ZhengyiLuo/AgentsDock/releases/tag/v1.0.4-beta.8),
+  [legacy Beta feed](https://github.com/ZhengyiLuo/AgentsDock-Releases/releases/tag/v1.0.4-beta.8).
+
+## 2026-09-19 — Custom endpoint model compatibility — 1.0.4-beta.7
+
+- Separate optional saved-model compatibility checks from endpoint saving.
+  Display unverified, unsupported and basic-check-passed states without
+  treating model discovery as proof of native Codex compatibility.
+- Respect explicit per-model effort capabilities, including empty effort
+  lists, and retain manual entry for unfamiliar model IDs. Fence saved-model
+  checks to the selected server and credential revision.
+- Pair this client candidate with AgentsServer 1.0.4-beta.7. Its 72 focused
+  provider and side-chat checks pass, including stale effort cleanup and
+  retained credential ownership. Native loopback capture confirms the
+  production override helper clears inherited effort while preserving
+  thread instructions and unrelated thread settings.
+- Exercise Settings, New chat and Composer in native offscreen Electron
+  through production preload, service, native HTTP, server middleware and
+  provider routes. Save without a model or test, and while a connection or
+  compatibility check is pending; verify late results cannot relabel saved
+  settings. Complete repeated checks through isolated native Codex against a
+  controlled streaming endpoint. Filter an embedding model, clamp advertised
+  efforts, and clear effort for unfamiliar/manual models. Inspect light/dark
+  narrow layouts, with no overflow or typing/idle requests. Ordinary account
+  status and full profile bootstrap are fixtures; chat-turn execution is
+  covered separately by server regression and native request capture.
+- Pass focused app, service and transport regressions, TypeScript, production
+  compilation and output verification. Also complete a basic check against a
+  configured external provider while preserving its saved credentials and
+  ordinary account configuration. This does not certify every model or tool.
+- Accept desktop **1.0.4-beta.7 / 1180** from
+  `26d6e4586e077997b7a5de203fa3b0d41e876699`. All 88 packaged compiled files
+  match the reviewed source and the fingerprints recorded before download.
+  Inspect the exact packaged renderer/preload in isolated offscreen Electron.
+  Universal Developer ID signatures, notarization, Gatekeeper, mounted
+  DMG/ZIP parity and updater checks pass locally; the signed executable passes
+  a clean CI launch. Recheck the native endpoint workflow against the final
+  paired server code, using isolated native Codex and a controlled provider.
+- Pass all four platform build and package checks, followed by all four
+  publication replay checks. macOS and both Linux release suites pass 4,550
+  tests (10 skipped); Windows passes 4,514 (16 skipped). Publish the Windows
+  installer under the documented unsigned distribution policy.
+- Publish matching sets of 14 assets and authored notes to both Beta feeds.
+  Match every public asset digest and size against independently hashed held
+  files, verify the exact source tag, and anonymously check all public asset
+  URLs. Download both checksum manifests and all updater metadata anonymously
+  and verify byte parity. Release/tag metadata uses authenticated public API
+  reads after the shared anonymous API rate limit is reached.
+- Releases: [desktop beta.7](https://github.com/ZhengyiLuo/AgentsDock/releases/tag/v1.0.4-beta.7),
+  [legacy Beta feed](https://github.com/ZhengyiLuo/AgentsDock-Releases/releases/tag/v1.0.4-beta.7).
+
+## 2026-09-19 — Center the Team Network mail reader — 1.0.4-beta.6
+
+- Center mail threads in a wider reading column instead of pushing sent
+  messages against the far-right edge. Align incoming and sent messages,
+  increase message spacing, and soften the sent-message background.
+- Reproduce the previous layout at 2,000 pixels and 70% zoom in native
+  offscreen Electron using the production mail and Markdown components.
+  Inspect the corrected reader at 2,000, 1,200 and 600 pixels in light and
+  dark themes, including long text, code blocks and attachments. Verify no
+  page overflow, native navigation and scrolling, code copy and attachment
+  preview. The fixture uses synthetic read-only mail and an isolated
+  clipboard; delivery and production server data are outside this check.
+- Pass all 114 existing mail/style tests, TypeScript, production compilation
+  and the compiled-output verifier. This layout change needs no server update.
+- Accept desktop **1.0.4-beta.6 / 1178** from
+  `7e9ec89e007bc32e1f7889c4f558160385773ba9`. All 88 packaged compiled files
+  match the reviewed source. Inspect the packaged renderer/preload in isolated
+  offscreen Electron. Universal signing, notarization, Gatekeeper, mounted
+  DMG/ZIP parity and updater checks pass locally; the signed executable passes
+  a clean CI launch. All four native platform builds and package checks pass,
+  and the release test suite passes 4,547 tests (10 skipped).
+- Publish matching sets of 14 reviewed assets and authored notes to both Beta
+  feeds after all four platform replay checks pass. Verify public asset
+  digests, updater metadata, exact source tag and canonical/legacy parity.
+- Release: [desktop beta.6](https://github.com/ZhengyiLuo/AgentsDock/releases/tag/v1.0.4-beta.6).
+
+## 2026-09-19 — Preserve side chats across servers — 1.0.4-beta.5
+
+- Keep side-chat state and its native conversation owned by the saved server
+  identity and chat, across connection generations. Preserve drafts, replies,
+  pending work and follow-up context when switching away and back. Retain
+  dispatch checks and explicit cancellation, removal and shutdown cleanup.
+- Reproduce lost history/drafts and a switch-triggered close request in native
+  offscreen Electron. Exercise the production panel/controller/lifecycle,
+  preload, AppService switching, isolated settings/cache and native HTTP to two
+  controlled servers with matching chat IDs. Verify background completion,
+  follow-up continuity, server separation and cancellation after returning.
+  Inspect dark and narrow/light views. The picker and store hydration are
+  outside this focused fixture; provider responses are explicitly controlled.
+- Also exercise a real Codex side chat against an existing authenticated
+  server, using one disposable main chat with a random verification fact.
+  Switch servers while its side question runs, restore its answer and draft,
+  and complete a contextual follow-up in the same native side conversation.
+  Verify both answers, then remove the disposable chat. Existing conversations
+  and login settings remain untouched.
+- Remove Electron's internal fork-error prefix. Exercise the production chat
+  menu through HTTP and native Codex: reproduce a valid symlink-workspace fork
+  rejection, then verify repeated forks and a child continuation with the
+  corrected standalone server while the parent continues running.
+- Pass 111 focused side-chat checks, four fork-error checks, TypeScript and
+  production compilation with output verification. The side-chat navigation
+  fix needs no server contract change; the fork workspace correction is in
+  AgentsServer 1.0.4-beta.5. Include authored notes for both releases.
+- Accept desktop **1.0.4-beta.5 / 1177** from
+  `56f268292b889f173f7d1e0a10bdc43796545575`. All 88 packaged compiled files
+  match the reviewed source. Inspect the packaged renderer/preload in isolated
+  offscreen Electron. Local universal signing, notarization, Gatekeeper,
+  mounted DMG/ZIP payload parity, checksums and updater metadata pass; the
+  signed executable passes a clean CI launch. The macOS release suite passes
+  4,547 tests (10 skipped).
+- Publish matching sets of 14 reviewed assets and authored notes to both Beta
+  feeds after all four native platform checks pass. Verify public asset
+  digests, updater metadata, source tag and canonical/legacy parity.
+- Publish the signed standalone server 1.0.4-beta.5 and submit its managed
+  update for idle installation. The running service remains on beta.4 while
+  active work continues; its pending update has no error.
+- Releases: [desktop beta.5](https://github.com/ZhengyiLuo/AgentsDock/releases/tag/v1.0.4-beta.5)
+  and [server beta.5](https://github.com/ZhengyiLuo/AgentsServer/releases/tag/v1.0.4-beta.5).
+
+## 2026-09-19 — Inter-chat chronology — 1.0.4-beta.4
+
+- Accept desktop **1.0.4-beta.4 / 1176** from
+  `d2b40e5b3e8f208d9b36f20be1efcb460ba821f4`.
+
+- Keep inter-chat cards among the work that happened around them, ahead of a
+  later final answer even when the turn has early-created files or media.
+  Give the trailing media group a presentation anchor consistent with its
+  displayed position, and refresh cached rows when that anchor advances.
+  Preserve original message timestamps and attachment metadata.
+- Reproduce the incorrect order with the production Timeline, virtualizer and
+  row components in native offscreen Electron using synthetic event snapshots.
+  Exercise native controls for live/completed work, late read receipts, cold
+  reopen, a genuinely later send and card expansion. Inspect light/dark output.
+  Provider execution and production chat data are outside this renderer check.
+- Pass 229 focused timeline tests, TypeScript and production compilation with
+  output verification. No server contract change or deployment is required.
+- Pass 4,538 desktop tests (10 skipped) in release CI. Verify all 88 packaged
+  compiled files against the committed source and inspect the packaged
+  renderer/preload. Universal macOS signing, notarization, Gatekeeper,
+  DMG/ZIP parity and clean executable launch pass. Linux x64/arm64 and Windows
+  x64 package and launch checks also pass; Windows remains an unsigned preview.
+- Publish identical sets of 14 assets, checksum manifests and authored
+  version-specific notes to both desktop Beta feeds. Independent public
+  download checks confirm the exact source tag, asset digests and all four
+  updater metadata files after publication.
+- Release: [desktop beta.4](https://github.com/ZhengyiLuo/AgentsDock/releases/tag/v1.0.4-beta.4).
+
+## 2026-09-18 — Custom endpoint model controls — 1.0.4-beta.3
+
+- Accept desktop **1.0.4-beta.3 / 1175** from
+  `c1dc59c56a666fe881317ff36781f78fcde6decd`, with matching standalone
+  AgentsServer **1.0.4-beta.4** from
+  `b4b116d022ba9d73949e56476cbfc46fdba27160`.
+- Configure a Codex endpoint with its URL and separate key. Saving no longer
+  requires a successful test or a model ID, and a pending test does not block it.
+- Discover the endpoint's models and choose a model and reasoning effort in
+  the normal chat controls. Keep an explicit model entry for endpoints without
+  discovery, and keep custom catalogs separate from ordinary Codex.
+- Require the matching server capability before using the new controls.
+  Existing custom chats retain their endpoint when the default is edited.
+- Validate production compilation and focused renderer, service and transport
+  regressions. Exercise native Electron input through the production service
+  and HTTP boundary with disposable state and controlled provider endpoints.
+- The matching server scopes messaging instructions to its helper contract;
+  the harness enforces messaging access instead of broad prompt restrictions.
+  Remove the blanket identifier prohibition without adding a special
+  permission paragraph for local log diagnosis or changing messaging grants.
+- Exercise simultaneous normal/custom native Codex threads against controlled
+  endpoints. Save and reset during active turns and a pending test; retain the
+  original endpoint through model/effort changes, follow-ups and native forks.
+  Stop one custom turn without interrupting the normal turn. Verify zero
+  account-login calls and unchanged normal runtime identity. Live external
+  gateway credentials and production background startup remain outside these
+  disposable acceptance fixtures.
+- Pass 4,536 desktop tests (10 skipped), TypeScript and production compilation.
+  Verify all packaged compiled files against the committed source and inspect
+  the packaged renderer/preload. Universal macOS signing, notarization,
+  Gatekeeper, DMG/ZIP parity and clean executable launch pass. Linux x64/arm64
+  and Windows x64 package and launch checks also pass; Windows remains an
+  explicitly approved unsigned preview.
+- Publish identical sets of 14 assets and checksum manifests to both desktop
+  Beta feeds. Independent publication checks revalidate every native platform
+  and confirm public updater metadata and Beta discovery. The matching signed
+  server release is published and its managed update is accepted for idle
+  installation; it remains pending while active work continues.
+- Releases: [desktop beta.3](https://github.com/ZhengyiLuo/AgentsDock/releases/tag/v1.0.4-beta.3)
+  and [server beta.4](https://github.com/ZhengyiLuo/AgentsServer/releases/tag/v1.0.4-beta.4).
+
+## 2026-09-18 — Codex credential isolation — 1.0.4-beta.2
+
+- Accept published desktop **1.0.4-beta.2 / 1173** from
+  `f87790cf69e66261a2271c2056bd5bcd06ff666a`, with matching standalone
+  AgentsServer **1.0.4-beta.2** from
+  `dfc05e997b7c97b366c87400f35e4c640f8f2f85`.
+- Remove shared API-key sign-in from Settings and every desktop transport
+  layer. Normal Codex account status is read-only. The matching server rejects
+  the legacy login route before accessing the account manager, including
+  requests from older clients. This prevents Settings from overwriting the
+  credentials used by ordinary Codex chats and the CLI.
+- Keep one explicit Custom endpoint flow: enter URL/model/key, Test, then
+  Save. Explain that a new chat must select **Codex · Custom endpoint**.
+  Normal account-status failures no longer block endpoint configuration.
+- Reproduce the original shared-login call in a disposable native runtime.
+  Exercise the corrected Settings with native mouse/keyboard input through
+  the full production server module and actual Codex process against a
+  controlled Responses service. Verify failed tests and retry, exact URL/model
+  persistence, invalidated tests after edits, busy-save rejection, Remove,
+  account-status failure recovery and legacy-route rejection. Confirm zero
+  native login calls and unchanged ordinary account state.
+- Verify simultaneous normal/custom native threads and follow-ups retain
+  separate credentials and models. Inspect the packaged renderer/preload and
+  all 88 compiled files; the removed shared-login paths are absent. UI fixtures
+  use disposable profiles and controlled endpoints; production background
+  lifecycle and a live external provider account are not claimed by these checks.
+- Pass focused regressions, TypeScript and production compilation. The macOS
+  release run passes 4,528 tests (10 skipped), universal signature/notarization,
+  DMG/ZIP parity and clean executable launch. Linux x64/arm64 and Windows x64
+  packaging and native launch checks also pass. Windows remains an explicitly
+  approved unsigned preview.
+- Publish the verified desktop packages to the canonical and legacy Beta
+  feeds with identical assets and checksum manifests. Independent publication
+  checks verify every platform again and confirm public Beta discovery.
+  Matching signed server artifacts are published; the managed server update
+  is queued for idle installation without interrupting active work.
+- Releases: [desktop beta.2](https://github.com/ZhengyiLuo/AgentsDock/releases/tag/v1.0.4-beta.2)
+  and [server beta.2](https://github.com/ZhengyiLuo/AgentsServer/releases/tag/v1.0.4-beta.2).
+
+## 2026-09-17 — Per-chat native Codex endpoint selection (beta candidate)
+
+- Accept local desktop **1.0.4-beta.1 / 1175** from `59451a6` and matching
+  standalone server **1.0.4-beta.1** from `46d72a4a`. Stamp only the desktop
+  package metadata in the clean build snapshot; verify all 88 compiled files
+  byte-for-byte, ARM64 Developer ID signature and disabled local updater.
+  The server archive matches all 85 allowlisted source files and its checksum.
+- Add **Codex · Custom endpoint** beside ordinary Codex in the composer and
+  New chat. Configure its base URL, exact model and separate masked key in
+  Settings; test explicitly before saving. Ordinary Codex sign-in remains
+  available and existing chats retain their original provider.
+- Persist the choice per chat and reject unsupported older servers before
+  they can silently ignore it or replace a global provider. Started chats
+  cannot switch providers. Custom readiness does not require ordinary OpenAI
+  sign-in; removing the endpoint leaves custom chats unavailable, not rerouted.
+- Run a real native Codex manager with simultaneous normal/custom threads and
+  repeated follow-ups against two controlled Responses endpoints. Verify
+  separate credentials/models, unchanged process defaults and no tool calls,
+  external requests or production account/history changes. The earlier real
+  gateway probe verifies the configured native protocol separately.
+- Add no polling, automatic model requests or per-keystroke network work.
+  Focused transport, renderer, persistence and provider-isolation checks pass.
+  Scheduled jobs use the same provider-specific readiness and label.
+- Exercise native offscreen mouse/keyboard input through the production
+  picker, New chat and Settings, real preload/main HTTP transport and extracted
+  production session routes/store. Verify Save, default/custom switching,
+  persisted selection, locked-thread rejection, older-server refusal and no
+  typing/idle requests. Inspect light/dark narrow layouts. Full application
+  bootstrap/cache/profile lifecycle remain fixture boundaries; packaged
+  production-profile startup is not claimed.
+- The clean-source package pass has 4,539 desktop tests passing (10 skipped),
+  TypeScript and production compilation. The clean standalone snapshot passes
+  175 focused tests and the real same-manager native provider check. These are
+  local test candidates, not published/notarized releases; no installed app,
+  production server or active chat was replaced or restarted.
+
+## 2026-09-17 — Native Codex custom endpoint controls (source only)
+
+- Add endpoint base URL, exact model ID and a masked provider key to Codex
+  account settings, with explicit Test connection, Save and reset actions.
+  Test uses native Codex Responses behavior rather than a replacement agent.
+- Keep provider credentials separate from normal Codex sign-in. Require a
+  successful test of the current form before saving; invalidate it on edits
+  and fence late responses by server/profile generation. Never reuse a saved
+  key for a newly entered endpoint or show raw provider errors.
+- Add no polling, per-keystroke requests or automatic retries. Test does not
+  save configuration; Save/reset reconcile runtime readiness once.
+- Exercise native offscreen Electron Settings navigation and the real
+  renderer/preload/service/HTTP/router/native Codex path against a controlled
+  Responses endpoint. Verify failed tests and retries, unchanged unsaved
+  configuration, stale-result invalidation, busy/authorization failures,
+  save/reset, missing-credential recovery and narrow localized themes.
+- Full profile bootstrap, account status and runtime refresh callbacks remain
+  fixture boundaries in UI acceptance; isolated tests cover admission and
+  readiness reconciliation. A separate authorized probe also completes a
+  native Codex response against a real external Responses gateway with its
+  exact model ID. That verifies a small model request, not every tool or
+  billing capability. Requires matching standalone server endpoints. No
+  release, production deployment or existing account change is included.
+- Full desktop tests, TypeScript and production compilation pass after the
+  recovery changes. The standalone server's selective source snapshot passes
+  its focused authentication, provider, side-chat and manifest regressions.
+
+## 2026-09-17 — Native Codex API-key authentication (source only)
+
+- Add Settings → Codex account with masked API-key sign-in, account status and
+  an explicit Recheck action. Explain server-wide account scope, native Codex
+  credential storage and separate API billing. Support English and Chinese.
+- Use the installed Codex app-server's native account API through the selected
+  server's operator-only HTTP endpoint. Do not replace Codex with a model API
+  client or put credentials into settings, histories, logs or command arguments.
+- Clear credentials on submit, cancel, close and server switch. Fence requests
+  by profile/generation, reject redirects and use fixed secret-free errors.
+  Add no polling, automatic login retries or per-keystroke network activity.
+- Preserve active/queued Codex work during authentication changes. Refresh
+  runtime readiness once after a successful save, including same-timestamp
+  health records and a pre-login probe that was already in flight.
+- Exercise the real UI with native offscreen Electron keyboard/mouse input,
+  production preload, scoped service methods, native HTTP, server authorization
+  and the actual Codex process using synthetic credentials in an ephemeral
+  store. Verify save/recheck/repeat, busy and permission failures, stale replies,
+  clearing secrets, idle traffic and narrow light/dark localized layouts.
+- Full Settings/profile bootstrap and runtime-catalog behavior remain isolated
+  fixture boundaries in UI acceptance; focused service tests cover readiness
+  reconciliation. TypeScript, production compilation and desktop regressions
+  pass. Native credential acceptance alone is not a live model/billing test.
+- Requires matching standalone server authentication endpoints. Availability
+  is source only: no public release, production deployment or account switch.
+
+## 2026-09-17 — Native provider side conversations (local build)
+
+- Build **1.0.3-local.1174 / 1174** from `36ba482`. Verify all 88 compiled
+  payload files, ARM64 Developer ID signature and local-only updater marker.
+- Place Side chat below Media & files, after Subagents, within one inspector.
+  Verify expanded/collapsed media and narrow/light/dark native Electron layouts.
+- Replace visible-text snapshots with native context: a persistent ephemeral
+  Codex fork, or Claude's native side-question control used by `/btw`. Include
+  provider tool results without injecting a new message into the main chat.
+- Keep follow-up identity and history on the server. Clear closes only the
+  selected side conversation; late requests cannot recreate it. Profile/chat
+  ownership, cancellation and provider-generation fences protect the main task.
+  No polling or per-keystroke network work is added.
+- Require the matching native-context server capability. Do not silently fall
+  back to a copied transcript on an older server or incompatible provider.
+- Real disposable-provider checks cover hidden tool-result recall, follow-ups,
+  cancellation while the main request runs, unchanged parent history/goals and
+  Claude cold resume without a main query. Focused transport and lifecycle
+  regressions cover cancellation, duplicate requests, expiry and cleanup races.
+- Exercise native offscreen Electron mouse/keyboard input through production
+  preload, native HTTP authorization, router, provider binding and Claude SDK
+  manager into a real authenticated Claude provider. Verify first answer,
+  follow-up, cancellation, Clear/new conversation and continued main work.
+  Both provider adapters also pass real disposable-provider checks; synthetic
+  full-boundary UI fixtures cover both providers. Session store/SDK option
+  construction and full app-profile bootstrap remain fixture boundaries.
+- TypeScript, production compilation and the clean-source desktop suite pass
+  (4,412 tests, 10 skipped). Matching standalone server source is `39e59aad`.
+  Packaged startup is not exercised; payload/signature validation does not
+  claim an installed production-profile test. No server deployment, publication
+  or replacement of the running app is included.
+
+## 2026-09-17 — Side chat in the shared inspector (local only)
+
+- Build **1.0.3-local.1173 / 1173** from `85471ed`. Verify the ARM64
+  Developer ID signature, local-only updater marker and exact compiled payload
+  against the accepted source. Do not replace the installed app or publish.
+- Place Side chat directly below Subagents in the existing inspector scroll;
+  remove its separate tab and nested inspector landmark. Keep Review available.
+- Preserve per-chat drafts, replies and pending requests across panel/review
+  navigation. Only the explicit Side chat shortcut focuses the composer;
+  merely opening the inspector cannot steal main-chat input focus.
+- Validate focused component/App regressions and TypeScript. Exercise the
+  production Inspector and Side chat with native offscreen Electron input in
+  light/dark and narrow layouts, using synthetic sessions and provider replies.
+  This is layout/interaction acceptance; transport and providers are unchanged.
+- Catch and correct a narrow-window clipping case by revealing the complete
+  composer rather than only its textarea. Verify long-history wheel scrolling,
+  localization and no extra transport/global-store writes while typing.
+- The final package pass has 4,387 tests passing, 10 skipped. One earlier run
+  encountered an intermittent pre-existing Team Network address-label timing
+  assertion; its focused rerun and final full run pass without changing that
+  feature. Package startup and live-provider behavior are not retested here.
+- Prepare a local desktop package only. No publication, server update or
+  replacement of the running application is part of this change.
+
+## 2026-09-17 — Desktop 1.0.3 stable accepted
+
+- Publish [AgentsDock 1.0.3](https://github.com/ZhengyiLuo/AgentsDock/releases/tag/v1.0.3),
+  build **1172**, from `fa5d815118c28a1c18fa6d9afc3cc77f7d089fff`.
+  Include Workspace Changes, native Side chat transport correction and the
+  small 9px sidebar app-version label. Matching AgentsServer 1.0.3 is published
+  for Git controls and the Codex Side chat startup correction.
+- Preparation `35277907016` and publication `35279799800` pass all four
+  platform gates. macOS is Developer ID signed and notarized; Windows retains
+  the approved unsigned policy. Verify the exact downloaded universal Mac
+  package's 1.0.3/build 1172 metadata, signature, notarization, public Stable
+  update feed, bundled feature code and version typography.
+- Verify identical 14-asset public and legacy releases, the pinned source tag,
+  sealed checksums and fresh public updater metadata for every platform.
+  Checksum-manifest SHA-256:
+  `6ede115f1bceb8acbfcb37cb951b3bc10753582051db378f57913a945b44f39a`.
+- Native offscreen interaction covers Sidebar themes/widths, real-repository
+  Changes workflows through the production client/server boundary, and real
+  provider Side chat answers, follow-ups and cancellation. A disposable Codex
+  overlap check confirms cancelling the side turn leaves its separate test
+  main turn active through normal completion. Official package clean-start
+  checks run on disposable CI machines; local native fixtures do not claim a
+  full packaged production-profile Changes journey.
+- Preserve concurrent uncommitted work. Publication does not replace the
+  user's running app, install on another machine, or restart either server.
+
+## 2026-09-17 — Quiet sidebar version label (unreleased)
+
+- Keep the installed app version beside the brand at a small, muted 9px size;
+  preserve the title and control layout and keep the full version in its tooltip.
+- Check production Sidebar rendering in isolated offscreen Electron at narrow
+  and normal sidebar widths, light and dark themes. Verify no title/control
+  overlap, working keyboard navigation, one local metadata read and no network
+  requests. This is renderer acceptance, not packaged-release acceptance.
+
+## 2026-09-17 — Workspace Changes first cut (unreleased)
+
+- Add a lazy Changes workspace tab for repository-wide staged, unstaged,
+  untracked and conflicted files, on-demand diffs, whole-file staging,
+  staged-set commit review, and text conflict resolution. Continue reports
+  further conflicts honestly; abort requires explicit confirmation.
+- Use native operator-only, profile-scoped requests and repository revisions.
+  Preserve conflict drafts on stale writes, reject late responses from another
+  workspace, and add no polling or per-keystroke Git requests.
+- Exercise production workspace entry/renderer, preload, HTTP client, server
+  Git router and native authorization with mouse/keyboard in isolated offscreen
+  Electron against disposable real repositories. Verify actual commits/index,
+  stale stage and resolution rejection, merge completion, confirmed abort,
+  tab switching/closing, light/dark and narrow views, and zero idle requests.
+  Session lookup and app-shell context are fixtures; full installed-app startup
+  and production-profile acceptance are not claimed.
+- Validate focused desktop regressions, TypeScript and production compilation.
+  This feature needs the matching standalone server Git endpoints. PR/MR,
+  push and branch creation remain outside this first cut. Not published,
+  installed or deployed; existing applications and research jobs remain intact.
+
+## 2026-09-17 — Desktop 1.0.3 acceptance checkpoint (not published)
+
+- Validate clean source `f387a1ac874ab3e153a648bd53e42bf4347ae4e4` with TypeScript,
+  production compilation, 4,369 passing desktop tests (10 skipped) and eight
+  package/license guards. Keep unrelated working-tree changes out of the pin.
+- Exercise Side chat with native Electron input, production preload IPC,
+  request ownership and HTTP client, the unchanged server authorization/router,
+  and a real Claude provider. First answer, contextual follow-up and cancellation
+  pass; the old generic transport reproduces 403. Session context and the main
+  task are synthetic: this does not validate a concurrent live main agent or
+  full production profile bootstrap.
+- The equivalent real Codex check uncovers a separate server adapter startup
+  failure before a thread starts: fresh temporary state indexes existing
+  provider history synchronously and initialization times out. Do not classify
+  that as an app authentication failure or extend deadlines to hide the work.
+- Hold publication pending the known Codex limitation and release decision.
+  No installed app or production server was replaced or restarted.
+
+## 2026-09-17 — Desktop 1.0.3 side-chat transport and visible versions
+
+- Correct side-question POST and cancellation to use the existing native HTTP
+  transport. Generic fetch added a browser-style header that the server's
+  native-only authorization rejects. Preserve the authentication boundary,
+  response ownership, follow-up history, cancellation and timeout behavior.
+- Replace mock-only HTTP checks with loopback wire checks reproducing the 403
+  and exercising the corrected requests, redirects and cancellation.
+- Show the app version and selected server version in the sidebar using local
+  app status and scoped server metadata, without polling. Validate light/dark,
+  narrow layout and server switching in an isolated native Electron renderer.
+- Add the app development operational manual to the repository rules, requiring
+  hands-on workflows and explicit accounting for real versus mocked boundaries.
+- These desktop changes do not require a matching server update. Source
+  preparation and focused checks are not publication or live-provider acceptance;
+  record those separately when completed.
+
+## 2026-09-17 — Desktop 1.0.2 stable accepted
+
+- Publish [AgentsDock 1.0.2](https://github.com/ZhengyiLuo/AgentsDock/releases/tag/v1.0.2),
+  build **1170**, from `94659a201581a2adf1f0938f157e519a859e1459`.
+  The public and legacy repositories carry identical sets of 14 release assets
+  and Stable updater metadata. Preserve unrelated uncommitted work.
+- Native release preparation `35195524801` and publication `35197194846` pass
+  all platform gates. macOS universal is Developer ID signed and notarized;
+  Linux x64/arm64 and the explicitly unsigned Windows x64 installer are verified.
+- Validate the exact committed desktop source with TypeScript, production
+  compilation, 4,360 desktop tests (10 skipped) and eight package/license guards.
+  Deterministic regressions cover both first-click races found by the initial
+  native release attempt; the failed candidate was never published.
+- Inspect the actual isolated Electron recovery dialog and full Team Network
+  surface in light/dark and wide/narrow layouts. Verify cancel/focus, wrong-host
+  errors, offline-to-workspace recovery and no typing-triggered requests or
+  global store writes. Synthetic endpoints never mutate live networks.
+- Pair with the published standalone AgentsServer 1.0.2 recovery contract.
+  Members must update their own server and explicitly change a moved host's
+  saved address; publication does not migrate addresses or restart services.
+
+## 2026-09-17 — Preserve the first recovery and attachment click
+
+- Native release checks expose a commit/passive-effect ordering race: a late
+  identity reset can close the freshly opened host-address dialog or invalidate
+  the first explicit attachment preview request.
+- Reset only these identity-bound local states in layout effects, before the
+  controls can be used. Preserve the existing stale-request fences and exact
+  dependencies; add no timers, polling or per-keystroke work.
+- Add deterministic commit-phase click regressions. Both reproduce the old
+  failure and pass after the correction; all 300 affected renderer tests and
+  TypeScript checks pass. Rebuild the held desktop 1.0.2 source rather than
+  publishing the failed candidate or weakening its tests.
+
+## 2026-09-17 — Desktop 1.0.2 endpoint recovery prepared
+
+- Add a single Change host address action for the current Team Network and
+  saved approved connections, including offline members. Reuse one localized
+  dialog with the previous address prefilled; preserve approval and routes.
+- Require the additive member-side AgentsServer 1.0.2 capability. Verify the
+  exact local server instance, saved connection and remote trust before a
+  write; reject stale replies and leave inactive connections inactive.
+- Retire old authenticated state only when a validated write begins, then
+  revalidate the current connection once. A lost write response permits one
+  status check, not a repeated mutation. Add no polling or per-keystroke work.
+- Inspect the actual isolated Electron actions and dialog in light/dark,
+  wide/narrow, error, pending and unsupported-server states. Exercise explicit
+  save/cancel and confirm typing makes no global store writes. These UI checks
+  use synthetic endpoints and cannot mutate real Team Networks.
+- Prepare stable notes against desktop 1.0.1. The release also includes the
+  committed independent Side chat, indexed Mail/Bulletin search, visible
+  changed-file summaries and quiet syncing status. Unrelated unfinished
+  changes remain excluded. Publication acceptance is recorded separately.
+
+## 2026-09-16 — Local desktop 1.0.1 build 1170 accepted
+
+- Package committed source `7f116b2` as an Apple Silicon local desktop build
+  with the Details / Side chat inspector layout, independent follow-ups and
+  retained drafts. Exclude unrelated unfinished worktree changes.
+- Validate full desktop tests, type checks, production compilation and package
+  guards. Confirm all 86 compiled files match the packaged archive and the
+  Developer ID signature verifies; keep local auto-updates disabled.
+- Exercise the actual isolated Electron panel in light/dark and wide/narrow
+  layouts, including follow-ups, hide/reopen, cancellation and stale replies.
+  Provider responses are mocked in these UI checks, not live model runs.
+- Prepare the matching standalone server `1.0.1-beta.2` package. Side chat needs
+  that server capability installed; neither server deployment, publication nor
+  replacement of the running desktop application is part of this local build.
+
+## 2026-09-16 — Side chat in the inspector dock
+
+- Replace the temporary question dialog with a full-height Side chat tab next
+  to Details. A labeled chat-header action opens and focuses it directly,
+  leaving the main conversation visible and usable.
+- Keep per-chat drafts and side answers in memory when the dock is hidden or
+  Details is selected. Follow-ups carry only the side conversation's bounded
+  completed question/answer pairs; Clear and Cancel affect only Side chat.
+- Keep typing local and introduce no polling, main timeline subscription or
+  normal chat turn. Fence in-flight work by server profile, generation, chat
+  and request identity; unsupported servers explain the missing capability.
+- Pair with the standalone server's additive side-history support. Packaging
+  does not install, publish or restart either running application or server.
+
+## 2026-09-15 — Independent side questions (unreleased)
+
+- Add a localized Side question entry for Codex and Claude chats. Questions and
+  answers stay in a temporary panel, with independent cancellation and explicit
+  context limits; they never become a normal prompt, queued turn or goal steer.
+- Use one request per question, with no polling or event subscriptions. Fence
+  answers and cancellation by server profile, generation, chat and request ID;
+  discard stale replies when a panel closes or the user changes chats/servers.
+- Require the additive standalone server capability. Older servers explain the
+  missing support instead of silently forwarding a question to the main agent.
+- Validate request/cancellation races and the actual renderer in light/dark,
+  wide/narrow, keyboard focus, pending, answer, error and localized states.
+  No installed application replacement, server restart or publication.
+- Guard cross-chat Markdown whitespace and preserve the exact sent body. The
+  standalone sender guidance discourages joining words and technical values;
+  historical text is not rewritten by speculative spacing corrections.
+
+## 2026-09-15 — Keep file changes visible outside collapsed progress (unreleased)
+
+- Keep known changed-file summaries and Review accessible when a turn's progress
+  is collapsed. Show a compact filename list with aggregate line counts while
+  leaving full diffs and tool activity behind their existing disclosures.
+- Reuse recorded diff metadata without fetching activity or parsing arbitrary
+  tool output on chat open. Keep scheduled-job summaries single-rendered.
+- Validate completed and live-to-completed turns, collapse/expand, exact Review
+  targets and scheduled-run identity. Check actual renderer layouts in light
+  and dark themes at wide and narrow sizes with network access disabled.
+  Type checks, desktop regressions and production compilation pass.
+- Desktop-only presentation change; no polling, provider runs, server update,
+  publication or running-app replacement.
+
+## 2026-09-15 — Local desktop 1.0.1 build 1169 accepted
+
+- Package committed source `9ca56af` as an Apple Silicon local desktop build,
+  including explicit Mail/Bulletin search and the quiet synchronization status.
+  Exclude unrelated unfinished worktree changes.
+- Verify TypeScript, desktop regressions, compile/license guards and production
+  compilation. Confirm all 86 compiled files match the packaged archive, the
+  hardened Electron bundle passes its audit, and the Developer ID signature
+  verifies. Keep local auto-updates disabled.
+- No publication, running-app replacement or server deployment. Indexed search
+  still requires the matching standalone server update; the synchronization
+  status change works without it.
+
+## 2026-09-15 — Quiet chat synchronization status (unreleased)
+
+- Replace the uncertain incoming-delivery warning during chat synchronization
+  with a muted “Syncing…” status. Keep known incoming-delivery notices and
+  explicit Stop/Send now confirmations unchanged. This is a desktop-only
+  presentation change with no new requests, subscriptions or server changes.
+
+## 2026-09-15 — Indexed Mail and Bulletin search (unreleased)
+
+- Add explicit Search/Enter and Clear controls to Inbox, Sent and Bulletin.
+  Search current subjects, message contents and sender names across accessible
+  history, with indexed server queries and explicit result pagination. Typing
+  stays local; no polling, timers or per-keystroke requests are introduced.
+- Keep filtered results separate from ordinary snapshots, unread counts and
+  notification acknowledgements. Fence old-query and old-connection results;
+  preserve route, read, edit and delete behavior for individual results.
+- Capability-gate the feature on the matching standalone server contract and
+  migration. Older hosts retain ordinary Mail with an update explanation.
+  See [Mail search](TEAM_MAIL_SEARCH.md) for compatibility and migration notes.
+- Validate renderer, IPC, direct and secure-peer paths, pagination, stale
+  responses, notification isolation and current-content indexing. The actual
+  renderer passes eight isolated light/dark and wide/narrow journeys: typing
+  and idle issue no requests; Enter searches, open/back retains the query, and
+  Clear restores the normal list. Type checks and production compilation pass.
+  No published artifact, installed app or running server is changed.
+
+## 2026-09-15 — Desktop 1.0.1 accepted
+
+- Published stable [AgentsDock 1.0.1](https://github.com/ZhengyiLuo/AgentsDock/releases/tag/v1.0.1),
+  build `1168`, from reviewed source `9a13649eb5a8f01d83c4c33b8bd3af3a70163cda`.
+  Includes member self-rename, durable join observation and force-update
+  confirmation recovery. See [release notes](RELEASE_1.0.1.md).
+- All four native build and package gates passed, followed by independent
+  package replay before publication. macOS is universal, Developer ID signed,
+  notarized and Gatekeeper-accepted. Windows remains unsigned under the
+  release owner's standing distribution policy; its status is explicit in
+  both public release listings.
+- The canonical and legacy repositories publish the same fourteen artifacts.
+  Both stable update feeds resolve to `1.0.1` for macOS, Linux x64, Linux arm64
+  and Windows. The sealed checksum manifest's SHA-256 is
+  `b1fcdc86950f190891ee6c0ea4e9bd1fd8a4495886b821362ed270d6e5250b58`;
+  the verified Mac update ZIP is
+  `c0649157f5f31a7b9cea37f447f7a3e465666d3f5a4f5a057b764353f01dbfc9`.
+- Confirmed the downloaded Mac package contains the member-rename renderer,
+  preload and main-process implementation. No installed app, live server,
+  mobile distribution or unrelated worktree change was included.
+
+## 2026-09-15 — Member self-rename, desktop 1.0.1 candidate
+
+- Committed member self-rename in `ee277b162b34a341d2d771e92bea2697342bcc3e`.
+  The owned member's directory menu now offers Rename. Saving changes its Team
+  Network display and recipient names in place, without changing its host role,
+  peer identity, connection or local profile label. Other members remain
+  protected; stale identities and mismatched receipts are rejected.
+- Verified the real paired-service principal, whose identity is distinct from
+  its directory node, along with legacy node-shaped sessions. The existing
+  published server API passes isolated self-rename, read-only, reprovision,
+  current-mention and new-mail-label checks; no server changes were required.
+- A clean archive of the committed source passes TypeScript, 4,218 desktop
+  tests (10 platform/intentional skips), eight compile/license guards and
+  production compilation. The actual renderer passes isolated offscreen
+  dark/light and narrow-layout checks for Save, Cancel and editable failures;
+  saving preserves row identity and adds no polling or role-switch operation.
+- Release notes are prepared in [RELEASE_1.0.1.md](RELEASE_1.0.1.md). Native
+  release packaging and publication remain pending per-release Windows signing
+  approval. This is not yet an accepted or published application package.
+  No installed app or live server was changed.
+
+## 2026-09-15 — Durable team join waiting (unreleased)
+
+- Keep one automatic-join observer attached across long HTTP observation
+  windows when the server confirms a durable pending approval or activation.
+  Renew only the same held read, with unchanged request, transcript, server and
+  cancellation fences. Reject early responses instead of creating a hot retry
+  loop; do not add inbox polling, repeated Join requests or UI refresh timers.
+- Make legacy expired incoming requests discoverable in a collapsed section,
+  separate from pending approvals and without approval controls. A replacement
+  request hides the stale attempt. New non-expiring joins require the matching
+  standalone server change on both host and joining server.
+- Accepted locally: 600 focused desktop checks, type checks, production
+  compilation and compile-output verification. Inspect the real host panel
+  offscreen at narrow width in light and dark themes, including expired and
+  replacement requests; no overflow, new network calls or approval mutations.
+  No package, installation, publication or live server restart performed.
+
+## 2026-09-14 — Force-update status recovery (unreleased)
+
+- Recover from a force-update confirmation refused because the queued update
+  changed while the confirmation was open. Read status once; never retry a
+  restart or update automatically. Follow an already-started update only when
+  its schedule, target and track match the approved reservation.
+- Show actual installer/preflight failures instead of a stale confirmation
+  error. If status cannot be verified, re-enable Check server. Clear only the
+  handled recovery notice after a successful check or server-scope change;
+  preserve unrelated failures and ignore responses from an old server/boot.
+- Support the existing beta.8 response, including bridges that preserve only
+  its error prose. No server contract change or background polling is added.
+- Validate focused confirmation-race and recovery regressions, the full desktop
+  suite, type checks, production compilation and compile/license guards. Inspect
+  the actual Settings dialog in isolated offscreen Electron in both themes,
+  covering install progress, preflight failure and manual-check recovery.
+- Source fix only: no new package, publication, installation or live restart.
+
 ## 2026-09-17 — Surface native artifact-open failures
 
 - Propagate operating-system errors when opening an artifact so the existing

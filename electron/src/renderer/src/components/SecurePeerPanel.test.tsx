@@ -1,4 +1,4 @@
-import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { StrictMode } from 'react'
 import type { AgentsDockAPI } from '@shared/ipc'
@@ -455,6 +455,50 @@ describe('automatic secure peer approval completion', () => {
 })
 
 describe('SecurePeerPanel', () => {
+  it('discloses expired incoming requests without offering approval or counting them as pending', async () => {
+    const expired = pairing({ direction: 'incoming', status: 'expired', peerServerIdentity: 'old-peer', peerDisplayName: 'Old test server' })
+    const outgoing = pairing({ ...expired, id: '19d7bb2e-3b47-4be7-89fc-2cecd90f4434', direction: 'outgoing', peerDisplayName: 'Other host' })
+    const pendingCount = vi.fn()
+    const { teamHub } = installAPI({ securePeerStatus: vi.fn().mockResolvedValue(control({
+      profileId: hostStatus.profileId, serverIdentity: hostStatus.serverIdentity!, pairings: [expired, outgoing]
+    })) })
+    render(<SecurePeerPanel status={hostStatus} details={details} workspace={workspace} onPendingCountChange={pendingCount} />)
+    const disclosure = await screen.findByText('Expired requests (1)')
+    fireEvent.click(disclosure)
+    expect(screen.getByText('Old test server')).toBeVisible()
+    expect(screen.getByText('Request expired · a new request is needed.')).toBeVisible()
+    expect(screen.getByText(/Ask the joining server to submit a new request/)).toBeVisible()
+    expect(screen.queryByText('Other host')).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Approve' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Reject' })).not.toBeInTheDocument()
+    expect(pendingCount).toHaveBeenLastCalledWith(0)
+    expect(teamHub.securePeerStatus).toHaveBeenCalledTimes(1)
+    expect(teamHub.approveSecurePeerPairing).not.toHaveBeenCalled()
+    act(() => setLocale('zh-CN'))
+    expect(screen.getByText('Expired requests (1)')).toBeVisible()
+    expect(teamHub.securePeerStatus).toHaveBeenCalledTimes(1)
+  })
+
+  it('keeps a durable pending replacement actionable without showing its older expired attempt', async () => {
+    const expired = pairing({ direction: 'incoming', status: 'expired', peerServerIdentity: 'replacement-peer', peerDisplayName: 'Test member' })
+    const pending = pairing({ ...expired, id: '19d7bb2e-3b47-4be7-89fc-2cecd90f4434', status: 'pending_approval', trustState: 'pending', expiresAt: null })
+    const pendingCount = vi.fn()
+    const { teamHub } = installAPI({ securePeerStatus: vi.fn().mockResolvedValue(control({
+      profileId: hostStatus.profileId, serverIdentity: hostStatus.serverIdentity!, pairings: [pending, expired]
+    })) })
+    render(<SecurePeerPanel status={hostStatus} details={details} workspace={workspace} onPendingCountChange={pendingCount} />)
+    expect(await screen.findByRole('button', { name: 'Approve' })).toBeDisabled()
+    const requests = screen.getByRole('region', { name: 'Connection requests' })
+    expect(within(requests).getAllByText('Test member')).toHaveLength(1)
+    expect(screen.queryByText(/Expired requests/)).not.toBeInTheDocument()
+    expect(screen.queryByText(/Invalid Date/)).not.toBeInTheDocument()
+    expect(pendingCount).toHaveBeenLastCalledWith(1)
+    fireEvent.click(screen.getByRole('checkbox', { name: 'The six words match.' }))
+    expect(screen.getByRole('button', { name: 'Approve' })).toBeEnabled()
+    expect(teamHub.approveSecurePeerPairing).not.toHaveBeenCalled()
+    expect(teamHub.securePeerStatus).toHaveBeenCalledTimes(1)
+  })
+
   it('switches host approval copy without changing names, pairing codes or request counts', async () => {
     const incoming = pairing({ direction: 'incoming', peerDisplayName: 'Exact QA server' })
     const { teamHub } = installAPI({ securePeerStatus: vi.fn().mockResolvedValue(control({

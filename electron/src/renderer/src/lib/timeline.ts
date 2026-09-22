@@ -158,7 +158,7 @@ export interface JobItem {
 }
 
 const traceTypes = new Set([
-  'reasoning_summary', 'tool_started', 'tool_finished', 'raw_event', 'process_started',
+  'reasoning_summary', 'reasoning_text', 'tool_started', 'tool_finished', 'raw_event', 'process_started',
   'provider_session', 'cwd_fallback', 'history_imported', 'backend_changed', 'artifact_error',
   'session_created', 'idle_warning', 'code_diff'
 ])
@@ -1176,6 +1176,7 @@ export class TimelineProjector {
       eventFile(event)
       || event.type === 'code_diff'
       || event.type === 'reasoning_summary'
+      || event.type === 'reasoning_text'
       || event.type === 'tool_started'
       || event.type === 'tool_finished'
     )) {
@@ -1953,7 +1954,16 @@ function renderTimelineItem(item: TimelineItem): RenderTimelineItem[] {
     }
   }
   if (outputFiles.length) {
-    rows.push({ kind: 'media', id: `${item.id}:media`, key: `${item.key}:media`, seq: outputFiles[0].seq ?? item.seq, files: outputFiles })
+    // Media is displayed after the turn's content, even when its first file
+    // was created earlier. An older anchor would pull intervening messages
+    // below the final answer and media when chronological rows are inserted.
+    const toolStartSequences = progressToolStartSequences(sourceEvents)
+    const mediaSeq = rows.reduce((anchor, row) => {
+      if (row.kind !== 'progress') return Math.max(anchor, row.seq)
+      const progress = { ...row, toolStartSequences }
+      return row.events.reduce((seq, event) => Math.max(seq, progressEventSequence(event, progress)), Math.max(anchor, row.seq))
+    }, outputFiles[0].seq ?? item.seq)
+    rows.push({ kind: 'media', id: `${item.id}:media`, key: `${item.key}:media`, seq: mediaSeq, files: outputFiles })
   }
   return rows
 }
@@ -1985,6 +1995,10 @@ function renderCrossChatMessage(item: SystemItem): SystemItem[] {
 
 /** Keep arrival order unless public commentary has an earlier, zoned timestamp in the same run. */
 export function activityEventSequence(event: Event, finals: Event[] = []): number {
+  // A completed summary retains the place where its first live text appeared.
+  // The durable sequence remains untouched for caching, read state and replay.
+  if ((event.type === 'reasoning_summary' || event.type === 'reasoning_text') && Number.isSafeInteger(event.reasoning_after_seq)
+    && event.reasoning_after_seq! >= 0 && event.reasoning_after_seq! < event.seq) return event.reasoning_after_seq! + 0.5
   if (!isPublicCommentary(event) || !event.run_id || !/(?:Z|[+-]\d{2}:\d{2})$/i.test(event.ts)) return event.seq
   const timestamp = Date.parse(event.ts)
   if (!Number.isFinite(timestamp)) return event.seq
@@ -2007,7 +2021,7 @@ function runPresentationSegments(events: Event[], finals: Event[], orderingFinal
   for (const event of orderedEvents) {
     // Post-answer diff/bookkeeping alone is not another working turn.
     if (event.type !== 'tool_started' && event.type !== 'tool_finished'
-      && !(event.type === 'reasoning_summary' && messageText(event).trim())
+      && !((event.type === 'reasoning_summary' || event.type === 'reasoning_text') && messageText(event).trim())
       && !isPublicCommentary(event)) continue
     const seq = activityEventSequence(event, orderingFinalEvents)
     while (finalCursor < finals.length && finals[finalCursor].seq < seq) finalCursor++
@@ -2034,7 +2048,7 @@ function runPresentationSegments(events: Event[], finals: Event[], orderingFinal
 }
 
 export function traceHasVisibleContent(events: Event[]): boolean {
-  return events.some(event => event.type === 'reasoning_summary' && Boolean(messageText(event).trim())) ||
+  return events.some(event => (event.type === 'reasoning_summary' || event.type === 'reasoning_text') && Boolean(messageText(event).trim())) ||
     events.some(isPublicCommentary) ||
     events.some(event => event.type === 'tool_started' || event.type === 'tool_finished') ||
     events.some(event => event.type === 'code_diff' && Boolean(event.run_id)) ||
@@ -2067,7 +2081,7 @@ export function reconcileRenderTimelineItems(previous: RenderTimelineItem[], nex
       sameReferences(before.events, item.events) &&
       sameReferences(before.sourceEvents ?? [], item.sourceEvents ?? []) &&
       sameReferences(before.lifecycle ?? [], item.lifecycle ?? [])) return before
-    if (before.kind === 'media' && item.kind === 'media' && sameReferences(before.files, item.files)) return before
+    if (before.kind === 'media' && item.kind === 'media' && before.seq === item.seq && sameReferences(before.files, item.files)) return before
     return item
   })
 }

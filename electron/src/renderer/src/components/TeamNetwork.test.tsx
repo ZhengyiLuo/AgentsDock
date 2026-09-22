@@ -16,7 +16,7 @@ import type {
   TeamNetworkPassiveRequestDetails,
   TeamNetworkProjectionPage
 } from '@shared/team-network'
-import { TeamNetwork as TeamNetworkView } from './TeamNetwork'
+import { applyNetworkServerRename, TeamNetwork as TeamNetworkView } from './TeamNetwork'
 import { resetTeamNetworkSnapshotCacheForTests } from '../lib/team-network-snapshot-cache'
 import { useAppStore } from '../store/app-store'
 
@@ -303,6 +303,7 @@ function installAPI(options: APIOptions = {}) {
     status: vi.fn().mockResolvedValue(statusValue),
     connect: vi.fn(),
     configureServerRole: vi.fn(),
+    renameNetworkServer: vi.fn(),
     disconnect: vi.fn(),
     forgetBinding: vi.fn(),
     bootstrap: vi.fn(),
@@ -380,6 +381,7 @@ function installAPI(options: APIOptions = {}) {
     cancelSecurePeerPairing: vi.fn(),
     activateSecurePeerPairing: vi.fn(),
     deactivateSecurePeerConnection: vi.fn(),
+    updateSecurePeerConnectionEndpoint: vi.fn(),
     forgetSecurePeerConnection: vi.fn(),
     approveSecurePeerPairing: vi.fn(),
     rejectSecurePeerPairing: vi.fn(),
@@ -525,6 +527,219 @@ describe('owned Host Rename', () => {
       view.unmount()
       resetTeamNetworkSnapshotCacheForTests()
     }
+  })
+})
+
+describe('owned member network Rename', () => {
+  function prepare(options: APIOptions = {}) {
+    useAppStore.setState({ activeProfileId: peerStatus.profileId, profileGeneration: peerStatus.profileGeneration,
+      switchingProfileId: null, profiles: [{ id: peerStatus.profileId, name: 'Local connection label',
+        serverUrl: 'https://example.test', serverIdentity: peerStatus.serverIdentity, hasAccessToken: true,
+        serverSetupComplete: true, connectionState: 'online', cachedUnreadCount: 0 }] })
+    return installAPI({ statusValue: peerStatus, ...options })
+  }
+  async function open() {
+    render(<TeamNetwork onClose={vi.fn()} initialSection="directory" />)
+    fireEvent.pointerDown(await screen.findByRole('button', { name: 'Manage Studio' }), { button: 0, ctrlKey: false })
+    fireEvent.click(await screen.findByRole('menuitem', { name: 'Rename…' }))
+    return screen.getByRole('form', { name: 'Rename server' })
+  }
+  const renamed = { id: 'server-peer', server_identity: 'identity-peer', display_name: 'Member workstation' }
+
+  it.each([true, false])('updates an advertised recipient alias without adding one to legacy rows: %s', hasAlias => {
+    const current = projectionFor(peerStatus)
+    if (hasAlias) current.servers[1].recipient_display_name = 'Studio'
+    const updated = applyNetworkServerRename(current, renamed)
+    expect(updated.servers[1]).toEqual({ ...current.servers[1], display_name: renamed.display_name,
+      ...(hasAlias ? { recipient_display_name: renamed.display_name } : {}) })
+    expect(Object.hasOwn(updated.servers[1], 'recipient_display_name')).toBe(hasAlias)
+    expect(updated.servers[0]).toBe(current.servers[0])
+    expect(updated.agents).toBe(current.agents)
+    expect(current.servers[1].display_name).toBe('Studio')
+    expect(current.servers[1].recipient_display_name).toBe(hasAlias ? 'Studio' : undefined)
+    expect(applyNetworkServerRename(current, { ...renamed, server_identity: 'foreign-identity' }).servers[1]).toBe(current.servers[1])
+  })
+
+  it('renames only the owned member and updates the same row and Team labels from the authoritative receipt', async () => {
+    const api = prepare()
+    api.renameNetworkServer.mockResolvedValue(renamed)
+    const form = await open()
+    const row = form.closest('.network-roster-server')
+    const networkReads = api.network.mock.calls.length
+    fireEvent.change(within(form).getByRole('textbox'), { target: { value: '  Member workstation  ' } })
+    fireEvent.submit(form)
+    fireEvent.submit(form)
+    await waitFor(() => expect(api.renameNetworkServer).toHaveBeenCalledExactlyOnceWith({
+      profileId: 'profile-peer', profileGeneration: 3, serverIdentity: 'identity-peer', generation: 4,
+      hubIdentity: 'hub-team', connectionId: 'connection-peer', hostServerIdentity: 'identity-host'
+    }, { teamId: 'team-1', serverId: 'server-peer', displayName: 'Member workstation' }))
+    const menu = await screen.findByRole('button', { name: 'Manage Member workstation' })
+    expect(menu.closest('.network-roster-server')).toBe(row)
+    expect(screen.queryByRole('form', { name: 'Rename server' })).not.toBeInTheDocument()
+    expect(screen.getAllByText('Member workstation')).toHaveLength(3)
+    expect(screen.getByText('Team Network name changed to Member workstation. The local server name and connection are unchanged.')).toBeVisible()
+    expect(api.network).toHaveBeenCalledTimes(networkReads)
+    expect(api.configureServerRole).not.toHaveBeenCalled()
+    expect(api.connect).not.toHaveBeenCalled()
+    expect(api.disconnect).not.toHaveBeenCalled()
+    expect(useAppStore.getState().profiles[0].name).toBe('Local connection label')
+    expect(peerStatus.serverName).toBe('Studio')
+    expect(screen.queryByRole('button', { name: 'Manage TargetApp' })).not.toBeInTheDocument()
+  })
+
+  it('cancel preserves the directory and does not submit either naming path', async () => {
+    const api = prepare()
+    const form = await open()
+    fireEvent.change(within(form).getByRole('textbox'), { target: { value: 'Not saved' } })
+    fireEvent.click(within(form).getByRole('button', { name: 'Cancel' }))
+    expect(screen.queryByRole('form', { name: 'Rename server' })).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Manage Studio' })).toBeVisible()
+    expect(api.renameNetworkServer).not.toHaveBeenCalled()
+    expect(api.configureServerRole).not.toHaveBeenCalled()
+  })
+
+  it.each(['read-only peer scope', 'unsupported legacy endpoint', 'lost response'])(
+    'keeps an explicit %s error and the draft without retry or role switching', async reason => {
+      const api = prepare()
+      api.renameNetworkServer.mockRejectedValue(new Error(reason))
+      const form = await open()
+      const reads = api.network.mock.calls.length
+      fireEvent.change(within(form).getByRole('textbox'), { target: { value: 'Member workstation' } })
+      fireEvent.click(within(form).getByRole('button', { name: 'Save' }))
+      expect(await screen.findByRole('alert')).toHaveTextContent(reason)
+      expect(within(form).getByRole('textbox')).toHaveValue('Member workstation')
+      expect(within(form).getByRole('button', { name: 'Save' })).toBeEnabled()
+      expect(screen.getByRole('button', { name: 'Manage Studio' })).toBeVisible()
+      expect(api.renameNetworkServer).toHaveBeenCalledTimes(1)
+      expect(api.network).toHaveBeenCalledTimes(reads)
+      expect(api.configureServerRole).not.toHaveBeenCalled()
+    }
+  )
+
+  it.each(['human', 'suspended-member', 'suspended-team', 'suspended-server', 'foreign-identity', 'not-owned', 'wrong-principal', 'no-connection'])(
+    'does not offer self Rename for %s', async fault => {
+      const status = { ...peerStatus }
+      const details = detailsFor(status)
+      const projection = projectionFor(status)
+      if (fault === 'human') status.authenticationMode = 'human'
+      if (fault === 'suspended-member') details.membership.status = 'suspended'
+      if (fault === 'suspended-team') details.team.status = 'suspended'
+      if (fault === 'suspended-server') projection.servers[1].status = 'suspended'
+      if (fault === 'foreign-identity') projection.servers[1].server_identity = 'someone-else'
+      if (fault === 'not-owned') projection.servers[1].owned_by_caller = false
+      if (fault === 'wrong-principal') details.membership.principal_id = 'someone-else'
+      if (fault === 'no-connection') delete status.connectionId
+      const api = prepare({ statusValue: status, detailsValue: details, projectionValue: projection })
+      render(<TeamNetwork onClose={vi.fn()} initialSection="directory" />)
+      expect(await screen.findByText('Studio', { selector: '.network-roster-server strong' })).toBeVisible()
+      expect(screen.queryByRole('button', { name: 'Manage Studio' })).not.toBeInTheDocument()
+      expect(api.renameNetworkServer).not.toHaveBeenCalled()
+    }
+  )
+
+  it.each(['connection', 'host', 'hub', 'generation', 'revoked'])('rejects fresh %s drift before sending Rename', async fault => {
+    const api = prepare()
+    const form = await open()
+    const changed = { ...peerStatus }
+    if (fault === 'connection') changed.connectionId = 'replacement-connection'
+    if (fault === 'host') changed.hostServerIdentity = 'other-host'
+    if (fault === 'hub') changed.hubIdentity = 'other-hub'
+    if (fault === 'generation') changed.generation += 1
+    if (fault === 'revoked') changed.authenticated = false
+    api.status.mockResolvedValue(changed)
+    fireEvent.change(within(form).getByRole('textbox'), { target: { value: 'Member workstation' } })
+    fireEvent.click(within(form).getByRole('button', { name: 'Save' }))
+    expect(await screen.findByRole('alert')).toHaveTextContent('The server connection or membership changed.')
+    expect(api.renameNetworkServer).not.toHaveBeenCalled()
+    expect(api.configureServerRole).not.toHaveBeenCalled()
+  })
+
+  it.each(['id', 'server_identity', 'display_name'])('rejects a mismatched receipt %s without changing any row', async field => {
+    const api = prepare()
+    api.renameNetworkServer.mockResolvedValue({ ...renamed, [field]: 'wrong-value' })
+    const form = await open()
+    fireEvent.change(within(form).getByRole('textbox'), { target: { value: 'Member workstation' } })
+    fireEvent.click(within(form).getByRole('button', { name: 'Save' }))
+    expect(await screen.findByRole('alert')).toHaveTextContent('Team Network did not confirm')
+    expect(screen.getByRole('button', { name: 'Manage Studio' })).toBeVisible()
+    expect(api.renameNetworkServer).toHaveBeenCalledTimes(1)
+    expect(api.configureServerRole).not.toHaveBeenCalled()
+  })
+
+  it('discards a late successful receipt after the selected profile changes', async () => {
+    const api = prepare()
+    const response = deferred<typeof renamed>()
+    api.renameNetworkServer.mockReturnValue(response.promise)
+    const form = await open()
+    fireEvent.change(within(form).getByRole('textbox'), { target: { value: 'Member workstation' } })
+    fireEvent.click(within(form).getByRole('button', { name: 'Save' }))
+    await waitFor(() => expect(api.renameNetworkServer).toHaveBeenCalledTimes(1))
+    act(() => useAppStore.setState({ profileGeneration: peerStatus.profileGeneration + 1 }))
+    await act(async () => response.resolve(renamed))
+    expect(screen.queryByText(/Team Network name changed/)).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Manage Member workstation' })).not.toBeInTheDocument()
+    expect(api.configureServerRole).not.toHaveBeenCalled()
+  })
+
+  it('fences a stale roster page that was already in flight when Rename completed', async () => {
+    const page = projectionFor(peerStatus)
+    page.has_more = true
+    const api = prepare({ projectionValue: page })
+    const stale = deferred<TeamNetworkProjectionPage>()
+    api.renameNetworkServer.mockResolvedValue(renamed)
+    const form = await open()
+    const loadMore = screen.getByRole('button', { name: 'Load more servers' })
+    api.network.mockReturnValueOnce(stale.promise)
+    fireEvent.change(within(form).getByRole('textbox'), { target: { value: 'Member workstation' } })
+    act(() => { fireEvent.submit(form); fireEvent.click(loadMore) })
+    await waitFor(() => expect(api.network).toHaveBeenCalledTimes(2))
+    expect(await screen.findByRole('button', { name: 'Manage Member workstation' })).toBeVisible()
+    await act(async () => stale.resolve(projectionFor(peerStatus)))
+    expect(screen.getByRole('button', { name: 'Manage Member workstation' })).toBeVisible()
+    expect(screen.queryByRole('button', { name: 'Manage Studio' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+    expect(api.renameNetworkServer).toHaveBeenCalledTimes(1)
+  })
+
+  it('invalidates the old snapshot so reopening re-reads the persisted network name', async () => {
+    const api = prepare()
+    api.renameNetworkServer.mockImplementation(async () => {
+      const page = projectionFor(peerStatus)
+      page.servers[1] = { ...page.servers[1], display_name: renamed.display_name }
+      api.network.mockResolvedValue(page)
+      return renamed
+    })
+    const form = await open()
+    fireEvent.change(within(form).getByRole('textbox'), { target: { value: renamed.display_name } })
+    fireEvent.click(within(form).getByRole('button', { name: 'Save' }))
+    await screen.findByRole('button', { name: 'Manage Member workstation' })
+    cleanup()
+    const reads = api.network.mock.calls.length
+    render(<TeamNetwork onClose={vi.fn()} initialSection="directory" />)
+    expect(await screen.findByRole('button', { name: 'Manage Member workstation' })).toBeVisible()
+    expect(api.network).toHaveBeenCalledTimes(reads + 1)
+    expect(api.renameNetworkServer).toHaveBeenCalledTimes(1)
+    expect(screen.queryByRole('button', { name: 'Manage Studio' })).not.toBeInTheDocument()
+  })
+
+  it('does not apply a pending Rename receipt into another selected team', async () => {
+    const workspace = workspaceFor(peerStatus)
+    workspace.teams.push({ ...workspace.teams[0], id: 'team-2', display_name: 'Other team' })
+    const api = prepare({ workspaceValue: workspace })
+    const response = deferred<typeof renamed>()
+    api.renameNetworkServer.mockReturnValue(response.promise)
+    const form = await open()
+    fireEvent.change(within(form).getByRole('textbox'), { target: { value: renamed.display_name } })
+    fireEvent.click(within(form).getByRole('button', { name: 'Save' }))
+    await waitFor(() => expect(api.renameNetworkServer).toHaveBeenCalledTimes(1))
+    api.team.mockResolvedValue(detailsFor(peerStatus, 'team-2', 'Other team'))
+    api.network.mockResolvedValue(projectionFor(peerStatus, 'team-2', 'Other team'))
+    fireEvent.change(screen.getByRole('combobox', { name: 'Team' }), { target: { value: 'team-2' } })
+    await waitFor(() => expect(api.network).toHaveBeenCalledTimes(2))
+    await act(async () => response.resolve(renamed))
+    expect(screen.getByRole('button', { name: 'Manage Studio' })).toBeVisible()
+    expect(screen.queryByRole('button', { name: 'Manage Member workstation' })).not.toBeInTheDocument()
+    expect(screen.queryByText(/Team Network name changed/)).not.toBeInTheDocument()
   })
 })
 
@@ -2733,7 +2948,10 @@ describe('Team Network', () => {
     expect(await screen.findByText('Initial update')).toBeVisible()
     fireEvent.click(screen.getByRole('button', { name: 'Servers' }))
 
-    expect(screen.queryByRole('button', { name: /Manage / })).not.toBeInTheDocument()
+    fireEvent.pointerDown(screen.getByRole('button', { name: 'Manage Studio' }), { button: 0, ctrlKey: false })
+    expect(await screen.findByRole('menuitem', { name: 'Rename…' })).toBeVisible()
+    expect(screen.queryByRole('menuitem', { name: 'Remove from network…' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Manage TargetApp' })).not.toBeInTheDocument()
     expect(securePeers).not.toHaveBeenCalled()
     expect(revokeSecurePeer).not.toHaveBeenCalled()
   })
@@ -2786,6 +3004,38 @@ describe('Team Network', () => {
     expect(screen.getByText('Studio')).toBeVisible()
     expect(screen.queryByText('Build agent')).not.toBeInTheDocument()
     expect(screen.getByRole('group', { name: 'Remove Studio' })).toBeVisible()
+  })
+
+  it('changes the saved host address from the offline recovery card and restores Team Network', async () => {
+    useAppStore.setState({ activeProfileId: peerStatus.profileId, profileGeneration: peerStatus.profileGeneration, switchingProfileId: null, profiles: [] })
+    const offline = { ...peerStatus, authenticated: false, connectionState: 'offline' as const,
+      backgroundReconnectAllowed: false, principal: null, session: null, error: 'The saved host is offline.' }
+    const saved = securePairing({ status: 'approved', trustState: 'approved', transportState: 'offline',
+      connectionId: peerStatus.connectionId, hubIdentity: peerStatus.hubIdentity, teamId: 'team-1',
+      certificateFingerprint: `sha256:${'d'.repeat(64)}` })
+    const initialControl = { ...secureControl(offline), endpointUpdateAvailable: true, pairings: [saved] }
+    const nextControl = { ...initialControl, pairings: [{ ...saved, remoteEndpoint: '100.64.0.9:7851', transportState: 'online' as const }] }
+    const teamHub = installAPI({ statusValue: offline, workspaceValue: workspaceFor(peerStatus),
+      detailsValue: detailsFor(peerStatus), projectionValue: projectionFor(peerStatus), overrides: {
+        securePeerStatus: vi.fn().mockResolvedValue(initialControl),
+        updateSecurePeerConnectionEndpoint: vi.fn().mockResolvedValue(nextControl)
+      } })
+    render(<TeamNetwork onClose={vi.fn()} />)
+    fireEvent.click(await screen.findByRole('button', { name: 'Change host address' }))
+    const dialog = await screen.findByRole('dialog', { name: 'Change host address' })
+    expect(within(dialog).getByRole('textbox')).toHaveValue('100.64.0.1:7851')
+    expect(teamHub.workspace).not.toHaveBeenCalled()
+    expect(teamHub.mailbox).not.toHaveBeenCalled()
+    fireEvent.change(within(dialog).getByRole('textbox'), { target: { value: '100.64.0.9' } })
+    teamHub.status.mockResolvedValue(peerStatus)
+    teamHub.securePeerStatus.mockResolvedValue(nextControl)
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Save' }))
+    expect(await screen.findByText('Initial update')).toBeVisible()
+    expect(teamHub.updateSecurePeerConnectionEndpoint).toHaveBeenCalledTimes(1)
+    expect(teamHub.connect).not.toHaveBeenCalled()
+    expect(teamHub.requestSecurePeerPairing).not.toHaveBeenCalled()
+    expect(screen.getByTitle('Current host address: 100.64.0.9:7851')).toBeVisible()
+    useAppStore.setState({ activeProfileId: null, profileGeneration: 0 })
   })
 
   it('renders network text as text rather than executable HTML', async () => {

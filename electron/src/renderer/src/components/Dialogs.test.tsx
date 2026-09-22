@@ -745,6 +745,49 @@ describe('SessionDialog runtime selection', () => {
     }
   }
 
+  it('creates a custom Codex chat without replacing normal Codex choices', async () => {
+    const create = vi.fn().mockResolvedValue({ id: 'custom-chat' })
+    Object.defineProperty(window, 'agentsDock', { configurable: true, value: {
+      sessions: { create }, preferences: { set: vi.fn().mockResolvedValue(undefined) }
+    } as unknown as AgentsDockAPI })
+    useAppStore.setState({ profiles: [], activeProfileId: null, profileGeneration: 0, sessions: [],
+      health: { ok: true, capabilities: { codex_provider_v1: { per_chat: true, per_chat_models: true } } },
+      runtimeCatalog: { backends: { ...runtimeCatalog.backends, codex: { ...runtimeCatalog.backends.codex,
+        custom_provider: { configured: true, available: true, model: null, base_url: 'https://inference.example/v1',
+          models: [{ value: 'provider/fast', label: 'Provider Fast' }], efforts: [], model_efforts: { 'provider/fast': [{ value: 'high', label: 'High' }] } }
+      } } }, refreshSessions: vi.fn().mockResolvedValue(undefined), selectSession: vi.fn().mockResolvedValue(undefined),
+      modals: { settings: false, newChat: true, resume: false, folder: false, digest: false, job: false, search: false, review: false, importChats: false }
+    })
+    const user = userEvent.setup()
+    render(<SessionDialog mode="newChat" />)
+    expect(screen.getByRole('button', { name: 'Codex' })).toHaveAttribute('aria-pressed', 'true')
+    await user.click(screen.getByRole('button', { name: 'Codex runtime · Custom endpoint' }))
+    expect(screen.getByRole('button', { name: 'Codex' })).toHaveAttribute('aria-pressed', 'false')
+    expect(screen.queryByLabelText('Reasoning')).not.toBeInTheDocument()
+    expect(screen.queryByRole('option', { name: 'GPT-5.6-Sol' })).not.toBeInTheDocument()
+    await user.selectOptions(screen.getByLabelText('Model'), 'provider/fast')
+    await user.selectOptions(screen.getByLabelText('Reasoning'), 'high')
+    await user.selectOptions(screen.getByLabelText('Model'), '__manual__')
+    await user.clear(screen.getByLabelText('Model ID'))
+    await user.type(screen.getByLabelText('Model ID'), 'provider/unlisted')
+    await user.click(screen.getByRole('button', { name: 'Create chat' }))
+    await waitFor(() => expect(create).toHaveBeenCalledWith(expect.objectContaining({ backend: 'codex', codex_provider: 'custom', model: 'provider/unlisted', effort: null })))
+  })
+
+  it('opens Settings for an unconfigured custom option without creating a normal Codex chat', async () => {
+    const create = vi.fn()
+    Object.defineProperty(window, 'agentsDock', { configurable: true, value: { sessions: { create } } as unknown as AgentsDockAPI })
+    useAppStore.setState({ sessions: [], runtimeCatalog, health: { ok: true },
+      modals: { settings: false, appSettings: false, newChat: true, resume: false, folder: false, digest: false, job: false, search: false, review: false, importChats: false }
+    })
+    const user = userEvent.setup()
+    render(<SessionDialog mode="newChat" />)
+    await user.click(screen.getByRole('button', { name: /Codex runtime · Custom endpoint · Configure in Settings/ }))
+    expect(useAppStore.getState().modals.appSettings).toBe(true)
+    expect(useAppStore.getState().modals.newChat).toBe(false)
+    expect(create).not.toHaveBeenCalled()
+  })
+
   it.each([{ mode: 'newChat' as const }, { mode: 'resume' as const }])(
     'offers an import-chat entry that opens the importer from the $mode dialog',
     async ({ mode }) => {
@@ -1091,6 +1134,37 @@ describe('SessionDialog runtime selection', () => {
 
 describe('JobDialog', () => {
   afterEach(cleanup)
+
+  it.each(['chat', 'standalone'] as const)('keeps custom Codex job admission and labels in %s mode independent of the normal model lock', async contextMode => {
+    const create = vi.fn().mockResolvedValue({})
+    Object.defineProperty(window, 'agentsDock', { configurable: true, value: { jobs: { create } } as unknown as AgentsDockAPI })
+    useAppStore.setState({ selectedSessionId: 'chat-1', sessions: [{ id: 'chat-1', title: 'Custom chat', backend: 'codex', codex_provider: 'custom', model: 'shared-model' }],
+      health: { ok: true, capabilities: { codex_provider_v1: { per_chat: true, per_chat_models: true },
+        scheduled_jobs: { available: true, required: false, message: '', action: null, version: 2, context_modes: ['chat', 'standalone'] }
+      } }, runtimeCatalog: { backends: { codex: {
+        models: [{ value: 'shared-model', label: 'Normal model', locked: true, locked_reason: 'Normal account model locked' }], efforts: [],
+        custom_provider: { configured: true, available: true, model: 'shared-model', base_url: 'https://inference.example/v1' }
+      } } }, drafts: {}, error: null,
+      modals: { settings: false, newChat: false, resume: false, folder: false, digest: false, job: true, search: false, review: false, importChats: false }
+    })
+    const user = userEvent.setup()
+    render(<JobDialog />)
+    if (contextMode === 'standalone') await user.click(screen.getByRole('button', { name: /Independent runs/ }))
+    expect(within(screen.getByRole('group', { name: 'Backend' })).getByRole('button', { name: 'Codex runtime · Custom endpoint' })).toBeVisible()
+    expect(screen.queryByText(/Normal account model locked/)).not.toBeInTheDocument()
+    await user.type(screen.getByLabelText('Title'), 'Custom check')
+    await user.type(screen.getByLabelText('Prompt'), 'Check the custom workspace')
+    act(() => useAppStore.setState(state => ({ runtimeCatalog: { backends: { codex: {
+      ...state.runtimeCatalog!.backends.codex, custom_provider: { configured: false, available: false, model: null, base_url: null }
+    } } } })))
+    expect(screen.getByRole('button', { name: 'Save job' })).toBeDisabled()
+    expect(screen.getByRole('alert')).toHaveTextContent('custom endpoint is not ready')
+    act(() => useAppStore.setState(state => ({ runtimeCatalog: { backends: { codex: {
+      ...state.runtimeCatalog!.backends.codex, custom_provider: { configured: true, available: true, model: 'shared-model', base_url: 'https://inference.example/v1' }
+    } } } })))
+    await user.click(screen.getByRole('button', { name: 'Save job' }))
+    await waitFor(() => expect(create).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ session_id: 'chat-1', backend: 'codex', context_mode: contextMode })))
+  })
 
   const renderJobMentionPalette = (create = vi.fn()) => {
     Object.defineProperty(window, 'agentsDock', {

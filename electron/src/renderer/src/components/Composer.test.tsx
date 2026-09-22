@@ -1366,6 +1366,88 @@ describe('Composer', () => {
     expect(screen.queryByRole('menuitemcheckbox', { name: /Cursor$/ })).not.toBeInTheDocument()
   })
 
+  it('offers normal and custom Codex separately and sends the explicit provider selection', async () => {
+    const update = vi.fn().mockImplementation(async (id, patch) => ({ id, title: 'Chat', ...patch }))
+    window.agentsDock.sessions = { update } as unknown as AgentsDockAPI['sessions']
+    useAppStore.setState({ health: { ok: true, capabilities: { codex_provider_v1: { per_chat: true, per_chat_models: true } } }, runtimeCatalog: {
+      backends: { codex: { models: [], efforts: [], custom_provider: {
+        configured: true, available: true, model: 'gpt-6-astra', base_url: 'https://inference.example/v1'
+      } } }
+    } })
+    const user = userEvent.setup()
+    render(<Composer />)
+    await user.click(screen.getByTitle('Change backend'))
+    expect(screen.getByRole('menuitemcheckbox', { name: 'Codex' })).toBeInTheDocument()
+    await user.click(screen.getByRole('menuitemcheckbox', { name: 'Codex runtime · Custom endpoint' }))
+    await waitFor(() => expect(update).toHaveBeenCalledWith('chat-1', expect.objectContaining({ backend: 'codex', codex_provider: 'custom', model: null, effort: null })))
+    expect(screen.getByTitle('Change backend')).toHaveTextContent('Codex runtime · Custom endpoint')
+    await user.click(screen.getByTitle('Change backend'))
+    await user.click(screen.getByRole('menuitemcheckbox', { name: 'Codex' }))
+    await waitFor(() => expect(update).toHaveBeenLastCalledWith('chat-1', expect.objectContaining({ backend: 'codex', codex_provider: 'default' })))
+  })
+
+  it('routes an unconfigured custom choice to Settings without changing the chat', async () => {
+    const update = vi.fn()
+    window.agentsDock.sessions = { update } as unknown as AgentsDockAPI['sessions']
+    const user = userEvent.setup()
+    render(<Composer />)
+    await user.click(screen.getByTitle('Change backend'))
+    await user.click(screen.getByRole('menuitem', { name: 'Codex runtime · Custom endpoint Configure in Settings' }))
+    expect(useAppStore.getState().modals.appSettings).toBe(true)
+    expect(update).not.toHaveBeenCalled()
+  })
+
+  it('keeps the custom provider fixed once the native thread starts', () => {
+    useAppStore.setState({ sessions: [{ id: 'chat-1', title: 'Chat', backend: 'codex', codex_provider: 'custom', codex_thread_id: 'native-custom' }] })
+    render(<Composer />)
+    const chip = screen.getByTitle('Backend is fixed after the provider session starts')
+    expect(chip).toBeDisabled()
+    expect(chip).toHaveTextContent('Codex runtime · Custom endpoint')
+  })
+
+  it('changes custom endpoint models and effort in the usual picker and permits an unlisted model', async () => {
+    const session: Session = { id: 'chat-1', title: 'Chat', backend: 'codex', codex_provider: 'custom', model: 'provider/first', effort: 'high' }
+    const update = vi.fn().mockImplementation(async (_id, patch) => ({ ...useAppStore.getState().sessions.find(item => item.id === session.id), ...Object.fromEntries(Object.entries(patch).filter(([, value]) => value !== undefined)) }))
+    window.agentsDock.sessions = { update } as unknown as AgentsDockAPI['sessions']
+    useAppStore.setState({ sessions: [session], runtimeCatalog: { backends: { codex: { models: [], efforts: [], custom_provider: {
+      configured: true, available: true, model: null, base_url: 'https://inference.example/v1',
+      models: [{ value: 'provider/first', label: 'First' }, { value: 'provider/next', label: 'Next' }],
+      efforts: [], model_efforts: { 'provider/next': [{ value: 'low', label: 'Low' }, { value: 'high', label: 'High' }] }
+    } } } } })
+    const user = userEvent.setup()
+    const { container } = render(<Composer />)
+    await user.click(container.querySelector<HTMLButtonElement>('.runtime-chip')!)
+    await user.click(screen.getByRole('menuitemcheckbox', { name: 'Next · Unverified' }))
+    await waitFor(() => expect(update).toHaveBeenLastCalledWith('chat-1', { model: 'provider/next', effort: 'high' }))
+    await user.click(container.querySelector<HTMLButtonElement>('.runtime-chip')!)
+    await user.click(screen.getByRole('menuitemcheckbox', { name: 'Low' }))
+    await waitFor(() => expect(update).toHaveBeenLastCalledWith('chat-1', { effort: 'low' }))
+    await user.click(container.querySelector<HTMLButtonElement>('.runtime-chip')!)
+    await user.click(screen.getByRole('menuitem', { name: 'Enter model ID…' }))
+    await user.clear(screen.getByLabelText('Model ID'))
+    await user.type(screen.getByLabelText('Model ID'), 'provider/unlisted')
+    await user.click(screen.getByRole('button', { name: 'Use model' }))
+    await waitFor(() => expect(update).toHaveBeenLastCalledWith('chat-1', { model: 'provider/unlisted', effort: null }))
+  })
+
+  it('sends a custom Codex chat independently of normal OpenAI sign-in', async () => {
+    const session: Session = { id: 'chat-1', title: 'Chat', backend: 'codex', codex_provider: 'custom', model: 'gpt-6-astra' }
+    const send = vi.fn().mockResolvedValue({ session: { ...session, backend_locked: true }, queued: false })
+    window.agentsDock.turns = { send } as unknown as AgentsDockAPI['turns']
+    useAppStore.setState({ sessions: [session], health: { ok: true, capabilities: { codex_provider_v1: { per_chat: true, per_chat_models: true } }, runtimes: {
+      codex: { backend: 'codex', status: 'unauthenticated', available: false, message: 'Sign in to normal Codex' }
+    } }, runtimeCatalog: { backends: { codex: { models: [], efforts: [], custom_provider: {
+      configured: true, available: true, model: 'gpt-6-astra', base_url: 'https://inference.example/v1'
+    } } } } })
+    const user = userEvent.setup()
+    render(<Composer />)
+    expect(screen.queryByText('Sign in to normal Codex')).not.toBeInTheDocument()
+    await user.type(screen.getByPlaceholderText('Message'), 'A custom endpoint message')
+    await user.click(screen.getByRole('button', { name: 'Send message' }))
+    await waitFor(() => expect(send).toHaveBeenCalledOnce())
+    expect(useAppStore.getState().error).toBeNull()
+  })
+
   it('offers ready Cursor backend switching when its runtime catalog is available', async () => {
     useAppStore.setState({
       health: {
@@ -1631,10 +1713,71 @@ describe('Composer', () => {
     confirm.mockRestore()
   })
 
+  it.each(['idle', 'cached', 'syncing', 'reconnecting', 'offline', 'error'] as const)(
+    'shows only a neutral sync status for an unknown active origin while chat sync is %s', status => {
+      useAppStore.setState({
+        activeSessionIds: new Set(['chat-1']),
+        syncBySession: { 'chat-1': { status, error: null } }
+      })
+      render(<Composer />)
+      const notice = screen.getByText('Syncing…')
+      expect(notice).toHaveAttribute('role', 'status')
+      expect(notice).toHaveClass('composer-sync-status')
+      expect(notice).not.toHaveClass('chat-reference-warning')
+      expect(screen.queryByText(/An active turn is running while chat sync is not live/)).not.toBeInTheDocument()
+
+      act(() => useAppStore.setState({ syncBySession: { 'chat-1': { status: 'live', error: null } } }))
+      expect(screen.queryByText('Syncing…')).not.toBeInTheDocument()
+      expect(useAppStore.getState().activeSessionIds).toContain('chat-1')
+      expect(screen.getByRole('button', { name: 'Stop' })).toBeInTheDocument()
+    }
+  )
+
+  it('localizes the neutral unknown-origin sync status without inventing activity for an idle chat', () => {
+    setLocale('zh-CN')
+    useAppStore.setState({ syncBySession: { 'chat-1': { status: 'syncing', error: null } } })
+    render(<Composer />)
+    expect(screen.queryByText('同步中…')).not.toBeInTheDocument()
+    act(() => useAppStore.setState({ activeSessionIds: new Set(['chat-1']) }))
+    expect(screen.getByText('同步中…')).toHaveClass('composer-sync-status')
+    act(() => useAppStore.setState({ activeSessionIds: new Set() }))
+    expect(screen.queryByText('同步中…')).not.toBeInTheDocument()
+  })
+
+  it('keeps explicit Stop and Send now confirmations for an unknown origin despite its neutral status', async () => {
+    const stop = vi.fn()
+    const runNow = vi.fn()
+    window.agentsDock.turns = { stop } as unknown as AgentsDockAPI['turns']
+    window.agentsDock.queue = { runNow } as unknown as AgentsDockAPI['queue']
+    useAppStore.setState({
+      activeSessionIds: new Set(['chat-1']),
+      syncBySession: { 'chat-1': { status: 'cached', error: null } },
+      snapshots: { 'chat-1': {
+        session: { id: 'chat-1', title: 'Chat', backend: 'codex' }, events: [],
+        queuedTurns: [{ queued_id: 'queued-user', session_id: 'chat-1', prompt: 'User follow-up', file_ids: [], position: 1 }],
+        files: [], hasMoreEvents: false, filesTotal: 0, cachedAt: 0
+      } }
+    })
+    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(false)
+    try {
+      render(<Composer />)
+      expect(screen.getByText('Syncing…')).toHaveClass('composer-sync-status')
+      await userEvent.click(screen.getByRole('button', { name: 'Stop' }))
+      await userEvent.click(screen.getByRole('button', { name: 'Send now' }))
+      expect(confirm).toHaveBeenCalledTimes(2)
+      expect(confirm.mock.calls[0]?.[0]).toMatch(/chat sync is not live.*Stop anyway\?/)
+      expect(confirm.mock.calls[1]?.[0]).toMatch(/chat sync is not live.*Send now anyway\?/)
+      expect(stop).not.toHaveBeenCalled()
+      expect(runNow).not.toHaveBeenCalled()
+    } finally { confirm.mockRestore() }
+  })
+
   it.each([
-    ['cross_chat_handoff_delivery', 'chat-to-chat'],
-    ['secure_peer_handoff_delivery', 'encrypted peer']
-  ])('warns and confirms before Stop or Send now interrupts an active %s run', async (purpose, label) => {
+    ['cross_chat_handoff_delivery', 'chat-to-chat', 'live'],
+    ['secure_peer_handoff_delivery', 'encrypted peer', 'live'],
+    ['cross_chat_handoff_delivery', 'chat-to-chat', 'reconnecting'],
+    ['secure_peer_handoff_delivery', 'encrypted peer', 'reconnecting']
+  ] as const)('warns and confirms before Stop or Send now interrupts an active %s (%s) run while sync is %s', async (purpose, label, syncStatus) => {
     const stop = vi.fn().mockResolvedValue({ stopped: true, pending: false, message: '' })
     const runNow = vi.fn().mockResolvedValue(true)
     const list = vi.fn().mockResolvedValue([])
@@ -1649,6 +1792,7 @@ describe('Composer', () => {
     useAppStore.setState({
       activeSessionIds: new Set(['chat-1']),
       stoppingSessionIds: new Set(),
+      syncBySession: { 'chat-1': { status: syncStatus, error: null } },
       snapshots: {
         'chat-1': {
           session: { id: 'chat-1', title: 'Chat', backend: 'codex' },
@@ -1671,7 +1815,8 @@ describe('Composer', () => {
     try {
       const user = userEvent.setup()
       render(<Composer />)
-      expect(screen.getByText(new RegExp(`incoming ${label} delivery is running`, 'i'))).toBeInTheDocument()
+      expect(screen.getByText(new RegExp(`incoming ${label} delivery is running`, 'i'))).toHaveClass('chat-reference-warning')
+      expect(screen.queryByText('Syncing…')).not.toBeInTheDocument()
 
       await user.click(screen.getByRole('button', { name: 'Stop' }))
       expect(stop).not.toHaveBeenCalled()

@@ -1,5 +1,6 @@
 import type { LanguagePreference } from './i18n'
 import type { SharedChatAttribution } from './chat-shares'
+import type { SideQuestionsCapability } from './side-questions'
 import type { MailHintProjection, TeamMailHintsCapability } from './team-mail-hints'
 import type { TeamActivityHintsCapability } from './team-bulletin-hints'
 
@@ -12,6 +13,7 @@ export type JsonPrimitive = string | number | boolean | null
 export type JsonValue = JsonPrimitive | JsonValue[] | { [key: string]: JsonValue }
 
 export type Backend = 'claude' | 'codex' | 'cursor'
+export type CodexProvider = 'default' | 'custom'
 export type ChatSyncStatus = 'idle' | 'cached' | 'syncing' | 'live' | 'reconnecting' | 'offline' | 'error'
 export type ServerConnectionState = 'online' | 'degraded' | 'connecting' | 'retrying' | 'offline' | 'cached'
 
@@ -253,6 +255,68 @@ export interface CodexGoalsConfiguration {
 /** Server selection displayed by the caller, checked before sending an admin request. */
 export type CodexServerSettingsScope = Pick<WorkspaceProfileScope, 'profileId' | 'profileGeneration'>
 
+/** Native Codex account metadata only. Credentials never cross back to the renderer. */
+export interface CodexAuthStatus {
+  available: boolean
+  auth_mode: 'apiKey' | 'chatgpt' | 'other' | 'none'
+  email: string | null
+  plan_type: string | null
+  requires_openai_auth: boolean
+}
+
+/** Custom Responses provider; never contains stored credentials. */
+export interface CodexProviderConfiguration {
+  available: boolean
+  configured: boolean
+  base_url: string | null
+  model: string | null
+  has_api_key: boolean
+  wire_api: 'responses'
+  credential_id?: string
+}
+
+/** Transient input sent only to the selected server's native admin route. */
+export interface CodexProviderInput {
+  base_url: string
+  model?: string
+  api_key: string
+}
+
+export interface CodexProviderTestResult {
+  ok: boolean
+  status: 'ready' | 'unsupported' | 'unsupported_parameter' | 'inconclusive' | 'authentication_failed' | 'connection_failed' | 'model_unavailable' | 'failed'
+  message: string
+  model?: string
+  compatibility?: 'unverified' | 'verified' | 'unsupported'
+  scope?: 'isolated_native_tools_and_continuation'
+  checks?: { native_tool_call: boolean; tool_roundtrip: boolean; continuation: boolean }
+  reasoning_summary_supported?: boolean | null
+  summary_check?: 'supported' | 'unsupported' | 'inconclusive' | 'not_checked'
+}
+
+export interface CodexProviderModelTestInput {
+  model: string
+  session_id?: string
+  credential_id?: string
+}
+
+export interface RuntimeModelCapability {
+  kind: 'chat' | 'unknown'
+  compatibility: 'unverified' | 'verified' | 'unsupported'
+  reasoning_efforts: string[]
+  reasoning_supported: boolean | null
+  reasoning_summary_supported?: boolean | null
+}
+
+export interface CodexProviderModels {
+  models: RuntimeModelOption[]
+  efforts: RuntimeOption[]
+  model_efforts?: Record<string, RuntimeOption[]>
+  model_capabilities?: Record<string, RuntimeModelCapability>
+  default_model: string | null
+  default_effort: string | null
+}
+
 /** Server override, not the provider's resolved or currently running limit. */
 export interface CodexSubagentsConfiguration {
   configurable: boolean
@@ -328,15 +392,31 @@ export interface CodexBackgroundTerminalsCleanInput {
   confirmed: boolean
 }
 
+export interface SessionSubagentLimitControl {
+  supported: boolean
+  /** Default fields may be omitted from compact session-list responses. */
+  scope?: 'chat'
+  mode?: 'native_concurrent'
+  applies_to?: 'new_or_reloaded_threads' | 'next_idle_provider_start' | 'next_provider_process_start'
+  reason?: string | null
+  message?: string
+}
+
 export interface Session {
   id: string
   title: string
   folder?: string | null
   cwd?: string | null
   backend: Backend
+  /** Missing on older sessions means native Codex's default provider. */
+  codex_provider?: CodexProvider
+  /** Safe catalog for this chat's retained endpoint credentials. */
+  codex_provider_catalog?: RuntimeBackendCatalog['custom_provider']
   model?: string | null
   effort?: string | null
   system_prompt?: string | null
+  subagent_limit?: number | null
+  subagent_limit_control?: SessionSubagentLimitControl
   /** Durable server-side fence set when the first ordinary chat turn is admitted. */
   backend_locked?: boolean | null
   session_id?: string | null
@@ -426,11 +506,25 @@ export interface RuntimeDiagnostic {
   last_error_at?: string | null
 }
 export interface RuntimeBackendCatalog {
+  /** Safe metadata only; credentials stay on the server. */
+  custom_provider?: {
+    configured: boolean
+    available: boolean
+    model: string | null
+    base_url: string | null
+    models?: RuntimeModelOption[]
+    efforts?: RuntimeOption[]
+    model_efforts?: Record<string, RuntimeOption[]>
+    model_capabilities?: Record<string, RuntimeModelCapability>
+    default_model?: string | null
+    default_effort?: string | null
+  }
   /** Explicit backend availability; required before optional backends are selectable. */
   available?: boolean
   models: RuntimeModelOption[]
   efforts: RuntimeOption[]
   model_efforts?: Record<string, RuntimeOption[]>
+  model_capabilities?: Record<string, RuntimeModelCapability>
   model_source?: string | null
   effort_source?: string | null
   default_model?: string | null
@@ -897,6 +991,10 @@ export interface Event extends SharedChatAttribution {
   provider_generated?: boolean | null
   provider_input_sha256?: string | null
   phase?: string | null
+  /** Durable summary placement at its first streamed section, without changing its ledger sequence. */
+  reasoning_after_seq?: number
+  /** Provider-supplied reasoning retained when its native item ended without authoritative completion. */
+  partial?: boolean
   /** Provider message identity when supplied by native output or history. */
   provider_message_id?: string | null
   /** True only for transcript records recovered by AgentsServer history import. */
@@ -1578,6 +1676,9 @@ export interface SessionForkCompletedPrefixCapability {
 }
 
 export interface HealthCapabilities {
+  subagent_limit_v1?: { version: number; backends?: Backend[] }
+  codex_provider_v1?: { available?: boolean; version?: number; per_chat?: boolean; per_chat_models?: boolean; model_discovery?: boolean; model_compatibility?: boolean }
+  side_questions?: SideQuestionsCapability
   tmux?: ServerCapability
   workspace_files?: WorkspaceFilesCapability
   working_directory_completion?: WorkingDirectoryCompletionCapability
@@ -1603,7 +1704,7 @@ export interface HealthCapabilities {
   pinned_items?: PinnedItemsCapability
   port_forwarding_v1?: PortForwardingCapability
   websocket_auth_v1?: ServerCapability
-  [key: string]: ServerCapability | ServerRestartCapability | TeamHubV1Capability | TeamHubHostControlCapability | LocalSessionImportCapability | SessionForkCompletedPrefixCapability | AgentEmergencyAlertsCapability | TeamMailHintsCapability | TeamActivityHintsCapability | AgentTeamMailCapability | AgentTeamMessagesCapability | TeamBulletinAliasCapability | TeamAllServersAliasCapability | PinnedItemsCapability | JsonValue | undefined
+  [key: string]: SideQuestionsCapability | ServerCapability | ServerRestartCapability | TeamHubV1Capability | TeamHubHostControlCapability | LocalSessionImportCapability | SessionForkCompletedPrefixCapability | AgentEmergencyAlertsCapability | TeamMailHintsCapability | TeamActivityHintsCapability | AgentTeamMailCapability | AgentTeamMessagesCapability | TeamBulletinAliasCapability | TeamAllServersAliasCapability | PinnedItemsCapability | JsonValue | undefined
 }
 
 export interface Health {
@@ -1715,6 +1816,10 @@ export interface ProviderRuntimeChanged {
   context_usage?: CodexTokenUsage | ClaudeTokenUsage | null
 }
 export interface ProfileProviderRuntimeEvent extends ProfileEventContext { event: ProviderRuntimeChanged }
+export interface ProfileReasoningStreamEvent extends ProfileEventContext {
+  sessionId: string
+  snapshot: ReasoningSummaryStreamSnapshot | null
+}
 export interface ProfileJobsEvent extends ProfileEventContext { jobs: Job[] }
 export interface ProfileRuntimeEvent extends ProfileEventContext { runtimeCatalog: RuntimeCatalog }
 export interface ProfileFilesEvent extends ProfileEventContext { sessionId: string; files: AgentFile[]; total: number }
@@ -2053,6 +2158,26 @@ export interface SessionSnapshot {
   generation?: number
   /** Renderer-only epoch for a genuinely disjoint authoritative timeline replacement. */
   timelineListGeneration?: number
+  /** Renderer-only provider reasoning channels; never part of the durable event/cache cursor. */
+  reasoningStream?: ReasoningSummaryStreamSnapshot
+}
+
+export interface ReasoningSummaryStreamItem extends Omit<Partial<Event>, 'seq' | 'id' | 'session_id' | 'type' | 'run_id' | 'item_id' | 'backend' | 'phase' | 'text' | 'ts'> {
+  run_id: string
+  item_id: string
+  backend: 'codex'
+  phase: 'summary' | 'reasoning'
+  text: string
+  ts: string
+  after_seq: number
+}
+
+export interface ReasoningSummaryStreamSnapshot {
+  type: 'reasoning_summary_stream'
+  session_id: string
+  instance_id: string
+  revision: number
+  items: ReasoningSummaryStreamItem[]
 }
 
 export interface ViewState {
@@ -2145,9 +2270,11 @@ export interface CreateSessionInput {
   folder: string
   cwd: string
   backend: Backend
+  codex_provider?: CodexProvider
   model?: string | null
   effort?: string | null
   system_prompt?: string | null
+  subagent_limit?: number | null
   codex_approval_policy?: CodexApprovalPolicy | null
   codex_sandbox_mode?: CodexSandboxMode | null
   codex_permission_profile?: string | null
@@ -2183,9 +2310,11 @@ export interface UpdateSessionInput {
   folder?: string
   cwd?: string
   backend?: Backend
+  codex_provider?: CodexProvider
   model?: string | null
   effort?: string | null
   system_prompt?: string | null
+  subagent_limit?: number | null
   codex_approval_policy?: CodexApprovalPolicy | null
   codex_sandbox_mode?: CodexSandboxMode | null
   codex_permission_profile?: string | null
@@ -2271,6 +2400,7 @@ export interface AppEventMap {
   'server:sessions': ProfileSessionsEvent
   'server:event': ProfileAgentEvent
   'server:provider-runtime': ProfileProviderRuntimeEvent
+  'server:reasoning-stream': ProfileReasoningStreamEvent
   'server:jobs': ProfileJobsEvent
   'server:runtime': ProfileRuntimeEvent
   'server:pins': ProfilePinsEvent

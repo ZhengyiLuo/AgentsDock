@@ -402,9 +402,15 @@ describe('chat forking', () => {
     }
   })
 
-  it('translates a raced server conflict instead of exposing the raw IPC error', async () => {
+  it.each([
+    ['wait for or stop the active turn before forking this chat', RUNNING_FORK_UNAVAILABLE],
+    [
+      'The native completed-turn fork could not be verified. The running chat was left unchanged.',
+      'The native completed-turn fork could not be verified. The running chat was left unchanged.'
+    ]
+  ])('shows a readable fork failure for %s', async (detail, expectedMessage) => {
     const fork = vi.fn().mockRejectedValue(new Error(
-      "Error invoking remote method 'sessions:fork': Error: wait for or stop the active turn before forking this chat"
+      `Error invoking remote method 'sessions:fork': Error: ${detail}`
     ))
     Object.defineProperty(window, 'agentsDock', {
       configurable: true,
@@ -419,7 +425,7 @@ describe('chat forking', () => {
     await useAppStore.getState().forkSession('chat-1')
 
     expect(fork).toHaveBeenCalledWith('chat-1')
-    expect(useAppStore.getState().error).toBe(RUNNING_FORK_UNAVAILABLE)
+    expect(useAppStore.getState().error).toBe(expectedMessage)
   })
 })
 
@@ -928,6 +934,27 @@ describe('instant new chat defaults', () => {
     error: null,
     modals: closedModals
   }))
+
+  it.each([true, false])('preserves custom Codex defaults and fails closed when readiness is %s', async ready => {
+    const stored = { version: 1, folder: 'Saved', cwd: '/work/saved', backend: 'codex', codex_provider: 'custom', model: 'gpt-6-astra', effort: null }
+    const create = vi.fn().mockResolvedValue({ id: 'custom-created', title: 'New chat', ...stored })
+    Object.defineProperty(window, 'agentsDock', { configurable: true, value: {
+      native: { analyticsDisabled: true }, preferences: { getScoped: vi.fn().mockResolvedValue(stored), setScoped: vi.fn().mockResolvedValue(undefined) }, sessions: { create }
+    } as unknown as AgentsDockAPI })
+    useAppStore.setState({ requestNewChat, profiles: [profile], activeProfileId: profile.id, profileGeneration: 1, switchingProfileId: null,
+      sessions: [], selectedSessionId: null, folderOrder: [], creatingChat: false, modals: closedModals,
+      health: { ok: true, capabilities: { codex_provider_v1: { per_chat: true, per_chat_models: true } } },
+      runtimeCatalog: { backends: { codex: { models: [], efforts: [], custom_provider: {
+        configured: ready, available: ready, model: ready ? 'gpt-6-astra' : null, base_url: ready ? 'https://inference.example/v1' : null
+      } } } }, refreshSessions: vi.fn().mockResolvedValue(undefined), selectSession: vi.fn().mockResolvedValue(undefined)
+    })
+    await useAppStore.getState().requestNewChat()
+    if (ready) expect(create).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ backend: 'codex', codex_provider: 'custom', model: 'gpt-6-astra' }))
+    else {
+      expect(create).not.toHaveBeenCalled()
+      expect(useAppStore.getState().modals.newChat).toBe(true)
+    }
+  })
 
   it('opens the chooser for the first chat in an empty workspace', async () => {
     const create = vi.fn()
@@ -4852,6 +4879,57 @@ describe('bootstrap', () => {
     )
     resolveRoutes({ routes: [freshRoute], max_routes: 16 })
     await vi.waitFor(() => expect(useAppStore.getState().agentRoutesBySession['chat-a']?.routes).toEqual([freshRoute]))
+  })
+})
+
+describe('live reasoning summary store integration', () => {
+  it('fences transient summaries by profile and revision, reconciles completion, and clears on reconnect', async () => {
+    const profile = profileFor('profile-reasoning')
+    const handlers = new Map<string, (payload: any) => void>()
+    Object.defineProperty(window, 'agentsDock', {
+      configurable: true,
+      value: {
+        bootstrap: vi.fn().mockResolvedValue(profileBootstrap(profile, [profile], 3)),
+        native: { log: vi.fn().mockResolvedValue(undefined), setBadge: vi.fn().mockResolvedValue(undefined), notify: vi.fn() },
+        events: { on: vi.fn((channel: string, handler: (payload: any) => void) => { handlers.set(channel, handler); return () => {} }) }
+      } as unknown as AgentsDockAPI
+    })
+    useAppStore.setState({ initialized: false, profiles: [], activeProfileId: null, profileGeneration: 0,
+      sessions: [], selectedSessionId: null, chatPanes: { primary: null, secondary: null },
+      focusedChatPane: 'primary', snapshots: {} })
+    await useAppStore.getState().initialize()
+    const initial = snapshot('chat-1', [event('turn_started', { run_id: 'run' })])
+    useAppStore.setState({ snapshots: { 'chat-1': initial }, selectedSessionId: 'chat-1',
+      chatPanes: { primary: 'chat-1', secondary: null }, sessions: [initial.session] })
+    const context = { profileId: profile.id, profileGeneration: 3, sessionId: 'chat-1' }
+    const stream = { type: 'reasoning_summary_stream', session_id: 'chat-1', instance_id: 'server-one', revision: 2,
+      items: [{ run_id: 'run', item_id: 'thought', backend: 'codex', phase: 'summary', text: 'First section',
+        ts: '2026-09-20T04:00:00Z', after_seq: 1 }] }
+    const deliver = handlers.get('server:reasoning-stream')!
+    deliver({ ...context, snapshot: stream })
+    expect(useAppStore.getState().snapshots['chat-1'].reasoningStream).toEqual(stream)
+    expect(useAppStore.getState().snapshots['chat-1'].events).toBe(initial.events)
+    for (const payload of [
+      { ...context, profileGeneration: 2, snapshot: { ...stream, revision: 9, items: [] } },
+      { ...context, profileId: 'other-server', snapshot: { ...stream, revision: 9, items: [] } },
+      { ...context, snapshot: { ...stream, revision: 1, items: [] } },
+      { ...context, snapshot: { ...stream, session_id: 'wrong-chat', revision: 9, items: [] } }
+    ]) deliver(payload)
+    expect(useAppStore.getState().snapshots['chat-1'].reasoningStream).toEqual(stream)
+    handlers.get('server:event')!({ ...context, event: event('reasoning_summary', {
+      id: 'completed-thought', seq: 2, run_id: 'run', item_id: 'thought', text: 'Authoritative final section'
+    }) })
+    deliver({ ...context, snapshot: { ...stream, revision: 3, items: [] } })
+    expect(useAppStore.getState().snapshots['chat-1'].events.at(-1)?.text).toBe('Authoritative final section')
+    expect(useAppStore.getState().snapshots['chat-1'].reasoningStream?.items).toEqual([])
+    deliver({ ...context, snapshot: { ...stream, revision: 4 } })
+    handlers.get('server:sync')!({ ...context, state: 'reconnecting' })
+    expect(useAppStore.getState().snapshots['chat-1'].reasoningStream).toBeUndefined()
+    deliver({ ...context, snapshot: { ...stream, instance_id: 'server-two', revision: 0 } })
+    expect(useAppStore.getState().snapshots['chat-1'].reasoningStream?.instance_id).toBe('server-two')
+    useAppStore.setState({ selectedSessionId: null, chatPanes: { primary: null, secondary: null } })
+    handlers.get('server:sync')!({ ...context, state: 'idle' })
+    expect(useAppStore.getState().snapshots['chat-1'].reasoningStream).toBeUndefined()
   })
 })
 

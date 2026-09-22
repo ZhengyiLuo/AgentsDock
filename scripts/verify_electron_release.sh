@@ -99,7 +99,12 @@ ACTUAL_SHA512="$(/usr/bin/openssl dgst -sha512 -binary "$ZIP_PATH" | /usr/bin/op
 /usr/sbin/spctl --assess --type open --context context:primary-signature --verbose=4 "$DMG_PATH"
 /usr/bin/xcrun stapler validate "$DMG_PATH"
 
-TEMP_DIR="$(/usr/bin/mktemp -d /tmp/agentsdock-release.XXXXXX)"
+TEMP_ROOT="${TMPDIR:-/tmp}"
+[[ -d "$TEMP_ROOT" && -w "$TEMP_ROOT" ]] || {
+  echo "Release verification temp directory is unavailable: $TEMP_ROOT" >&2
+  exit 2
+}
+TEMP_DIR="$(/usr/bin/mktemp -d "${TEMP_ROOT%/}/agentsdock-release.XXXXXX")"
 MOUNT_DIR="$TEMP_DIR/dmg"
 DMG_ATTACHED=false
 SMOKE_PID=""

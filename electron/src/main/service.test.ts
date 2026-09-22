@@ -16,6 +16,7 @@ import type {
   JobRunNowResult,
   JobRunHistoryPage,
   LocalSessionCandidate,
+  ReasoningSummaryStreamSnapshot,
   RuntimeCatalog,
   ServerRestartRequest,
   ServerRestartStatus,
@@ -301,6 +302,14 @@ describe('opening artifact files externally', () => {
 })
 
 describe('session summary merging', () => {
+  it('keeps the retained endpoint model list when a slim summary omits it', () => {
+    const catalog = { configured: true, available: true, model: null, base_url: 'https://first.example/v1',
+      models: [{ value: 'first/model', label: 'First' }], model_efforts: { 'first/model': [{ value: 'high', label: 'High' }] } }
+    const existing: Session = { id: 'chat', title: 'Chat', backend: 'codex', codex_provider: 'custom', codex_provider_catalog: catalog }
+    const { models: _models, model_efforts: _efforts, ...summary } = catalog
+    expect(mergeSessionSummaries([existing], [{ ...existing, codex_provider_catalog: summary }])[0].codex_provider_catalog).toEqual(catalog)
+    expect(mergeSessionSummaries([existing], [{ ...existing, codex_provider_catalog: { ...summary, base_url: 'https://second.example/v1' } }])[0].codex_provider_catalog?.models).toBeUndefined()
+  })
   it('preserves selected-session details omitted by compact polling', () => {
     const previous: Session[] = [{
       id: 'chat',
@@ -612,11 +621,12 @@ describe('background refresh failures', () => {
     }
   })
 
-  it('publishes reconnect health before deferring the fetched session apply', async () => {
+  it('restores requested live streams during input while deferring session metadata', async () => {
     vi.useFakeTimers()
     let service: AppService | null = null
     try {
       const fetchedSessions = deferred<Session[]>()
+      const cachedSession = emptyTimelinePage('chat').session
       let healthRequest = 0
       let sessionRequest = 0
       const active = fakeClient({
@@ -624,22 +634,33 @@ describe('background refresh failures', () => {
           if (++healthRequest === 1) throw new Error('offline')
           return { ok: true }
         },
-        sessions: () => ++sessionRequest === 1 ? Promise.resolve([]) : fetchedSessions.promise
+        sessions: () => ++sessionRequest === 1 ? Promise.resolve([]) : fetchedSessions.promise,
+        sessionPage: async sessionId => emptyTimelinePage(sessionId),
+        stream: (_sessionId, _after, _onEvent, onState) => {
+          onState(true)
+          return vi.fn()
+        }
       })
       const inactive = fakeClient()
       const created = createProfileService({
         'http://a.test:7850': [active],
         'http://b.test:7850': [inactive]
-      })
+      }, cache => cache.putSessions('profile:a', [cachedSession]))
       service = created.service
       const { listeners, window } = addInteractiveWindow(service)
       service.start()
       await settleImmediateRefresh()
+      await service.subscribeTimeline('chat', 0)
+      await service.subscribeTimeline('hidden-chat', 0)
+      await settleImmediateRefresh()
+      expect(active.sessionPage).not.toHaveBeenCalled()
+      expect(active.stream).not.toHaveBeenCalled()
       window.webContents.send.mockClear()
       const putSessions = vi.spyOn(created.cache, 'putSessions')
 
       await vi.advanceTimersByTimeAsync(30_000)
       listeners.get('before-input-event')?.({}, { type: 'keyDown' })
+      service.unsubscribeTimeline('hidden-chat')
       fetchedSessions.resolve([{ id: 'chat', title: 'Recovered', backend: 'codex' }])
       await settleImmediateRefresh()
 
@@ -647,8 +668,27 @@ describe('background refresh failures', () => {
         'server:connection',
         expect.objectContaining({ connected: true })
       ])
+      expect(active.sessionPage).toHaveBeenCalledOnce()
+      expect(active.sessionPage.mock.calls[0][0]).toBe('chat')
+      expect(active.stream).toHaveBeenCalledOnce()
+      expect(active.stream.mock.calls[0][0]).toBe('chat')
+      expect(window.webContents.send).toHaveBeenCalledWith('server:sync',
+        expect.objectContaining({ sessionId: 'chat', state: 'live' }))
       expect(putSessions).not.toHaveBeenCalled()
-      expect((await service.bootstrap()).sessions).toEqual([])
+      expect(window.webContents.send).not.toHaveBeenCalledWith('server:sessions', expect.anything())
+      expect((await service.bootstrap()).sessions).toEqual([cachedSession])
+
+      for (let index = 0; index < 6; index += 1) {
+        await vi.advanceTimersByTimeAsync(500)
+        listeners.get('before-input-event')?.({}, { type: 'char' })
+      }
+      expect(putSessions).not.toHaveBeenCalled()
+      expect(active.stream).toHaveBeenCalledOnce()
+      await vi.advanceTimersByTimeAsync(2_999)
+      expect(putSessions).not.toHaveBeenCalled()
+      await vi.advanceTimersByTimeAsync(1)
+      expect(putSessions).toHaveBeenCalledOnce()
+      expect(window.webContents.send.mock.calls.filter(([channel]) => channel === 'server:sessions')).toHaveLength(1)
     } finally {
       service?.stop()
       vi.useRealTimers()
@@ -913,6 +953,182 @@ describe('server-wide Codex subagents scope', () => {
   )
 })
 
+describe('Codex account status profile isolation', () => {
+  const caller = { profileId: 'profile-a', profileGeneration: 1 }
+  const account = { available: true, auth_mode: 'apiKey', email: null, plan_type: null, requires_openai_auth: true }
+  function harness() {
+    const client = { codexAuth: vi.fn().mockResolvedValue(account) }
+    const scope = { profileId: caller.profileId, generation: 1, namespace: 'profile:profile-a', client }
+    const service = Object.create(AppService.prototype) as AppService
+    Object.assign(service, { scope, activeProfileId: caller.profileId, profileGeneration: 1,
+      validatedGeneration: 1, profileResetIsPending: vi.fn().mockReturnValue(false) })
+    return { service, client }
+  }
+  it('reads the captured account and has no credential-mutation method', async () => {
+    const { service, client } = harness()
+    expect(await service.codexAuth(caller)).toEqual(account)
+    expect(client.codexAuth).toHaveBeenCalledOnce()
+    expect(service).not.toHaveProperty('codexLoginWithApiKey')
+  })
+  it('rejects a stale renderer before reading another server', async () => {
+    const { service, client } = harness()
+    Object.assign(service, { activeProfileId: 'profile-b', profileGeneration: 2 })
+    await expect(service.codexAuth(caller)).rejects.toThrow('superseded')
+    expect(client.codexAuth).not.toHaveBeenCalled()
+  })
+  it('rejects a late account result after switching servers', async () => {
+    const { service, client } = harness()
+    const response = deferred<typeof account>(), called = deferred<void>()
+    client.codexAuth.mockImplementation(() => { called.resolve(); return response.promise })
+    const pending = service.codexAuth(caller)
+    await called.promise
+    Object.assign(service, { activeProfileId: 'profile-b', profileGeneration: 2 })
+    response.resolve(account)
+    await expect(pending).rejects.toThrow('superseded')
+    expect(client.codexAuth).toHaveBeenCalledOnce()
+  })
+})
+
+describe('Codex endpoint request profile isolation', () => {
+  const caller = { profileId: 'provider-a', profileGeneration: 1 }
+  const configuration = { available: true, configured: true, base_url: 'https://gateway.example/v1',
+    model: 'gpt-6-astra', has_api_key: true, wire_api: 'responses' }
+  const input = { base_url: configuration.base_url, model: configuration.model, api_key: 'synthetic-key' }
+  const testResult = { ok: true, status: 'ready', message: '' }
+  function harness() {
+    const client = { codexProviderModels: vi.fn().mockRejectedValue(new Error('offline discovery')), codexProvider: vi.fn().mockResolvedValue(configuration), testCodexProvider: vi.fn().mockResolvedValue(testResult),
+      setCodexProvider: vi.fn().mockResolvedValue(configuration), resetCodexProvider: vi.fn().mockResolvedValue(configuration) }
+    const service = Object.create(AppService.prototype) as AppService
+    const refreshRuntime = vi.fn().mockResolvedValue(undefined)
+    Object.assign(service, { scope: { profileId: caller.profileId, generation: 1, namespace: 'profile:provider-a', client },
+      activeProfileId: caller.profileId, profileGeneration: 1, validatedGeneration: 1,
+      health: { capabilities: { codex_provider_v1: { available: true, per_chat: true, per_chat_models: true } } },
+      profileResetIsPending: vi.fn().mockReturnValue(false), refreshRuntime })
+    return { service, client, refreshRuntime }
+  }
+  it('does not refresh or save during testing; saves/resets explicitly refresh once', async () => {
+    const { service, client, refreshRuntime } = harness()
+    expect(await service.codexProvider(caller)).toEqual(configuration)
+    expect(await service.testCodexProvider(caller, input)).toEqual(testResult)
+    expect(refreshRuntime).not.toHaveBeenCalled()
+    expect(client.setCodexProvider).not.toHaveBeenCalled()
+    expect(await service.setCodexProvider(caller, input)).toEqual(configuration)
+    expect(refreshRuntime).toHaveBeenCalledOnce()
+    await service.resetCodexProvider(caller)
+    expect(refreshRuntime).toHaveBeenCalledTimes(2)
+    expect(client.testCodexProvider.mock.calls).toEqual([[input]])
+    expect(client.setCodexProvider.mock.calls).toEqual([[input]])
+  })
+  it.each(['codexProvider', 'testCodexProvider', 'setCodexProvider', 'resetCodexProvider'] as const)(
+    'rejects stale selection before %s can dispatch any key', async action => {
+      const { service, client } = harness()
+      Object.assign(service, { activeProfileId: 'provider-b', profileGeneration: 2 })
+      await expect(service[action](caller, input)).rejects.toThrow('superseded')
+      for (const request of Object.values(client)) expect(request).not.toHaveBeenCalled()
+    }
+  )
+  it('discards late endpoint test result after changing servers', async () => {
+    const { service, client, refreshRuntime } = harness()
+    const response = deferred<typeof testResult>(), started = deferred<void>()
+    client.testCodexProvider.mockImplementation(() => { started.resolve(); return response.promise })
+    const pending = service.testCodexProvider(caller, input)
+    await started.promise
+    Object.assign(service, { activeProfileId: 'provider-b', profileGeneration: 2 })
+    response.resolve(testResult)
+    await expect(pending).rejects.toThrow('superseded')
+    expect(refreshRuntime).not.toHaveBeenCalled()
+  })
+  it('does not turn saved settings into a failure when readiness refresh fails', async () => {
+    const { service, client, refreshRuntime } = harness()
+    refreshRuntime.mockRejectedValue(new Error('offline'))
+    await expect(service.setCodexProvider(caller, input)).resolves.toEqual(configuration)
+    expect(client.setCodexProvider).toHaveBeenCalledOnce()
+  })
+  it('completes saving before a slow endpoint model discovery returns', async () => {
+    const { service, client } = harness()
+    client.codexProviderModels.mockImplementation(() => new Promise(() => {}))
+    await expect(service.setCodexProvider(caller, input)).resolves.toEqual(configuration)
+    expect(client.codexProviderModels).toHaveBeenCalledOnce()
+  })
+  it('does not configure a custom endpoint on older global-override servers, but permits recovery reset', async () => {
+    const { service, client } = harness()
+    Object.assign(service, { health: { capabilities: { codex_provider_v1: { available: true } } } })
+    await expect(service.setCodexProvider(caller, input)).rejects.toThrow('CODEX_PROVIDER_UPDATE')
+    expect(client.setCodexProvider).not.toHaveBeenCalled()
+    await expect(service.resetCodexProvider(caller)).resolves.toEqual(configuration)
+  })
+})
+
+describe('per-chat Codex endpoint compatibility', () => {
+  function harness(perChat: boolean) {
+    const session = { id: 'chat', title: 'Chat', backend: 'codex', codex_provider: 'custom' }
+    const client = { createSession: vi.fn().mockResolvedValue(session), updateSession: vi.fn().mockResolvedValue(session) }
+    const service = Object.create(AppService.prototype) as AppService
+    Object.assign(service, { scope: { profileId: 'profile', generation: 1, namespace: 'profile:profile', client },
+      activeProfileId: 'profile', profileGeneration: 1, validatedGeneration: 1,
+      profileResetIsPending: vi.fn().mockReturnValue(false), upsertSession: vi.fn(),
+      health: { capabilities: { codex_provider_v1: { available: true, per_chat: perChat } } } })
+    return { service, client }
+  }
+  const draft = { title: 'Chat', folder: 'General', cwd: '/work', backend: 'codex' as const, codex_provider: 'custom' as const }
+  it('refuses an old server before it can silently create or switch to ordinary Codex', async () => {
+    const { service, client } = harness(false)
+    await expect(service.createSession(draft)).rejects.toThrow('Update AgentsServer')
+    await expect(service.resumeSession({ ...draft, providerId: 'native-thread' })).rejects.toThrow('Update AgentsServer')
+    await expect(service.updateSession('chat', { codex_provider: 'custom' })).rejects.toThrow('Update AgentsServer')
+    expect(client.createSession).not.toHaveBeenCalled()
+    expect(client.updateSession).not.toHaveBeenCalled()
+  })
+  it('passes explicit choices to a capable server without changing normal chat behavior', async () => {
+    const { service, client } = harness(true)
+    await service.createSession(draft)
+    await service.updateSession('chat', { codex_provider: 'default' })
+    expect(client.createSession).toHaveBeenCalledWith(draft)
+    expect(client.updateSession).toHaveBeenCalledWith('chat', { codex_provider: 'default' })
+    const legacy = harness(false)
+    await legacy.service.createSession({ ...draft, codex_provider: undefined })
+    expect(legacy.client.createSession).toHaveBeenCalledOnce()
+  })
+})
+
+describe('per-chat sub-agent limit ownership', () => {
+  function harness(capable = true) {
+    const client = { createSession: vi.fn(), updateSession: vi.fn().mockResolvedValue({ id: 'chat' }) }
+    const service = Object.create(AppService.prototype) as AppService
+    Object.assign(service, { scope: { profileId: 'one', generation: 4, namespace: 'one', client },
+      activeProfileId: 'one', profileGeneration: 4, validatedGeneration: 4,
+      settings: { getProfile: () => ({ serverIdentity: 'server-one' }) },
+      profileResetIsPending: vi.fn().mockReturnValue(false), upsertSession: vi.fn(),
+      health: { capabilities: capable ? { subagent_limit_v1: { version: 1 } } : {} } })
+    return { service, client }
+  }
+  const scope = { profileId: 'one', profileGeneration: 4, serverIdentity: 'server-one' }
+  it('refuses a stale target before issuing any request', async () => {
+    const { service, client } = harness()
+    await expect(service.updateSession('chat', { subagent_limit: 3 }, { ...scope, profileGeneration: 3 })).rejects.toThrow()
+    await expect(service.updateSession('chat', { subagent_limit: 3 }, { ...scope, serverIdentity: 'replaced' })).rejects.toThrow()
+    expect(client.updateSession).not.toHaveBeenCalled()
+    await service.updateSession('chat', { subagent_limit: 3 }, scope)
+    expect(client.updateSession).toHaveBeenCalledExactlyOnceWith('chat', { subagent_limit: 3 })
+  })
+  it('refuses old servers even when clearing, before silent field loss', async () => {
+    const { service, client } = harness(false)
+    await expect(service.updateSession('chat', { subagent_limit: null }, scope)).rejects.toThrow('Update AgentsServer')
+    await expect(service.createSession({ title: 'Chat', folder: '', cwd: '', backend: 'codex', subagent_limit: 3 })).rejects.toThrow('Update AgentsServer')
+    expect(client.updateSession).not.toHaveBeenCalled()
+    expect(client.createSession).not.toHaveBeenCalled()
+  })
+  it('validates positive whole numbers and preserves the explicit null reset', async () => {
+    const { service, client } = harness()
+    for (const value of [0, -1, 1.5, true, '2', Number.MAX_SAFE_INTEGER + 1]) {
+      await expect(service.updateSession('chat', { subagent_limit: value as number }, scope)).rejects.toThrow('positive whole number')
+    }
+    expect(client.updateSession).not.toHaveBeenCalled()
+    await service.updateSession('chat', { subagent_limit: null }, scope)
+    expect(client.updateSession).toHaveBeenCalledExactlyOnceWith('chat', { subagent_limit: null })
+  })
+})
+
 describe('provider command compatibility', () => {
   it.each([404, 405, 501])('treats an older server HTTP %s as unsupported', async status => {
     const client = {
@@ -991,6 +1207,109 @@ describe('secure peer control fencing', () => {
     expect(test.retireMailHints).toHaveBeenCalledOnce()
   })
 
+  function endpointHarness(active = true) {
+    const test = completionHarness()
+    test.pairing.transport_state = active ? 'offline' : 'disconnected'
+    test.pairing.status = active ? 'connected' : 'approved'
+    test.status.active_connection_id = active ? test.pairing.connection_id : null
+    const migrated = structuredClone(test.status)
+    migrated.pairings[0].remote_endpoint = '100.64.0.2:7852'
+    const update = vi.fn().mockResolvedValue(migrated)
+    Object.assign(test.client, { updateSecurePeerConnectionEndpoint: update })
+    Object.assign(test.service, { health: { capabilities: { secure_peer_v1: {
+      available: true, version: 1, endpoint_update_version: 1,
+      endpoint_update_path: '/api/admin/secure-peers/v1/connections/{connection_id}/endpoint'
+    } } } })
+    const input = { connectionId: test.pairing.connection_id, expectedServerInstanceId: 'instance-a',
+      expectedHostServerIdentity: 'server-host', expectedHubIdentity: 'hub-host',
+      expectedRemoteEndpoint: '100.64.0.1:7851', host: '100.64.0.2:7852', confirmed: true as const }
+    return { ...test, migrated, update, endpointInput: input }
+  }
+
+  it.each([true, false])('migrates an approved unreachable endpoint preserving active=%s and exact trust', async active => {
+    const test = endpointHarness(active)
+    const result = await test.service.updateSecurePeerConnectionEndpoint(test.expected, test.endpointInput)
+    expect(result).toMatchObject({ activeConnectionId: test.status.active_connection_id,
+      endpointUpdateAvailable: true, pairings: [{ remoteEndpoint: '100.64.0.2:7852', trustState: 'approved' }] })
+    expect(test.update).toHaveBeenCalledExactlyOnceWith(test.pairing.connection_id, {
+      request_id: expect.stringMatching(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/),
+      expected_server_identity: 'server-a', expected_server_instance_id: 'instance-a',
+      expected_host_server_identity: 'server-host', expected_hub_id: 'hub-host',
+      expected_host_ip: '100.64.0.1', expected_port: 7851, host_ip: '100.64.0.2', port: 7852, confirmed: true
+    })
+    expect(test.client.securePeerStatus).toHaveBeenCalledOnce()
+    expect(test.client.requestSecurePeerPairing).not.toHaveBeenCalled()
+    expect(test.retireMailHints).toHaveBeenCalledTimes(active ? 1 : 0)
+  })
+
+  it.each(['old-address', 'host-pin', 'hub-pin', 'connection', 'unapproved', 'instance', 'unsupported', 'confirmation', 'invalid-address', 'unchanged'])(
+    'rejects %s endpoint migration before any write', async fault => {
+      const test = endpointHarness()
+      if (fault === 'old-address') test.endpointInput.expectedRemoteEndpoint = '100.64.0.3:7851'
+      if (fault === 'host-pin') test.endpointInput.expectedHostServerIdentity = 'other-host'
+      if (fault === 'hub-pin') test.endpointInput.expectedHubIdentity = 'other-hub'
+      if (fault === 'connection') test.endpointInput.connectionId = test.pairing.id
+      if (fault === 'unapproved') { test.pairing.status = 'revoked'; test.pairing.trust_state = 'revoked'; test.pairing.transport_state = 'revoked' }
+      if (fault === 'instance') test.endpointInput.expectedServerInstanceId = 'old-instance'
+      if (fault === 'unsupported') Object.assign(test.service, { health: { capabilities: {} } })
+      if (fault === 'confirmation') Object.assign(test.endpointInput, { confirmed: false })
+      if (fault === 'invalid-address') test.endpointInput.host = 'https://other.invalid'
+      if (fault === 'unchanged') test.endpointInput.host = test.endpointInput.expectedRemoteEndpoint
+      const beforeWrite = vi.fn()
+      await expect(test.service.updateSecurePeerConnectionEndpoint(test.expected, test.endpointInput, beforeWrite)).rejects.toThrow()
+      expect(beforeWrite).not.toHaveBeenCalled()
+      expect(test.update).not.toHaveBeenCalled()
+      expect(test.retireMailHints).not.toHaveBeenCalled()
+    }
+  )
+
+  it.each(['address', 'host-pin', 'hub-pin', 'certificate', 'selection', 'instance'])(
+    'rejects a migration receipt with the wrong %s', async fault => {
+      const test = endpointHarness()
+      if (fault === 'address') test.migrated.pairings[0].remote_endpoint = '100.64.0.3:7852'
+      if (fault === 'host-pin') test.migrated.pairings[0].host_server_identity = 'other-host'
+      if (fault === 'hub-pin') test.migrated.pairings[0].hub_id = 'other-hub'
+      if (fault === 'certificate') test.migrated.pairings[0].certificate_fingerprint = `sha256:${'e'.repeat(64)}`
+      if (fault === 'selection') test.migrated.active_connection_id = null
+      if (fault === 'instance') test.migrated.server_instance_id = 'other-instance'
+      await expect(test.service.updateSecurePeerConnectionEndpoint(test.expected, test.endpointInput)).rejects.toThrow()
+      expect(test.update).toHaveBeenCalledOnce()
+      expect(test.retireMailHints).not.toHaveBeenCalled()
+    }
+  )
+
+  it('resolves a committed lost response with one status read and never repeats the write', async () => {
+    const test = endpointHarness()
+    test.update.mockRejectedValue(new Error('socket closed after commit'))
+    test.client.securePeerStatus.mockResolvedValueOnce(test.status).mockResolvedValueOnce(test.migrated)
+    await expect(test.service.updateSecurePeerConnectionEndpoint(test.expected, test.endpointInput)).resolves.toMatchObject({
+      pairings: [{ remoteEndpoint: '100.64.0.2:7852' }]
+    })
+    expect(test.update).toHaveBeenCalledOnce()
+    expect(test.client.securePeerStatus).toHaveBeenCalledTimes(2)
+  })
+
+  it('retains an interrupted migration failure when readback still has the old endpoint', async () => {
+    const test = endpointHarness()
+    const failure = new Error('socket closed before commit')
+    test.update.mockRejectedValue(failure)
+    await expect(test.service.updateSecurePeerConnectionEndpoint(test.expected, test.endpointInput)).rejects.toBe(failure)
+    expect(test.update).toHaveBeenCalledOnce()
+    expect(test.client.securePeerStatus).toHaveBeenCalledTimes(2)
+    expect(test.retireMailHints).not.toHaveBeenCalled()
+  })
+
+  it('discards a migrated receipt when the active profile changed while awaiting it', async () => {
+    const test = endpointHarness()
+    const requireContext = vi.fn().mockImplementationOnce(() => undefined).mockImplementation(() => {
+      throw new Error('AgentsServer profile changed')
+    })
+    Object.assign(test.service, { requireSecurePeerControlContext: requireContext })
+    await expect(test.service.updateSecurePeerConnectionEndpoint(test.expected, test.endpointInput)).rejects.toThrow('profile changed')
+    expect(test.update).toHaveBeenCalledOnce()
+    expect(test.retireMailHints).not.toHaveBeenCalled()
+  })
+
   it.each(['wrong-transcript', 'wrong-connection', 'offline', 'no-consent'] as const)('rejects %s completion instead of adopting it', async fault => {
     const test = completionHarness()
     if (fault === 'wrong-transcript') test.pairing.transcript_hash = 'e'.repeat(64)
@@ -1021,6 +1340,135 @@ describe('secure peer control fencing', () => {
     test.client.securePeerPairingCompletion.mockImplementation(async () => { test.controller.abort(); return test.receipt })
     await expect(test.service.waitForSecurePeerPairingCompletion(test.expected, test.input, test.controller.signal)).rejects.toThrow()
     expect(test.client.securePeerStatus).not.toHaveBeenCalled()
+  })
+
+  function observationWindowReceipt(test: ReturnType<typeof completionHarness>) {
+    return {
+      version: 1, completion_state: 'unavailable', reason: 'observation_window_elapsed',
+      pairing: { ...test.pairing, status: 'pending_approval', trust_state: 'pending', transport_state: 'disconnected',
+        connection_id: null, local_proxy_base_path: null, certificate_fingerprint: null, certificate_expires_at: null,
+        granted_scopes: [], expires_at: null }
+    }
+  }
+
+  it('re-arms only the same held observer across multiple windows, then verifies completion once', async () => {
+    const test = completionHarness()
+    let elapsed = 0
+    vi.spyOn(performance, 'now').mockImplementation(() => elapsed)
+    const waiting = observationWindowReceipt(test)
+    test.client.securePeerPairingCompletion
+      .mockImplementationOnce(async () => { elapsed += 600_000; return waiting })
+      .mockImplementationOnce(async () => { elapsed += 600_000; return waiting })
+      .mockResolvedValueOnce(test.receipt)
+    await expect(test.service.waitForSecurePeerPairingCompletion(test.expected, test.input, test.controller.signal))
+      .resolves.toMatchObject({ activeConnectionId: test.pairing.connection_id })
+    expect(test.client.securePeerPairingCompletion).toHaveBeenCalledTimes(3)
+    for (const call of test.client.securePeerPairingCompletion.mock.calls) {
+      expect(call).toEqual([test.pairing.id, {
+        expected_server_identity: 'server-a', expected_server_instance_id: 'instance-a', expected_transcript_hash: 'c'.repeat(64)
+      }, test.controller.signal])
+    }
+    expect(test.client.securePeerStatus).toHaveBeenCalledExactlyOnceWith(test.controller.signal)
+    expect(test.client.requestSecurePeerPairing).not.toHaveBeenCalled()
+    expect(test.retireMailHints).toHaveBeenCalledOnce()
+  })
+
+  it.each(['early', 'other-reason', 'missing-reason', 'legacy-expiry', 'missing-expiry', 'wrong-pairing',
+    'wrong-transcript', 'incoming', 'no-consent', 'rejected', 'pairing-error', 'malformed'] as const)(
+    'does not re-arm an %s observer response or refresh/recreate the Join', async fault => {
+      const test = completionHarness()
+      let elapsed = 0
+      vi.spyOn(performance, 'now').mockImplementation(() => elapsed)
+      const waiting = observationWindowReceipt(test) as Record<string, any>
+      if (fault === 'other-reason') waiting.reason = 'unavailable'
+      if (fault === 'missing-reason') delete waiting.reason
+      if (fault === 'legacy-expiry') waiting.pairing.expires_at = '2026-09-15T12:00:00Z'
+      if (fault === 'missing-expiry') delete waiting.pairing.expires_at
+      if (fault === 'wrong-pairing') waiting.pairing.id = '29d7bb2e-3b47-4be7-89fc-2cecd90f4434'
+      if (fault === 'wrong-transcript') waiting.pairing.transcript_hash = 'e'.repeat(64)
+      if (fault === 'incoming') waiting.pairing.direction = 'incoming'
+      if (fault === 'no-consent') waiting.pairing.complete_on_approval = false
+      if (fault === 'rejected') Object.assign(waiting.pairing, { status: 'rejected', trust_state: 'rejected' })
+      if (fault === 'pairing-error') waiting.pairing.error = 'Host unavailable'
+      if (fault === 'malformed') waiting.pairing = null
+      test.client.securePeerPairingCompletion.mockImplementationOnce(async () => {
+        elapsed += fault === 'early' ? 1 : 600_000
+        return waiting
+      })
+      await expect(test.service.waitForSecurePeerPairingCompletion(test.expected, test.input, test.controller.signal)).rejects.toThrow()
+      expect(test.client.securePeerPairingCompletion).toHaveBeenCalledTimes(1)
+      expect(test.client.securePeerStatus).not.toHaveBeenCalled()
+      expect(test.client.requestSecurePeerPairing).not.toHaveBeenCalled()
+      expect(test.retireMailHints).not.toHaveBeenCalled()
+    }
+  )
+
+  it('requires a fresh long hold on every observer window instead of reusing elapsed time', async () => {
+    const test = completionHarness()
+    let elapsed = 0
+    vi.spyOn(performance, 'now').mockImplementation(() => elapsed)
+    const waiting = observationWindowReceipt(test)
+    test.client.securePeerPairingCompletion
+      .mockImplementationOnce(async () => { elapsed += 600_000; return waiting })
+      .mockResolvedValueOnce(waiting)
+    await expect(test.service.waitForSecurePeerPairingCompletion(test.expected, test.input, test.controller.signal)).rejects.toThrow()
+    expect(test.client.securePeerPairingCompletion).toHaveBeenCalledTimes(2)
+    expect(test.client.securePeerStatus).not.toHaveBeenCalled()
+    expect(test.client.requestSecurePeerPairing).not.toHaveBeenCalled()
+    expect(test.retireMailHints).not.toHaveBeenCalled()
+  })
+
+  it.each(['disconnected', 'offline', 'reconnecting'] as const)(
+    'retains approved but %s automatic activation across a held window', async transportState => {
+      const test = completionHarness()
+      let elapsed = 0
+      vi.spyOn(performance, 'now').mockImplementation(() => elapsed)
+      const waiting = { ...observationWindowReceipt(test), pairing: {
+        ...test.pairing, status: 'approved', transport_state: transportState
+      } }
+      test.client.securePeerPairingCompletion.mockImplementationOnce(async () => { elapsed += 600_000; return waiting })
+      await expect(test.service.waitForSecurePeerPairingCompletion(test.expected, test.input, test.controller.signal))
+        .resolves.toMatchObject({ activeConnectionId: test.pairing.connection_id })
+      expect(test.client.securePeerPairingCompletion).toHaveBeenCalledTimes(2)
+      expect(test.client.securePeerStatus).toHaveBeenCalledTimes(1)
+      expect(test.client.requestSecurePeerPairing).not.toHaveBeenCalled()
+      expect(test.retireMailHints).toHaveBeenCalledOnce()
+    }
+  )
+
+  it.each(['abort', 'scope', 'transport'] as const)('stops the held observer on %s loss without re-arming', async fault => {
+    const test = completionHarness()
+    let elapsed = 0
+    vi.spyOn(performance, 'now').mockImplementation(() => elapsed)
+    test.client.securePeerPairingCompletion.mockImplementationOnce(async () => {
+      elapsed += 600_000
+      if (fault === 'abort') test.controller.abort()
+      if (fault === 'scope') vi.mocked(test.service['requireSecurePeerControlContext']).mockImplementation(() => { throw new Error('Stale server scope') })
+      if (fault === 'transport') throw new Error('Lost connection')
+      return observationWindowReceipt(test)
+    })
+    await expect(test.service.waitForSecurePeerPairingCompletion(test.expected, test.input, test.controller.signal)).rejects.toThrow()
+    expect(test.client.securePeerPairingCompletion).toHaveBeenCalledTimes(1)
+    expect(test.client.securePeerStatus).not.toHaveBeenCalled()
+    expect(test.retireMailHints).not.toHaveBeenCalled()
+  })
+
+  it('returns cancellation after a held observer window without ending consent early', async () => {
+    const test = completionHarness()
+    let elapsed = 0
+    vi.spyOn(performance, 'now').mockImplementation(() => elapsed)
+    const waiting = observationWindowReceipt(test)
+    test.client.securePeerPairingCompletion.mockImplementationOnce(async () => { elapsed += 600_000; return waiting })
+    test.receipt.completion_state = 'cancelled'
+    test.pairing.status = 'approved'
+    test.pairing.transport_state = 'disconnected'
+    test.pairing.complete_on_approval = false
+    test.status.active_connection_id = null
+    const result = await test.service.waitForSecurePeerPairingCompletion(test.expected, test.input, test.controller.signal)
+    expect(result.pairingCompletion?.state).toBe('cancelled')
+    expect(test.client.securePeerPairingCompletion).toHaveBeenCalledTimes(2)
+    expect(test.client.securePeerStatus).toHaveBeenCalledTimes(1)
+    expect(test.retireMailHints).not.toHaveBeenCalled()
   })
 
   it('sends automatic consent only when explicitly requested and exactly advertised', async () => {
@@ -2193,6 +2641,43 @@ describe('emergency contact service fencing', () => {
   })
 })
 
+describe('workspace Git scope fencing', () => {
+  const expected = { profileId: 'profile', profileGeneration: 4, serverIdentity: 'server-a' }
+  function fixture() {
+    const client = Object.fromEntries(['workspaceGitStatus', 'workspaceGitDiff', 'workspaceGitConflict', 'workspaceGitAction']
+      .map(method => [method, vi.fn().mockResolvedValue({ revision: 'snapshot' })]))
+    const scope = { client }
+    const service = Object.create(AppService.prototype) as AppService
+    const requireWorkspaceScope = vi.fn(() => scope)
+    const ensureValidatedScope = vi.fn().mockResolvedValue(undefined)
+    const assertCurrentScope = vi.fn()
+    Object.assign(service, { requireWorkspaceScope, ensureValidatedScope, assertCurrentScope })
+    return { service, client, requireWorkspaceScope, ensureValidatedScope, assertCurrentScope }
+  }
+  it('checks profile before and after every read and mutation', async () => {
+    const f = fixture()
+    await f.service.workspaceGitStatus(expected, 'chat')
+    await f.service.workspaceGitDiff(expected, 'chat', 'file.ts', 'staged')
+    await f.service.workspaceGitConflict(expected, 'chat', 'file.ts')
+    await f.service.workspaceGitAction(expected, 'chat', { action: 'commit', expected_revision: 'rev', message: 'Reviewed' })
+    expect(f.requireWorkspaceScope).toHaveBeenCalledTimes(4)
+    for (const call of f.requireWorkspaceScope.mock.calls) expect(call).toEqual([expected])
+    expect(f.assertCurrentScope).toHaveBeenCalledTimes(8)
+  })
+  it('never mutates after server validation discovers a profile switch', async () => {
+    const f = fixture()
+    f.assertCurrentScope.mockImplementation(() => { throw new Error('Server changed') })
+    await expect(f.service.workspaceGitAction(expected, 'chat', { action: 'stage', paths: ['file'], expected_revision: 'rev' })).rejects.toThrow('Server changed')
+    expect(f.client.workspaceGitAction).not.toHaveBeenCalled()
+  })
+  it('does not return an old server response into a new workspace', async () => {
+    const f = fixture()
+    f.assertCurrentScope.mockImplementationOnce(() => {}).mockImplementationOnce(() => { throw new Error('Server changed') })
+    await expect(f.service.workspaceGitStatus(expected, 'chat')).rejects.toThrow('Server changed')
+    expect(f.client.workspaceGitStatus).toHaveBeenCalledOnce()
+  })
+})
+
 describe('persistent agent handoff route scope fencing', () => {
   it('validates the active profile around every route admin operation', async () => {
     const route = { route_id: 'route-1', alias: 'mobile' }
@@ -2687,7 +3172,7 @@ interface FakeClientOptions {
     callerSignal?: AbortSignal
   ) => Promise<Response>
   workspaceDownloadRequest?: (sessionId: string, path: string) => Promise<Response>
-  stream?: (sessionId: string, after: number, onEvent: (event: Event) => void, onState: (connected: boolean, error?: string) => void) => () => void
+  stream?: AgentServerClient['stream']
   emergencyStream?: (
     expectedServerIdentity: string,
     onSessions: (sessions: Session[], snapshot: boolean, removedSessionId?: string) => void,
@@ -3193,6 +3678,92 @@ describe('background connection event publication', () => {
 })
 
 describe('split-chat timeline subscriptions', () => {
+  it('forwards transient summaries only for the current lease and profile without writing them to SQLite', async () => {
+    const streams: Array<{
+      summary: NonNullable<Parameters<AgentServerClient['stream']>[6]>
+      event: (event: Event) => void
+      stop: ReturnType<typeof vi.fn>
+    }> = []
+    const client = () => fakeClient({
+      sessionPage: async sessionId => emptyTimelinePage(sessionId),
+      stream: (_sessionId, _after, event, _state, _runtime, _pins, summary) => {
+        expect(summary).toBeTypeOf('function')
+        const stream = { summary: summary!, event, stop: vi.fn() }
+        streams.push(stream)
+        return stream.stop
+      }
+    })
+    const { service, cache } = createProfileService({
+      'http://a.test:7850': [client()], 'http://b.test:7850': [client()]
+    })
+    Object.assign(service, { validatedGeneration: 1 })
+    const send = vi.fn()
+    service.addWindow({ isDestroyed: () => false, on: vi.fn(), webContents: { send } } as never)
+    const internals = service as unknown as {
+      scope: { profileId: string; generation: number; namespace: string }
+      pendingEventCache: Map<string, unknown>
+      flushEventCache(): void
+    }
+    const snapshot: ReasoningSummaryStreamSnapshot = {
+      type: 'reasoning_summary_stream', session_id: 'chat', instance_id: 'boot-a', revision: 1,
+      items: [{ run_id: 'run-a', item_id: 'item-a', backend: 'codex', phase: 'summary',
+        text: 'Current live summary.', ts: '2026-09-20T05:00:00Z', after_seq: 0 }]
+    }
+    await service.subscribeTimeline('chat', 0)
+    await settleBackgroundWork()
+    const putEvents = vi.spyOn(cache, 'putEvents')
+    const before = cache.snapshot(internals.scope.namespace, 'chat')
+    send.mockClear()
+    streams[0].summary(snapshot)
+    expect(send).toHaveBeenCalledExactlyOnceWith('server:reasoning-stream', {
+      profileId: 'a', profileGeneration: 1, sessionId: 'chat', snapshot
+    })
+    expect(internals.pendingEventCache.size).toBe(0)
+    internals.flushEventCache()
+    expect(putEvents).not.toHaveBeenCalled()
+    expect(cache.snapshot(internals.scope.namespace, 'chat')).toEqual(before)
+    // The durable lane still persists normally through this same subscription.
+    const durable: Event = { id: 'durable', session_id: 'chat', seq: 1, type: 'assistant_text', ts: 'now', text: 'Complete.' }
+    streams[0].event(durable)
+    internals.flushEventCache()
+    expect(putEvents).toHaveBeenCalledWith(internals.scope.namespace, 'chat', [durable])
+
+    await service.subscribeTimeline('chat', 1)
+    await settleBackgroundWork()
+    expect(streams[0].stop).toHaveBeenCalledOnce()
+    send.mockClear()
+    putEvents.mockClear()
+    streams[0].summary({ ...snapshot, revision: 90 })
+    const replacement = { ...snapshot, revision: 2, items: [] }
+    streams[1].summary(replacement)
+    expect(send).toHaveBeenCalledExactlyOnceWith('server:reasoning-stream', {
+      profileId: 'a', profileGeneration: 1, sessionId: 'chat', snapshot: replacement
+    })
+    service.unsubscribeTimeline('chat')
+    send.mockClear()
+    streams[1].summary({ ...snapshot, revision: 91 })
+    expect(send).not.toHaveBeenCalled()
+
+    await service.switchServer('b')
+    Object.assign(service, { validatedGeneration: internals.scope.generation })
+    await service.subscribeTimeline('chat', 0)
+    await settleBackgroundWork()
+    const current = streams.at(-1)!
+    expect(current).not.toBe(streams[1])
+    send.mockClear()
+    putEvents.mockClear()
+    streams[0].summary({ ...snapshot, revision: 92 })
+    streams[1].summary({ ...snapshot, revision: 93 })
+    const otherProfile = { ...snapshot, instance_id: 'boot-b', revision: 0 }
+    current.summary(otherProfile)
+    expect(send).toHaveBeenCalledExactlyOnceWith('server:reasoning-stream', {
+      profileId: 'b', profileGeneration: internals.scope.generation, sessionId: 'chat', snapshot: otherProfile
+    })
+    expect(internals.pendingEventCache.size).toBe(0)
+    internals.flushEventCache()
+    expect(putEvents).not.toHaveBeenCalled()
+  })
+
   it('keeps two session streams live and scopes events and sync state to their source chat', async () => {
     const streams = new Map<string, {
       onEvent: (event: Event) => void
@@ -3467,6 +4038,88 @@ describe('split-chat timeline subscriptions', () => {
 })
 
 describe('subagent lifecycle hydration', () => {
+  it.each(['task_notification', 'task_updated'])('reopens a running Claude agent and persists progress and %s completion', async subtype => {
+    const session: Session = { id: 'chat', title: 'Chat', backend: 'claude' }
+    let agent: Event = {
+      seq: 7, id: 'subagent:chat:run-1:child-1', session_id: session.id,
+      run_id: 'run-1', type: 'subagent_state', backend: 'claude',
+      ts: '2026-09-20T12:00:00Z', subagent_id: 'child-1',
+      subagent_tool_id: 'agent-tool', subagent_name: 'Review the renderer',
+      subagent_status: 'running'
+    }
+    let onEvent: (event: Event) => void = () => { throw new Error('Timeline stream did not start.') }
+    const client = fakeClient({
+      sessionPage: async () => ({ session, events: [], has_more: false, latest_seq: 7 }),
+      subagents: async () => ({
+        session_id: session.id,
+        subagents: [agent, ...['local_bash', 'local_workflow'].map(kind => ({
+          ...agent, id: `subagent:${kind}`, subagent_id: kind, subagent_kind: kind
+        }))], count: 3,
+        active_count: agent.subagent_status === 'running' ? 1 : 0, latest_seq: agent.seq
+      }),
+      stream: (_sessionId, _after, receiveEvent) => {
+        onEvent = receiveEvent
+        return vi.fn()
+      }
+    })
+    const { service, cache } = createProfileService({ 'http://a.test:7850': [client] })
+    Object.assign(service, { validatedGeneration: 1 })
+
+    await service.openTimeline(session.id, true)
+    await settleBackgroundWork()
+    expect(client.subagents).toHaveBeenCalledOnce()
+    expect(cache.snapshot('profile:a', session.id)?.events).toEqual([agent])
+
+    const childEvent = (seq: number, raw: object): Event => ({
+      seq, id: `raw-${seq}`, session_id: session.id, run_id: 'run-1',
+      backend: 'claude', type: 'raw_event', ts: `2026-09-20T12:00:${seq}Z`,
+      raw: JSON.stringify({ type: 'system', task_id: 'child-1', ...raw })
+    })
+    const flush = () => (service as unknown as { flushEventCache(): void }).flushEventCache()
+    onEvent(childEvent(6, { subtype: 'task_started', task_type: 'local_agent', description: 'Old start' }))
+    onEvent(childEvent(6, { subtype: 'task_progress', description: 'Old progress' }))
+    onEvent(childEvent(6, { subtype: 'task_notification', status: 'completed', summary: 'Old completion' }))
+    onEvent(childEvent(6, {
+      type: 'assistant', parent_tool_use_id: 'agent-tool',
+      message: { content: [{ type: 'text', text: 'Old child activity' }] }
+    }))
+    flush()
+    expect(cache.snapshot('profile:a', session.id)?.events).toEqual([agent])
+    onEvent(childEvent(8, { subtype: 'task_progress', description: 'Checking timeline updates' }))
+    flush()
+    expect(cache.snapshot('profile:a', session.id)?.events).toEqual([
+      expect.objectContaining({ id: agent.id, subagent_status: 'running', subagent_activity: 'Checking timeline updates' })
+    ])
+    // An older snapshot arriving after live progress cannot regress the cache
+    // or the projector's activity log.
+    const internals = service as unknown as {
+      scope: unknown
+      timelineSubscriptions: Map<string, { lease: number }>
+      refreshSubagentSnapshot(scope: unknown, sessionId: string, lease: number): Promise<void>
+    }
+    await internals.refreshSubagentSnapshot(internals.scope, session.id, internals.timelineSubscriptions.get(session.id)!.lease)
+    expect(cache.snapshot('profile:a', session.id)?.events[0]).toMatchObject({ seq: 8, subagent_activity: 'Checking timeline updates' })
+    onEvent(childEvent(9, {
+      subtype,
+      ...(subtype === 'task_updated'
+        ? { patch: { status: 'completed', summary: 'Review complete' } }
+        : { status: 'completed', summary: 'Review complete' })
+    }))
+    flush()
+    expect(cache.snapshot('profile:a', session.id)?.events).toEqual([
+      expect.objectContaining({ id: agent.id, subagent_status: 'completed', subagent_summary: 'Review complete' })
+    ])
+    expect(cache.snapshot('profile:a', session.id)?.events[0].subagent_log?.map(entry => entry.text))
+      .toEqual(['Checking timeline updates', 'Review complete'])
+    agent = cache.snapshot('profile:a', session.id)!.events[0]
+
+    service.unsubscribeTimeline(session.id)
+    await service.openTimeline(session.id, true)
+    await settleBackgroundWork()
+    expect(client.subagents).toHaveBeenCalledTimes(3)
+    expect(cache.snapshot('profile:a', session.id)?.events).toEqual([agent])
+  })
+
   it('deduplicates concurrent snapshot requests and tolerates an older server', async () => {
     const response = deferred<SubagentSnapshot>()
     const client = fakeClient({ subagents: async () => response.promise })

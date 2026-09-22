@@ -216,7 +216,8 @@ function scheduledJobRuntimeError(
   catalog: RuntimeCatalog | null
 ): string | null {
   const backend = job.context_mode === 'standalone' ? job.backend ?? session.backend : session.backend
-  return runtimeSelectionError(health, catalog, backend, backend === session.backend ? session.model : null)
+  return runtimeSelectionError(health, catalog, backend, backend === session.backend ? session.model : null,
+    backend === session.backend ? session.codex_provider : undefined, session.codex_provider_catalog)
 }
 
 function activeScheduledJobId(events: AgentEvent[], activeRunId: string | null): string | null {

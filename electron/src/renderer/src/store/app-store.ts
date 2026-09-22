@@ -14,6 +14,7 @@ import { turnSendErrorMessage } from '@shared/server-errors'
 import { completedPrefixForkAvailable, RUNNING_FORK_UNAVAILABLE } from '@shared/session-fork'
 import { agentFileBelongsToSession, isolateSessionEvent, isolateSessionSnapshot } from '@shared/session-files'
 import { isImportedClaudeControlCompanion, isImportedCodexRuntimeContext, isImportedHistoryRecord, isImportedProviderControlMetadata, isImportedProviderInterruption, mergeProviderInterruptionEvent } from '@shared/provider-origin'
+import { isReasoningSummaryStream } from '@shared/reasoning-stream'
 import { trackEvent } from '../lib/analytics'
 import { nudgeChatFontSize, setChatFontFamily, setChatFontSize } from '../lib/chat-font'
 import { activeEmergencyAlert } from '../lib/emergency-alert'
@@ -287,16 +288,18 @@ export interface NewChatDefaults {
   folder: string
   cwd: string
   backend: Backend
+  codex_provider?: CreateSessionInput['codex_provider']
   model: string | null
   effort: string | null
 }
 
-function normalizedNewChatDefaults(input: Pick<CreateSessionInput, 'folder' | 'cwd' | 'backend' | 'model' | 'effort'>): NewChatDefaults {
+function normalizedNewChatDefaults(input: Pick<CreateSessionInput, 'folder' | 'cwd' | 'backend' | 'codex_provider' | 'model' | 'effort'>): NewChatDefaults {
   return {
     version: 1,
     folder: input.folder.trim() || 'General',
     cwd: input.cwd.trim(),
     backend: input.backend,
+    ...(input.backend === 'codex' && input.codex_provider === 'custom' ? { codex_provider: 'custom' as const } : {}),
     model: input.model?.trim() || null,
     effort: input.effort?.trim() || null
   }
@@ -308,6 +311,7 @@ function parseNewChatDefaults(value: unknown): NewChatDefaults | null {
   if (
     candidate.version !== 1
     || !['claude', 'codex', 'cursor'].includes(String(candidate.backend))
+    || candidate.codex_provider !== undefined && !['default', 'custom'].includes(candidate.codex_provider)
     || typeof candidate.folder !== 'string'
     || typeof candidate.cwd !== 'string'
     || candidate.model !== null && typeof candidate.model !== 'string'
@@ -332,12 +336,13 @@ function sessionNewChatDefaults(session: Session, defaultCwd: string): NewChatDe
     folder: session.folder || 'General',
     cwd: session.cwd || defaultCwd,
     backend: session.backend,
+    codex_provider: session.codex_provider,
     model: session.model,
     effort: session.effort
   })
 }
 
-export function saveNewChatDefaults(scope: WorkspaceProfileScope | null, input: Pick<CreateSessionInput, 'folder' | 'cwd' | 'backend' | 'model' | 'effort'>): Promise<void> {
+export function saveNewChatDefaults(scope: WorkspaceProfileScope | null, input: Pick<CreateSessionInput, 'folder' | 'cwd' | 'backend' | 'codex_provider' | 'model' | 'effort'>): Promise<void> {
   try {
     return setWorkspacePreference(scope, NEW_CHAT_DEFAULTS_PREFERENCE_KEY, normalizedNewChatDefaults(input))
   } catch (error) {
@@ -356,6 +361,7 @@ function directChatPlaceholderFingerprint(session: Session): string {
     folder: session.folder?.trim() || 'General',
     cwd: session.cwd?.trim() || '',
     backend: session.backend,
+    ...(session.backend === 'codex' && session.codex_provider === 'custom' ? { codexProvider: 'custom' } : {}),
     model: session.model?.trim() || null,
     effort: session.effort?.trim() || null,
     systemPrompt: session.system_prompt ?? null,
@@ -668,6 +674,11 @@ export const useAppStore = create<AppState>((set, get) => ({
       window.agentsDock.events.on('server:sync', payload => {
         const current = get()
         if (!profileEventMatches(payload, current)) return
+        if (payload.state !== 'live' && current.snapshots[payload.sessionId]?.reasoningStream) {
+          set(state => ({ snapshots: { ...state.snapshots, [payload.sessionId]: {
+            ...state.snapshots[payload.sessionId], reasoningStream: undefined
+          } } }))
+        }
         if (!visibleChatSessionIds(current.chatPanes).includes(payload.sessionId)) return
         const compatible = healthIsCompatible(current.health)
         const websocketUnavailable = current.health?.websocket_runtime === false
@@ -901,6 +912,26 @@ export const useAppStore = create<AppState>((set, get) => ({
           typeof payload.activeSession === 'boolean'
             ? { active: payload.activeSession, runId: payload.activeRunId }
             : undefined)
+      }),
+      window.agentsDock.events.on('server:reasoning-stream', payload => {
+        if (!profileEventMatches(payload, get())) return
+        const stream = payload.snapshot
+        if (stream && (!isReasoningSummaryStream(stream) || stream.session_id !== payload.sessionId)) return
+        const previous = get().snapshots[payload.sessionId]?.reasoningStream
+        if (previous && stream && previous.instance_id === stream.instance_id
+          && stream.revision <= previous.revision) return
+        // Deliver preceding durable completions before removing their live
+        // snapshots, even when normal timeline events are batched for typing.
+        if (previous?.items.some(item => !stream?.items.some(next => (
+          next.run_id === item.run_id && next.item_id === item.item_id && next.phase === item.phase
+        )))) flushLiveEvents(true)
+        set(state => {
+          const snapshot = state.snapshots[payload.sessionId]
+          if (!snapshot) return state
+          return { snapshots: { ...state.snapshots, [payload.sessionId]: {
+            ...snapshot, reasoningStream: stream ?? undefined
+          } } }
+        })
       }),
       window.agentsDock.events.on('native:notification', route => {
         void openProfileNotificationRoute(route, get).catch(error => get().setError(errorMessage(error)))
@@ -1738,7 +1769,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       set({ error: 'The selected chat is no longer available.' })
       return false
     }
-    const runtimeError = runtimeSelectionError(get().health, get().runtimeCatalog, currentTarget.backend, currentTarget.model)
+    const runtimeError = runtimeSelectionError(get().health, get().runtimeCatalog, currentTarget.backend, currentTarget.model, currentTarget.codex_provider, currentTarget.codex_provider_catalog)
     if (runtimeError) {
       set({ error: runtimeError })
       return false
@@ -2026,7 +2057,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       }
       if (
         !selectableChatBackends(current.health, current.runtimeCatalog).includes(defaults.backend)
-        || runtimeSelectionError(current.health, current.runtimeCatalog, defaults.backend, defaults.model)
+        || runtimeSelectionError(current.health, current.runtimeCatalog, defaults.backend, defaults.model, defaults.codex_provider)
       ) {
         set({ creatingChat: false })
         current.setModal('newChat', true)
@@ -2037,6 +2068,7 @@ export const useAppStore = create<AppState>((set, get) => ({
         folder: defaults.folder,
         cwd: defaults.cwd,
         backend: defaults.backend,
+        ...(defaults.codex_provider === 'custom' ? { codex_provider: 'custom' as const } : {}),
         model: defaults.model,
         effort: defaults.effort,
         system_prompt: null,
@@ -3551,7 +3583,8 @@ export function mergeSnapshots(previous: SessionSnapshot | undefined, next: Sess
     nextTimelineBefore,
     semanticPaging,
     generation: nextTimelineGeneration(previous, events, eventPrefixStable),
-    timelineListGeneration: previous.timelineListGeneration ?? 0
+    timelineListGeneration: previous.timelineListGeneration ?? 0,
+    reasoningStream: previous.reasoningStream
   }
 }
 
@@ -3597,6 +3630,7 @@ export function replaceSnapshot(
     ...next,
     events,
     historyDiscontinuity: false,
+    reasoningStream: previous?.reasoningStream,
     hasMoreEvents: retainedPrefix.length
       ? previous!.hasMoreEvents
       : next.hasMoreEvents,
@@ -4701,7 +4735,7 @@ export function isSupersededTimelineSelection(error: unknown): boolean {
   return /Timeline selection superseded/.test(errorMessage(error))
 }
 function forkErrorMessage(error: unknown): string {
-  const message = errorMessage(error)
+  const message = errorMessage(error).replace(/^Error invoking remote method 'sessions:fork': (?:Error: )?/, '')
   return message.toLocaleLowerCase().includes('active turn before forking')
     ? RUNNING_FORK_UNAVAILABLE
     : message
@@ -4744,7 +4778,7 @@ function eventMayRenderInTimeline(event: Event): boolean {
   if (event.type === 'turn_started' || isNativeGoalSteerEvent(event)) return Boolean(event.prompt?.trim() || event.file_ids?.length)
   if (event.type === 'assistant_text') return Boolean(event.text?.trim())
   if (event.type === 'turn_finished') return Boolean(event.result_text?.trim())
-  if (event.type === 'reasoning_summary') return Boolean((event.text || String(event.message || '')).trim())
+  if (event.type === 'reasoning_summary' || event.type === 'reasoning_text') return Boolean((event.text || String(event.message || '')).trim())
   if (event.type === 'tool_started' || event.type === 'tool_finished') return true
   if (event.type === 'artifact_created' || event.type === 'file_uploaded' || event.type === 'code_diff') return true
   if (event.type.startsWith('handoff_digest_') || event.type.startsWith('job_')) return true
@@ -4758,9 +4792,11 @@ function normalizeSessionPatch(patch: Partial<Session>) { return {
   folder: patch.folder ?? undefined,
   cwd: patch.cwd ?? undefined,
   backend: patch.backend,
+  codex_provider: patch.codex_provider,
   model: patch.model,
   effort: patch.effort,
   system_prompt: patch.system_prompt,
+  subagent_limit: patch.subagent_limit,
   codex_approval_policy: patch.codex_approval_policy,
   codex_sandbox_mode: patch.codex_sandbox_mode,
   codex_permission_profile: patch.codex_permission_profile,

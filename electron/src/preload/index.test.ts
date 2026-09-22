@@ -27,6 +27,22 @@ import './index'
 describe('preload session IPC bridge', () => {
   beforeEach(() => electronHarness.invoke.mockReset())
 
+  it('exposes Codex account status without shared-login mutation', () => {
+    expect(electronHarness.exposed?.codex.auth).toBeTypeOf('function')
+    expect(electronHarness.exposed?.codex).not.toHaveProperty('loginWithApiKey')
+  })
+
+  it('keeps side-question IPC separate from turn submission and binds cancellation to its original scope', async () => {
+    const scope = { profileId: 'server-a', profileGeneration: 7 }
+    const input = { request_id: 'question-a', question: 'Why?' }
+    await electronHarness.exposed?.sideQuestions?.ask(scope, 'chat-a', input)
+    await electronHarness.exposed?.sideQuestions?.cancel(scope, 'chat-a', input.request_id)
+    expect(electronHarness.invoke.mock.calls).toEqual([
+      ['side-questions:ask', scope, 'chat-a', input],
+      ['side-questions:cancel', scope, 'chat-a', input.request_id]
+    ])
+  })
+
   it('exposes app language selection and change events independently of server settings', async () => {
     const snapshot = { preference: 'zh-CN', systemLocale: 'en-US' }
     electronHarness.invoke.mockResolvedValue(snapshot)
@@ -167,6 +183,12 @@ describe('preload session IPC bridge', () => {
       'chat-1',
       { provider_jobs_access: 'blocked' }
     )
+  })
+
+  it('preserves the expected server identity when saving a chat limit', async () => {
+    const scope = { profileId: 'one', profileGeneration: 4, serverIdentity: 'server-one' }
+    await electronHarness.exposed?.sessions.update('chat-1', { subagent_limit: null }, scope)
+    expect(electronHarness.invoke).toHaveBeenCalledWith('sessions:update', 'chat-1', { subagent_limit: null }, scope)
   })
 
   it('exposes generation-fenced port forwarding without renderer network authority', async () => {

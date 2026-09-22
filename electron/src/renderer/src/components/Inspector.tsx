@@ -1,7 +1,7 @@
 // Localized display strings use semantic catalog keys.
 import { t, getLocale } from '@shared/i18n'
 import { useLocale } from '../lib/i18n'
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import * as Dialog from '@radix-ui/react-dialog'
 import { Bot, ChevronDown, ChevronRight, Copy, Download, ExternalLink, File, FileCode2, FileStack, FolderOpen, LoaderCircle, Pin, Play, RefreshCw, Unplug, X } from 'lucide-react'
 import { effectiveFileContentType, isEditorTextFile, isPreviewableFile } from '@shared/file-content-type'
@@ -16,10 +16,11 @@ import { requestOpenAgentFile, requestOpenWorkspacePath, workspacePathForAgentFi
 import { useAppStore } from '../store/app-store'
 import { LazyVideoThumbnail, MediaPreviewDialog } from './MediaGrid'
 import { NativeFileDragSurface } from './NativeFileDragSurface'
+import { SessionSubagentSettings } from './SessionSubagentSettings'
 
 const EMPTY_FILES: AgentFile[] = []
 
-export function Inspector() {
+export function Inspector({ embedded = false, afterMedia }: { embedded?: boolean; afterMedia?: ReactNode } = {}) {
   useLocale()
   const activeProfileId = useAppStore(state => state.activeProfileId)
   const profileGeneration = useAppStore(state => state.profileGeneration)
@@ -115,7 +116,8 @@ export function Inspector() {
   }
   const toggleMedia = () => { const next = !mediaOpen; setMediaOpen(next); if (next && session && files.length === 0) void loadFiles(true) }
 
-  return <aside className="inspector">
+  const Container = embedded ? 'div' : 'aside'
+  return <Container className="inspector">
     <div className="inspector-drag-region" />
     <div className="inspector-scroll">
       {!session ? <div className="inspector-empty">{t("ui.Inspector.Inspector.select_a_chat_to_inspect_its_runtime_files_f5631ca")}</div> : <>
@@ -123,16 +125,21 @@ export function Inspector() {
           <SessionPromptField value={session.system_prompt || ''} onSave={value => useAppStore.getState().updateSession(session.id, { system_prompt: value || null })} />
         </section>
 
+        {pinProfileScope && (session.backend === 'codex' || session.backend === 'claude') && <SessionSubagentSettings
+          key={`subagent-limit:${activeProfileId}:${profileGeneration}:${serverIdentity}:${session.id}:${session.backend}`}
+          session={session} profileScope={pinProfileScope}
+        />}
         {pinProfileScope && <PinnedSection key={`pinned:${session.id}`} profileScope={pinProfileScope} sessionId={session.id} pins={pins} setPins={setPins} files={files} />}
         <SubagentsSection key={`subagents:${session.id}`} sessionId={session.id} />
         <section className="inspector-section collapsible-section">
           <div className="section-heading-row"><button className="section-toggle" onClick={toggleMedia}>{mediaOpen ? <ChevronDown size={14} /> : <ChevronRight size={14} />}<FileStack size={15} /><strong>{t("ui.Inspector.Inspector.media_files_9d2cd70")}</strong><small>{files.length}/{filesTotal || files.length}</small></button><button className="nested-icon" title={t("ui.Inspector.Inspector.refresh_0e91610")} onClick={() => void loadFiles(true)}><RefreshCw size={12} /></button></div>
           {mediaOpen && pinProfileScope && <MediaInspector profileScope={pinProfileScope} sessionId={session.id} workspaceRoot={session.cwd ?? null} files={files} total={filesTotal} loading={loadingFiles} loadMore={() => void loadFiles(false)} onPreview={setPreview} />}
         </section>
+        {afterMedia}
         <MediaPreviewDialog sessionId={session.id} file={preview} files={files} onSelect={setPreview} onClose={() => setPreview(null)} />
       </>}
     </div>
-  </aside>
+  </Container>
 
 }
 

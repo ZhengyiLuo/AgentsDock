@@ -26,9 +26,10 @@ describe('profile-scoped sidebar position', () => {
   it('restores the active profile scroll and joins the switch flush', async () => {
     const get = vi.fn().mockResolvedValue(42)
     const set = vi.fn().mockResolvedValue(undefined)
+    const status = vi.fn().mockResolvedValue({ currentVersion: '1.0.0-beta.7' })
     Object.defineProperty(window, 'agentsDock', {
       configurable: true,
-      value: { preferences: { get, set } } as unknown as AgentsDockAPI
+      value: { preferences: { get, set }, updates: { status } } as unknown as AgentsDockAPI
     })
     useAppStore.setState({
       profiles: [profile],
@@ -51,6 +52,8 @@ describe('profile-scoped sidebar position', () => {
     expect(toggleSidebar).toHaveBeenCalledOnce()
     const list = container.querySelector<HTMLDivElement>('.session-list')!
     await waitFor(() => expect(list.scrollTop).toBe(42))
+    expect(screen.getByTitle('AgentsDock v1.0.0-beta.7')).toHaveTextContent('v1.0.0-beta.7')
+    expect(status).toHaveBeenCalledOnce()
 
     list.scrollTop = 91
     fireEvent.scroll(list)

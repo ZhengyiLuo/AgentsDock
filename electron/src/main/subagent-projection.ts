@@ -1,6 +1,7 @@
 import type { Event } from '../shared/types'
 
 interface LiveSubagentState {
+  seq: number
   sessionId: string
   runId: string
   taskId: string
@@ -33,8 +34,10 @@ export class SubagentEventProjector {
       const stateKey = key(event.session_id, event.run_id, event.subagent_id)
       const previous = this.states.get(stateKey)
       const status = normalizeStatus(event.subagent_status)
+      if (previous && event.seq < previous.seq) return null
       if (previous && !isActiveStatus(previous.status) && isActiveStatus(status)) return null
       const state: LiveSubagentState = {
+        seq: event.seq,
         sessionId: event.session_id, runId: event.run_id, taskId: event.subagent_id,
         toolId: event.subagent_tool_id || previous?.toolId || '',
         name: event.subagent_name || previous?.name || 'Claude subagent',
@@ -47,7 +50,7 @@ export class SubagentEventProjector {
       this.states.set(stateKey, state)
       if (state.toolId) this.taskByTool.set(key(event.session_id, event.run_id, state.toolId), stateKey)
       this.prune()
-      return null // The server's structured event already reaches the renderer.
+      return event // Hydration persists only structured states accepted above.
     }
     if (event.type === 'turn_finished' || event.type === 'turn_stopped' || event.type === 'error') {
       this.releaseRun(event.session_id, String(event.run_id || ''))
@@ -65,8 +68,10 @@ export class SubagentEventProjector {
     if (raw.type === 'system' && subtype === 'task_started' && raw.task_type === 'local_agent' && taskId) {
       const stateKey = key(event.session_id, runId, taskId)
       const previous = this.states.get(stateKey)
+      if (previous && event.seq < previous.seq) return null
       if (previous && !isActiveStatus(previous.status)) return null
       const state: LiveSubagentState = {
+        seq: event.seq,
         sessionId: event.session_id,
         runId,
         taskId,
@@ -82,27 +87,28 @@ export class SubagentEventProjector {
       }
       this.states.set(stateKey, state)
       if (toolId) this.taskByTool.set(key(event.session_id, runId, toolId), stateKey)
-      this.note(state, event.ts, raw.description || 'Subagent started')
+      this.note(state, event, raw.description || 'Subagent started')
       this.prune()
       return projectedEvent(event, state)
     }
 
     if (raw.type === 'system' && subtype === 'task_progress' && taskId) {
       const state = this.states.get(key(event.session_id, runId, taskId))
-      if (!state || !isActiveStatus(state.status)) return null
+      if (!state || event.seq < state.seq || !isActiveStatus(state.status)) return null
       state.status = 'running'
-      this.note(state, event.ts, raw.description || 'Working')
+      this.note(state, event, raw.description || 'Working')
       return projectedEvent(event, state)
     }
 
-    if (raw.type === 'system' && subtype === 'task_notification' && taskId) {
+    if (raw.type === 'system' && (subtype === 'task_notification' || subtype === 'task_updated') && taskId) {
       const state = this.states.get(key(event.session_id, runId, taskId))
-      if (!state) return null
-      const status = normalizeStatus(raw.status)
+      if (!state || event.seq < state.seq) return null
+      const patch = subtype === 'task_updated' && raw.patch && typeof raw.patch === 'object' ? raw.patch : {}
+      const status = normalizeStatus(patch.status || raw.status || state.status)
       if (!isActiveStatus(state.status) && isActiveStatus(status)) return null
       state.status = status
-      state.summary = compact(raw.summary)
-      this.note(state, event.ts, raw.summary || `Subagent ${state.status}`)
+      state.summary = compact(patch.summary || raw.summary) || state.summary
+      this.note(state, event, patch.description || patch.message || patch.summary || raw.summary || `Subagent ${state.status}`)
       return projectedEvent(event, state)
     }
 
@@ -110,20 +116,21 @@ export class SubagentEventProjector {
       const stateKey = this.taskByTool.get(key(event.session_id, runId, parentToolId))
       const state = stateKey ? this.states.get(stateKey) : undefined
       const activity = childActivity(raw)
-      if (!state || !activity || !isActiveStatus(state.status)) return null
-      this.note(state, event.ts, activity)
+      if (!state || event.seq < state.seq || !activity || !isActiveStatus(state.status)) return null
+      this.note(state, event, activity)
       return projectedEvent(event, state)
     }
 
     return null
   }
 
-  private note(state: LiveSubagentState, ts: string, value: unknown): void {
+  private note(state: LiveSubagentState, event: Event, value: unknown): void {
+    state.seq = event.seq
     const text = compact(value)
     if (!text) return
-    state.updatedAt = ts || state.updatedAt
+    state.updatedAt = event.ts || state.updatedAt
     state.activity = text
-    if (state.log.at(-1)?.text !== text) state.log = [...state.log, { ts, text }].slice(-LOG_LIMIT)
+    if (state.log.at(-1)?.text !== text) state.log = [...state.log, { ts: event.ts, text }].slice(-LOG_LIMIT)
   }
 
   private releaseRun(sessionId: string, runId: string): void {

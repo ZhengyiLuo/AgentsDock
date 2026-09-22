@@ -1,6 +1,6 @@
 import { createElement } from 'react'
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { PublicServerProfile } from '@shared/types'
 import { useAppStore } from '../store/app-store'
 import { connectionStateLabel, profileHostSubtitle, ServerSelector, serverProfileHost } from './ServerSelector'
@@ -32,8 +32,43 @@ afterEach(() => {
   cleanup()
   analytics.trackEvent.mockClear()
 })
+beforeEach(() => useAppStore.setState({ health: null }))
 
 describe('server selector labels', () => {
+  it('shows the selected server version and never borrows health from another server', () => {
+    useAppStore.setState({
+      profiles: [{ ...alpha, serverVersion: '0.1.26-beta.40' }, { ...beta, serverVersion: '0.1.25' }],
+      activeProfileId: alpha.id,
+      switchingProfileId: null,
+      health: { ok: true, server_identity: alpha.serverIdentity!, server_version: '0.1.26-beta.46' }
+    })
+    render(createElement(ServerSelector))
+    expect(screen.getByTitle('AgentsServer v0.1.26-beta.46').parentElement).toHaveTextContent('alpha.example:7850v0.1.26-beta.46')
+
+    act(() => useAppStore.setState({ switchingProfileId: beta.id }))
+    expect(screen.queryByTitle('AgentsServer v0.1.26-beta.46')).not.toBeInTheDocument()
+    expect(screen.getByTitle('AgentsServer v0.1.26-beta.40')).toBeInTheDocument()
+
+    act(() => useAppStore.setState({ activeProfileId: beta.id, switchingProfileId: null }))
+    expect(screen.getByTitle('AgentsServer v0.1.25')).toBeInTheDocument()
+    expect(screen.queryByTitle('AgentsServer v0.1.26-beta.46')).not.toBeInTheDocument()
+
+    act(() => useAppStore.setState({ profiles: [alpha, beta] }))
+    expect(screen.queryByTitle(/^AgentsServer v/)).not.toBeInTheDocument()
+    expect(screen.getByText('beta.example:7850')).toBeInTheDocument()
+  })
+
+  it('shows a known version even when the profile name already contains the address', () => {
+    useAppStore.setState({
+      profiles: [{ ...alpha, name: 'alpha.example:7850', serverVersion: '0.1.26' }],
+      activeProfileId: alpha.id,
+      switchingProfileId: null
+    })
+    render(createElement(ServerSelector))
+    expect(screen.getByTitle('AgentsServer v0.1.26')).toHaveTextContent('v0.1.26')
+    expect(screen.getAllByText('alpha.example:7850')).toHaveLength(1)
+  })
+
   it('extracts the host and port from a server URL', () => {
     expect(serverProfileHost('https://alpha.example:9443/api')).toBe('alpha.example:9443')
     expect(serverProfileHost('not a URL')).toBeNull()
