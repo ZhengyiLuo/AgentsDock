@@ -643,7 +643,7 @@ export function AppSettingsDialog({ serverSettings, serverUpdates, onServerUpdat
                 </div>
               </div>
               {update?.state === 'downloading' && <div className="app-settings-update-progress" role="progressbar" aria-label={t("ui.Dialogs.AppSettingsDialog.update_download_1c20b42")} aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round(update.progress ?? 0)}><span style={{ width: `${update.progress ?? 0}%` }} /></div>}
-              {update?.serverUpdates?.map(server => <div className="app-settings-row" key={server.profileId}>
+              {update?.serverUpdates?.map(server => <div className="app-settings-row coordinated-server-update-row" key={server.profileId}>
                 <div className="app-settings-row-copy"><strong>{server.name} <small>→ {server.targetVersion}</small></strong><span role="status">{server.message}</span><LegacyUpdateRecovery update={server} /></div>
                 <span className="app-settings-value">{t(`coordinatedUpdate.${server.phase}`)}</span>
                 {(server.paused || legacyUpdateRecoveryCommand(server)) && <button type="button" className="quiet-button" onClick={() => {
