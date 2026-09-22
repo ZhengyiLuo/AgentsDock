@@ -1,9 +1,8 @@
 // Localized display strings use semantic catalog keys.
 import { getLocale } from '@shared/i18n'
 import { localeOptions } from '@shared/locales'
-import { legacyUpdateRecoveryCommand } from '@shared/server-update-recovery'
 import { useLocale } from '../lib/i18n'
-import { forwardRef, useEffect, useLayoutEffect, useMemo, useRef, useState, type FormEvent, type KeyboardEvent, type ReactNode } from 'react'
+import { forwardRef, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type FormEvent, type KeyboardEvent, type ReactNode } from 'react'
 import * as Dialog from '@radix-ui/react-dialog'
 import { ArrowRight, Check, ChevronDown, ChevronRight, CircleAlert, Clock3, Command, Copy, Download, ExternalLink, FileText, FolderOpen, GitFork, Import, KeyRound, Laptop, LoaderCircle, Network, RefreshCw, RotateCcw, Search, Server, Sparkles, X } from 'lucide-react'
 import type { AppUpdateStatus, AppUpdateTrack, Backend, BulkImportSessionItem, BulkImportSessionResult, ChatReference, ChatReferenceAction, CoordinatedServerUpdate, CreateJobInput, Health, Job, JobContextMode, JobScheduleKind, LocalSessionCandidate, ServerRestartBlockerSnapshot, ServerSetupCapabilities, ServerSetupProgress, ServerUpdateStatus, ServerUpdateTrack, Session, TeamReference, UpdateJobInput, WorkspaceProfileScope } from '@shared/types'
@@ -29,7 +28,7 @@ import { ChatShareDialog } from './ChatShareDialog'
 import { CodexAuthSettings } from './CodexAuthSettings'
 import { CodexModelDiscovery } from './CodexModelDiscovery'
 import { ReasoningDisplaySettings } from './ReasoningDisplaySettings'
-import { LegacyUpdateRecovery } from './LegacyUpdateRecovery'
+import { CoordinatedServerUpdateRow } from './CoordinatedServerUpdateRow'
 import { CodexServerSettings } from './CodexServerSettings'
 import { CodexSubagentSettings } from './CodexSubagentSettings'
 import { RuntimeHealthPanel } from './RuntimeHealth'
@@ -470,8 +469,9 @@ export function Dialogs() {
 
 type AppSettingsSection = 'general' | 'shortcuts' | 'server' | 'updates'
 
-export function AppSettingsDialog({ serverSettings, serverUpdates, onServerUpdatesVisible, onCoordinatedServerUpdate }: {
+export function AppSettingsDialog({ serverSettings, serverUpdates, onServerUpdatesVisible, onServerReleaseChecksVisible, onCoordinatedServerUpdate }: {
   serverSettings?: ReactNode; serverUpdates?: ReactNode; onServerUpdatesVisible?: (visible: boolean) => void
+  onServerReleaseChecksVisible?: (visible: boolean) => void
   onCoordinatedServerUpdate?: (status: CoordinatedServerUpdate | null) => void
 } = {}) {
   useLocale()
@@ -486,7 +486,6 @@ export function AppSettingsDialog({ serverSettings, serverUpdates, onServerUpdat
   const [appearance, setAppearance] = useState<AppearanceMode>('system')
   const [update, setUpdate] = useState<AppUpdateStatus | null>(null)
   const [updateTrackBusy, setUpdateTrackBusy] = useState(false)
-  const [serverRecoveryOpen, setServerRecoveryOpen] = useState(false)
   const activeSectionRef = useRef<HTMLButtonElement | null>(null)
 
   const closeSettings = () => {
@@ -509,10 +508,12 @@ export function AppSettingsDialog({ serverSettings, serverUpdates, onServerUpdat
     if (legacyServerSettingsOpen) setSection('server')
   }, [legacyServerSettingsOpen])
   useEffect(() => {
-    if (!open) setServerRecoveryOpen(false)
-    onServerUpdatesVisible?.(open && update !== null
-      && (update.serverUpdates === undefined || (section === 'updates' && serverRecoveryOpen)))
-  }, [open, update?.serverUpdates !== undefined, update !== null, section, serverRecoveryOpen, onServerUpdatesVisible])
+    // Paired updates have one owner. Opening Settings must not also run the
+    // legacy server checker or expose a competing server channel/install flow.
+    const legacy = open && update !== null && update.serverUpdates === undefined
+    onServerUpdatesVisible?.(legacy && (section === 'server' || section === 'updates'))
+    onServerReleaseChecksVisible?.(legacy && section === 'updates')
+  }, [open, section, update?.serverUpdates !== undefined, update !== null, onServerUpdatesVisible, onServerReleaseChecksVisible])
   const activeCoordinatedUpdate = update?.serverUpdates?.find(server => server.profileId === activeProfileId) || null
   useEffect(() => {
     onCoordinatedServerUpdate?.(activeCoordinatedUpdate)
@@ -527,9 +528,6 @@ export function AppSettingsDialog({ serverSettings, serverUpdates, onServerUpdat
     void Promise.resolve(window.agentsDock.updates.status()).then(status => {
       if (!active) return undefined
       if (status) setUpdate(status)
-      return window.agentsDock.updates.check()
-    }).then(status => {
-      if (active && status) setUpdate(status)
     }).catch(error => {
       if (active) useAppStore.getState().setError(message(error))
     })
@@ -643,21 +641,10 @@ export function AppSettingsDialog({ serverSettings, serverUpdates, onServerUpdat
                 </div>
               </div>
               {update?.state === 'downloading' && <div className="app-settings-update-progress" role="progressbar" aria-label={t("ui.Dialogs.AppSettingsDialog.update_download_1c20b42")} aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round(update.progress ?? 0)}><span style={{ width: `${update.progress ?? 0}%` }} /></div>}
-              {update?.serverUpdates?.map(server => <div className="app-settings-row coordinated-server-update-row" key={server.profileId}>
-                <div className="app-settings-row-copy"><strong>{server.name} <small>→ {server.targetVersion}</small></strong><span role="status">{server.message}</span><LegacyUpdateRecovery update={server} /></div>
-                <span className="app-settings-value">{t(`coordinatedUpdate.${server.phase}`)}</span>
-                {(server.paused || legacyUpdateRecoveryCommand(server)) && <button type="button" className="quiet-button" onClick={() => {
-                  void window.agentsDock.updates.retryServers(server.profileId).then(setUpdate).catch(error => useAppStore.getState().setError(message(error)))
-                }}>{t('coordinatedUpdate.retry')}</button>}
-              </div>)}
+              {update?.serverUpdates?.map(server => <CoordinatedServerUpdateRow key={server.profileId} server={server} onUpdate={setUpdate} />)}
               {update?.serverUpdateMessage && <p role="status">{update.serverUpdateMessage}</p>}
             </div>
-            {update?.serverUpdates !== undefined
-              ? <details className="app-settings-list" open={serverRecoveryOpen} onToggle={event => setServerRecoveryOpen(event.currentTarget.open)}>
-                <summary>{t('coordinatedUpdate.recovery')}</summary>
-                {serverRecoveryOpen && serverUpdates}
-              </details>
-              : serverUpdates}
+            {update?.serverUpdates === undefined && serverUpdates}
           </section>}
         </div>
       </Dialog.Content>
@@ -1180,6 +1167,10 @@ export function SettingsDialog() {
   const open = useAppStore(state => state.modals.settings)
   const appSettingsOpen = Boolean(useAppStore(state => state.modals.appSettings))
   const [legacyServerUpdatesVisible, setLegacyServerUpdatesVisible] = useState(false)
+  const legacyServerReleaseChecksVisible = useRef(false)
+  const setLegacyServerReleaseChecksVisible = useCallback((visible: boolean) => {
+    legacyServerReleaseChecksVisible.current = visible
+  }, [])
   const connected = useAppStore(state => state.connected)
   const health = useAppStore(state => state.health)
   const activeProfileId = useAppStore(state => state.activeProfileId)
@@ -1624,7 +1615,7 @@ export function SettingsDialog() {
       setServerUpdateTrack(track)
       // Legacy checks replace the durable failed row. Opening recovery must
       // preserve that evidence; only the explicit Check server action may check.
-      if (refreshOnly || status.phase === 'failed' || serverUpdateIsActive(status) || deferredServerUpdate || submittedServerUpdatesRef.current[submittedUpdateKey]) return
+      if (!legacyServerReleaseChecksVisible.current || refreshOnly || status.phase === 'failed' || serverUpdateIsActive(status) || deferredServerUpdate || submittedServerUpdatesRef.current[submittedUpdateKey]) return
       try {
         const checked = await window.agentsDock.serverUpdates.check(track)
         if (
@@ -2824,7 +2815,7 @@ export function SettingsDialog() {
     <footer><button type="button" className="primary-button" onClick={closeSettings}>{t("ui.Dialogs.SettingsDialog.done_11a6767")}</button></footer>
   </div>
   return <>
-  <AppSettingsDialog serverSettings={serverSettingsContent} serverUpdates={serverUpdatesContent} onServerUpdatesVisible={setLegacyServerUpdatesVisible} onCoordinatedServerUpdate={setCoordinatedServerUpdate} />
+  <AppSettingsDialog serverSettings={serverSettingsContent} serverUpdates={serverUpdatesContent} onServerUpdatesVisible={setLegacyServerUpdatesVisible} onServerReleaseChecksVisible={setLegacyServerReleaseChecksVisible} onCoordinatedServerUpdate={setCoordinatedServerUpdate} />
   <Shell
     open={updateNowConfirmationOpen}
     onOpenChange={value => { if (!value && !restartingServer) closeUpdateNowConfirmation() }}

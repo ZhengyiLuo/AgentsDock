@@ -1970,7 +1970,6 @@ export interface CoordinatedServerUpdate {
   executionVersion?: string
   operationId?: string
   scheduleId?: string
-  activationBlocked?: boolean
   operationTargetVersion?: string
   operationOwned?: boolean
   paused?: boolean

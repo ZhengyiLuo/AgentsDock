@@ -65,9 +65,7 @@ describe('AppSettingsDialog', () => {
     const updateStatus = { state: 'not-available' as const, channel: 'direct' as const, track: 'stable' as const, currentVersion: '0.2.0', message: 'AgentsDock is up to date.',
       serverUpdates: [{ profileId: 'server-a', serverIdentity: 'identity-a', name: 'Research server', targetVersion: '1.2.0', phase: 'pending' as const, message: 'Queued until idle.' },
         { profileId: 'server-b', serverIdentity: 'identity-b', name: 'Laptop server', targetVersion: '1.2.0', phase: 'offline' as const, message: 'The paired update will resume on reconnect.' }] }
-    const check = vi.fn()
-      .mockResolvedValueOnce(updateStatus)
-      .mockResolvedValue({ ...updateStatus, state: 'downloaded', message: 'Ready to install' })
+    const check = vi.fn().mockResolvedValue({ ...updateStatus, state: 'downloaded', message: 'Ready to install' })
     const install = vi.fn().mockResolvedValue(true)
     const setTrack = vi.fn().mockResolvedValue({ ...updateStatus, track: 'beta', message: 'AgentsDock is up to date on the beta channel.' })
     Object.defineProperty(window, 'agentsDock', {
@@ -106,6 +104,9 @@ describe('AppSettingsDialog', () => {
     expect(within(dialog).getByRole('switch', { name: 'Share usage analytics' })).toBeInTheDocument()
     expect(within(dialog).getByRole('button', { name: /Privacy Policy/ })).toBeInTheDocument()
     expect(within(dialog).queryByRole('button', { name: 'Privacy' })).not.toBeInTheDocument()
+    expect(check).not.toHaveBeenCalled()
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Server' }))
+    expect(check).not.toHaveBeenCalled()
 
     fireEvent.click(within(dialog).getByRole('button', { name: 'Keyboard shortcuts' }))
     expect(within(dialog).getByRole('button', { name: 'Keyboard shortcuts' })).toHaveAttribute('aria-current', 'page')
@@ -125,22 +126,23 @@ describe('AppSettingsDialog', () => {
     expect(within(dialog).getByText('Reconnect to resume')).toBeInTheDocument()
     expect(within(dialog).queryByText('Existing server updates')).not.toBeInTheDocument()
     expect(recoveryVisible).toHaveBeenLastCalledWith(false)
-    expect(check).toHaveBeenCalledOnce()
+    expect(check).not.toHaveBeenCalled()
     const appUpdateChannel = within(dialog).getByRole('group', { name: 'App update channel' })
     fireEvent.click(within(appUpdateChannel).getByRole('button', { name: 'Beta' }))
     await waitFor(() => expect(setTrack).toHaveBeenCalledWith('beta'))
     fireEvent.click(within(dialog).getByRole('button', { name: 'Check for updates' }))
-    expect(check).toHaveBeenCalledTimes(2)
+    expect(check).toHaveBeenCalledOnce()
     fireEvent.click(await within(dialog).findByRole('button', { name: 'Update AgentsDock' }))
     expect(install).toHaveBeenCalledOnce()
     expect(within(dialog).queryByRole('button', { name: 'Check for updates' })).not.toBeInTheDocument()
-    fireEvent.click(within(dialog).getByText('Advanced server recovery'))
-    await waitFor(() => expect(within(dialog).getByText('Existing server updates')).toBeInTheDocument())
-    expect(recoveryVisible).toHaveBeenLastCalledWith(true)
+    expect(within(dialog).queryByText('Advanced server recovery')).not.toBeInTheDocument()
+    expect(within(dialog).queryByText('Existing server updates')).not.toBeInTheDocument()
+    expect(recoveryVisible).toHaveBeenLastCalledWith(false)
 
     fireEvent.click(within(dialog).getByRole('button', { name: 'Server' }))
     expect(within(dialog).getByRole('button', { name: 'Server' })).toHaveAttribute('aria-current', 'page')
     expect(within(dialog).getByText('Existing server controls')).toBeInTheDocument()
+    expect(check).toHaveBeenCalledOnce()
     expect(useAppStore.getState().modals).toMatchObject({ appSettings: true, settings: false })
   })
 
@@ -186,7 +188,7 @@ describe('AppSettingsDialog', () => {
     const checkButton = within(dialog).getByRole('button', { name: 'Check for updates' })
     expect(checkButton).toBeEnabled()
     fireEvent.click(checkButton)
-    await waitFor(() => expect(check).toHaveBeenCalledTimes(2))
+    await waitFor(() => expect(check).toHaveBeenCalledOnce())
   })
 })
 

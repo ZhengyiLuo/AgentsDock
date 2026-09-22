@@ -1,19 +1,25 @@
 # Coordinated app and server updates
 
-Stable **1.0.4 build 1193** has passed the exact packaged upgrade journey from
-the published **1.0.3 stable app and server**. The matching npm version on
-`latest`, signed standalone bridge and both existing stable desktop feeds are
-published and verified. Stable users remain on Stable throughout this migration.
+**1.0.4 and 1.0.5 are withdrawn.** Public stable app and server feeds currently
+offer 1.0.3. Their earlier acceptance below covered particular fixtures and
+missed retained rollback records and channel transitions; it does not establish
+that those withdrawn releases are suitable for existing installations.
 
-For that journey, the user selects **Update AgentsDock** once in 1.0.3. After
-installing and relaunching, 1.0.4 performs the supported server migration and
-subsequent npm package updates automatically. Users do not separately install
-or select a server version. About still displays the actual app version;
-Settings reports server progress and any actionable failure. Existing stable
-users need neither a beta-channel change nor npm setup.
+The corrected workflow updates the desktop app independently. After relaunch,
+its bundled signed descriptor drives each saved server's matching update. A
+server's version, channel, connectivity or failed update never prevents the app
+from installing. Source corrections and their native acceptance are recorded in
+[the development log](DEV_LOG.md); they are not a new published release.
 
-Published beta: `1.0.4-beta.12`, desktop build `1189`. The native app, public npm
-package and signed standalone server bridge are available. The accepted native
+The intended journey remains one **Update AgentsDock** action. After installing
+and relaunching, the app updates each server using its bundled release. Users
+do not need to install npm, run a server command, or select a server version.
+About displays the app version; Settings reports each server's progress and any
+actionable failure. Existing stable users need neither a beta-channel change nor
+npm setup. A corrected production package must pass this complete journey before
+publication; the source acceptance below is not that release acceptance.
+
+Historical beta acceptance: `1.0.4-beta.12`, desktop build `1189`. The accepted native
 update journey starts with the unchanged published beta.8 desktop and a genuine
 beta.9 server: one app-update click replaces and relaunches the app, then its
 bundled coordinator migrates the server without a separate server-update action.
@@ -48,7 +54,7 @@ for fresh installations and deliberately refuses existing managed state.
 
 | Starting point | Upgrade path and evidence |
 | --- | --- |
-| Stable desktop 1.0.3 with managed server 1.0.3 | Available with accepted build 1193: one app-update action to stable 1.0.4, followed by automatic stable server migration. |
+| Stable desktop 1.0.3 with managed server 1.0.3 | Historical build 1193 fixture used one app-update action; it missed normal existing-root permissions. The withdrawn release is not an upgrade recommendation. |
 | Original managed macOS server 0.1.26-beta.29 | Accepted native migration, candidate failure, rollback and same-byte retry to stable 1.0.4 after explicit operator selection of Stable. This does not establish its historical desktop/feed path or automatic beta-to-stable promotion. |
 | Desktop beta.8 with managed server beta.9 | Direct update to beta.12; the complete native one-click journey is accepted. |
 | Another compatible 1.x app and managed legacy server | Use the existing app feed and signed server bridge; eligibility depends on the server's advertised update capability. The accepted starting pairs are not proof for every historical version. |
@@ -61,11 +67,9 @@ The existing managed update capability is an eligibility check, not proof that
 every historical release can migrate. Current code requires update
 capability version 2 or later for verified HTTP-loopback connections and version
 9 or later, with server/process identity fencing, for remote servers. These are protocol
-capability versions, not server release numbers. Later updates from an already
-coordinated app also check the signed API compatibility interval before app
-activation. An older app without the coordinator cannot perform that preflight:
-it installs the new app first, so its starting server must remain compatible
-enough for the new app to complete the bridge. The native installer
+capability versions, not server release numbers. The app installs first;
+server compatibility affects connecting and updating that server, never app
+installation. The native installer
 separately verifies the admitted update and its caller; older runners can lack
 that authority information even when their advertised capability passes the
 app's check. Do not turn these capability thresholds into a promised minimum
@@ -76,8 +80,9 @@ migration, rollback and retry boundary. When its status omits the runner process
 ID, the installer proves the actual updater's executable, kernel arguments,
 ancestry and tmux ownership, alongside authenticated identity and idle admission.
 It retains these checks when rollback leaves a dead candidate receipt. The test
-explicitly selects Stable before requesting 1.0.4; app updates do not change a
-server's release channel. This native server result does not establish every
+explicitly selected Stable before requesting 1.0.4. In the corrected coordinator,
+the installed app's signed release selects the matching server channel. This
+historical native server result does not establish every
 historical desktop/feed combination or custom-directory installation. The old
 runner's latest-only behavior also remains; requesting a retained intermediate
 version through that API is not a supported shortcut.
@@ -99,28 +104,30 @@ identifies the native app and `@agentsdock/server`; native build numbers remain
 separate platform metadata. npm distributes the Python server and its explicit
 installation CLI, not the desktop app or a replacement JavaScript server.
 
-The app persists the exact signed server release before activation. Each saved
+After relaunch, the app persists its bundled signed server release. Each saved
 server profile reconciles independently using its own credentials, stable server
 identity and current process identity. A busy server queues the update until
 idle; a disconnected server resumes reconciliation when it reconnects. Settings
 shows progress per server. Scheduling or downloading never means installed.
 An owned update that fails or is canceled stays paused across app restarts.
-Retry is explicit and scoped to the selected server. Legacy controls live under
-Advanced server recovery for enrolled releases. Opening recovery preserves a
-failed operation. After a coordinated Retry, an already expanded recovery panel
-refreshes authoritative status automatically, without a new release check.
+Retry is explicit and scoped to the selected server. Paired releases show one
+app update control and per-server progress or a concrete failure with Retry.
+They do not expose a second server channel selector or installation control.
+Opening Settings does not trigger app release discovery; only explicit update
+checks and the updater's existing startup/periodic cadence do so.
 Legacy servers that omit update progress from health are observed through the
 app's existing health callbacks while the owned operation is active.
 
-For later updates from an already coordinated desktop, an active server known
-to be outside the signed compatibility interval keeps the working app open.
-This protection is absent from the first update by an old desktop without the
-coordinator; the accepted beta.8/beta.9 and stable 1.0.3 starting pairs have
-sufficient API overlap.
-Legacy servers within the supported interval can finish queued work while the
-app updates. An equal or newer server satisfies a
+All servers can finish their current work while the app updates. A server's
+failed update or unsupported API never gates desktop installation. An equal or newer server satisfies a
 release only with the supported API contract; reconciliation never downgrades a
-server. An app update does not change a server's stable/beta channel.
+server. The selected app release determines the server's stable/beta channel.
+An older server that rejects that choice through its npm endpoint can use its
+existing authenticated update endpoint with the same exact signed target.
+
+Already installed withdrawn apps retain their old gate until replaced. If that
+gate prevents self-update, install the corrected desktop package directly once;
+publishing a newer npm server alone cannot change the old app's updater code.
 
 ## Existing installations
 
@@ -338,7 +345,10 @@ Continue recording these scenarios at their actual source and platform boundary:
 | Corrupt package or descriptor, wrong key/channel/API | Reject before activation; keep working release |
 | Candidate health failure or interrupted activation | Restore prior release, service configuration and preserved data |
 | Disk/dependency/service-manager failure | Actionable failure with recoverable prior installation |
-| Multiple saved servers | Independent progress; active incompatible server blocks app activation |
+| Multiple saved servers | Independent server progress; every server state permits the app to install |
+| Old terminal rollback journal overlaps a new Hub update | Retire the old journal and continue the new request; no orphan maintenance fence or manual unlock |
+| Release host returns HTTP 429 | Respect Retry-After, share checks, show the cause; no HTML scraping burst |
+| Downloaded release is withdrawn | Clear its install offer when the public feed confirms a different release |
 
 Platform acceptance, npm registry round-trip verification and native publication
 remain release gates even when source tests pass.

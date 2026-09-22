@@ -47,7 +47,7 @@ export interface CoordinatedProfile {
   active?: boolean
 }
 export interface CoordinatedConnection {
-  client: Pick<AgentServerClient, 'health' | 'ensureServerUpdate' | 'serverUpdateStatus' | 'checkServerUpdate' | 'startServerUpdate' | 'dispose'>
+  client: Pick<AgentServerClient, 'health' | 'ensureServerUpdate' | 'serverUpdateStatus' | 'startServerUpdate' | 'dispose'>
   assertCurrent(): void
   loopback: boolean
 }
@@ -62,11 +62,9 @@ export interface CoordinatedUpdateStore {
 export interface CoordinatedUpdateOptions {
   profiles(): CoordinatedProfile[]
   connect(profile: CoordinatedProfile): Promise<CoordinatedConnection>
-  load(version: string): Promise<SignedServerRelease>
   store: CoordinatedUpdateStore
   publish(records: CoordinatedServerUpdate[]): void
   publicKey?: string
-  prepareWaitMs?: number
   onError?: (error: unknown) => void
 }
 
@@ -83,50 +81,15 @@ export class CoordinatedUpdateManager {
 
   status(): CoordinatedServerUpdate[] { return structuredClone(this.plan?.records ?? []) }
 
-  prepareEnrolled(version: string, packagedEnrollment = false): Promise<boolean> {
-    return packagedEnrollment || this.plan ? this.prepare(version) : Promise.resolve(true)
-  }
-
   async resume(bundled?: SignedServerRelease, installedVersion?: string): Promise<void> {
     const saved = this.options.store.read()
     if (bundled) {
       const manifest = this.verify(bundled, installedVersion)
-      const previous = saved && this.verify(saved.envelope)
-      // A failed app restart can leave an authorized newer plan. Never replace it
-      // with the still-running old app's bundled descriptor.
-      if (!previous || compareReleaseVersions(manifest.version, previous.version) >= 0) {
-        this.adopt(bundled, manifest, saved?.records ?? [])
-      } else this.adopt(saved!.envelope, previous, saved!.records)
+      // The installed app's bundle owns the desired server release. A cached
+      // pre-install plan from an older app must not override that choice.
+      this.adopt(bundled, manifest, saved?.records ?? [])
     } else if (saved) this.adopt(saved.envelope, this.verify(saved.envelope), saved.records)
     await this.reconcileAll()
-  }
-
-  async prepare(version: string): Promise<boolean> {
-    const envelope = this.manifest?.version === version && this.plan
-      ? this.plan.envelope : await this.options.load(version)
-    const manifest = this.verify(envelope, version)
-    this.adopt(envelope, manifest, this.plan?.records ?? [], true)
-    // Every saved profile has an independent bounded connection. A disconnected
-    // profile cannot hold another profile's update transaction hostage.
-    let timer: NodeJS.Timeout | undefined
-    try {
-      await Promise.race([this.reconcileAll(), new Promise<void>(resolve => {
-        timer = setTimeout(resolve, this.options.prepareWaitMs ?? 10_000)
-      })])
-    } finally { clearTimeout(timer) }
-    return this.canActivate()
-  }
-
-  canActivate(): boolean {
-    if (!this.manifest) return false
-    const active = this.options.profiles().find(profile => profile.active)
-    const record = this.plan?.records.find(candidate => candidate.profileId === active?.id)
-    // Unreachable profiles continue through the app's existing recovery UI. A
-    // positively known incompatible active server keeps the downloaded app in
-    // place until the bridge has restarted; no forced quit of the working app.
-    return !record || (record.serverIdentity === active?.serverIdentity && !record.activationBlocked && (record.apiContractVersion === undefined
-      || (record.apiContractVersion >= this.manifest.minimum_server_api_contract
-        && record.apiContractVersion <= this.manifest.api_contract_version)))
   }
 
   serverReachable(profileId: string, health: Health): void {
@@ -167,15 +130,17 @@ export class CoordinatedUpdateManager {
     return verifyPairedRelease(envelope, version, this.options.publicKey ?? SERVER_RELEASE_PUBLIC_KEY)
   }
 
-  private adopt(envelope: SignedServerRelease, manifest: PairedServerManifest, previous: CoordinatedServerUpdate[], explicitRetry = false): void {
+  private adopt(envelope: SignedServerRelease, manifest: PairedServerManifest, previous: CoordinatedServerUpdate[]): void {
     this.generation += 1
     this.manifest = manifest
     this.observations.clear()
     this.plan = { envelope, records: this.options.profiles().map(profile => {
       const old = previous.find(record => record.profileId === profile.id && record.serverIdentity === profile.serverIdentity)
-      const paused = !explicitRetry && old?.targetVersion === manifest.version && old.paused === true
+      const sameTarget = old?.targetVersion === manifest.version
+      const paused = sameTarget && old.paused === true
       return { ...old, profileId: profile.id, name: profile.name, serverIdentity: profile.serverIdentity,
-        ...(explicitRetry ? { operationId: undefined, scheduleId: undefined, operationTargetVersion: undefined, operationOwned: false } : {}),
+        ...(!sameTarget ? { operationId: undefined, scheduleId: undefined,
+          operationTargetVersion: undefined, operationOwned: false } : {}),
         targetVersion: manifest.version, paused, phase: paused ? old!.phase : 'checking',
         message: paused ? old!.message : 'Checking the paired server update…' }
     }) }
@@ -236,15 +201,13 @@ export class CoordinatedUpdateManager {
       connection.assertCurrent()
       if (generation !== this.generation) return
       if (!health.ok || !profile.serverIdentity || health.server_identity !== profile.serverIdentity) {
-        patch({ phase: 'blocked', activationBlocked: true, message: 'Reconnect and verify this server identity before updating.' })
+        patch({ phase: 'blocked', message: 'Reconnect and verify this server identity before updating.' })
         return
       }
       const target = updateTarget(health)
       const components = componentVersions(health)
       patch({ apiContractVersion: health.api_contract_version, serverInstanceId: health.server_instance_id,
-        gatewayVersion: components?.gatewayVersion, executionVersion: components?.executionVersion,
-        activationBlocked: previousReceipt?.activationBlocked === true || health.api_contract_version === undefined || health.api_contract_version < manifest.minimum_server_api_contract
-          || health.api_contract_version > manifest.api_contract_version })
+        gatewayVersion: components?.gatewayVersion, executionVersion: components?.executionVersion })
       const currentVersion = health.server_version ?? ''
       const executionCurrent = compareReleaseVersions(currentVersion, manifest.version) >= 0
       const gatewayCurrent = !components || compareReleaseVersions(components.gatewayVersion, manifest.version) >= 0
@@ -254,11 +217,13 @@ export class CoordinatedUpdateManager {
         && ACTIVE_PHASES.has(updateReceipt.phase)
       const activationPending = health.execution_service?.maintenance_held === true || activeTarget
       if (executionCurrent && gatewayCurrent && !activationPending) {
-        patch({ phase: health.api_contract_version === manifest.api_contract_version ? 'current' : 'blocked', paused: false,
-          activationBlocked: health.api_contract_version !== manifest.api_contract_version,
-          message: health.api_contract_version === manifest.api_contract_version
-            ? `Server ${currentVersion} is compatible with AgentsDock ${manifest.version}.`
-            : 'This server version does not provide the required API contract.' })
+        const api = health.api_contract_version
+        const supported = api !== undefined && api >= manifest.minimum_server_api_contract && api <= manifest.api_contract_version
+        patch({ phase: supported ? 'current' : 'blocked', paused: false,
+          message: supported ? 'Server is up to date.'
+            : api === undefined ? 'The server did not report its API version. Reconnect to check it.'
+              : api < manifest.minimum_server_api_contract ? 'This server needs an update before chats can connect.'
+                : 'Update AgentsDock to connect to this server’s newer API.' })
         return
       }
       if (previousReceipt?.paused) return
@@ -272,7 +237,7 @@ export class CoordinatedUpdateManager {
         observedStatus = observed
         connection.assertCurrent()
         if (observed.server_identity !== target.expected_server_identity || observed.server_instance_id !== target.expected_server_instance_id) {
-          patch({ phase: 'blocked', activationBlocked: true, message: 'Update status belongs to another server instance.' })
+          patch({ phase: 'blocked', message: 'Update status belongs to another server instance.' })
           return
         }
         const failedOwnTarget = (observed.phase === 'failed' || ['server_update_recovery_failed', 'server_update_recovery_launch_failed'].includes(observed.error_code ?? '')) && (observed.target_version === previousReceipt.operationTargetVersion
@@ -281,7 +246,8 @@ export class CoordinatedUpdateManager {
         const canceledOwnReservation = ['idle', 'available', 'current'].includes(observed.phase)
         if (failedOwnTarget || canceledOwnReservation) {
           patch({ paused: true, phase: failedOwnTarget ? 'failed' : 'blocked',
-            message: failedOwnTarget ? 'The server update failed. Retry when ready.' : 'The server update was canceled. Retry when ready.' })
+            message: failedOwnTarget ? observed.message || 'The server update failed. Retry when ready.'
+              : 'The server update was canceled. Retry when ready.' })
           return
         }
       }
@@ -295,14 +261,13 @@ export class CoordinatedUpdateManager {
         connection.assertCurrent()
         if (!target || observed.server_identity !== target.expected_server_identity
           || observed.server_instance_id !== target.expected_server_instance_id) {
-          patch({ phase: 'blocked', activationBlocked: true, message: 'Update status belongs to another server instance.' })
+          patch({ phase: 'blocked', message: 'Update status belongs to another server instance.' })
           return
         }
         const active = ACTIVE_PHASES.has(observed.phase)
         patch({ phase: observed.phase === 'failed' ? 'failed' : active ? 'pending' : 'blocked',
           paused: observed.phase === 'failed',
-          activationBlocked: health.api_contract_version !== manifest.api_contract_version,
-          message: observed.phase === 'failed' ? 'The server update failed before all components were ready. Retry when ready.'
+          message: observed.phase === 'failed' ? observed.message || 'The server update failed before all components were ready. Retry when ready.'
             : active ? observed.message || 'Finishing the server update; waiting for verified reconnection.'
               : 'The server update is incomplete. Reconnect to check recovery.' })
         return
@@ -316,11 +281,17 @@ export class CoordinatedUpdateManager {
         try {
           status = await connection.client.ensureServerUpdate(plan.envelope, target)
         } catch (error) {
-          if (!(error instanceof ServerError) || error.status !== 409 || !isPendingConflict(error)) throw error
-          // An older reservation is still owned by the server. Observe it once;
-          // its next health revision will reconcile our durable newer intent.
-          status = await connection.client.serverUpdateStatus(target)
-          if (!ACTIVE_PHASES.has(status.phase)) throw error
+          if (isLegacyChannelConflict(error)) {
+            // Old ensure handlers rejected a channel change that their manual
+            // update route already supports. Use the same verified bundle and
+            // authenticated server identity, without release discovery.
+            status = await this.bridge(connection, health, manifest, target, () => { operationOwned = true })
+          } else {
+            if (!(error instanceof ServerError) || error.status !== 409 || !isPendingConflict(error)) throw error
+            // Observe an existing reservation until that server reconciles it.
+            status = await connection.client.serverUpdateStatus(target)
+            if (!ACTIVE_PHASES.has(status.phase)) throw error
+          }
         }
       } else {
         status = await this.bridge(connection, health, manifest, target, () => { operationOwned = true })
@@ -331,15 +302,13 @@ export class CoordinatedUpdateManager {
         && 'version' in updateCapability && Number(updateCapability.version) >= 9)
       if (replyIsFenced && target && (status.server_identity !== target.expected_server_identity
         || status.server_instance_id !== target.expected_server_instance_id)) {
-        patch({ phase: 'blocked', activationBlocked: true, message: 'Update response belongs to another server instance. Reconnect to reconcile it.' })
+        patch({ phase: 'blocked', message: 'Update response belongs to another server instance. Reconnect to reconcile it.' })
         return
       }
       const recoveryFailed = ['server_update_recovery_failed', 'server_update_recovery_launch_failed'].includes(status.error_code ?? '')
       patch({ phase: recoveryFailed ? 'failed' : status.phase === 'pending' ? 'pending' : status.phase === 'failed' ? 'failed'
         : ACTIVE_PHASES.has(status.phase) ? 'updating' : 'pending',
         ...(recoveryFailed ? { paused: true } : {}),
-        activationBlocked: health.api_contract_version === undefined || health.api_contract_version < manifest.minimum_server_api_contract
-          || health.api_contract_version > manifest.api_contract_version,
         operationId: status.update_id ?? undefined, scheduleId: status.schedule_id ?? undefined,
         operationTargetVersion: status.target_version ?? manifest.version,
         operationOwned: operationOwned || (previousReceipt?.operationOwned === true
@@ -350,7 +319,7 @@ export class CoordinatedUpdateManager {
       const message = error instanceof Error ? error.message : String(error)
       patch({ phase: error instanceof ServerError || error instanceof ComponentHealthError || /channel|identity|legacy|managed|signed/i.test(message) ? 'blocked' : 'offline',
         ...(error instanceof ServerError && error.status === 503 && needsLegacyUpdateRecovery(message) ? { paused: true } : {}),
-        ...(error instanceof ComponentHealthError || /channel|identity/i.test(message) ? { activationBlocked: true } : {}), message })
+        message })
     } finally {
       clearTimeout(timeout)
       connection?.client.dispose()
@@ -368,19 +337,11 @@ export class CoordinatedUpdateManager {
     const current = await connection.client.serverUpdateStatus(version >= 9 ? target : undefined)
     connection.assertCurrent()
     if (ACTIVE_PHASES.has(current.phase)) return current // Join; never cancel another client's reservation.
-    // A canceled manual request can leave status.track pointing at a different
-    // channel. It is not authority to switch the installed server's channel.
-    const track: ServerUpdateTrack = (health.server_version ?? '').includes('-') ? 'beta' : 'stable'
-    if (track !== manifest.track) throw new Error('Server update channel differs from this app release. Its channel was preserved.')
-    const checked = await connection.client.checkServerUpdate(track, version >= 9 ? target : undefined)
-    connection.assertCurrent()
-    if (ACTIVE_PHASES.has(checked.phase)) return checked
-    const bridgeVersion = checked.latest_version
-    if (!bridgeVersion || compareReleaseVersions(bridgeVersion, health.server_version ?? '') <= 0) {
-      throw new Error('No newer signed legacy bridge is available for this server yet.')
-    }
+    // The signed app bundle already selects an exact server version and channel.
+    // Legacy release discovery adds a rate-limited request without changing that
+    // choice; the runner verifies the selected release before installing it.
     started()
-    return connection.client.startServerUpdate(bridgeVersion, track, true, version >= 9 ? target : undefined)
+    return connection.client.startServerUpdate(manifest.version, manifest.track, true, version >= 9 ? target : undefined)
   }
 
   private save(): void {
@@ -401,6 +362,12 @@ function isPendingConflict(error: ServerError): boolean {
   const detail = error.detail
   return Boolean(detail && typeof detail === 'object' && 'error_code' in detail && detail.error_code === 'server_update_pending')
     || error.message.includes('server_update_pending')
+}
+
+function isLegacyChannelConflict(error: unknown): boolean {
+  return error instanceof ServerError && error.status === 409
+    && Boolean(error.detail && typeof error.detail === 'object'
+      && 'code' in error.detail && error.detail.code === 'server_update_channel_conflict')
 }
 
 export function compareReleaseVersions(left: string, right: string): number {
@@ -448,27 +415,4 @@ export function fileCoordinatedUpdateStore(path: string): CoordinatedUpdateStore
       renameSync(temporary, path)
     }
   }
-}
-
-export async function fetchPairedServerRelease(version: string, fetcher: (url: string, init?: RequestInit) => Promise<Response>): Promise<SignedServerRelease> {
-  if (!RELEASE_VERSION.test(version)) throw new Error('Invalid paired release version.')
-  const root = `https://github.com/ZhengyiLuo/AgentsDock/releases/download/v${version}/agents-server-npm-manifest`
-  const get = async (suffix: string, limit: number): Promise<Buffer> => {
-    const response = await fetcher(`${root}${suffix}`, { signal: AbortSignal.timeout(15_000) })
-    if (!response.ok || !response.body) throw new Error(`Paired server release is unavailable (HTTP ${response.status}).`)
-    const reader = response.body.getReader(), chunks: Uint8Array[] = []
-    let size = 0
-    try {
-      for (;;) {
-        const item = await reader.read()
-        if (item.done) break
-        size += item.value.byteLength
-        if (size > limit) throw new Error('Paired server release asset exceeds its bounds.')
-        chunks.push(item.value)
-      }
-    } finally { await reader.cancel() }
-    return Buffer.concat(chunks)
-  }
-  const [manifest, signature] = await Promise.all([get('.json', MAX_MANIFEST_BYTES), get('.sig', 64)])
-  return { manifest_base64: manifest.toString('base64'), signature_base64: signature.toString('base64') }
 }

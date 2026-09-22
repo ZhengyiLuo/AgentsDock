@@ -30,7 +30,6 @@ const TRACK_BLOCKING_STATES = new Set<AppUpdateStatus['state']>([
 export interface AppUpdateLifecycle {
   beforeInstall?: () => void
   installFailed?: () => void
-  prepareInstall?: (version: string) => Promise<boolean>
   retryServers?: (profileId: string) => Promise<void>
 }
 
@@ -52,17 +51,12 @@ export class AppUpdateManager {
   private betaFeedOverridden = false
   private developmentChecksEnabled = false
   private installInFlight: Promise<boolean> | null = null
-  private coordinatedInstallWaiting = false
 
   setServerUpdates(serverUpdates: NonNullable<AppUpdateStatus['serverUpdates']>): void {
     this.set({ serverUpdates, serverUpdateMessage: undefined })
   }
 
   setServerUpdateError(message: string): void { this.set({ serverUpdateMessage: message }) }
-
-  resumeCoordinatedInstall(): void {
-    if (this.coordinatedInstallWaiting && !this.installInFlight) void this.install()
-  }
 
   async retryServers(profileId: string): Promise<AppUpdateStatus> {
     await this.lifecycle.retryServers?.(profileId)
@@ -277,18 +271,6 @@ export class AppUpdateManager {
         : `Restarting into AgentsDock ${this.value.availableVersion ?? 'update'}…`
     })
     try {
-      if (this.lifecycle.prepareInstall && !await this.lifecycle.prepareInstall(pinnedVersion)) {
-        this.coordinatedInstallWaiting = true
-        const blocked = this.value.serverUpdates?.find(server => server.activationBlocked && server.phase === 'blocked')
-        this.set({ state: 'downloaded', message: blocked
-          ? `${blocked.name}: ${blocked.message} The downloaded app remains ready; AgentsDock will continue when the server is compatible.`
-          : 'The server update is queued. AgentsDock will restart automatically when the server is compatible; this app remains usable while waiting.' })
-        return false
-      }
-      this.coordinatedInstallWaiting = false
-      if (this.status().availableVersion !== pinnedVersion || this.status().state !== 'installing') {
-        throw new Error('The downloaded app changed while preparing its paired server update. Try Update AgentsDock again.')
-      }
       if (process.platform === 'darwin') {
         const downloadedAt = Date.parse(this.value.downloadedAt ?? '')
         const elapsed = Number.isFinite(downloadedAt) ? Math.max(0, Date.now() - downloadedAt) : 0
@@ -348,13 +330,17 @@ export class AppUpdateManager {
     })
     autoUpdater.on('update-not-available', (info: UpdateInfo) => {
       appLog('updater', 'app is current', { version: info.version })
-      if (this.restoreReadyUpdate()) return
+      const previouslyDownloaded = this.readyUpdateBeforeRefresh?.availableVersion
+      if (previouslyDownloaded === info.version && this.restoreReadyUpdate()) return
+      this.readyUpdateBeforeRefresh = null
       this.set({
         state: 'not-available',
         availableVersion: undefined,
         progress: undefined,
         downloadedAt: undefined,
-        message: this.track === 'beta' ? 'AgentsDock is up to date on the beta channel.' : 'AgentsDock is up to date.',
+        message: previouslyDownloaded
+          ? `AgentsDock ${previouslyDownloaded} is no longer offered. No update is currently available.`
+          : this.track === 'beta' ? 'AgentsDock is up to date on the beta channel.' : 'AgentsDock is up to date.',
         checkedAt: now()
       })
       this.manualCheck = false

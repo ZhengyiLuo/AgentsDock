@@ -1,5 +1,60 @@
 # Public development log
 
+## 2026-09-22 — Repair update blocking after withdrawing 1.0.4 and 1.0.5
+
+- Post-withdrawal checks found both public desktop repositories and the
+  standalone server's stable feed back on 1.0.3. The 1.0.4/1.0.5 release pages
+  and checked assets were unavailable, as were the public npm package metadata
+  and tarballs. Withdrawal does not repair already installed apps or servers.
+  Publication entries below describe the earlier state, not a current upgrade
+  recommendation.
+- Remove the desktop installation gate entirely: a saved server's release
+  channel, API version, connectivity or failed update cannot prevent an app
+  update. After relaunch, the installed app's signed bundle selects the server
+  target. Ignore stale pre-install plans and an older target's failed operation
+  receipt; keep already newer servers unchanged.
+  Old apps that still contain the gate may need the corrected direct desktop
+  installer once. Publishing npm alone cannot change their updater code.
+- Remove the artificial Stable/Beta server-channel veto. For older servers that
+  return that exact rejection, use their existing authenticated update route
+  with the bundled target. Other authentication and update failures retain their
+  own handling. Avoid a redundant latest-release lookup for a known target.
+- Fix the Team Hub operation collision: a new update's maintenance fence could
+  be confused with an older retained rollback journal. Recover the old terminal
+  operation, then continue the same new request automatically. Clean up only
+  the unstarted request when recovery cannot proceed. An already-absent restore
+  receipt no longer requires stopping the live Hub to acquire its runtime lease.
+- Stop the release-check request burst. Share simultaneous checks, cache recent
+  results, respect GitHub's retry interval and remove the multi-page HTML
+  fallback after HTTP 429. Show the cause and retry delay. Opening Settings no
+  longer triggers app release discovery or unrelated server release checks.
+- Simplify paired Updates to one app update control, per-server progress and a
+  Retry action. Show concrete causes and keep protocol diagnostics expandable.
+  Remove duplicate server-channel/recovery controls from paired releases. A
+  downloaded withdrawn app is no longer offered when a fresh feed response
+  confirms a different release.
+- Validation: 196 focused server tests and 103 Hub/activation tests pass, along
+  with installer succession and rollback regressions. The collision regression
+  fails against the withdrawn source. A real native macOS 1.0.3 update API run
+  starts with a 0755 installation root, retained terminal rollback journal and
+  newly admitted Hub operation; it completes both services without a remaining
+  journal or fence. All 107 candidate runtime files match; existing Codex/Claude
+  histories, authority files, synthetic credentials, Hub records and bootstrap
+  claims survive. An existing mTLS peer reads old data and writes/reads new data.
+- The native migration uses a private QA feed/signing key and a captured source
+  candidate retaining its 1.0.5 test label. The later retry-delay wording change
+  passes nine targeted request tests separately. The 266 focused desktop tests,
+  TypeScript and production compilation cover the installation gate removal.
+  Native desktop UI checks exercise production IPC and authenticated HTTP, scoped Retry and
+  readable dark/narrow layouts with no implicit release checks; that fixture
+  deliberately rejects its test signing key and does not claim an app binary
+  replacement or successful server migration. A subsequent change preserves
+  the server's concrete failure text in two coordinator branches; all 55
+  coordinator tests, TypeScript and production compilation pass afterward.
+- This records source repair, not a new release. No live service was restarted
+  or redeployed. A corrected signed desktop package still needs its complete
+  update/relaunch and publication validation before shipping.
+
 ## 2026-09-22 — Publish coordinated AgentsDock 1.0.5 (1194)
 
 - Publish the accepted build unchanged to the [public desktop release](https://github.com/ZhengyiLuo/AgentsDock/releases/tag/v1.0.5)

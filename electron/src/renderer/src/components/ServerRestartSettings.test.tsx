@@ -285,122 +285,49 @@ describe('SettingsDialog managed server restart', () => {
     }))
   })
 
-  it('preserves failed update evidence when recovery opens and reopens until Check server is clicked', async () => {
-    const failure = 'legacy installer has no admitted runner authority'
-    const failed: ServerUpdateStatus = {
-      phase: 'failed', current_version: '0.1.26-beta.29', target_version: '1.0.4-beta.12',
-      latest_version: '1.0.4-beta.12', track: 'beta', update_available: true,
-      update_id: '7'.repeat(32), message: failure
-    }
-    installBridge(vi.fn().mockResolvedValue(failed))
+  it('reads restart status without checking GitHub when opening legacy Server settings', async () => {
+    const status = vi.fn().mockResolvedValue({ phase: 'current', current_version: '1.0.3', track: 'stable' })
+    installBridge(status)
+    showSettings(recoveryHealth({ server_version: '1.0.3' }))
+    render(<SettingsDialog />)
+    await waitFor(() => expect(status).toHaveBeenCalledOnce())
+    expect(screen.getByRole('button', { name: 'Server' })).toHaveAttribute('aria-current', 'page')
+    expect(window.agentsDock.serverUpdates.check).not.toHaveBeenCalled()
+    fireEvent.click(screen.getByRole('button', { name: 'Updates' }))
+    fireEvent.click(await screen.findByRole('button', { name: 'Check server' }))
+    await waitFor(() => expect(window.agentsDock.serverUpdates.check).toHaveBeenCalledExactlyOnceWith('stable'))
+  })
+
+  it('shows scoped paired recovery without opening the legacy update checker', async () => {
+    const failure = 'HTTP Error 503: Service Unavailable'
+    installBridge(vi.fn().mockResolvedValue({ phase: 'failed', current_version: '1.0.3', message: failure }))
     const enrolled: AppUpdateStatus = {
-      state: 'not-available', channel: 'direct', track: 'beta',
-      currentVersion: '1.0.4-beta.12', serverUpdates: []
+      state: 'not-available', channel: 'direct', track: 'stable', currentVersion: '1.0.5',
+      serverUpdates: [{ profileId: 'profile-1', name: 'Production east', serverIdentity: 'server-a',
+        targetVersion: '1.0.5', phase: 'failed', message: failure }]
     }
     vi.mocked(window.agentsDock.updates.status).mockResolvedValue(enrolled)
     vi.mocked(window.agentsDock.updates.check).mockResolvedValue(enrolled)
-    vi.mocked(window.agentsDock.serverUpdates.check).mockResolvedValue({
-      ...failed, phase: 'available', update_id: undefined,
-      message: 'AgentsServer 1.0.4-beta.12 is available.'
-    })
-    showSettings(recoveryHealth({ server_version: '0.1.26-beta.29' }))
+    showSettings(recoveryHealth({ server_version: '1.0.4-beta.9' }))
     useAppStore.setState(state => ({ modals: { ...state.modals, settings: false, appSettings: true } }))
     render(<SettingsDialog />)
     fireEvent.click(screen.getByRole('button', { name: 'Updates' }))
-
-    const disclosure = await screen.findByText('Advanced server recovery')
+    expect(await screen.findByRole('button', { name: 'Retry server update' })).toBeEnabled()
+    expect(screen.queryByText('Advanced server recovery')).not.toBeInTheDocument()
+    expect(screen.queryByRole('group', { name: 'Server update channel' })).not.toBeInTheDocument()
+    expect(screen.getAllByRole('group', { name: 'App update channel' })).toHaveLength(1)
+    expect(screen.queryByRole('button', { name: 'Check server' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Force restart server' })).not.toBeInTheDocument()
+    fireEvent.click(screen.getByText('Error details'))
+    expect(screen.getByText(failure)).toBeVisible()
+    fireEvent.click(screen.getByRole('button', { name: 'General' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Updates' }))
+    expect(screen.getByRole('button', { name: 'Retry server update' })).toBeEnabled()
     expect(window.agentsDock.serverUpdates.status).not.toHaveBeenCalled()
-    fireEvent.click(disclosure)
-    expect(await screen.findByText(failure)).toBeInTheDocument()
-    await waitFor(() => expect(updatesSurface().getByRole('button', { name: 'Check server' })).toBeEnabled())
     expect(window.agentsDock.serverUpdates.check).not.toHaveBeenCalled()
-
-    fireEvent.click(disclosure)
-    await waitFor(() => expect(screen.queryByText(failure)).not.toBeInTheDocument())
-    fireEvent.click(disclosure)
-    expect(await screen.findByText(failure)).toBeInTheDocument()
-    await waitFor(() => expect(updatesSurface().getByRole('button', { name: 'Check server' })).toBeEnabled())
-    expect(window.agentsDock.serverUpdates.status).toHaveBeenCalledTimes(2)
-    expect(window.agentsDock.serverUpdates.check).not.toHaveBeenCalled()
-
-    fireEvent.click(updatesSurface().getByRole('button', { name: 'Check server' }))
-    expect(await screen.findByText('AgentsServer 1.0.4-beta.12 is available.')).toBeInTheDocument()
-    expect(window.agentsDock.serverUpdates.check).toHaveBeenCalledExactlyOnceWith('beta')
     expect(window.agentsDock.serverUpdates.start).not.toHaveBeenCalled()
     expect(window.agentsDock.serverUpdates.cancel).not.toHaveBeenCalled()
   })
-
-  it.each(['coordinated completion', 'server boot', 'server version', 'retained failure', 'unavailable status'] as const)(
-    'refreshes open recovery read-only after %s without erasing unconfirmed failure', async change => {
-      const failure = 'HTTP Error 503: Service Unavailable'
-      const failed: ServerUpdateStatus = {
-        phase: 'failed', current_version: '1.0.3', target_version: '1.0.4',
-        latest_version: '1.0.4', track: 'stable', update_available: true,
-        update_id: '8'.repeat(32), message: failure
-      }
-      const completed: ServerUpdateStatus = {
-        phase: 'complete', current_version: '1.0.4', target_version: '1.0.4',
-        track: 'stable', update_available: false, message: 'The coordinated retry completed.'
-      }
-      let settleRefresh!: (status: ServerUpdateStatus) => void
-      let failRefresh!: (error: Error) => void
-      const refresh = new Promise<ServerUpdateStatus>((resolve, reject) => {
-        settleRefresh = resolve
-        failRefresh = reject
-      })
-      const status = vi.fn().mockResolvedValueOnce(failed).mockReturnValue(refresh)
-      installBridge(status)
-      const enrolled: AppUpdateStatus = {
-        state: 'not-available', channel: 'direct', track: 'stable', currentVersion: '1.0.4',
-        serverUpdates: [{
-          profileId: 'profile-1', name: 'Production east', serverIdentity: 'server-a',
-          targetVersion: '1.0.4', phase: 'failed', paused: true, message: 'Retry when ready.'
-        }]
-      }
-      vi.mocked(window.agentsDock.updates.status).mockResolvedValue(enrolled)
-      vi.mocked(window.agentsDock.updates.check).mockResolvedValue(enrolled)
-      showSettings(recoveryHealth({ server_version: '1.0.3' }))
-      useAppStore.setState(state => ({ modals: { ...state.modals, settings: false, appSettings: true } }))
-      render(<SettingsDialog />)
-      fireEvent.click(screen.getByRole('button', { name: 'Updates' }))
-      fireEvent.click(await screen.findByText('Advanced server recovery'))
-      expect(await screen.findByText(failure)).toBeInTheDocument()
-      await waitFor(() => expect(updatesSurface().getByRole('button', { name: 'Check server' })).toBeEnabled())
-      expect(status).toHaveBeenCalledTimes(1)
-
-      act(() => {
-        if (change === 'coordinated completion') {
-          const listener = vi.mocked(window.agentsDock.events.on).mock.calls
-            .find(([event]) => event === 'app:update')?.[1] as (value: AppUpdateStatus) => void
-          expect(listener).toBeTypeOf('function')
-          listener({ ...enrolled, serverUpdates: [{ ...enrolled.serverUpdates![0], phase: 'current', paused: false }] })
-        } else {
-          useAppStore.setState(state => ({ health: {
-            ...state.health!,
-            ...(change === 'server version' ? { server_version: '1.0.4' } : { server_instance_id: 'boot-new' })
-          } }))
-        }
-      })
-      await waitFor(() => expect(status).toHaveBeenCalledTimes(2))
-      // A changed boot or coordinator message alone is not proof of success.
-      expect(screen.getByText(failure)).toBeInTheDocument()
-      expect(window.agentsDock.serverUpdates.check).not.toHaveBeenCalled()
-      await act(async () => {
-        if (change === 'unavailable status') failRefresh(new Error('Status temporarily unavailable'))
-        else settleRefresh(change === 'retained failure' ? failed : completed)
-        await Promise.resolve()
-      })
-      if (change === 'retained failure' || change === 'unavailable status') {
-        expect(screen.getByText(failure)).toBeInTheDocument()
-      } else {
-        expect(await screen.findByText(completed.message!)).toBeInTheDocument()
-        expect(screen.queryByText(failure)).not.toBeInTheDocument()
-      }
-      expect(window.agentsDock.serverUpdates.check).not.toHaveBeenCalled()
-      expect(window.agentsDock.serverUpdates.start).not.toHaveBeenCalled()
-      expect(window.agentsDock.serverUpdates.cancel).not.toHaveBeenCalled()
-    }
-  )
 
   it('preserves an open restart confirmation when delayed app update status arrives, then clears it on reopening Settings', async () => {
     installBridge()

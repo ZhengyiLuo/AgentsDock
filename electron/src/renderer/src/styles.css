@@ -1850,6 +1850,9 @@ button.tool-event-toggle:hover { background: #242424; }
 .legacy-update-recovery { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 8px; font-size: var(--text-size-meta); }
 .legacy-update-recovery p { flex-basis: 100%; margin: 0; line-height: var(--line-height-body); }
 .legacy-update-recovery code { min-width: 0; overflow-wrap: anywhere; user-select: text; }
+.coordinated-update-details { font-size: var(--text-size-meta); color: var(--muted); }
+.coordinated-update-details summary { cursor: pointer; }
+.coordinated-update-details p { margin: 8px 0 0; overflow-wrap: anywhere; user-select: text; }
 @media (max-width: 700px) {
   .coordinated-server-update-row { flex-wrap: wrap; }
   .coordinated-server-update-row > .app-settings-row-copy { flex-basis: 100%; }
