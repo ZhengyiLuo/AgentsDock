@@ -330,6 +330,78 @@ describe('SettingsDialog managed server restart', () => {
     expect(window.agentsDock.serverUpdates.cancel).not.toHaveBeenCalled()
   })
 
+  it.each(['coordinated completion', 'server boot', 'server version', 'retained failure', 'unavailable status'] as const)(
+    'refreshes open recovery read-only after %s without erasing unconfirmed failure', async change => {
+      const failure = 'HTTP Error 503: Service Unavailable'
+      const failed: ServerUpdateStatus = {
+        phase: 'failed', current_version: '1.0.3', target_version: '1.0.4',
+        latest_version: '1.0.4', track: 'stable', update_available: true,
+        update_id: '8'.repeat(32), message: failure
+      }
+      const completed: ServerUpdateStatus = {
+        phase: 'complete', current_version: '1.0.4', target_version: '1.0.4',
+        track: 'stable', update_available: false, message: 'The coordinated retry completed.'
+      }
+      let settleRefresh!: (status: ServerUpdateStatus) => void
+      let failRefresh!: (error: Error) => void
+      const refresh = new Promise<ServerUpdateStatus>((resolve, reject) => {
+        settleRefresh = resolve
+        failRefresh = reject
+      })
+      const status = vi.fn().mockResolvedValueOnce(failed).mockReturnValue(refresh)
+      installBridge(status)
+      const enrolled: AppUpdateStatus = {
+        state: 'not-available', channel: 'direct', track: 'stable', currentVersion: '1.0.4',
+        serverUpdates: [{
+          profileId: 'profile-1', name: 'Production east', serverIdentity: 'server-a',
+          targetVersion: '1.0.4', phase: 'failed', paused: true, message: 'Retry when ready.'
+        }]
+      }
+      vi.mocked(window.agentsDock.updates.status).mockResolvedValue(enrolled)
+      vi.mocked(window.agentsDock.updates.check).mockResolvedValue(enrolled)
+      showSettings(recoveryHealth({ server_version: '1.0.3' }))
+      useAppStore.setState(state => ({ modals: { ...state.modals, settings: false, appSettings: true } }))
+      render(<SettingsDialog />)
+      fireEvent.click(screen.getByRole('button', { name: 'Updates' }))
+      fireEvent.click(await screen.findByText('Advanced server recovery'))
+      expect(await screen.findByText(failure)).toBeInTheDocument()
+      await waitFor(() => expect(updatesSurface().getByRole('button', { name: 'Check server' })).toBeEnabled())
+      expect(status).toHaveBeenCalledTimes(1)
+
+      act(() => {
+        if (change === 'coordinated completion') {
+          const listener = vi.mocked(window.agentsDock.events.on).mock.calls
+            .find(([event]) => event === 'app:update')?.[1] as (value: AppUpdateStatus) => void
+          expect(listener).toBeTypeOf('function')
+          listener({ ...enrolled, serverUpdates: [{ ...enrolled.serverUpdates![0], phase: 'current', paused: false }] })
+        } else {
+          useAppStore.setState(state => ({ health: {
+            ...state.health!,
+            ...(change === 'server version' ? { server_version: '1.0.4' } : { server_instance_id: 'boot-new' })
+          } }))
+        }
+      })
+      await waitFor(() => expect(status).toHaveBeenCalledTimes(2))
+      // A changed boot or coordinator message alone is not proof of success.
+      expect(screen.getByText(failure)).toBeInTheDocument()
+      expect(window.agentsDock.serverUpdates.check).not.toHaveBeenCalled()
+      await act(async () => {
+        if (change === 'unavailable status') failRefresh(new Error('Status temporarily unavailable'))
+        else settleRefresh(change === 'retained failure' ? failed : completed)
+        await Promise.resolve()
+      })
+      if (change === 'retained failure' || change === 'unavailable status') {
+        expect(screen.getByText(failure)).toBeInTheDocument()
+      } else {
+        expect(await screen.findByText(completed.message!)).toBeInTheDocument()
+        expect(screen.queryByText(failure)).not.toBeInTheDocument()
+      }
+      expect(window.agentsDock.serverUpdates.check).not.toHaveBeenCalled()
+      expect(window.agentsDock.serverUpdates.start).not.toHaveBeenCalled()
+      expect(window.agentsDock.serverUpdates.cancel).not.toHaveBeenCalled()
+    }
+  )
+
   it('preserves an open restart confirmation when delayed app update status arrives, then clears it on reopening Settings', async () => {
     installBridge()
     const resolveAppUpdateStatus = delayAppUpdateStatus()

@@ -1,5 +1,24 @@
 # Public development log
 
+## 2026-09-21 — Correct stable migration recovery found by native testing
+
+- Keep expanded server recovery in sync with the active server's coordinated
+  update, boot and version changes. Refresh only authoritative status; preserve
+  the original failure while a refresh is pending or unavailable, without
+  implicitly checking for a new release.
+- Accept the additional command-display quoting used by newer tmux versions
+  when proving an older macOS updater's ownership. Decode at most one extra
+  serialization layer, then retain exact kernel argument, executable, ancestry,
+  operation and authenticated idle checks before stopping the old service.
+- Five renderer regressions fail before the fix; 285 related tests and type
+  checking pass afterward. The real private tmux launch regression reproduces
+  the old proof failure on tmux 3.7 and passes with the correction. All 23 helper
+  tests pass on the native framework-Python host; the release interpreter and
+  separate native guest pass with one framework-specific skip.
+- Availability: committed corrections awaiting a new signed candidate and its
+  packaged migration, failure/retry and rollback acceptance. No stable 1.0.4
+  release is published from the superseded candidate.
+
 ## 2026-09-21 — Prepare the stable coordinated-update bridge
 
 - Target the existing stable 1.0.3 app and managed server. The user keeps one
