@@ -1,5 +1,37 @@
 # Public development log
 
+## 2026-09-22 — Accept direct AgentsDock 1.0.5 (1194)
+
+- Accepted product source: `321448f7ac5f7ae393a61660ec6168eedc9791b0`.
+  The paired standalone server is `144d2eaf1690185d6fae1386f793ced32ce18e3f`;
+  its runtime matches the signed npm package byte for byte across 107 files.
+- Desktop validation passes 4,699 tests with five existing skips. All eight
+  server test shards pass (5,031 cases), together with focused CLI, packaging
+  and publication checks. Windows and Linux x64/ARM64 builds pass their native
+  verification jobs. The universal macOS app and DMG pass Developer ID,
+  notarization, Gatekeeper, exact updater metadata, checksums and launch checks.
+  Windows installers remain unsigned.
+- The unchanged published 1.0.3 app updates to signed 1.0.5/build 1194 through
+  the real updater, automatically relaunches, and migrates an existing 1.0.3
+  server with a `0755` installation root. One app-update click completes both;
+  no separate server-update action is used.
+- The unchanged published 1.0.4 app updates and automatically relaunches into
+  the same accepted package with a genuinely stranded 1.0.4 server migration.
+  Settings displays the pinned recovery command and copies it correctly. The
+  exact npm package recovers the missing-stage transaction without restarting
+  the incumbent. One native Retry click then completes the paired update, and
+  reopening Settings shows both components current with no recovery prompt.
+- Both paths retain server identity, Codex and Claude histories, authority and
+  credential files, Hub data and bootstrap claims. An existing mutual-TLS peer
+  can read retained data and exchange a new message. Both use original
+  production signatures and the unchanged trust key. Private feed routing
+  supplies the exact signed bytes; public registry/feed verification follows
+  publication. An interrupted VM/VNC harness attempt is retained separately
+  and is not used as upgrade evidence.
+- Sixteen verified release assets are sealed with matching platform feeds and
+  the same signed server descriptor. This entry accepts build 1194 before
+  upload; publication is performed separately using these exact bytes.
+
 ## 2026-09-22 — Prepare coordinated 1.0.5 correction
 
 - Remove the withdrawn 1.0.4 legacy desktop mirror after preserving and
