@@ -8,9 +8,14 @@
   with a conclusively absent process and matching authenticated legacy health.
   Preserve the receipt and all existing native identity, idle and update-owner
   checks; never send credentials to the stale callback endpoint.
-- Pass 61 focused activation, recovery-intent, transaction and management tests,
+- Acquire the installer's authenticated legacy proof when no split execution
+  layout is installed, including after rollback leaves a dead worker receipt.
+  The native failure test exposed this separate shell-path omission before
+  shutdown; retain the Python classifier and its ownership checks.
+- Pass 62 focused activation, recovery-intent, transaction and management tests,
   including a real process lease followed by abrupt process death, rollback,
-  and a new admitted retry. Cover active or malformed receipts, held or unsafe
+  and a new admitted retry. Exercise the actual installer shell function feeding
+  both Python admission checks. Cover active or malformed receipts, held or unsafe
   locks, changed ownership and published-layout races.
 - Correct an asynchronous Team Network test to await the recovered host-address
   control independently of bulletin loading. The 119 related renderer tests and
