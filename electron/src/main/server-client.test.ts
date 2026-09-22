@@ -15,6 +15,30 @@ import {
 import { PinRevisionConflictError } from './pin-sync'
 import { TEAM_MAIL_HINTS_PATH, TEAM_MAIL_HINTS_PROTOCOL, type MailboxCoverage } from '../shared/team-mail-hints'
 import { emptyBulletinCursor, TEAM_ACTIVITY_HINTS_PROTOCOL, type BulletinChangeCursor } from '../shared/team-bulletin-hints'
+import { appLog } from './logger'
+
+vi.mock('./logger', () => ({ appLog: vi.fn() }))
+
+describe('AgentServerClient network diagnostics', () => {
+  afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); vi.mocked(appLog).mockClear() })
+
+  it('records nested socket codes without secrets and preserves the original failure without retrying', async () => {
+    const socket = Object.assign(new Error('secret token and request body'), { code: 'ECONNRESET', syscall: 'read' })
+    const cause = Object.assign(new AggregateError([socket], 'private query'), { code: 'UND_ERR_SOCKET' })
+    const error = new TypeError('fetch failed with secret', { cause })
+    const fetchMock = vi.fn().mockRejectedValue(error)
+    vi.stubGlobal('fetch', fetchMock)
+    const client = new AgentServerClient('http://example.test:7850', 'secret-token')
+
+    await expect(client.health()).rejects.toBe(error)
+    expect(fetchMock).toHaveBeenCalledOnce()
+    expect(appLog).toHaveBeenCalledWith('transport', 'server request failed', {
+      origin: 'http://example.test:7850', path: '/api/health', method: 'GET', durationMs: expect.any(Number),
+      error: { name: 'TypeError', cause: { name: 'AggregateError', code: 'UND_ERR_SOCKET', errors: [{ name: 'Error', code: 'ECONNRESET', syscall: 'read' }] } }
+    })
+    expect(JSON.stringify(vi.mocked(appLog).mock.calls)).not.toMatch(/secret|private/)
+  })
+})
 
 async function withLocalHTTPServer(
   handler: (request: IncomingMessage, response: ServerResponse) => void | Promise<void>,

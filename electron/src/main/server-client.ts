@@ -123,6 +123,8 @@ import { parseAgentTeamMessagesCapability, parseTeamBulletinAliasCapability, par
 import { PinRevisionConflictError } from './pin-sync'
 import { PORT_TUNNEL_SUBPROTOCOL } from './port-tunnel-manager'
 import { SecurePeerRequestAdmission } from './secure-peer-request-admission'
+import { appLog } from './logger'
+import { networkErrorDetails } from './network-error'
 import {
   parseMailHintPacket, TEAM_MAIL_HINTS_MAX_PACKET_CHARS, TEAM_MAIL_HINTS_PATH, TEAM_MAIL_HINTS_PROTOCOL,
   type MailboxCoverage, type MailHintMailbox, type MailHintPacket
@@ -2563,15 +2565,33 @@ export class AgentServerClient {
     const headers = new Headers(init.headers)
     this.applyAuth(headers, configuration)
     if (init.body && !(init.body instanceof FormData) && !headers.has('Content-Type')) headers.set('Content-Type', 'application/json')
-    const response = await fetch(configurationURL(configuration, path), {
-      ...init,
-      headers,
-      // Never allow a profile credential to be replayed to a redirect target.
-      // Even same-origin redirects are rejected so an intermediary cannot
-      // silently rewrite the authenticated method or request body.
-      redirect: 'error',
-      signal: combineAbortSignals(configuration.abortController.signal, init.signal ?? AbortSignal.timeout(DEFAULT_REQUEST_TIMEOUT_MS))
-    })
+    const target = new URL(configurationURL(configuration, path))
+    const started = performance.now()
+    let response: Response
+    try {
+      response = await fetch(target.toString(), {
+        ...init,
+        headers,
+        // Never allow a profile credential to be replayed to a redirect target.
+        // Even same-origin redirects are rejected so an intermediary cannot
+        // silently rewrite the authenticated method or request body.
+        redirect: 'error',
+        signal: combineAbortSignals(configuration.abortController.signal, init.signal ?? AbortSignal.timeout(DEFAULT_REQUEST_TIMEOUT_MS))
+      })
+    } catch (error) {
+      // Profile retirement is expected cancellation. Preserve unexpected socket
+      // failures that otherwise become only "fetch failed" across Electron IPC.
+      if (!configuration.abortController.signal.aborted) {
+        appLog('transport', 'server request failed', {
+          origin: target.origin,
+          path: target.pathname,
+          method: init.method ?? 'GET',
+          durationMs: Math.round(performance.now() - started),
+          error: networkErrorDetails(error)
+        })
+      }
+      throw error
+    }
     if (!response.ok) {
       let detail = `${response.status} ${response.statusText}`
       let rawDetail: unknown

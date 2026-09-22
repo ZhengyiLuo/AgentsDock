@@ -1,5 +1,17 @@
 # Public development log
 
+## 2026-09-22 — Preserve native connection failure diagnostics
+
+- Record request duration and bounded native socket error codes when desktop
+  server requests fail. Exclude credentials, request bodies, query strings and
+  exception messages; retain the original error and do not retry mutations.
+- Validate focused client tests, TypeScript and production compilation. In an
+  isolated native Electron app, real server switching and a Claude send/reply
+  succeed; an unavailable local endpoint records `ECONNREFUSED` and the app
+  reconnects after switching back to the healthy server.
+- This adds diagnostics for intermittent failures. It does not establish the
+  cause of a past disconnect or claim that diagnostics alone fix recovery.
+
 ## 2026-09-22 — Bound Windows release test concurrency
 
 - Run the Windows release tests with one worker after concurrent disk-heavy
