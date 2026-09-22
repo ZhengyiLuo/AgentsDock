@@ -24,6 +24,12 @@ Never add message or prompt text, chat/job/agent/folder names, skill or command 
 | `app_launched` | The Electron renderer mounts. | None |
 | `chat_created` | A quick-create or new-chat request succeeds. | None |
 | `chat_opened` | A session becomes newly visible in a chat pane. This can result from navigation or restoration, not only a mouse click. | None |
+| `split_view_opened` | The chat layout transitions from one visible chat to two distinct visible chats. Replacing a chat in an already-open split does not count. | None |
+| `chat_forked` | Creating a fork of an existing chat succeeds. | None |
+| `chat_share_opened` | The sharing dialog opens for a valid chat in the active server workspace. | None |
+| `chat_share_snapshot_created` | Creating a view-only chat snapshot succeeds. Clipboard or browser-opening failures after creation do not change this outcome. | None |
+| `chat_share_interactive_created` | Creating an interactive shared-chat session succeeds. Clipboard or browser-opening failures after creation do not change this outcome. | None |
+| `chat_share_revoked` | Revoking an existing snapshot or interactive share succeeds. | None |
 | `chat_resumed` | A single external provider session is successfully resumed, including resume by session ID. Selecting an already-imported AgentsDock chat does not count. | None |
 | `chats_bulk_imported` | At least one chat succeeds through the multi-select import workflow. A single-session Resume action no longer emits this event. | `success: true` |
 | `message_sent` | A composer message is accepted or queued successfully. | None |
@@ -31,6 +37,7 @@ Never add message or prompt text, chat/job/agent/folder names, skill or command 
 | `slash_command_used` | An accepted message uses a provider inventory item classified as a non-skill command. | None |
 | `chat_reference_sent` | An accepted message contains one or more structured `@Chat` route references. This measures use of the reference, not whether the agent later performs a handoff. | None |
 | `team_reference_sent` | An accepted message contains one or more structured Team Network (`@@`) references. | None |
+| `team_network_opened` | The Team Network surface transitions from closed to open. Navigating within an already-open Team Network does not count. | None |
 
 ### Scheduled jobs
 
@@ -52,6 +59,7 @@ Never add message or prompt text, chat/job/agent/folder names, skill or command 
 | `folder_created` | A unique chat folder is created. | None |
 | `folder_deleted` | Folder deletion and any required moves to General complete successfully. | None |
 | `folder_reordered` | A drag-and-drop folder reorder is applied. | None |
+| `chat_reordered` | A drag-and-drop reorder within the same chat folder succeeds. | None |
 | `chat_moved_to_folder` | A server-confirmed chat update changes its organizational folder. This covers the header picker, sidebar menu, and drag-and-drop. | None |
 | `working_directory_changed` | A server-confirmed chat update changes its working directory. | None |
 
@@ -71,7 +79,7 @@ Never add message or prompt text, chat/job/agent/folder names, skill or command 
 | --- | --- | --- |
 | `connection_tested` | A server connection test finishes. | `success` |
 | `server_added` | Adding a server profile finishes. | `success` |
-| `server_switched` | Explicitly switching to a server from Settings finishes. | `success` |
+| `server_switched` | Explicitly switching to a server from Settings or the sidebar finishes. Automatic and superseded switches do not count. | `success` |
 
 ## Cleanup notes
 
@@ -80,6 +88,6 @@ Never add message or prompt text, chat/job/agent/folder names, skill or command 
 - `message_sent` remains the overall talk metric. The new companion events separate anonymous aggregate use of provider slash skills/commands and structured agent references without recording their contents or destinations.
 - `job_schedule_opened` remains for historical continuity, while successful create, update, delete, and queued-run cancellation now have distinct events.
 
-## Known follow-up
+## User control
 
-An earlier Settings cleanup removed the analytics opt-out control, while the privacy page still says it is available in Settings. The stored opt-out decision is still honored by the analytics runtime, but the UI and published explanation should be reconciled in a separate product decision.
+Settings > General includes a Usage analytics switch and a link to the published Privacy Policy. Turning analytics off aborts pending requests, deletes the anonymous per-install identifier, and prevents subsequent events. A previously stored opt-out remains off after an update.

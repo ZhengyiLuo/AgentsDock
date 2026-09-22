@@ -12,6 +12,7 @@ const workspaceEditorHarness = vi.hoisted(() => ({
   onReady: null as (() => void) | null
 }))
 const appRenderHarness = vi.hoisted(() => ({ sidebarRenders: 0 }))
+const analytics = vi.hoisted(() => ({ trackEvent: vi.fn() }))
 const sideChatHarness = vi.hoisted(() => ({ props: null as any }))
 const teamspaceHarness = vi.hoisted(() => ({
   mounts: 0,
@@ -26,6 +27,8 @@ const teamspaceHarness = vi.hoisted(() => ({
     onSecurePeerInviteHandled?: (requestId: number) => void
   }
 }))
+
+vi.mock('./lib/analytics', () => analytics)
 
 vi.mock('./components/Sidebar', () => ({
   Sidebar: ({ hidden = false }: { hidden?: boolean }) => {
@@ -52,9 +55,10 @@ vi.mock('./components/Composer', () => ({
   }
 }))
 vi.mock('./components/Dialogs', () => ({ Dialogs: () => <div data-testid="dialogs" /> }))
-vi.mock('./components/InspectorDock', () => ({ InspectorDock: (props: any) => {
+vi.mock('./components/InspectorDock', () => ({ InspectorDock: () => <div data-testid="inspector" /> }))
+vi.mock('./components/SideChatPopover', () => ({ SideChatPopover: (props: any) => {
   sideChatHarness.props = props
-  return <div data-testid="inspector" />
+  return <div data-testid="side-chat-popover" />
 } }))
 vi.mock('./components/CodeReview', () => ({ CodeReview: () => <div data-testid="review" /> }))
 vi.mock('./components/TerminalDock', () => ({ TerminalDock: () => <div data-testid="terminal" /> }))
@@ -143,6 +147,7 @@ describe('App chat workspace identity', () => {
     teamspaceHarness.mounts = 0
     teamspaceHarness.unmounts = 0
     teamspaceHarness.props = null
+    analytics.trackEvent.mockClear()
     window.history.replaceState({}, '', '/')
     localStorage.clear()
     Object.defineProperty(window, 'agentsDock', {
@@ -238,15 +243,13 @@ describe('App chat workspace identity', () => {
     expect(useAppStore.getState().selectedSessionId).toBe('chat-b')
     expect(useAppStore.getState().focusedChatPane).toBe('secondary')
     expect(sideChatHarness.props.open).toBe(true)
-    expect(sideChatHarness.props.content.props.tab).toBe('details')
-    expect(sideChatHarness.props.content.props.session.id).toBe('chat-b')
-    const focusVersion = sideChatHarness.props.content.props.focusVersion
+    expect(useAppStore.getState().inspectorVisible).toBe(false)
+    expect(sideChatHarness.props.session.id).toBe('chat-b')
+    const focusVersion = sideChatHarness.props.focusVersion
     open(4, 'chat-b')
-    expect(sideChatHarness.props.content.props.focusVersion).toBe(focusVersion + 1)
-    act(() => sideChatHarness.props.content.props.onFocusHandled())
-    expect(sideChatHarness.props.content.props.focusVersion).toBe(0)
+    expect(sideChatHarness.props.focusVersion).toBe(focusVersion + 1)
     open(4, 'missing')
-    expect(sideChatHarness.props.content.props.session.id).toBe('chat-b')
+    expect(sideChatHarness.props.session.id).toBe('chat-b')
   })
 
   it('keeps side state and pending work through hiding and a failed profile switch', async () => {
@@ -261,11 +264,11 @@ describe('App chat workspace identity', () => {
     act(() => window.dispatchEvent(new CustomEvent('agentsdock:open-side-chat', {
       detail: { profileId: profile.id, profileGeneration: 4, sessionId: 'chat-a' }
     })))
-    const { controller, scope } = sideChatHarness.props.content.props
+    const { controller, scope } = sideChatHarness.props
     controller.setDraft(scope, 'chat-a', 'Explain the choice.')
     const pending = controller.send(scope, sessions[0])
     expect(ask).toHaveBeenCalledOnce()
-    act(() => sideChatHarness.props.content.props.onHide())
+    act(() => sideChatHarness.props.onOpenChange(false))
     expect(cancel).not.toHaveBeenCalled()
     expect(controller.snapshot(scope, 'chat-a').pending).not.toBeNull()
     act(() => useAppStore.setState({ switchingProfileId: 'profile-b' }))
@@ -288,20 +291,20 @@ describe('App chat workspace identity', () => {
       available: true, version: 2, native_context: true, backends: ['codex'], max_question_chars: 8000
     } } } })
     render(<App />)
-    const { controller, scope } = sideChatHarness.props.content.props
+    const { controller, scope } = sideChatHarness.props
     controller.setDraft(scope, 'chat-a', 'Explain A')
     const pending = controller.send(scope, sessions[0])
     controller.setDraft(scope, 'chat-a', 'Next A draft')
     act(() => useAppStore.setState({ switchingProfileId: other.id }))
     act(() => useAppStore.setState({ activeProfileId: other.id, profileGeneration: 5, switchingProfileId: null }))
-    const otherScope = sideChatHarness.props.content.props.scope
+    const otherScope = sideChatHarness.props.scope
     expect(controller.snapshot(otherScope, 'chat-a').exchanges).toEqual([])
     controller.setDraft(otherScope, 'chat-a', 'B draft')
     answer({ request_id: ask.mock.calls[0][2].request_id, session_id: 'chat-a', backend: 'codex', answer: 'A completed while away' })
     await act(async () => { await pending })
     expect(controller.snapshot(otherScope, 'chat-a')).toMatchObject({ draft: 'B draft', exchanges: [] })
     act(() => useAppStore.setState({ activeProfileId: profile.id, profileGeneration: 6 }))
-    const returned = sideChatHarness.props.content.props.scope
+    const returned = sideChatHarness.props.scope
     expect(controller.snapshot(returned, 'chat-a')).toMatchObject({ draft: 'Next A draft', pending: null,
       sideChatId: ask.mock.calls[0][2].side_chat_id,
       exchanges: [expect.objectContaining({ answer: 'A completed while away' })] })
@@ -365,7 +368,7 @@ describe('App chat workspace identity', () => {
     expect(dock).toBeVisible()
     expect(dock).toHaveTextContent('Chat A needs immediate attention.')
     expect(workspace).toContainElement(dock)
-    expect(dock.nextElementSibling).toBe(composer)
+    expect(dock.nextElementSibling).toContainElement(composer)
   })
 
   it('closes Teamspace when the active server scope changes and does not reopen on switch-back', async () => {
@@ -388,6 +391,24 @@ describe('App chat workspace identity', () => {
     act(() => useAppStore.setState({ activeProfileId: profile.id, profileGeneration: 6 }))
     expect(screen.queryByTestId('teamspace')).not.toBeInTheDocument()
     expect(teamspaceHarness.mounts).toBe(1)
+  })
+
+  it('records each transition into Team Network once, not navigation within the open surface', async () => {
+    render(<App />)
+    analytics.trackEvent.mockClear()
+
+    act(() => { window.dispatchEvent(new CustomEvent('agentsdock:open-teamspace')) })
+    expect(await screen.findByTestId('teamspace')).toBeVisible()
+    await waitFor(() => expect(analytics.trackEvent).toHaveBeenCalledExactlyOnceWith('team_network_opened'))
+
+    act(() => { window.dispatchEvent(new CustomEvent('agentsdock:open-teamspace', { detail: { section: 'feed' } })) })
+    expect(analytics.trackEvent).toHaveBeenCalledTimes(1)
+
+    act(() => { window.dispatchEvent(new Event('agentsdock:close-teamspace')) })
+    await waitFor(() => expect(screen.queryByTestId('teamspace')).not.toBeInTheDocument())
+    act(() => { window.dispatchEvent(new CustomEvent('agentsdock:open-teamspace')) })
+    await waitFor(() => expect(analytics.trackEvent).toHaveBeenCalledTimes(2))
+    expect(analytics.trackEvent).toHaveBeenLastCalledWith('team_network_opened')
   })
 
   it('opens Teamspace directly to Inbox when a received-mail notice requests it', async () => {

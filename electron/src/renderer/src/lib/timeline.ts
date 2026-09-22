@@ -19,6 +19,9 @@ export interface MessageItem {
   events: Event[]
   role: 'user' | 'assistant'
   files: AgentFile[]
+  /** Renderer-only outbound message that has not been accepted by AgentsServer yet. */
+  pending?: boolean
+  pendingPhase?: 'preflight' | 'submitting' | 'submitted'
 }
 
 export interface TraceItem {

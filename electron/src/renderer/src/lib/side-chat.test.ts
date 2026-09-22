@@ -11,6 +11,28 @@ beforeEach(() => useAppStore.setState({ activeProfileId: 'a', profileGeneration:
   health: { ok: true, capabilities: { side_questions: capability } } }))
 
 describe('SideChatController', () => {
+  it('restores each chat and server position across visits, but rejects saves from a cleared view', () => {
+    Object.defineProperty(window, 'agentsDock', { configurable: true, value: { sideQuestions: {} } })
+    const controller = new SideChatController()
+    const owner = { ...scope, serverIdentity: 'identity-a' }
+    const other = { ...owner, profileId: 'b', serverIdentity: 'identity-b' }
+    const id = controller.snapshot(owner, session.id).sideChatId
+    controller.saveHistoryScroll(owner, session.id, id, { scrollTop: 240, atBottom: false })
+    const nextVisit = { ...owner, profileGeneration: owner.profileGeneration + 2 }
+    expect(controller.historyScroll(nextVisit, session.id)).toEqual({ scrollTop: 240, atBottom: false })
+    expect(controller.historyScroll(owner, 'other-chat')).toBeUndefined()
+    expect(controller.historyScroll(other, session.id)).toBeUndefined()
+    expect(controller.historyScroll({ ...owner, serverIdentity: 'replacement-a' }, session.id)).toBeUndefined()
+    controller.clear(owner, session.id)
+    controller.saveHistoryScroll(owner, session.id, id, { scrollTop: 240, atBottom: false })
+    expect(controller.historyScroll(owner, session.id)).toBeUndefined()
+    const newId = controller.snapshot(owner, session.id).sideChatId
+    controller.saveHistoryScroll(owner, session.id, newId, { scrollTop: 300, atBottom: true })
+    controller.reset()
+    controller.saveHistoryScroll(owner, session.id, newId, { scrollTop: 300, atBottom: true })
+    expect(controller.historyScroll(owner, session.id)).toBeUndefined()
+  })
+
   it('discards only removed or rebound profile state and rejects its late reply', async () => {
     const response = deferred()
     const ask = vi.fn().mockReturnValue(response.promise)

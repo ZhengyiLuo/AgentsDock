@@ -1,22 +1,20 @@
 import { useId, useLayoutEffect, useRef, type ReactNode } from 'react'
-import * as DropdownMenu from '@radix-ui/react-dropdown-menu'
-import { MessageCircleQuestion, MoreHorizontal, X } from 'lucide-react'
+import { X } from 'lucide-react'
 import { t } from '@shared/i18n'
 import type { SideQuestionScope } from '@shared/side-questions'
 import type { Session } from '@shared/types'
 import { useLocale } from '../lib/i18n'
 import { SideChatController } from '../lib/side-chat'
 import { Inspector } from './Inspector'
-import { SideQuestionPanel } from './SideQuestionPanel'
+import './SideQuestionPanel.css'
 
 export type InspectorWorkspaceTab = 'details' | 'review'
-export function InspectorWorkspace({ session, scope, controller, tab, onTabChange, onHide, focusVersion, onFocusHandled, review, visible }: {
+export function InspectorWorkspace({ session, scope, controller, tab, onTabChange, onHide, review }: {
   session: Session | null; scope: SideQuestionScope; controller: SideChatController; tab: InspectorWorkspaceTab
-  onTabChange: (tab: InspectorWorkspaceTab) => void; onHide: () => void; focusVersion: number; onFocusHandled?: () => void; review?: ReactNode; visible: boolean
+  onTabChange: (tab: InspectorWorkspaceTab) => void; onHide: () => void; review?: ReactNode
 }) {
   useLocale()
   const id = useId()
-  const sideChatAvailable = !window.agentsDock.sharedChat && (session?.backend === 'codex' || session?.backend === 'claude')
   const selectedTab = tab === 'review' && !review ? 'details' : tab
   const tabs: InspectorWorkspaceTab[] = ['details', 'review']
   return <aside className="inspector inspector-workspace">
@@ -38,26 +36,13 @@ export function InspectorWorkspace({ session, scope, controller, tab, onTabChang
       <button type="button" className="icon-button" aria-label={t('sideChat.hide')} title={t('sideChat.hide')} onClick={onHide}><X size={15} /></button>
     </header>
     {selectedTab === 'details' && <div className="inspector-workspace-content" role={review ? 'tabpanel' : undefined} id={`${id}-details-panel`} aria-labelledby={review ? `${id}-details-tab` : undefined}>
-      <InspectorDetails scope={scope} sessionId={session?.id ?? ''} controller={controller}>
-        {sideChatAvailable && session && <section className="inspector-section side-chat-section">
-          <div className="side-chat-heading"><h3><MessageCircleQuestion size={15} />{t('sideChat.title')}</h3>
-            <DropdownMenu.Root>
-              <DropdownMenu.Trigger asChild><button type="button" className="icon-button" aria-label={t('sideChat.actions')}><MoreHorizontal size={15} /></button></DropdownMenu.Trigger>
-              <DropdownMenu.Portal><DropdownMenu.Content className="menu-content" align="end">
-                <DropdownMenu.Item className="menu-item" onSelect={() => controller.clear(scope, session.id)}>{t('sideChat.clear')}</DropdownMenu.Item>
-              </DropdownMenu.Content></DropdownMenu.Portal>
-            </DropdownMenu.Root>
-          </div>
-          <SideQuestionPanel key={JSON.stringify([scope.profileId, scope.profileGeneration, session.id])} session={session} scope={scope} controller={controller}
-            active={visible} autoFocus={false} focusVersion={focusVersion} onFocusHandled={onFocusHandled} />
-        </section>}
-      </InspectorDetails>
+      <InspectorDetails scope={scope} sessionId={session?.id ?? ''} controller={controller} />
     </div>}
     {review && selectedTab === 'review' && <div className="inspector-workspace-content" role="tabpanel" id={`${id}-review-panel`} aria-labelledby={`${id}-review-tab`}>{review}</div>}
   </aside>
 }
 
-function InspectorDetails({ scope, sessionId, controller, children }: { scope: SideQuestionScope; sessionId: string; controller: SideChatController; children?: ReactNode }) {
+function InspectorDetails({ scope, sessionId, controller }: { scope: SideQuestionScope; sessionId: string; controller: SideChatController }) {
   const host = useRef<HTMLDivElement | null>(null)
   useLayoutEffect(() => {
     const element = host.current?.querySelector<HTMLElement>('.inspector-scroll')
@@ -65,5 +50,5 @@ function InspectorDetails({ scope, sessionId, controller, children }: { scope: S
     element.scrollTop = controller.detailsScroll(scope, sessionId)
     return () => controller.saveDetailsScroll(scope, sessionId, element.scrollTop)
   }, [scope.profileId, scope.profileGeneration, sessionId, controller])
-  return <div className="inspector-details-host" ref={host}><Inspector embedded afterMedia={children} /></div>
+  return <div className="inspector-details-host" ref={host}><Inspector embedded /></div>
 }

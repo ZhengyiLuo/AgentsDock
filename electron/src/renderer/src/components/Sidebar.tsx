@@ -68,7 +68,6 @@ export function Sidebar({ hidden = false }: { hidden?: boolean }) {
   const collapsed = useAppStore(state => state.collapsedFolders)
   const archivedCollapsed = useAppStore(state => state.archivedCollapsed)
   const catalog = useAppStore(state => state.runtimeCatalog)
-  const [appVersion, setAppVersion] = useState<string | null>(null)
   const chatCount = sessions.filter(session => !session.archived).length
   const [dragging, setDragging] = useState<{ id: string; label: string; type: 'session' | 'folder' } | null>(null)
   const [drop, setDrop] = useState<DropIndicator | null>(null)
@@ -90,14 +89,6 @@ export function Sidebar({ hidden = false }: { hidden?: boolean }) {
   const folders = stableFolders.current
   const suppressClick = useCallback((id: string) => suppressClickRef.current === id, [])
   const isSidebarScrolling = useCallback(() => Date.now() < sidebarScrollingUntil.current, [])
-
-  useEffect(() => {
-    let active = true
-    void window.agentsDock?.updates?.status?.().then(status => {
-      if (active) setAppVersion(status.currentVersion?.trim() || null)
-    }).catch(() => undefined)
-    return () => { active = false }
-  }, [])
 
   useEffect(() => () => {
     if (suppressClickTimer.current != null) window.clearTimeout(suppressClickTimer.current)
@@ -231,6 +222,7 @@ export function Sidebar({ hidden = false }: { hidden?: boolean }) {
           operation.targetFolder
         )
         useAppStore.setState({ sessions: next })
+        trackEvent(sidebarReorderAnalyticsEvent(operation))
       } catch (error) { useAppStore.getState().setError(error instanceof Error ? error.message : String(error)) }
     }
   }
@@ -239,7 +231,7 @@ export function Sidebar({ hidden = false }: { hidden?: boolean }) {
     <aside className="sidebar" aria-hidden={hidden} inert={hidden ? true : undefined}>
       <div className="sidebar-drag-region" />
       <div className="sidebar-topbar">
-        <div className="sidebar-brand"><strong>AgentsDock</strong>{appVersion && <small className="sidebar-app-version" title={`AgentsDock v${appVersion}`}>v{appVersion}</small>}</div>
+        <strong>AgentsDock</strong>
         <div className="toolbar-cluster">
           <ShortcutTooltip shortcut="toggleSidebar" label={t('ui.sidebar.hideChatList')}><button className="icon-button" aria-label={t('ui.sidebar.hideChatList')} onClick={() => window.dispatchEvent(new Event('agentsdock:toggle-sidebar'))}><PanelLeftClose size={15} /></button></ShortcutTooltip>
           <button className="icon-button" title={connected ? t("ui.Sidebar.Sidebar.refresh_0e91610") : t("ui.Sidebar.Sidebar.reconnect_bf8a9ea")} aria-label={connected ? t("ui.Sidebar.Sidebar.refresh_chats_bf904ec") : t("ui.Sidebar.Sidebar.reconnect_server_558abe3")} disabled={Boolean(switchingProfileId)} onClick={() => void useAppStore.getState().refreshSessions()}><RefreshCw size={15} /></button>
@@ -568,4 +560,10 @@ export function resolveSidebarDrop(
 
 export function sidebarFolderAssignmentPatch(folder: string): Partial<Session> {
   return { folder, archived: false }
+}
+
+export function sidebarReorderAnalyticsEvent(
+  operation: Extract<SidebarDropOperation, { kind: 'reorder-session' }>
+): 'chat_moved_to_folder' | 'chat_reordered' {
+  return operation.targetFolder ? 'chat_moved_to_folder' : 'chat_reordered'
 }

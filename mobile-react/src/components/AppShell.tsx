@@ -8,6 +8,7 @@ import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context'
 import { AlertCircle, Settings, X } from 'lucide-react-native'
 import { trackEvent } from '../lib/analytics'
 import { dismissAppKeyboard, useAppKeyboardLifecycle } from '../lib/app-keyboard'
+import { chatWorkspaceLayout } from '../lib/chat-layout'
 import { isServerSetupRequired, shouldPresentServerSetup } from '../lib/first-launch'
 import { fullscreenModalTopPadding } from '../lib/fullscreen-modal-layout'
 import { profileNamespace } from '../lib/server-profiles'
@@ -100,10 +101,9 @@ function AppShellContent() {
   const pendingInspectorFallback = useRef<ReturnType<typeof setTimeout> | null>(null)
   const [modalGeneration, setModalGeneration] = useState(profileGeneration)
   const modalScopeCurrent = modalGeneration === profileGeneration
-  // Keep phones in the stacked navigator when they rotate to landscape. Using
-  // width alone rebuilt the entire workspace as an iPad layout mid-rotation.
-  const compact = width < 720 || Math.min(width, height) < 600
-  const showInspector = !compact && width >= 1080 && inspectorVisible
+  const chatLayout = chatWorkspaceLayout(width, height)
+  const compact = chatLayout.compact
+  const showInspector = chatLayout.inlineInspectorAvailable && inspectorVisible
   const serverProfileItems = useMemo<ServerProfileListItem[]>(() => profiles.map(profile => ({
     id: profile.id,
     name: profile.name,
@@ -345,7 +345,7 @@ function AppShellContent() {
   const connectionKey = `${activeProfileId ?? 'none'}:${profileGeneration}`
   const sidebar = <Sidebar key={`sidebar:${connectionKey}`} profiles={serverProfileItems} activeProfileId={activeProfileId} switchingProfileId={switchingProfileId} onSwitchServer={switchServer} onAddServer={() => openServers('add')} onManageServers={() => openServers('manage')} onSettings={openSettings} onTeamNetwork={openTeamNetwork} onNewChat={() => void quickNewChat()} onOpenChat={() => { trackEvent('chat_opened'); openMobileChat() }} />
   const chat = selected
-    ? <ChatScreen key={`${connectionKey}:${selected.id}`} sessionId={selected.id} compact={compact} onBack={closeMobileChat} onOptions={openOptions} onSearch={openSearch} onToggleInspector={() => setInspectorVisible(value => !value)} onReview={openReview} onSetupServer={() => openServers('add')} onOpenMcp={() => openClaudeMcp(selected.id)} />
+    ? <ChatScreen key={`${connectionKey}:${selected.id}`} sessionId={selected.id} compact={compact} inlineInspectorAvailable={chatLayout.inlineInspectorAvailable} onBack={closeMobileChat} onOptions={openOptions} onSearch={openSearch} onToggleInspector={() => setInspectorVisible(value => !value)} onReview={openReview} onSetupServer={() => openServers('add')} onOpenMcp={() => openClaudeMcp(selected.id)} />
     : <NoChat connecting={connecting} onSettings={() => openServers('manage')} />
 
   return <View style={[styles.fill, { backgroundColor: colors.background }]}>

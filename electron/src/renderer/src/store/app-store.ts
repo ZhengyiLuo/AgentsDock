@@ -85,6 +85,28 @@ interface SendPromptOptions {
   confirmSteer?: () => boolean
 }
 
+interface PendingTurnSubmissionInput {
+  prompt: string
+  steer?: boolean
+  consumeComposer?: boolean
+  chatReferences?: ChatReference[]
+  teamReferences?: TeamReference[]
+}
+
+export interface PendingTurnSubmission {
+  token: string
+  prompt: string
+  files: AgentFile[]
+  uploadPaths: NativeFileRef[]
+  chatReferences: ChatReference[]
+  teamReferences: TeamReference[]
+  createdAt: number
+  afterSeq: number
+  mode: 'start' | 'queue' | 'steer'
+  phase: 'preflight' | 'submitting' | 'submitted'
+  consumeComposer: boolean
+}
+
 interface SessionSyncState {
   status: ChatSyncStatus
   error: string | null
@@ -188,6 +210,7 @@ interface AppState {
   inspectorVisible: boolean
   activeSessionIds: Set<string>
   turnAdmissionTokens: Record<string, string>
+  pendingTurnSubmissions: Record<string, PendingTurnSubmission>
   stoppingSessionIds: Set<string>
   storageFull: boolean
   error: string | null
@@ -203,8 +226,8 @@ interface AppState {
   selectAdjacentServer(direction: 1 | -1): Promise<void>
   openNotificationRoute(route: ProfileNotificationRoute): Promise<boolean>
   selectSession(sessionId: string, force?: boolean): Promise<void>
-  selectSessionInPane(sessionId: string, pane: ChatPane, force?: boolean, focus?: boolean): Promise<void>
-  reloadSession(sessionId: string): Promise<void>
+  selectSessionInPane(sessionId: string, pane: ChatPane, force?: boolean, focus?: boolean, suppressErrors?: boolean): Promise<void>
+  reloadSession(sessionId: string, suppressErrors?: boolean): Promise<void>
   openSessionInSplit(sessionId: string, force?: boolean): Promise<void>
   focusChatPane(pane: ChatPane): void
   closeChatPane(pane: ChatPane): void
@@ -219,6 +242,8 @@ interface AppState {
   revokeAgentRoute(sessionId: string, routeId: string, expectedRevision: string): Promise<boolean>
   beginTurnAdmission(sessionId: string): string | null
   endTurnAdmission(sessionId: string, token: string): void
+  stagePendingTurnSubmission(sessionId: string, token: string, input: PendingTurnSubmissionInput): boolean
+  rollbackPendingTurnSubmission(sessionId: string, token: string): void
   sendPrompt(promptOverride?: string, steer?: boolean, options?: SendPromptOptions): Promise<boolean>
   sendPromptForSession(sessionId: string, promptOverride?: string, steer?: boolean, options?: SendPromptOptions): Promise<boolean>
   stopTurn(): Promise<void>
@@ -478,6 +503,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   inspectorVisible: false,
   activeSessionIds: new Set(),
   turnAdmissionTokens: {},
+  pendingTurnSubmissions: {},
   stoppingSessionIds: new Set(),
   error: null,
   creatingChat: false,
@@ -820,7 +846,7 @@ export const useAppStore = create<AppState>((set, get) => ({
         if (current.switchingProfileId || payload.activeProfileId !== current.activeProfileId || payload.profileGeneration < current.profileGeneration) return
         if (payload.profileGeneration !== current.profileGeneration) {
           clearProfileVolatileState()
-          set({ profiles: payload.profiles, profileGeneration: payload.profileGeneration, mailHints: consumeBufferedMailHints({ ...current, profiles: payload.profiles, profileGeneration: payload.profileGeneration }, current.mailHints), forwardedPorts: [], forwardedPortsRevision: 0, loadingSessionIds: new Set(), loadingSessionId: null, syncBySession: {}, turnAdmissionTokens: {}, stoppingSessionIds: new Set() })
+          set({ profiles: payload.profiles, profileGeneration: payload.profileGeneration, mailHints: consumeBufferedMailHints({ ...current, profiles: payload.profiles, profileGeneration: payload.profileGeneration }, current.mailHints), forwardedPorts: [], forwardedPortsRevision: 0, loadingSessionIds: new Set(), loadingSessionId: null, syncBySession: {}, turnAdmissionTokens: {}, pendingTurnSubmissions: {}, stoppingSessionIds: new Set() })
           queueMicrotask(() => void hydrateVisibleChatPanes(get))
         } else {
           const before = current.profiles.find(profile => profile.id === current.activeProfileId)
@@ -869,8 +895,12 @@ export const useAppStore = create<AppState>((set, get) => ({
             ? replaceSnapshot(state.snapshots[sessionId], snapshot)
             : mergeSnapshots(state.snapshots[sessionId], snapshot)
           const loadingSessionIds = withoutSessionId(state.loadingSessionIds, sessionId)
+          const pending = state.pendingTurnSubmissions[sessionId]
           return {
             snapshots: cacheSnapshot(state.snapshots, sessionId, incoming, visibleChatSessionIds(currentChatPaneLayout(state).panes)),
+            pendingTurnSubmissions: pending && pendingTurnSubmissionAccepted(pending, incoming.events)
+              ? removePendingTurnSubmission(state.pendingTurnSubmissions, sessionId, pending.token)
+              : state.pendingTurnSubmissions,
             loadingSessionIds,
             loadingSessionId: focusedLoadingSessionId(state.selectedSessionId, loadingSessionIds)
           }
@@ -974,6 +1004,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       switchingProfileId: profileId,
       creatingChat: false,
       turnAdmissionTokens: {},
+      pendingTurnSubmissions: {},
       stoppingSessionIds: new Set(),
       error: null,
       modals: {
@@ -1062,6 +1093,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       switchingProfileId: profileId,
       creatingChat: false,
       turnAdmissionTokens: {},
+      pendingTurnSubmissions: {},
       stoppingSessionIds: new Set(),
       error: null,
       modals: {
@@ -1142,9 +1174,17 @@ export const useAppStore = create<AppState>((set, get) => ({
     await state.selectSessionInPane(sessionId, pane, force)
   },
 
-  async selectSessionInPane(sessionId, pane, force = false, focus = true) {
+  async selectSessionInPane(sessionId, pane, force = false, focus = true, suppressErrors = false) {
     if (get().switchingProfileId || !get().sessions.some(session => session.id === sessionId)) return
     const scope = captureProfileScope(get())
+    const previousSync = get().syncBySession[sessionId]
+    const previousFocusedSync = get().selectedSessionId === sessionId
+      ? {
+          syncSessionId: get().syncSessionId,
+          syncStatus: get().syncStatus,
+          syncError: get().syncError
+        }
+      : null
     const beforeLayout = currentChatPaneLayout(get())
     const selectedLayout = selectChatInPane(beforeLayout, sessionId, pane)
     const layout = focus
@@ -1213,15 +1253,22 @@ export const useAppStore = create<AppState>((set, get) => ({
       )
       if (!selectionRequestMatches(request, sessionId, scope)) return
       if (cached && !forceRemote && !snapshotNeedsAuthoritativeTail(cached)) {
-        set(state => ({
-          ...clearSessionLoading(state, sessionId),
-          snapshots: cacheSnapshot(
-            state.snapshots,
-            sessionId,
-            mergeSnapshots(state.snapshots[sessionId], cached),
-            visibleChatSessionIds(currentChatPaneLayout(state).panes)
-          )
-        }))
+        set(state => {
+          const incoming = mergeSnapshots(state.snapshots[sessionId], cached)
+          const pending = state.pendingTurnSubmissions[sessionId]
+          return {
+            ...clearSessionLoading(state, sessionId),
+            snapshots: cacheSnapshot(
+              state.snapshots,
+              sessionId,
+              incoming,
+              visibleChatSessionIds(currentChatPaneLayout(state).panes)
+            ),
+            pendingTurnSubmissions: pending && pendingTurnSubmissionAccepted(pending, incoming.events)
+              ? removePendingTurnSubmission(state.pendingTurnSubmissions, sessionId, pending.token)
+              : state.pendingTurnSubmissions
+          }
+        })
         subscribeToTimeline(sessionId, cached.events.at(-1)?.seq ?? 0, request, scope)
         logTimelineSelection('selection painted from disk cache', { sessionId, pane, request, events: cached.events.length })
         return
@@ -1273,6 +1320,7 @@ export const useAppStore = create<AppState>((set, get) => ({
           ? replaceSnapshot(state.snapshots[sessionId], snapshot, true)
           : mergeSnapshots(state.snapshots[sessionId], snapshot)
         const accepted = deferredOverflowed ? { ...incoming, historyDiscontinuity: true } : incoming
+        const pending = state.pendingTurnSubmissions[sessionId]
         return {
           ...clearSessionLoading(state, sessionId),
           snapshots: cacheSnapshot(
@@ -1280,7 +1328,10 @@ export const useAppStore = create<AppState>((set, get) => ({
             sessionId,
             accepted,
             visibleChatSessionIds(currentChatPaneLayout(state).panes)
-          )
+          ),
+          pendingTurnSubmissions: pending && pendingTurnSubmissionAccepted(pending, accepted.events)
+            ? removePendingTurnSubmission(state.pendingTurnSubmissions, sessionId, pending.token)
+            : state.pendingTurnSubmissions
         }
       })
       logTimelineSelection('cold timeline open completed', { sessionId, pane, request, events: snapshot.events.length })
@@ -1295,6 +1346,19 @@ export const useAppStore = create<AppState>((set, get) => ({
         return
       }
       logTimelineSelection('cold timeline open failed', { sessionId, pane, request, error: errorMessage(error) })
+      if (suppressErrors) {
+        set(state => {
+          const syncBySession = { ...state.syncBySession }
+          if (previousSync) syncBySession[sessionId] = previousSync
+          else delete syncBySession[sessionId]
+          return {
+            ...clearSessionLoading(state, sessionId),
+            syncBySession,
+            ...(state.selectedSessionId === sessionId && previousFocusedSync ? previousFocusedSync : {})
+          }
+        })
+        return
+      }
       set(state => {
         const snapshots = { ...state.snapshots }
         if (snapshotNeedsAuthoritativeTail(snapshots[sessionId]) && !snapshots[sessionId]?.historyDiscontinuity) {
@@ -1313,11 +1377,20 @@ export const useAppStore = create<AppState>((set, get) => ({
   },
 
   async openSessionInSplit(sessionId, force = false) {
-    const pane: ChatPane = get().chatPanes.primary ? 'secondary' : 'primary'
-    await get().selectSessionInPane(sessionId, pane, force)
+    const scope = captureProfileScope(get())
+    const before = get().chatPanes
+    const pane: ChatPane = before.primary ? 'secondary' : 'primary'
+    const selection = get().selectSessionInPane(sessionId, pane, force)
+    if (profileScopeMatches(scope, get())) {
+      const after = get().chatPanes
+      const previouslySplit = Boolean(before.primary && before.secondary && before.primary !== before.secondary)
+      const nowSplit = Boolean(after.primary && after.secondary && after.primary !== after.secondary)
+      if (!previouslySplit && nowSplit) trackEvent('split_view_opened')
+    }
+    await selection
   },
 
-  async reloadSession(sessionId) {
+  async reloadSession(sessionId, suppressErrors = false) {
     const state = get()
     const pane: ChatPane | null = state.chatPanes.primary === sessionId
       ? 'primary'
@@ -1327,7 +1400,7 @@ export const useAppStore = create<AppState>((set, get) => ({
     if (!pane) return
     // Background continuity repair must not steal keyboard focus from the
     // other visible pane.
-    await state.selectSessionInPane(sessionId, pane, true, false)
+    await state.selectSessionInPane(sessionId, pane, true, false, suppressErrors)
   },
 
   focusChatPane(pane) {
@@ -1547,6 +1620,34 @@ export const useAppStore = create<AppState>((set, get) => ({
     })
   },
 
+  stagePendingTurnSubmission(sessionId, token, input) {
+    let staged = false
+    set(state => {
+      if (state.turnAdmissionTokens[sessionId] !== token) return state
+      const pending = pendingTurnSubmissionFromState(state, sessionId, token, input)
+      staged = true
+      return {
+        ...(pending.consumeComposer ? {
+          drafts: { ...state.drafts, [sessionId]: '' },
+          chatReferencesBySession: { ...state.chatReferencesBySession, [sessionId]: [] },
+          teamReferencesBySession: { ...state.teamReferencesBySession, [sessionId]: [] },
+          uploadsBySession: { ...state.uploadsBySession, [sessionId]: [] },
+          uploadPathsBySession: { ...state.uploadPathsBySession, [sessionId]: [] }
+        } : {}),
+        pendingTurnSubmissions: {
+          ...state.pendingTurnSubmissions,
+          [sessionId]: pending
+        }
+      }
+    })
+    if (staged) window.dispatchEvent(new CustomEvent('agentsdock:local-send', { detail: { sessionId } }))
+    return staged
+  },
+
+  rollbackPendingTurnSubmission(sessionId, token) {
+    set(state => rollbackPendingTurnSubmissionState(state, sessionId, token))
+  },
+
   async sendPrompt(promptOverride, steer = false, options) {
     const sessionId = get().selectedSessionId
     if (!sessionId) return false
@@ -1559,18 +1660,26 @@ export const useAppStore = create<AppState>((set, get) => ({
     if (!target || target.archived || !visibleChatSessionIds(currentChatPaneLayout(get()).panes).includes(sessionId)) return false
     const scope = captureProfileScope(get())
     const steeringScope = captureSteeringScope(sessionId, get())
-    const rawPrompt = promptOverride ?? get().drafts[sessionId] ?? ''
+    const preflightSubmission = options?.admissionToken
+      && get().pendingTurnSubmissions[sessionId]?.token === options.admissionToken
+      ? get().pendingTurnSubmissions[sessionId]
+      : undefined
+    const rawPrompt = preflightSubmission?.prompt ?? promptOverride ?? get().drafts[sessionId] ?? ''
     const leadingWhitespace = rawPrompt.length - rawPrompt.trimStart().length
     const prompt = rawPrompt.trim()
-    const consumeComposer = options?.consumeComposer ?? true
-    const requestedReferences = (consumeComposer
+    const consumeComposer = preflightSubmission?.consumeComposer ?? options?.consumeComposer ?? true
+    const requestedReferences = (preflightSubmission
+      ? preflightSubmission.chatReferences
+      : consumeComposer
       ? options?.chatReferences ?? get().chatReferencesBySession[sessionId] ?? []
       : []).map(reference => ({
         ...reference,
         source_text_start: reference.source_text_start - leadingWhitespace,
         source_text_end: reference.source_text_end - leadingWhitespace
       }))
-    const requestedTeamReferences = (consumeComposer
+    const requestedTeamReferences = (preflightSubmission
+      ? preflightSubmission.teamReferences
+      : consumeComposer
       ? options?.teamReferences ?? get().teamReferencesBySession[sessionId] ?? []
       : []).map(reference => ({
         ...reference,
@@ -1652,8 +1761,8 @@ export const useAppStore = create<AppState>((set, get) => ({
         return false
       }
     }
-    const uploads = consumeComposer ? get().uploadsBySession[sessionId] ?? [] : []
-    const uploadPaths = consumeComposer ? get().uploadPathsBySession[sessionId] ?? [] : []
+    const uploads = preflightSubmission?.files ?? (consumeComposer ? get().uploadsBySession[sessionId] ?? [] : [])
+    const uploadPaths = preflightSubmission?.uploadPaths ?? (consumeComposer ? get().uploadPathsBySession[sessionId] ?? [] : [])
     if ((!prompt && uploads.length === 0) || uploadPaths.length > 0) return false
     const currentTarget = get().sessions.find(session => session.id === sessionId)
     if (!currentTarget) {
@@ -1669,15 +1778,40 @@ export const useAppStore = create<AppState>((set, get) => ({
     if (!admissionToken || get().turnAdmissionTokens[sessionId] !== admissionToken) return false
     const session = currentTarget
     const queuedBeforeSend = new Set((get().snapshots[sessionId]?.queuedTurns ?? []).map(turn => turn.queued_id))
-    if (consumeComposer) {
-      set(state => ({
+    const currentState = get()
+    const stagedSubmission = currentState.pendingTurnSubmissions[sessionId]?.token === admissionToken
+      ? currentState.pendingTurnSubmissions[sessionId]
+      : undefined
+    const pendingSubmission: PendingTurnSubmission = stagedSubmission ? {
+      ...stagedSubmission,
+      phase: 'submitting'
+    } : {
+      token: admissionToken,
+      prompt,
+      files: uploads.map(file => ({ ...file })),
+      uploadPaths: uploadPaths.map(file => ({ ...file })),
+      chatReferences: chatReferences.map(reference => ({ ...reference })),
+      teamReferences: teamReferences.map(reference => ({ ...reference })),
+      createdAt: Date.now(),
+      afterSeq: (currentState.snapshots[sessionId]?.events ?? []).reduce(
+        (latest, event) => Math.max(latest, event.seq),
+        session.latest_event_seq ?? 0
+      ),
+      mode: steer ? 'steer' : currentState.activeSessionIds.has(sessionId) ? 'queue' : 'start',
+      phase: 'submitting',
+      consumeComposer
+    }
+    set(state => ({
+      ...(consumeComposer && !stagedSubmission?.consumeComposer ? {
         drafts: { ...state.drafts, [sessionId]: '' },
         chatReferencesBySession: { ...state.chatReferencesBySession, [sessionId]: [] },
         teamReferencesBySession: { ...state.teamReferencesBySession, [sessionId]: [] },
         uploadsBySession: { ...state.uploadsBySession, [sessionId]: [] },
         uploadPathsBySession: { ...state.uploadPathsBySession, [sessionId]: [] }
-      }))
-    }
+      } : {}),
+      pendingTurnSubmissions: { ...state.pendingTurnSubmissions, [sessionId]: pendingSubmission }
+    }))
+    if (!stagedSubmission) window.dispatchEvent(new CustomEvent('agentsdock:local-send', { detail: { sessionId } }))
     try {
       const response = await window.agentsDock.turns.send({
         sessionId,
@@ -1694,8 +1828,13 @@ export const useAppStore = create<AppState>((set, get) => ({
       if (response.event && eventAffectsQueuedTurns(response.event)) {
         invalidateQueuedTurnsRequests(sessionId)
       }
+      const responseQueued = Boolean(response.queued || response.queued_id || response.event?.type === 'turn_queued')
       set(state => {
         const snapshot = state.snapshots[sessionId]
+        const authoritativeQueuedReceipt = Boolean(
+          response.queued_id
+          && snapshot?.queuedTurns.some(turn => turn.queued_id === response.queued_id)
+        )
         const nextEvents = response.event && snapshot ? upsertEvent(snapshot.events, response.event) : null
         const nextSnapshot = response.event && snapshot && nextEvents
           ? {
@@ -1713,12 +1852,21 @@ export const useAppStore = create<AppState>((set, get) => ({
         return {
           sessions: state.sessions.map(candidate => candidate.id === reconciledSession.id ? reconciledSession : candidate),
           activeSessionIds: response.event ? updateActiveSessions(state.activeSessionIds, response.event) : state.activeSessionIds,
+          pendingTurnSubmissions: response.event || authoritativeQueuedReceipt
+            ? removePendingTurnSubmission(state.pendingTurnSubmissions, sessionId, admissionToken)
+            : updatePendingTurnSubmissionPhase(
+                state.pendingTurnSubmissions,
+                sessionId,
+                admissionToken,
+                'submitted',
+                responseQueued && !steer ? 'queue' : undefined
+              ),
           snapshots: nextSnapshot
             ? cacheSnapshot(state.snapshots, sessionId, nextSnapshot, visibleChatSessionIds(currentChatPaneLayout(state).panes))
             : state.snapshots
         }
       })
-      const responseQueued = Boolean(response.queued || response.queued_id || response.event?.type === 'turn_queued')
+      if (!response.event) void get().reloadSession(sessionId, true).catch(() => undefined)
       if (steer && responseQueued) {
         try {
           const queuedId = response.queued_id
@@ -1738,31 +1886,11 @@ export const useAppStore = create<AppState>((set, get) => ({
       if (chatReferences.some(reference => reference.target_kind !== 'secure_peer' && reference.grant_intent === true)) {
         void get().refreshAgentRoutes(sessionId)
       }
-      window.dispatchEvent(new CustomEvent('agentsdock:local-send', { detail: { sessionId } }))
       return true
     } catch (error) {
       if (!profileScopeMatches(scope, get())) return false
-      if (consumeComposer) {
-        set(state => {
-          const newerDraftExists = Boolean(state.drafts[sessionId]?.trim())
-          return {
-            drafts: { ...state.drafts, [sessionId]: newerDraftExists ? state.drafts[sessionId] : prompt },
-            chatReferencesBySession: {
-              ...state.chatReferencesBySession,
-              [sessionId]: newerDraftExists ? state.chatReferencesBySession[sessionId] ?? [] : chatReferences
-            },
-            teamReferencesBySession: {
-              ...state.teamReferencesBySession,
-              [sessionId]: newerDraftExists ? state.teamReferencesBySession[sessionId] ?? [] : teamReferences
-            },
-            uploadsBySession: { ...state.uploadsBySession, [sessionId]: mergeFiles(state.uploadsBySession[sessionId] ?? [], uploads) },
-            uploadPathsBySession: { ...state.uploadPathsBySession, [sessionId]: mergeUploadPaths(state.uploadPathsBySession[sessionId] ?? [], uploadPaths) },
-            error: turnSendErrorMessage(error)
-          }
-        })
-      } else {
-        set({ error: turnSendErrorMessage(error) })
-      }
+      get().rollbackPendingTurnSubmission(sessionId, admissionToken)
+      set({ error: turnSendErrorMessage(error) })
       return false
     } finally {
       get().endTurnAdmission(sessionId, admissionToken)
@@ -2055,6 +2183,7 @@ export const useAppStore = create<AppState>((set, get) => ({
     const scope = captureProfileScope(get())
     try {
       const session = await window.agentsDock.sessions.fork(sessionId)
+      trackEvent('chat_forked')
       if (!profileScopeMatches(scope, get())) return
       await get().refreshSessions()
       if (!profileScopeMatches(scope, get())) return
@@ -2789,6 +2918,7 @@ function workspaceStateFromBootstrap(
     inspectorVisible: payload.inspectorVisible,
     activeSessionIds: healthActiveSessionIDs(payload.health),
     turnAdmissionTokens: {},
+    pendingTurnSubmissions: {},
     stoppingSessionIds: new Set(),
     creatingChat: false,
     error: 'profileTransitionWarning' in payload ? payload.profileTransitionWarning ?? null : null
@@ -3169,6 +3299,7 @@ function releaseFailedNamespaceAdoption(
     agentRouteErrorsBySession: {},
     revokingAgentRouteIds: new Set(),
     turnAdmissionTokens: {},
+    pendingTurnSubmissions: {},
     stoppingSessionIds: new Set(),
     syncSessionId: selectedSessionId,
     syncStatus: selectedSessionId ? (current.connected ? 'cached' : 'offline') : 'idle',
@@ -3749,6 +3880,130 @@ function upsertEvent(events: Event[], event: Event): Event[] {
   if (!last || last.seq <= event.seq) return [...events, event]
   return mergeEvents(events, [event])
 }
+function pendingTurnSubmissionFromState(
+  state: AppState,
+  sessionId: string,
+  token: string,
+  input: PendingTurnSubmissionInput
+): PendingTurnSubmission {
+  const rawPrompt = input.prompt
+  const leadingWhitespace = rawPrompt.length - rawPrompt.trimStart().length
+  const consumeComposer = input.consumeComposer ?? true
+  const session = state.sessions.find(candidate => candidate.id === sessionId)
+  return {
+    token,
+    prompt: rawPrompt.trim(),
+    files: (consumeComposer ? state.uploadsBySession[sessionId] ?? [] : []).map(file => ({ ...file })),
+    uploadPaths: (consumeComposer ? state.uploadPathsBySession[sessionId] ?? [] : []).map(file => ({ ...file })),
+    chatReferences: (consumeComposer ? input.chatReferences ?? state.chatReferencesBySession[sessionId] ?? [] : []).map(reference => ({
+      ...reference,
+      source_text_start: reference.source_text_start - leadingWhitespace,
+      source_text_end: reference.source_text_end - leadingWhitespace
+    })),
+    teamReferences: (consumeComposer ? input.teamReferences ?? state.teamReferencesBySession[sessionId] ?? [] : []).map(reference => ({
+      ...reference,
+      source_text_start: reference.source_text_start - leadingWhitespace,
+      source_text_end: reference.source_text_end - leadingWhitespace
+    })),
+    createdAt: Date.now(),
+    afterSeq: (state.snapshots[sessionId]?.events ?? []).reduce(
+      (latest, event) => Math.max(latest, event.seq),
+      session?.latest_event_seq ?? 0
+    ),
+    mode: input.steer ? 'steer' : state.activeSessionIds.has(sessionId) ? 'queue' : 'start',
+    phase: 'preflight',
+    consumeComposer
+  }
+}
+const PENDING_TURN_ACCEPTANCE_TYPES = new Set(['turn_started', 'turn_queued', 'turn_queue_run_now'])
+export function pendingTurnSubmissionAccepted(pending: PendingTurnSubmission, events: readonly Event[]): boolean {
+  // No server event can acknowledge this client submission until preflight
+  // has completed and the IPC request has actually been dispatched.
+  if (pending.phase === 'preflight') return false
+  const pendingFileIds = pending.files.map(file => file.id).sort()
+  return events.some(event => {
+    if (event.seq <= pending.afterSeq || !PENDING_TURN_ACCEPTANCE_TYPES.has(event.type)) return false
+    const prompt = (event.prompt ?? event.message ?? '').trim()
+    const fileIds = [...(event.file_ids ?? [])].sort()
+    return prompt === pending.prompt
+      && fileIds.length === pendingFileIds.length
+      && fileIds.every((id, index) => id === pendingFileIds[index])
+  })
+}
+function removePendingTurnSubmission(
+  pending: Record<string, PendingTurnSubmission>,
+  sessionId: string,
+  token: string
+): Record<string, PendingTurnSubmission> {
+  if (pending[sessionId]?.token !== token) return pending
+  const next = { ...pending }
+  delete next[sessionId]
+  return next
+}
+function updatePendingTurnSubmissionPhase(
+  pending: Record<string, PendingTurnSubmission>,
+  sessionId: string,
+  token: string,
+  phase: PendingTurnSubmission['phase'],
+  mode?: PendingTurnSubmission['mode']
+): Record<string, PendingTurnSubmission> {
+  const current = pending[sessionId]
+  if (!current || current.token !== token) return pending
+  const nextMode = mode ?? current.mode
+  if (current.phase === phase && current.mode === nextMode) return pending
+  return { ...pending, [sessionId]: { ...current, phase, mode: nextMode } }
+}
+function rollbackPendingTurnSubmissionState(
+  state: AppState,
+  sessionId: string,
+  token: string
+): AppState | Partial<AppState> {
+  const pending = state.pendingTurnSubmissions[sessionId]
+  if (!pending || pending.token !== token) return state
+  const pendingTurnSubmissions = removePendingTurnSubmission(state.pendingTurnSubmissions, sessionId, token)
+  if (!pending.consumeComposer) return { pendingTurnSubmissions }
+  const newerDraft = state.drafts[sessionId] ?? ''
+  const hasNewerDraft = Boolean(newerDraft.trim())
+  const separator = pending.prompt && hasNewerDraft ? '\n\n' : ''
+  const restoredDraft = hasNewerDraft
+    ? `${pending.prompt}${separator}${newerDraft}`
+    : pending.prompt
+  const newerReferenceOffset = pending.prompt.length + separator.length
+  const chatReferences = hasNewerDraft
+    ? [
+        ...pending.chatReferences,
+        ...(state.chatReferencesBySession[sessionId] ?? []).map(reference => ({
+          ...reference,
+          source_text_start: reference.source_text_start + newerReferenceOffset,
+          source_text_end: reference.source_text_end + newerReferenceOffset
+        }))
+      ]
+    : pending.chatReferences
+  const teamReferences = hasNewerDraft
+    ? [
+        ...pending.teamReferences,
+        ...(state.teamReferencesBySession[sessionId] ?? []).map(reference => ({
+          ...reference,
+          source_text_start: reference.source_text_start + newerReferenceOffset,
+          source_text_end: reference.source_text_end + newerReferenceOffset
+        }))
+      ]
+    : pending.teamReferences
+  return {
+    drafts: { ...state.drafts, [sessionId]: restoredDraft },
+    chatReferencesBySession: { ...state.chatReferencesBySession, [sessionId]: chatReferences },
+    teamReferencesBySession: { ...state.teamReferencesBySession, [sessionId]: teamReferences },
+    uploadsBySession: {
+      ...state.uploadsBySession,
+      [sessionId]: mergeFiles(state.uploadsBySession[sessionId] ?? [], pending.files)
+    },
+    uploadPathsBySession: {
+      ...state.uploadPathsBySession,
+      [sessionId]: mergeUploadPaths(state.uploadPathsBySession[sessionId] ?? [], pending.uploadPaths)
+    },
+    pendingTurnSubmissions
+  }
+}
 function mergeFiles(a: AgentFile[], b: AgentFile[]): AgentFile[] {
   if (!b.length) return a
   if (!a.length) return b
@@ -4197,6 +4452,7 @@ function flushLiveEvents(forceAll = false): void {
     let activeSessionIds = state.activeSessionIds
     let health = state.health
     let snapshots = state.snapshots
+    let pendingTurnSubmissions = state.pendingTurnSubmissions
     let connected = state.connected
     let connectionError = state.connectionError
     let syncStatus = state.syncStatus
@@ -4215,6 +4471,14 @@ function flushLiveEvents(forceAll = false): void {
         if (epoch !== undefined) liveEventActivityEpochs.set(merged, epoch)
         return merged
       })
+      const pendingSubmission = pendingTurnSubmissions[sessionId]
+      if (pendingSubmission && pendingTurnSubmissionAccepted(pendingSubmission, events)) {
+        pendingTurnSubmissions = removePendingTurnSubmission(
+          pendingTurnSubmissions,
+          sessionId,
+          pendingSubmission.token
+        )
+      }
       if (
         sessionId === state.selectedSessionId
         && healthIsCompatible(state.health)
@@ -4292,6 +4556,7 @@ function flushLiveEvents(forceAll = false): void {
       activeSessionIds === state.activeSessionIds
       && health === state.health
       && snapshots === state.snapshots
+      && pendingTurnSubmissions === state.pendingTurnSubmissions
       && connected === state.connected
       && connectionGeneration === state.connectionGeneration
       && connectionError === state.connectionError
@@ -4302,6 +4567,7 @@ function flushLiveEvents(forceAll = false): void {
       activeSessionIds,
       health,
       snapshots,
+      pendingTurnSubmissions,
       connected,
       connectionGeneration,
       connectionError,

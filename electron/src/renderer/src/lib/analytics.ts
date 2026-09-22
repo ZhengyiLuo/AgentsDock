@@ -110,38 +110,49 @@ function safeEventProps(props?: AnalyticsEventProps): Record<string, boolean> {
 }
 
 /** The complete set of analytics events tracked in this app. Extend deliberately. */
-export type AnalyticsEvent =
-  | 'app_launched'
-  | 'terminal_opened'
-  | 'file_view_opened'
-  | 'job_schedule_opened'
-  | 'scheduled_job_created'
-  | 'scheduled_job_updated'
-  | 'scheduled_job_deleted'
-  | 'scheduled_job_paused'
-  | 'scheduled_job_resumed'
-  | 'scheduled_job_run_requested'
-  | 'scheduled_job_run_cancelled'
-  | 'chat_created'
-  | 'chats_bulk_imported'
-  | 'chat_resumed'
-  | 'chat_opened'
-  | 'message_sent'
-  | 'slash_skill_used'
-  | 'slash_command_used'
-  | 'chat_reference_sent'
-  | 'team_reference_sent'
-  | 'folder_created'
-  | 'folder_deleted'
-  | 'folder_reordered'
-  | 'chat_moved_to_folder'
-  | 'working_directory_changed'
-  | 'digest_opened'
-  | 'search_opened'
-  | 'open_file_clicked'
-  | 'connection_tested'
-  | 'server_added'
-  | 'server_switched'
+export const ANALYTICS_EVENTS = [
+  'app_launched',
+  'terminal_opened',
+  'file_view_opened',
+  'job_schedule_opened',
+  'scheduled_job_created',
+  'scheduled_job_updated',
+  'scheduled_job_deleted',
+  'scheduled_job_paused',
+  'scheduled_job_resumed',
+  'scheduled_job_run_requested',
+  'scheduled_job_run_cancelled',
+  'chat_created',
+  'chats_bulk_imported',
+  'chat_resumed',
+  'chat_opened',
+  'chat_share_opened',
+  'chat_share_snapshot_created',
+  'chat_share_interactive_created',
+  'chat_share_revoked',
+  'split_view_opened',
+  'chat_forked',
+  'chat_reordered',
+  'team_network_opened',
+  'message_sent',
+  'slash_skill_used',
+  'slash_command_used',
+  'chat_reference_sent',
+  'team_reference_sent',
+  'folder_created',
+  'folder_deleted',
+  'folder_reordered',
+  'chat_moved_to_folder',
+  'working_directory_changed',
+  'digest_opened',
+  'search_opened',
+  'open_file_clicked',
+  'connection_tested',
+  'server_added',
+  'server_switched'
+] as const
+
+export type AnalyticsEvent = typeof ANALYTICS_EVENTS[number]
 
 export function trackEvent(name: AnalyticsEvent, props?: AnalyticsEventProps): void {
   const invokedRevision = consentRevision

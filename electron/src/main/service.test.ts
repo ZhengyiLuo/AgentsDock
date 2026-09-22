@@ -39,6 +39,7 @@ const electronHarness = vi.hoisted(() => ({
   showOpenDialog: vi.fn(),
   showSaveDialog: vi.fn(),
   shellOpenExternal: vi.fn(),
+  shellOpenPath: vi.fn(),
   notifications: [] as Array<{
     options: { title: string; body: string; silent: boolean }
     shown: boolean
@@ -68,7 +69,10 @@ vi.mock('electron', () => ({
     show() { this.record.shown = true }
   },
   safeStorage: {},
-  shell: { openExternal: (...args: unknown[]) => electronHarness.shellOpenExternal(...args) }
+  shell: {
+    openExternal: (...args: unknown[]) => electronHarness.shellOpenExternal(...args),
+    openPath: (...args: unknown[]) => electronHarness.shellOpenPath(...args)
+  }
 }))
 
 import { LocalCache, TIMELINE_PAGING_SCHEMA_VERSION } from './persistence'
@@ -252,6 +256,49 @@ afterEach(() => {
   electronHarness.showOpenDialog.mockReset()
   electronHarness.showSaveDialog.mockReset()
   electronHarness.shellOpenExternal.mockReset()
+  electronHarness.shellOpenPath.mockReset()
+})
+
+describe('opening artifact files externally', () => {
+  const file = { id: 'artifact-a', filename: 'artifact.bin', content_type: 'application/octet-stream' }
+  const localPath = '/synthetic/artifact.bin'
+
+  function harness() {
+    const service = Object.create(AppService.prototype) as AppService
+    const ensureLocalFile = vi.fn().mockResolvedValue(localPath)
+    Object.assign(service, { ensureLocalFile })
+    return { service, ensureLocalFile }
+  }
+
+  it('resolves when the operating system opens the downloaded file', async () => {
+    const { service, ensureLocalFile } = harness()
+    electronHarness.shellOpenPath.mockResolvedValue('')
+
+    await expect(service.openFile('chat-a', file)).resolves.toBeUndefined()
+
+    expect(ensureLocalFile).toHaveBeenCalledWith('chat-a', file)
+    expect(electronHarness.shellOpenPath).toHaveBeenCalledExactlyOnceWith(localPath)
+  })
+
+  it('rejects with the operating system error when opening the file fails', async () => {
+    const { service } = harness()
+    const message = 'No application is registered to open this file.'
+    electronHarness.shellOpenPath.mockResolvedValue(message)
+
+    await expect(service.openFile('chat-a', file)).rejects.toThrow(message)
+
+    expect(electronHarness.shellOpenPath).toHaveBeenCalledExactlyOnceWith(localPath)
+  })
+
+  it('does not invoke the operating system when downloading the file fails', async () => {
+    const { service, ensureLocalFile } = harness()
+    const error = new Error('Artifact download failed.')
+    ensureLocalFile.mockRejectedValue(error)
+
+    await expect(service.openFile('chat-a', file)).rejects.toBe(error)
+
+    expect(electronHarness.shellOpenPath).not.toHaveBeenCalled()
+  })
 })
 
 describe('session summary merging', () => {
@@ -574,11 +621,12 @@ describe('background refresh failures', () => {
     }
   })
 
-  it('publishes reconnect health before deferring the fetched session apply', async () => {
+  it('restores requested live streams during input while deferring session metadata', async () => {
     vi.useFakeTimers()
     let service: AppService | null = null
     try {
       const fetchedSessions = deferred<Session[]>()
+      const cachedSession = emptyTimelinePage('chat').session
       let healthRequest = 0
       let sessionRequest = 0
       const active = fakeClient({
@@ -586,22 +634,33 @@ describe('background refresh failures', () => {
           if (++healthRequest === 1) throw new Error('offline')
           return { ok: true }
         },
-        sessions: () => ++sessionRequest === 1 ? Promise.resolve([]) : fetchedSessions.promise
+        sessions: () => ++sessionRequest === 1 ? Promise.resolve([]) : fetchedSessions.promise,
+        sessionPage: async sessionId => emptyTimelinePage(sessionId),
+        stream: (_sessionId, _after, _onEvent, onState) => {
+          onState(true)
+          return vi.fn()
+        }
       })
       const inactive = fakeClient()
       const created = createProfileService({
         'http://a.test:7850': [active],
         'http://b.test:7850': [inactive]
-      })
+      }, cache => cache.putSessions('profile:a', [cachedSession]))
       service = created.service
       const { listeners, window } = addInteractiveWindow(service)
       service.start()
       await settleImmediateRefresh()
+      await service.subscribeTimeline('chat', 0)
+      await service.subscribeTimeline('hidden-chat', 0)
+      await settleImmediateRefresh()
+      expect(active.sessionPage).not.toHaveBeenCalled()
+      expect(active.stream).not.toHaveBeenCalled()
       window.webContents.send.mockClear()
       const putSessions = vi.spyOn(created.cache, 'putSessions')
 
       await vi.advanceTimersByTimeAsync(30_000)
       listeners.get('before-input-event')?.({}, { type: 'keyDown' })
+      service.unsubscribeTimeline('hidden-chat')
       fetchedSessions.resolve([{ id: 'chat', title: 'Recovered', backend: 'codex' }])
       await settleImmediateRefresh()
 
@@ -609,8 +668,27 @@ describe('background refresh failures', () => {
         'server:connection',
         expect.objectContaining({ connected: true })
       ])
+      expect(active.sessionPage).toHaveBeenCalledOnce()
+      expect(active.sessionPage.mock.calls[0][0]).toBe('chat')
+      expect(active.stream).toHaveBeenCalledOnce()
+      expect(active.stream.mock.calls[0][0]).toBe('chat')
+      expect(window.webContents.send).toHaveBeenCalledWith('server:sync',
+        expect.objectContaining({ sessionId: 'chat', state: 'live' }))
       expect(putSessions).not.toHaveBeenCalled()
-      expect((await service.bootstrap()).sessions).toEqual([])
+      expect(window.webContents.send).not.toHaveBeenCalledWith('server:sessions', expect.anything())
+      expect((await service.bootstrap()).sessions).toEqual([cachedSession])
+
+      for (let index = 0; index < 6; index += 1) {
+        await vi.advanceTimersByTimeAsync(500)
+        listeners.get('before-input-event')?.({}, { type: 'char' })
+      }
+      expect(putSessions).not.toHaveBeenCalled()
+      expect(active.stream).toHaveBeenCalledOnce()
+      await vi.advanceTimersByTimeAsync(2_999)
+      expect(putSessions).not.toHaveBeenCalled()
+      await vi.advanceTimersByTimeAsync(1)
+      expect(putSessions).toHaveBeenCalledOnce()
+      expect(window.webContents.send.mock.calls.filter(([channel]) => channel === 'server:sessions')).toHaveLength(1)
     } finally {
       service?.stop()
       vi.useRealTimers()
@@ -3960,6 +4038,88 @@ describe('split-chat timeline subscriptions', () => {
 })
 
 describe('subagent lifecycle hydration', () => {
+  it.each(['task_notification', 'task_updated'])('reopens a running Claude agent and persists progress and %s completion', async subtype => {
+    const session: Session = { id: 'chat', title: 'Chat', backend: 'claude' }
+    let agent: Event = {
+      seq: 7, id: 'subagent:chat:run-1:child-1', session_id: session.id,
+      run_id: 'run-1', type: 'subagent_state', backend: 'claude',
+      ts: '2026-09-20T12:00:00Z', subagent_id: 'child-1',
+      subagent_tool_id: 'agent-tool', subagent_name: 'Review the renderer',
+      subagent_status: 'running'
+    }
+    let onEvent: (event: Event) => void = () => { throw new Error('Timeline stream did not start.') }
+    const client = fakeClient({
+      sessionPage: async () => ({ session, events: [], has_more: false, latest_seq: 7 }),
+      subagents: async () => ({
+        session_id: session.id,
+        subagents: [agent, ...['local_bash', 'local_workflow'].map(kind => ({
+          ...agent, id: `subagent:${kind}`, subagent_id: kind, subagent_kind: kind
+        }))], count: 3,
+        active_count: agent.subagent_status === 'running' ? 1 : 0, latest_seq: agent.seq
+      }),
+      stream: (_sessionId, _after, receiveEvent) => {
+        onEvent = receiveEvent
+        return vi.fn()
+      }
+    })
+    const { service, cache } = createProfileService({ 'http://a.test:7850': [client] })
+    Object.assign(service, { validatedGeneration: 1 })
+
+    await service.openTimeline(session.id, true)
+    await settleBackgroundWork()
+    expect(client.subagents).toHaveBeenCalledOnce()
+    expect(cache.snapshot('profile:a', session.id)?.events).toEqual([agent])
+
+    const childEvent = (seq: number, raw: object): Event => ({
+      seq, id: `raw-${seq}`, session_id: session.id, run_id: 'run-1',
+      backend: 'claude', type: 'raw_event', ts: `2026-09-20T12:00:${seq}Z`,
+      raw: JSON.stringify({ type: 'system', task_id: 'child-1', ...raw })
+    })
+    const flush = () => (service as unknown as { flushEventCache(): void }).flushEventCache()
+    onEvent(childEvent(6, { subtype: 'task_started', task_type: 'local_agent', description: 'Old start' }))
+    onEvent(childEvent(6, { subtype: 'task_progress', description: 'Old progress' }))
+    onEvent(childEvent(6, { subtype: 'task_notification', status: 'completed', summary: 'Old completion' }))
+    onEvent(childEvent(6, {
+      type: 'assistant', parent_tool_use_id: 'agent-tool',
+      message: { content: [{ type: 'text', text: 'Old child activity' }] }
+    }))
+    flush()
+    expect(cache.snapshot('profile:a', session.id)?.events).toEqual([agent])
+    onEvent(childEvent(8, { subtype: 'task_progress', description: 'Checking timeline updates' }))
+    flush()
+    expect(cache.snapshot('profile:a', session.id)?.events).toEqual([
+      expect.objectContaining({ id: agent.id, subagent_status: 'running', subagent_activity: 'Checking timeline updates' })
+    ])
+    // An older snapshot arriving after live progress cannot regress the cache
+    // or the projector's activity log.
+    const internals = service as unknown as {
+      scope: unknown
+      timelineSubscriptions: Map<string, { lease: number }>
+      refreshSubagentSnapshot(scope: unknown, sessionId: string, lease: number): Promise<void>
+    }
+    await internals.refreshSubagentSnapshot(internals.scope, session.id, internals.timelineSubscriptions.get(session.id)!.lease)
+    expect(cache.snapshot('profile:a', session.id)?.events[0]).toMatchObject({ seq: 8, subagent_activity: 'Checking timeline updates' })
+    onEvent(childEvent(9, {
+      subtype,
+      ...(subtype === 'task_updated'
+        ? { patch: { status: 'completed', summary: 'Review complete' } }
+        : { status: 'completed', summary: 'Review complete' })
+    }))
+    flush()
+    expect(cache.snapshot('profile:a', session.id)?.events).toEqual([
+      expect.objectContaining({ id: agent.id, subagent_status: 'completed', subagent_summary: 'Review complete' })
+    ])
+    expect(cache.snapshot('profile:a', session.id)?.events[0].subagent_log?.map(entry => entry.text))
+      .toEqual(['Checking timeline updates', 'Review complete'])
+    agent = cache.snapshot('profile:a', session.id)!.events[0]
+
+    service.unsubscribeTimeline(session.id)
+    await service.openTimeline(session.id, true)
+    await settleBackgroundWork()
+    expect(client.subagents).toHaveBeenCalledTimes(3)
+    expect(cache.snapshot('profile:a', session.id)?.events).toEqual([agent])
+  })
+
   it('deduplicates concurrent snapshot requests and tolerates an older server', async () => {
     const response = deferred<SubagentSnapshot>()
     const client = fakeClient({ subagents: async () => response.promise })

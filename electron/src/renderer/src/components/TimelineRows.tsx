@@ -64,6 +64,7 @@ function Message({ item, sessionId, profileScope, pinned }: { item: MessageItem;
   const collaborator = role === 'user' && isSharedChatCollaborator(primary)
     && events.every(part => isSharedChatCollaborator(part) && part.shared_chat_id === primary.shared_chat_id)
   const text = messageItemText(item)
+  const pendingBusy = item.pending && item.pendingPhase !== 'submitted'
   const [copied, setCopied] = useState(false)
   const pinId = `message:${primary.id}`
   const togglePin = async () => {
@@ -82,15 +83,18 @@ function Message({ item, sessionId, profileScope, pinned }: { item: MessageItem;
   const copy = async () => { await window.agentsDock.native.writeClipboard(text); setCopied(true); window.setTimeout(() => setCopied(false), 1200) }
   return (
     <div
-      className={`message-row ${role}`}
+      className={`message-row ${role}${item.pending ? ' pending' : ''}`}
       data-event-id={primary.id}
       data-event-count={item.events.length}
+      aria-busy={pendingBusy || undefined}
     >
       <div className="message-surface">
         <header>
           <span>{role === 'user' ? t(collaborator ? 'chatShare.collaborator' : 'timeline.ui.you') : primary.purpose === 'handoff_digest' ? t('timeline.ui.digest') : t('timeline.ui.assistant')}</span>
-          <time>{formatTime(event.ts)}</time>
-          <button type="button" className={`pin-button ${pinned ? 'active' : ''}`} aria-pressed={pinned} title={pinned ? t('timeline.ui.unpinMessage') : t('timeline.ui.pinMessage')} onClick={() => runTimelineAction(togglePin())}><Pin size={12} fill={pinned ? 'currentColor' : 'none'} /></button>
+          {item.pending
+            ? <span className="message-pending-status" role="status">{pendingBusy && <span className="activity-ring" aria-hidden="true" />}{t(item.pendingPhase === 'submitted' ? 'timeline.status.submitted' : 'timeline.status.submitting')}</span>
+            : <time>{formatTime(event.ts)}</time>}
+          {!item.pending && <button type="button" className={`pin-button ${pinned ? 'active' : ''}`} aria-pressed={pinned} title={pinned ? t('timeline.ui.unpinMessage') : t('timeline.ui.pinMessage')} onClick={() => runTimelineAction(togglePin())}><Pin size={12} fill={pinned ? 'currentColor' : 'none'} /></button>}
           <button type="button" title={t('timeline.ui.copyFullMessage')} onClick={() => runTimelineAction(copy())}>{copied ? <Check size={12} /> : <Copy size={12} />}</button>
         </header>
         <div className="message-parts">

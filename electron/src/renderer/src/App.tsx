@@ -28,6 +28,7 @@ import { Dialogs } from './components/Dialogs'
 import { EmergencyTimelineDock } from './components/EmergencyTimelineDock'
 import { InspectorDock } from './components/InspectorDock'
 import { InspectorWorkspace, type InspectorWorkspaceTab } from './components/InspectorWorkspace'
+import { SideChatPopover } from './components/SideChatPopover'
 import { SideChatController } from './lib/side-chat'
 import { Sidebar } from './components/Sidebar'
 import { TerminalDock } from './components/TerminalDock'
@@ -137,7 +138,7 @@ export function App() {
   const [sideChatController] = useState(() => new SideChatController())
   const [inspectorTab, setInspectorTab] = useState<InspectorWorkspaceTab>('details')
   const [sideChatFocusVersion, setSideChatFocusVersion] = useState(0)
-  const [sideChatFocusTarget, setSideChatFocusTarget] = useState<string | null>(null)
+  const [sideChatOpenTarget, setSideChatOpenTarget] = useState<string | null>(null)
   useEffect(() => {
     const unsubscribe = useAppStore.subscribe((state, previous) => {
       if (state.profiles !== previous.profiles) sideChatController.reconcileProfiles(state.profiles)
@@ -154,10 +155,8 @@ export function App() {
       if (state.chatPanes.primary === session.id) state.focusChatPane('primary')
       else if (state.chatPanes.secondary === session.id) state.focusChatPane('secondary')
       else if (state.selectedSessionId !== session.id) return
-      setInspectorTab('details')
-      setSideChatFocusTarget(JSON.stringify([detail.profileId, detail.profileGeneration, session.id]))
+      setSideChatOpenTarget(JSON.stringify([detail.profileId, detail.profileGeneration, session.id]))
       setSideChatFocusVersion(value => value + 1)
-      state.setInspectorVisible(true)
     }
     window.addEventListener('agentsdock:open-side-chat', open)
     return () => window.removeEventListener('agentsdock:open-side-chat', open)
@@ -216,6 +215,11 @@ export function App() {
     ? scopedReviewTarget.target
     : null
   const teamspaceOpen = teamspaceScopeKey === activeRenderKey
+  const previousTeamspaceOpen = useRef(false)
+  useEffect(() => {
+    if (teamspaceOpen && !previousTeamspaceOpen.current) trackEvent('team_network_opened')
+    previousTeamspaceOpen.current = teamspaceOpen
+  }, [teamspaceOpen])
   const sidebarVisible = sidebarVisibilityByWorkspace[activeProfileKey] ?? savedWorkspaceSidebarVisible(activeProfileKey)
   const terminalOpen = selectedSessionId && !selectedSession?.archived ? terminalOpenBySession[selectedWorkspaceKey] ?? false : false
   const toggleSidebar = useCallback(() => {
@@ -769,6 +773,18 @@ export function App() {
     useAppStore.getState().setModal('digest', true)
   }
 
+  const sideChat = (session: NonNullable<typeof selectedSession>) => <SideChatPopover
+    key={`side-chat:${activeRenderKey}:${session.id}`} session={session}
+    scope={{ profileId: activeProfileId ?? '', profileGeneration, serverIdentity: activeServerIdentity }}
+    controller={sideChatController}
+    open={!switchingProfileId && sideChatOpenTarget === JSON.stringify([activeProfileId, profileGeneration, session.id])}
+    focusVersion={sideChatFocusVersion}
+    onOpenChange={open => {
+      if (open) window.dispatchEvent(new CustomEvent('agentsdock:open-side-chat', { detail: { sessionId: session.id, profileId: activeProfileId, profileGeneration } }))
+      else setSideChatOpenTarget(null)
+    }}
+  />
+
   const chatWorkspace = <div
     className="chat-workspace"
     onKeyDown={handleChatShortcut}
@@ -790,9 +806,12 @@ export function App() {
         sessionId={selectedSession.id}
         focused
       />}
-      {selectedSession?.archived
-        ? <div className="composer disabled"><span>{t("ui.App.App.archived_chat_unarchive_it_to_send_a_messa_1b14da3")}</span></div>
-        : <Composer key={`composer:${selectedRenderKey}`} dropActive={fileDropActive} />}
+      <div className="chat-workspace-composer">
+        {selectedSession && sideChat(selectedSession)}
+        {selectedSession?.archived
+          ? <div className="composer disabled"><span>{t("ui.App.App.archived_chat_unarchive_it_to_send_a_messa_1b14da3")}</span></div>
+          : <Composer key={`composer:${selectedRenderKey}`} dropActive={fileDropActive} />}
+      </div>
     </>}
   </div>
 
@@ -865,6 +884,7 @@ export function App() {
                 key={`${activeRenderKey}:${primarySession.id}`}
                 pane="primary"
                 session={primarySession}
+                sideChat={sideChat(primarySession)}
                 focused={focusedChatPane === 'primary'}
                 split
                 sidebarVisible={sidebarVisible}
@@ -876,6 +896,7 @@ export function App() {
                 key={`${activeRenderKey}:${secondarySession.id}`}
                 pane="secondary"
                 session={secondarySession}
+                sideChat={sideChat(secondarySession)}
                 focused={focusedChatPane === 'secondary'}
                 split
                 sidebarVisible={sidebarVisible}
@@ -923,8 +944,7 @@ export function App() {
         disabled={Boolean(switchingProfileId)}
         contentKey={selectedRenderKey}
         content={<InspectorWorkspace session={selectedSession} scope={{ profileId: activeProfileId ?? '', profileGeneration, serverIdentity: activeServerIdentity }}
-          controller={sideChatController} tab={inspectorTab} focusVersion={sideChatFocusTarget === JSON.stringify([activeProfileId, profileGeneration, selectedSession?.id]) ? sideChatFocusVersion : 0} visible={visibleDockOpen}
-          onFocusHandled={() => setSideChatFocusTarget(null)} onTabChange={setInspectorTab}
+          controller={sideChatController} tab={inspectorTab} onTabChange={setInspectorTab}
           onHide={() => { setInspectorTab(current => current === 'review' ? 'details' : current); useAppStore.getState().setInspectorVisible(false) }}
           review={reviewTarget ? <CodeReview target={reviewTarget} onClose={() => { setScopedReviewTarget(null); setInspectorTab('details') }} /> : undefined} />}
       />

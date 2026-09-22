@@ -359,6 +359,50 @@
   or deployed by this entry.
   See [the implementation boundary](PERSISTENT_EXECUTION.md).
 
+## 2026-09-21 — Integrate completed desktop work into main
+
+- Merge the completed desktop branch through `8d7745d` with main `33f9355`,
+  including the Side chat popup, copy and scroll behavior, provider settings,
+  reasoning controls, Claude subagent visibility and live synchronization fix.
+- Retain newer main changes for analytics privacy, optimistic send feedback,
+  shared-chat recovery, artifact-open errors, media layout and release workflows.
+  Combine live reasoning overlays with pending-send presentation.
+- Pass all 4,634 desktop tests (five intentional skips) with four workers,
+  TypeScript validation, eight compile/license checks, production compilation
+  and the compiled-entry guard.
+- Re-exercise the merged production renderer/preload in native offscreen Electron
+  with production IPC/service/native HTTP: Side chat opening and sizing, native
+  copy/paste, scroll restoration, independent chat positions, pending close/reopen,
+  cancellation and a subsequent question. Check light/dark and narrow layout;
+  restore the clipboard. These requests use a controlled loopback response
+  server; live model execution is covered by earlier feature acceptance.
+- Exercise the merged desktop and isolated real server together with synthetic
+  histories and controlled health failures: live updates recover in 727 ms
+  during continuous native typing, including an injected 700 ms server delay.
+  Preserve all 48 draft characters and retain deferred metadata application.
+- Availability: source integration. This does not create a new app package or
+  update a running server; paired server changes are integrated separately.
+
+## 2026-09-21 — Resume live chat updates during input — source acceptance
+
+- Resume requested chat subscriptions immediately after the server is healthy,
+  before waiting for the foreground input pause used by background session/job
+  metadata. Preserve scope and subscription ownership; hidden chats stay closed.
+- Pass six focused service checks, TypeScript validation, production compilation
+  and compiled-entry verification. The regression fails on the old ordering.
+- Exercise actual offscreen Electron with production service, packaged renderer
+  and preload, native sidebar clicks and typing, and an isolated real server.
+  Synthetic histories contain 5,000 and 300 events; normal cached switches are
+  already fast and are not reported as a reproduced stall.
+- Inject one HTTP health failure and a 700 ms healthy response delay. On the
+  old service, selected-chat recovery waits 8.93 seconds, including three seconds
+  after typing stops. The correction recovers in 732 ms during continuous input;
+  an independent repeat records 729 ms, preserves all 49 typed characters, and
+  leaves background metadata deferred. No provider turn is part of this check.
+- Availability: accepted source correction for the coordinated desktop release.
+  A separate compatible server optimization avoids redundant full-history fork
+  scans on timeline refreshes. Production apps and servers remain unchanged.
+
 ## 2026-09-20 — Revised beta.12 package and public release validation
 
 - Build the revised server package from clean committed source `751c1e0`.
@@ -577,6 +621,179 @@
   the complete coordinated upgrade and packaged native acceptance remain
   required before a coordinated release. No production service or published
   release is changed by this source work.
+
+## 2026-09-20 — Side chat scroll memory — 1.0.4-beta.16 local acceptance
+
+- Accept signed local Apple silicon macOS app **1.0.4-beta.16 / 1190** from
+  `9451baae691a2f9ad93bbef8e05b60c3e1a38a12`. Verify bundle audit, Developer ID
+  signature, runtime entitlements, exact version/build and isolated startup.
+  All 88 compiled files in the package match the tested production output.
+- Exercise the exact packaged renderer/preload with native offscreen mouse
+  input. Verify exact scroll restoration after reopening, stable reading
+  position when replies arrive, bottom following after a reply arrives while
+  closed, Jump to latest and independent positions across two chats. The
+  controlled server and unchanged provider boundary are described below.
+- Availability: signed local `.app` with automatic updates disabled, not a
+  notarized public release. This scroll correction needs no server update.
+
+## 2026-09-20 — Remember Side chat reading position — source acceptance
+
+- Restore each Side chat's reading position across closing/reopening and chat
+  switches. Keep positions scoped to their server and parent chat, and reset
+  them when the side conversation is cleared or its server is removed.
+- Open new conversations at the bottom. Follow replies while already at the
+  bottom; preserve the reading position while scrolled up and offer a compact
+  Jump to latest control. Restore after the popup measures its available space.
+- Pass 38 focused component/controller/layout checks, TypeScript validation
+  and production compilation. In native offscreen Electron, exercise actual
+  scrolling, close/reopen, delayed replies while reading older text, replies
+  arriving while closed, Jump to latest and independent positions in two chats.
+  The controlled server exercises production preload/IPC/native HTTP. Provider
+  execution and server-picker transitions are outside this acceptance; a
+  focused ownership check covers server identity changes and revisits.
+- Availability: source correction. No server change is needed for scroll state.
+
+## 2026-09-20 — Side chat button spacing — 1.0.4-beta.15 local acceptance
+
+- Accept signed local Apple silicon macOS app **1.0.4-beta.15 / 1189** from
+  `d3e4877a6b83eae994e4ee910d0e998808465850`. Verify bundle audit, Developer ID
+  signature, runtime entitlements, version/build and isolated startup. All 88
+  compiled files in the package match the tested production output.
+- Reproduce overlapping controls in beta.14, then exercise native offscreen
+  scrolling and clicks in the corrected source and exact packaged renderer.
+  At normal and narrow widths, Side chat sits 30 pixels lower with a clear gap
+  beneath Jump to latest. Both controls work, and the popup opens above the
+  unobscured composer. The controlled timeline uses production preload/IPC and
+  native HTTP; provider execution is outside this layout-only acceptance.
+- Availability: signed local `.app` with automatic updates disabled, not a
+  notarized public release. No server update is required.
+
+## 2026-09-20 — Side chat button spacing — source correction
+
+- Lower the Side chat button into the folder row above the message composer,
+  separating it from the timeline's jump-to-latest arrow. Reserve room beside
+  the folder control and keep the button clickable above the composer layer.
+- Pass 30 existing component/layout checks, TypeScript validation and
+  production compilation. No server change is required.
+
+## 2026-09-20 — Side chat copying — 1.0.4-beta.14 local acceptance
+
+- Accept signed local Apple silicon macOS app **1.0.4-beta.14 / 1188** from
+  `3a6905319b229aaa08f1e3012af09c2d08756ef3`. Verify bundle audit, Developer ID
+  signature, runtime entitlements, version/build and isolated startup. All 88
+  packaged compiled files match the tested production output.
+- Reproduce disabled selection in beta.13. In the corrected source and exact
+  beta.14 packaged renderer/preload, use native offscreen mouse dragging to
+  select user messages, assistant prose and inline code. Native copy commands
+  produce the exact selected text; paste inserts it into the composer while
+  the popup remains open. Restore the original clipboard after verification.
+- Keyboard verification uses Meta+C/Meta+V with Chromium native edit commands;
+  the hidden window does not exercise macOS global menu accelerators. The
+  production menu retains its standard copy/paste roles. The controlled server
+  exercises production native transport; no model-provider execution changes.
+- Availability: signed local `.app` with automatic updates disabled, not a
+  notarized public release. No server update is required.
+
+## 2026-09-20 — Side chat text selection — source correction
+
+- Restore normal text selection in Side chat history so user messages,
+  assistant replies and inline code can be copied with the native shortcut.
+  The popup no longer inherits the app chrome's selection-disabled style.
+- Pass 27 existing component/theme checks, TypeScript validation and production
+  compilation. Native clipboard and packaged-app acceptance are recorded
+  above. No server change is required.
+
+## 2026-09-20 — Compact popup — 1.0.4-beta.13 local acceptance
+
+- Accept the signed local Apple silicon macOS app **1.0.4-beta.13 / 1187** from
+  `c3aab200f66c5b36526b899b8e087658c543711a`. Verify bundle audit, Developer ID
+  signature, runtime entitlements, version/build and clean isolated startup.
+  All 88 packaged compiled files match the tested production output.
+- Exercise the exact packaged renderer, preload and CSS in native offscreen
+  Electron with keyboard focus enabled. Verify compact empty presentation,
+  growing drafts, long-answer scrolling, Clear, help, close/reopen and Escape
+  in dark/light themes and a narrow window. The controlled server and service
+  harness preserve the boundary described below; no model provider runs.
+- Availability: signed local `.app` with automatic updates disabled, not a
+  notarized public release. No server update is required for this layout change.
+
+## 2026-09-20 — Compact Side chat popup — source acceptance
+
+- Size the popup to its content instead of reserving a full-height empty panel.
+  Start with a single-line composer and grow it with the draft. Keep long
+  conversations scrollable within the existing maximum popup height.
+- Remove the duplicate input focus outline, manual resize grip and repeated
+  explanatory text. Keep one subtle composer focus treatment, a circular Send
+  button and direct Clear/Close icons. Expand context help inline when requested.
+- Pass 27 existing component/theme checks and TypeScript validation. Exercise
+  native offscreen Electron with production CSS ordering and keyboard focus:
+  empty and long drafts, long-answer wheel scrolling, Clear shrinking the popup,
+  context help, close/reopen and Escape, dark/light themes and a narrow window.
+  Requests use production preload, IPC and native HTTP into a controlled local
+  server; provider execution is unchanged and outside this visual acceptance.
+- Availability: source correction; no server change is required.
+
+## 2026-09-20 — Side chat popup and Claude agents — 1.0.4-beta.12 local acceptance
+
+- Accept the local Apple silicon macOS app **1.0.4-beta.12 / 1186** from
+  `a83a18e85e0b6207f5583e317dc00f902076912b`, including the popup and Claude
+  subagent corrections described below. Pass 381 service/projector checks,
+  100 focused popup checks, TypeScript validation and production compilation.
+- Verify Developer ID signing, bundle audit, hardened-runtime entitlements,
+  exact version/build and clean startup with isolated user data. All 88
+  packaged compiled files are identical to the accepted production output.
+- Exercise the exact packaged renderer and preload in native offscreen
+  Electron through production bootstrap, store, IPC and read-only HTTP:
+  opening/reopening Claude agents, opening the popup, retained drafts, direct
+  Clear and Escape. The harness compiles the service from the same committed
+  source and suppresses read receipts. The signed main binary is checked
+  separately at startup. Real Claude side-question acceptance precedes packaging.
+- Availability: signed local `.app` with automatic updates disabled. This is
+  not a notarized public release, cross-platform acceptance or server deployment.
+  Claude subagent visibility works with the existing server; the separate side
+  question configuration correction still requires a server update.
+
+## 2026-09-20 — Claude subagent refresh — source acceptance
+
+- Fetch authoritative subagent state when opening Claude chats, as already
+  done for Codex. Seed live tracking from that state and retain progress and
+  completion in the local cache, including native `task_updated` messages.
+- Exclude explicitly identified background shell and workflow tasks from the
+  agent list. Reject older snapshots and replayed events after newer activity
+  so reopening cannot roll an agent's status backward.
+- Reproduce the missing snapshot request in isolated native offscreen Electron.
+  Verify the corrected full app through production preload, IPC and native
+  read-only HTTP: cold-open a real Claude chat, inspect its active and historical
+  agents, open details, navigate away and reopen. The authoritative state and
+  agent activity persist; background shell tasks do not flood the list.
+- This read-only check does not launch a new provider agent. Focused service
+  checks cover progress, both completion formats and stale-event races.
+- Availability: source correction using the existing server API. No server
+  update is required for this subagent visibility fix.
+
+## 2026-09-20 — Side chat popup — source candidate
+
+- Move Side chat to a single button beside the composer. Open the conversation
+  in a floating popup without changing the main chat width, including split
+  chat panes. Keep Clear and Close directly accessible in its header.
+- Preserve side conversations, pending answers and drafts when the popup is
+  dismissed. Retain the existing per-chat and per-server ownership rules.
+- Pass 100 focused checks, TypeScript validation and production compilation.
+  Exercise the full app in isolated native offscreen Electron: popup placement,
+  input focus, Escape and outside-click dismissal, reopening drafts and answers,
+  direct Clear, pending request retention and cancellation, split-pane isolation,
+  dark/light themes, narrow layout and Chinese text. Requests cross production
+  preload, IPC and native HTTP. Also exercise real native Claude through an
+  isolated production server: ask about a fact present only in a completed tool
+  result, ask a contextual follow-up, close/reopen and clear the popup. The
+  running parent stays active, and side requests do not alter its transcript.
+  The test bootstrap uses a seeded native profile; full server-picker setup is
+  outside this check.
+- The paired server correction preserves the connected Claude parent when
+  saved effort settings change for a future turn. Existing servers require
+  that correction to avoid the related side-question configuration conflict.
+- Availability: source candidate. No published build or live production server
+  is changed by this acceptance.
 
 ## 2026-09-20 — Compact running command blocks — 1.0.4-beta.11 local acceptance
 
@@ -1425,6 +1642,13 @@
   the actual Settings dialog in isolated offscreen Electron in both themes,
   covering install progress, preflight failure and manual-check recovery.
 - Source fix only: no new package, publication, installation or live restart.
+
+## 2026-09-17 — Surface native artifact-open failures
+
+- Propagate operating-system errors when opening an artifact so the existing
+  desktop action handlers can report the failure.
+- Add focused service coverage for successful opens, native error responses,
+  and download failures using synthetic data and mocked native boundaries.
 
 ## 2026-09-14 — Desktop 1.0.0 replacement accepted
 

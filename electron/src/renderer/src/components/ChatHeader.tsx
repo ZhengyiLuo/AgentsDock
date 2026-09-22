@@ -3,7 +3,7 @@ import { t } from '@shared/i18n'
 import { useLocale } from '../lib/i18n'
 import { useEffect, useMemo, useState } from 'react'
 import * as DropdownMenu from '@radix-ui/react-dropdown-menu'
-import { Archive, ArchiveRestore, ArrowLeftRight, Check, ChevronRight, Columns2, Copy, Folder, GitFork, LoaderCircle, MessageCircleQuestion, MoreHorizontal, PanelLeft, PanelRight, PanelRightClose, Pin, RefreshCw, SquareTerminal, Trash2, X } from 'lucide-react'
+import { Archive, ArchiveRestore, ArrowLeftRight, Check, ChevronRight, Columns2, Copy, Folder, GitFork, LoaderCircle, MoreHorizontal, PanelLeft, PanelRight, PanelRightClose, Pin, RefreshCw, SquareTerminal, Trash2, X } from 'lucide-react'
 import type { Session } from '@shared/types'
 import { completedPrefixForkAvailable } from '@shared/session-fork'
 import { backendLabel, shortId } from '../lib/format'
@@ -168,11 +168,6 @@ export function ChatHeader({
         </DropdownMenu.Content></DropdownMenu.Portal></DropdownMenu.Root>
         {sidebarButton}
         <ScheduledJobsPopover session={session} />
-        {!window.agentsDock.sharedChat && (session.backend === 'codex' || session.backend === 'claude') && <button type="button"
-          className="quiet-button side-chat-open" title={t('sideChat.title')} aria-label={t('sideChat.title')}
-          onClick={() => window.dispatchEvent(new CustomEvent('agentsdock:open-side-chat', { detail: {
-            sessionId: session.id, profileId, profileGeneration
-          } }))}><MessageCircleQuestion size={14} /><span>{t('sideChat.title')}</span></button>}
         {onSwapPanes && <button className="icon-button" title={t("ui.ChatHeader.ChatHeader.swap_chat_panes_7129f59")} aria-label={t("ui.ChatHeader.ChatHeader.swap_chat_panes_7129f59")} onClick={onSwapPanes}><ArrowLeftRight size={15} /></button>}
         {focused && onTerminalToggle && <ShortcutTooltip shortcut="toggleTerminal" label={terminalOpen ? t("ui.ChatHeader.ChatHeader.close_terminal_panel_48e963f") : t("ui.ChatHeader.ChatHeader.open_terminal_panel_3284242")}><button
           className={`icon-button terminal-toggle${terminalOpen ? ' active' : ''}`}
@@ -184,7 +179,7 @@ export function ChatHeader({
         {(running || admitting) && (
           session.backend === 'claude'
           || (session.backend === 'codex' && !codexControlsSupported)
-        ) && <AgentRunningStatus backend={session.backend} />}
+        ) && <AgentRunningStatus backend={session.backend} starting={!running && admitting} />}
         <ChatSyncStatus sessionId={session.id} />
         {focused && <ShortcutTooltip shortcut="toggleInspector" label={`${inspector ? t("ui.ChatHeader.ChatHeader.hide_ac20a57") : 'Show'} right panel`}><button className="icon-button inspector-toggle" aria-label={`${inspector ? t("ui.ChatHeader.ChatHeader.hide_ac20a57") : 'Show'} right panel`} onClick={() => useAppStore.getState().setInspectorVisible(!inspector)}>{inspector ? <PanelRightClose size={16} /> : <PanelRight size={16} />}</button></ShortcutTooltip>}
         {onClosePane && <button className="icon-button" title={t("ui.ChatHeader.ChatHeader.close_this_chat_pane_4926598")} aria-label={t("ui.ChatHeader.ChatHeader.close_pane_fe2672f", { "title": String(session.title) })} onClick={onClosePane}><X size={15} /></button>}
@@ -193,9 +188,9 @@ export function ChatHeader({
   )
 }
 
-function AgentRunningStatus({ backend }: { backend: 'claude' | 'codex' }) {
+function AgentRunningStatus({ backend, starting = false }: { backend: 'claude' | 'codex'; starting?: boolean }) {
   const provider = backendLabel(backend)
-  const status = t('timeline.status.running')
+  const status = t(starting ? 'timeline.status.starting' : 'timeline.status.running')
   return <span className="codex-status-button active agent-running-status" role="status" aria-label={`${provider} ${status}`} title={`${provider} ${status}`}>
     <span aria-hidden="true" />
     <b>{provider}</b>

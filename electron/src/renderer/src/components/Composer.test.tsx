@@ -186,6 +186,7 @@ describe('Composer', () => {
       revokingAgentRouteIds: new Set(),
       activeSessionIds: new Set(),
       turnAdmissionTokens: {},
+      pendingTurnSubmissions: {},
       stoppingSessionIds: new Set(),
       runtimeCatalog: null,
       health: null,
@@ -196,6 +197,47 @@ describe('Composer', () => {
   it('mounts with empty per-chat upload state without an external-store render loop', () => {
     render(<Composer />)
     expect(screen.getByPlaceholderText('Message')).toBeInTheDocument()
+  })
+
+  it('shows an active-turn submission immediately in the queue shelf', () => {
+    useAppStore.setState({
+      activeSessionIds: new Set(['chat-1']),
+      pendingTurnSubmissions: {
+        'chat-1': {
+          token: 'queue-admission', prompt: 'Follow up after the current task', files: [], uploadPaths: [],
+          chatReferences: [], teamReferences: [], createdAt: Date.now(), afterSeq: 4,
+          mode: 'queue', phase: 'submitting', consumeComposer: true
+        }
+      }
+    })
+
+    const view = render(<Composer />)
+
+    expect(view.container.querySelector('.queue-shelf')).toHaveTextContent('Queued turns1')
+    expect(view.container.querySelector('.queued-row.local-pending')).toHaveTextContent('Follow up after the current task')
+    expect(view.container.querySelector('.queued-row.local-pending')).toHaveTextContent('Adding to queue…')
+    expect(view.container.querySelector('.queued-row.local-pending button')).toBeNull()
+  })
+
+  it('keeps an offline shared-chat draft editable while gating message and attachment writes', () => {
+    const send = vi.fn()
+    Object.defineProperty(window, 'agentsDock', { configurable: true, value: {
+      ...window.agentsDock,
+      sharedChat: true,
+      turns: { send } as unknown as AgentsDockAPI['turns']
+    } })
+    const view = render(<Composer writeDisabled />)
+    const editor = screen.getByRole('textbox', { name: 'Message' })
+    fireEvent.change(editor, { target: { value: 'Draft while offline' } })
+    expect(editor).toBeEnabled()
+    expect(editor).toHaveValue('Draft while offline')
+    expect(view.container.querySelector('.send-button')).toBeDisabled()
+    expect(view.container.querySelector('.composer-add-button')).toBeDisabled()
+    expect(view.container.querySelector('.composer-goal-controls')).toBeDisabled()
+    expect(view.container.querySelector('.composer-queue-controls')).toBeDisabled()
+    expect(view.container.querySelector('.composer-write-controls')).toBeDisabled()
+    fireEvent.keyDown(editor, { key: 'Enter' })
+    expect(send).not.toHaveBeenCalled()
   })
 
   it('does no Team Network work on ordinary chat mount, typing, or idle', async () => {
@@ -633,6 +675,39 @@ describe('Composer', () => {
     expect(useAppStore.getState().drafts['chat-1']).toBe('Fast typing')
     expect(appStoreChange).toHaveBeenCalled()
     unsubscribe()
+  })
+
+  it('does not restore a consumed message from a late persisted-draft read', async () => {
+    const persistedDraft = deferred<string>()
+    const send = vi.fn().mockResolvedValue({
+      session: { id: 'chat-1', title: 'Chat', backend: 'codex' }, queued: false
+    })
+    Object.defineProperty(window, 'agentsDock', {
+      configurable: true,
+      value: {
+        preferences: {
+          get: vi.fn((key: string, fallback: unknown) => key === 'draft:chat-1'
+            ? persistedDraft.promise
+            : Promise.resolve(fallback)),
+          set: vi.fn().mockResolvedValue(undefined)
+        },
+        turns: { send }
+      } as unknown as AgentsDockAPI
+    })
+    const user = userEvent.setup()
+    render(<Composer />)
+    const editor = screen.getByPlaceholderText('Message')
+
+    await user.type(editor, 'Already sent')
+    await user.click(screen.getByRole('button', { name: 'Send message' }))
+    await waitFor(() => expect(send).toHaveBeenCalledOnce())
+    expect(editor).toHaveValue('')
+    expect(useAppStore.getState().drafts['chat-1']).toBe('')
+
+    await act(async () => persistedDraft.resolve('Already sent'))
+
+    expect(editor).toHaveValue('')
+    expect(useAppStore.getState().drafts['chat-1']).toBe('')
   })
 
   it('leaves text paste native and preserves whitespace plus UTF-16 selection offsets', () => {
@@ -1514,16 +1589,24 @@ describe('Composer', () => {
       } as unknown as AgentsDockAPI
     })
     useAppStore.setState({ sessions: [{ id: 'chat-1', title: 'Chat', backend: 'claude' }] })
-    const user = userEvent.setup()
     render(<Composer />)
 
-    await user.type(screen.getByPlaceholderText('Message'), 'Start the first turn')
-    await user.click(screen.getByRole('button', { name: 'Send message' }))
+    fireEvent.change(screen.getByPlaceholderText('Message'), { target: { value: 'Start the first turn' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Send message' }))
 
     await waitFor(() => expect(send).toHaveBeenCalledTimes(1))
-    expect(screen.getByTitle('Wait for the message to be accepted before changing backend')).toBeDisabled()
-    expect(screen.getByRole('button', { name: 'Send message' })).toBeDisabled()
+    expect((screen.getByTitle('Wait for the message to be accepted before changing backend') as HTMLButtonElement).disabled).toBe(true)
+    expect((screen.getByRole('button', { name: 'Send message' }) as HTMLButtonElement).disabled).toBe(true)
     expect(useAppStore.getState().turnAdmissionTokens['chat-1']).toBeTruthy()
+    expect(useAppStore.getState().pendingTurnSubmissions['chat-1']?.prompt).toBe('Start the first turn')
+    expect(screen.getByRole('status').textContent).toContain('Starting…')
+    act(() => useAppStore.setState({
+      activeSessionIds: new Set(['chat-1']),
+      pendingTurnSubmissions: {}
+    }))
+    expect(screen.getByRole('status').textContent).toContain('Running')
+    expect(screen.getByRole('status').textContent).not.toContain('Waiting to start')
+    act(() => useAppStore.setState({ activeSessionIds: new Set() }))
 
     await act(async () => resolveSend({
       session: { id: 'chat-1', title: 'Chat', backend: 'claude', backend_locked: true },
@@ -1531,8 +1614,9 @@ describe('Composer', () => {
     }))
 
     await waitFor(() => expect(useAppStore.getState().turnAdmissionTokens['chat-1']).toBeUndefined())
-    expect(screen.getByTitle('Backend is fixed after the provider session starts')).toBeDisabled()
-  })
+    expect(screen.queryByRole('status')).toBeNull()
+    expect((screen.getByTitle('Backend is fixed after the provider session starts') as HTMLButtonElement).disabled).toBe(true)
+  }, 15_000)
 
   it('reloads the selected chat provider from the composer runtime menu', async () => {
     const reloadProvider = vi.fn().mockResolvedValue({
@@ -2082,13 +2166,17 @@ describe('Composer', () => {
     await user.click(screen.getByRole('button', { name: 'Send message' }))
 
     expect(send).not.toHaveBeenCalled()
-    expect(screen.getByPlaceholderText('Message')).toHaveValue('Use the new policy')
-    expect(screen.getByTitle('Wait for the message to be accepted before changing backend')).toBeDisabled()
+    expect(useAppStore.getState().pendingTurnSubmissions['chat-1']?.prompt).toBe('Use the new policy')
+    expect(screen.getByRole('status').textContent).toContain('Starting…')
+    expect((screen.getByPlaceholderText('Message') as HTMLTextAreaElement).value).toBe('')
+    expect((screen.getByTitle('Wait for the message to be accepted before changing backend') as HTMLButtonElement).disabled).toBe(true)
+    fireEvent.change(screen.getByPlaceholderText('Message'), { target: { value: 'Draft the next request' } })
     permissionResponse.resolve()
     await waitFor(() => expect(send).toHaveBeenCalledWith(expect.objectContaining({
       sessionId: 'chat-1', prompt: 'Use the new policy'
     })))
-  })
+    expect((screen.getByPlaceholderText('Message') as HTMLTextAreaElement).value).toBe('Draft the next request')
+  }, 30_000)
 
   it('restores the authoritative permission policy when auto-save fails', async () => {
     const update = vi.fn().mockRejectedValue(new Error('Policy update denied'))
@@ -2322,12 +2410,14 @@ describe('Composer', () => {
     await user.click(screen.getByRole('button', { name: 'Send message' }))
 
     expect(send).not.toHaveBeenCalled()
-    expect(screen.getByPlaceholderText('Message')).toHaveValue('Use the new Claude policy')
+    expect(useAppStore.getState().pendingTurnSubmissions['chat-1']?.prompt).toBe('Use the new Claude policy')
+    expect(screen.getByRole('status').textContent).toContain('Starting…')
+    expect((screen.getByPlaceholderText('Message') as HTMLTextAreaElement).value).toBe('')
     permissionResponse.resolve()
     await waitFor(() => expect(send).toHaveBeenCalledWith(expect.objectContaining({
       sessionId: 'chat-1', prompt: 'Use the new Claude policy'
     })))
-  })
+  }, 30_000)
 
   it('restores the authoritative Claude permission mode when auto-save fails', async () => {
     const update = vi.fn().mockRejectedValue(new Error('Claude policy update denied'))

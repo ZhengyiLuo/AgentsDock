@@ -4,6 +4,7 @@ import { useLocale } from '../lib/i18n'
 import * as DropdownMenu from '@radix-ui/react-dropdown-menu'
 import { Check, ChevronDown, LoaderCircle, Plus, Settings } from 'lucide-react'
 import type { PublicServerProfile, ServerConnectionState } from '@shared/types'
+import { trackEvent } from '../lib/analytics'
 import { useAppStore } from '../store/app-store'
 import { ShortcutTooltip } from './ShortcutTooltip'
 
@@ -15,18 +16,18 @@ export function ServerSelector() {
   const profiles = useAppStore(state => state.profiles)
   const activeProfileId = useAppStore(state => state.activeProfileId)
   const switchingProfileId = useAppStore(state => state.switchingProfileId)
-  const healthVersion = useAppStore(state => state.health?.server_version)
-  const healthIdentity = useAppStore(state => state.health?.server_identity)
   const switchServer = useAppStore(state => state.switchServer)
   const active = profiles.find(profile => profile.id === activeProfileId) ?? profiles[0] ?? null
   const switchingProfile = profiles.find(profile => profile.id === switchingProfileId) ?? null
   const activeHost = active ? profileHostSubtitle(active) : null
-  const activeVersion = ((!switchingProfileId && active?.id === activeProfileId && active?.serverIdentity && active.serverIdentity === healthIdentity
-    ? healthVersion : null) || active?.serverVersion)?.trim() || null
 
   const chooseProfile = (profileId: string) => {
     if (profileId === activeProfileId || profileId === switchingProfileId) return
-    void Promise.resolve(switchServer(profileId)).catch(error => {
+    void Promise.resolve(switchServer(profileId)).then(switched => {
+      if (!switched || useAppStore.getState().activeProfileId !== profileId) return
+      trackEvent('server_switched', { success: true })
+    }).catch(error => {
+      trackEvent('server_switched', { success: false })
       useAppStore.getState().setError(error instanceof Error ? error.message : String(error))
     })
   }
@@ -53,10 +54,7 @@ export function ServerSelector() {
         <ConnectionDot state={active?.connectionState ?? 'cached'} label={active ? profileConnectionLabel(active) : undefined} />
         <span className="server-selector-copy">
           <strong>{active?.name || t("ui.ServerSelector.ServerSelector.choose_server_389e87e")}</strong>
-          {(activeHost || activeVersion) && <small className="server-selector-metadata">
-            {activeHost && <span className="server-selector-host" title={activeHost}>{activeHost}</span>}
-            {activeVersion && <span className="server-selector-version" title={`AgentsServer v${activeVersion}`}>v{activeVersion}</span>}
-          </small>}
+          {activeHost && <small>{activeHost}</small>}
         </span>
         {active && active.cachedUnreadCount > 0 && <UnreadBadge count={active.cachedUnreadCount} />}
         {switchingProfileId ? <LoaderCircle className="spin server-selector-spinner" size={13} /> : <ChevronDown size={13} />}

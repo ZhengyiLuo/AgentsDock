@@ -129,6 +129,32 @@ describe('timeline pin state', () => {
     expect(screen.getByTitle('Copy full message')).toBeInTheDocument()
   })
 
+  it('renders an outbound message as provisional until the server accepts it', () => {
+    const event: Event = {
+      id: 'pending:admission-1', session_id: 'chat-1', seq: 2, type: 'turn_started',
+      ts: '2026-09-18T18:30:00Z', prompt: 'Start this task', provider_user_authored: true
+    }
+    const item: MessageItem = {
+      kind: 'message', id: event.id, key: event.id, seq: event.seq,
+      event, events: [event], role: 'user', files: [], pending: true, pendingPhase: 'submitting'
+    }
+
+    const view = render(<TimelineRowView item={item} sessionId="chat-1" onFindFile={() => {}} pinnedItemIds={new Set()} />)
+    const { container } = view
+
+    expect(screen.getByRole('status').textContent).toContain('Submitting')
+    expect(screen.getByText('Start this task')).toBeDefined()
+    expect(screen.queryByTitle('Pin message')).toBeNull()
+    expect(screen.getByTitle('Copy full message')).toBeDefined()
+    expect(container.querySelector('.message-row.pending')?.getAttribute('aria-busy')).toBe('true')
+    expect(container.querySelector('.message-pending-status .activity-ring')).not.toBeNull()
+
+    view.rerender(<TimelineRowView item={{ ...item, pendingPhase: 'submitted' }} sessionId="chat-1" onFindFile={() => {}} pinnedItemIds={new Set()} />)
+    expect(screen.getByRole('status').textContent).toContain('Submitted')
+    expect(container.querySelector('.message-row.pending')?.hasAttribute('aria-busy')).toBe(false)
+    expect(container.querySelector('.message-pending-status .activity-ring')).toBeNull()
+  })
+
   it('localizes Team Network generated copy while preserving the authored title', () => {
     const timestamp = new Date().toISOString()
     setLocale('zh-CN')

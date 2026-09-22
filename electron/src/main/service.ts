@@ -3249,7 +3249,10 @@ export class AppService {
       if (!this.isCurrentTimeline(scope, sessionId, lease)) return
       const subagentState = this.subagentProjector.project(event)
       if (event.type === 'raw_event') {
-        if (subagentState) this.emitAgentEvent(scope, subagentState)
+        if (subagentState) {
+          this.emitAgentEvent(scope, subagentState)
+          this.enqueueEventCache(scope, subagentState)
+        }
         return
       }
       this.emitAgentEvent(scope, event)
@@ -4412,7 +4415,8 @@ export class AppService {
   }
 
   async openFile(sessionId: string, file: AgentFile): Promise<void> {
-    await shell.openPath(await this.ensureLocalFile(sessionId, file))
+    const error = await shell.openPath(await this.ensureLocalFile(sessionId, file))
+    if (error) throw new Error(error)
   }
   async openLinkedFile(sessionId: string, target: string): Promise<void> {
     const scope = this.captureScope()
@@ -5037,12 +5041,8 @@ export class AppService {
     }
     const namespaceWasAdopted = activeScope !== scope
     if (!this.isCurrentScope(activeScope)) return
-    if (
-      deferApplyDuringInteraction
-      && Date.now() - this.lastForegroundInteractionAt < FOREGROUND_INTERACTION_QUIET_MS
-      && !await this.waitForForegroundQuiet(activeScope)
-    ) return
-    if (!this.isCurrentScope(activeScope)) return
+    // Already-requested chats need live recovery as soon as health is valid,
+    // even while background session/job metadata waits for an input pause.
     if (!namespaceWasAdopted) {
       for (const [sessionId, subscription] of [...this.timelineSubscriptions]) {
         if (subscription.connected || subscription.initializing) continue
@@ -5052,6 +5052,12 @@ export class AppService {
         queueMicrotask(() => void this.reconcileTimelineAndStream(activeScope, sessionId, cachedLast, lease))
       }
     }
+    if (
+      deferApplyDuringInteraction
+      && Date.now() - this.lastForegroundInteractionAt < FOREGROUND_INTERACTION_QUIET_MS
+      && !await this.waitForForegroundQuiet(activeScope)
+    ) return
+    if (!this.isCurrentScope(activeScope)) return
 
     if (sessions.status === 'fulfilled') {
       const mergedSessions = mergePolledSessionSummaries(this.sessions, sessions.value)
@@ -5523,7 +5529,7 @@ export class AppService {
     lease: number
   ): Promise<void> {
     const session = this.cache.snapshot(scope.namespace, sessionId)?.session
-    if (session?.backend !== 'codex') return
+    if (session?.backend !== 'codex' && session?.backend !== 'claude') return
     const subagents = await this.fetchSubagentSnapshot(scope, sessionId)
     if (!subagents || !this.isCurrentTimeline(scope, sessionId, lease)) return
     const persistable = persistableSubagentSnapshotEvents(subagents, sessionId)
@@ -5533,8 +5539,14 @@ export class AppService {
       sessionId,
       dropped: persistable.dropped
     })
-    if (!persistable.events.length) return
-    this.cache.putEvents(scope.namespace, sessionId, persistable.events)
+    const events = persistable.events.filter(event => event.backend !== 'claude' || (
+      event.subagent_kind !== 'local_bash'
+      && event.subagent_kind !== 'local_workflow'
+      && this.subagentProjector.project(event) !== null
+    ))
+    if (!events.length) return
+    this.flushEventCache()
+    this.cache.putEvents(scope.namespace, sessionId, events)
     const snapshot = this.cache.snapshot(scope.namespace, sessionId)
     if (!snapshot || !this.isCurrentTimeline(scope, sessionId, lease)) return
     this.emit('server:timeline', {
