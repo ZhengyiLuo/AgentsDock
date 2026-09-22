@@ -1,5 +1,21 @@
 # Public development log
 
+## 2026-09-22 — Publish app-only 1.0.6-beta.1 (1196)
+
+- Publish the accepted artifacts unchanged to the [public beta release](https://github.com/ZhengyiLuo/AgentsDock/releases/tag/v1.0.6-beta.1)
+  and [legacy desktop mirror](https://github.com/ZhengyiLuo/AgentsDock-Releases/releases/tag/v1.0.6-beta.1).
+  Both are prereleases with exactly 14 desktop assets and no server descriptor.
+- Independent anonymous readback verifies all eight beta platform feeds select
+  1.0.6-beta.1, both direct macOS DMG links respond successfully, and both public
+  checksum manifests match the accepted seal. All stable feeds and latest stable
+  release APIs remain on 1.0.3.
+- Server and npm publication remain held. Neither a 1.0.6-beta.1 standalone
+  server release nor an npm version is published. Existing server installations
+  are not updated by this desktop beta.
+- Users on withdrawn app versions 1.0.4/1.0.5 should install the direct desktop
+  download once to replace the old updater. The native 1.0.3 update journey and
+  1.0.5 direct-install recovery are recorded in the acceptance entry below.
+
 ## 2026-09-22 — Accept app-only 1.0.6-beta.1 (1196)
 
 - Accepted product source: `d36e1637e6fa6a7cec1b11cf7ffbaf70cff8e17e`.
