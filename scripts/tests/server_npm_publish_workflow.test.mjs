@@ -193,7 +193,7 @@ test('registry verification immediately succeeds without sleeping or publishing 
   assert.equal(fixture.run().status, 0)
   fixture.assertCalls(1, 0)
   assert.equal((publish.match(/run: npm publish /g) ?? []).length, 1)
-  assert.match(publish, /name: Verify the public registry metadata and exact downloaded bytes\n        timeout-minutes: 6\n/)
+  assert.match(publish, /name: Verify the public registry metadata and exact downloaded bytes\n        timeout-minutes: 11\n/)
 })
 
 test('registry visibility polling reuses exact verification pins and succeeds after visibility', t => {
@@ -207,5 +207,5 @@ test('unverifiable registry bytes exhaust the bounded polling window and fail wi
   const result = fixture.run()
   denied(result, 'registry verification exhausted')
   assert.match(result.stderr, /did not succeed within the bounded visibility window/)
-  fixture.assertCalls(31, 30)
+  fixture.assertCalls(61, 60)
 })
