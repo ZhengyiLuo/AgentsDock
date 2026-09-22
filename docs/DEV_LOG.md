@@ -33,6 +33,20 @@
   used; model inference and a release package were not exercised. All isolated
   test processes exited. Availability: source only for a subsequent desktop beta.
 
+## 2026-09-22 — Resolve guided server setup from signed release metadata
+
+- Remove obsolete Stable/Beta installer pins. Local and SSH guided setup now
+  discover the selected published channel and verify its immutable signed
+  manifest before downloading the exact verified archive.
+- Keep release discovery cancellable and report its failure before starting
+  an installer. Preserve the existing server channel semantics and check an
+  installed server's version before selecting an older Beta.
+- Validate focused setup/resolver checks, TypeScript and the production desktop
+  compilation. Live public metadata checks select the published releases;
+  no server version is inferred from an app-only release.
+- Native SSH installation acceptance is pending on the disposable test host.
+  This source change does not publish a release or change installed clients.
+
 ## 2026-09-22 — Publish app-only 1.0.6-beta.1 (1196)
 
 - Publish the accepted artifacts unchanged to the [public beta release](https://github.com/ZhengyiLuo/AgentsDock/releases/tag/v1.0.6-beta.1)
