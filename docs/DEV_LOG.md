@@ -1,5 +1,24 @@
 # Public development log
 
+## 2026-09-22 — Publish coordinated AgentsDock 1.0.5 (1194)
+
+- Publish the accepted build unchanged to the [public desktop release](https://github.com/ZhengyiLuo/AgentsDock/releases/tag/v1.0.5)
+  and legacy desktop mirror. Both stable update feeds now offer 1.0.5.
+- Publish `@agentsdock/server@1.0.5` through trusted npm publishing and verify
+  that `latest` resolves to 1.0.5 and the public tarball matches the signed
+  descriptor. Publish the [standalone server bridge](https://github.com/ZhengyiLuo/AgentsServer/releases/tag/v1.0.5)
+  and verify its production signature, archive and 107-file runtime parity.
+- Independently read both public desktop feeds without credentials. All four
+  platform feeds, checksums and signed server descriptors match the accepted
+  seal; all 16 uploaded asset digests match. The public release page and macOS
+  ZIP/DMG download links respond successfully.
+- Native acceptance covers the unchanged stable 1.0.3 app's single-update
+  migration and recovery from a genuine failed 1.0.4 migration. Already
+  stranded servers require `npx @agentsdock/server@1.0.5 recover` on the server
+  computer, followed by Settings → Updates → Retry server update.
+- The 1.0.4 desktop release remains withdrawn. npm 1.0.4 still exists as an
+  immutable version, but is no longer `latest`; no npm deprecation is claimed.
+
 ## 2026-09-22 — Accept direct AgentsDock 1.0.5 (1194)
 
 - Accepted product source: `321448f7ac5f7ae393a61660ec6168eedc9791b0`.
