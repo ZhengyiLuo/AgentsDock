@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { spawnSync } from 'node:child_process'
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -24,6 +24,7 @@ function runStep(name) {
 
 const identityGuard = runStep('Require the reviewed workflow and source commit')
 const ancestryGuard = runStep('Bind accepted product source to the reviewed publishing workflow')
+const registryVerification = runStep('Verify the public registry metadata and exact downloaded bytes')
 
 function bash(script, env, cwd) {
   return spawnSync('/bin/bash', ['--noprofile', '--norc', '-e', '-o', 'pipefail', '-c', `${script}\nprintf 'publication-authorized\\n'`], {
@@ -146,4 +147,65 @@ test('fresh branch proof rejects removed ancestry and a missing reviewed branch'
   fixture.command('push', '--force', 'origin', `${fixture.source}:refs/heads/release/1.0.4`)
   denied(bash(ancestryGuard, pins(fixture.source, fixture.reviewed), fixture.checkout), 'workflow removed from branch')
   denied(bash(ancestryGuard, pins(fixture.source, fixture.source, { SOURCE_REF: 'release/missing' }), fixture.checkout), 'missing branch')
+})
+
+function verificationFixture(t, visibleAfter) {
+  const base = mkdtempSync(join(tmpdir(), 'agentsdock-registry-visibility-'))
+  t.after(() => rmSync(base, { recursive: true, force: true }))
+  const env = {
+    ...pins('a'.repeat(40)),
+    PATH: base,
+    RUNNER_TEMP: join(base, 'runner temp'),
+    QA_ATTEMPTS: join(base, 'attempts'),
+    QA_ARGUMENTS: join(base, 'arguments'),
+    QA_SLEEPS: join(base, 'sleeps'),
+    QA_NPM: join(base, 'npm-called'),
+    QA_VISIBLE_AFTER: String(visibleAfter),
+  }
+  writeFileSync(join(base, 'node'), `#!/bin/bash
+printf '%s\\0' "$@" >> "$QA_ARGUMENTS"
+attempt=0
+if [[ -f "$QA_ATTEMPTS" ]]; then read -r attempt < "$QA_ATTEMPTS"; fi
+attempt=$((attempt + 1))
+printf '%s\\n' "$attempt" > "$QA_ATTEMPTS"
+if ((attempt < QA_VISIBLE_AFTER)); then exit 1; fi
+exit 0
+`, { mode: 0o700 })
+  writeFileSync(join(base, 'sleep'), '#!/bin/bash\nprintf \'%s\\n\' "$*" >> "$QA_SLEEPS"\n', { mode: 0o700 })
+  writeFileSync(join(base, 'npm'), '#!/bin/bash\nprintf \'unexpected npm call\\n\' >> "$QA_NPM"\nexit 99\n', { mode: 0o700 })
+  return {
+    run() { return bash(registryVerification, env, base) },
+    assertCalls(attempts, sleeps) {
+      assert.equal(Number(readFileSync(env.QA_ATTEMPTS, 'utf8')), attempts)
+      const expectedArguments = [
+        'scripts/verify_npm_publication.mjs', 'verify', `${env.RUNNER_TEMP}/npm-candidate`,
+        env.SOURCE_SHA, env.ACCEPTED_MANIFEST_SHA256, `${env.RUNNER_TEMP}/npm-candidate-release.json`,
+      ]
+      assert.deepEqual(readFileSync(env.QA_ARGUMENTS, 'utf8').split('\0').slice(0, -1), Array.from({ length: attempts }, () => expectedArguments).flat())
+      assert.equal(existsSync(env.QA_SLEEPS) ? readFileSync(env.QA_SLEEPS, 'utf8') : '', '10\n'.repeat(sleeps))
+      assert.equal(existsSync(env.QA_NPM), false, 'read-only verification must never publish or change tags')
+    },
+  }
+}
+
+test('registry verification immediately succeeds without sleeping or publishing again', t => {
+  const fixture = verificationFixture(t, 1)
+  assert.equal(fixture.run().status, 0)
+  fixture.assertCalls(1, 0)
+  assert.equal((publish.match(/run: npm publish /g) ?? []).length, 1)
+  assert.match(publish, /name: Verify the public registry metadata and exact downloaded bytes\n        timeout-minutes: 6\n/)
+})
+
+test('registry visibility polling reuses exact verification pins and succeeds after visibility', t => {
+  const fixture = verificationFixture(t, 3)
+  assert.equal(fixture.run().status, 0)
+  fixture.assertCalls(3, 2)
+})
+
+test('unverifiable registry bytes exhaust the bounded polling window and fail without republishing', t => {
+  const fixture = verificationFixture(t, 100)
+  const result = fixture.run()
+  denied(result, 'registry verification exhausted')
+  assert.match(result.stderr, /did not succeed within the bounded visibility window/)
+  fixture.assertCalls(31, 30)
 })

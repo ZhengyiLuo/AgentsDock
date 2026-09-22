@@ -159,4 +159,19 @@ jobs:
         # Do not unpack, repack, rebuild, or execute package lifecycle scripts.
         run: npm publish "$ARCHIVE" --ignore-scripts --access public --tag "$DIST_TAG" --registry https://registry.npmjs.org/
       - name: Verify the public registry metadata and exact downloaded bytes
-        run: node scripts/verify_npm_publication.mjs verify "$RUNNER_TEMP/npm-candidate" "$SOURCE_SHA" "$ACCEPTED_MANIFEST_SHA256" "$RUNNER_TEMP/npm-candidate-release.json"
+        timeout-minutes: 6
+        shell: bash
+        # npm may acknowledge publication before the registry serves the bytes.
+        # Retry only the unchanged read-only verifier, never npm publish.
+        run: |
+          for ((attempt = 1; attempt <= 31; attempt++)); do
+            if node scripts/verify_npm_publication.mjs verify "$RUNNER_TEMP/npm-candidate" "$SOURCE_SHA" "$ACCEPTED_MANIFEST_SHA256" "$RUNNER_TEMP/npm-candidate-release.json"; then
+              exit 0
+            fi
+            if ((attempt < 31)); then
+              printf 'Exact registry verification has not succeeded (attempt %s/31); retrying in 10 seconds.\n' "$attempt"
+              sleep 10
+            fi
+          done
+          printf 'Exact registry verification did not succeed within the bounded visibility window.\n' >&2
+          exit 1
