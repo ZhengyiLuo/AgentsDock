@@ -3260,6 +3260,7 @@ export class AppService {
       const current = this.timelineSubscriptions.get(sessionId)
       if (!current) return
       current.connected = connected
+      if (!connected && !this.isValidatedScope(scope)) this.suspendTimelineSubscriptions(true)
       this.emitSync(scope, sessionId, connected ? 'live' : 'reconnecting', error)
       if (connected) void this.refreshPinsFromNotice(scope, sessionId)
     }, event => {
@@ -3306,9 +3307,10 @@ export class AppService {
     if (firstError) throw firstError
   }
 
-  private suspendTimelineSubscriptions(): void {
+  private suspendTimelineSubscriptions(preserveConnected = false): void {
     const subscriptions = [...this.timelineSubscriptions]
     for (const [sessionId, subscription] of subscriptions) {
+      if (preserveConnected && subscription.connected) continue
       this.timelineSubscriptions.set(sessionId, {
         lease: ++this.timelineLeaseSequence,
         stop: null,
@@ -4806,7 +4808,7 @@ export class AppService {
   private scheduleBackgroundRefresh(scope: ConnectionScope): void {
     if (!this.running || !this.isCurrentScope(scope)) return
     const now = Date.now()
-    if (now - this.lastForegroundInteractionAt >= FOREGROUND_INTERACTION_QUIET_MS) {
+    if (!this.isValidatedScope(scope) || now - this.lastForegroundInteractionAt >= FOREGROUND_INTERACTION_QUIET_MS) {
       void this.runBackgroundRefresh(false, scope)
       return
     }
@@ -4838,7 +4840,7 @@ export class AppService {
     }
     const now = Date.now()
     const quietAt = this.lastForegroundInteractionAt + FOREGROUND_INTERACTION_QUIET_MS
-    if (now < quietAt) {
+    if (this.isValidatedScope(pending) && now < quietAt) {
       this.armDeferredBackgroundRefresh()
       return
     }
@@ -4962,11 +4964,15 @@ export class AppService {
     deferApplyDuringInteraction: boolean
   ): Promise<void> {
     const started = Date.now()
-    const [health, sessions, jobs] = await Promise.allSettled([
-      this.readActivityHealth(scope, () => scope.client.health()),
+    const healthResult = Promise.allSettled([
+      this.readActivityHealth(scope, () => scope.client.health())
+    ])
+    const metadataResults = Promise.allSettled([
       scope.client.sessions(),
       includeJobs ? scope.client.jobs() : Promise.resolve(this.jobs)
     ])
+    // A slow chat list must not delay health validation or live-stream recovery.
+    const [health] = await healthResult
     if (!this.isCurrentScope(scope)) return
 
     let activeScope = scope
@@ -5006,22 +5012,23 @@ export class AppService {
         this.emitConnection(scope, false, undefined, message)
       }
     } else {
-      // A rejected health request cannot authenticate the process currently
-      // listening at this profile. Drop the cached capability fence on the
-      // first failure so Team Hub never reuses credentials against an
-      // unverified or replaced server while the ordinary reconnect UI is
-      // still in its transient `retrying` state.
+      // Revalidate privileged requests after failed health, but a transient
+      // HTTP failure does not invalidate an already authenticated chat socket.
+      // Let that transport report its own disconnect instead of closing it.
+      const transient = health.reason instanceof TypeError
+        || health.reason instanceof Error && health.reason.name === 'TimeoutError'
+        || health.reason instanceof ServerError && health.reason.status >= 500
       this.portTunnels.disposeAll()
       this.health = null
       this.validatedGeneration = null
-      this.suspendTimelineSubscriptions()
+      this.suspendTimelineSubscriptions(transient)
       this.stopEmergencyStream()
       this.mailHints.suspend()
       this.healthFailureCount += 1
       const message = errorText(health.reason)
       announcedError = health.reason
       this.setProfileRuntime(scope.profileId, {
-        connectionState: this.healthFailureCount < 2 ? 'retrying' : 'offline',
+        connectionState: this.healthFailureCount < 2 || this.hasConnectedTimelineSubscription() ? 'retrying' : 'offline',
         lastConnectionError: message,
         lastConnectionCheckedAt: Date.now()
       })
@@ -5049,6 +5056,7 @@ export class AppService {
         queueMicrotask(() => void this.reconcileTimelineAndStream(activeScope, sessionId, cachedLast, lease))
       }
     }
+    const [sessions, jobs] = await metadataResults
     if (
       deferApplyDuringInteraction
       && Date.now() - this.lastForegroundInteractionAt < FOREGROUND_INTERACTION_QUIET_MS

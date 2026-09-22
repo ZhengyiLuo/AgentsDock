@@ -1984,6 +1984,8 @@ export interface AppUpdateStatus {
   message?: string
   checkedAt?: string
   downloadedAt?: string
+  /** Whether the pending app update can still be canceled before native installation. */
+  cancelable?: boolean
   serverUpdates?: CoordinatedServerUpdate[]
   serverUpdateMessage?: string
 }

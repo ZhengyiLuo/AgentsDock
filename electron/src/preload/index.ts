@@ -121,6 +121,7 @@ const api: AgentsDockAPI = {
     status: () => ipcRenderer.invoke('updates:status'),
     check: () => ipcRenderer.invoke('updates:check'),
     install: () => ipcRenderer.invoke('updates:install'),
+    cancel: () => ipcRenderer.invoke('updates:cancel'),
     retryServers: profileId => ipcRenderer.invoke('updates:retry-servers', profileId),
     setTrack: track => ipcRenderer.invoke('updates:set-track', track)
   },

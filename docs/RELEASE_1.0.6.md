@@ -11,6 +11,12 @@ app.
   idle before submitting the update; keep the app open for that waiting period.
 - Keep app installation independent of the connected server version or update
   channel. This release does not automatically install or restart a server.
+- Cancel an app update before installation starts, discard a downloaded update,
+  and switch channels without being trapped by a pending download.
+- Keep live chats connected through a temporary health-request failure. Process
+  successful health checks without waiting for a slow chat list, and allow
+  connection recovery while typing or scrolling.
+- Avoid duplicating text already retyped in the composer after a failed send.
 - Make guided server setup use the published signed release for its selected
   channel instead of reinstalling an obsolete version.
 - Give model selection more space in the composer and keep custom-provider

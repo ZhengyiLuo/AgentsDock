@@ -519,6 +519,32 @@ describe('background refresh failures', () => {
     }
   })
 
+  it('does not postpone failed-connection recovery while the user types', async () => {
+    vi.useFakeTimers()
+    let service: AppService | null = null
+    try {
+      const active = fakeClient()
+      ;({ service } = createProfileService({ 'http://a.test:7850': [active] }))
+      const { listeners } = addInteractiveWindow(service)
+      service.start()
+      await settleImmediateRefresh()
+      active.health.mockRejectedValueOnce(new TypeError('fetch failed'))
+      await vi.advanceTimersByTimeAsync(30_000)
+      expect((service as unknown as { validatedGeneration: number | null }).validatedGeneration).toBeNull()
+      active.health.mockClear()
+
+      await vi.advanceTimersByTimeAsync(29_900)
+      listeners.get('before-input-event')?.({}, { type: 'keyDown' })
+      await vi.advanceTimersByTimeAsync(100)
+
+      expect(active.health).toHaveBeenCalledOnce()
+      expect((service as unknown as { validatedGeneration: number | null }).validatedGeneration).not.toBeNull()
+    } finally {
+      service?.stop()
+      vi.useRealTimers()
+    }
+  })
+
   it('coalesces continued scrolling and runs one poll promptly after real quiet', async () => {
     vi.useFakeTimers()
     let service: AppService | null = null
@@ -712,13 +738,14 @@ describe('background refresh failures', () => {
     let service: AppService | null = null
     try {
       const fetchedSessions = deferred<Session[]>()
+      const fetchedHealth = deferred<Health>()
       const cachedSession = emptyTimelinePage('chat').session
       let healthRequest = 0
       let sessionRequest = 0
       const active = fakeClient({
         health: async () => {
           if (++healthRequest === 1) throw new Error('offline')
-          return { ok: true }
+          return fetchedHealth.promise
         },
         sessions: () => ++sessionRequest === 1 ? Promise.resolve([]) : fetchedSessions.promise,
         sessionPage: async sessionId => emptyTimelinePage(sessionId),
@@ -747,6 +774,7 @@ describe('background refresh failures', () => {
       await vi.advanceTimersByTimeAsync(30_000)
       listeners.get('before-input-event')?.({}, { type: 'keyDown' })
       service.unsubscribeTimeline('hidden-chat')
+      fetchedHealth.resolve({ ok: true })
       fetchedSessions.resolve([{ id: 'chat', title: 'Recovered', backend: 'codex' }])
       await settleImmediateRefresh()
 
@@ -3978,6 +4006,92 @@ describe('split-chat timeline subscriptions', () => {
     })
     expect(send).not.toHaveBeenCalledWith('server:event', expect.objectContaining({ event: expect.objectContaining({ id: 'stale-a' }) }))
     expect(send).toHaveBeenCalledWith('server:event', expect.objectContaining({ event: expect.objectContaining({ id: 'current-b' }) }))
+  })
+
+  it('keeps authenticated chat events live through a failed health request, but closes on rejected credentials', async () => {
+    const stop = vi.fn()
+    let emitEvent!: (event: Event) => void
+    const client = fakeClient({
+      sessionPage: async sessionId => emptyTimelinePage(sessionId),
+      stream: (_sessionId, _after, onEvent, onState) => {
+        emitEvent = onEvent
+        onState(true)
+        return stop
+      }
+    })
+    const { service } = createProfileService({ 'http://a.test:7850': [client] })
+    Object.assign(service, { validatedGeneration: 1 })
+    const send = vi.fn()
+    service.addWindow({ isDestroyed: () => false, on: vi.fn(), webContents: { send } } as never)
+    await service.subscribeTimeline('chat-a', 0)
+    await settleBackgroundWork()
+    const internals = service as unknown as {
+      scope: unknown
+      validatedGeneration: number | null
+      refreshAll(announce: boolean, includeJobs: boolean, scope: unknown): Promise<void>
+    }
+    client.health.mockRejectedValueOnce(new TypeError('fetch failed'))
+    await internals.refreshAll(false, false, internals.scope)
+    expect(stop).not.toHaveBeenCalled()
+    expect(internals.validatedGeneration).toBeNull()
+    emitEvent({ id: 'still-live', session_id: 'chat-a', seq: 1, type: 'assistant_text', ts: 'now', text: 'Continuing' })
+    expect(send).toHaveBeenCalledWith('server:event', expect.objectContaining({
+      event: expect.objectContaining({ id: 'still-live' })
+    }))
+
+    client.health.mockRejectedValueOnce(new ServerError(401, 'Invalid token'))
+    await internals.refreshAll(false, false, internals.scope)
+    expect(stop).toHaveBeenCalledOnce()
+  })
+
+  it('restores live chat before a slow session list settles', async () => {
+    const sessionList = deferred<Session[]>()
+    const client = fakeClient({
+      sessions: () => sessionList.promise,
+      sessionPage: async sessionId => emptyTimelinePage(sessionId)
+    })
+    const { service } = createProfileService({ 'http://a.test:7850': [client] })
+    await service.subscribeTimeline('chat-a', 0)
+    await settleBackgroundWork()
+    expect(client.stream).not.toHaveBeenCalled()
+    const internals = service as unknown as {
+      scope: unknown
+      refreshAll(announce: boolean, includeJobs: boolean, scope: unknown): Promise<void>
+    }
+    const refreshing = internals.refreshAll(false, false, internals.scope)
+    await settleBackgroundWork()
+    expect(client.stream).toHaveBeenCalledOnce()
+    sessionList.resolve([])
+    await refreshing
+  })
+
+  it.each([false, true])('waits for fresh health before a disconnected chat socket retries (initially connected: %s)', async connected => {
+    const stop = vi.fn()
+    let emitState!: (connected: boolean, error?: string) => void
+    const client = fakeClient({
+      sessionPage: async sessionId => emptyTimelinePage(sessionId),
+      stream: (_id, _after, _onEvent, onState) => {
+        emitState = onState
+        onState(connected)
+        return stop
+      }
+    })
+    const { service } = createProfileService({ 'http://a.test:7850': [client] })
+    Object.assign(service, { validatedGeneration: 1 })
+    await service.subscribeTimeline('chat-a', 0)
+    await settleBackgroundWork()
+    const internals = service as unknown as {
+      scope: unknown
+      refreshAll(announce: boolean, includeJobs: boolean, scope: unknown): Promise<void>
+    }
+    client.health.mockRejectedValueOnce(new TypeError('fetch failed'))
+    await internals.refreshAll(false, false, internals.scope)
+    expect(stop).toHaveBeenCalledTimes(connected ? 0 : 1)
+    if (connected) emitState(false, 'socket closed')
+    expect(stop).toHaveBeenCalledOnce()
+    await internals.refreshAll(false, false, internals.scope)
+    await settleBackgroundWork()
+    expect(client.stream).toHaveBeenCalledTimes(2)
   })
 
   it('does not supersede a cold timeline open while health polling completes', async () => {

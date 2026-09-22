@@ -1823,6 +1823,19 @@ export const useAppStore = create<AppState>((set, get) => ({
         chatReferences,
         teamReferences,
         ...(options?.skillSelection ? { skillSelection: options.skillSelection } : {})
+      }).catch(error => {
+        if (!profileScopeMatches(scope, get())) throw error
+        // The live stream can acknowledge a turn before its HTTP reply is
+        // lost. Use that receipt through the normal path, including steering.
+        flushLiveEvents(true)
+        const accepted = get().snapshots[sessionId]?.events.findLast(event => pendingTurnSubmissionAccepted(pendingSubmission, [event]))
+        if (!accepted) throw error
+        return {
+          session: get().sessions.find(candidate => candidate.id === sessionId) ?? session,
+          event: accepted,
+          queued: accepted.type === 'turn_queued',
+          queued_id: accepted.type === 'turn_queued' ? accepted.queued_id : undefined
+        }
       })
       if (!profileScopeMatches(scope, get())) return false
       if (response.event && eventAffectsQueuedTurns(response.event)) {
@@ -3964,12 +3977,15 @@ function rollbackPendingTurnSubmissionState(
   if (!pending.consumeComposer) return { pendingTurnSubmissions }
   const newerDraft = state.drafts[sessionId] ?? ''
   const hasNewerDraft = Boolean(newerDraft.trim())
+  // The user may have already retyped the failed prompt. Keep that draft and
+  // its current reference selections instead of inserting the same text twice.
+  const sameDraft = hasNewerDraft && newerDraft.trim() === pending.prompt
   const separator = pending.prompt && hasNewerDraft ? '\n\n' : ''
-  const restoredDraft = hasNewerDraft
+  const restoredDraft = sameDraft ? newerDraft : hasNewerDraft
     ? `${pending.prompt}${separator}${newerDraft}`
     : pending.prompt
   const newerReferenceOffset = pending.prompt.length + separator.length
-  const chatReferences = hasNewerDraft
+  const chatReferences = sameDraft ? state.chatReferencesBySession[sessionId] ?? [] : hasNewerDraft
     ? [
         ...pending.chatReferences,
         ...(state.chatReferencesBySession[sessionId] ?? []).map(reference => ({
@@ -3979,7 +3995,7 @@ function rollbackPendingTurnSubmissionState(
         }))
       ]
     : pending.chatReferences
-  const teamReferences = hasNewerDraft
+  const teamReferences = sameDraft ? state.teamReferencesBySession[sessionId] ?? [] : hasNewerDraft
     ? [
         ...pending.teamReferences,
         ...(state.teamReferencesBySession[sessionId] ?? []).map(reference => ({

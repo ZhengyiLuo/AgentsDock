@@ -4288,7 +4288,11 @@ describe('Composer', () => {
     await waitFor(() => expect(screen.queryByText('Sending now…')).not.toBeInTheDocument())
   })
 
-  it('preserves text typed while a failed send is still in flight', async () => {
+  it.each([
+    ['Next request', 'First request\n\nNext request'],
+    ['First request', 'First request'],
+    ['  First request  ', '  First request  ']
+  ])('preserves next draft %j while a failed send is still in flight', async (newerDraft, restoredDraft) => {
     let rejectSend!: (error: Error) => void
     Object.defineProperty(window, 'agentsDock', {
       configurable: true,
@@ -4304,12 +4308,45 @@ describe('Composer', () => {
     await user.type(editor, 'First request')
     await user.click(screen.getByRole('button', { name: 'Send message' }))
     expect(screen.getByTitle('Wait for the message to be accepted before changing backend')).toBeDisabled()
-    await user.type(editor, 'Next request')
+    await user.type(editor, newerDraft)
     await act(async () => rejectSend(new Error('offline')))
 
-    await waitFor(() => expect(editor).toHaveValue('First request\n\nNext request'))
+    await waitFor(() => expect(editor).toHaveValue(restoredDraft))
+    expect(useAppStore.getState().drafts['chat-1']).toBe(restoredDraft)
+    expect(window.agentsDock.turns.send).toHaveBeenCalledTimes(1)
     expect(screen.getByTitle('Change backend')).toBeEnabled()
     expect(useAppStore.getState().turnAdmissionTokens['chat-1']).toBeUndefined()
+  })
+
+  it('does not restore an accepted prompt when the HTTP response is lost', async () => {
+    const pendingSend = deferred<never>()
+    const send = vi.fn(() => pendingSend.promise)
+    Object.defineProperty(window, 'agentsDock', {
+      configurable: true,
+      value: {
+        preferences: { get: vi.fn().mockResolvedValue(''), set: vi.fn().mockResolvedValue(undefined) },
+        turns: { send }
+      } as unknown as AgentsDockAPI
+    })
+    const user = userEvent.setup()
+    render(<Composer />)
+    const editor = screen.getByPlaceholderText('Message')
+    await user.type(editor, 'Accepted request')
+    await user.click(screen.getByRole('button', { name: 'Send message' }))
+    await act(async () => {
+      useAppStore.setState({ snapshots: { 'chat-1': {
+        session: { id: 'chat-1', title: 'Chat', backend: 'codex' },
+        events: [{ id: 'accepted', session_id: 'chat-1', seq: 1, type: 'turn_started', ts: '2026-09-22T00:00:00Z', prompt: 'Accepted request', file_ids: [] }],
+        queuedTurns: [], files: [], filesTotal: 0, hasMoreEvents: false, cachedAt: 0
+      } } })
+      pendingSend.reject(new Error('HTTP response lost'))
+    })
+
+    await waitFor(() => expect(useAppStore.getState().turnAdmissionTokens['chat-1']).toBeUndefined())
+    expect(editor).toHaveValue('')
+    expect(useAppStore.getState().drafts['chat-1']).toBe('')
+    expect(useAppStore.getState().error).toBeNull()
+    expect(send).toHaveBeenCalledTimes(1)
   })
 
   it('uses Command-Enter to steer a new message immediately', async () => {

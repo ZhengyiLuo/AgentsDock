@@ -61,6 +61,77 @@ describe('Dialog close controls', () => {
 describe('AppSettingsDialog', () => {
   afterEach(cleanup)
 
+  async function renderAppUpdate(status: AppUpdateStatus, overrides: Partial<AgentsDockAPI['updates']> = {}) {
+    const updates = {
+      status: vi.fn().mockResolvedValue(status),
+      check: vi.fn().mockResolvedValue(status),
+      install: vi.fn().mockResolvedValue(true),
+      cancel: vi.fn().mockResolvedValue(status),
+      setTrack: vi.fn().mockResolvedValue(status),
+      ...overrides
+    }
+    Object.defineProperty(window, 'agentsDock', {
+      configurable: true,
+      value: { updates, events: { on: vi.fn().mockReturnValue(() => undefined) } } as unknown as AgentsDockAPI
+    })
+    useAppStore.setState({ modals: { ...useAppStore.getState().modals, settings: false, appSettings: true }, error: null })
+    render(<AppSettingsDialog />)
+    fireEvent.click(screen.getByRole('button', { name: 'Updates' }))
+    await screen.findByText(status.message!)
+    return updates
+  }
+
+  it.each(['checking', 'downloading', 'installing', 'downloaded'] as const)('cancels a %s update through the updater and clears the pending UI', async state => {
+    const status: AppUpdateStatus = {
+      state, channel: 'direct', track: 'stable', currentVersion: '1.0.6-beta.1',
+      availableVersion: '1.0.6', message: 'Update in progress', progress: 42,
+      cancelable: state === 'downloaded' ? undefined : true
+    }
+    let resolveCancel!: (status: AppUpdateStatus) => void
+    const cancel = vi.fn(() => new Promise<AppUpdateStatus>(resolve => { resolveCancel = resolve }))
+    await renderAppUpdate(status, { cancel })
+
+    if (state === 'checking' || state === 'downloading') expect(screen.getByRole('button', { name: 'Check for updates' })).toBeDisabled()
+    if (state === 'installing') expect(screen.getByText('Restarting…')).toBeInTheDocument()
+    const button = screen.getByRole('button', { name: state === 'downloaded' ? 'Discard update' : 'Cancel update' })
+    expect(button).toBeEnabled()
+    fireEvent.click(button)
+    expect(cancel).toHaveBeenCalledOnce()
+    expect(screen.getByRole('button', { name: 'Cancelling…' })).toBeDisabled()
+    expect(screen.getByText('Update in progress')).toBeInTheDocument()
+
+    await act(async () => resolveCancel({ ...status, state: 'idle', cancelable: false, availableVersion: undefined, progress: undefined, message: 'Update cancelled.' }))
+    expect(screen.getByText('Update cancelled.')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Check for updates' })).toBeEnabled()
+    expect(screen.getByRole('button', { name: 'Beta' })).toBeEnabled()
+    expect(screen.queryByRole('button', { name: /Cancel update|Discard update|Cancelling/ })).not.toBeInTheDocument()
+    expect(screen.queryByText('Restarting…')).not.toBeInTheDocument()
+    expect(screen.queryByRole('progressbar')).not.toBeInTheDocument()
+  })
+
+  it('allows changing channels after download and renders the replacement updater state', async () => {
+    const status: AppUpdateStatus = {
+      state: 'downloaded', channel: 'direct', track: 'stable', currentVersion: '1.0.6-beta.1',
+      availableVersion: '1.0.3', cancelable: true, message: 'AgentsDock 1.0.3 is ready to install.'
+    }
+    const setTrack = vi.fn().mockResolvedValue({ ...status, track: 'beta', state: 'idle', availableVersion: undefined, cancelable: false, message: 'Beta channel selected.' })
+    const updates = await renderAppUpdate(status, { setTrack })
+
+    expect(screen.getByRole('button', { name: 'Beta' })).toBeEnabled()
+    fireEvent.click(screen.getByRole('button', { name: 'Beta' }))
+    await screen.findByText('Beta channel selected.')
+    expect(setTrack).toHaveBeenCalledWith('beta')
+    expect(screen.queryByText('AgentsDock 1.0.3 is ready to install.')).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Update AgentsDock' })).not.toBeInTheDocument()
+    expect(updates.install).not.toHaveBeenCalled()
+  })
+
+  it('does not offer cancellation after the native installer takes over', async () => {
+    await renderAppUpdate({ state: 'installing', channel: 'direct', track: 'stable', currentVersion: '1.0.6-beta.1', message: 'Restarting to install…', cancelable: false })
+    expect(screen.getByText('Restarting…')).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /Cancel update|Discard update/ })).not.toBeInTheDocument()
+  })
+
   it('keeps app preferences, server controls, and updates in one settings dialog', async () => {
     const updateStatus = { state: 'not-available' as const, channel: 'direct' as const, track: 'stable' as const, currentVersion: '0.2.0', message: 'AgentsDock is up to date.',
       serverUpdates: [{ profileId: 'server-a', serverIdentity: 'identity-a', name: 'Research server', targetVersion: '1.2.0', phase: 'pending' as const, message: 'Queued until idle.' },

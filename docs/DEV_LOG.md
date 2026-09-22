@@ -1,5 +1,33 @@
 # Public development log
 
+## 2026-09-22 — Cancel desktop updates and recover live chat promptly
+
+- Add Cancel during app update preparation/download and Discard after download.
+  Discarded updates no longer lock channel selection. Cancellation stops the
+  download when supported, invalidates late callbacks and prevents a pending
+  restart; native installation handoff remains the final boundary. Normal quit
+  does not install a downloaded update. Focused updater and Settings checks
+  pass; signed-package cancellation acceptance is recorded separately.
+- Keep existing authenticated chat sockets through transient health failures,
+  while retaining fresh validation for reconnecting sockets and privileged
+  requests. Process health before slow session/job metadata, and allow the
+  existing recovery poll during typing or scrolling without adding a poll loop.
+- In an isolated native Electron app using real authenticated HTTP/WebSockets,
+  an injected health rejection leaves chat sockets open. Successful health
+  restores Online before an eight-second delayed chat-list response. Focused
+  service/client checks, TypeScript and production compilation pass.
+- Prevent failed sends from duplicating text already retyped in the composer,
+  preserving current references and attachments. An authoritative live event
+  can confirm acceptance when the HTTP reply is lost; the existing success and
+  steering behavior then runs without resending the prompt. Focused store and
+  Composer checks include lost replies and profile changes. Native UI checks
+  use an authenticated protocol fixture with controlled HTTP/WebSocket faults,
+  not provider inference.
+- These changes address app recovery and draft handling. The original cause of
+  the intermittent socket failures remains unconfirmed; bounded native error
+  diagnostics preserve evidence for a recurrence. No server deployment or
+  desktop publication is recorded by this entry.
+
 ## 2026-09-22 — Preserve native connection failure diagnostics
 
 - Record request duration and bounded native socket error codes when desktop

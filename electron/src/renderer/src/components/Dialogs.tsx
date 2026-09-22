@@ -477,6 +477,7 @@ export function AppSettingsDialog({ serverSettings, serverUpdates, onServerUpdat
   const [appearance, setAppearance] = useState<AppearanceMode>('system')
   const [update, setUpdate] = useState<AppUpdateStatus | null>(null)
   const [updateTrackBusy, setUpdateTrackBusy] = useState(false)
+  const [updateCancelBusy, setUpdateCancelBusy] = useState(false)
   const activeSectionRef = useRef<HTMLButtonElement | null>(null)
 
   const closeSettings = () => {
@@ -548,13 +549,19 @@ export function AppSettingsDialog({ serverSettings, serverUpdates, onServerUpdat
     try { await window.agentsDock.updates.install() }
     catch (error) { useAppStore.getState().setError(message(error)) }
   }
+  const cancelUpdate = async () => {
+    setUpdateCancelBusy(true)
+    try { setUpdate(await window.agentsDock.updates.cancel()) }
+    catch (error) { useAppStore.getState().setError(message(error)) }
+    finally { setUpdateCancelBusy(false) }
+  }
   const updateBusy = Boolean(update && (
     update.state === 'checking'
     || (update.channel === 'direct' && ['available', 'downloading'].includes(update.state))
   ))
   const updateTrackLocked = Boolean(update && (
     update.state === 'checking'
-    || (update.channel === 'direct' && ['available', 'downloading', 'downloaded', 'installing'].includes(update.state))
+    || (update.channel === 'direct' && ['available', 'downloading', 'installing'].includes(update.state))
   ))
   const developmentUpdateCheckEnabled = update?.channel === 'development' && update.state !== 'disabled'
   const appUpdateCheckedAt = updateCheckedAtLabel(update?.checkedAt)
@@ -622,14 +629,15 @@ export function AppSettingsDialog({ serverSettings, serverUpdates, onServerUpdat
                 <div className="app-settings-row-copy"><strong>AgentsDock {update?.currentVersion ? <small>v{update.currentVersion}</small> : null}</strong><span role="status" aria-live="polite">{[update?.state === 'not-available' ? t("ui.Dialogs.AppSettingsDialog.this_is_the_latest_one_0791214") : update?.message || t("ui.Dialogs.AppSettingsDialog.checking_for_updates_497a199"), appUpdateCheckedAt].filter(Boolean).join(' · ')}</span></div>
                 <div className="app-settings-actions">
                   {(update?.channel === 'direct' || update?.channel === 'development') && <div className="segmented update-track-picker" role="group" aria-label={t("ui.Dialogs.AppSettingsDialog.app_update_channel_95487e7")}>
-                    <button type="button" className={update.track === 'stable' ? 'active' : ''} disabled={updateTrackBusy || updateTrackLocked} onClick={() => void chooseUpdateTrack('stable')}>{t("ui.Dialogs.AppSettingsDialog.stable_90ee305")}</button>
-                    <button type="button" className={update.track === 'beta' ? 'active' : ''} disabled={updateTrackBusy || updateTrackLocked} onClick={() => void chooseUpdateTrack('beta')}>{t("ui.Dialogs.AppSettingsDialog.beta_7033903")}</button>
+                    <button type="button" className={update.track === 'stable' ? 'active' : ''} disabled={updateTrackBusy || updateTrackLocked || updateCancelBusy} onClick={() => void chooseUpdateTrack('stable')}>{t("ui.Dialogs.AppSettingsDialog.stable_90ee305")}</button>
+                    <button type="button" className={update.track === 'beta' ? 'active' : ''} disabled={updateTrackBusy || updateTrackLocked || updateCancelBusy} onClick={() => void chooseUpdateTrack('beta')}>{t("ui.Dialogs.AppSettingsDialog.beta_7033903")}</button>
                   </div>}
                   {update?.channel === 'app-store' && <span className="app-settings-value">App Store</span>}
                   {update?.channel === 'development' && <button type="button" className="quiet-button" disabled={!developmentUpdateCheckEnabled || updateBusy || updateTrackBusy} title={developmentUpdateCheckEnabled ? undefined : update.message || t("ui.Dialogs.AppSettingsDialog.app_update_checks_are_unavailable_for_this_86d2da7")} onClick={() => void checkForUpdates()}>{updateBusy || updateTrackBusy ? <LoaderCircle className="spin" size={13} /> : <RefreshCw size={13} />}{updateBusy || updateTrackBusy ? t("ui.Dialogs.AppSettingsDialog.checking_ec963ff") : t("ui.Dialogs.AppSettingsDialog.check_for_updates_f26f327")}</button>}
-                  {update?.channel === 'direct' && update.state !== 'downloaded' && update.state !== 'installing' && <button type="button" className="quiet-button" disabled={updateBusy} onClick={() => void checkForUpdates()}>{updateBusy ? <LoaderCircle className="spin" size={13} /> : <RefreshCw size={13} />}{t("ui.Dialogs.AppSettingsDialog.check_for_updates_f26f327")}</button>}
-                  {update?.channel === 'direct' && update.state === 'downloaded' && <button type="button" className="primary-button" onClick={() => void installUpdate()}><RotateCcw size={13} />{t("ui.Dialogs.AppSettingsDialog.restart_to_update_451d3a7")}</button>}
+                  {update?.channel === 'direct' && update.state !== 'downloaded' && update.state !== 'installing' && <button type="button" className="quiet-button" disabled={updateBusy || updateCancelBusy} onClick={() => void checkForUpdates()}>{updateBusy ? <LoaderCircle className="spin" size={13} /> : <RefreshCw size={13} />}{t("ui.Dialogs.AppSettingsDialog.check_for_updates_f26f327")}</button>}
+                  {update?.channel === 'direct' && update.state === 'downloaded' && <button type="button" className="primary-button" disabled={updateCancelBusy || updateTrackBusy} onClick={() => void installUpdate()}><Download size={13} />{t("ui.Dialogs.AppSettingsDialog.restart_to_update_451d3a7")}</button>}
                   {update?.channel === 'direct' && update.state === 'installing' && <span className="app-settings-value"><LoaderCircle className="spin" size={13} />{t("ui.Dialogs.AppSettingsDialog.restarting_75d0f14")}</span>}
+                  {update?.channel === 'direct' && (update.state === 'downloaded' || update.cancelable) && <button type="button" className="quiet-button" disabled={updateCancelBusy} onClick={() => void cancelUpdate()}>{updateCancelBusy ? <LoaderCircle className="spin" size={13} /> : <X size={13} />}{updateCancelBusy ? t('appUpdate.cancelling') : update.state === 'downloaded' ? t('appUpdate.discard') : t('appUpdate.cancel')}</button>}
                 </div>
               </div>
               {update?.state === 'downloading' && <div className="app-settings-update-progress" role="progressbar" aria-label={t("ui.Dialogs.AppSettingsDialog.update_download_1c20b42")} aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round(update.progress ?? 0)}><span style={{ width: `${update.progress ?? 0}%` }} /></div>}

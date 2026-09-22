@@ -1434,14 +1434,15 @@ export const Composer = memo(function Composer({ dropActive = false, sessionId, 
             source_text_end: reference.source_text_end - outgoingLeadingWhitespace
           })))
           const hasNewerDraft = Boolean(newerDraft.trim())
+          const sameDraft = hasNewerDraft && newerDraft.trim() === normalizedOutgoing
           const separator = normalizedOutgoing && hasNewerDraft ? '\n\n' : ''
-          const restored = hasNewerDraft
+          const restored = sameDraft ? newerDraft : hasNewerDraft
             ? `${normalizedOutgoing}${separator}${newerDraft}`
             : normalizedOutgoing
           const newerReferenceOffset = normalizedOutgoing.length + separator.length
           const newerReferences = validChatReferences(newerDraft, referencesRef.current, selectedId)
           const newerTeamReferences = validTeamReferences(newerDraft, teamReferencesRef.current)
-          const restoredReferences = hasNewerDraft
+          const restoredReferences = sameDraft ? newerReferences : hasNewerDraft
             ? [
                 ...normalizedOutgoingReferences,
                 ...newerReferences.map(reference => ({
@@ -1451,7 +1452,7 @@ export const Composer = memo(function Composer({ dropActive = false, sessionId, 
                 }))
               ]
             : normalizedOutgoingReferences
-          const restoredTeamReferences = hasNewerDraft
+          const restoredTeamReferences = sameDraft ? newerTeamReferences : hasNewerDraft
             ? [
                 ...normalizedOutgoingTeamReferences,
                 ...newerTeamReferences.map(reference => ({
