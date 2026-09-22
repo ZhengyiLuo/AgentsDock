@@ -1,4 +1,4 @@
-# AgentsDock 1.0.7
+# AgentsDock 1.0.6
 
 Restore server updates for existing installations, including AgentsServer
 0.1.25, without requiring SSH setup or a server upgrade before installing the
