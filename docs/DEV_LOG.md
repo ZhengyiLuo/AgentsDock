@@ -1,5 +1,36 @@
 # Public development log
 
+## 2026-09-22 — Accept app-only 1.0.6-beta.1 (1196)
+
+- Accepted product source: `d36e1637e6fa6a7cec1b11cf7ffbaf70cff8e17e`.
+  This desktop beta includes no server descriptor or enrollment and cannot
+  resume an older app's saved server-update plan. Server publication remains
+  held; this release does not install the server-side repairs below.
+- Desktop validation passes 4,736 tests with five existing skips, TypeScript,
+  production compilation and native platform package verification. The universal
+  macOS ZIP and DMG pass Developer ID signing, notarization, Gatekeeper, updater
+  metadata, checksum, package parity and clean-launch checks. Windows remains
+  explicitly unsigned. The 14-file app-only checksum seal is
+  `f7bdb3ebc6cb503839b69c5855b41812d1ce6b36b895e3115b1508db7a11e547`.
+- The unchanged published 1.0.3 app opts into Beta, downloads the exact signed
+  package, installs through its native updater and automatically relaunches as
+  build 1196. Its existing server remains on 1.0.3 with the same process; a
+  legacy 0755 root and retained rollback journal are unchanged.
+- The unchanged 1.0.5 app reproduces its old pre-install failure because this
+  app-only release has no server descriptor. Direct replacement with the same
+  signed app then succeeds, preserving its profile and the old update-plan file
+  byte for byte. Users on withdrawn 1.0.4/1.0.5 should use the direct installer.
+  This is not a claim that their old in-app updater was retroactively repaired.
+- Both native macOS journeys preserve server/runtime files, chats, provider and
+  authority files, Hub records, bootstrap claims and existing mTLS access. No
+  update, restart or stop request reaches either server. A real server-owned
+  terminal worker keeps its process identity and advancing heartbeat through
+  app replacement. This continuity test does not exercise model inference.
+- Tests use disposable native machines and private feed routing of the exact
+  production-signed bytes. Stable does not offer the beta without opt-in. This
+  entry accepts the unchanged artifacts before upload; publication and public
+  feed readback follow separately.
+
 ## 2026-09-22 — Prepare app-only 1.0.6-beta.1; hold the server release
 
 - Prepare an opt-in desktop beta with independent app updates and clearer

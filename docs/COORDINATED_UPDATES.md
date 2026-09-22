@@ -5,7 +5,7 @@ offer 1.0.3. Their earlier acceptance below covered particular fixtures and
 missed retained rollback records and channel transitions; it does not establish
 that those withdrawn releases are suitable for existing installations.
 
-**1.0.6-beta.1 is being prepared as an app-only beta.** Server publication is
+**1.0.6-beta.1 build 1196 is accepted as an app-only beta.** Server publication is
 held. This app carries no server-update descriptor and does not resume earlier
 saved server-update plans. It leaves existing servers running their installed
 versions. The coordinated workflow below applies to a future release that
