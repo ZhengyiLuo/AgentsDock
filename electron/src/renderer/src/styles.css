@@ -501,9 +501,6 @@ body.column-resizing { cursor: col-resize; user-select: none; }
 .sidebar { display: flex; flex-direction: column; border-right: 0; }
 .sidebar-topbar { height: 42px; padding: 0 12px 0 16px; display: flex; align-items: center; justify-content: space-between; }
 .sidebar-topbar strong { font-size: var(--text-size-ui); }
-.sidebar-brand { min-width: 0; display: flex; align-items: baseline; gap: var(--space-2); margin-right: var(--space-2); }
-.sidebar-brand strong, .sidebar-topbar .toolbar-cluster { flex-shrink: 0; }
-.sidebar-app-version { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted); font-size: var(--text-size-micro); font-weight: var(--text-weight-body); }
 .toolbar-cluster { display: flex; gap: var(--space-1); }
 .server-selector-trigger { min-width: 0; min-height: 45px; margin: 0 10px 7px; display: flex; align-items: center; gap: 9px; padding: var(--space-3) 9px; color: var(--text); background: var(--surface-2); border: 1px solid var(--border-soft); border-radius: var(--radius-selection); text-align: left; -webkit-app-region: no-drag; }
 .server-selector-trigger:hover, .server-selector-trigger[data-state="open"] { background: var(--surface-3); border-color: var(--border); }
@@ -511,9 +508,6 @@ body.column-resizing { cursor: col-resize; user-select: none; }
 .server-selector-copy strong, .server-profile-copy strong, .server-selector-copy small, .server-profile-copy small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .server-selector-copy strong, .server-profile-copy strong { font-size: var(--text-size-ui); line-height: 16px; font-weight: var(--text-weight-body); }
 .server-selector-copy small, .server-profile-copy small { color: var(--faint); font-size: var(--text-size-meta); line-height: 13px; }
-.server-selector-metadata { display: flex; align-items: baseline; gap: var(--space-2); }
-.server-selector-host { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
-.server-selector-version { flex-shrink: 0; color: var(--muted); font-size: var(--text-size-caption); }
 .server-selector-trigger > svg { flex: 0 0 auto; color: var(--faint); }
 .server-selector-spinner { color: var(--amber) !important; }
 .server-selector-menu { width: min(270px, calc(100vw - 20px)); }
