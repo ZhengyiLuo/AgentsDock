@@ -1,5 +1,38 @@
 # Public development log
 
+## 2026-09-22 — Validate desktop 1.0.6, build 1201
+
+- Build committed source `564f38a64a9e748f810de64668e860a4c7badcca` as
+  desktop 1.0.6, build 1201. macOS signing, notarization, clean launch and the
+  stock release verifier pass. Windows and both Linux architectures pass
+  their complete release jobs; all 14 release assets and updater checksums
+  are verified. Windows remains unsigned.
+- In an isolated macOS VM, the unchanged published 1.0.3 and 1.0.6-beta.1
+  apps each update through the native updater and automatically relaunch the
+  exact accepted package. Saved connections and the respective Stable/Beta
+  preferences survive. The original authenticated 0.1.25 server keeps its
+  process, identity, credentials, chats and runtime files, with no mutation
+  requests during either app replacement.
+- The signed package passes native Cancel during checking, download,
+  pre-install refresh and the restart delay; Discard, explicit retry and
+  channel switching also pass. The app process stays alive and late results
+  do not restore the canceled update. These cancellation checks use isolated
+  future-version metadata pointing at the accepted ZIP, without handing that
+  substituted version to the native installer.
+- Native connection recovery retains the authenticated chat socket during an
+  injected health failure and restores Online before delayed metadata, even
+  during continuous native typing and scrolling. A separate real Claude
+  round trip succeeds. The original intermittent socket trigger remains
+  unconfirmed. Native send-failure checks also preserve drafts and accepted
+  turns without resending, including the Send now queue action.
+- Finally, the accepted signed app's restored Install button upgrades the
+  isolated original 0.1.25 server to the public, production-signed 1.0.3
+  archive through one authenticated update request. All 82 runtime files
+  match; the original identity, token, chat and event bytes survive. The app
+  reconnects and shows the retained chat and installed/healthy status.
+- These are desktop-only artifacts. No npm/server publication or production
+  server restart is part of this release acceptance.
+
 ## 2026-09-22 — Cancel desktop updates and recover live chat promptly
 
 - Add Cancel during app update preparation/download and Discard after download.
