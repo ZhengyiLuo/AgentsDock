@@ -37,12 +37,12 @@ function fixture(version = '1.0.3', overrides: Record<string, unknown> = {}) {
 }
 
 describe('guided setup signed release discovery', () => {
-  it('runs the host guard in a real shell and blocks older Beta installation while allowing fresh, equal and newer versions', () => {
-    const home = mkdtempSync(join(tmpdir(), 'agentsdock-version-guard-'))
-    const current = join(home, '.local/share/agents-server/current')
+  it.skipIf(process.platform === 'win32')('runs the host guard in a real shell and blocks older Beta installation while allowing fresh, equal and newer versions', () => {
+    const installRoot = mkdtempSync(join(tmpdir(), 'agentsdock-version-guard-'))
+    const current = join(installRoot, 'current')
     const script = serverSetupVersionGuard({ track: 'beta', version: '1.0.4-beta.10', url: '', sha256: '' })
     const run = () => spawnSync('/bin/sh', ['-s'], {
-      input: script, encoding: 'utf8', env: { PATH: process.env.PATH, HOME: home }
+      input: script, encoding: 'utf8', env: { PATH: process.env.PATH, AGENTS_SERVER_INSTALL_DIR: installRoot }
     })
     try {
       expect(run().status).toBe(0)
@@ -57,7 +57,7 @@ describe('guided setup signed release discovery', () => {
         writeFileSync(join(current, 'VERSION'), `${version}\n`)
         expect(run().status).toBe(0)
       }
-    } finally { rmSync(home, { recursive: true, force: true }) }
+    } finally { rmSync(installRoot, { recursive: true, force: true }) }
   })
 
   it('resolves Stable through the public latest endpoint and verifies the immutable signed release', async () => {
