@@ -285,6 +285,51 @@ describe('SettingsDialog managed server restart', () => {
     }))
   })
 
+  it('preserves failed update evidence when recovery opens and reopens until Check server is clicked', async () => {
+    const failure = 'legacy installer has no admitted runner authority'
+    const failed: ServerUpdateStatus = {
+      phase: 'failed', current_version: '0.1.26-beta.29', target_version: '1.0.4-beta.12',
+      latest_version: '1.0.4-beta.12', track: 'beta', update_available: true,
+      update_id: '7'.repeat(32), message: failure
+    }
+    installBridge(vi.fn().mockResolvedValue(failed))
+    const enrolled: AppUpdateStatus = {
+      state: 'not-available', channel: 'direct', track: 'beta',
+      currentVersion: '1.0.4-beta.12', serverUpdates: []
+    }
+    vi.mocked(window.agentsDock.updates.status).mockResolvedValue(enrolled)
+    vi.mocked(window.agentsDock.updates.check).mockResolvedValue(enrolled)
+    vi.mocked(window.agentsDock.serverUpdates.check).mockResolvedValue({
+      ...failed, phase: 'available', update_id: undefined,
+      message: 'AgentsServer 1.0.4-beta.12 is available.'
+    })
+    showSettings(recoveryHealth({ server_version: '0.1.26-beta.29' }))
+    useAppStore.setState(state => ({ modals: { ...state.modals, settings: false, appSettings: true } }))
+    render(<SettingsDialog />)
+    fireEvent.click(screen.getByRole('button', { name: 'Updates' }))
+
+    const disclosure = await screen.findByText('Advanced server recovery')
+    expect(window.agentsDock.serverUpdates.status).not.toHaveBeenCalled()
+    fireEvent.click(disclosure)
+    expect(await screen.findByText(failure)).toBeInTheDocument()
+    await waitFor(() => expect(updatesSurface().getByRole('button', { name: 'Check server' })).toBeEnabled())
+    expect(window.agentsDock.serverUpdates.check).not.toHaveBeenCalled()
+
+    fireEvent.click(disclosure)
+    await waitFor(() => expect(screen.queryByText(failure)).not.toBeInTheDocument())
+    fireEvent.click(disclosure)
+    expect(await screen.findByText(failure)).toBeInTheDocument()
+    await waitFor(() => expect(updatesSurface().getByRole('button', { name: 'Check server' })).toBeEnabled())
+    expect(window.agentsDock.serverUpdates.status).toHaveBeenCalledTimes(2)
+    expect(window.agentsDock.serverUpdates.check).not.toHaveBeenCalled()
+
+    fireEvent.click(updatesSurface().getByRole('button', { name: 'Check server' }))
+    expect(await screen.findByText('AgentsServer 1.0.4-beta.12 is available.')).toBeInTheDocument()
+    expect(window.agentsDock.serverUpdates.check).toHaveBeenCalledExactlyOnceWith('beta')
+    expect(window.agentsDock.serverUpdates.start).not.toHaveBeenCalled()
+    expect(window.agentsDock.serverUpdates.cancel).not.toHaveBeenCalled()
+  })
+
   it('preserves an open restart confirmation when delayed app update status arrives, then clears it on reopening Settings', async () => {
     installBridge()
     const resolveAppUpdateStatus = delayAppUpdateStatus()

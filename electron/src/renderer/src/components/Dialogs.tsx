@@ -1594,7 +1594,9 @@ export function SettingsDialog() {
       setServerUpdate(status)
       const track = serverTrackForStatus(status)
       setServerUpdateTrack(track)
-      if (serverUpdateIsActive(status) || deferredServerUpdate || submittedServerUpdatesRef.current[submittedUpdateKey]) return
+      // Legacy checks replace the durable failed row. Opening recovery must
+      // preserve that evidence; only the explicit Check server action may check.
+      if (status.phase === 'failed' || serverUpdateIsActive(status) || deferredServerUpdate || submittedServerUpdatesRef.current[submittedUpdateKey]) return
       try {
         const checked = await window.agentsDock.serverUpdates.check(track)
         if (

@@ -1,5 +1,19 @@
 # Coordinated app and server updates
 
+Stable rollout target: **1.0.4**, starting from the published **1.0.3 stable app
+and server**. Stable publication remains gated on the exact packaged stable
+upgrade journey. A beta bridge does not migrate stable users: the bridge must
+be available through the existing stable desktop feeds and signed standalone
+server channel, with the matching npm version on `latest`, before the stable
+desktop update is exposed.
+
+For that journey, the user selects **Update AgentsDock** once in 1.0.3. After
+installing and relaunching, 1.0.4 performs the supported server migration and
+subsequent npm package updates automatically. Users do not separately install
+or select a server version. About still displays the actual app version;
+Settings reports server progress and any actionable failure. Existing stable
+users need neither a beta-channel change nor npm setup.
+
 Published beta: `1.0.4-beta.12`, desktop build `1189`. The native app, public npm
 package and signed standalone server bridge are available. The accepted native
 update journey starts with the unchanged published beta.8 desktop and a genuine
@@ -36,10 +50,11 @@ for fresh installations and deliberately refuses existing managed state.
 
 | Starting point | Upgrade path and evidence |
 | --- | --- |
+| Stable desktop 1.0.3 with managed server 1.0.3 | Target: one app-update action to stable 1.0.4, followed by automatic stable server migration. Exact stable package and native journey acceptance are required before publication. |
 | Desktop beta.8 with managed server beta.9 | Direct update to beta.12; the complete native one-click journey is accepted. |
 | Another compatible 1.x app and managed legacy server | Use the existing app feed and signed server bridge; eligibility depends on the server's advertised update capability. The beta.8/beta.9 acceptance is not proof for every historical version. |
 | A pre-1.0 desktop with an old feed implementation | Follow the earlier [1.0 feed migration](DIRECT_RELEASES.md#migration-to-10) first when required. Retain those historical bridge releases; do not assume these clients can skip directly to beta.12. |
-| Stable-channel installation | Remain on stable. A coordinated stable release must be published through both old channels and npm after its own acceptance; beta.12 does not silently enroll stable servers into beta. |
+| Another stable-channel installation | Remain on stable. The bridge must be published through both old stable channels and npm after its own acceptance; beta.12 does not enroll stable servers into beta or prove every older stable migration. |
 | Very old, unmanaged or unsupported remote server | Requires a separately validated legacy upgrade path before automatic coordination. Do not run the fresh npm installer over its existing state. |
 | Older macOS service with custom paths | Preserve the original installation, configuration and state directories during the one-time migration; older services may not record all three paths. |
 

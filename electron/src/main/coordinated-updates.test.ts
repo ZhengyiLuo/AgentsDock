@@ -255,6 +255,68 @@ describe('coordinated app/server reconciliation (mocked server boundary)', () =>
     expect(f.clients.a.startServerUpdate).not.toHaveBeenCalled()
     expect(f.manager.status()[0].scheduleId).toBe('someone-elses-schedule')
   })
+  it.each(['failed', 'available'] as const)('observes legacy terminal %s on unchanged health and stops after pausing', async phase => {
+    const f = fixture()
+    const unchanged = health('a', { capabilities: { server_updates: { available: true, version: 9 } } })
+    const starting: ServerUpdateStatus = { phase: 'starting', current_version: '1.1.0-beta.1',
+      target_version: '1.1.0-beta.3', update_id: 'legacy-operation',
+      server_identity: 'server-a', server_instance_id: 'boot-a' }
+    f.clients.a.health.mockResolvedValue(unchanged)
+    f.clients.a.serverUpdateStatus.mockResolvedValue({ ...starting, phase: 'current' })
+    f.clients.a.startServerUpdate.mockResolvedValue(starting)
+    await f.manager.prepare('1.2.0-beta.2')
+    f.clients.a.serverUpdateStatus.mockResolvedValue(starting)
+    f.manager.serverReachable('a', unchanged)
+    await f.manager.reconcileAll()
+    expect(f.manager.status()[0]).toMatchObject({ phase: 'updating', operationOwned: true })
+
+    f.clients.a.serverUpdateStatus.mockResolvedValue({ ...starting, phase })
+    f.manager.serverReachable('a', unchanged)
+    await vi.waitFor(() => expect(f.manager.status()[0]).toMatchObject({ phase: phase === 'failed' ? 'failed' : 'blocked', paused: true }))
+    const calls = f.options.connect.mock.calls.length
+    f.manager.serverReachable('a', unchanged)
+    await Promise.resolve()
+    expect(f.options.connect).toHaveBeenCalledTimes(calls)
+    expect(f.clients.a.startServerUpdate).toHaveBeenCalledOnce()
+    expect(f.clients.a.checkServerUpdate).toHaveBeenCalledOnce()
+  })
+  it('coalesces unchanged legacy health during a pending status read without retrying a failure', async () => {
+    const f = fixture()
+    const unchanged = health('a', { capabilities: { server_updates: { available: true, version: 9 } } })
+    const starting: ServerUpdateStatus = { phase: 'starting', current_version: '1.1.0-beta.1',
+      target_version: '1.2.0-beta.2', update_id: 'legacy-operation',
+      server_identity: 'server-a', server_instance_id: 'boot-a' }
+    f.clients.a.health.mockResolvedValue(unchanged)
+    f.clients.a.serverUpdateStatus.mockResolvedValue(starting)
+    await f.manager.prepare('1.2.0-beta.2')
+    let complete!: (value: ServerUpdateStatus) => void
+    f.clients.a.serverUpdateStatus.mockImplementationOnce(() => new Promise(resolve => { complete = resolve }))
+    const calls = f.clients.a.serverUpdateStatus.mock.calls.length
+    f.manager.serverReachable('a', unchanged)
+    await vi.waitFor(() => expect(f.clients.a.serverUpdateStatus).toHaveBeenCalledTimes(calls + 1))
+    for (let index = 0; index < 5; index++) f.manager.serverReachable('a', unchanged)
+    complete({ ...starting, phase: 'failed' })
+    await f.manager.reconcileAll()
+    await vi.waitFor(() => expect(f.manager.status()[0]).toMatchObject({ phase: 'failed', paused: true }))
+    await f.manager.reconcileAll()
+    expect(f.clients.a.serverUpdateStatus).toHaveBeenCalledTimes(calls + 1)
+    expect(f.clients.a.startServerUpdate).not.toHaveBeenCalled()
+    expect(f.clients.a.checkServerUpdate).not.toHaveBeenCalled()
+  })
+  it('does not recheck idle legacy profiles on unchanged health', async () => {
+    const f = fixture()
+    const unchanged = health('a', { server_version: '1.2.0-beta.2',
+      capabilities: { server_updates: { available: true, version: 9 } } })
+    f.clients.a.health.mockResolvedValue(unchanged)
+    await f.manager.prepare('1.2.0-beta.2')
+    f.manager.serverReachable('a', unchanged)
+    await f.manager.reconcileAll()
+    const calls = f.options.connect.mock.calls.length
+    f.manager.serverReachable('a', unchanged)
+    await Promise.resolve()
+    expect(f.options.connect).toHaveBeenCalledTimes(calls)
+    expect(f.clients.a.serverUpdateStatus).not.toHaveBeenCalled()
+  })
   it('joins a retryable older reservation and retries on same-boot operation transitions without polling', async () => {
     const f = fixture()
     f.clients.a.ensureServerUpdate.mockRejectedValueOnce(new ServerError(409, 'Another update must finish.', { error_code: 'server_update_pending' }))

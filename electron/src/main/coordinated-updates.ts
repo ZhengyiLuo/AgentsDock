@@ -132,7 +132,16 @@ export class CoordinatedUpdateManager {
     if (!this.plan) return
     const observation = JSON.stringify([health.server_identity, health.server_instance_id, health.server_version,
       health.api_contract_version, health.gateway, health.execution_service, health.server_update])
-    if (this.observations.get(profileId) === observation) return
+    const record = this.plan.records.find(candidate => candidate.profileId === profileId
+      && candidate.serverIdentity === health.server_identity)
+    // Older bridges omit update progress from health. Observe our admitted
+    // operation on the service's existing health callbacks until it settles;
+    // identical idle/paused health still causes no additional requests.
+    const legacyOperationNeedsStatus = health.server_update == null && !health.capabilities?.server_update_ensure_v1
+      && record && !record.paused && (record.operationId || record.scheduleId)
+      && (record.operationOwned || record.operationTargetVersion === this.manifest?.version)
+      && ['pending', 'updating', 'offline'].includes(record.phase)
+    if (this.observations.get(profileId) === observation && !legacyOperationNeedsStatus) return
     this.observations.set(profileId, observation)
     if (this.inFlight.has(profileId)) {
       this.pendingObservations.add(profileId)

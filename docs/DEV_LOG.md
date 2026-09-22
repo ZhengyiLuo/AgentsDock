@@ -1,5 +1,29 @@
 # Public development log
 
+## 2026-09-21 — Prepare the stable coordinated-update bridge
+
+- Target the existing stable 1.0.3 app and managed server. The user keeps one
+  app-update action; the updated app requests the matching server automatically,
+  with npm handled by the managed updater. Retain both old stable download
+  channels and the actual app version in About.
+- Reproduce an older macOS migration rejection through the unchanged published
+  app and an original signed beta.29 server. Verify that its original process,
+  runtime, identity, chats, credentials, Hub data and peer connection survive.
+  Add a read-only native ownership proof for old updaters without a recorded
+  process ID, including the exact Homebrew Python framework launcher mapping.
+  Retain all existing authenticated identity, idle and service ownership checks.
+- Fix the reproduced stale Updating row for legacy servers that omit update
+  progress from health. Observe an owned active operation through existing
+  health callbacks, and stop when it pauses. Preserve a failed status when
+  opening recovery; checking again remains an explicit action.
+- Validate the focused coordinator and renderer regressions, TypeScript and
+  production compilation. Native process/tmux proof tests cover ordinary and
+  framework Python. Isolate inherited Hub configuration in four installer test
+  fixtures after reproducing their failures on unchanged published source.
+- Availability: source candidate. Exact signed stable package, native stable
+  1.0.3 upgrade, failure/rollback, and public distribution acceptance remain
+  required before release. Beta.12 publication is not stable rollout acceptance.
+
 ## 2026-09-21 — Clarify the bridge to npm updates
 
 - Document the first coordinated release as a bridge delivered through the

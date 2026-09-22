@@ -589,7 +589,7 @@ describe('SettingsDialog server updates', () => {
     const start = vi.fn().mockImplementation(() => new Promise(resolve => { resolveStart = resolve }))
     installBridge({
       status: vi.fn().mockResolvedValue(failed),
-      check: vi.fn().mockResolvedValueOnce(failed).mockResolvedValue(checked),
+      check: vi.fn().mockResolvedValue(checked),
       start
     })
     showSettings()
@@ -597,6 +597,7 @@ describe('SettingsDialog server updates', () => {
     const warning = await screen.findByText('Native listener was not ready. Retry the update.')
     await waitFor(() => expect(screen.getByRole('button', { name: 'Check server' })).toBeEnabled())
     expect(screen.queryByRole('button', { name: /Retry update/ })).not.toBeInTheDocument()
+    expect(window.agentsDock.serverUpdates.check).not.toHaveBeenCalled()
 
     fireEvent.click(screen.getByRole('button', { name: 'Check server' }))
     const retry = await screen.findByRole('button', { name: 'Retry update (0.1.26-beta.51)' })
