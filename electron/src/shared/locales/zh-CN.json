@@ -126,6 +126,7 @@
   "codexAuth.testResult.model_unavailable": "端点无法使用此模型。请检查准确的模型 ID 和账户访问权限。",
   "codexAuth.testResult.failed": "端点检查未完成。您仍可保存并在对话选择器中选择模型。",
   "codexProvider.label": "Codex 运行时 · 自定义端点",
+  "codexProvider.compactLabel": "Codex · 自定义",
   "codexProvider.chooseModel": "选择模型",
   "codexProvider.compatibility.unverified": "未验证",
   "codexProvider.compatibility.verified": "基础检查通过",

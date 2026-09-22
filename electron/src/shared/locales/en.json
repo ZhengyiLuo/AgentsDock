@@ -126,6 +126,7 @@
   "codexAuth.testResult.model_unavailable": "The endpoint could not use this model. Check the exact model ID and your account’s access.",
   "codexAuth.testResult.failed": "The endpoint check did not complete. You can save and choose a model in the chat picker.",
   "codexProvider.label": "Codex runtime · Custom endpoint",
+  "codexProvider.compactLabel": "Codex · Custom",
   "codexProvider.chooseModel": "Choose model",
   "codexProvider.compatibility.unverified": "Unverified",
   "codexProvider.compatibility.verified": "Basic check passed",

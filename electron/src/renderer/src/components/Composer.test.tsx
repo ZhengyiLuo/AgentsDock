@@ -1380,7 +1380,8 @@ describe('Composer', () => {
     expect(screen.getByRole('menuitemcheckbox', { name: 'Codex' })).toBeInTheDocument()
     await user.click(screen.getByRole('menuitemcheckbox', { name: 'Codex runtime · Custom endpoint' }))
     await waitFor(() => expect(update).toHaveBeenCalledWith('chat-1', expect.objectContaining({ backend: 'codex', codex_provider: 'custom', model: null, effort: null })))
-    expect(screen.getByTitle('Change backend')).toHaveTextContent('Codex runtime · Custom endpoint')
+    expect(screen.getByTitle('Change backend')).toHaveTextContent('Codex · Custom')
+    expect(screen.getByTitle('Change backend')).toHaveAccessibleName('Codex runtime · Custom endpoint')
     await user.click(screen.getByTitle('Change backend'))
     await user.click(screen.getByRole('menuitemcheckbox', { name: 'Codex' }))
     await waitFor(() => expect(update).toHaveBeenLastCalledWith('chat-1', expect.objectContaining({ backend: 'codex', codex_provider: 'default' })))
@@ -1402,7 +1403,8 @@ describe('Composer', () => {
     render(<Composer />)
     const chip = screen.getByTitle('Backend is fixed after the provider session starts')
     expect(chip).toBeDisabled()
-    expect(chip).toHaveTextContent('Codex runtime · Custom endpoint')
+    expect(chip).toHaveTextContent('Codex · Custom')
+    expect(chip).toHaveAccessibleName('Codex runtime · Custom endpoint')
   })
 
   it('changes custom endpoint models and effort in the usual picker and permits an unlisted model', async () => {

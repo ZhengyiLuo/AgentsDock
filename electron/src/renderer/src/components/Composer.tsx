@@ -3198,6 +3198,7 @@ function RuntimeMenu({
   const reloadNoticeTimer = useRef<number | null>(null)
   const contentRef = useRef<HTMLDivElement | null>(null)
   const providerName = backendLabel(session.backend)
+  const selectedRuntimeLabel = runtimeLabel(session, catalog)
   const providerMutating = session.backend === 'codex' ? codexRuntime.mutating : claudeRuntime.mutating
   const reloadDisabled = running || admitting || reloading || providerMutating
 
@@ -3252,7 +3253,7 @@ function RuntimeMenu({
   return (
     <>
       <DropdownMenu.Root open={open} onOpenChange={onOpenChange}>
-        <DropdownMenu.Trigger asChild><button className="runtime-chip"><span>{runtimeLabel(session, catalog)}</span><ChevronDown size={13} /></button></DropdownMenu.Trigger>
+        <DropdownMenu.Trigger asChild><button className="runtime-chip" title={selectedRuntimeLabel}><span>{selectedRuntimeLabel}</span><ChevronDown size={13} /></button></DropdownMenu.Trigger>
         <DropdownMenu.Portal><DropdownMenu.Content
           ref={contentRef}
           className="menu-content runtime-menu"
@@ -3317,7 +3318,11 @@ function BackendMenu({ session, running, admitting }: { session: Session; runnin
       : admitting
         ? 'Wait for the message to be accepted before changing backend'
         : t('ui.composer.changeAgent')
-  const chip = <button className="backend-chip" title={title} disabled={disabled}><BackendMark backend={session.backend} size={17} /><span>{backendLabel(session.backend, session.codex_provider)}</span>{!disabled && <ChevronDown size={12} />}</button>
+  const providerLabel = backendLabel(session.backend, session.codex_provider)
+  const compactLabel = session.backend === 'codex' && session.codex_provider === 'custom'
+    ? t('codexProvider.compactLabel')
+    : providerLabel
+  const chip = <button className="backend-chip" title={title} aria-label={providerLabel} disabled={disabled}><BackendMark backend={session.backend} size={17} /><span>{compactLabel}</span>{!disabled && <ChevronDown size={12} />}</button>
   if (disabled) return chip
   return <Tooltip.Provider delayDuration={250}><DropdownMenu.Root><DropdownMenu.Trigger asChild>{chip}</DropdownMenu.Trigger><DropdownMenu.Portal><DropdownMenu.Content className="menu-content" side="top" align="start">{backends.map(choice => {
     const { backend, codex_provider } = chatBackendSelection(choice)

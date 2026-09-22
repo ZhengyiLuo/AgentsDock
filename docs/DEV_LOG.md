@@ -1,5 +1,24 @@
 # Public development log
 
+## 2026-09-22 — Give the composer model picker available space
+
+- Remove fixed model/effort chip width caps so the full selection can use the
+  available toolbar width. Keep the dropdown arrow and send controls visible,
+  and expose the full selection on hover when a narrow pane still truncates it.
+- Shorten the custom-provider toolbar label to “Codex · Custom”; retain the
+  complete provider name in the menu and accessible button label. English and
+  Chinese are covered. No provider selection or server behavior changes.
+- Reproduced the clipped model and effort in an isolated native Electron app,
+  then verified the complete label at the same width after the change. Exercised
+  the actual picker twice through production IPC and authenticated HTTP into an
+  isolated 1.0.6-beta.1 server; both effort changes persisted. Checked dark/light,
+  narrow layouts, keyboard focus return, and send control visibility.
+- Validation: 4,736 desktop tests passed (five existing skips), followed by 221
+  focused tests after the compact-label refinement; eight build/license checks,
+  TypeScript, and production compilation pass. Synthetic endpoint metadata was
+  used; model inference and a release package were not exercised. All isolated
+  test processes exited. Availability: source only for a subsequent desktop beta.
+
 ## 2026-09-22 — Publish app-only 1.0.6-beta.1 (1196)
 
 - Publish the accepted artifacts unchanged to the [public beta release](https://github.com/ZhengyiLuo/AgentsDock/releases/tag/v1.0.6-beta.1)
