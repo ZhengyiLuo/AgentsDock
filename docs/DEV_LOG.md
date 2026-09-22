@@ -1,5 +1,24 @@
 # Public development log
 
+## 2026-09-21 — Correct retry after a failed split-runtime migration
+
+- Classify the installed runtime before authorizing shutdown or seeding recovery.
+  After a verified rollback to the original server, a candidate's leftover
+  process receipt is accepted as stale only under its private worker lock,
+  with a conclusively absent process and matching authenticated legacy health.
+  Preserve the receipt and all existing native identity, idle and update-owner
+  checks; never send credentials to the stale callback endpoint.
+- Pass 61 focused activation, recovery-intent, transaction and management tests,
+  including a real process lease followed by abrupt process death, rollback,
+  and a new admitted retry. Cover active or malformed receipts, held or unsafe
+  locks, changed ownership and published-layout races.
+- Correct an asynchronous Team Network test to await the recovered host-address
+  control independently of bulletin loading. The 119 related renderer tests and
+  type checking pass; product behavior is unchanged by this test correction.
+- Availability: source corrections awaiting official signing and fresh native
+  macOS/Linux rollback-retry acceptance. Build 1192 remains unpublished and is
+  retained only as preparatory test evidence.
+
 ## 2026-09-21 — Correct stable migration recovery found by native testing
 
 - Keep expanded server recovery in sync with the active server's coordinated
