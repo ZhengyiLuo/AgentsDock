@@ -1,6 +1,8 @@
 {
   "coordinatedUpdate.retry": "重试服务器更新",
   "coordinatedUpdate.recovery": "高级服务器恢复",
+  "coordinatedUpdate.legacyRecovery": "如果此服务器卡在 1.0.4 更新，请在运行 {name} 的电脑上打开终端，执行一次以下命令，然后在此选择“重试服务器更新”。命令会先检查是否可以安全恢复，再进行更改。",
+  "coordinatedUpdate.copyRecovery": "复制恢复命令",
   "coordinatedUpdate.checking": "正在检查",
   "coordinatedUpdate.pending": "等待空闲",
   "coordinatedUpdate.updating": "正在更新",

@@ -23,3 +23,15 @@ Stable 1.0.3 and 1.0.4 app users can update directly to 1.0.5. The app handles
 the matching server update; initial server migration and execution replacement
 wait for idle. macOS packages are signed and notarized. Windows packages remain
 unsigned.
+
+If the server is already stuck after the withdrawn 1.0.4 update, open a terminal
+on the computer hosting that server and run:
+
+```sh
+npx @agentsdock/server@1.0.5 recover
+```
+
+Then choose **Retry server update** in the app's Settings → Updates. This
+one-time repair checks the failed transaction and preserves the running server.
+It refuses transactions that cannot be repaired safely without restarting it.
+Unaffected installations do not need this step.

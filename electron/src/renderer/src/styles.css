@@ -1847,6 +1847,9 @@ button.tool-event-toggle:hover { background: #242424; }
 .app-settings-row-copy strong { color: var(--text); font-size: var(--text-size-ui); font-weight: var(--text-weight-body); }
 .app-settings-row-copy strong small { margin-left: 5px; color: var(--muted); font-size: var(--font-size-sm); font-weight: var(--font-weight-medium); }
 .app-settings-row-copy > span { color: var(--muted); font-size: var(--text-size-meta); line-height: var(--line-height-body); }
+.legacy-update-recovery { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 8px; font-size: var(--text-size-meta); }
+.legacy-update-recovery p { flex-basis: 100%; margin: 0; line-height: var(--line-height-body); }
+.legacy-update-recovery code { min-width: 0; overflow-wrap: anywhere; user-select: text; }
 .app-settings-value { display: inline-flex; flex: 0 0 auto; align-items: center; gap: 5px; color: var(--muted); font-size: var(--text-size-label); white-space: nowrap; }
 .app-settings-actions { display: flex; flex: 0 0 auto; align-items: center; gap: 8px; }
 .app-settings-select { width: auto; min-width: 112px; height: var(--control-height-md); padding: 0 28px 0 9px; color: var(--text); background-color: transparent; border: 1px solid var(--border); border-radius: var(--radius-control); font-family: inherit; font-size: var(--text-size-label); font-weight: var(--font-weight-medium); }

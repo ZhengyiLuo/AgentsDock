@@ -1,6 +1,7 @@
 // Localized display strings use semantic catalog keys.
 import { getLocale } from '@shared/i18n'
 import { localeOptions } from '@shared/locales'
+import { legacyUpdateRecoveryCommand } from '@shared/server-update-recovery'
 import { useLocale } from '../lib/i18n'
 import { forwardRef, useEffect, useLayoutEffect, useMemo, useRef, useState, type FormEvent, type KeyboardEvent, type ReactNode } from 'react'
 import * as Dialog from '@radix-ui/react-dialog'
@@ -28,6 +29,7 @@ import { ChatShareDialog } from './ChatShareDialog'
 import { CodexAuthSettings } from './CodexAuthSettings'
 import { CodexModelDiscovery } from './CodexModelDiscovery'
 import { ReasoningDisplaySettings } from './ReasoningDisplaySettings'
+import { LegacyUpdateRecovery } from './LegacyUpdateRecovery'
 import { CodexServerSettings } from './CodexServerSettings'
 import { CodexSubagentSettings } from './CodexSubagentSettings'
 import { RuntimeHealthPanel } from './RuntimeHealth'
@@ -642,9 +644,9 @@ export function AppSettingsDialog({ serverSettings, serverUpdates, onServerUpdat
               </div>
               {update?.state === 'downloading' && <div className="app-settings-update-progress" role="progressbar" aria-label={t("ui.Dialogs.AppSettingsDialog.update_download_1c20b42")} aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round(update.progress ?? 0)}><span style={{ width: `${update.progress ?? 0}%` }} /></div>}
               {update?.serverUpdates?.map(server => <div className="app-settings-row" key={server.profileId}>
-                <div className="app-settings-row-copy"><strong>{server.name} <small>→ {server.targetVersion}</small></strong><span role="status">{server.message}</span></div>
+                <div className="app-settings-row-copy"><strong>{server.name} <small>→ {server.targetVersion}</small></strong><span role="status">{server.message}</span><LegacyUpdateRecovery update={server} /></div>
                 <span className="app-settings-value">{t(`coordinatedUpdate.${server.phase}`)}</span>
-                {server.paused && <button type="button" className="quiet-button" onClick={() => {
+                {(server.paused || legacyUpdateRecoveryCommand(server)) && <button type="button" className="quiet-button" onClick={() => {
                   void window.agentsDock.updates.retryServers(server.profileId).then(setUpdate).catch(error => useAppStore.getState().setError(message(error)))
                 }}>{t('coordinatedUpdate.retry')}</button>}
               </div>)}

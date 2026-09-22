@@ -2,6 +2,7 @@ import { verify } from 'node:crypto'
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
 import { dirname } from 'node:path'
 import type { CoordinatedServerUpdate, Health, ServerUpdateStatus, ServerUpdateTrack } from '../shared/types'
+import { needsLegacyUpdateRecovery } from '../shared/server-update-recovery'
 import { AgentServerClient, ServerError, type ServerUpdateTarget } from './server-client'
 
 // This is the existing server release trust root, not an npm registry key.
@@ -348,6 +349,7 @@ export class CoordinatedUpdateManager {
       if (previousReceipt?.paused && !(error instanceof ComponentHealthError)) return
       const message = error instanceof Error ? error.message : String(error)
       patch({ phase: error instanceof ServerError || error instanceof ComponentHealthError || /channel|identity|legacy|managed|signed/i.test(message) ? 'blocked' : 'offline',
+        ...(error instanceof ServerError && error.status === 503 && needsLegacyUpdateRecovery(message) ? { paused: true } : {}),
         ...(error instanceof ComponentHealthError || /channel|identity/i.test(message) ? { activationBlocked: true } : {}), message })
     } finally {
       clearTimeout(timeout)

@@ -87,6 +87,22 @@ describe('signed coordinated release contract', () => {
 })
 
 describe('coordinated app/server reconciliation (mocked server boundary)', () => {
+  it('pauses an unrecoverable legacy 1.0.4 attempt and retries the paired bridge after host repair', async () => {
+    const f = fixture()
+    f.clients.a.health.mockResolvedValue(health('a', { server_version: '1.0.3',
+      capabilities: { server_updates: { available: true, version: 9 } } }))
+    f.clients.a.serverUpdateStatus.mockResolvedValue({ phase: 'failed', current_version: '1.0.3', target_version: '1.0.4' })
+    f.clients.a.checkServerUpdate.mockRejectedValueOnce(new ServerError(503, 'the previous server update could not be safely finalized'))
+    await f.manager.prepare('1.0.5')
+    expect(f.manager.status()[0]).toMatchObject({ phase: 'blocked', paused: true, targetVersion: '1.0.5' })
+    expect(f.clients.a.startServerUpdate).not.toHaveBeenCalled()
+    f.clients.a.checkServerUpdate.mockResolvedValue({ phase: 'available', current_version: '1.0.3', latest_version: '1.0.5', track: 'stable' })
+    await f.manager.retry('a')
+    expect(f.clients.a.startServerUpdate).toHaveBeenCalledExactlyOnceWith('1.0.5', 'stable', true,
+      { expected_server_identity: 'server-a', expected_server_instance_id: 'boot-a' })
+    expect(f.manager.status()[0]).toMatchObject({ phase: 'pending', paused: false })
+  })
+
   it('keeps the bundled update pending when only the gateway reaches the paired version', async () => {
     const f = fixture()
     f.clients.a.health.mockResolvedValue(splitHealth('1.1.0-beta.1', '1.2.0-beta.2'))

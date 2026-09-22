@@ -1,6 +1,8 @@
 {
   "coordinatedUpdate.retry": "Retry server update",
   "coordinatedUpdate.recovery": "Advanced server recovery",
+  "coordinatedUpdate.legacyRecovery": "If this server is stuck on the 1.0.4 update, run this command once in a terminal on the computer hosting {name}, then choose Retry server update here. The command checks whether recovery is safe before making changes.",
+  "coordinatedUpdate.copyRecovery": "Copy recovery command",
   "coordinatedUpdate.checking": "Checking",
   "coordinatedUpdate.pending": "Waiting for idle",
   "coordinatedUpdate.updating": "Updating",
