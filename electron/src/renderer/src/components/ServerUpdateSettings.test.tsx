@@ -885,17 +885,20 @@ describe('SettingsDialog server updates', () => {
     }
   })
 
-  it('keeps a busy remote v3 update local until work is idle, then checks and installs once', async () => {
+  it('keeps a busy remote v3 update local until idle and preserves its check across health refreshes', async () => {
     const available: ServerUpdateStatus = {
       phase: 'available', current_version: '0.1.25', latest_version: '0.1.26',
       track: 'stable', update_available: true
     }
-    const check = vi.fn().mockResolvedValue(available)
+    let resolveIdleCheck!: (status: ServerUpdateStatus) => void
+    const check = vi.fn().mockResolvedValueOnce(available).mockImplementationOnce(
+      () => new Promise<ServerUpdateStatus>(resolve => { resolveIdleCheck = resolve })
+    )
     const start = vi.fn().mockResolvedValue({ ...installingStatus, target_version: available.latest_version })
     installBridge({ status: vi.fn().mockResolvedValue(available), check, start })
     showSettings()
     useAppStore.setState(state => ({ health: {
-      ...state.health!, active_sessions: ['chat-1'],
+      ...state.health!, active: ['chat-1'],
       capabilities: { ...state.health!.capabilities, server_updates: queueSafeServerUpdates }
     } }))
 
@@ -908,7 +911,12 @@ describe('SettingsDialog server updates', () => {
       .toMatchObject({ 'profile-1': { version: '0.1.26', serverIdentity: 'test-server' } })
     expect(await screen.findByRole('button', { name: 'Cancel queued update' })).toBeEnabled()
 
-    act(() => useAppStore.setState(state => ({ health: { ...state.health!, active_sessions: [] } })))
+    act(() => useAppStore.setState(state => ({ health: { ...state.health!, active: [] } })))
+    await waitFor(() => expect(check).toHaveBeenCalledTimes(2))
+    act(() => useAppStore.setState(state => ({ health: {
+      ...state.health!, capabilities: { ...state.health!.capabilities, server_updates: { ...queueSafeServerUpdates } }
+    } })))
+    await act(async () => { resolveIdleCheck(available); await Promise.resolve() })
     await waitFor(() => expect(start).toHaveBeenCalledExactlyOnceWith('0.1.26', 'stable'))
     expect(check).toHaveBeenLastCalledWith('stable')
     expect(window.localStorage.getItem('agentsdock:deferred-server-updates:v1')).toBeNull()

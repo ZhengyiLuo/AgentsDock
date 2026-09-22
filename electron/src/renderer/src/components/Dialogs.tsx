@@ -1884,7 +1884,7 @@ export function SettingsDialog() {
     deferredServerUpdate?.waitForQueuedTurns,
     deferredServerUpdateRetry,
     health?.server_identity,
-    health?.capabilities?.server_updates,
+    serverUpdateCapabilityVersion(health?.capabilities?.server_updates),
     profileGeneration,
     restartingServer,
     deferredQueuedServerUpdateBlockers,
