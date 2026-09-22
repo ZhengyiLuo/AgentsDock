@@ -11,6 +11,8 @@ app.
   idle before submitting the update; keep the app open for that waiting period.
 - Keep app installation independent of the connected server version or update
   channel. This release does not automatically install or restart a server.
+- Make guided server setup use the published signed release for its selected
+  channel instead of reinstalling an obsolete version.
 - Give model selection more space in the composer and keep custom-provider
   labels compact.
 
