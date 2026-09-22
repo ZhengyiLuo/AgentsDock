@@ -2406,9 +2406,10 @@ button.tool-event-toggle:hover { background: #242424; }
   .diff-line[data-conflict-side] code { color: CanvasText; background: Canvas; forced-color-adjust: auto; }
   .diff-line[data-conflict-side] code { border-left-color: Highlight; }
 }
-.error-toast { position: fixed; z-index: 2000; right: 18px; bottom: 18px; max-width: 480px; display: flex; align-items: flex-start; gap: 10px; padding: 11px 12px; color: #ffd4d1; background: #482725; border: 1px solid #743a37; border-radius: 8px; box-shadow: 0 12px 30px #0009; }
-.error-toast span { flex: 1; user-select: text; }
-.error-toast button { color: #ffaaa5; background: transparent; }
+.error-toast { position: fixed; z-index: 2000; right: 18px; bottom: 18px; max-width: min(480px, calc(100vw - 36px)); display: flex; align-items: flex-start; gap: 10px; padding: 11px 12px; color: #ffd4d1; background: #482725; border: 1px solid #743a37; border-radius: 8px; box-shadow: 0 12px 30px #0009; pointer-events: auto; -webkit-app-region: no-drag; }
+.error-toast span { min-width: 0; flex: 1; user-select: text; overflow-wrap: anywhere; }
+.error-toast button { flex: none; color: #ffaaa5; background: transparent; -webkit-app-region: no-drag; }
+.error-toast .icon-button:hover { background: #ffaaa51a; }
 .provider-reload-toast { position: fixed; z-index: 2001; right: 18px; bottom: 72px; max-width: 480px; display: flex; align-items: flex-start; gap: 10px; padding: 11px 12px; color: #d9f7e6; background: #203b2c; border: 1px solid #35664a; border-radius: 8px; box-shadow: 0 12px 30px #0009; pointer-events: auto; -webkit-app-region: no-drag; }
 .provider-reload-toast.error { color: #ffd4d1; background: #482725; border-color: #743a37; }
 .provider-reload-toast > svg { flex: none; margin-top: 1px; color: #65d993; }

@@ -1,5 +1,5 @@
 import { app, BrowserWindow, dialog, nativeImage, Notification, shell } from 'electron'
-import { chmodSync, createWriteStream, existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
+import { chmodSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
 import { open, rename, rm, stat, writeFile } from 'node:fs/promises'
 import { createHash, randomUUID } from 'node:crypto'
 import { Readable } from 'node:stream'
@@ -6753,11 +6753,15 @@ export class AppService {
 
   private async downloadResponse(response: Response, path: string): Promise<void> {
     mkdirSync(dirname(path), { recursive: true })
-    const partial = `${path}.part-${process.pid}-${Date.now()}`
+    const partial = `${path}.part-${randomUUID()}`
+    // Only clean up a file this download created; another save may target the
+    // same destination concurrently, including within the same millisecond.
+    const output = await open(partial, 'wx', 0o600)
     try {
-      await pipeline(Readable.fromWeb(response.body as never), createWriteStream(partial))
+      await pipeline(Readable.fromWeb(response.body as never), output.createWriteStream())
       await rename(partial, path)
     } catch (error) {
+      await output.close().catch(() => undefined)
       await rm(partial, { force: true }).catch(() => undefined)
       throw error
     }

@@ -962,7 +962,7 @@ export function App() {
         session={selectedSession}
         onRequestClose={closeTerminal}
       />}
-      {!storageFull && error && <div className="error-toast" role="alert"><span>{error}</span><button type="button" aria-label={t("ui.App.App.dismiss_error_2db0466")} onClick={() => useAppStore.getState().setError(null)}><X size={14} /></button></div>}
+      {!storageFull && error && <div className="error-toast" role="alert"><span>{error}</span><button type="button" className="icon-button" aria-label={t("ui.App.App.dismiss_error_2db0466")} title={t("ui.App.App.dismiss_error_2db0466")} onClick={() => useAppStore.getState().setError(null)}><X size={16} /></button></div>}
       <div className="top-right-notice-stack">
         <EmergencyNotice />
         {storageFull && <div className="error-toast storage-full-notice" role="alert">

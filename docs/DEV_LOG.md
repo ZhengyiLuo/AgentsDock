@@ -48,6 +48,25 @@
   accept a replacement release; final signed-package migration and desktop
   relaunch acceptance remain required before publication.
 
+## 2026-09-21 — Keep download errors dismissible and isolate simultaneous saves
+
+- Wrap long error paths within the window and reserve a fixed-size close
+  button with a translated label and tooltip. Confirm native mouse, Tab/Enter
+  and Tab/Space dismissal, including repeated errors, in dark and light themes
+  at wide and narrow window sizes. The isolated offscreen app reproduces the
+  previous offscreen close button and passes all six corrected layout cases.
+- Give each download an exclusively created UUID temporary file. Concurrent
+  saves to the same destination no longer share a partial file, and an
+  interrupted save cannot remove another save's in-progress file. Real
+  AppService/filesystem regressions fail with the previous implementation and
+  pass with the correction, including failure isolation and complete output.
+- Validation: 384 service/file-action tests, 49 app/design-system tests, and
+  TypeScript checks pass. Production compilation and the toast's native
+  offscreen interaction pass. Error text in the toast check is a fixture;
+  separate native download/HTTP and final packaged acceptance remain pending.
+- Availability: source only. The sidebar version-label removal from PR #34
+  is included in the coordinated correction; no replacement is published yet.
+
 ## 2026-09-21 — Publish stable 1.0.4 build 1193
 
 - Publish and verify `@agentsdock/server@1.0.4` on npm `latest`, retaining

@@ -259,6 +259,92 @@ afterEach(() => {
   electronHarness.shellOpenPath.mockReset()
 })
 
+describe('concurrent artifact downloads', () => {
+  const file = { id: 'artifact-a', filename: 'artifact.zip', content_type: 'application/zip' }
+
+  function controlledResponse() {
+    let controller!: ReadableStreamDefaultController<Uint8Array>
+    const response = new Response(new ReadableStream<Uint8Array>({
+      start(value) { controller = value }
+    }))
+    return { response, controller }
+  }
+
+  async function waitForWrittenBytes(directory: string, bytes: Buffer) {
+    await vi.waitFor(() => {
+      expect(readdirSync(directory).some(name => readFileSync(join(directory, name)).equals(bytes))).toBe(true)
+    })
+  }
+
+  it.each([
+    { firstFails: false, result: 'finishes both without sharing partial files' },
+    { firstFails: true, result: 'keeps the other download intact when one stream fails' }
+  ])('$result when saves share a destination and timestamp', async ({ firstFails }) => {
+    const directory = mkdtempSync(join(tmpdir(), 'agentsdock-concurrent-download-'))
+    cleanup.push(() => rmSync(directory, { recursive: true, force: true }))
+    const destination = join(directory, file.filename)
+    const original = Buffer.from('existing complete download')
+    writeFileSync(destination, original)
+    electronHarness.showSaveDialog.mockResolvedValue({ canceled: false, filePath: destination })
+    const first = controlledResponse()
+    const second = controlledResponse()
+    const responses = [first.response, second.response]
+    const a = fakeClient({ fileRequest: async () => responses.shift()! })
+    const { service } = createProfileService({
+      'http://a.test:7850': [a],
+      'http://b.test:7850': [fakeClient()]
+    })
+    const now = vi.spyOn(Date, 'now').mockReturnValue(1790050083758)
+    const saves: Array<Promise<PromiseSettledResult<string | null>>> = []
+    const save = () => {
+      const result = service.saveFile('chat', file).then(
+        value => ({ status: 'fulfilled' as const, value }),
+        reason => ({ status: 'rejected' as const, reason })
+      )
+      saves.push(result)
+      return result
+    }
+    const firstBytes = Buffer.from('first complete archive')
+    const secondPrefix = Buffer.from('second archive prefix')
+    const secondSuffix = Buffer.from(' plus its final bytes')
+    try {
+      const firstSave = save()
+      first.controller.enqueue(firstBytes)
+      await waitForWrittenBytes(directory, firstBytes)
+
+      const secondSave = save()
+      second.controller.enqueue(secondPrefix)
+      await waitForWrittenBytes(directory, secondPrefix)
+      expect(a.fileRequest).toHaveBeenCalledTimes(2)
+
+      if (firstFails) first.controller.error(new Error('first download interrupted'))
+      else first.controller.close()
+      const firstResult = await firstSave
+      const destinationAfterFirst = readFileSync(destination)
+
+      second.controller.enqueue(secondSuffix)
+      second.controller.close()
+      const secondResult = await secondSave
+
+      expect(secondResult).toEqual({ status: 'fulfilled', value: destination })
+      if (firstFails) {
+        expect(firstResult).toMatchObject({ status: 'rejected', reason: new Error('first download interrupted') })
+        expect(destinationAfterFirst).toEqual(original)
+      } else {
+        expect(firstResult).toEqual({ status: 'fulfilled', value: destination })
+        expect(destinationAfterFirst).toEqual(firstBytes)
+      }
+      expect(readFileSync(destination)).toEqual(Buffer.concat([secondPrefix, secondSuffix]))
+      expect(readdirSync(directory)).toEqual([file.filename])
+    } finally {
+      first.controller.error(new Error('test cleanup'))
+      second.controller.error(new Error('test cleanup'))
+      await Promise.all(saves)
+      now.mockRestore()
+    }
+  })
+})
+
 describe('opening artifact files externally', () => {
   const file = { id: 'artifact-a', filename: 'artifact.bin', content_type: 'application/octet-stream' }
   const localPath = '/synthetic/artifact.bin'
