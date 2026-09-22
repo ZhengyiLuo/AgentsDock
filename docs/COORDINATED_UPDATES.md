@@ -5,6 +5,12 @@ offer 1.0.3. Their earlier acceptance below covered particular fixtures and
 missed retained rollback records and channel transitions; it does not establish
 that those withdrawn releases are suitable for existing installations.
 
+**1.0.6-beta.1 is being prepared as an app-only beta.** Server publication is
+held. This app carries no server-update descriptor and does not resume earlier
+saved server-update plans. It leaves existing servers running their installed
+versions. The coordinated workflow below applies to a future release that
+explicitly includes its server package.
+
 The corrected workflow updates the desktop app independently. After relaunch,
 its bundled signed descriptor drives each saved server's matching update. A
 server's version, channel, connectivity or failed update never prevents the app
@@ -104,7 +110,9 @@ identifies the native app and `@agentsdock/server`; native build numbers remain
 separate platform metadata. npm distributes the Python server and its explicit
 installation CLI, not the desktop app or a replacement JavaScript server.
 
-After relaunch, the app persists its bundled signed server release. Each saved
+After relaunch, a paired app persists its bundled signed server release. An
+app-only release performs no server reconciliation and preserves earlier saved
+plans without executing them. Each saved
 server profile reconciles independently using its own credentials, stable server
 identity and current process identity. A busy server queues the update until
 idle; a disconnected server resumes reconciliation when it reconnects. Settings

@@ -82,13 +82,22 @@ export class CoordinatedUpdateManager {
   status(): CoordinatedServerUpdate[] { return structuredClone(this.plan?.records ?? []) }
 
   async resume(bundled?: SignedServerRelease, installedVersion?: string): Promise<void> {
+    if (!bundled) {
+      // An app-only release must not revive an older app's server-update intent.
+      // Keep the durable receipt for a future explicitly paired release.
+      this.generation += 1
+      this.plan = null
+      this.manifest = null
+      this.observations.clear()
+      this.pendingObservations.clear()
+      this.options.publish([])
+      return
+    }
     const saved = this.options.store.read()
-    if (bundled) {
-      const manifest = this.verify(bundled, installedVersion)
-      // The installed app's bundle owns the desired server release. A cached
-      // pre-install plan from an older app must not override that choice.
-      this.adopt(bundled, manifest, saved?.records ?? [])
-    } else if (saved) this.adopt(saved.envelope, this.verify(saved.envelope), saved.records)
+    const manifest = this.verify(bundled, installedVersion)
+    // The installed app's bundle owns the desired server release. A cached
+    // pre-install plan from an older app must not override that choice.
+    this.adopt(bundled, manifest, saved?.records ?? [])
     await this.reconcileAll()
   }
 

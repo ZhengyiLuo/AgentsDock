@@ -1,15 +1,21 @@
 # Public development log
 
-## 2026-09-22 — Prepare coordinated 1.0.6-beta.1
+## 2026-09-22 — Prepare app-only 1.0.6-beta.1; hold the server release
 
-- Prepare an opt-in desktop beta and matching server package containing the
-  update-blocking, Team Hub recovery, release-request and Settings repairs below.
+- Prepare an opt-in desktop beta with independent app updates and clearer
+  Settings. The server release is held; no npm or standalone server release is
+  included. Previously prepared paired desktop artifacts are superseded.
+- An app without a bundled server target does not resume a saved server-update
+  plan, contact the update endpoint, or change that saved plan. App updates can
+  proceed independently of existing servers; server repairs below remain
+  unreleased and are not claimed as installed by this app-only beta.
 - Preserve stable 1.0.3 availability. Verify unchanged 1.0.3 and withdrawn 1.0.5
-  clients against the exact signed beta package, including an existing server
-  with retained rollback state. Verify direct desktop replacement for any old
-  updater whose installed gate prevents self-update.
-- This entry records preparation only. Native package acceptance and registry
-  availability must be established before beta publication.
+  clients against the signed app-only beta, retaining server processes, versions,
+  chats and Hub data. Verify direct desktop replacement for any old updater
+  whose installed gate prevents self-update.
+- The app-only behavior passes 316 focused desktop tests and TypeScript checks,
+  including pending, failed, newer and unreadable saved update plans. This entry
+  records preparation only; native package acceptance is pending.
 
 ## 2026-09-22 — Repair update blocking after withdrawing 1.0.4 and 1.0.5
 

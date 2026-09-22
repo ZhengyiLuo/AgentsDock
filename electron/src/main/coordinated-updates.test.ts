@@ -486,7 +486,7 @@ describe('coordinated app/server reconciliation (mocked server boundary)', () =>
     expect(f.manager.status().map(record => record.phase)).toEqual(['pending', 'offline'])
     const resumed = new CoordinatedUpdateManager(f.options)
     f.clients.b.health.mockResolvedValue(health('b'))
-    await resumed.resume()
+    await resumed.resume(signed('1.2.0-beta.2'), '1.2.0-beta.2')
     expect(resumed.status().map(record => record.phase)).toEqual(['pending', 'pending'])
   })
   it('does not lose a new boot observation while an earlier ensure response is still in flight', async () => {
@@ -513,7 +513,7 @@ describe('coordinated app/server reconciliation (mocked server boundary)', () =>
     expect(f.manager.status().every(record => record.paused)).toBe(true)
     expect(f.clients.a.ensureServerUpdate).toHaveBeenCalledOnce()
     const resumed = new CoordinatedUpdateManager(f.options)
-    await resumed.resume()
+    await resumed.resume(signed('1.2.0-beta.2'), '1.2.0-beta.2')
     resumed.serverReachable('a', health('a', { server_update: { phase, updated_at: 'changed' } }))
     await resumed.reconcileAll()
     expect(resumed.status().every(record => record.paused)).toBe(true)
@@ -523,7 +523,7 @@ describe('coordinated app/server reconciliation (mocked server boundary)', () =>
     expect(f.clients.b.ensureServerUpdate).toHaveBeenCalledOnce()
     expect(resumed.status().find(record => record.profileId === 'b')?.paused).toBe(true)
   })
-  it('only enrolls server updates from installed bundled metadata or a saved plan', async () => {
+  it('only enrolls server updates when the installed app includes bundled metadata', async () => {
     const f = fixture()
     await f.manager.resume()
     expect(f.options.connect).not.toHaveBeenCalled()
@@ -531,6 +531,66 @@ describe('coordinated app/server reconciliation (mocked server boundary)', () =>
     await f.manager.resume(signed('1.2.0-beta.2'), '1.2.0-beta.2')
     expect(f.options.connect).toHaveBeenCalledOnce()
     expect(f.manager.status()[0].phase).toBe('pending')
+  })
+  it.each([
+    { phase: 'pending', version: '1.0.5' },
+    { phase: 'failed', version: '1.0.5' },
+    { phase: 'pending', version: '9.0.0' }
+  ] as const)('leaves a saved $phase plan for $version untouched in an app-only release', async ({ phase, version }) => {
+    const f = fixture()
+    f.store.write({ envelope: signed(version), records: [{ profileId: 'a', name: 'Server a',
+      serverIdentity: 'server-a', targetVersion: version, phase, paused: phase === 'failed',
+      operationOwned: true, operationId: 'old-operation', operationTargetVersion: version, message: 'Saved update.' }] })
+    const saved = f.saved()
+    f.store.write.mockClear()
+    const read = vi.spyOn(f.store, 'read')
+
+    await f.manager.resume(undefined, '1.0.6-beta.1')
+    f.manager.serverReachable('a', health())
+    await f.manager.reconcileAll()
+    await expect(f.manager.retry('a')).rejects.toThrow('no longer belongs')
+
+    expect(read).not.toHaveBeenCalled()
+    expect(f.store.write).not.toHaveBeenCalled()
+    expect(f.saved()).toEqual(saved)
+    expect(f.options.publish).toHaveBeenCalledExactlyOnceWith([])
+    expect(f.manager.status()).toEqual([])
+    expect(f.options.connect).not.toHaveBeenCalled()
+    expect(f.clients.a.ensureServerUpdate).not.toHaveBeenCalled()
+    expect(f.clients.a.startServerUpdate).not.toHaveBeenCalled()
+  })
+  it.each(['missing', 'corrupt'])('does not read a %s saved store in an app-only release', async condition => {
+    const f = fixture()
+    const read = vi.spyOn(f.store, 'read').mockImplementation(() => {
+      if (condition === 'corrupt') throw new Error('Invalid saved JSON')
+      return null
+    })
+    await f.manager.resume()
+    expect(read).not.toHaveBeenCalled()
+    expect(f.store.write).not.toHaveBeenCalled()
+    expect(f.options.connect).not.toHaveBeenCalled()
+    expect(f.options.publish).toHaveBeenCalledExactlyOnceWith([])
+  })
+  it('clears an in-memory paired plan without modifying its saved receipt when resuming app-only', async () => {
+    const f = fixture()
+    await f.manager.resume(signed('1.2.0-beta.2'), '1.2.0-beta.2')
+    const saved = f.saved()
+    f.options.connect.mockClear()
+    f.store.write.mockClear()
+    f.clients.a.ensureServerUpdate.mockClear()
+
+    await f.manager.resume()
+    f.manager.serverReachable('a', health())
+    await f.manager.reconcileAll()
+    await expect(f.manager.retry('a')).rejects.toThrow('no longer belongs')
+
+    expect(f.manager.status()).toEqual([])
+    expect(f.options.publish).toHaveBeenLastCalledWith([])
+    expect(f.saved()).toEqual(saved)
+    expect(f.store.write).not.toHaveBeenCalled()
+    expect(f.options.connect).not.toHaveBeenCalled()
+    expect(f.clients.a.ensureServerUpdate).not.toHaveBeenCalled()
+    expect(f.clients.a.startServerUpdate).not.toHaveBeenCalled()
   })
   it('uses the installed app bundle instead of a newer pre-install plan left by an older app', async () => {
     const f = fixture()
