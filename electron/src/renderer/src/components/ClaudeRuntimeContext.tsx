@@ -79,6 +79,8 @@ export function ClaudeRuntimeProvider({ session, capability, children }: ClaudeR
   const connectedRef = useRef(connected)
   const runtimeRef = useRef<ClaudeRuntimeSnapshot | null>(null)
   const runtimeIdentityRef = useRef<string | null>(null)
+  const sessionRef = useRef(session)
+  sessionRef.current = session
   const sessionIdRef = useRef(session?.id)
   sessionIdRef.current = session?.id
   const profileIdentity = `${activeProfileId ?? ''}\u0000${profileGeneration}`
@@ -256,6 +258,9 @@ export function ClaudeRuntimeProvider({ session, capability, children }: ClaudeR
 
   useEffect(() => {
     if (!supported || !session?.id) return
+    // Timeline updates replace the Session object. Keep the subscription and its
+    // queued terminal-event refresh alive while the selected chat stays the same.
+    const sessionId = session.id
     const queueRefresh = () => {
       if (
         mutationCount.current > 0
@@ -271,7 +276,7 @@ export function ClaudeRuntimeProvider({ session, capability, children }: ClaudeR
       if (
         payload.profileId !== activeProfileId
         || payload.profileGeneration !== profileGeneration
-        || payload.event.session_id !== session.id
+        || payload.event.session_id !== sessionId
         || !isClaudeControlEvent(payload.event.type)
       ) return
       queueRefresh()
@@ -280,7 +285,7 @@ export function ClaudeRuntimeProvider({ session, capability, children }: ClaudeR
       if (
         payload.profileId !== activeProfileId
         || payload.profileGeneration !== profileGeneration
-        || payload.event.session_id !== session.id
+        || payload.event.session_id !== sessionId
         || payload.event.backend !== 'claude'
         || payload.event.runtime !== 'context_usage'
       ) return
@@ -288,11 +293,11 @@ export function ClaudeRuntimeProvider({ session, capability, children }: ClaudeR
     })
     const unsubscribeSessions = window.agentsDock.events.on('server:sessions', payload => {
       if (payload.profileId !== activeProfileId || payload.profileGeneration !== profileGeneration) return
-      const updated = payload.sessions.find(candidate => candidate.id === session.id)
+      const updated = payload.sessions.find(candidate => candidate.id === sessionId)
       if (!updated) return
       if (
-        numberField(session, 'claude_pending_interaction_count') !== numberField(updated, 'claude_pending_interaction_count')
-        || booleanField(session, 'claude_needs_user_action') !== booleanField(updated, 'claude_needs_user_action')
+        numberField(sessionRef.current, 'claude_pending_interaction_count') !== numberField(updated, 'claude_pending_interaction_count')
+        || booleanField(sessionRef.current, 'claude_needs_user_action') !== booleanField(updated, 'claude_needs_user_action')
       ) queueRefresh()
     })
     return () => {
@@ -302,7 +307,7 @@ export function ClaudeRuntimeProvider({ session, capability, children }: ClaudeR
       if (refreshQueued.current !== null) window.clearTimeout(refreshQueued.current)
       refreshQueued.current = null
     }
-  }, [activeProfileId, profileGeneration, refresh, session, supported])
+  }, [activeProfileId, profileGeneration, refresh, session?.id, supported])
 
   const run = useCallback(async <T,>(operation: () => Promise<T>): Promise<T> => {
     const sessionId = session?.id
