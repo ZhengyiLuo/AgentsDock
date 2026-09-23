@@ -27,8 +27,9 @@ function updateDescription(server: CoordinatedServerUpdate): string {
     || t('coordinatedUpdate.missingStatus', { name: server.name })
 }
 
-export function CoordinatedServerUpdateRow({ server, onUpdate }: {
+export function CoordinatedServerUpdateRow({ server, currentVersion, onUpdate }: {
   server: CoordinatedServerUpdate
+  currentVersion?: string | null
   onUpdate: (status: AppUpdateStatus) => void
 }) {
   const [retrying, setRetrying] = useState(false)
@@ -61,6 +62,7 @@ export function CoordinatedServerUpdateRow({ server, onUpdate }: {
       </details>}
     </div>
     <div className="app-settings-actions">
+      {currentVersion && <span className="app-settings-value">AgentsServer {currentVersion}</span>}
       <span className="app-settings-value">{busy && <LoaderCircle className="spin" size={13} />}{t(`coordinatedUpdate.${server.phase}`)}</span>
       {needsRetry && <button type="button" className="quiet-button" disabled={retrying} onClick={() => void retry()}>
         {retrying ? <LoaderCircle className="spin" size={13} /> : <RefreshCw size={13} />}{t('coordinatedUpdate.retry')}

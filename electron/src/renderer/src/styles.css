@@ -1874,6 +1874,7 @@ button.tool-event-toggle:hover { background: #242424; }
 .app-settings-update-progress { height: 3px; margin: -1px var(--space-1) var(--space-5); overflow: hidden; background: var(--surface-3); border-radius: var(--radius-pill); }
 .app-settings-update-progress > span { height: 100%; display: block; background: var(--accent); border-radius: inherit; transition: width 160ms ease; }
 .app-settings-server-updates { display: grid; gap: 0; }
+.app-settings-server-inventory { margin-left: var(--space-5); padding-left: var(--space-6); border-left: 1px solid var(--border-soft); }
 .app-settings-server-actions { display: grid; gap: 0; margin-top: 24px; border-top: 1px solid var(--border-soft); }
 .app-settings-server-notice { padding: 9px 11px; color: var(--accent); background: color-mix(in srgb, var(--accent) 8%, transparent); border: 1px solid color-mix(in srgb, var(--accent) 24%, transparent); border-radius: var(--radius-popover); font-size: var(--font-size-md); line-height: var(--line-height-ui); }
 .app-settings-server-notice.error { color: var(--danger); background: color-mix(in srgb, var(--danger) 8%, transparent); border-color: color-mix(in srgb, var(--danger) 24%, transparent); }

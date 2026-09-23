@@ -835,7 +835,7 @@ describe('SettingsDialog server updates', () => {
       render(<SettingsDialog />)
       const install = await screen.findByRole('button', { name: `Install ${available.latest_version}` })
       expect(screen.queryByRole('button', { name: /Update server to Beta/ })).not.toBeInTheDocument()
-      expect(screen.getByRole('button', { name: /Install or update AgentsServer/ })).toBeInTheDocument()
+      expect(screen.queryByRole('button', { name: /Install or update AgentsServer|Set up your server/ })).not.toBeInTheDocument()
       fireEvent.click(install)
 
       await waitFor(() => expect(start).toHaveBeenCalledWith(available.latest_version, 'beta', true))

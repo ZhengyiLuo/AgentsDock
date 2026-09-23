@@ -469,6 +469,7 @@ export function AppSettingsDialog({ serverSettings, serverUpdates, onServerUpdat
   const language = useLanguagePreference()
   const appSettingsOpen = Boolean(useAppStore(state => state.modals.appSettings))
   const legacyServerSettingsOpen = Boolean(useAppStore(state => state.modals.settings))
+  const connected = useAppStore(state => state.connected)
   const health = useAppStore(state => state.health)
   const profiles = useAppStore(state => state.profiles)
   const activeProfileId = useAppStore(state => state.activeProfileId)
@@ -566,6 +567,10 @@ export function AppSettingsDialog({ serverSettings, serverUpdates, onServerUpdat
   const developmentUpdateCheckEnabled = update?.channel === 'development' && update.state !== 'disabled'
   const appUpdateCheckedAt = updateCheckedAtLabel(update?.checkedAt)
   const serverVersion = health?.server_version || profiles.find(profile => profile.id === activeProfileId)?.serverVersion
+  const coordinatedServerUpdates = new Map((update?.serverUpdates || []).map(server => [server.profileId, server]))
+  const hasConfiguredServer = connected || Boolean(health?.server_identity) || profiles.some(profile =>
+    profile.serverSetupComplete || profile.hasAccessToken || Boolean(profile.serverIdentity)
+  )
 
   return <Dialog.Root open={open} onOpenChange={value => { if (!value) closeSettings() }}>
     <Dialog.Portal>
@@ -629,22 +634,52 @@ export function AppSettingsDialog({ serverSettings, serverUpdates, onServerUpdat
                 <div className="app-settings-row-copy"><strong>AgentsDock {update?.currentVersion ? <small>v{update.currentVersion}</small> : null}</strong><span role="status" aria-live="polite">{[update?.state === 'not-available' ? t("ui.Dialogs.AppSettingsDialog.this_is_the_latest_one_0791214") : update?.message || t("ui.Dialogs.AppSettingsDialog.checking_for_updates_497a199"), appUpdateCheckedAt].filter(Boolean).join(' · ')}</span></div>
                 <div className="app-settings-actions">
                   {(update?.channel === 'direct' || update?.channel === 'development') && <div className="segmented update-track-picker" role="group" aria-label={t("ui.Dialogs.AppSettingsDialog.app_update_channel_95487e7")}>
-                    <button type="button" className={update.track === 'stable' ? 'active' : ''} disabled={updateTrackBusy || updateTrackLocked || updateCancelBusy} onClick={() => void chooseUpdateTrack('stable')}>{t("ui.Dialogs.AppSettingsDialog.stable_90ee305")}</button>
-                    <button type="button" className={update.track === 'beta' ? 'active' : ''} disabled={updateTrackBusy || updateTrackLocked || updateCancelBusy} onClick={() => void chooseUpdateTrack('beta')}>{t("ui.Dialogs.AppSettingsDialog.beta_7033903")}</button>
+                    <button type="button" className={update.track === 'stable' ? 'active' : ''} aria-pressed={update.track === 'stable'} disabled={updateTrackBusy || updateTrackLocked || updateCancelBusy} onClick={() => void chooseUpdateTrack('stable')}>{t("ui.Dialogs.AppSettingsDialog.stable_90ee305")}</button>
+                    <button type="button" className={update.track === 'beta' ? 'active' : ''} aria-pressed={update.track === 'beta'} disabled={updateTrackBusy || updateTrackLocked || updateCancelBusy} onClick={() => void chooseUpdateTrack('beta')}>{t("ui.Dialogs.AppSettingsDialog.beta_7033903")}</button>
                   </div>}
                   {update?.channel === 'app-store' && <span className="app-settings-value">App Store</span>}
                   {update?.channel === 'development' && <button type="button" className="quiet-button" disabled={!developmentUpdateCheckEnabled || updateBusy || updateTrackBusy} title={developmentUpdateCheckEnabled ? undefined : update.message || t("ui.Dialogs.AppSettingsDialog.app_update_checks_are_unavailable_for_this_86d2da7")} onClick={() => void checkForUpdates()}>{updateBusy || updateTrackBusy ? <LoaderCircle className="spin" size={13} /> : <RefreshCw size={13} />}{updateBusy || updateTrackBusy ? t("ui.Dialogs.AppSettingsDialog.checking_ec963ff") : t("ui.Dialogs.AppSettingsDialog.check_for_updates_f26f327")}</button>}
-                  {update?.channel === 'direct' && update.state !== 'downloaded' && update.state !== 'installing' && <button type="button" className="quiet-button" disabled={updateBusy || updateCancelBusy} onClick={() => void checkForUpdates()}>{updateBusy ? <LoaderCircle className="spin" size={13} /> : <RefreshCw size={13} />}{t("ui.Dialogs.AppSettingsDialog.check_for_updates_f26f327")}</button>}
+                  {update?.channel === 'direct' && update.state !== 'downloaded' && update.state !== 'installing' && <button type="button" className="quiet-button" disabled={updateBusy || updateTrackBusy || updateCancelBusy} onClick={() => void checkForUpdates()}>{updateBusy || updateTrackBusy ? <LoaderCircle className="spin" size={13} /> : <RefreshCw size={13} />}{t("ui.Dialogs.AppSettingsDialog.check_for_updates_f26f327")}</button>}
                   {update?.channel === 'direct' && update.state === 'downloaded' && <button type="button" className="primary-button" disabled={updateCancelBusy || updateTrackBusy} onClick={() => void installUpdate()}><Download size={13} />{t("ui.Dialogs.AppSettingsDialog.restart_to_update_451d3a7")}</button>}
                   {update?.channel === 'direct' && update.state === 'installing' && <span className="app-settings-value"><LoaderCircle className="spin" size={13} />{t("ui.Dialogs.AppSettingsDialog.restarting_75d0f14")}</span>}
-                  {update?.channel === 'direct' && (update.state === 'downloaded' || update.cancelable) && <button type="button" className="quiet-button" disabled={updateCancelBusy} onClick={() => void cancelUpdate()}>{updateCancelBusy ? <LoaderCircle className="spin" size={13} /> : <X size={13} />}{updateCancelBusy ? t('appUpdate.cancelling') : update.state === 'downloaded' ? t('appUpdate.discard') : t('appUpdate.cancel')}</button>}
+                  {update?.channel === 'direct' && (update.state === 'downloaded' || update.cancelable) && <button type="button" className="quiet-button" disabled={updateCancelBusy || updateTrackBusy} onClick={() => void cancelUpdate()}>{updateCancelBusy ? <LoaderCircle className="spin" size={13} /> : <X size={13} />}{updateCancelBusy ? t('appUpdate.cancelling') : update.state === 'downloaded' ? t('appUpdate.discard') : t('appUpdate.cancel')}</button>}
                 </div>
               </div>
               {update?.state === 'downloading' && <div className="app-settings-update-progress" role="progressbar" aria-label={t("ui.Dialogs.AppSettingsDialog.update_download_1c20b42")} aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round(update.progress ?? 0)}><span style={{ width: `${update.progress ?? 0}%` }} /></div>}
-              {update?.serverUpdates?.map(server => <CoordinatedServerUpdateRow key={server.profileId} server={server} onUpdate={setUpdate} />)}
-              {update?.serverUpdateMessage && <p role="status">{update.serverUpdateMessage}</p>}
             </div>
             {manualServerUpdates && serverUpdates}
+            {!manualServerUpdates && <div className="app-settings-server-updates">
+              <div className="app-settings-row app-settings-update-row server-update-panel">
+                <div className="app-settings-row-copy"><strong>AgentsServer</strong>{update?.serverUpdateMessage && <span role="status">{update.serverUpdateMessage}</span>}</div>
+              </div>
+            </div>}
+            <div className="app-settings-server-inventory">
+              {profiles.map(profile => {
+                const coordinated = coordinatedServerUpdates.get(profile.id)
+                const currentVersion = profile.id === activeProfileId
+                  ? health?.server_version || profile.serverVersion
+                  : profile.serverVersion
+                return coordinated
+                  ? <CoordinatedServerUpdateRow key={profile.id} server={{ ...coordinated, name: profile.name }} currentVersion={coordinated.executionVersion || currentVersion} onUpdate={setUpdate} />
+                  : <div className="app-settings-row" key={profile.id}>
+                    <div className="app-settings-row-copy">
+                      <strong>{profile.name}</strong>
+                      <span>{profile.serverUrl}</span>
+                    </div>
+                    <span className="app-settings-value">{currentVersion ? `AgentsServer ${currentVersion}` : t('settings.versionUnavailable')}</span>
+                  </div>
+              })}
+            </div>
+            {!hasConfiguredServer && <div className="app-settings-server-actions">
+              <button type="button" className="server-setup-guide compact" onClick={() => {
+                closeSettings()
+                window.dispatchEvent(new CustomEvent('agentsdock:server-setup', { detail: { intent: 'setup' } }))
+              }}>
+                <span className="server-setup-icon"><Server size={18} /></span>
+                <span><strong>{t('ui.WelcomeChat.WelcomeChat.set_up_your_server_8e99107')}</strong></span>
+                <ArrowRight size={15} />
+              </button>
+            </div>}
           </section>}
         </div>
       </Dialog.Content>
@@ -2741,8 +2776,8 @@ export function SettingsDialog() {
   // cancelling an idle update. Never pretend legacy safe-only APIs can force.
   const restartServerButton = (force = false) => restartAdvertised && <button type="button" className="quiet-button server-restart-button" disabled={Boolean(restartDisabledReason)} title={restartDisabledReason || (force ? `Force restart ${activeProfile?.name || 'the active server'}. Active work will be interrupted.` : t("ui.Dialogs.SettingsDialog.safely_restart_2340480", { "server": String(activeProfile?.name || 'the active server') }))} onClick={() => openRestartConfirmation(force ? 'force' : 'safe')}>{serverControlBusy ? <LoaderCircle className="spin" size={13} /> : <RotateCcw size={13} />} {restartingServer ? t("ui.Dialogs.SettingsDialog.restarting_75d0f14") : force ? 'Force restart server' : t("ui.Dialogs.SettingsDialog.restart_server_51cd293")}</button>
   const serverUpdatesContent = <div className="app-settings-server-updates">
-    {(showServerUpdateControls || restartAdvertised) && <div className="app-settings-row app-settings-update-row server-update-panel">
-      <div className="app-settings-row-copy"><strong>AgentsServer <small>{serverUpdate?.current_version || String(health?.server_version || t("ui.Dialogs.SettingsDialog.version_unknown_ff5a99f"))}</small></strong><span className={restartNotice
+    {activeProfile && <div className="app-settings-row app-settings-update-row server-update-panel">
+      <div className="app-settings-row-copy"><strong>AgentsServer <small>{serverUpdate?.current_version || String(health?.server_version || activeProfile.serverVersion || t("ui.Dialogs.SettingsDialog.version_unknown_ff5a99f"))}</small></strong><span className={restartNotice
         ? `server-restart-notice ${restartNotice.kind}`
         : submittedServerUpdate || serverUpdateWarning || serverUpdateStatusWarning
           ? 'server-update-warning'
@@ -2759,8 +2794,8 @@ export function SettingsDialog() {
       <div className="app-settings-actions">
         {showServerUpdateControls && <>
         <div className="segmented update-track-picker" role="group" aria-label={t("ui.Dialogs.SettingsDialog.server_update_channel_e0e5ffe")}>
-          <button type="button" className={serverUpdateTrack === 'stable' ? 'active' : ''} disabled={serverUpdateControlsBusy || serverUpdateBusy || serverUpdateIsActive(serverUpdate) || Boolean(deferredServerUpdate) || Boolean(submittedServerUpdate)} onClick={() => void chooseServerUpdateTrack('stable')}>{t("ui.Dialogs.SettingsDialog.stable_90ee305")}</button>
-          <button type="button" className={serverUpdateTrack === 'beta' ? 'active' : ''} disabled={serverUpdateControlsBusy || serverUpdateBusy || serverUpdateIsActive(serverUpdate) || Boolean(deferredServerUpdate) || Boolean(submittedServerUpdate)} onClick={() => void chooseServerUpdateTrack('beta')}>{t("ui.Dialogs.SettingsDialog.beta_7033903")}</button>
+          <button type="button" className={serverUpdateTrack === 'stable' ? 'active' : ''} aria-pressed={serverUpdateTrack === 'stable'} disabled={serverUpdateControlsBusy || serverUpdateBusy || serverUpdateIsActive(serverUpdate) || Boolean(deferredServerUpdate) || Boolean(submittedServerUpdate)} onClick={() => void chooseServerUpdateTrack('stable')}>{t("ui.Dialogs.SettingsDialog.stable_90ee305")}</button>
+          <button type="button" className={serverUpdateTrack === 'beta' ? 'active' : ''} aria-pressed={serverUpdateTrack === 'beta'} disabled={serverUpdateControlsBusy || serverUpdateBusy || serverUpdateIsActive(serverUpdate) || Boolean(deferredServerUpdate) || Boolean(submittedServerUpdate)} onClick={() => void chooseServerUpdateTrack('beta')}>{t("ui.Dialogs.SettingsDialog.beta_7033903")}</button>
         </div>
         {submittedServerUpdate
           ? <button type="button" className="quiet-button" disabled={serverUpdateControlsBusy || serverUpdateBusy || submittedUpdateChecking || !connected} onClick={() => void checkSubmittedUpdateStatus(submittedServerUpdate, () => submittedUpdateIsCurrent(submittedServerUpdate) && Boolean(useAppStore.getState().modals.settings || useAppStore.getState().modals.appSettings))}>{submittedUpdateChecking ? <LoaderCircle className="spin" size={13} /> : <RefreshCw size={13} />} Check status</button>
@@ -2783,14 +2818,7 @@ export function SettingsDialog() {
           : null}
       </div>
     </div>}
-    <div className="app-settings-server-actions">
-      {restartNotice && !showServerUpdateControls && !restartAdvertised && <div className={`app-settings-server-notice ${restartNotice.kind}`} role={restartNotice.kind === 'error' ? 'alert' : 'status'} aria-live="polite">{restartNotice.message}</div>}
-      <button type="button" className="server-setup-guide compact" disabled={serverUpdateControlsBusy || Boolean(submittedServerUpdate)} onClick={() => openServerSetup()}>
-        <span className="server-setup-icon"><Server size={18} /></span>
-        <span><strong>{t("ui.Dialogs.SettingsDialog.install_or_update_agentsserver_d76fdc0")}</strong></span>
-        <ArrowRight size={15} />
-      </button>
-    </div>
+    {restartNotice && !showServerUpdateControls && !restartAdvertised && <div className={`app-settings-server-notice ${restartNotice.kind}`} role={restartNotice.kind === 'error' ? 'alert' : 'status'} aria-live="polite">{restartNotice.message}</div>}
   </div>
   const closeSettings = () => {
     const store = useAppStore.getState()
