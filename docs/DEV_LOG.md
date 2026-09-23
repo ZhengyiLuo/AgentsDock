@@ -1,5 +1,26 @@
 # Public development log
 
+## 2026-09-23 — Validate local beta.8, build 1211
+
+- Build local macOS arm64 `1.0.7-beta.8` from committed source
+  `8a9605aaa4c036061a4912cf5b9ef883d45e5b3a`. Package checks, bundle audit
+  and deep Developer ID signature verification pass. This local build has
+  automatic updates disabled and is not a notarized public release.
+- Personally exercise the exact packaged app with native input, isolated
+  profiles and real IPC/HTTP. Codex Side chat reads a newly created workspace
+  file, recalls its unpredictable value on follow-up, and clears successfully.
+  The parent gains no conversation turns; normal provider-load metadata is
+  permitted. The provider runs against the corrected isolated server.
+- On a 600-turn synthetic conversation, scroll upward and use the floating
+  bottom button; navigate into older history and return to the latest message;
+  fork through the real HTTP memory-fork route and verify the child opens at
+  the bottom. Each bottom check measures zero remaining scroll distance.
+  No renderer exceptions occur. Stop all owned test apps and servers.
+- Packaged archive SHA256:
+  `8b94bf826ed2e3d848f83650f1b8e79c836419b4218ee51af79a6463640ca7fe`.
+  Production server activation and public distribution are separate from this
+  local acceptance; Side chat tool access requires the corrected server.
+
 ## 2026-09-23 — Restore side-chat inspection and reliable latest navigation
 
 - Match native Codex Side chat: retain the parent workspace and permission
