@@ -6,7 +6,10 @@
   1.0.7-beta.3, build 1205. All 4,792 app tests, TypeScript and production
   compilation pass. The universal macOS app and installer pass signing,
   notarization, Gatekeeper, package parity, updater checksum and clean-launch
-  verification.
+  verification. Both Linux architectures and Windows pass their release
+  jobs. Windows first encounters a timeout in an unchanged history-cache
+  test; the single retry passes with the same source and unchanged limits.
+  All 14 assets and updater checksums are verified. Windows remains unsigned.
 - Personally exercise the actual signed app through native mouse and wheel
   input, production IPC and authenticated HTTP against isolated synthetic
   histories. First visits open at latest; returning to an older message in a
