@@ -57,7 +57,7 @@ export function timelineRowSequenceRange(row: TimelineRow): readonly [number, nu
   if (row.kind === 'message' || row.kind === 'trace' || row.kind === 'progress' || row.kind === 'job') {
     for (const event of row.events) if (Number.isFinite(event.seq)) sequences.push(event.seq)
   } else if (row.kind === 'system') {
-    if (Number.isFinite(row.event.seq)) sequences.push(row.event.seq)
+    if (!row.crossChatLegId && Number.isFinite(row.event.seq)) sequences.push(row.event.seq)
     for (const seq of row.representedEventSeqs ?? []) if (Number.isFinite(seq)) sequences.push(seq)
   } else {
     for (const file of row.files) if (Number.isFinite(file.seq)) sequences.push(file.seq!)
@@ -102,7 +102,9 @@ function representedTimelineTargetRowIndex(
     // min/max range can span events that the bounded page did not load, so a
     // target sequence must be represented by an actual event in that card.
     if (row.kind === 'job') return row.events.some(event => event.seq === target.seq)
-    if (row.kind === 'system') return row.event.seq === target.seq
+    if (row.kind === 'system') return row.crossChatLegId
+      ? row.representedEventSeqs?.includes(target.seq) === true
+      : row.event.seq === target.seq
     return row.files.some(file => file.seq === target.seq)
   })
 }

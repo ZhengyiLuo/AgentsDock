@@ -13,7 +13,7 @@ import { sessionNeedsProviderInteraction, sessionPendingInteractionCount } from 
 import { dismissAppKeyboard } from '../lib/app-keyboard'
 import { isServerSetupRequired } from '../lib/first-launch'
 import { serverSearchQuery } from '../lib/server-search'
-import { sidebarContentResult } from '../lib/sidebar-search'
+import { rankSidebarSessions, sidebarContentResult } from '../lib/sidebar-search'
 import { isWelcomeSession } from '../lib/welcome-session'
 import { Text, TextInput } from './AppText'
 import { BackendMark } from './BackendMark'
@@ -89,6 +89,7 @@ export function Sidebar({ profiles, activeProfileId, switchingProfileId, onSwitc
   const clearSearch = useAppStore(state => state.clearSearch)
   const select = useAppStore(state => state.selectSession)
   const seekTimelineResult = useAppStore(state => state.seekTimelineResult)
+  const cancelTimelineSeek = useAppStore(state => state.cancelTimelineSeek)
   const reorder = useAppStore(state => state.reorderSession)
   const refreshSessions = useAppStore(state => state.refreshSessions)
   const setFolderOrder = useAppStore(state => state.setFolderOrder)
@@ -102,17 +103,22 @@ export function Sidebar({ profiles, activeProfileId, switchingProfileId, onSwitc
   const listState = useMemo(() => ({ active, selected, openingSearchResultId }), [active, openingSearchResultId, selected])
   const searchTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const searchInput = useRef<TextInput>(null)
-  const openingSearchResult = useRef(false)
+  const openingSearchResult = useRef<symbol | null>(null)
   const dismissSearchKeyboard = useCallback(() => {
     searchInput.current?.blur()
     dismissAppKeyboard()
   }, [])
   const handleSearchChange = useCallback((value: string) => {
+    if (openingSearchResult.current) {
+      openingSearchResult.current = null
+      if (profileScopeIsCurrent(profileScope)) cancelTimelineSeek()
+      setOpeningSearchResultId(null)
+    }
     // Clear synchronously with the edit so results for the previous query
     // never render under the new text while its debounce is pending.
     clearSearch()
     setQuery(value)
-  }, [clearSearch])
+  }, [cancelTimelineSeek, clearSearch, profileScope])
 
   useEffect(() => {
     if (searchTimer.current) clearTimeout(searchTimer.current)
@@ -132,10 +138,10 @@ export function Sidebar({ profiles, activeProfileId, switchingProfileId, onSwitc
       if (searchTimer.current) clearTimeout(searchTimer.current)
       searchTimer.current = null
     }
-  }, [clearSearch, needsServerSetup, profileScope, query, search, switchingProfileId])
+  }, [clearSearch, needsServerSetup, profileScope, query, search, switchingProfileId, workspaceAdopting])
 
   useEffect(() => {
-    openingSearchResult.current = false
+    openingSearchResult.current = null
     setOpeningSearchResultId(null)
   }, [profileScope])
 
@@ -154,25 +160,24 @@ export function Sidebar({ profiles, activeProfileId, switchingProfileId, onSwitc
       }
     }
     const matchedByContent = new Set(contentResults.keys())
-    const clean = query.trim().toLowerCase()
-    const filtered = clean
-      ? sessions.filter(session => session.title.toLowerCase().includes(clean) || matchedByContent.has(session.id))
-          .sort((a, b) => Number(b.title.toLowerCase().includes(clean)) - Number(a.title.toLowerCase().includes(clean)))
-      : sessions
-    return orderedSessionSections(filtered, folderOrder, true, !clean).flatMap<Row>(section => {
+    const clean = query.trim()
+    // Search is one ranked list. Passing these matches back through folder
+    // ordering buries names beneath pinned/history hits and re-sorts their rank.
+    if (clean) return rankSidebarSessions(sessions, clean, matchedByContent).map<Row>(session => ({
+      kind: 'session', key: session.id, session,
+      // A name match opens the chat at its live position, even if history also
+      // matches; content-only hits retain their exact timeline destination.
+      searchResult: sidebarContentResult(session.title, clean, contentResults.get(session.id)),
+    }))
+    return orderedSessionSections(sessions, folderOrder, true, true).flatMap<Row>(section => {
       const folder = section.id
       const values = section.sessions
       return [
         { kind: 'header', key: `header:${folder}`, title: folder, folder, count: values.length },
-        ...((collapsed.has(folder) && !clean ? [] : values.map(session => ({
+        ...((collapsed.has(folder) ? [] : values.map(session => ({
           kind: 'session' as const,
           key: session.id,
           session,
-          // A visible title match is a request to open that chat at its live
-          // position. Do not silently reinterpret the same row as an older
-          // content hit merely because the server also found the query in its
-          // transcript.
-          searchResult: sidebarContentResult(session.title, clean, contentResults.get(session.id)),
         })))),
       ]
     })
@@ -223,12 +228,14 @@ export function Sidebar({ profiles, activeProfileId, switchingProfileId, onSwitc
       void selection
       return
     }
-    openingSearchResult.current = true
+    const request = Symbol('open-search-result')
+    openingSearchResult.current = request
     setOpeningSearchResultId(result.event_id)
     void seekTimelineResult(result, profileScope.profileGeneration).then(opened => {
-      if (opened && sessionScopeIsCurrent(profileScope, session.id)) onOpenChat?.()
+      if (opened && openingSearchResult.current === request && sessionScopeIsCurrent(profileScope, session.id)) onOpenChat?.()
     }).finally(() => {
-      openingSearchResult.current = false
+      if (openingSearchResult.current !== request) return
+      openingSearchResult.current = null
       if (profileScopeIsCurrent(profileScope)) setOpeningSearchResultId(null)
     })
   }, [dismissSearchKeyboard, onOpenChat, profileScope, seekTimelineResult, select])
@@ -362,6 +369,14 @@ export function Sidebar({ profiles, activeProfileId, switchingProfileId, onSwitc
         alwaysBounceVertical={Platform.OS === 'ios'}
         onScrollBeginDrag={dismissSearchKeyboard}
         contentContainerStyle={styles.list}
+        ListHeaderComponent={query.trim() && rows.length ? <View style={styles.header}>
+          <Search size={13} color={colors.muted} />
+          <Text style={[styles.headerText, { color: colors.muted }]}>Matches</Text>
+          <Text style={[styles.count, { color: colors.muted }]}>{rows.length}</Text>
+        </View> : null}
+        ListEmptyComponent={query.trim() ? <Text style={[styles.searchEmpty, { color: colors.muted }]}>
+          {searchBusy ? 'Searching history…' : 'No matching chats'}
+        </Text> : null}
         renderItem={({ item }) => item.kind === 'header' ? <FolderHeader
           item={item}
           profileScope={profileScope}
@@ -400,7 +415,7 @@ export function Sidebar({ profiles, activeProfileId, switchingProfileId, onSwitc
         })()}
       />
       <View style={[styles.footer, { borderColor: colors.border, minHeight: 34 + insets.bottom, paddingBottom: insets.bottom }]}>
-        <Text style={{ color: colors.muted, fontSize: 10 }}>{sessions.length} chats</Text>
+        <Text style={{ color: colors.muted, fontSize: 10 }}>{query.trim() ? `${rows.length} ${rows.length === 1 ? 'match' : 'matches'}` : `${sessions.length} chats`}</Text>
         <View style={{ flex: 1 }} />
         {waitingSessionCount ? <>
           <View style={[styles.footerDot, { backgroundColor: colors.orange }]} />
@@ -650,7 +665,7 @@ function SessionRow({ session, profileScope, selected, running, searchSnippet, o
         <Text style={[styles.sessionTitle, { color: colors.text }]} numberOfLines={1}>{session.title}</Text>
         <View style={styles.sessionMetaRow}>
           <Text style={[styles.sessionMeta, { color: unread ? colors.blue : colors.muted }]} numberOfLines={1}>
-            {welcome ? 'Local setup guide' : (searchSnippet || (waiting ? `${runtimeSummary(session)} · waiting for you` : running ? `${runtimeSummary(session)} · running` : unread ? `${runtimeSummary(session)} · new` : runtimeSummary(session)))}
+            {welcome ? 'Local setup guide' : (searchSnippet ? `History · ${searchSnippet}` : (waiting ? `${runtimeSummary(session)} · waiting for you` : running ? `${runtimeSummary(session)} · running` : unread ? `${runtimeSummary(session)} · new` : runtimeSummary(session)))}
           </Text>
           {activityDate ? <Text style={[styles.sessionDate, { color: colors.muted }]} numberOfLines={1}>{activityDate}</Text> : null}
         </View>
@@ -696,6 +711,7 @@ const styles = StyleSheet.create({
   searchErrorText: { flex: 1, fontSize: 11.5, fontWeight: '600' },
   searchRetry: { minWidth: 64, minHeight: 44, paddingHorizontal: 10, borderWidth: StyleSheet.hairlineWidth, borderRadius: 7, alignItems: 'center', justifyContent: 'center' },
   searchRetryText: { fontSize: 11.5, fontWeight: '800' },
+  searchEmpty: { paddingHorizontal: 12, paddingVertical: 20, fontSize: 13 },
   list: { paddingHorizontal: 6, paddingBottom: 24 },
   folderHeaderShell: { minHeight: 44, flexDirection: 'row', alignItems: 'stretch' },
   header: { minHeight: 44, paddingHorizontal: 5, flexDirection: 'row', alignItems: 'center', gap: 4 },

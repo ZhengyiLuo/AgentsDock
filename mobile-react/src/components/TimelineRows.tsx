@@ -64,14 +64,14 @@ export const TimelineRowView = memo(function TimelineRowView({ row, sessionId, o
   if (row.kind === 'progress') return <ProgressRowView row={row} fontScale={fontScale} />
   if (row.kind === 'media') return <MediaRowView row={row} sessionId={sessionId} />
   if (row.kind === 'job') return <JobRowView row={row} sessionId={sessionId} onReview={onReview} fontScale={fontScale} />
-  if (row.importedDelivery) return <ImportedCrossChatDeliveryCard row={row} fontScale={fontScale} />
+  if (row.importedDelivery) return <ImportedCrossChatDeliveryCard row={row} fontScale={fontScale} layoutWidth={layoutWidth} />
   if (row.mailboxMessages) return <ChatInboxGroup row={row} sessionId={sessionId} fontScale={fontScale} layoutWidth={layoutWidth} />
   if (row.crossChatMessage) return <CrossChatMessageCard event={row.event} events={row.events} rowKey={row.key} anchorTs={row.anchorTs} sessionId={sessionId} fontScale={fontScale} layoutWidth={layoutWidth} />
   if (codexLifecycleSemanticKey(row.event)) return <CodexLifecycleRowView row={row} fontScale={fontScale} />
   if (row.key.startsWith('provider-interaction-audit:')) return <ProviderInteractionAuditView row={row} />
   const exchangeId = row.event.exchange_id?.trim() || row.event.cross_chat_exchange_id?.trim()
-  if (row.event.type.startsWith('cross_chat_exchange_') && exchangeId) return <CrossChatExchangeCard event={row.event} events={row.events} rowKey={row.key} sessionId={sessionId} fontScale={fontScale} />
-  if (row.event.type.startsWith('cross_chat_')) return <CrossChatHandoffCard event={row.event} rowKey={row.key} sessionId={sessionId} />
+  if (row.event.type.startsWith('cross_chat_exchange_') && exchangeId) return <CrossChatExchangeCard event={row.event} events={row.events} rowKey={row.key} sessionId={sessionId} fontScale={fontScale} layoutWidth={layoutWidth} legId={row.crossChatLegId} anchorTs={row.anchorTs} />
+  if (row.event.type.startsWith('cross_chat_')) return <CrossChatHandoffCard event={row.event} rowKey={row.key} sessionId={sessionId} fontScale={fontScale} layoutWidth={layoutWidth} />
   if (row.event.type === 'emergency_alert_raised') return <EmergencyAlertView event={row.event} sessionId={sessionId} />
   return <SystemRowView row={row} fontScale={fontScale} />
 })

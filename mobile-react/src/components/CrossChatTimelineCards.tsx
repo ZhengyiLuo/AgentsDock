@@ -1,14 +1,13 @@
-import { Fragment, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
-import { ActivityIndicator, Pressable, StyleSheet, useColorScheme, View } from 'react-native'
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { Pressable, StyleSheet, useColorScheme, View } from 'react-native'
 import { useRecyclingState } from '@shopify/flash-list'
-import { AlertTriangle, ChevronDown, ChevronRight, MessageSquareShare } from 'lucide-react-native'
-import Svg, { Defs, LinearGradient, Rect, Stop } from 'react-native-svg'
+import { AlertTriangle, MessageSquareShare } from 'lucide-react-native'
 import type { AgentServerClient } from '../api/AgentServerClient'
 import { exactQueuedDeliverySkipAvailable } from '../lib/chat-references'
 import { authenticatedChatMessageBody } from '../lib/chat-message-body'
 import { chatMailboxAvailable } from '../lib/chat-mailbox'
 import { legacyOutgoingDeliveryStatus, outgoingDeliveryStatus, outgoingMailboxCanCancel, requireMailboxCancellationReceipt } from '../lib/cross-chat-delivery-status'
-import { formatDateTime, messageText } from '../lib/format'
+import { messageText } from '../lib/format'
 import { timelineChatReferenceIsRemote, timelineChatReferenceKey } from '../lib/timeline-inline-references'
 import type {
   ChatReference,
@@ -28,38 +27,17 @@ const CROSS_CHAT_LONG_MESSAGE_CHARS = 640
 const CROSS_CHAT_LONG_MESSAGE_LINES = 10
 const EMPTY_READ_ONLY_REFERENCE_KEYS: ReadonlySet<string> = new Set()
 
-// Shared by conversation surfaces so legacy one-shot handoffs retain their
-// blue treatment. These are the current Mac conversation colors, not generic
-// app theme tokens.
+// Secondary conversation metadata colors; message surfaces follow the current Mac bubbles.
 export const CROSS_CHAT_CONVERSATION_DARK = {
-  gradientStart: '#281f3b',
-  gradientEnd: '#211b31',
-  border: '#594675',
-  accent: '#8c6fe8',
-  shadow: '#130c22',
-  shadowOpacity: 0.28,
-  icon: '#bca8ff',
-  eyebrow: '#bba9ef',
   state: '#cfc3ef',
   stateCompleted: '#aee2c4',
   stateFailed: '#ffb4af',
   stateTerminal: '#b7a9d6',
-  title: '#eee9ff',
-  participants: '#a99bc9',
-  participantCurrent: '#e8e0ff',
-  bridge: '#9682ca',
-  speaker: '#eee8ff',
-  currentDot: '#a98cf5',
-  body: '#ded6f1',
-  incomingBackground: '#302640',
-  incomingBorder: '#4d3e61',
-  toggle: '#b9a5ec',
+  toggle: '#c9b1eb',
   control: '#c3b2ee',
   controlPressed: '#f0ebff',
   placeholder: '#a99bc9',
-  empty: '#ad9fcf',
   failure: '#ffbbb6',
-  details: '#9f91bf',
   detailText: '#a99bc9',
   detailStrong: '#c9bde6',
   detailNote: '#baabc9',
@@ -69,34 +47,15 @@ export const CROSS_CHAT_CONVERSATION_DARK = {
 } as const
 
 export const CROSS_CHAT_CONVERSATION_LIGHT: CrossChatConversationPalette = {
-  gradientStart: '#f5f1ff',
-  gradientEnd: '#eee8fb',
-  border: '#c8b7e3',
-  accent: '#8566bd',
-  shadow: '#5b477c',
-  shadowOpacity: 0.1,
-  icon: '#7050aa',
-  eyebrow: '#7055a1',
   state: '#5c467f',
   stateCompleted: '#276847',
   stateFailed: '#922824',
   stateTerminal: '#705c89',
-  title: '#3f2e61',
-  participants: '#705c89',
-  participantCurrent: '#452d6b',
-  bridge: '#8065aa',
-  speaker: '#46315f',
-  currentDot: '#7652ad',
-  body: '#503e68',
-  incomingBackground: '#faf8ff',
-  incomingBorder: '#d4c7e6',
-  toggle: '#67458f',
+  toggle: '#664185',
   control: '#5b3d80',
   controlPressed: '#3f265f',
   placeholder: '#75618f',
-  empty: '#705c89',
   failure: '#842722',
-  details: '#705c89',
   detailText: '#705c89',
   detailStrong: '#52366f',
   detailNote: '#765f86',
@@ -106,8 +65,8 @@ export const CROSS_CHAT_CONVERSATION_LIGHT: CrossChatConversationPalette = {
 }
 
 export type CrossChatConversationPalette = {
-  [Key in Exclude<keyof typeof CROSS_CHAT_CONVERSATION_DARK, 'shadowOpacity'>]: string
-} & { shadowOpacity: number }
+  [Key in keyof typeof CROSS_CHAT_CONVERSATION_DARK]: string
+}
 
 const crossChatTimeFormatter = new Intl.DateTimeFormat(undefined, {
   hour: 'numeric',
@@ -216,15 +175,15 @@ function openTargetSession(
 }
 
 /** Navigation only. Authenticated IDs, never display names, identify local peers. */
-export function CrossChatPeerHeading({ peerId, sessionId, children, testID }: {
-  peerId?: string | null; sessionId: string; children: ReactNode; testID?: string
+export function CrossChatPeerHeading({ peerId, sessionId, children, testID, intrinsic = false }: {
+  peerId?: string | null; sessionId: string; children: ReactNode; testID?: string; intrinsic?: boolean
 }) {
   const target = peerId?.trim()
-  return !target || target === sessionId ? <>{children}</> : <ScopedCrossChatPeerHeading target={target} sessionId={sessionId} testID={testID}>{children}</ScopedCrossChatPeerHeading>
+  return !target || target === sessionId ? <>{children}</> : <ScopedCrossChatPeerHeading target={target} sessionId={sessionId} testID={testID} intrinsic={intrinsic}>{children}</ScopedCrossChatPeerHeading>
 }
 
-function ScopedCrossChatPeerHeading({ target, sessionId, children, testID }: {
-  target: string; sessionId: string; children: ReactNode; testID?: string
+function ScopedCrossChatPeerHeading({ target, sessionId, children, testID, intrinsic }: {
+  target: string; sessionId: string; children: ReactNode; testID?: string; intrinsic: boolean
 }) {
   const colors = usePalette()
   const revision = useTimelineWorkspaceRevision(sessionId)
@@ -246,7 +205,7 @@ function ScopedCrossChatPeerHeading({ target, sessionId, children, testID }: {
     catch (cause) { if (mounted.current && timelineWorkspaceProfileCurrent(scope)) setError(timelineActionError(cause)) }
     finally { busy.current = false }
   }
-  return <View style={{ flex: 1, minWidth: 0 }}>
+  return <View style={intrinsic ? { flexShrink: 1, minWidth: 0 } : { flex: 1, minWidth: 0 }}>
     <Pressable testID={testID ?? `cross-chat-peer-${target}`} accessibilityRole="button" accessibilityLabel={`Open chat ${target}`} onPress={() => void open()} style={{ minHeight: 44, justifyContent: 'center', minWidth: 44 }}>{children}</Pressable>
     {error ? <Text accessibilityRole="alert" style={{ color: colors.red }}>{error}</Text> : null}
   </View>
@@ -325,9 +284,38 @@ function timelineReferenceLabel(reference: ChatReference): string {
   return `${timelineReferencePrefix(reference)}${reference.display_title_snapshot}`
 }
 
-interface CrossChatCardProps { event: Event; events?: Event[]; rowKey: string; sessionId: string; fontScale?: number }
+interface CrossChatCardProps { event: Event; events?: Event[]; rowKey: string; sessionId: string; fontScale?: number; anchorTs?: string; layoutWidth?: number; legId?: string }
 
 interface CrossChatMessageCardProps extends CrossChatCardProps { anchorTs?: string; layoutWidth?: number }
+
+/** Mac message presentation shared by current and historical cross-chat records. */
+export function CrossChatMessageSurface({ identity, incoming, layoutWidth = 640, sessionId, peerId, title, time, children }: {
+  identity: string; incoming: boolean; layoutWidth?: number; sessionId: string; peerId?: string | null
+  title: string; time?: string; children: ReactNode
+}) {
+  const colors = usePalette()
+  const light = useColorScheme() === 'light'
+  return <View testID={identity} style={styles.asyncMessage}>
+    <View testID={`${identity}-surface`} style={[
+      styles.asyncMessageSurface,
+      {
+        maxWidth: Math.min(760, Math.max(0, layoutWidth - 28) * (layoutWidth <= 480 ? 0.94 : 0.82)),
+        alignSelf: incoming ? 'flex-end' : 'flex-start',
+        paddingHorizontal: layoutWidth <= 480 ? 10 : 13,
+        paddingVertical: layoutWidth <= 480 ? 9 : 10,
+        backgroundColor: light ? '#eee5fb' : '#332444',
+        borderColor: light ? '#bca5dc' : '#685080',
+      },
+    ]}>
+      <View style={styles.asyncMessageHeader}>
+        <MessageSquareShare size={13} color={colors.muted} />
+        <CrossChatPeerHeading peerId={peerId} sessionId={sessionId} intrinsic><Text accessibilityRole="header" style={[styles.asyncMessageTitle, { color: colors.text }]} numberOfLines={2}>{title}</Text></CrossChatPeerHeading>
+        {time ? <Text style={[styles.conversationTime, { color: colors.muted }]}>{time}</Text> : null}
+      </View>
+      {children}
+    </View>
+  </View>
+}
 
 /** One explicit async message, with no legacy exchange or automatic-reply controls. */
 export function CrossChatMessageCard(props: CrossChatMessageCardProps) {
@@ -455,20 +443,9 @@ function CrossChatMessageCardScoped({
   const toggleLabel = loading ? 'Loading full message…' : expanded ? 'Show less' : 'View message'
   const identity = `cross-chat-async-message-${envelopeId || event.id}`
   const time = formatCrossChatTime(anchorTs || event.ts)
-  return <View testID={identity} style={styles.asyncMessage}>
-    <View testID={`${identity}-surface`} style={[
-      styles.asyncMessageSurface,
-      {
-        width: layoutWidth > 720 ? '82%' : '94%', alignSelf: incoming ? 'flex-end' : 'flex-start',
-        backgroundColor: incoming ? light ? '#eee5fb' : '#332444' : colors.raised,
-        borderColor: incoming ? light ? '#bca5dc' : '#685080' : colors.border,
-      },
-    ]}>
-      <View style={styles.asyncMessageHeader}>
-        <MessageSquareShare size={13} color={colors.muted} />
-        <CrossChatPeerHeading peerId={sourceId === sessionId || targetId === sessionId ? counterpartId : null} sessionId={sessionId}><Text accessibilityRole="header" style={[styles.asyncMessageTitle, { color: colors.text }]} numberOfLines={2}>{title}</Text></CrossChatPeerHeading>
-        {time ? <Text style={[styles.conversationTime, { color: colors.muted }]}>{time}</Text> : null}
-      </View>
+  return <CrossChatMessageSurface identity={identity} incoming={incoming} layoutWidth={layoutWidth} sessionId={sessionId}
+    peerId={sourceId === sessionId || targetId === sessionId ? counterpartId : null} title={title} time={time}>
+      {editedByUser ? <Text style={[styles.note, { color: colors.muted }]}>Edited by you</Text> : null}
       {text ? <MarkdownContent value={text} compact fontScale={fontScale} color={colors.text} />
         : <Text style={[styles.note, { color: colors.muted }]}>Message body available on demand.</Text>}
       {moreBodyAvailable || longBody ? <Pressable
@@ -486,8 +463,7 @@ function CrossChatMessageCardScoped({
       {mailboxAvailable && !cancellation?.cancelled && outgoingMailboxCanCancel(event, lifecycle, sessionId) ? <CardAction testID={`${identity}-cancel`} label={cancellation?.busy ? 'Cancelling…' : 'Cancel unread message'} disabled={Boolean(cancellation?.busy) || !cancelScope.connected || !cancelScope.connection.isValidated || cancelScope.connection.isDisposed} destructive onPress={() => void cancelMailbox()} /> : null}
       {cancellation?.error ? <InlineError prefix="Could not cancel mailbox message" message={cancellation.error} /> : null}
       {loadError ? <InlineError prefix="Could not load full message" message={loadError} /> : null}
-    </View>
-  </View>
+  </CrossChatMessageSurface>
 }
 
 interface CrossChatConversationLeg extends CrossChatExchangeLeg {
@@ -504,7 +480,7 @@ export function CrossChatHandoffCard(props: CrossChatCardProps) {
   />
 }
 
-function CrossChatHandoffCardScoped({ event, rowKey, sessionId, profileGeneration }: CrossChatCardProps & { profileGeneration: number }) {
+function CrossChatHandoffCardScoped({ event, rowKey, sessionId, profileGeneration, fontScale = 1, layoutWidth, anchorTs }: CrossChatCardProps & { profileGeneration: number }) {
   const colors = usePalette()
   const workspaceRevision = useTimelineWorkspaceRevision(sessionId)
   const envelopeId = event.handoff_id?.trim() || event.correlation_id?.trim() || ''
@@ -515,17 +491,16 @@ function CrossChatHandoffCardScoped({ event, rowKey, sessionId, profileGeneratio
   const counterpartTitle = counterpart?.title
     || (sourceId === sessionId ? event.target_title : event.source_title)
     || 'another chat'
-  const counterpartAvailable = Boolean(counterpart && !counterpart.archived)
   const preview = event.handoff_preview?.trim() || ''
   const truncated = event.handoff_body_truncated === true
-  const [open, setOpen] = useRecyclingState(false, [profileGeneration, rowKey, sessionId])
   const [body, setBody] = useState(truncated ? '' : preview)
+  const [expanded, setExpanded] = useState(false)
+  const [bodyLimit, setBodyLimit] = useState(CROSS_CHAT_BODY_CHUNK)
   const [bodyLoading, setBodyLoading] = useState(false)
   const [bodyError, setBodyError] = useState('')
   const [handoffStatusSnapshot, setHandoffStatusSnapshot] = useState<{ status: string; eventSeq: number } | null>(null)
   const [cancelling, setCancelling] = useState(false)
   const [cancelError, setCancelError] = useState('')
-  const [openError, setOpenError] = useState('')
   const bodyRequest = useRef(0)
   const cancelRequest = useRef(0)
   const bodyLoadingRef = useRef(false)
@@ -537,12 +512,13 @@ function CrossChatHandoffCardScoped({ event, rowKey, sessionId, profileGeneratio
     bodyLoadingRef.current = false
     cancellingRef.current = false
     setBody(truncated ? '' : preview)
+    setExpanded(false)
+    setBodyLimit(CROSS_CHAT_BODY_CHUNK)
     setBodyLoading(false)
     setBodyError('')
     setHandoffStatusSnapshot(null)
     setCancelling(false)
     setCancelError('')
-    setOpenError('')
   }, [envelopeId, sourceId, targetId, event.handoff_body_sha256, preview, profileGeneration, rowKey, sessionId, truncated, workspaceRevision])
 
   const loadBody = async () => {
@@ -568,6 +544,7 @@ function CrossChatHandoffCardScoped({ event, rowKey, sessionId, profileGeneratio
       }
       if (typeof loaded.body !== 'string' || !loaded.body.trim()) throw new Error('AgentsServer did not return a message body')
       setBody(loaded.body)
+      setExpanded(true)
     } catch (error) {
       if (request === bodyRequest.current && timelineWorkspaceScopeCurrent(scope)) setBodyError(timelineActionError(error))
     } finally {
@@ -617,53 +594,39 @@ function CrossChatHandoffCardScoped({ event, rowKey, sessionId, profileGeneratio
     : event
   const status = handoffStatus(displayEvent)
   const failed = /failed|error/u.test(status)
-  const title = sourceId === sessionId ? `To ${counterpartTitle}` : crossChatTitle(displayEvent, counterpartTitle, sessionId)
+  const incoming = targetId === sessionId && sourceId !== sessionId
+  const title = incoming ? counterpartTitle : `To ${counterpartTitle}`
   const detail = messageText(event).trim()
   const canCancel = sourceId === sessionId && /queued|deferred/u.test(status) && Boolean(envelopeId)
-  const hasDetail = Boolean(envelopeId || preview || detail || counterpartId || canCancel)
-  const toggleOpen = () => {
-    const next = !open
-    setOpen(next)
-    if (next) void loadBody()
+  const fullText = body || preview
+  const moreBodyAvailable = Boolean(envelopeId) && (!fullText || (truncated && !body))
+  const longBody = fullText.length > CROSS_CHAT_LONG_MESSAGE_CHARS || fullText.split('\n').length > CROSS_CHAT_LONG_MESSAGE_LINES
+  const visibleBody = expanded ? fullText.slice(0, bodyLimit) : longBody ? crossChatCollapsedText(fullText) : fullText
+  const locallyHidden = expanded && fullText.length > bodyLimit
+  const bodyToggleLabel = bodyLoading ? 'Loading full message…' : expanded ? locallyHidden ? 'Show more' : 'Show less' : 'View message'
+  const toggleBody = () => {
+    if (moreBodyAvailable) { void loadBody(); return }
+    if (locallyHidden) { setBodyLimit(value => value + CROSS_CHAT_BODY_CHUNK); return }
+    setExpanded(value => !value)
+    setBodyLimit(CROSS_CHAT_BODY_CHUNK)
   }
-
-  return <View style={[styles.card, { borderColor: failed ? colors.red : colors.blue, backgroundColor: failed ? `${colors.red}12` : `${colors.blue}0D` }]}>
-    <View style={styles.cardHeader}>
-    <CrossChatPeerHeading peerId={sourceId === sessionId || targetId === sessionId ? counterpartId : null} sessionId={sessionId}><Text style={[styles.title, { color: colors.text }]} numberOfLines={2}>{title}</Text></CrossChatPeerHeading>
-    <Pressable
-      testID={`cross-chat-handoff-${envelopeId || event.id}`}
-      accessibilityRole="button"
-      accessibilityLabel={title}
-      accessibilityState={{ expanded: open }}
-      disabled={!hasDetail}
-      onPress={toggleOpen}
-      style={styles.cardHeader}
-    >
-      {failed ? <AlertTriangle size={15} color={colors.red} /> : <MessageSquareShare size={15} color={colors.blue} />}
-      <View style={styles.heading}>
-        <Text style={[styles.meta, { color: colors.muted }]} numberOfLines={1}>{sourceId === sessionId ? legacyOutgoingDeliveryStatus(status, displayEvent.type) : statusLabel(status)}</Text>
-      </View>
-      {hasDetail ? open ? <ChevronDown size={15} color={colors.muted} /> : <ChevronRight size={15} color={colors.muted} /> : null}
-    </Pressable>
-    </View>
-    <Text style={[styles.meta, { color: colors.muted }]} numberOfLines={1}>{directionLabel(sourceId, sessionId)} · {formatDateTime(event.ts)}</Text>
-    {open ? <View style={[styles.detail, { borderTopColor: colors.border }]}>
-      {detail && detail !== title ? <Text selectable style={[styles.detailText, { color: colors.text }]}>{boundedInlineText(detail)}</Text> : null}
-      {body || preview ? <BoundedBody identity={`${envelopeId}:${event.handoff_body_sha256 || body.length}`} text={body || preview} /> : null}
-      {bodyLoading ? <InlineStatus label="Loading full message…" /> : null}
-      {!bodyLoading && truncated && !body && !bodyError ? <Text style={[styles.note, { color: colors.muted }]}>Preview shown while the full message loads.</Text> : null}
-      {bodyError ? <InlineError prefix="Could not load full message" message={bodyError} /> : null}
-      {cancelError ? <InlineError prefix="Could not cancel handoff" message={cancelError} /> : null}
-      {openError ? <InlineError prefix="Could not open referenced chat" message={openError} /> : null}
-      <View style={styles.actions}>
-        {counterpartId && counterpartAvailable ? <CardAction testID={`cross-chat-open-${counterpartId}`} label={`Open ${counterpartTitle}`} onPress={() => {
-          setOpenError('')
-          openTargetSession(counterpartId, sessionId, profileGeneration, setOpenError)
-        }} /> : null}
-        {canCancel ? <CardAction testID={`cross-chat-cancel-handoff-${envelopeId}`} label={cancelling ? 'Cancelling…' : 'Cancel handoff'} destructive disabled={cancelling} onPress={() => void cancelHandoff()} /> : null}
-      </View>
-    </View> : null}
-  </View>
+  return <CrossChatMessageSurface identity={`cross-chat-handoff-${envelopeId || event.id}`} incoming={incoming}
+    layoutWidth={layoutWidth} sessionId={sessionId} peerId={sourceId === sessionId || targetId === sessionId ? counterpartId : null}
+    title={title} time={formatCrossChatTime(anchorTs || event.ts)}>
+    {fullText ? <MarkdownContent value={`${visibleBody}${locallyHidden ? '…' : ''}`} compact fontScale={fontScale} color={colors.text} />
+      : <Text style={[styles.note, { color: colors.muted }]}>{detail || 'Message body available on demand.'}</Text>}
+    {moreBodyAvailable || longBody ? <Pressable testID={`cross-chat-handoff-body-${envelopeId}`} accessibilityRole="button"
+      accessibilityLabel={bodyToggleLabel} accessibilityState={{ expanded, busy: bodyLoading, disabled: bodyLoading }} disabled={bodyLoading}
+      onPress={toggleBody} style={styles.conversationBodyToggle}>
+      <Text style={[styles.conversationBodyToggleText, { color: colors.muted }]}>{bodyToggleLabel}</Text>
+    </Pressable> : null}
+    {failed && preview ? <InlineError message={detail || crossChatTitle(displayEvent, counterpartTitle, sessionId)} /> : null}
+    {incoming && status === 'cancelled' ? <Text style={[styles.note, { color: colors.muted }]}>Cancelled</Text> : null}
+    {!incoming ? <Text style={[styles.note, { color: colors.muted }]} accessibilityLiveRegion="polite">{legacyOutgoingDeliveryStatus(status, displayEvent.type)}</Text> : null}
+    {bodyError ? <InlineError prefix="Could not load full message" message={bodyError} /> : null}
+    {cancelError ? <InlineError prefix="Could not cancel handoff" message={cancelError} /> : null}
+    {canCancel ? <CardAction testID={`cross-chat-cancel-handoff-${envelopeId}`} label={cancelling ? 'Cancelling…' : 'Cancel handoff'} destructive disabled={cancelling} onPress={() => void cancelHandoff()} /> : null}
+  </CrossChatMessageSurface>
 }
 
 export function CrossChatExchangeCard(props: CrossChatCardProps) {
@@ -675,7 +638,7 @@ export function CrossChatExchangeCard(props: CrossChatCardProps) {
   />
 }
 
-function CrossChatExchangeCardScoped({ event, events, rowKey, sessionId, profileGeneration, fontScale = 1 }: CrossChatCardProps & { profileGeneration: number }) {
+function CrossChatExchangeCardScoped({ event, events, rowKey, sessionId, profileGeneration, fontScale = 1, layoutWidth, legId, anchorTs }: CrossChatCardProps & { profileGeneration: number }) {
   const workspaceRevision = useTimelineWorkspaceRevision(sessionId)
   const conversationPalette = useColorScheme() === 'light'
     ? CROSS_CHAT_CONVERSATION_LIGHT
@@ -688,7 +651,6 @@ function CrossChatExchangeCardScoped({ event, events, rowKey, sessionId, profile
   const sessions = useAppStore(state => state.sessions)
   const canSkipExactDelivery = useAppStore(state => exactQueuedDeliverySkipAvailable(state.health))
   const [open, setOpen] = useRecyclingState(false, [profileGeneration, rowKey, sessionId])
-  const [showEarlier, setShowEarlier] = useRecyclingState(false, [profileGeneration, rowKey, sessionId])
   const [detailsOpen, setDetailsOpen] = useRecyclingState(false, [profileGeneration, rowKey, sessionId])
   const [exchangeSnapshot, setExchangeSnapshot] = useState<{ exchange: CrossChatExchange; eventSeq: number } | null>(null)
   const exchange = exchangeSnapshot?.exchange ?? null
@@ -701,7 +663,6 @@ function CrossChatExchangeCardScoped({ event, events, rowKey, sessionId, profile
   const [skipError, setSkipError] = useState('')
   const [skippedQueuedId, setSkippedQueuedId] = useState('')
   const [deliveryPromoted, setDeliveryPromoted] = useState(false)
-  const [openError, setOpenError] = useState('')
   const detailRequest = useRef(0)
   const cancelRequest = useRef(0)
   const skipRequest = useRef(0)
@@ -727,7 +688,6 @@ function CrossChatExchangeCardScoped({ event, events, rowKey, sessionId, profile
     setSkipError('')
     setSkippedQueuedId('')
     setDeliveryPromoted(false)
-    setOpenError('')
     setDetailsOpen(false)
   }, [exchangeId, profileGeneration, rowKey, sessionId, workspaceRevision])
 
@@ -765,11 +725,8 @@ function CrossChatExchangeCardScoped({ event, events, rowKey, sessionId, profile
   const titleFor = (id: string, fallback: string) => sessions.find(candidate => candidate.id === id)?.title
     || latestParticipantTitle(lifecycleEvents, id, requesterId, responderId)
     || fallback
-  const requesterTitle = titleFor(requesterId, requesterId === sessionId ? 'This chat' : 'Requesting agent')
-  const responderTitle = titleFor(responderId, responderId === sessionId ? 'This chat' : 'Responding agent')
   const counterpartId = counterpartSessionId(sessionId, sourceId, targetId, requesterId, responderId)
   const counterpartTitle = titleFor(counterpartId, 'another chat')
-  const counterpartAvailable = sessions.some(candidate => candidate.id === counterpartId && !candidate.archived)
 
   const loadExchange = async (expectedScope?: TimelineWorkspaceScope, force = false) => {
     if (!exchangeId || (!force && exchange && snapshotCurrent) || loadingRef.current || cancellingRef.current) return
@@ -891,7 +848,6 @@ function CrossChatExchangeCardScoped({ event, events, rowKey, sessionId, profile
     || null
   const activeOwnerId = terminalStatus ? '' : actionLeg?.target_session_id || (exchangeStatus === 'waiting_request' ? requesterId : '')
   const activeOwnerTitle = activeOwnerId ? titleFor(activeOwnerId, activeOwnerId === sessionId ? 'This chat' : 'Other agent') : ''
-  const title = counterpartId ? `Conversation with ${counterpartTitle}` : 'Agent conversation'
   const stateLabel = exchangeStateLabel(exchangeStatus, activeOwnerTitle, activeOwnerId === sessionId, actionLeg?.status || '')
   const maxLegs = latestExchangeNumber(lifecycleEvents, candidate => candidate.exchange_max_legs) ?? exchange?.max_legs ?? 6
   const usedLegs = latestExchangeNumber(lifecycleEvents, candidate => candidate.exchange_used_legs) ?? exchange?.used_legs ?? conversationLegs.length
@@ -926,31 +882,8 @@ function CrossChatExchangeCardScoped({ event, events, rowKey, sessionId, profile
           .map(code => `Reason code: ${code}`)
       : []),
   ])]
-  const primaryIds = new Set([conversationLegs[0]?.id, conversationLegs.at(-1)?.id, terminalStatus ? null : actionLeg?.id].filter((value): value is string => Boolean(value)))
-  const hiddenLegs = conversationLegs.filter(leg => !primaryIds.has(leg.id))
-  const firstHiddenLegId = hiddenLegs[0]?.id || ''
-  const allConversationLegsVisible = showEarlier || open
-  const hasExpandableMessage = conversationLegs.some(leg => crossChatLegMayHaveMoreBody(leg, snapshotCurrent) || crossChatLegBodyIsLong(leg))
-  const showConversationControls = Boolean(exchangeId) && (
-    open
-    || !exchange
-    || !snapshotCurrent
-    || hiddenLegs.length > 0
-    || hasExpandableMessage
-  )
   const showConversationDetails = Boolean(authorizationLabel || initialAction || maxLegs || technicalNotes.length)
-  const preview = latestExchangeString(lifecycleEvents, candidate => candidate.handoff_preview)
-  const conversationLabel = `Agent conversation between ${requesterTitle} and ${responderTitle}`
   const stateColor = crossChatConversationStateColor(conversationPalette, exchangeStatus, failed)
-  const expandConversation = () => {
-    setOpen(true)
-    setShowEarlier(true)
-    if (!exchange || !snapshotCurrent || conversationLegs.some(leg => crossChatLegMayHaveMoreBody(leg, snapshotCurrent))) void loadExchange()
-  }
-  const collapseConversation = () => {
-    setOpen(false)
-    setShowEarlier(false)
-  }
 
   useEffect(() => {
     if (
@@ -964,148 +897,55 @@ function CrossChatExchangeCardScoped({ event, events, rowKey, sessionId, profile
     void loadExchange()
   }, [event.seq, exchangeId, loading, cancelling, open, snapshotCurrent, workspaceRevision])
 
-  return <CrossChatConversationSurface
-    testID={`cross-chat-exchange-${exchangeId || event.id}`}
-    palette={conversationPalette}
-    failed={failed}
-  >
-    <View style={styles.conversationHeader}>
-      <Text style={[styles.conversationEyebrow, { color: conversationPalette.eyebrow }]}>Agent conversation</Text>
-      <Text style={[styles.conversationTime, { color: conversationPalette.participants }]}>{formatCrossChatTime(event.ts)}</Text>
-    </View>
-    <View style={styles.conversationHeading}>
-      <Text style={[styles.conversationTitle, { color: conversationPalette.title }]} numberOfLines={1}>{title}</Text>
-      <View accessibilityRole="text" accessibilityLabel={`Conversation status: ${stateLabel}`} style={styles.conversationState}>
-        {failed ? <AlertTriangle size={11} color={stateColor} /> : null}
-        <Text style={[styles.conversationStateText, { color: stateColor }]} numberOfLines={1}>{stateLabel}</Text>
-      </View>
-    </View>
-    <View accessible accessibilityRole="text" accessibilityLabel={conversationLabel} style={styles.conversationParticipants}>
-      <Text style={[styles.conversationParticipant, { color: requesterId === sessionId ? conversationPalette.participantCurrent : conversationPalette.participants }]} numberOfLines={1}>
-        {requesterTitle}{requesterId === sessionId ? ' (this chat)' : ''}
-      </Text>
-      <Text accessibilityElementsHidden style={[styles.conversationBridge, { color: conversationPalette.bridge }]}>↔</Text>
-      <Text style={[styles.conversationParticipant, { color: responderId === sessionId ? conversationPalette.participantCurrent : conversationPalette.participants }]} numberOfLines={1}>
-        {responderTitle}{responderId === sessionId ? ' (this chat)' : ''}
-      </Text>
-    </View>
-    {showConversationControls ? <View style={styles.conversationControls}>
-      <ConversationControl
-        testID={`cross-chat-toggle-conversation-${exchangeId}`}
-        label={open ? 'Show less' : 'Show full conversation'}
-        expanded={open}
-        palette={conversationPalette}
-        onPress={open ? collapseConversation : expandConversation}
-      />
-      {loading ? <ConversationInlineStatus label="Loading messages…" palette={conversationPalette} /> : null}
-      {loadError && !loading ? <ConversationControl testID={`cross-chat-retry-exchange-${exchangeId}`} label="Retry loading" palette={conversationPalette} onPress={() => void loadExchange()} /> : null}
-    </View> : null}
-    {loadError ? <ConversationInlineError prefix="Could not load the full conversation" message={loadError} palette={conversationPalette} /> : null}
-    <View accessibilityLabel={conversationLabel} style={styles.conversationTranscript}>
-      {conversationLegs.map((leg, index) => {
-        const isFirstHidden = leg.id === firstHiddenLegId
-        const fold = isFirstHidden && !open ? <ConversationFold
-          testID={allConversationLegsVisible ? `cross-chat-hide-earlier-${exchangeId}` : `cross-chat-show-earlier-${exchangeId}`}
-          label={allConversationLegsVisible
-            ? 'Hide earlier messages'
-            : `Show ${hiddenLegs.length} earlier ${hiddenLegs.length === 1 ? 'message' : 'messages'}`}
-          expanded={allConversationLegsVisible}
-          palette={conversationPalette}
-          onPress={() => setShowEarlier(value => !value)}
-        /> : null
-        if (!allConversationLegsVisible && !primaryIds.has(leg.id)) {
-          return fold ? <Fragment key={`fold:${leg.id}`}>{fold}</Fragment> : null
-        }
-        const sourceTitle = titleFor(leg.source_session_id, leg.source_session_id === sessionId ? 'This chat' : 'Other agent')
-        const targetTitle = titleFor(leg.target_session_id, leg.target_session_id === sessionId ? 'This chat' : 'Other agent')
-        return <Fragment key={leg.id}>
-          {fold}
-          <ConversationLeg
-            leg={leg}
-            index={index}
-            requesterId={requesterId}
-            sessionId={sessionId}
-            sourceTitle={sourceTitle}
-            targetTitle={targetTitle}
-            current={!terminalStatus && actionLeg?.id === leg.id}
-            conversationExpanded={open}
-            bodyComplete={snapshotCurrent}
-            loading={loading}
-            palette={conversationPalette}
-            fontScale={fontScale}
-            onRequestFull={() => void loadExchange()}
-          />
-        </Fragment>
-      })}
-      {!conversationLegs.length && preview ? <Text selectable style={[styles.conversationPreview, { color: conversationPalette.body }]}>{crossChatCollapsedText(preview)}</Text> : null}
-      {!conversationLegs.length && !preview && !loading ? <Text style={[styles.conversationEmpty, { color: conversationPalette.empty }]}>Waiting for the first agent message.</Text> : null}
-    </View>
-    {failureSummary ? <Text accessibilityRole="alert" selectable style={[styles.conversationFailure, { color: conversationPalette.failure }]}>{failureSummary}</Text> : null}
-    {showConversationDetails ? <View style={styles.conversationDetails}>
-      <Pressable
-        testID={`cross-chat-details-${exchangeId}`}
-        accessibilityRole="button"
-        accessibilityLabel={detailsOpen ? 'Hide conversation details' : 'Show conversation details'}
-        accessibilityState={{ expanded: detailsOpen }}
-        onPress={() => setDetailsOpen(value => !value)}
-        style={styles.conversationDetailsToggle}
-      ><Text style={[styles.conversationDetailsToggleText, { color: conversationPalette.toggle }]}>Details</Text></Pressable>
-      {detailsOpen ? <View style={styles.conversationDetailLines}>
-        {authorizationLabel ? <ConversationDetailLine label="Access" value={authorizationLabel} palette={conversationPalette} /> : null}
-        {initialAction ? <ConversationDetailLine label="Started as" value={initialAction === 'instruction' ? 'Instruction' : 'Question with replies'} palette={conversationPalette} /> : null}
-        <ConversationDetailLine label="Messages" value={`${usedLegs} of ${maxLegs}`} palette={conversationPalette} />
-        {!terminalStatus && remainingLegs != null ? <ConversationDetailLine label="Remaining" value={String(remainingLegs)} palette={conversationPalette} /> : null}
-        {technicalNotes.map(note => <ConversationDetailLine key={note} label="System note" value={note} note palette={conversationPalette} />)}
-      </View> : null}
-    </View> : null}
-    {cancelError ? <ConversationInlineError prefix="Could not end the conversation" message={cancelError} palette={conversationPalette} /> : null}
-    {skipError ? <ConversationInlineError prefix="Could not remove the queued message" message={skipError} palette={conversationPalette} /> : null}
-    {skippedQueuedId ? <Text accessibilityRole="text" accessibilityLiveRegion="polite" style={[styles.conversationNotice, { color: conversationPalette.details }]}>Queued message removed.</Text> : null}
-    {openError ? <ConversationInlineError prefix="Could not open referenced chat" message={openError} palette={conversationPalette} /> : null}
-    <View style={styles.conversationActions}>
-      {counterpartId && counterpartAvailable ? <ConversationAction testID={`cross-chat-open-${counterpartId}`} label={`Open ${counterpartTitle}`} palette={conversationPalette} onPress={() => { setOpenError(''); openTargetSession(counterpartId, sessionId, profileGeneration, setOpenError) }} /> : null}
-      {queuedDelivery && canSkipExactDelivery ? <ConversationAction testID={`cross-chat-skip-delivery-${queuedDelivery.queued_id}`} label={skipping ? 'Removing…' : 'Remove queued message'} destructive disabled={skipping} palette={conversationPalette} onPress={() => void skipQueuedDelivery()} /> : null}
-      {canCancel ? <ConversationAction testID={`cross-chat-cancel-exchange-${exchangeId}`} label={cancelling ? 'Ending…' : 'End conversation'} accessibilityHint="Stops future messages; work already in progress may still finish." destructive disabled={cancelling} palette={conversationPalette} onPress={() => void cancelExchange()} /> : null}
-    </View>
-  </CrossChatConversationSurface>
-}
-
-export function CrossChatConversationSurface({ testID, palette, children, failed = false }: {
-  testID: string
-  palette: CrossChatConversationPalette
-  children: ReactNode
-  failed?: boolean
-}) {
-  return <View style={[
-    styles.conversationShadow,
-    { shadowColor: palette.shadow, shadowOpacity: palette.shadowOpacity },
-  ]}>
-    <View
-      testID={testID}
-      style={[
-        styles.conversationCard,
-        { borderColor: palette.border, backgroundColor: palette.gradientEnd },
-      ]}
-    >
-      <Svg pointerEvents="none" width="100%" height="100%" style={StyleSheet.absoluteFill}>
-        <Defs>
-          <LinearGradient id="cross-chat-conversation-gradient" x1="0%" y1="0%" x2="100%" y2="100%">
-            <Stop offset="0%" stopColor={palette.gradientStart} />
-            <Stop offset="100%" stopColor={palette.gradientEnd} />
-          </LinearGradient>
-        </Defs>
-        <Rect width="100%" height="100%" fill="url(#cross-chat-conversation-gradient)" />
-      </Svg>
-      <View pointerEvents="none" style={[styles.conversationAccent, { backgroundColor: palette.accent }]} />
-      <View style={styles.conversationLayout}>
-        <View style={styles.conversationIcon}>
-          {failed
-            ? <AlertTriangle size={14} color={palette.icon} />
-            : <MessageSquareShare size={14} color={palette.icon} />}
-        </View>
-        <View style={styles.conversationContent}>{children}</View>
-      </View>
-    </View>
+  const displayedLegs = legId ? conversationLegs.filter(leg => leg.id === legId) : conversationLegs
+  return <View testID={`cross-chat-exchange-${exchangeId || event.id}`}>
+    {displayedLegs.map((leg, index) => {
+      const actionMessage = actionLeg?.id === leg.id
+      return <ConversationLeg key={leg.id}
+        leg={leg} index={index} sessionId={sessionId}
+        sourceTitle={titleFor(leg.source_session_id, 'Other agent')}
+        targetTitle={titleFor(leg.target_session_id, 'Other agent')}
+        current={!terminalStatus && actionMessage}
+        bodyComplete={snapshotCurrent} loading={loading} palette={conversationPalette}
+        fontScale={fontScale} layoutWidth={layoutWidth} anchorTs={anchorTs}
+        onRequestFull={() => { setOpen(true); void loadExchange() }}
+      >
+        {actionMessage ? <>
+          <Text accessibilityRole="text" accessibilityLabel={`Conversation status: ${stateLabel}`} accessibilityLiveRegion="polite" style={[styles.note, { color: stateColor }]}>
+            {skippedQueuedId ? 'Queued message removed.' : deliveryPromoted && !terminalStatus ? 'Starting' : stateLabel}
+          </Text>
+          {failureSummary ? <ConversationInlineError prefix="Could not complete conversation" message={failureSummary} palette={conversationPalette} /> : null}
+          {showConversationDetails ? <View style={styles.conversationDetails}>
+            <Pressable testID={`cross-chat-details-${exchangeId}`} accessibilityRole="button"
+              accessibilityLabel={detailsOpen ? 'Hide conversation details' : 'Show conversation details'}
+              accessibilityState={{ expanded: detailsOpen }} onPress={() => setDetailsOpen(value => !value)} style={styles.conversationDetailsToggle}>
+              <Text style={[styles.conversationDetailsToggleText, { color: conversationPalette.toggle }]}>Details</Text>
+            </Pressable>
+            {detailsOpen ? <View style={styles.conversationDetailLines}>
+              {authorizationLabel ? <ConversationDetailLine label="Access" value={authorizationLabel} palette={conversationPalette} /> : null}
+              {initialAction ? <ConversationDetailLine label="Started as" value={initialAction === 'instruction' ? 'Instruction' : 'Question with replies'} palette={conversationPalette} /> : null}
+              <ConversationDetailLine label="Messages" value={`${usedLegs} of ${maxLegs}`} palette={conversationPalette} />
+              {!terminalStatus && remainingLegs != null ? <ConversationDetailLine label="Remaining" value={String(remainingLegs)} palette={conversationPalette} /> : null}
+              {technicalNotes.map(note => <ConversationDetailLine key={note} label="System note" value={note} note palette={conversationPalette} />)}
+            </View> : null}
+          </View> : null}
+          {cancelError ? <ConversationInlineError prefix="Could not end the conversation" message={cancelError} palette={conversationPalette} /> : null}
+          {skipError ? <ConversationInlineError prefix="Could not remove the queued message" message={skipError} palette={conversationPalette} /> : null}
+          {queuedDelivery && canSkipExactDelivery ? <ConversationAction testID={`cross-chat-skip-delivery-${queuedDelivery.queued_id}`} label={skipping ? 'Removing…' : 'Remove queued message'} destructive disabled={skipping} palette={conversationPalette} onPress={() => void skipQueuedDelivery()} /> : null}
+          {canCancel ? <ConversationAction testID={`cross-chat-cancel-exchange-${exchangeId}`} label={cancelling ? 'Ending…' : 'End conversation'} accessibilityHint="Stops future messages; work already in progress may still finish." destructive disabled={cancelling} palette={conversationPalette} onPress={() => void cancelExchange()} /> : null}
+        </> : null}
+        {loadError ? <ConversationInlineError prefix="Could not load full message" message={loadError} palette={conversationPalette} /> : null}
+      </ConversationLeg>
+    })}
+    {!displayedLegs.length ? <CrossChatMessageSurface identity={`cross-chat-empty-${exchangeId}`} incoming={targetId === sessionId && sourceId !== sessionId}
+      layoutWidth={layoutWidth} sessionId={sessionId} peerId={participant ? counterpartId : null} title={counterpartTitle} time={formatCrossChatTime(event.ts)}>
+      <Text style={[styles.note, { color: conversationPalette.placeholder }]}>{stateLabel}</Text>
+      <ConversationControl testID={`cross-chat-load-exchange-${exchangeId}`} label={loading ? 'Loading messages…' : 'View message'}
+        palette={conversationPalette} onPress={() => { setOpen(true); void loadExchange() }} />
+      {canCancel ? <ConversationAction testID={`cross-chat-cancel-exchange-${exchangeId}`} label={cancelling ? 'Ending…' : 'End conversation'} destructive disabled={cancelling} palette={conversationPalette} onPress={() => void cancelExchange()} /> : null}
+      {loadError ? <ConversationInlineError prefix="Could not load full message" message={loadError} palette={conversationPalette} /> : null}
+      {cancelError ? <ConversationInlineError prefix="Could not end the conversation" message={cancelError} palette={conversationPalette} /> : null}
+    </CrossChatMessageSurface> : null}
   </View>
 }
 
@@ -1210,6 +1050,7 @@ function crossChatLegMayHaveMoreBody(leg: CrossChatConversationLeg, bodyComplete
   if (bodyComplete) return false
   if (leg.bodyTruncated) return true
   const body = leg.body.trim()
+  if (!body) return true
   if ((leg.body_chars ?? 0) > body.length) return true
   return body.endsWith('…') || body.endsWith('...')
 }
@@ -1219,7 +1060,7 @@ function crossChatLegBodyIsLong(leg: CrossChatConversationLeg): boolean {
     || leg.body.split('\n').length > CROSS_CHAT_LONG_MESSAGE_LINES
 }
 
-function crossChatCollapsedText(value: string): string {
+export function crossChatCollapsedText(value: string): string {
   const lineClipped = value.split('\n').slice(0, CROSS_CHAT_LONG_MESSAGE_LINES).join('\n')
   const characters = Array.from(lineClipped)
   const clipped = characters.length > CROSS_CHAT_LONG_MESSAGE_CHARS
@@ -1302,10 +1143,6 @@ function handoffStatus(event: Event): string {
   return String(event.handoff_status || generic || event.type).toLocaleLowerCase()
 }
 
-function directionLabel(sourceId: string, sessionId: string): string {
-  return sourceId && sourceId !== sessionId ? 'Incoming' : 'Outgoing'
-}
-
 function statusLabel(value: string): string {
   const words = value.replace(/^cross_chat_(?:exchange_)?/u, '').replaceAll('_', ' ').trim()
   if (!words) return 'Updated'
@@ -1337,49 +1174,52 @@ function crossChatTitle(event: Event, counterpartTitle: string, currentSessionId
 function ConversationLeg({
   leg,
   index,
-  requesterId,
   sessionId,
   sourceTitle,
   targetTitle,
   current,
-  conversationExpanded,
   bodyComplete,
   loading,
   palette,
   fontScale,
+  layoutWidth,
+  anchorTs,
+  children,
   onRequestFull,
 }: {
   leg: CrossChatConversationLeg
   index: number
-  requesterId: string
   sessionId: string
   sourceTitle: string
   targetTitle: string
   current: boolean
-  conversationExpanded: boolean
   bodyComplete: boolean
   loading: boolean
   palette: CrossChatConversationPalette
   fontScale: number
+  layoutWidth?: number
+  anchorTs?: string
+  children?: ReactNode
   onRequestFull: () => void
 }) {
   const identity = `${leg.exchange_id}:${leg.id}:${leg.body_sha256}`
-  const [expanded, setExpanded] = useRecyclingState(false, [leg.exchange_id, leg.id, conversationExpanded])
+  const colors = usePalette()
+  const [expanded, setExpanded] = useRecyclingState(false, [leg.exchange_id, leg.id])
   const [limit, setLimit] = useRecyclingState(CROSS_CHAT_BODY_CHUNK, [identity])
   const fromThisChat = leg.source_session_id === sessionId
-  const requesterSide = leg.source_session_id === requesterId || (!requesterId && fromThisChat)
+  const incoming = leg.target_session_id === sessionId && !fromThisChat
   const messageNumber = leg.ordinal > 0 ? leg.ordinal : index + 1
   const mayHaveMoreBody = crossChatLegMayHaveMoreBody(leg, bodyComplete)
   const longBody = crossChatLegBodyIsLong(leg)
-  const bodyExpanded = conversationExpanded || expanded || !longBody
+  const bodyExpanded = expanded || !longBody
   const completeVisibleBody = bodyExpanded ? leg.body : crossChatCollapsedText(leg.body)
-  const visibleBody = conversationExpanded ? completeVisibleBody : completeVisibleBody.slice(0, limit)
+  const visibleBody = completeVisibleBody.slice(0, limit)
   const locallyHidden = Math.max(0, completeVisibleBody.length - visibleBody.length)
-  const showBodyToggle = !conversationExpanded && (mayHaveMoreBody || longBody || locallyHidden > 0)
+  const showBodyToggle = mayHaveMoreBody || longBody || locallyHidden > 0
   const toggleLabel = mayHaveMoreBody && loading
     ? 'Loading…'
     : mayHaveMoreBody || !bodyExpanded || locallyHidden > 0
-      ? 'Show more'
+      ? locallyHidden > 0 && expanded ? 'Show more' : 'View message'
       : 'Show less'
   const toggleBody = () => {
     if (mayHaveMoreBody) {
@@ -1397,8 +1237,6 @@ function ConversationLeg({
     }
     setExpanded(false)
   }
-  const failed = leg.status === 'failed'
-  const speakerColor = failed ? palette.stateFailed : palette.speaker
   const accessibilityLabel = [
     `Message ${messageNumber} from ${sourceTitle} to ${targetTitle}.`,
     `${statusLabel(leg.status)}.`,
@@ -1406,24 +1244,14 @@ function ConversationLeg({
     current ? 'Current conversation step.' : '',
   ].filter(Boolean).join(' ')
 
-  return <View style={[
-      styles.conversationLeg,
-      requesterSide ? styles.conversationLegRequester : styles.conversationLegResponder,
-    ]}>
+  return <CrossChatMessageSurface identity={`cross-chat-message-${leg.id}`} incoming={incoming} layoutWidth={layoutWidth}
+    sessionId={sessionId} peerId={leg.source_session_id === sessionId || leg.target_session_id === sessionId ? incoming ? leg.source_session_id : leg.target_session_id : null}
+    title={incoming ? sourceTitle : `To ${targetTitle}`} time={formatCrossChatTime(anchorTs || leg.created_at)}>
     <View
       accessibilityLabel={accessibilityLabel}
       accessibilityState={{ selected: current }}
-      style={styles.conversationLegHeader}
     >
-      <View style={styles.conversationSpeakerRow}>
-        <CrossChatPeerHeading peerId={leg.source_session_id === sessionId || leg.target_session_id === sessionId ? fromThisChat ? leg.target_session_id : leg.source_session_id : null} sessionId={sessionId}><Text style={[styles.conversationSpeaker, { color: speakerColor }]} numberOfLines={1}>{fromThisChat ? `To ${targetTitle}` : sourceTitle}</Text></CrossChatPeerHeading>
-        {current ? <View accessibilityElementsHidden style={[styles.conversationCurrentDot, { backgroundColor: palette.currentDot }]} /> : null}
-      </View>
-      <Text style={[styles.conversationLegTime, { color: palette.participants }]}>{formatCrossChatTime(leg.created_at)}</Text>
-    </View>
-    {leg.body ? conversationExpanded || expanded
-      ? <MarkdownContent value={`${visibleBody}${locallyHidden ? '…' : ''}`} compact color={palette.body} fontScale={fontScale} />
-      : <Text selectable style={[styles.conversationBody, { color: palette.body }]}>{visibleBody}{locallyHidden ? '…' : ''}</Text>
+    {leg.body ? <MarkdownContent value={`${visibleBody}${locallyHidden ? '…' : ''}`} compact color={colors.text} fontScale={fontScale} />
       : null}
     {!leg.body && mayHaveMoreBody ? <Text style={[styles.conversationPlaceholder, { color: palette.placeholder }]}>Message body available on demand.</Text> : null}
     {showBodyToggle ? <Pressable
@@ -1435,7 +1263,9 @@ function ConversationLeg({
       onPress={toggleBody}
       style={({ pressed }) => [styles.conversationBodyToggle, { opacity: mayHaveMoreBody && loading ? 0.6 : pressed ? 0.72 : 1 }]}
     ><Text style={[styles.conversationBodyToggleText, { color: palette.toggle }]}>{toggleLabel}</Text></Pressable> : null}
-  </View>
+    {children}
+    </View>
+  </CrossChatMessageSurface>
 }
 
 function ConversationControl({
@@ -1459,31 +1289,6 @@ function ConversationControl({
     onPress={onPress}
     style={styles.conversationControl}
   >{({ pressed }) => <Text style={[styles.conversationControlText, { color: pressed ? palette.controlPressed : palette.control }]}>{label}</Text>}</Pressable>
-}
-
-function ConversationFold({
-  testID,
-  label,
-  expanded,
-  palette,
-  onPress,
-}: {
-  testID: string
-  label: string
-  expanded: boolean
-  palette: CrossChatConversationPalette
-  onPress: () => void
-}) {
-  return <View style={styles.conversationFold}>
-    <ConversationControl testID={testID} label={label} expanded={expanded} palette={palette} onPress={onPress} />
-  </View>
-}
-
-function ConversationInlineStatus({ label, palette }: { label: string; palette: CrossChatConversationPalette }) {
-  return <View accessibilityRole="progressbar" style={styles.conversationInlineStatus}>
-    <ActivityIndicator size="small" color={palette.toggle} />
-    <Text style={[styles.conversationStatusNote, { color: palette.placeholder }]}>{label}</Text>
-  </View>
 }
 
 function ConversationInlineError({ prefix, message, palette }: { prefix: string; message: string; palette: CrossChatConversationPalette }) {
@@ -1542,27 +1347,6 @@ function ConversationAction({
   ]}>{label}</Text>}</Pressable>
 }
 
-function BoundedBody({ identity, text }: { identity: string; text: string }) {
-  const colors = usePalette()
-  const [limit, setLimit] = useRecyclingState(CROSS_CHAT_BODY_CHUNK, [identity])
-  const visible = text.slice(0, limit)
-  const hidden = Math.max(0, text.length - visible.length)
-  return <View style={[styles.body, { borderColor: colors.border, backgroundColor: colors.surface }]}>
-    <Text selectable style={[styles.bodyText, { color: colors.text }]}>{visible}{hidden ? '\n…' : ''}</Text>
-    {hidden ? <Pressable
-      accessibilityRole="button"
-      accessibilityLabel={`Show ${Math.min(CROSS_CHAT_BODY_CHUNK, hidden)} more characters`}
-      onPress={() => setLimit(current => Math.min(text.length, current + CROSS_CHAT_BODY_CHUNK))}
-      style={styles.showMore}
-    ><Text style={[styles.showMoreText, { color: colors.blue }]}>{hidden.toLocaleString()} characters hidden · Show more</Text></Pressable> : null}
-  </View>
-}
-
-function InlineStatus({ label }: { label: string }) {
-  const colors = usePalette()
-  return <View accessibilityRole="progressbar" style={styles.inlineStatus}><ActivityIndicator size="small" color={colors.blue} /><Text style={[styles.note, { color: colors.muted }]}>{label}</Text></View>
-}
-
 function InlineError({ prefix, message }: { prefix?: string; message: string }) {
   const colors = usePalette()
   const detail = boundedInlineText(message)
@@ -1587,74 +1371,22 @@ const styles = StyleSheet.create({
   asyncMessage: { minWidth: 0, marginHorizontal: 14, marginVertical: 8 },
   asyncMessageSurface: { minWidth: 0, maxWidth: 760, paddingVertical: 10, paddingHorizontal: 13, borderWidth: 1, borderRadius: 10 },
   asyncMessageHeader: { minWidth: 0, flexDirection: 'row', alignItems: 'center', gap: 7, marginBottom: 7 },
-  asyncMessageTitle: { flex: 1, minWidth: 0, fontSize: 11, lineHeight: 16, fontWeight: '700' },
+  asyncMessageTitle: { flexShrink: 1, minWidth: 0, fontSize: 11, lineHeight: 16, fontWeight: '700' },
   referenceList: { gap: 6, marginTop: 8 },
   referenceChip: { minHeight: 44, borderRadius: 7, borderWidth: StyleSheet.hairlineWidth, paddingHorizontal: 10, paddingVertical: 7, flexDirection: 'row', alignItems: 'center', gap: 7 },
   referenceText: { flex: 1, minWidth: 0, fontSize: 11.5, lineHeight: 16 },
   referenceStrong: { fontWeight: '800' },
-  card: { marginHorizontal: 14, borderRadius: 8, borderWidth: StyleSheet.hairlineWidth, overflow: 'hidden' },
-  cardHeader: { minHeight: 54, paddingHorizontal: 11, paddingVertical: 7, flexDirection: 'row', alignItems: 'center', gap: 8 },
-  heading: { flex: 1, minWidth: 0, gap: 3 },
-  title: { fontSize: 12, lineHeight: 16, fontWeight: '800' },
-  meta: { fontSize: 10, lineHeight: 14 },
-  detail: { borderTopWidth: StyleSheet.hairlineWidth, paddingHorizontal: 11, paddingVertical: 10, gap: 8 },
-  detailText: { fontSize: 12, lineHeight: 17 },
-  body: { borderRadius: 7, borderWidth: StyleSheet.hairlineWidth, overflow: 'hidden' },
-  bodyText: { paddingHorizontal: 10, paddingTop: 9, paddingBottom: 8, fontSize: 11.5, lineHeight: 17, fontFamily: 'Menlo' },
-  showMore: { minHeight: 44, paddingHorizontal: 10, justifyContent: 'center' },
-  showMoreText: { fontSize: 11, fontWeight: '800' },
-  note: { flex: 1, fontSize: 10.5, lineHeight: 15 },
-  inlineStatus: { minHeight: 32, flexDirection: 'row', alignItems: 'center', gap: 7 },
+  note: { fontSize: 10.5, lineHeight: 15, marginTop: 6 },
   inlineError: { minHeight: 32, flexDirection: 'row', alignItems: 'center', gap: 7 },
   errorText: { flex: 1, fontSize: 10.5, lineHeight: 15 },
-  actions: { flexDirection: 'row', flexWrap: 'wrap', gap: 7 },
   action: { minHeight: 44, maxWidth: '100%', borderRadius: 7, borderWidth: StyleSheet.hairlineWidth, paddingHorizontal: 11, alignItems: 'center', justifyContent: 'center' },
   actionText: { fontSize: 11, fontWeight: '800' },
-  conversationShadow: {
-    marginHorizontal: 14,
-    marginVertical: 8,
-    borderRadius: 7,
-    shadowOffset: { width: 0, height: 8 },
-    shadowRadius: 12,
-    elevation: 5,
-  },
-  conversationCard: { position: 'relative', overflow: 'hidden', borderRadius: 7, borderWidth: 1 },
-  conversationAccent: { position: 'absolute', top: 0, bottom: 0, left: 0, width: 3 },
-  conversationLayout: { minWidth: 0, flexDirection: 'row', gap: 6, paddingHorizontal: 12, paddingVertical: 10 },
-  conversationIcon: { width: 18, flexShrink: 0, alignItems: 'center', paddingTop: 1 },
-  conversationContent: { minWidth: 0, flex: 1 },
-  conversationHeader: { minWidth: 0, flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 2 },
-  conversationEyebrow: { flex: 1, minWidth: 0, fontSize: 9, lineHeight: 13, fontWeight: '700', letterSpacing: 0.6, textTransform: 'uppercase' },
-  conversationTime: { flexShrink: 0, fontSize: 9, lineHeight: 13, fontVariant: ['tabular-nums'] },
-  conversationHeading: { minWidth: 0, flexDirection: 'row', alignItems: 'center', gap: 9 },
-  conversationTitle: { minWidth: 0, flex: 1, fontSize: 12, lineHeight: 16, fontWeight: '800' },
-  conversationState: { maxWidth: '54%', flexShrink: 0, flexDirection: 'row', alignItems: 'center', gap: 4 },
-  conversationStateText: { flexShrink: 1, fontSize: 9, lineHeight: 13, fontWeight: '700' },
-  conversationParticipants: { minWidth: 0, flexDirection: 'row', alignItems: 'center', gap: 5, marginTop: 1, marginBottom: 8 },
-  conversationParticipant: { minWidth: 0, flexShrink: 1, fontSize: 9, lineHeight: 13 },
-  conversationBridge: { flexShrink: 0, fontSize: 11, lineHeight: 14 },
-  conversationControls: { minHeight: 44, flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', justifyContent: 'flex-end', columnGap: 8 },
+  conversationTime: { flexShrink: 0, marginLeft: 'auto', fontSize: 9, lineHeight: 13, fontVariant: ['tabular-nums'] },
   conversationControl: { minWidth: 44, minHeight: 44, maxWidth: '100%', justifyContent: 'center', paddingHorizontal: 2 },
   conversationControlText: { fontSize: 9.5, lineHeight: 14, fontWeight: '700' },
-  conversationTranscript: { minWidth: 0, gap: 12, marginTop: 3, marginBottom: 5, paddingVertical: 4 },
-  conversationLeg: { width: '80%', minWidth: 0, paddingHorizontal: 2, paddingVertical: 3 },
-  conversationLegRequester: { alignSelf: 'flex-start' },
-  conversationLegResponder: { alignSelf: 'flex-end' },
-  conversationLegHeader: { minWidth: 0, flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 2 },
-  conversationSpeakerRow: { minWidth: 0, flex: 1, flexDirection: 'row', alignItems: 'center', gap: 5 },
-  conversationSpeaker: { minWidth: 0, flexShrink: 1, fontSize: 9.5, lineHeight: 14, fontWeight: '800' },
-  conversationCurrentDot: { width: 5, height: 5, flexShrink: 0, borderRadius: 999 },
-  conversationLegTime: { flexShrink: 0, fontSize: 9, lineHeight: 13, fontVariant: ['tabular-nums'] },
-  conversationBody: { minWidth: 0, fontSize: 12, lineHeight: 19 },
   conversationPlaceholder: { marginTop: 6, fontSize: 9, lineHeight: 13 },
   conversationBodyToggle: { minWidth: 44, minHeight: 44, alignSelf: 'flex-start', justifyContent: 'center' },
   conversationBodyToggleText: { fontSize: 9.5, lineHeight: 14, fontWeight: '700' },
-  conversationFold: { width: '100%', minHeight: 44, alignItems: 'center', justifyContent: 'center' },
-  conversationPreview: { width: '80%', alignSelf: 'flex-start', paddingHorizontal: 2, paddingVertical: 3, fontSize: 12, lineHeight: 19 },
-  conversationEmpty: { alignSelf: 'center', paddingVertical: 5, fontSize: 10, lineHeight: 15 },
-  conversationFailure: { marginTop: 6, marginBottom: 2, fontSize: 10, lineHeight: 15 },
-  conversationInlineStatus: { minHeight: 44, flexDirection: 'row', alignItems: 'center', gap: 6 },
-  conversationStatusNote: { fontSize: 9, lineHeight: 13 },
   conversationInlineError: { minHeight: 32, flexDirection: 'row', alignItems: 'center', gap: 6 },
   conversationInlineErrorText: { minWidth: 0, flex: 1, fontSize: 9.5, lineHeight: 14 },
   conversationDetails: { marginTop: 3 },
@@ -1662,8 +1394,6 @@ const styles = StyleSheet.create({
   conversationDetailsToggleText: { fontSize: 9.5, lineHeight: 14, fontWeight: '700' },
   conversationDetailLines: { marginTop: -4, paddingBottom: 3 },
   conversationDetailLine: { marginVertical: 2, fontSize: 9, lineHeight: 14 },
-  conversationNotice: { fontSize: 9.5, lineHeight: 14 },
-  conversationActions: { minHeight: 44, flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', columnGap: 12, marginTop: 3 },
   conversationAction: { minWidth: 44, minHeight: 44, maxWidth: '100%', justifyContent: 'center' },
   conversationActionText: { fontSize: 10, lineHeight: 15, fontWeight: '700' },
 })

@@ -52,6 +52,7 @@ export function sameTimelineRow(left: TimelineRow, right: TimelineRow): boolean 
     // their bodies: previews may be 48k across hundreds of lifecycle cards.
     && left.event === right.event
     && left.crossChatMessage === right.crossChatMessage
+    && left.crossChatLegId === right.crossChatLegId
     && left.anchorTs === right.anchorTs
     && sameMailboxChildren(left, right)
     && sameOptionalReferences(left.events, right.events)

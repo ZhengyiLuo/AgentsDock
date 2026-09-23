@@ -210,7 +210,7 @@ for (const session_id of ['recipient', 'sender']) test(`mixed lifecycle keeps th
   } finally { await act(async () => renderer.unmount()) }
 })
 
-for (const theme of ['dark', 'light']) for (const width of [320, 834]) test(`${theme} async message uses readable incoming/outgoing surfaces at ${width}px`, async () => {
+for (const theme of ['dark', 'light']) for (const width of [320, 480, 600, 834, 1280]) test(`${theme} async message uses readable incoming/outgoing surfaces at ${width}px`, async () => {
   reset(); fixture.theme = theme
   const renderer = await render(event(), width)
   try {
@@ -219,8 +219,9 @@ for (const theme of ['dark', 'light']) for (const width of [320, 834]) test(`${t
     assert.equal(renderer.root.findAllByType('Pressable').length, 1, 'The only action is local peer navigation, not sending or granting a route')
     const surface = flatten(byID(renderer, 'cross-chat-async-message-message-a-surface')[0].props.style)
     assert.equal(surface.alignSelf, 'flex-end')
-    assert.equal(surface.width, width > 720 ? '82%' : '94%')
-    assert.equal(surface.maxWidth, 760)
+    assert.equal(surface.width, undefined, 'Short messages keep intrinsic width')
+    assert.equal(surface.maxWidth, Math.min(760, (width - 28) * (width <= 480 ? 0.94 : 0.82)))
+    assert.equal(surface.paddingHorizontal, width <= 480 ? 10 : 13)
     assert.equal(surface.minWidth, 0)
     assert.equal(surface.backgroundColor, theme === 'dark' ? '#332444' : '#eee5fb')
     const markdown = renderer.root.findByType(MarkdownContent)
@@ -232,6 +233,7 @@ for (const theme of ['dark', 'light']) for (const width of [320, 834]) test(`${t
     await act(async () => renderer.update(React.createElement(TimelineRowView, props(row(event({ session_id: 'sender', type: 'chat_conversation_message_registered' })), width))))
     assert.match(visible(renderer), /To Mobile agent/)
     assert.equal(flatten(byID(renderer, 'cross-chat-async-message-message-a-surface')[0].props.style).alignSelf, 'flex-start')
+    assert.equal(flatten(byID(renderer, 'cross-chat-async-message-message-a-surface')[0].props.style).backgroundColor, theme === 'dark' ? '#332444' : '#eee5fb')
     assert.deepEqual(calls, [])
   } finally { await act(async () => renderer.unmount()) }
 })
@@ -351,7 +353,7 @@ test('long complete messages fold locally without extra requests and remeasure o
     assert.equal(content(renderer), value)
     await act(async () => renderer.update(React.createElement(TimelineRowView, props(row(original), 834))))
     assert.equal(content(renderer), value, 'Rotation must preserve full-message expansion')
-    assert.equal(flatten(byID(renderer, 'cross-chat-async-message-message-a-surface')[0].props.style).width, '82%')
+    assert.equal(flatten(byID(renderer, 'cross-chat-async-message-message-a-surface')[0].props.style).maxWidth, (834 - 28) * 0.82)
     await press(renderer)
     assert.equal(content(renderer), '😀'.repeat(640) + '…')
     assert.deepEqual(calls, [])
@@ -448,6 +450,30 @@ for (const body of [undefined, null, '', '   ']) test(`malformed or empty full b
 
 const legacyEvent = patch => event({ type: 'cross_chat_handoff_queued', conversation_mode: undefined, handoff_status: 'queued', ...patch })
 const pressID = async (renderer, id) => act(async () => byID(renderer, id)[0].props.onPress())
+
+test('legacy handoff with no preview still loads and long bodies fold without losing retry or cancel', async () => {
+  reset(); publish({ selectedSessionId: 'sender' })
+  const body = '# Result\n\n' + 'Long authenticated result. '.repeat(400)
+  let reads = 0
+  client.crossChatHandoff = async () => { if (++reads === 1) throw new Error('Temporary detail failure'); return handoff({ body }) }
+  const renderer = await render(legacyEvent({ session_id: 'sender', handoff_preview: '', handoff_body_truncated: undefined }))
+  try {
+    assert.match(visible(renderer), /Message body available on demand/)
+    await pressID(renderer, 'cross-chat-handoff-body-message-a')
+    assert.match(visible(renderer), /Temporary detail failure/)
+    await pressID(renderer, 'cross-chat-handoff-body-message-a')
+    assert.equal(content(renderer), body.slice(0, 4000) + '…')
+    await pressID(renderer, 'cross-chat-handoff-body-message-a')
+    assert.equal(content(renderer), body.slice(0, 8000) + '…')
+    await pressID(renderer, 'cross-chat-handoff-body-message-a')
+    assert.equal(content(renderer), body)
+    await pressID(renderer, 'cross-chat-handoff-body-message-a')
+    assert.equal(content(renderer), body.slice(0, 640).trimEnd() + '…')
+    assert.equal(reads, 2)
+    assert.equal(byID(renderer, 'cross-chat-cancel-handoff-message-a').length, 1)
+    assert.doesNotMatch(visible(renderer), /Temporary detail failure/)
+  } finally { await act(async () => renderer.unmount()) }
+})
 
 test('timeline dispatches passive mailbox messages into a folded inbox without queue or run controls', async () => {
   reset()
@@ -582,7 +608,6 @@ for (const status of ['running', 'delivered']) test(`legacy cancel shows returne
   client.cancelCrossChatHandoff = async () => handoff({ status })
   const renderer = await render(legacyEvent({ session_id: 'sender' }))
   try {
-    await pressID(renderer, 'cross-chat-handoff-message-a')
     await pressID(renderer, 'cross-chat-cancel-handoff-message-a')
     assert.match(visible(renderer), /cancellation was not confirmed/)
     assert.ok(visible(renderer).toLowerCase().includes(status))
@@ -595,7 +620,7 @@ test('legacy handoff detail rejects changed participants before rendering their 
   reset(); client.crossChatHandoff = async () => handoff({ source_session_id: 'unexpected-peer', body: 'Wrong participant body' })
   const renderer = await render(legacyEvent({ handoff_body_truncated: true }))
   try {
-    await pressID(renderer, 'cross-chat-handoff-message-a')
+    await pressID(renderer, 'cross-chat-handoff-body-message-a')
     assert.match(visible(renderer), /different handoff participants/)
     assert.doesNotMatch(visible(renderer), /Wrong participant body/)
   } finally { await act(async () => renderer.unmount()) }
@@ -606,7 +631,6 @@ test('legacy cancellation rejects changed participant identities', async () => {
   client.cancelCrossChatHandoff = async () => handoff({ target_session_id: 'unexpected-peer', status: 'cancelled' })
   const renderer = await render(legacyEvent({ session_id: 'sender' }))
   try {
-    await pressID(renderer, 'cross-chat-handoff-message-a')
     await pressID(renderer, 'cross-chat-cancel-handoff-message-a')
     assert.match(visible(renderer), /different handoff participants/)
     assert.doesNotMatch(visible(renderer), /· Cancelled ·/)
@@ -620,7 +644,6 @@ test('a late legacy cancel receipt cannot overwrite a newer delivered lifecycle 
   const initial = legacyEvent({ session_id: 'sender' })
   const renderer = await render(initial)
   try {
-    await pressID(renderer, 'cross-chat-handoff-message-a')
     await pressID(renderer, 'cross-chat-cancel-handoff-message-a')
     const delivered = { ...initial, id: 'event-b', seq: 2, type: 'cross_chat_handoff_delivered', handoff_status: 'delivered' }
     await act(async () => renderer.update(React.createElement(TimelineRowView, props(row([initial, delivered])))))
@@ -635,7 +658,6 @@ test('a confirmed legacy cancellation updates the card and removes its cancel ac
   client.cancelCrossChatHandoff = async () => handoff({ status: 'cancelled' })
   const renderer = await render(legacyEvent({ session_id: 'sender' }))
   try {
-    await pressID(renderer, 'cross-chat-handoff-message-a')
     await pressID(renderer, 'cross-chat-cancel-handoff-message-a')
     assert.match(visible(renderer), /Cancelled/)
     assert.doesNotMatch(visible(renderer), /not confirmed/)

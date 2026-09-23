@@ -11,6 +11,14 @@ export const Switch = 'Switch'
 export const ActivityIndicator = 'ActivityIndicator'
 export const Image = 'Image'
 export const TouchableOpacity = 'TouchableOpacity'
+export const KeyboardAvoidingView = 'KeyboardAvoidingView'
+
+export function FlatList({ data, renderItem, ListEmptyComponent, ListHeaderComponent, ...props }: any) {
+  return createElement('FlatList', props, ListHeaderComponent,
+    data.length ? data.map((item: any, index: number) => createElement('Row', { key: item.key }, renderItem({ item, index }))) : ListEmptyComponent)
+}
+
+export const ActionSheetIOS = { showActionSheetWithOptions() {} }
 
 export function Modal({ visible = true, ...props }: Record<string, unknown>) {
   return visible ? createElement('Modal', props) : null
