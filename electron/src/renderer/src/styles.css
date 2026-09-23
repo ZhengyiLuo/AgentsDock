@@ -1880,6 +1880,7 @@ button.tool-event-toggle:hover { background: #242424; }
 .app-settings-update-progress { height: 3px; margin: -1px var(--space-1) var(--space-5); overflow: hidden; background: var(--surface-3); border-radius: var(--radius-pill); }
 .app-settings-update-progress > span { height: 100%; display: block; background: var(--accent); border-radius: inherit; transition: width 160ms ease; }
 .app-settings-server-updates { display: grid; gap: 0; }
+.app-settings-server-inventory { margin-left: var(--space-5); padding-left: var(--space-6); border-left: 1px solid var(--border-soft); }
 .app-settings-server-actions { display: grid; gap: 0; margin-top: 24px; border-top: 1px solid var(--border-soft); }
 .app-settings-server-notice { padding: 9px 11px; color: var(--accent); background: color-mix(in srgb, var(--accent) 8%, transparent); border: 1px solid color-mix(in srgb, var(--accent) 24%, transparent); border-radius: var(--radius-popover); font-size: var(--font-size-md); line-height: var(--line-height-ui); }
 .app-settings-server-notice.error { color: var(--danger); background: color-mix(in srgb, var(--danger) 8%, transparent); border-color: color-mix(in srgb, var(--danger) 24%, transparent); }
@@ -2281,8 +2282,6 @@ button.tool-event-toggle:hover { background: #242424; }
 .codex-subagent-settings-controls input { width: 150px; max-width: 100%; min-height: var(--control-height-lg); background: var(--surface); color: var(--text); border: 1px solid var(--border); border-radius: var(--radius-control); padding: var(--space-2) var(--space-3); font-size: var(--text-size-ui); }
 .codex-subagent-settings-controls input:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .codex-subagent-settings-controls input:disabled { opacity: .6; }
-.privacy-policy-link { display: inline-flex; align-items: center; gap: 4px; width: fit-content; padding: 0; color: var(--accent); background: transparent; font-size: var(--text-size-meta); font-weight: var(--text-weight-label); }
-.privacy-policy-link:hover { color: color-mix(in srgb, var(--accent), white 24%); }
 .settings-switch { position: relative; width: 31px; height: 18px; flex: none; padding: 0; background: #454545; border: 0; border-radius: 999px; transition: background 120ms ease; }
 .settings-switch[data-state="checked"] { background: var(--accent); }
 .settings-switch:disabled { opacity: .45; cursor: default; }

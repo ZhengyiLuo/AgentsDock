@@ -1,5 +1,18 @@
 # Public development log
 
+## 2026-09-23 — Clarify update settings and first-time server setup
+
+- Keep desktop and server updates together, with configured servers and their
+  known versions listed beneath the server controls.
+- Show the setup entry only before any server is configured. Saved offline
+  servers retain their existing update/recovery controls without a duplicate
+  general installation prompt.
+- Mark selected update channels accessibly and prevent conflicting app update
+  actions while a channel change is pending.
+- The 222 focused settings checks, TypeScript and production compilation pass.
+  Native click-through acceptance is pending computer-use permissions; this
+  records source/local-build validation, not a release or server deployment.
+
 ## 2026-09-22 — Prepare OpenCode desktop/server beta candidate
 
 - Integrate OpenCode into the maintained desktop and server sources for

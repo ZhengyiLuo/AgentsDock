@@ -20,7 +20,11 @@ function show(update: CoordinatedServerUpdate, retryResult?: Promise<AppUpdateSt
     updates: { status: vi.fn().mockResolvedValue(status), check: vi.fn().mockResolvedValue(status), retryServers },
     events: { on: vi.fn().mockReturnValue(() => undefined) }
   } })
-  useAppStore.setState(state => ({ profiles: [], activeProfileId: 'another-server', health: null, error: null,
+  useAppStore.setState(state => ({ profiles: [{
+    id: update.profileId, name: update.name, serverUrl: 'https://studio.example.test',
+    serverIdentity: update.serverIdentity, hasAccessToken: true, serverSetupComplete: true,
+    connectionState: 'offline', cachedUnreadCount: 0, serverVersion: '1.0.4'
+  }], activeProfileId: 'another-server', health: null, error: null,
     modals: { ...state.modals, appSettings: true, settings: false } }))
   render(<AppSettingsDialog />)
   fireEvent.click(screen.getByRole('button', { name: t('settings.updates') }))
