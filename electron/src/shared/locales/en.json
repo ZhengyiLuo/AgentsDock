@@ -3001,5 +3001,12 @@
   "claudeGoal.status.failed": "Goal failed",
   "claudeGoal.loading": "Loading Claude goal status…",
   "claudeGoal.busyReplace": "Clear & stop before replacing this goal.",
-  "claudeGoal.busyStart": "Wait for current work to finish before starting a goal."
+  "claudeGoal.busyStart": "Wait for current work to finish before starting a goal.",
+  "codexGoal.title": "Codex goal",
+  "codexGoal.description": "Set one goal for Codex to keep working toward across turns.",
+  "codexGoal.close": "Close goal",
+  "codexGoal.condition": "Completion condition",
+  "codexGoal.current": "Current goal",
+  "codexGoal.open": "Goal…",
+  "codexGoal.start": "Start goal"
 }

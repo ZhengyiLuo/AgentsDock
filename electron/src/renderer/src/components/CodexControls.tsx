@@ -47,6 +47,7 @@ import {
 } from './CodexRuntimeContext'
 import { useTransientClose } from '../lib/transient-close'
 import { CodexInteractionCard } from './CodexInteractionShelf'
+import { GoalConditionField, GoalDialogContent } from './GoalDialog'
 import './CodexControls.css'
 
 export function CodexStatusButton() {
@@ -124,12 +125,7 @@ export function CodexStatusButton() {
         <ChevronRight size={12} aria-hidden="true" />
       </button>
     </Dialog.Trigger>
-    <Dialog.Portal>
-      <Dialog.Overlay className="dialog-overlay codex-controls-overlay" />
-      <Dialog.Content className="codex-controls-dialog" aria-describedby="codex-controls-description">
-        <CodexControlsPanel focusGoal={focusGoal} />
-      </Dialog.Content>
-    </Dialog.Portal>
+    <CodexControlsDialog focusGoal={focusGoal} onOpenGoal={() => setFocusGoal(true)} />
   </Dialog.Root>
 }
 
@@ -138,6 +134,7 @@ export function CodexContextIndicator() {
   useLocale()
   const { supported, runtime, session, refresh } = useCodexRuntime()
   const meterId = useId()
+  const [focusGoal, setFocusGoal] = useState(false)
   const events = useAppStore(state => session ? state.snapshots[session.id]?.events ?? EMPTY_EVENTS : EMPTY_EVENTS)
   const runtimeUsage = runtime
     ? runtime.token_usage_snapshot !== undefined
@@ -156,7 +153,7 @@ export function CodexContextIndicator() {
     ? detail
     : `${formattedPercent} context used · ${detail}`
   return <Dialog.Root onOpenChange={open => {
-    if (open) void refresh()
+    if (open) { setFocusGoal(false); void refresh() }
   }}>
     <Tooltip.Provider delayDuration={100}>
       <Tooltip.Root>
@@ -207,12 +204,7 @@ export function CodexContextIndicator() {
       aria-valuenow={percent ?? undefined}
       aria-valuetext={tooltip}
     >{tooltip}</span>
-    <Dialog.Portal>
-      <Dialog.Overlay className="dialog-overlay codex-controls-overlay" />
-      <Dialog.Content className="codex-controls-dialog" aria-describedby="codex-controls-description">
-        <CodexControlsPanel />
-      </Dialog.Content>
-    </Dialog.Portal>
+    <CodexControlsDialog focusGoal={focusGoal} onOpenGoal={() => setFocusGoal(true)} />
   </Dialog.Root>
 }
 
@@ -353,16 +345,35 @@ export function CodexGoalBar() {
       </div>}
       {displayedError && <div className="codex-goal-bar-error" role="alert">{displayedError}</div>}
     </section>
-    <Dialog.Portal>
-      <Dialog.Overlay className="dialog-overlay codex-controls-overlay" />
-      <Dialog.Content className="codex-controls-dialog" aria-describedby="codex-controls-description">
-        <CodexControlsPanel focusGoal={focusGoal} />
-      </Dialog.Content>
-    </Dialog.Portal>
+    <CodexControlsDialog focusGoal={focusGoal} onOpenGoal={() => setFocusGoal(true)} />
   </Dialog.Root>
 }
 
-export function CodexControlsPanel({ focusGoal = false }: { focusGoal?: boolean }) {
+function CodexControlsDialog({ focusGoal, onOpenGoal }: { focusGoal: boolean; onOpenGoal(): void }) {
+  if (focusGoal) return <CodexGoalDialogContent />
+  return <Dialog.Portal>
+    <Dialog.Overlay className="dialog-overlay codex-controls-overlay" />
+    <Dialog.Content className="codex-controls-dialog" aria-describedby="codex-controls-description">
+      <CodexControlsPanel onOpenGoal={onOpenGoal} />
+    </Dialog.Content>
+  </Dialog.Portal>
+}
+
+function CodexGoalDialogContent() {
+  useLocale()
+  const { session, loading, mutating } = useCodexRuntime()
+  const [notice, setNotice] = useState<string | null>(null)
+  const profileId = useAppStore(state => state.activeProfileId)
+  const profileGeneration = useAppStore(state => state.profileGeneration)
+  useEffect(() => setNotice(null), [profileId, profileGeneration, session?.id])
+  return <GoalDialogContent title={t('codexGoal.title')} description={t('codexGoal.description')} closeLabel={t('codexGoal.close')} busy={mutating}>
+    {loading
+      ? <p className="goal-dialog-message goal-feedback" role="status">{t('ui.CodexControls.CodexControlsPanel.loading_thread_controls_8d8c070')}</p>
+      : <GoalSettings key={`${profileId}:${profileGeneration}`} onNotice={setNotice} notice={notice} />}
+  </GoalDialogContent>
+}
+
+export function CodexControlsPanel({ onOpenGoal }: { onOpenGoal(): void }) {
   useLocale()
   const { runtime, session, loading, refreshing, mutating, error, refresh } = useCodexRuntime()
   const sharedDisconnected = useAppStore(state => window.agentsDock.sharedChat === true && !state.connected)
@@ -393,7 +404,12 @@ export function CodexControlsPanel({ focusGoal = false }: { focusGoal?: boolean 
         : <fieldset className="codex-controls-body" disabled={sharedDisconnected}>
           <PendingControlsSection />
           <ThreadStatusSection />
-          <GoalSettings onNotice={setNotice} autoFocusObjective={focusGoal} />
+          <section className="codex-control-section">
+            <div className="codex-action-row">
+              <div><strong>{t('codexGoal.title')}</strong><small>{t('ui.CodexControls.GoalSettings.survives_turns_in_this_codex_thread_09f87c8')}</small></div>
+              <button type="button" className="quiet-button" onClick={onOpenGoal}><Goal size={14} />{t('codexGoal.open')}</button>
+            </div>
+          </section>
           {!window.agentsDock.sharedChat && <ThreadActions onNotice={setNotice} />}
           {!window.agentsDock.sharedChat && <BackgroundTerminals onNotice={setNotice} />}
         </fieldset>}
@@ -467,9 +483,12 @@ function ThreadStatusSection() {
   </section>
 }
 
-function GoalSettings({ onNotice, autoFocusObjective = false }: { onNotice(value: string): void; autoFocusObjective?: boolean }) {
+function GoalSettings({ onNotice, notice }: { onNotice(value: string): void; notice: string | null }) {
   useLocale()
-  const { runtime, session, run, applyGoalSnapshot } = useCodexRuntime()
+  const { runtime, session, error, run, applyGoalSnapshot } = useCodexRuntime()
+  const sharedDisconnected = useAppStore(state => window.agentsDock.sharedChat === true && !state.connected)
+  const switchingProfileId = useAppStore(state => state.switchingProfileId)
+  const blocked = sharedDisconnected || Boolean(switchingProfileId)
   const goal = runtime?.goal
   const [objective, setObjective] = useState(goal?.objective ?? '')
   const [status, setStatus] = useState<CodexGoalStatus>((goal?.status as CodexGoalStatus) ?? 'active')
@@ -514,7 +533,7 @@ function GoalSettings({ onNotice, autoFocusObjective = false }: { onNotice(value
 
   if (!session) return null
   if (runtime?.goals_enabled === false) {
-    return <section className="codex-control-section" aria-label={t("ui.CodexControls.GoalSettings.persistent_goals_disabled_bb137e5")}>
+    return <section className="goal-dialog-message" aria-label={t("ui.CodexControls.GoalSettings.persistent_goals_disabled_bb137e5")}>
       <div className="codex-section-heading"><Goal size={15} /><div><strong>{t("ui.CodexControls.GoalSettings.persistent_goals_953c4a2")}</strong><small>{t("ui.CodexControls.GoalSettings.disabled_server_wide_9a00be5")}</small></div></div>
       <div className="codex-goals-disabled" role="status">
         <strong>{t("ui.CodexControls.GoalSettings.persistent_goals_are_disabled_on_this_serv_d45e99e")}</strong>
@@ -541,9 +560,9 @@ function GoalSettings({ onNotice, autoFocusObjective = false }: { onNotice(value
   }
   const save = (event: FormEvent) => {
     event.preventDefault()
-    if (actionInFlight.current) return
+    if (blocked || actionInFlight.current) return
     const trimmedObjective = objective.trim()
-    if (!trimmedObjective) return
+    if (!trimmedObjective || objective.length > 4000) return
     const tokenBudgetResult = optionalPositiveInteger(tokenBudget, 'Token budget')
     const timeBudgetResult = optionalPositiveInteger(timeBudget, 'Time limit')
     const validationError = tokenBudgetResult.error || timeBudgetResult.error
@@ -580,7 +599,7 @@ function GoalSettings({ onNotice, autoFocusObjective = false }: { onNotice(value
     })
   }
   const clear = () => {
-    if (actionInFlight.current) return
+    if (blocked || actionInFlight.current) return
     const epoch = actionEpoch.current
     const submittedRevision = draftRevision.current
     actionInFlight.current = true
@@ -605,18 +624,20 @@ function GoalSettings({ onNotice, autoFocusObjective = false }: { onNotice(value
   }
   const goalActionPending = goalAction === 'saving' || goalAction === 'clearing'
 
-  return <section className="codex-control-section">
-    <div className="codex-section-heading"><Goal size={15} /><div><strong>{t("ui.CodexControls.GoalSettings.persistent_goal_389445f")}</strong><small>{t("ui.CodexControls.GoalSettings.survives_turns_in_this_codex_thread_09f87c8")}</small></div></div>
-    <form className="codex-goal-form" noValidate onSubmit={save}>
-      <label className="wide">
-        <span>{t("ui.CodexControls.GoalSettings.objective_3b20adc")}</span>
-        <textarea autoFocus={autoFocusObjective} rows={3} maxLength={4000} value={objective} placeholder={t("ui.CodexControls.GoalSettings.what_should_codex_keep_working_toward_da42c7b")} onChange={event => {
-          markDraftDirty()
-          setObjective(event.target.value)
-        }} />
-      </label>
+  return <form noValidate onSubmit={save}>
+      {sharedDisconnected && <p className="goal-feedback" role="status">{t('chatShare.web.disconnected')}</p>}
+      {goal && <section className="goal-progress" aria-label={t('codexGoal.current')}>
+        <strong>{goalStatusLabel(goal.status)}</strong>
+        <p>{goal.objective}</p>
+        <dl>
+          <div><dt>{t('ui.CodexControls.CodexGoalBar.tokens_a039dfb')}</dt><dd>{formatGoalBudget(goal.tokensUsed, goal.tokenBudget)}</dd></div>
+          <div><dt>{t('ui.CodexControls.CodexGoalBar.time_33b9347')}</dt><dd>{formatGoalBudget(goal.timeUsedSeconds, runtime?.time_budget_seconds, true)}</dd></div>
+        </dl>
+      </section>}
+      <GoalConditionField label={t('codexGoal.condition')} placeholder={t('ui.CodexControls.GoalSettings.what_should_codex_keep_working_toward_da42c7b')}
+        value={objective} disabled={blocked} onChange={value => { markDraftDirty(); setObjective(value) }} />
       <div className="codex-control-fields three-column">
-        <label><span>{t("ui.CodexControls.GoalSettings.status_920e413")}</span><select value={status} onChange={event => {
+        <label><span>{t("ui.CodexControls.GoalSettings.status_920e413")}</span><select disabled={blocked} value={status} onChange={event => {
           markDraftDirty()
           setStatus(event.target.value as CodexGoalStatus)
         }}>
@@ -627,13 +648,13 @@ function GoalSettings({ onNotice, autoFocusObjective = false }: { onNotice(value
           <option value="budgetLimited">{t("ui.CodexControls.GoalSettings.budget_limited_1ab998e")}</option>
           <option value="complete">{t("ui.CodexControls.GoalSettings.complete_143b270")}</option>
         </select></label>
-        <label><span>{t("ui.CodexControls.GoalSettings.token_budget_9ab958b")}</span><input type="number" min="1" step="1" value={tokenBudget} placeholder={t("ui.CodexControls.GoalSettings.no_limit_f7fcff0")} onChange={event => {
+        <label><span>{t("ui.CodexControls.GoalSettings.token_budget_9ab958b")}</span><input disabled={blocked} type="number" min="1" step="1" value={tokenBudget} placeholder={t("ui.CodexControls.GoalSettings.no_limit_f7fcff0")} onChange={event => {
           markDraftDirty()
           setTokenBudget(event.target.value)
         }} /></label>
         <label>
           <span>{t("ui.CodexControls.GoalSettings.time_limit_seconds_cf9965b")}</span>
-          <input type="number" min="1" step="1" value={timeBudget} placeholder={t("ui.CodexControls.GoalSettings.no_limit_f7fcff0")} onChange={event => {
+          <input disabled={blocked} type="number" min="1" step="1" value={timeBudget} placeholder={t("ui.CodexControls.GoalSettings.no_limit_f7fcff0")} onChange={event => {
             markDraftDirty()
             setTimeBudget(event.target.value)
           }} />
@@ -641,9 +662,10 @@ function GoalSettings({ onNotice, autoFocusObjective = false }: { onNotice(value
           {timeBudgetExhausted && <small className="codex-field-error" role="status">{t("ui.CodexControls.GoalSettings.exhausted_raise_this_limit_or_change_the_o_1acb6cb")}</small>}
         </label>
       </div>
-      <div className="codex-section-actions">
-        {goalActionError && <span className="codex-inline-action-error" role="alert">{goalActionError}</span>}
-        {goal && <button type="button" className="quiet-button codex-decline" disabled={goalActionPending} onClick={clear}>
+      {(goalActionError || error) && <p className="goal-feedback error codex-inline-action-error" role="alert">{goalActionError || error}</p>}
+      {notice && !goalActionError && <p className="goal-feedback" role="status">{notice}</p>}
+      <footer>
+        {goal && <button type="button" className="quiet-button codex-decline" disabled={blocked || goalActionPending} onClick={clear}>
           {goalAction === 'clearing' ? <LoaderCircle className="spin" size={14} /> : <Trash2 size={14} />}
           {goalAction === 'clearing' ? t("ui.CodexControls.GoalSettings.clearing_9a81378") : goalAction === 'clear-failed' ? t("ui.CodexControls.GoalSettings.retry_clear_19e9863") : t("ui.CodexControls.GoalSettings.clear_goal_0d7c342")}
         </button>}
@@ -651,20 +673,19 @@ function GoalSettings({ onNotice, autoFocusObjective = false }: { onNotice(value
           type="submit"
           className="primary-button"
           aria-busy={goalAction === 'saving'}
-          disabled={goalActionPending || !objective.trim()}
+          disabled={blocked || goalActionPending || !objective.trim() || objective.length > 4000}
         >
-          {goalAction === 'saving' ? <LoaderCircle className="spin" size={14} /> : <Check size={14} />}
+          {goalAction === 'saving' ? <LoaderCircle className="spin" size={14} /> : null}
           {goalAction === 'saving'
             ? t("ui.CodexControls.GoalSettings.saving_23e3929")
             : goalAction === 'saved'
               ? t("ui.CodexControls.GoalSettings.saved_b5c120b")
               : goalAction === 'save-failed'
                 ? t("ui.CodexControls.GoalSettings.retry_save_71fdfa7")
-                : t("ui.CodexControls.GoalSettings.save_goal_88b7665")}
+                : !goal && status === 'active' ? t("codexGoal.start") : t("ui.CodexControls.GoalSettings.save_goal_88b7665")}
         </button>
-      </div>
-    </form>
-  </section>
+      </footer>
+  </form>
 }
 
 function ThreadActions({ onNotice }: { onNotice(value: string): void }) {

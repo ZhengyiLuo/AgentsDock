@@ -3001,5 +3001,12 @@
   "claudeGoal.status.failed": "目标失败",
   "claudeGoal.loading": "正在加载 Claude 目标状态…",
   "claudeGoal.busyReplace": "请先清除并停止当前目标，再替换目标。",
-  "claudeGoal.busyStart": "请等待当前工作结束后再开始目标。"
+  "claudeGoal.busyStart": "请等待当前工作结束后再开始目标。",
+  "codexGoal.title": "Codex 目标",
+  "codexGoal.description": "设置一个目标，让 Codex 跨轮次持续推进。",
+  "codexGoal.close": "关闭目标",
+  "codexGoal.condition": "完成条件",
+  "codexGoal.current": "当前目标",
+  "codexGoal.open": "目标…",
+  "codexGoal.start": "开始目标"
 }

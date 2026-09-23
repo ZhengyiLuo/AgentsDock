@@ -370,8 +370,7 @@
 .codex-json-details summary { color: var(--muted); font-size: var(--text-size-label); font-weight: var(--text-weight-label); cursor: default; }
 
 .codex-question-form,
-.codex-elicitation-form,
-.codex-goal-form { display: flex; flex-direction: column; gap: 10px; }
+.codex-elicitation-form { display: flex; flex-direction: column; gap: 10px; }
 .codex-question-form fieldset {
   min-width: 0;
   display: flex;
@@ -421,7 +420,6 @@
 .codex-elicitation-form textarea,
 .codex-control-fields input,
 .codex-control-fields select,
-.codex-goal-form textarea,
 .codex-review-target input,
 .codex-review-target select,
 .codex-advanced textarea,
@@ -664,13 +662,11 @@
 .codex-control-fields.two-column { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 .codex-control-fields.three-column { grid-template-columns: 1fr 1fr 1.4fr; }
 .codex-control-fields label,
-.codex-goal-form > label,
 .codex-number-field { min-width: 0; display: flex; flex-direction: column; gap: 4px; color: var(--muted); font-size: var(--text-size-label); font-weight: var(--text-weight-label); }
 .codex-control-fields label > small { min-height: 22px; color: var(--faint); font-size: var(--text-size-meta); font-weight: var(--text-weight-body); }
 .codex-control-fields label > .codex-field-error { color: #ff938f; }
 .codex-control-fields label > .codex-field-warning { color: var(--amber); }
 .codex-control-fields select:disabled { opacity: .45; }
-.codex-goal-form textarea { min-height: 65px; resize: vertical; line-height: 1.45; }
 .codex-section-actions { margin-top: 9px; }
 .codex-inline-action-error {
   min-width: 0;
@@ -850,7 +846,6 @@
 :root[data-theme="light"] .codex-elicitation-form textarea,
 :root[data-theme="light"] .codex-control-fields input,
 :root[data-theme="light"] .codex-control-fields select,
-:root[data-theme="light"] .codex-goal-form textarea,
 :root[data-theme="light"] .codex-review-target input,
 :root[data-theme="light"] .codex-review-target select,
 :root[data-theme="light"] .codex-advanced textarea,
