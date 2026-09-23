@@ -60,6 +60,7 @@ describe('Dialog close controls', () => {
 
 describe('AppSettingsDialog', () => {
   afterEach(cleanup)
+  beforeEach(() => useAppStore.setState({ connected: false, health: null, profiles: [], activeProfileId: null }))
 
   it('keeps app preferences, server controls, and updates in one settings dialog', async () => {
     const updateStatus = { state: 'not-available' as const, channel: 'direct' as const, track: 'stable' as const, currentVersion: '0.2.0', message: 'AgentsDock is up to date.' }
@@ -67,7 +68,8 @@ describe('AppSettingsDialog', () => {
       .mockResolvedValueOnce(updateStatus)
       .mockResolvedValue({ ...updateStatus, state: 'downloaded', message: 'Ready to install' })
     const install = vi.fn().mockResolvedValue(true)
-    const setTrack = vi.fn().mockResolvedValue({ ...updateStatus, track: 'beta', message: 'AgentsDock is up to date on the beta channel.' })
+    let resolveSetTrack!: (status: AppUpdateStatus) => void
+    const setTrack = vi.fn(() => new Promise<AppUpdateStatus>(resolve => { resolveSetTrack = resolve }))
     Object.defineProperty(window, 'agentsDock', {
       configurable: true,
       value: {
@@ -120,8 +122,14 @@ describe('AppSettingsDialog', () => {
     expect(within(dialog).getByText('This is the latest one.')).toBeInTheDocument()
     expect(check).toHaveBeenCalledOnce()
     const appUpdateChannel = within(dialog).getByRole('group', { name: 'App update channel' })
+    expect(within(appUpdateChannel).getByRole('button', { name: 'Stable' })).toHaveAttribute('aria-pressed', 'true')
+    expect(within(appUpdateChannel).getByRole('button', { name: 'Beta' })).toHaveAttribute('aria-pressed', 'false')
     fireEvent.click(within(appUpdateChannel).getByRole('button', { name: 'Beta' }))
-    await waitFor(() => expect(setTrack).toHaveBeenCalledWith('beta'))
+    expect(within(appUpdateChannel).getByRole('button', { name: 'Beta' })).toBeDisabled()
+    expect(within(dialog).getByRole('button', { name: 'Check for updates' })).toBeDisabled()
+    expect(setTrack).toHaveBeenCalledWith('beta')
+    await act(async () => resolveSetTrack({ ...updateStatus, track: 'beta' }))
+    expect(within(appUpdateChannel).getByRole('button', { name: 'Beta' })).toHaveAttribute('aria-pressed', 'true')
     fireEvent.click(within(dialog).getByRole('button', { name: 'Check for updates' }))
     expect(check).toHaveBeenCalledTimes(2)
     fireEvent.click(await within(dialog).findByRole('button', { name: 'Restart to update' }))
@@ -133,6 +141,53 @@ describe('AppSettingsDialog', () => {
     expect(within(dialog).getByRole('button', { name: 'Server' })).toHaveAttribute('aria-current', 'page')
     expect(within(dialog).getByText('Existing server controls')).toBeInTheDocument()
     expect(useAppStore.getState().modals).toMatchObject({ appSettings: true, settings: false })
+  })
+
+  it('lists saved servers and only offers setup before any server is configured', async () => {
+    const updateStatus: AppUpdateStatus = { state: 'idle', channel: 'direct', track: 'stable', currentVersion: '0.2.0' }
+    const install = vi.fn()
+    Object.defineProperty(window, 'agentsDock', {
+      configurable: true,
+      value: {
+        updates: { check: vi.fn().mockResolvedValue(updateStatus), install },
+        events: { on: vi.fn().mockReturnValue(() => undefined) }
+      } as unknown as AgentsDockAPI
+    })
+    const placeholder: PublicServerProfile = {
+      id: 'placeholder', name: 'My server', serverUrl: 'http://127.0.0.1:7850',
+      hasAccessToken: false, serverSetupComplete: false, connectionState: 'offline', cachedUnreadCount: 0
+    }
+    const saved: PublicServerProfile = {
+      id: 'saved', name: 'Saved server', serverUrl: 'https://saved.example.test',
+      hasAccessToken: true, serverSetupComplete: true, connectionState: 'offline', cachedUnreadCount: 0,
+      serverVersion: '0.1.26'
+    }
+    useAppStore.setState({
+      profiles: [placeholder, saved], activeProfileId: placeholder.id,
+      modals: { ...useAppStore.getState().modals, settings: false, appSettings: true }
+    })
+    render(<AppSettingsDialog serverUpdates={<div>Server update controls</div>} />)
+    await screen.findByText('Version 0.2.0')
+    fireEvent.click(screen.getByRole('button', { name: 'Updates' }))
+    expect(screen.getByText('Server update controls')).toBeInTheDocument()
+    expect(screen.getByText('Saved server')).toBeInTheDocument()
+    expect(screen.getByText('AgentsServer 0.1.26')).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /Set up your server|Install or update AgentsServer/ })).not.toBeInTheDocument()
+
+    act(() => useAppStore.setState({ activeProfileId: saved.id, health: { ok: true, server_version: '0.1.27' } }))
+    expect(screen.getByText('AgentsServer 0.1.27')).toBeInTheDocument()
+    act(() => useAppStore.setState({ profiles: [placeholder], activeProfileId: placeholder.id, health: null }))
+    const setup = vi.fn()
+    window.addEventListener('agentsdock:server-setup', setup)
+    try {
+      fireEvent.click(screen.getByRole('button', { name: 'Set up your server' }))
+      expect(setup).toHaveBeenCalledOnce()
+      expect((setup.mock.calls[0][0] as CustomEvent).detail).toMatchObject({ intent: 'setup' })
+      expect(useAppStore.getState().modals).toMatchObject({ appSettings: false, settings: false })
+      expect(install).not.toHaveBeenCalled()
+    } finally {
+      window.removeEventListener('agentsdock:server-setup', setup)
+    }
   })
 
   it('checks releases in development without offering an external installer download', async () => {
