@@ -33,7 +33,6 @@ import type {
 import { useAppStore } from '../store/app-store'
 import {
   formatCompactTokens,
-  formatContextUsage,
   formatContextUsageDetail,
   latestCodexContextUsage,
   type CodexContextUsage
@@ -435,7 +434,6 @@ function ThreadStatusSection() {
     [events, runtimeUsage, session?.codex_thread_id, session?.session_id]
   )
   const goal = runtime?.goal
-  const flags = runtime?.status?.type === 'active' ? runtime.status.activeFlags : []
   const used = numberValue(goal?.tokensUsed)
   const budget = numberValue(goal?.tokenBudget)
   const elapsed = numberValue(goal?.timeUsedSeconds)
@@ -444,14 +442,6 @@ function ThreadStatusSection() {
 
   return <section className="codex-control-section status">
     <div className="codex-section-heading"><CircleGauge size={15} /><div><strong>{t("ui.CodexControls.ThreadStatusSection.thread_status_b5c2efa")}</strong><small>{t("ui.CodexControls.ThreadStatusSection.live_state_from_codex_app_server_01ac470")}</small></div></div>
-    <div className="codex-status-grid">
-      <StatusDatum label={t("ui.CodexControls.ThreadStatusSection.state_a3b50c4")} value={runtime?.available === false ? 'Unavailable' : codexStatusLabel(runtime?.status)} />
-      <StatusDatum label={t("ui.CodexControls.ThreadStatusSection.thread_5373c7f")} value={runtime?.thread_loaded === false ? 'Not loaded' : 'Loaded'} />
-      <StatusDatum label={t("ui.CodexControls.ThreadStatusSection.context_a6e600a")} value={formatContextUsage(usage)} title={formatContextUsageDetail(usage)} />
-      <StatusDatum label={t("ui.CodexControls.ThreadStatusSection.transport_aaead4a")} value={runtime?.transport || 'app-server'} />
-      <StatusDatum label={t("ui.CodexControls.ThreadStatusSection.waiting_6e293a8")} value={flags.length ? flags.map(sentenceCase).join(', ') : 'No'} />
-      <StatusDatum label={t("ui.CodexControls.ThreadStatusSection.budget_1c6225e")} value={timeBudgetExhausted ? 'Time exhausted' : timeLimit ? 'Available' : 'No time limit'} />
-    </div>
     {usage && <ContextUsageDetail usage={usage} />}
     {timeBudgetExhausted && <div className="codex-budget-exhausted" role="alert">
       <AlertTriangle size={14} />
@@ -882,11 +872,6 @@ function BackgroundTerminals({ onNotice }: { onNotice(value: string): void }) {
   </section>
 }
 
-function StatusDatum({ label, value, title }: { label: string; value: string; title?: string }) {
-  useLocale()
-  return <div title={title}><small>{label}</small><strong>{value}</strong></div>
-}
-
 function ContextUsageDetail({ usage }: { usage: CodexContextUsage }) {
   useLocale()
   const effectiveTokens = usage.contextTokens == null
@@ -994,10 +979,6 @@ function formatGoalBudget(value: number, maximum?: number | null, duration = fal
   if (!maximum || maximum <= 0) return current
   const limit = duration ? formatGoalDuration(maximum) : maximum.toLocaleString()
   return `${current} / ${limit}`
-}
-
-function sentenceCase(value: string): string {
-  return value.replace(/([a-z])([A-Z])/g, '$1 $2').replace(/[_-]+/g, ' ').replace(/^./, match => match.toUpperCase())
 }
 
 function shortUsageId(value: string): string {

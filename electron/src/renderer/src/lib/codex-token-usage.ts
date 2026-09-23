@@ -63,15 +63,6 @@ export function parseCodexContextUsage(value: unknown): CodexContextUsage | null
   return parseUsageRecords(root, null)
 }
 
-export function formatContextUsage(usage: CodexContextUsage | null): string {
-  if (!usage) return '—'
-  if (usage.contextPercent != null) return `${formatPercent(usage.contextPercent)}%`
-  if (usage.contextTokens != null && usage.contextWindow != null && usage.contextWindow > 0) {
-    return `${formatPercent(usage.contextTokens / usage.contextWindow * 100)}%`
-  }
-  return usage.contextTokens != null ? formatCompactTokens(usage.contextTokens) : '—'
-}
-
 export function formatContextUsageDetail(usage: CodexContextUsage | null): string {
   if (!usage) return 'Context usage is not available yet.'
   const effectiveTokens = usage.contextTokens == null
@@ -252,11 +243,6 @@ function cleanString(value: unknown): string | null {
 function sumKnown(...values: Array<number | null>): number | null {
   const known = values.filter((value): value is number => value != null)
   return known.length ? known.reduce((sum, value) => sum + value, 0) : null
-}
-
-function formatPercent(value: number): string {
-  const bounded = Math.max(0, value)
-  return bounded < 10 && bounded % 1 !== 0 ? bounded.toFixed(1) : String(Math.round(bounded))
 }
 
 function roundPercent(value: number): number {

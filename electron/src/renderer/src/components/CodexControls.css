@@ -587,18 +587,6 @@
 .codex-section-heading > div { display: flex; flex-direction: column; gap: 2px; }
 .codex-section-heading strong { color: var(--text); font-size: var(--text-size-label); font-weight: var(--text-weight-label); }
 .codex-section-heading small { color: var(--faint); font-size: var(--text-size-meta); font-weight: var(--text-weight-body); }
-.codex-status-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(96px, 1fr)); gap: 6px; }
-.codex-status-grid > div {
-  min-width: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  padding: 7px 8px;
-  background: color-mix(in srgb, var(--surface-3), transparent 28%);
-  border-radius: var(--radius-selection);
-}
-.codex-status-grid small { color: var(--faint); font-size: var(--text-size-meta); font-weight: var(--text-weight-body); text-transform: uppercase; }
-.codex-status-grid strong { overflow: hidden; color: var(--text); font-size: var(--text-size-label); font-weight: var(--text-weight-label); text-overflow: ellipsis; white-space: nowrap; }
 .codex-context-detail {
   display: flex;
   flex-direction: column;
@@ -834,7 +822,6 @@
 :root[data-theme="light"] .codex-controls-dialog { box-shadow: 0 26px 80px #00000021; }
 :root[data-theme="light"] .codex-controls-header { background: var(--surface-2); border-color: var(--border); }
 :root[data-theme="light"] .codex-control-mark,
-:root[data-theme="light"] .codex-status-grid > div,
 :root[data-theme="light"] .codex-terminal-list > article { background: var(--surface-2); border-color: var(--border); }
 :root[data-theme="light"] .codex-context-detail { background: var(--surface-2); border-color: var(--border-soft); }
 :root[data-theme="light"] .codex-context-metrics > span { background: var(--surface); }
@@ -878,7 +865,6 @@
 @media (max-width: 760px) {
   .codex-controls-dialog { width: calc(100vw - 20px); max-height: calc(100vh - 20px); }
   .codex-controls { max-height: calc(100vh - 20px); }
-  .codex-status-grid,
   .codex-control-fields.two-column,
   .codex-control-fields.three-column,
   .codex-budget-summary { grid-template-columns: repeat(2, minmax(0, 1fr)); }

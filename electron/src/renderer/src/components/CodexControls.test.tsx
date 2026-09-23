@@ -134,6 +134,8 @@ describe('Codex controls', () => {
     expect(screen.getByRole('progressbar', { name: '80k of 88k usable context tokens used' })).toBeInTheDocument()
     expect(screen.queryByText('Permissions and approvals')).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: 'Save permissions' })).not.toBeInTheDocument()
+    expect(document.querySelector('.codex-status-grid')).toBeNull()
+    expect(screen.queryByText('Transport')).not.toBeInTheDocument()
   })
 
   it('disables shared goal controls when access is lost, while keeping Close available', async () => {
@@ -769,7 +771,6 @@ describe('Codex controls', () => {
 
     expect(await screen.findByText('Time budget exhausted')).toBeInTheDocument()
     expect(screen.getByText('New goal turns are blocked. Increase the time limit or change the objective to continue.')).toBeInTheDocument()
-    expect(screen.getByText('Time exhausted')).toBeInTheDocument()
     expect(screen.getByText('Exhausted. Raise this limit or change the objective before starting another goal turn.')).toBeInTheDocument()
   })
 
@@ -931,8 +932,9 @@ describe('Codex controls', () => {
     await userEvent.setup().click(trigger)
 
     await waitFor(() => {
-      expect(screen.getByText('Idle', { selector: 'strong' })).toBeInTheDocument()
-      expect(screen.getByText('Loaded', { selector: 'strong' })).toBeInTheDocument()
+      const description = document.getElementById('codex-controls-description')
+      expect(description).toHaveTextContent(/Idle/)
+      expect(description).not.toHaveTextContent('thread not loaded')
     })
     expect(loadThread).toHaveBeenCalledTimes(2)
   })

@@ -1,7 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { Event } from '@shared/types'
 import {
-  formatContextUsage,
   latestCodexContextUsage,
   parseCodexContextUsage
 } from './codex-token-usage'
@@ -51,7 +50,6 @@ describe('Codex context usage', () => {
       baselineTokens: 12_000,
       effectiveContextWindow: 246_400
     })
-    expect(formatContextUsage(usage)).toBe('91%')
   })
 
   it('prefers normalized durable fields and retains latest-turn attribution', () => {
@@ -124,7 +122,6 @@ describe('Codex context usage', () => {
       runId: 'run-compact',
       seq: 6
     })
-    expect(formatContextUsage(usage)).toBe('5.7%')
   })
 
   it('does not resurrect stale durable usage after the current runtime clears it', () => {
@@ -152,6 +149,5 @@ describe('Codex context usage', () => {
 
   it('returns no usage for legacy servers without token data', () => {
     expect(latestCodexContextUsage([event(1, 'turn_finished')], null)).toBeNull()
-    expect(formatContextUsage(null)).toBe('—')
   })
 })
