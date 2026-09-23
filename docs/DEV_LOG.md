@@ -1,5 +1,27 @@
 # Public development log
 
+## 2026-09-22 — Validate local desktop beta.4, build 1206
+
+- Build committed source `230f946912c0cdf4f05da0c87e0f106973c0e5b5` as
+  1.0.7-beta.4, build 1206. TypeScript, all 4,794 active app tests, production
+  compilation, bundle audit and Developer ID signing pass. The first packaging
+  attempt omitted the beta-track environment; correcting that local build
+  configuration passes the unchanged suite. Five tests are skipped by the suite.
+- Personally exercise a real Claude turn through the isolated native app,
+  production IPC and authenticated server: compact thinking, live setting on/off,
+  completion collapse with the setting enabled, and retained manual history.
+  A 7,206-character received thinking event remains available. Verify long-text
+  fixtures and bounded dark/light rendering, including a narrow viewport.
+- Open the exact signed package and verify the compact disclosure, full-text
+  expansion, native wheel scrolling and settings behavior on completed history.
+  The panel is capped at 320 pixels, or 40 percent of the viewport height.
+  No renderer exceptions occur; close the isolated test app and remove its
+  temporary credential afterward.
+- Availability is a local Apple silicon `.app` only, signed but not notarized,
+  with automatic updates disabled by the local-build workflow. No publication,
+  installed-app replacement or server deployment. This correction needs no
+  server update.
+
 ## 2026-09-22 — Make Claude thinking compact and optional
 
 - Keep Claude thinking in a single-line disclosure by default. Apply the
