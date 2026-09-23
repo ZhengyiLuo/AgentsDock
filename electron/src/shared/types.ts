@@ -2247,6 +2247,7 @@ export interface ReasoningSummaryStreamSnapshot {
 export interface ViewState {
   sessionId: string
   topItemId?: string | null
+  topItemSeq?: number | null
   topOffset?: number
   distanceFromBottom?: number
   atBottom?: boolean

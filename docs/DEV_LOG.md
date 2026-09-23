@@ -1,5 +1,43 @@
 # Public development log
 
+## 2026-09-22 — Preserve chat reading positions
+
+- Restore the saved message and pixel offset when returning to a chat. First
+  visits and readers already at the bottom still open at the latest message.
+- Save the message sequence alongside the existing position. If that message
+  has left the in-memory cache, use the existing history-window request to
+  reload it before displaying the conversation. Do not save the interim tail.
+- Keep user scrolling and explicit navigation in control of delayed restores.
+  Empty or failed history requests leave the current history usable; saved
+  positions from older apps remain compatible.
+- Reproduce the old jump in an isolated native desktop app. Verify rapid chat
+  switching and restore the exact message and offset in a 600-turn history
+  beyond the cache limit through production IPC and authenticated HTTP.
+  Delayed history replies do not override a newer chat selection or wheel
+  input. All 4,792 app tests, TypeScript and production compilation pass.
+- This is an app-only correction for desktop 1.0.7-beta.3; the prepared server
+  remains 1.0.7-beta.2. Package acceptance and availability are recorded
+  separately.
+
+## 2026-09-22 — Validate unpublished desktop beta.2, build 1204
+
+- Build committed source `5fb88e8a09e013eff13f37a706de020aa74ca0d9` as
+  1.0.7-beta.2, build 1204. All 4,789 app tests pass. Universal macOS signing,
+  notarization, clean launch and the stock artifact verifier pass. Windows
+  and both Linux architectures pass their release jobs; all 14 assets and
+  updater checksums are verified. Windows remains unsigned.
+- In the actual signed macOS app, complete a native Claude goal, observe
+  Start goal automatically become available without reopening the dialog,
+  and send a normal follow-up that appears exactly once. The isolated server
+  runs 1.0.7-beta.2; no runtime refresh or renderer reload is used.
+- Prepare the signed 1.0.7-beta.2 server package from source `9ae743b`; its
+  server tree exactly matches the desktop source. All eight test shards,
+  signatures and archive checks pass, with identical runtime files in the npm
+  and legacy packages.
+- Keep these candidates unpublished while correcting chat-switch reading
+  positions in the next desktop beta. No npm publication or production server
+  deployment is part of this acceptance.
+
 ## 2026-09-22 — Correct goal completion refresh and compaction history
 
 - Keep Claude runtime subscriptions stable when timeline updates replace the

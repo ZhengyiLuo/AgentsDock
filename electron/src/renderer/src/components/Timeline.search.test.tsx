@@ -12,6 +12,7 @@ const virtuosoHarness = vi.hoisted(() => ({
   atBottomStateChange: null as ((value: boolean) => void) | null,
   isScrolling: null as ((value: boolean) => void) | null,
   startReached: null as (() => void) | null,
+  initialLocation: undefined as unknown,
   renderCount: 0
 }))
 
@@ -26,6 +27,7 @@ vi.mock('react-virtuoso', async () => {
       isScrolling?: (value: boolean) => void
       scrollerRef?: (node: HTMLElement | Window | null) => void
       startReached?: () => void
+      initialTopMostItemIndex?: unknown
     }, ref: React.ForwardedRef<unknown>) {
       virtuosoHarness.renderCount += 1
       React.useImperativeHandle(ref, () => ({
@@ -34,6 +36,7 @@ vi.mock('react-virtuoso', async () => {
       virtuosoHarness.atBottomStateChange = props.atBottomStateChange ?? null
       virtuosoHarness.isScrolling = props.isScrolling ?? null
       virtuosoHarness.startReached = props.startReached ?? null
+      virtuosoHarness.initialLocation = props.initialTopMostItemIndex
       const setScroller = React.useCallback((node: HTMLDivElement | null) => {
         props.scrollerRef?.(node)
       }, [props.scrollerRef])
@@ -100,6 +103,7 @@ describe('Timeline search navigation', () => {
     virtuosoHarness.isScrolling = null
     virtuosoHarness.startReached = null
     virtuosoHarness.renderCount = 0
+    virtuosoHarness.initialLocation = undefined
     search.mockReset()
     around.mockReset()
     historicalOlder.mockReset()
@@ -163,6 +167,38 @@ describe('Timeline search navigation', () => {
     if (!(button instanceof HTMLButtonElement)) throw new Error('Search result button was not rendered')
     return button
   }
+
+  it('restores an unloaded saved anchor without showing or saving the interim tail', async () => {
+    let finish!: (page: TimelinePage) => void
+    around.mockReturnValue(new Promise(resolve => { finish = resolve }))
+    useAppStore.setState({ snapshots: { [SESSION_ID]: {
+      ...snapshot([timelineEvent(100)]),
+      viewState: { sessionId: SESSION_ID, topItemId: 'turn:seq-2:assistant', topItemSeq: 2, topOffset: -37, atBottom: false, updatedAt: 1 }
+    } } })
+    render(<Timeline />)
+    expect(around).toHaveBeenCalledExactlyOnceWith(SESSION_ID, 2, expect.any(Number))
+    expect(screen.queryByTestId('timeline-virtuoso')).not.toBeInTheDocument()
+    act(() => { window.dispatchEvent(new CustomEvent('agentsdock:capture-timeline')) })
+    expect(window.agentsDock.timeline.saveViewState).not.toHaveBeenCalled()
+    await act(async () => { finish({ session, events: [timelineEvent(2)], has_more: false, next_before: null, latest_seq: 100 }) })
+    expect(screen.getByText('turn:seq-2:assistant')).toBeInTheDocument()
+    expect(virtuosoHarness.initialLocation).toEqual(expect.objectContaining({ align: 'start', offset: 37 }))
+  })
+
+  it('ignores a delayed saved-anchor response after the user scrolls', async () => {
+    let finish!: (page: TimelinePage) => void
+    around.mockReturnValue(new Promise(resolve => { finish = resolve }))
+    useAppStore.setState({ snapshots: { [SESSION_ID]: {
+      ...snapshot([timelineEvent(100)]),
+      viewState: { sessionId: SESSION_ID, topItemId: 'turn:seq-2:assistant', topItemSeq: 2, topOffset: -37, atBottom: false, updatedAt: 1 }
+    } } })
+    const { container } = render(<Timeline />)
+    fireEvent.wheel(container.querySelector('.timeline')!, { deltaY: -100 })
+    expect(screen.getByText('turn:seq-100:assistant')).toBeInTheDocument()
+    await act(async () => { finish({ session, events: [timelineEvent(2)], has_more: false, next_before: null, latest_seq: 100 }) })
+    expect(screen.queryByText('turn:seq-2:assistant')).not.toBeInTheDocument()
+    expect(screen.getByText('turn:seq-100:assistant')).toBeInTheDocument()
+  })
 
   it('scrolls to a loaded result and closes the search overlay when clicked', async () => {
     const searchResult = result('event-100', 100)
