@@ -1,5 +1,21 @@
 # Public development log
 
+## 2026-09-22 — Correct goal completion refresh and compaction history
+
+- Keep Claude runtime subscriptions stable when timeline updates replace the
+  selected chat's session snapshot. A queued completion refresh now survives,
+  so Start goal becomes available when the turn returns to idle. Reproduced
+  the failure in packaged build 1202 and verified the correction through the
+  real desktop IPC, isolated server and native Claude provider.
+- Recognize Codex compaction output using its native response receipt and
+  typed replacement history. Omit the proven summary during the existing
+  parsing pass and repair affected imported rows on read. Ordinary assistant
+  imports do not gain an additional source-prefix scan, and genuine replies
+  with the same text remain visible.
+- Preserve beta.1 artifacts as an unpublished candidate. The corrected
+  candidate is 1.0.7-beta.2; package acceptance and availability are recorded
+  separately.
+
 ## 2026-09-22 — Integrate native Claude Goals and repair turn transitions
 
 - Add desktop Claude Goal controls using the installed provider's native
