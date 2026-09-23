@@ -1,0 +1,689 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="description" content="为 agentic AI 研究而设计的 IDE。在你自己的机器上运行 Claude Code、Codex 和 Cursor，桌面与移动端共用一个工作区——从任何设备访问。" />
+    <!-- Social preview (Open Graph / Twitter) -->
+    <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="AgentsDock" />
+    <meta property="og:title" content="AgentsDock — 为 agentic AI 研究而设计的 IDE" />
+    <meta property="og:description" content="为 agentic AI 研究而设计的 IDE。在你自己的机器上运行 Claude Code、Codex 和 Cursor，桌面与移动端共用一个工作区——从任何设备访问。" />
+    <meta property="og:url" content="https://agentsdock.net/zh/index.html" />
+    <meta property="og:image" content="https://agentsdock.net/assets/og-card.png?v=82a3bdda" />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+    <meta property="og:image:alt" content="AgentsDock — an IDE designed for agentic AI research" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="AgentsDock — 为 agentic AI 研究而设计的 IDE" />
+    <meta name="twitter:description" content="为 agentic AI 研究而设计的 IDE。在你自己的机器上运行 Claude Code、Codex 和 Cursor，桌面与移动端共用一个工作区——从任何设备访问。" />
+    <meta name="twitter:image" content="https://agentsdock.net/assets/og-card.png?v=82a3bdda" />
+    <meta name="theme-color" content="#0d1013" />
+    <title>AgentsDock — 为 agentic AI 研究而设计的 IDE</title>
+    <link rel="icon" href="../favicon.ico" sizes="any" />
+    <link rel="icon" type="image/png" href="../assets/favicon-96.png" sizes="96x96" />
+    <link rel="apple-touch-icon" href="../assets/apple-touch-icon.png" />
+    <!-- Google Analytics (GA4) -->
+    <script async src="https://www.googletagmanager.com/gtag/js?id=G-G3XRBEHKVD"></script>
+    <script>
+      window.dataLayer = window.dataLayer || [];
+      function gtag(){dataLayer.push(arguments);}
+      gtag('js', new Date());
+      gtag('config', 'G-G3XRBEHKVD');
+    </script>
+    <script src="../analytics.js" defer></script>
+    <script src="../site-nav.js?v=e6b98484" defer></script>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&amp;family=Instrument+Sans:wght@400;500;600;700&amp;family=Inter:wght@400;500;600;700&amp;display=swap" rel="stylesheet" />
+    <meta property="og:locale" content="zh_CN" />
+    <link rel="stylesheet" href="../styles.css?v=cf92b7e1" />
+  </head>
+  <body>
+    <header class="site-header">
+      <a class="brand" href="./index.html" aria-label="AgentsDock 首页">
+        <img src="../assets/agentsdock-icon.png" alt="" />
+        <span>AgentsDock</span>
+      </a>
+      <nav aria-label="主导航">
+        <a href="./index.html">首页</a>
+        <a href="./setup.html">文档</a>
+        <a class="nav-discord" href="https://discord.gg/ZGDrhEWqPt" target="_blank" rel="noopener"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M20.317 4.369a19.79 19.79 0 0 0-4.885-1.515.074.074 0 0 0-.079.037c-.211.375-.446.865-.608 1.249a18.27 18.27 0 0 0-5.487 0 12.6 12.6 0 0 0-.617-1.25.077.077 0 0 0-.079-.036A19.74 19.74 0 0 0 3.677 4.37a.07.07 0 0 0-.032.027C.533 9.046-.32 13.58.099 18.057a.082.082 0 0 0 .031.057 19.9 19.9 0 0 0 5.993 3.03.078.078 0 0 0 .084-.028 14.2 14.2 0 0 0 1.226-1.994.076.076 0 0 0-.041-.106 13.1 13.1 0 0 1-1.872-.892.077.077 0 0 1-.008-.128 10 10 0 0 0 .372-.291.074.074 0 0 1 .077-.01c3.928 1.793 8.18 1.793 12.062 0a.074.074 0 0 1 .078.009q.181.15.373.292a.077.077 0 0 1-.006.127 12.3 12.3 0 0 1-1.873.891.077.077 0 0 0-.041.107c.36.698.772 1.362 1.225 1.993a.076.076 0 0 0 .084.028 19.84 19.84 0 0 0 6.002-3.03.077.077 0 0 0 .032-.054c.5-5.177-.838-9.674-3.549-13.66a.06.06 0 0 0-.031-.03zM8.02 15.331c-1.183 0-2.157-1.085-2.157-2.419 0-1.333.956-2.419 2.157-2.419 1.21 0 2.176 1.096 2.157 2.42 0 1.333-.956 2.418-2.157 2.418m7.975 0c-1.183 0-2.157-1.085-2.157-2.419 0-1.333.955-2.419 2.157-2.419 1.21 0 2.176 1.096 2.157 2.42 0 1.333-.946 2.418-2.157 2.418"/></svg>Discord</a>
+      </nav>
+      <div class="lang-switch header-lang">
+        <button type="button" class="lang-switch-btn" aria-haspopup="listbox" aria-expanded="false" aria-label="语言"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18"/></svg><span class="lang-switch-label">中文</span><svg class="lang-switch-chev" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg></button>
+        <ul class="lang-switch-menu" role="listbox" hidden>
+          <li><a role="option" href="../index.html" hreflang="en" lang="en">English</a></li>
+          <li><a role="option" class="is-current" aria-selected="true" aria-current="true" lang="zh-CN">简体中文<svg class="lang-switch-check" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12l5 5L20 7"/></svg></a></li>
+        </ul>
+      </div>
+    </header>
+
+    <main id="top">
+      <section class="hero" aria-labelledby="hero-title" id="product">
+        <div class="hero-shade" aria-hidden="true"></div>
+        <div class="hero-copy">
+          <a class="github-badge" href="https://github.com/ZhengyiLuo/AgentsDock" target="_blank" rel="noopener" aria-label="AgentsDock is open source on GitHub — star the repository">
+            <span class="beta-dot beta-dot--blue" aria-hidden="true"></span>
+            <span>在 GitHub 开源</span>
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 2C6.477 2 2 6.477 2 12c0 4.418 2.865 8.166 6.839 9.489.5.092.682-.217.682-.482 0-.237-.009-.868-.013-1.703-2.782.603-3.369-1.342-3.369-1.342-.454-1.154-1.11-1.462-1.11-1.462-.908-.62.069-.608.069-.608 1.003.07 1.531 1.03 1.531 1.03.892 1.529 2.341 1.087 2.91.831.092-.647.35-1.087.636-1.337-2.22-.253-4.555-1.11-4.555-4.943 0-1.091.39-1.984 1.029-2.683-.103-.253-.446-1.27.098-2.647 0 0 .84-.269 2.75 1.025A9.578 9.578 0 0 1 12 6.836c.85.004 1.705.114 2.504.336 1.909-1.294 2.747-1.025 2.747-1.025.546 1.377.202 2.394.1 2.647.64.699 1.028 1.592 1.028 2.683 0 3.842-2.339 4.687-4.566 4.935.359.309.678.919.678 1.852 0 1.336-.012 2.415-.012 2.744 0 .267.18.579.688.481C19.138 20.163 22 16.418 22 12c0-5.523-4.477-10-10-10z"/></svg>
+            <span class="github-badge-sep">·</span>
+            <svg class="github-badge-star" width="15" height="15" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M8 .25a.75.75 0 0 1 .673.418l1.882 3.815 4.21.612a.75.75 0 0 1 .416 1.279l-3.046 2.97.719 4.192a.751.751 0 0 1-1.088.791L8 12.347l-3.766 1.98a.75.75 0 0 1-1.088-.79l.72-4.194L.818 6.374a.75.75 0 0 1 .416-1.28l4.21-.611L7.327.668A.75.75 0 0 1 8 .25Zm0 2.445L6.615 5.5a.75.75 0 0 1-.564.41l-3.097.45 2.24 2.184a.75.75 0 0 1 .216.664l-.528 3.084 2.769-1.456a.75.75 0 0 1 .698 0l2.77 1.456-.53-3.084a.75.75 0 0 1 .216-.664l2.24-2.183-3.096-.45a.75.75 0 0 1-.564-.41L8 2.694Z"/></svg>
+            <span class="github-badge-count" data-gh-stars>76</span>
+          </a>
+          <h1 id="hero-title">AgentsDock</h1>
+          <p class="hero-lede">为 agentic AI 研究而设计的 IDE。AgentsDock 目前在同一个桌面与移动端工作区中支持 Claude Code、Codex 和 Cursor。</p>
+          <div class="hero-actions" aria-label="Downloads">
+            <a class="download-button primary" data-dl="macos" href="https://github.com/ZhengyiLuo/AgentsDock/releases/download/v1.0.0/AgentsDock-1.0.0-mac-universal.dmg" target="_blank" rel="noopener">
+              <svg class="button-icon" width="17" height="17" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M17.05 12.04c-.03-2.6 2.12-3.85 2.22-3.9-1.21-1.77-3.1-2.02-3.77-2.04-1.6-.16-3.12.94-3.93.94-.81 0-2.06-.92-3.39-.9-1.74.03-3.35 1.01-4.25 2.57-1.81 3.14-.46 7.78 1.3 10.32.86 1.24 1.89 2.63 3.24 2.58 1.3-.05 1.79-.84 3.36-.84 1.57 0 2.01.84 3.39.81 1.4-.02 2.29-1.26 3.15-2.51.99-1.44 1.4-2.83 1.42-2.9-.03-.01-2.73-1.05-2.76-4.15zM14.6 4.2c.72-.87 1.2-2.08 1.07-3.28-1.03.04-2.28.69-3.02 1.56-.66.77-1.24 2-1.08 3.18 1.15.09 2.32-.58 3.03-1.46z"/></svg>
+              <strong>下载 macOS 版</strong>
+            </a>
+            <a class="download-button secondary appstore-btn" href="https://apps.apple.com/us/app/agentsdock/id6769275751" target="_blank" rel="noopener">
+              <span class="button-icon" aria-hidden="true">&#xF8FF;</span>
+              <strong>下载 iPhone 和 iPad 版</strong>
+            </a>
+            <a class="download-button secondary" data-dl="linux" href="https://github.com/ZhengyiLuo/AgentsDock/releases/download/v1.0.0/AgentsDock-1.0.0-linux-x86_64.AppImage" target="_blank" rel="noopener">
+              <span class="button-icon terminal-icon" aria-hidden="true">&gt;_</span>
+              <strong>下载 Linux 版 · x86_64</strong>
+            </a>
+            <a class="download-button secondary" data-dl="linux-arm64" href="https://github.com/ZhengyiLuo/AgentsDock/releases/download/v1.0.0/AgentsDock-1.0.0-linux-arm64.AppImage" target="_blank" rel="noopener">
+              <span class="button-icon terminal-icon" aria-hidden="true">&gt;_</span>
+              <strong>下载 Linux 版 · ARM64</strong>
+            </a>
+            <a class="download-button secondary" data-dl="windows" href="https://github.com/ZhengyiLuo/AgentsDock/releases/download/v1.0.0/AgentsDock-1.0.0-win-x64.exe" target="_blank" rel="noopener">
+              <svg class="button-icon" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M3 4.6l8.2-1.13V11H3zM12.2 3.33L21 2.1V11h-8.8zM3 13h8.2v7.53L3 19.4zM12.2 13H21v8.9l-8.8-1.2z"/></svg>
+              <strong>下载 Windows 版</strong>
+            </a>
+            <a class="download-button secondary" data-dl="android" href="https://github.com/ZhengyiLuo/AgentsDock-Releases/releases/download/android-v0.1.1-beta.7/AgentsDock-0.1.1-android-arm64-beta.7.apk" target="_blank" rel="noopener">
+              <svg class="button-icon" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M17.523 15.3414c-.5511 0-.9993-.4486-.9993-.9997s.4483-.9993.9993-.9993c.5511 0 .9993.4483.9993.9993 0 .5511-.4483.9997-.9993.9997m-11.046 0c-.5511 0-.9993-.4486-.9993-.9997s.4483-.9993.9993-.9993c.5511 0 .9993.4483.9993.9993 0 .5511-.4483.9997-.9993.9997m11.4045-6.02l1.9973-3.4592a.416.416 0 00-.1521-.5676.416.416 0 00-.5676.1521l-2.0223 3.503C15.5902 8.2439 13.8533 7.8508 12 7.8508s-3.5902.3931-5.1367 1.0989L4.841 5.4467a.4161.4161 0 00-.5677-.1521.4157.4157 0 00-.1521.5676l1.9973 3.4592C2.6889 11.1867.3432 14.6589 0 18.761h24c-.3435-4.1021-2.6892-7.5743-6.1185-9.4396"/></svg>
+              <strong>下载 Android 版</strong>
+            </a>
+          </div>
+        </div>
+        <div class="hero-product-devices">
+          <div class="hero-desktop-shot" aria-label="AgentsDock desktop app">
+            <img src="../assets/app-desktop.png" alt="AgentsDock desktop app showing a Codex chat with model training results, a files and media grid of plots, and the session inspector panel" loading="eager" />
+          </div>
+          <div class="hero-mobile-shot" aria-label="AgentsDock on iPhone">
+            <img src="../assets/app-mobile.png" alt="AgentsDock iPhone app showing the chat list with a connected Mac Mini server and recent Claude and Codex sessions" loading="eager" />
+          </div>
+        </div>
+      </section>
+
+      <div class="trusted-by" aria-label="Trusted by researchers">
+        <p class="trusted-label">来自这些机构的研究者都在用</p>
+        <div class="trusted-logos">
+          <img src="../assets/logo-cmu.png" alt="Carnegie Mellon University" />
+          <img src="../assets/logo-berkeley.png" alt="UC Berkeley" />
+          <img src="../assets/logo-nvidia.png" alt="NVIDIA" />
+        </div>
+
+        <div class="quote-marquee quote-marquee--two" aria-label="研究者怎么说">
+          <div class="quote-row">
+            <div class="quote-track">
+            <div class="quote-group">
+              <div class="quote-card">
+                <div class="quote-author"><span class="quote-avatar" style="background:#9BC3BA"><img src="../assets/line-faces/face1.png" alt="" /></span><span class="quote-handle">vv</span></div>
+                <p>我平常就是想看看效果我必须拿个电脑，赶地铁的时候也不好拿电脑。现在有 AgentsDock 了。</p>
+              </div>
+              <div class="quote-card">
+                <div class="quote-author"><span class="quote-avatar" style="background:#92A9D1"><img src="../assets/line-faces/face2.png" alt="" /></span><span class="quote-handle">mira</span></div>
+                <p>就是随时随地手机 vibe coding。碎片化时间也可以看自己训练模型效果（并且能够返回图片和视频查看）。</p>
+              </div>
+              <div class="quote-card">
+                <div class="quote-author"><span class="quote-avatar" style="background:#B2A3CB"><img src="../assets/line-faces/face3.png" alt="" /></span><span class="quote-handle">tomo</span></div>
+                <p>首先他能够连接多个服务器，然后随时切换 Server。以往手机要搞 vibe coding，基本就是你手机需要登录个飞书连个 openclaw 啥的，或者就是你 codex 就单独连接一个 Server。</p>
+              </div>
+              <div class="quote-card">
+                <div class="quote-author"><span class="quote-avatar" style="background:#FFD986"><img src="../assets/line-faces/face4.png" alt="" /></span><span class="quote-handle">kai</span></div>
+                <p>这个我觉得真的超级效率，手机端这个真的很好。</p>
+              </div>
+            </div>
+            <div class="quote-group" aria-hidden="true">
+              <div class="quote-card">
+                <div class="quote-author"><span class="quote-avatar" style="background:#9BC3BA"><img src="../assets/line-faces/face1.png" alt="" /></span><span class="quote-handle">vv</span></div>
+                <p>我平常就是想看看效果我必须拿个电脑，赶地铁的时候也不好拿电脑。现在有 AgentsDock 了。</p>
+              </div>
+              <div class="quote-card">
+                <div class="quote-author"><span class="quote-avatar" style="background:#92A9D1"><img src="../assets/line-faces/face2.png" alt="" /></span><span class="quote-handle">mira</span></div>
+                <p>就是随时随地手机 vibe coding。碎片化时间也可以看自己训练模型效果（并且能够返回图片和视频查看）。</p>
+              </div>
+              <div class="quote-card">
+                <div class="quote-author"><span class="quote-avatar" style="background:#B2A3CB"><img src="../assets/line-faces/face3.png" alt="" /></span><span class="quote-handle">tomo</span></div>
+                <p>首先他能够连接多个服务器，然后随时切换 Server。以往手机要搞 vibe coding，基本就是你手机需要登录个飞书连个 openclaw 啥的，或者就是你 codex 就单独连接一个 Server。</p>
+              </div>
+              <div class="quote-card">
+                <div class="quote-author"><span class="quote-avatar" style="background:#FFD986"><img src="../assets/line-faces/face4.png" alt="" /></span><span class="quote-handle">kai</span></div>
+                <p>这个我觉得真的超级效率，手机端这个真的很好。</p>
+              </div>
+            </div>
+            <div class="quote-group" aria-hidden="true">
+              <div class="quote-card">
+                <div class="quote-author"><span class="quote-avatar" style="background:#9BC3BA"><img src="../assets/line-faces/face1.png" alt="" /></span><span class="quote-handle">vv</span></div>
+                <p>我平常就是想看看效果我必须拿个电脑，赶地铁的时候也不好拿电脑。现在有 AgentsDock 了。</p>
+              </div>
+              <div class="quote-card">
+                <div class="quote-author"><span class="quote-avatar" style="background:#92A9D1"><img src="../assets/line-faces/face2.png" alt="" /></span><span class="quote-handle">mira</span></div>
+                <p>就是随时随地手机 vibe coding。碎片化时间也可以看自己训练模型效果（并且能够返回图片和视频查看）。</p>
+              </div>
+              <div class="quote-card">
+                <div class="quote-author"><span class="quote-avatar" style="background:#B2A3CB"><img src="../assets/line-faces/face3.png" alt="" /></span><span class="quote-handle">tomo</span></div>
+                <p>首先他能够连接多个服务器，然后随时切换 Server。以往手机要搞 vibe coding，基本就是你手机需要登录个飞书连个 openclaw 啥的，或者就是你 codex 就单独连接一个 Server。</p>
+              </div>
+              <div class="quote-card">
+                <div class="quote-author"><span class="quote-avatar" style="background:#FFD986"><img src="../assets/line-faces/face4.png" alt="" /></span><span class="quote-handle">kai</span></div>
+                <p>这个我觉得真的超级效率，手机端这个真的很好。</p>
+              </div>
+            </div>
+            <div class="quote-group" aria-hidden="true">
+              <div class="quote-card">
+                <div class="quote-author"><span class="quote-avatar" style="background:#9BC3BA"><img src="../assets/line-faces/face1.png" alt="" /></span><span class="quote-handle">vv</span></div>
+                <p>我平常就是想看看效果我必须拿个电脑，赶地铁的时候也不好拿电脑。现在有 AgentsDock 了。</p>
+              </div>
+              <div class="quote-card">
+                <div class="quote-author"><span class="quote-avatar" style="background:#92A9D1"><img src="../assets/line-faces/face2.png" alt="" /></span><span class="quote-handle">mira</span></div>
+                <p>就是随时随地手机 vibe coding。碎片化时间也可以看自己训练模型效果（并且能够返回图片和视频查看）。</p>
+              </div>
+              <div class="quote-card">
+                <div class="quote-author"><span class="quote-avatar" style="background:#B2A3CB"><img src="../assets/line-faces/face3.png" alt="" /></span><span class="quote-handle">tomo</span></div>
+                <p>首先他能够连接多个服务器，然后随时切换 Server。以往手机要搞 vibe coding，基本就是你手机需要登录个飞书连个 openclaw 啥的，或者就是你 codex 就单独连接一个 Server。</p>
+              </div>
+              <div class="quote-card">
+                <div class="quote-author"><span class="quote-avatar" style="background:#FFD986"><img src="../assets/line-faces/face4.png" alt="" /></span><span class="quote-handle">kai</span></div>
+                <p>这个我觉得真的超级效率，手机端这个真的很好。</p>
+              </div>
+            </div>
+            </div>
+          </div>
+          <div class="quote-row is-reverse">
+            <div class="quote-track">
+            <div class="quote-group">
+              <div class="quote-card">
+                <div class="quote-author"><span class="quote-avatar" style="background:#FFB78D"><img src="../assets/line-faces/face5.png" alt="" /></span><span class="quote-handle">人形机器人研究者</span></div>
+                <p>整体还是很好用的，已经是我工作流的主力 ai 使用平台了。</p>
+              </div>
+              <div class="quote-card">
+                <div class="quote-author"><span class="quote-avatar" style="background:#D29DAD"><img src="../assets/line-faces/face6.png" alt="" /></span><span class="quote-handle">Krish Mehta · @djkesu1</span></div>
+                <p>真的很好用——像是 Termius、Claude、Codex 和 Cursor 一起生了个机器人宝宝。</p>
+              </div>
+              <div class="quote-card">
+                <div class="quote-author"><span class="quote-avatar" style="background:#E4A09E"><img src="../assets/line-faces/face1.png" alt="" /></span><span class="quote-handle">Ray</span></div>
+                <p>谢谢 AgentsDock——让我在夏威夷用手机就把行程改好了。</p>
+              </div>
+              <div class="quote-card">
+                <div class="quote-author"><span class="quote-avatar" style="background:#BCC4BF"><img src="../assets/line-faces/face2.png" alt="" /></span><span class="quote-handle">doggy bot</span></div>
+                <p lang="zh-CN">AgentsDock 真的很适合科研宝宝的体质！我最喜欢的就是可以用手机随时随地 Vibe Coding，出门在外也能继续推进实验；而且跑完任务后可以直接看到可视化结果和仿真效果，不用一直守在电脑前，对做机器人科研真的很方便。</p>
+              </div>
+              <div class="quote-card">
+                <div class="quote-author"><span class="quote-avatar" style="background:#A8C8A0"><img src="../assets/line-faces/face3.png" alt="" /></span><span class="quote-handle">nico</span></div>
+                <p>我朋友现在全都在用。</p>
+              </div>
+              <div class="quote-card">
+                <a class="quote-author quote-author--link" href="https://ziwang1105.github.io/" target="_blank" rel="noopener" aria-label="Zi — personal page"><span class="quote-avatar" style="background:#9BB8D9"><img src="../assets/line-faces/face4.png" alt="" /></span><span class="quote-handle">Zi</span></a>
+                <p>AgentsDock 用起来非常方便，大大提高了我的效率，希望大家都来试试。</p>
+              </div>
+            </div>
+            <div class="quote-group" aria-hidden="true">
+              <div class="quote-card">
+                <div class="quote-author"><span class="quote-avatar" style="background:#FFB78D"><img src="../assets/line-faces/face5.png" alt="" /></span><span class="quote-handle">人形机器人研究者</span></div>
+                <p>整体还是很好用的，已经是我工作流的主力 ai 使用平台了。</p>
+              </div>
+              <div class="quote-card">
+                <div class="quote-author"><span class="quote-avatar" style="background:#D29DAD"><img src="../assets/line-faces/face6.png" alt="" /></span><span class="quote-handle">Krish Mehta · @djkesu1</span></div>
+                <p>真的很好用——像是 Termius、Claude、Codex 和 Cursor 一起生了个机器人宝宝。</p>
+              </div>
+              <div class="quote-card">
+                <div class="quote-author"><span class="quote-avatar" style="background:#E4A09E"><img src="../assets/line-faces/face1.png" alt="" /></span><span class="quote-handle">Ray</span></div>
+                <p>谢谢 AgentsDock——让我在夏威夷用手机就把行程改好了。</p>
+              </div>
+              <div class="quote-card">
+                <div class="quote-author"><span class="quote-avatar" style="background:#BCC4BF"><img src="../assets/line-faces/face2.png" alt="" /></span><span class="quote-handle">doggy bot</span></div>
+                <p lang="zh-CN">AgentsDock 真的很适合科研宝宝的体质！我最喜欢的就是可以用手机随时随地 Vibe Coding，出门在外也能继续推进实验；而且跑完任务后可以直接看到可视化结果和仿真效果，不用一直守在电脑前，对做机器人科研真的很方便。</p>
+              </div>
+              <div class="quote-card">
+                <div class="quote-author"><span class="quote-avatar" style="background:#A8C8A0"><img src="../assets/line-faces/face3.png" alt="" /></span><span class="quote-handle">nico</span></div>
+                <p>我朋友现在全都在用。</p>
+              </div>
+              <div class="quote-card">
+                <a class="quote-author quote-author--link" href="https://ziwang1105.github.io/" target="_blank" rel="noopener" aria-label="Zi — personal page"><span class="quote-avatar" style="background:#9BB8D9"><img src="../assets/line-faces/face4.png" alt="" /></span><span class="quote-handle">Zi</span></a>
+                <p>AgentsDock 用起来非常方便，大大提高了我的效率，希望大家都来试试。</p>
+              </div>
+            </div>
+            <div class="quote-group" aria-hidden="true">
+              <div class="quote-card">
+                <div class="quote-author"><span class="quote-avatar" style="background:#FFB78D"><img src="../assets/line-faces/face5.png" alt="" /></span><span class="quote-handle">人形机器人研究者</span></div>
+                <p>整体还是很好用的，已经是我工作流的主力 ai 使用平台了。</p>
+              </div>
+              <div class="quote-card">
+                <div class="quote-author"><span class="quote-avatar" style="background:#D29DAD"><img src="../assets/line-faces/face6.png" alt="" /></span><span class="quote-handle">Krish Mehta · @djkesu1</span></div>
+                <p>真的很好用——像是 Termius、Claude、Codex 和 Cursor 一起生了个机器人宝宝。</p>
+              </div>
+              <div class="quote-card">
+                <div class="quote-author"><span class="quote-avatar" style="background:#E4A09E"><img src="../assets/line-faces/face1.png" alt="" /></span><span class="quote-handle">Ray</span></div>
+                <p>谢谢 AgentsDock——让我在夏威夷用手机就把行程改好了。</p>
+              </div>
+              <div class="quote-card">
+                <div class="quote-author"><span class="quote-avatar" style="background:#BCC4BF"><img src="../assets/line-faces/face2.png" alt="" /></span><span class="quote-handle">doggy bot</span></div>
+                <p lang="zh-CN">AgentsDock 真的很适合科研宝宝的体质！我最喜欢的就是可以用手机随时随地 Vibe Coding，出门在外也能继续推进实验；而且跑完任务后可以直接看到可视化结果和仿真效果，不用一直守在电脑前，对做机器人科研真的很方便。</p>
+              </div>
+              <div class="quote-card">
+                <div class="quote-author"><span class="quote-avatar" style="background:#A8C8A0"><img src="../assets/line-faces/face3.png" alt="" /></span><span class="quote-handle">nico</span></div>
+                <p>我朋友现在全都在用。</p>
+              </div>
+              <div class="quote-card">
+                <a class="quote-author quote-author--link" href="https://ziwang1105.github.io/" target="_blank" rel="noopener" aria-label="Zi — personal page"><span class="quote-avatar" style="background:#9BB8D9"><img src="../assets/line-faces/face4.png" alt="" /></span><span class="quote-handle">Zi</span></a>
+                <p>AgentsDock 用起来非常方便，大大提高了我的效率，希望大家都来试试。</p>
+              </div>
+            </div>
+            <div class="quote-group" aria-hidden="true">
+              <div class="quote-card">
+                <div class="quote-author"><span class="quote-avatar" style="background:#FFB78D"><img src="../assets/line-faces/face5.png" alt="" /></span><span class="quote-handle">人形机器人研究者</span></div>
+                <p>整体还是很好用的，已经是我工作流的主力 ai 使用平台了。</p>
+              </div>
+              <div class="quote-card">
+                <div class="quote-author"><span class="quote-avatar" style="background:#D29DAD"><img src="../assets/line-faces/face6.png" alt="" /></span><span class="quote-handle">Krish Mehta · @djkesu1</span></div>
+                <p>真的很好用——像是 Termius、Claude、Codex 和 Cursor 一起生了个机器人宝宝。</p>
+              </div>
+              <div class="quote-card">
+                <div class="quote-author"><span class="quote-avatar" style="background:#E4A09E"><img src="../assets/line-faces/face1.png" alt="" /></span><span class="quote-handle">Ray</span></div>
+                <p>谢谢 AgentsDock——让我在夏威夷用手机就把行程改好了。</p>
+              </div>
+              <div class="quote-card">
+                <div class="quote-author"><span class="quote-avatar" style="background:#BCC4BF"><img src="../assets/line-faces/face2.png" alt="" /></span><span class="quote-handle">doggy bot</span></div>
+                <p lang="zh-CN">AgentsDock 真的很适合科研宝宝的体质！我最喜欢的就是可以用手机随时随地 Vibe Coding，出门在外也能继续推进实验；而且跑完任务后可以直接看到可视化结果和仿真效果，不用一直守在电脑前，对做机器人科研真的很方便。</p>
+              </div>
+              <div class="quote-card">
+                <div class="quote-author"><span class="quote-avatar" style="background:#A8C8A0"><img src="../assets/line-faces/face3.png" alt="" /></span><span class="quote-handle">nico</span></div>
+                <p>我朋友现在全都在用。</p>
+              </div>
+              <div class="quote-card">
+                <a class="quote-author quote-author--link" href="https://ziwang1105.github.io/" target="_blank" rel="noopener" aria-label="Zi — personal page"><span class="quote-avatar" style="background:#9BB8D9"><img src="../assets/line-faces/face4.png" alt="" /></span><span class="quote-handle">Zi</span></a>
+                <p>AgentsDock 用起来非常方便，大大提高了我的效率，希望大家都来试试。</p>
+              </div>
+            </div>
+            </div>
+          </div>
+        </div>
+        <div class="quote-marquee quote-marquee--one" aria-hidden="true">
+          <div class="quote-row">
+            <div class="quote-track">
+            <div class="quote-group">
+              <div class="quote-card">
+                <div class="quote-author"><span class="quote-avatar" style="background:#9BC3BA"><img src="../assets/line-faces/face1.png" alt="" /></span><span class="quote-handle">vv</span></div>
+                <p>我平常就是想看看效果我必须拿个电脑，赶地铁的时候也不好拿电脑。现在有 AgentsDock 了。</p>
+              </div>
+              <div class="quote-card">
+                <div class="quote-author"><span class="quote-avatar" style="background:#92A9D1"><img src="../assets/line-faces/face2.png" alt="" /></span><span class="quote-handle">mira</span></div>
+                <p>就是随时随地手机 vibe coding。碎片化时间也可以看自己训练模型效果（并且能够返回图片和视频查看）。</p>
+              </div>
+              <div class="quote-card">
+                <div class="quote-author"><span class="quote-avatar" style="background:#B2A3CB"><img src="../assets/line-faces/face3.png" alt="" /></span><span class="quote-handle">tomo</span></div>
+                <p>首先他能够连接多个服务器，然后随时切换 Server。以往手机要搞 vibe coding，基本就是你手机需要登录个飞书连个 openclaw 啥的，或者就是你 codex 就单独连接一个 Server。</p>
+              </div>
+              <div class="quote-card">
+                <div class="quote-author"><span class="quote-avatar" style="background:#FFD986"><img src="../assets/line-faces/face4.png" alt="" /></span><span class="quote-handle">kai</span></div>
+                <p>这个我觉得真的超级效率，手机端这个真的很好。</p>
+              </div>
+              <div class="quote-card">
+                <div class="quote-author"><span class="quote-avatar" style="background:#FFB78D"><img src="../assets/line-faces/face5.png" alt="" /></span><span class="quote-handle">人形机器人研究者</span></div>
+                <p>整体还是很好用的，已经是我工作流的主力 ai 使用平台了。</p>
+              </div>
+              <div class="quote-card">
+                <div class="quote-author"><span class="quote-avatar" style="background:#D29DAD"><img src="../assets/line-faces/face6.png" alt="" /></span><span class="quote-handle">Krish Mehta · @djkesu1</span></div>
+                <p>真的很好用——像是 Termius、Claude、Codex 和 Cursor 一起生了个机器人宝宝。</p>
+              </div>
+              <div class="quote-card">
+                <div class="quote-author"><span class="quote-avatar" style="background:#E4A09E"><img src="../assets/line-faces/face1.png" alt="" /></span><span class="quote-handle">Ray</span></div>
+                <p>谢谢 AgentsDock——让我在夏威夷用手机就把行程改好了。</p>
+              </div>
+              <div class="quote-card">
+                <div class="quote-author"><span class="quote-avatar" style="background:#BCC4BF"><img src="../assets/line-faces/face2.png" alt="" /></span><span class="quote-handle">doggy bot</span></div>
+                <p lang="zh-CN">AgentsDock 真的很适合科研宝宝的体质！我最喜欢的就是可以用手机随时随地 Vibe Coding，出门在外也能继续推进实验；而且跑完任务后可以直接看到可视化结果和仿真效果，不用一直守在电脑前，对做机器人科研真的很方便。</p>
+              </div>
+              <div class="quote-card">
+                <div class="quote-author"><span class="quote-avatar" style="background:#A8C8A0"><img src="../assets/line-faces/face3.png" alt="" /></span><span class="quote-handle">nico</span></div>
+                <p>我朋友现在全都在用。</p>
+              </div>
+              <div class="quote-card">
+                <a class="quote-author quote-author--link" href="https://ziwang1105.github.io/" target="_blank" rel="noopener" aria-label="Zi — personal page"><span class="quote-avatar" style="background:#9BB8D9"><img src="../assets/line-faces/face4.png" alt="" /></span><span class="quote-handle">Zi</span></a>
+                <p>AgentsDock 用起来非常方便，大大提高了我的效率，希望大家都来试试。</p>
+              </div>
+            </div>
+            <div class="quote-group" aria-hidden="true">
+              <div class="quote-card">
+                <div class="quote-author"><span class="quote-avatar" style="background:#9BC3BA"><img src="../assets/line-faces/face1.png" alt="" /></span><span class="quote-handle">vv</span></div>
+                <p>我平常就是想看看效果我必须拿个电脑，赶地铁的时候也不好拿电脑。现在有 AgentsDock 了。</p>
+              </div>
+              <div class="quote-card">
+                <div class="quote-author"><span class="quote-avatar" style="background:#92A9D1"><img src="../assets/line-faces/face2.png" alt="" /></span><span class="quote-handle">mira</span></div>
+                <p>就是随时随地手机 vibe coding。碎片化时间也可以看自己训练模型效果（并且能够返回图片和视频查看）。</p>
+              </div>
+              <div class="quote-card">
+                <div class="quote-author"><span class="quote-avatar" style="background:#B2A3CB"><img src="../assets/line-faces/face3.png" alt="" /></span><span class="quote-handle">tomo</span></div>
+                <p>首先他能够连接多个服务器，然后随时切换 Server。以往手机要搞 vibe coding，基本就是你手机需要登录个飞书连个 openclaw 啥的，或者就是你 codex 就单独连接一个 Server。</p>
+              </div>
+              <div class="quote-card">
+                <div class="quote-author"><span class="quote-avatar" style="background:#FFD986"><img src="../assets/line-faces/face4.png" alt="" /></span><span class="quote-handle">kai</span></div>
+                <p>这个我觉得真的超级效率，手机端这个真的很好。</p>
+              </div>
+              <div class="quote-card">
+                <div class="quote-author"><span class="quote-avatar" style="background:#FFB78D"><img src="../assets/line-faces/face5.png" alt="" /></span><span class="quote-handle">人形机器人研究者</span></div>
+                <p>整体还是很好用的，已经是我工作流的主力 ai 使用平台了。</p>
+              </div>
+              <div class="quote-card">
+                <div class="quote-author"><span class="quote-avatar" style="background:#D29DAD"><img src="../assets/line-faces/face6.png" alt="" /></span><span class="quote-handle">Krish Mehta · @djkesu1</span></div>
+                <p>真的很好用——像是 Termius、Claude、Codex 和 Cursor 一起生了个机器人宝宝。</p>
+              </div>
+              <div class="quote-card">
+                <div class="quote-author"><span class="quote-avatar" style="background:#E4A09E"><img src="../assets/line-faces/face1.png" alt="" /></span><span class="quote-handle">Ray</span></div>
+                <p>谢谢 AgentsDock——让我在夏威夷用手机就把行程改好了。</p>
+              </div>
+              <div class="quote-card">
+                <div class="quote-author"><span class="quote-avatar" style="background:#BCC4BF"><img src="../assets/line-faces/face2.png" alt="" /></span><span class="quote-handle">doggy bot</span></div>
+                <p lang="zh-CN">AgentsDock 真的很适合科研宝宝的体质！我最喜欢的就是可以用手机随时随地 Vibe Coding，出门在外也能继续推进实验；而且跑完任务后可以直接看到可视化结果和仿真效果，不用一直守在电脑前，对做机器人科研真的很方便。</p>
+              </div>
+              <div class="quote-card">
+                <div class="quote-author"><span class="quote-avatar" style="background:#A8C8A0"><img src="../assets/line-faces/face3.png" alt="" /></span><span class="quote-handle">nico</span></div>
+                <p>我朋友现在全都在用。</p>
+              </div>
+              <div class="quote-card">
+                <a class="quote-author quote-author--link" href="https://ziwang1105.github.io/" target="_blank" rel="noopener" aria-label="Zi — personal page"><span class="quote-avatar" style="background:#9BB8D9"><img src="../assets/line-faces/face4.png" alt="" /></span><span class="quote-handle">Zi</span></a>
+                <p>AgentsDock 用起来非常方便，大大提高了我的效率，希望大家都来试试。</p>
+              </div>
+            </div>
+            <div class="quote-group" aria-hidden="true">
+              <div class="quote-card">
+                <div class="quote-author"><span class="quote-avatar" style="background:#9BC3BA"><img src="../assets/line-faces/face1.png" alt="" /></span><span class="quote-handle">vv</span></div>
+                <p>我平常就是想看看效果我必须拿个电脑，赶地铁的时候也不好拿电脑。现在有 AgentsDock 了。</p>
+              </div>
+              <div class="quote-card">
+                <div class="quote-author"><span class="quote-avatar" style="background:#92A9D1"><img src="../assets/line-faces/face2.png" alt="" /></span><span class="quote-handle">mira</span></div>
+                <p>就是随时随地手机 vibe coding。碎片化时间也可以看自己训练模型效果（并且能够返回图片和视频查看）。</p>
+              </div>
+              <div class="quote-card">
+                <div class="quote-author"><span class="quote-avatar" style="background:#B2A3CB"><img src="../assets/line-faces/face3.png" alt="" /></span><span class="quote-handle">tomo</span></div>
+                <p>首先他能够连接多个服务器，然后随时切换 Server。以往手机要搞 vibe coding，基本就是你手机需要登录个飞书连个 openclaw 啥的，或者就是你 codex 就单独连接一个 Server。</p>
+              </div>
+              <div class="quote-card">
+                <div class="quote-author"><span class="quote-avatar" style="background:#FFD986"><img src="../assets/line-faces/face4.png" alt="" /></span><span class="quote-handle">kai</span></div>
+                <p>这个我觉得真的超级效率，手机端这个真的很好。</p>
+              </div>
+              <div class="quote-card">
+                <div class="quote-author"><span class="quote-avatar" style="background:#FFB78D"><img src="../assets/line-faces/face5.png" alt="" /></span><span class="quote-handle">人形机器人研究者</span></div>
+                <p>整体还是很好用的，已经是我工作流的主力 ai 使用平台了。</p>
+              </div>
+              <div class="quote-card">
+                <div class="quote-author"><span class="quote-avatar" style="background:#D29DAD"><img src="../assets/line-faces/face6.png" alt="" /></span><span class="quote-handle">Krish Mehta · @djkesu1</span></div>
+                <p>真的很好用——像是 Termius、Claude、Codex 和 Cursor 一起生了个机器人宝宝。</p>
+              </div>
+              <div class="quote-card">
+                <div class="quote-author"><span class="quote-avatar" style="background:#E4A09E"><img src="../assets/line-faces/face1.png" alt="" /></span><span class="quote-handle">Ray</span></div>
+                <p>谢谢 AgentsDock——让我在夏威夷用手机就把行程改好了。</p>
+              </div>
+              <div class="quote-card">
+                <div class="quote-author"><span class="quote-avatar" style="background:#BCC4BF"><img src="../assets/line-faces/face2.png" alt="" /></span><span class="quote-handle">doggy bot</span></div>
+                <p lang="zh-CN">AgentsDock 真的很适合科研宝宝的体质！我最喜欢的就是可以用手机随时随地 Vibe Coding，出门在外也能继续推进实验；而且跑完任务后可以直接看到可视化结果和仿真效果，不用一直守在电脑前，对做机器人科研真的很方便。</p>
+              </div>
+              <div class="quote-card">
+                <div class="quote-author"><span class="quote-avatar" style="background:#A8C8A0"><img src="../assets/line-faces/face3.png" alt="" /></span><span class="quote-handle">nico</span></div>
+                <p>我朋友现在全都在用。</p>
+              </div>
+              <div class="quote-card">
+                <a class="quote-author quote-author--link" href="https://ziwang1105.github.io/" target="_blank" rel="noopener" aria-label="Zi — personal page"><span class="quote-avatar" style="background:#9BB8D9"><img src="../assets/line-faces/face4.png" alt="" /></span><span class="quote-handle">Zi</span></a>
+                <p>AgentsDock 用起来非常方便，大大提高了我的效率，希望大家都来试试。</p>
+              </div>
+            </div>
+            <div class="quote-group" aria-hidden="true">
+              <div class="quote-card">
+                <div class="quote-author"><span class="quote-avatar" style="background:#9BC3BA"><img src="../assets/line-faces/face1.png" alt="" /></span><span class="quote-handle">vv</span></div>
+                <p>我平常就是想看看效果我必须拿个电脑，赶地铁的时候也不好拿电脑。现在有 AgentsDock 了。</p>
+              </div>
+              <div class="quote-card">
+                <div class="quote-author"><span class="quote-avatar" style="background:#92A9D1"><img src="../assets/line-faces/face2.png" alt="" /></span><span class="quote-handle">mira</span></div>
+                <p>就是随时随地手机 vibe coding。碎片化时间也可以看自己训练模型效果（并且能够返回图片和视频查看）。</p>
+              </div>
+              <div class="quote-card">
+                <div class="quote-author"><span class="quote-avatar" style="background:#B2A3CB"><img src="../assets/line-faces/face3.png" alt="" /></span><span class="quote-handle">tomo</span></div>
+                <p>首先他能够连接多个服务器，然后随时切换 Server。以往手机要搞 vibe coding，基本就是你手机需要登录个飞书连个 openclaw 啥的，或者就是你 codex 就单独连接一个 Server。</p>
+              </div>
+              <div class="quote-card">
+                <div class="quote-author"><span class="quote-avatar" style="background:#FFD986"><img src="../assets/line-faces/face4.png" alt="" /></span><span class="quote-handle">kai</span></div>
+                <p>这个我觉得真的超级效率，手机端这个真的很好。</p>
+              </div>
+              <div class="quote-card">
+                <div class="quote-author"><span class="quote-avatar" style="background:#FFB78D"><img src="../assets/line-faces/face5.png" alt="" /></span><span class="quote-handle">人形机器人研究者</span></div>
+                <p>整体还是很好用的，已经是我工作流的主力 ai 使用平台了。</p>
+              </div>
+              <div class="quote-card">
+                <div class="quote-author"><span class="quote-avatar" style="background:#D29DAD"><img src="../assets/line-faces/face6.png" alt="" /></span><span class="quote-handle">Krish Mehta · @djkesu1</span></div>
+                <p>真的很好用——像是 Termius、Claude、Codex 和 Cursor 一起生了个机器人宝宝。</p>
+              </div>
+              <div class="quote-card">
+                <div class="quote-author"><span class="quote-avatar" style="background:#E4A09E"><img src="../assets/line-faces/face1.png" alt="" /></span><span class="quote-handle">Ray</span></div>
+                <p>谢谢 AgentsDock——让我在夏威夷用手机就把行程改好了。</p>
+              </div>
+              <div class="quote-card">
+                <div class="quote-author"><span class="quote-avatar" style="background:#BCC4BF"><img src="../assets/line-faces/face2.png" alt="" /></span><span class="quote-handle">doggy bot</span></div>
+                <p lang="zh-CN">AgentsDock 真的很适合科研宝宝的体质！我最喜欢的就是可以用手机随时随地 Vibe Coding，出门在外也能继续推进实验；而且跑完任务后可以直接看到可视化结果和仿真效果，不用一直守在电脑前，对做机器人科研真的很方便。</p>
+              </div>
+              <div class="quote-card">
+                <div class="quote-author"><span class="quote-avatar" style="background:#A8C8A0"><img src="../assets/line-faces/face3.png" alt="" /></span><span class="quote-handle">nico</span></div>
+                <p>我朋友现在全都在用。</p>
+              </div>
+              <div class="quote-card">
+                <a class="quote-author quote-author--link" href="https://ziwang1105.github.io/" target="_blank" rel="noopener" aria-label="Zi — personal page"><span class="quote-avatar" style="background:#9BB8D9"><img src="../assets/line-faces/face4.png" alt="" /></span><span class="quote-handle">Zi</span></a>
+                <p>AgentsDock 用起来非常方便，大大提高了我的效率，希望大家都来试试。</p>
+              </div>
+            </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <section class="quickstart" aria-labelledby="quickstart-title">
+        <div class="quickstart-inner">
+          <div class="quickstart-copy">
+            <h2 id="quickstart-title">工作原理</h2>
+            <ul class="quickstart-points">
+              <li><span class="step-n">1</span>用几条简单命令搭建你的服务器</li>
+              <li><span class="step-n">2</span>从任何设备访问这台服务器</li>
+              <li><span class="step-n">3</span>让 agent 替你做研究和模型训练</li>
+            </ul>
+            <a class="quickstart-docs" href="./setup.html">阅读完整搭建指南 <span aria-hidden="true">→</span></a>
+            <div class="ways">
+              <p class="ways-helper">支持：</p>
+              <ul class="ways-grid">
+                <li class="ways-tile">
+                  <span class="ways-icon"><img src="../assets/claude-code-logo.png" alt="" /></span>
+                  <span class="ways-tile-label">Claude Code</span>
+                </li>
+                <li class="ways-tile">
+                  <span class="ways-icon"><img src="../assets/codex-logo.png" alt="" /></span>
+                  <span class="ways-tile-label">Codex</span>
+                </li>
+                <li class="ways-tile">
+                  <span class="ways-icon"><img src="../assets/cursor-logo.png" alt="" /></span>
+                  <span class="ways-tile-label">Cursor</span>
+                </li>
+              </ul>
+              <ul class="check-list">
+                <li><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 12l5 5L20 6"/></svg>Tailscale <span class="check-opt">（可选）</span></li>
+                <li><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 12l5 5L20 6"/></svg>tmux <span class="check-opt">（可选）</span></li>
+              </ul>
+            </div>
+          </div>
+          <div class="code-card" aria-label="安装命令">
+            <div class="code-card-bar" aria-hidden="true"><span></span><span></span><span></span><em>bash</em></div>
+            <pre class="code-card-body"><code><span class="tok-comment"># 1 · 安装 AgentsDock 服务器</span>
+<span class="tok-prompt">$</span> git clone https://github.com/ZhengyiLuo/AgentsServer.git
+<span class="tok-prompt">$</span> cd AgentsServer
+<span class="tok-prompt">$</span> ./install.sh
+
+<span class="tok-comment"># 2 · 打开应用，粘贴你的服务器地址</span>
+<span class="tok-prompt">$</span> open -a AgentsDock</code></pre>
+          </div>
+        </div>
+      </section>
+
+      <section class="feature-band" aria-labelledby="feature-title" id="self-hosted">
+        <div class="feature-heading">
+          <h2 id="feature-title"><span class="heading-emoji" aria-hidden="true">💻</span> 为 AI 研究者而生</h2>
+        </div>
+      </section>
+
+      <section class="showcase" aria-label="AgentsDock 功能">
+        <div class="showcase-row">
+          <figure class="showcase-media">
+            <video autoplay muted loop playsinline preload="metadata" poster="../assets/feature-agents-poster.jpg">
+              <source src="../assets/feature-agents.mp4" type="video/mp4" />
+            </video>
+          </figure>
+          <div class="showcase-copy">
+            <h3>所有 agent，并排使用</h3>
+            <p>在一个地方并排和不同的 agent 聊天——Claude Code、Codex，还有更多。</p>
+          </div>
+        </div>
+
+        <div class="showcase-row">
+          <figure class="showcase-media">
+            <video autoplay muted loop playsinline preload="metadata" poster="../assets/setup-switch-poster.jpg">
+              <source src="../assets/setup-switch.mp4" type="video/mp4" />
+            </video>
+          </figure>
+          <div class="showcase-copy">
+            <h3>从任何设备连接多台服务器</h3>
+            <p>实验室的工作站、家里的 Mac mini、租来的 GPU 机器——全部连上，随时切换，在你的每一台设备上都行。</p>
+          </div>
+        </div>
+
+        <div class="showcase-row">
+          <figure class="showcase-media">
+            <video autoplay muted loop playsinline preload="metadata" poster="../assets/feature-files-poster.jpg">
+              <source src="../assets/feature-files.mp4" type="video/mp4" />
+            </video>
+          </figure>
+          <div class="showcase-copy">
+            <h3>查看和编辑代码</h3>
+            <p>直接打开、编辑远程机器上的文件，自带语法高亮——不需要另外的编辑器。</p>
+          </div>
+        </div>
+
+        <div class="showcase-row">
+          <figure class="showcase-media">
+            <video autoplay muted loop playsinline preload="metadata" poster="../assets/feature-terminal-poster.jpg">
+              <source src="../assets/feature-terminal.mp4" type="video/mp4" />
+            </video>
+          </figure>
+          <div class="showcase-copy">
+            <h3>随时随地完整访问终端</h3>
+            <p>从任何设备接入会话的持久 <code>tmux</code> 会话——同一个 shell，处处可用。</p>
+          </div>
+        </div>
+
+        <div class="showcase-row">
+          <figure class="showcase-media chatmedia-media" aria-hidden="true">
+            <div class="cm-msg">
+              <span class="cm-avatar"><img src="../assets/codex-logo.png" alt="" /></span>
+              <div class="cm-bubble">
+                <p>仿真评测完成：人形机器人 loco-manipulation。Checkpoint <code>ckpt_0421_best</code> 通过了论文就绪检查。</p>
+                <div class="cm-metrics">
+                  <span><b>92.4%</b><small>成功率</small></span>
+                  <span><b>0.18 m</b><small>最终误差</small></span>
+                  <span><b>42k</b><small>步数</small></span>
+                </div>
+              </div>
+            </div>
+            <div class="cm-media">
+              <video autoplay muted loop playsinline preload="metadata" poster="../assets/feature-sim-poster.jpg">
+                <source src="../assets/feature-sim.mp4" type="video/mp4" />
+              </video>
+            </div>
+            <p class="cm-caption">loco_manip_rollout.mp4 · ckpt_0421_best</p>
+          </figure>
+          <div class="showcase-copy">
+            <h3>查看视频任务结果</h3>
+            <p>agent 会把图表、图片和渲染好的 rollout 直接发回聊天里——在会话中就能审阅一次运行的真实输出。</p>
+          </div>
+        </div>
+      </section>
+
+      <section class="downloads" id="downloads" aria-labelledby="download-title">
+        <div>
+          <p class="section-kicker" id="release-version">版本 1.0.0</p>
+          <h2 id="download-title">下载 AgentsDock</h2>
+          <p>安装桌面客户端，连接到你的 AgentsDock 服务器，让 Claude 和 Codex 在你用的每台机器上随时可用。</p>
+          <p class="download-seeall"><a href="https://github.com/ZhengyiLuo/AgentsDock-Releases/releases" target="_blank" rel="noopener">查看所有发布版本 <span aria-hidden="true">&rarr;</span></a></p>
+        </div>
+        <div class="download-options">
+          <article>
+            <div><span class="platform-mark">⌘</span><p><strong>macOS</strong><small>通用版 · macOS 14+</small></p></div>
+            <a data-dl="macos" href="https://github.com/ZhengyiLuo/AgentsDock/releases/download/v1.0.0/AgentsDock-1.0.0-mac-universal.dmg" target="_blank" rel="noopener" class="download-options-link">下载 .dmg</a>
+          </article>
+          <article>
+            <div><span class="platform-mark terminal-icon">&gt;_</span><p><strong>Linux</strong><small>AppImage · x86_64 或 ARM64</small></p></div>
+            <div class="download-arch">
+              <a data-dl="linux" href="https://github.com/ZhengyiLuo/AgentsDock/releases/download/v1.0.0/AgentsDock-1.0.0-linux-x86_64.AppImage" target="_blank" rel="noopener" class="download-options-link">x86_64</a>
+              <a data-dl="linux-arm64" href="https://github.com/ZhengyiLuo/AgentsDock/releases/download/v1.0.0/AgentsDock-1.0.0-linux-arm64.AppImage" target="_blank" rel="noopener" class="download-options-link">ARM64</a>
+            </div>
+          </article>
+          <article>
+            <div><span class="platform-mark"><svg width="22" height="22" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M3 4.6l8.2-1.13V11H3zM12.2 3.33L21 2.1V11h-8.8zM3 13h8.2v7.53L3 19.4zM12.2 13H21v8.9l-8.8-1.2z"/></svg></span><p><strong>Windows</strong><small>x64 · Windows 10+</small></p></div>
+            <a data-dl="windows" href="https://github.com/ZhengyiLuo/AgentsDock/releases/download/v1.0.0/AgentsDock-1.0.0-win-x64.exe" target="_blank" rel="noopener" class="download-options-link">下载 .exe</a>
+          </article>
+          <article>
+            <div><span class="platform-mark">&#xF8FF;</span><p><strong>iPhone 和 iPad</strong><small>iOS 和 iPadOS 16.4+ · App Store</small></p></div>
+            <a href="https://apps.apple.com/us/app/agentsdock/id6769275751" target="_blank" rel="noopener" class="download-options-link">在 App Store 下载</a>
+          </article>
+          <article>
+            <div><span class="platform-mark"><svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M17.523 15.3414c-.5511 0-.9993-.4486-.9993-.9997s.4483-.9993.9993-.9993c.5511 0 .9993.4483.9993.9993 0 .5511-.4483.9997-.9993.9997m-11.046 0c-.5511 0-.9993-.4486-.9993-.9997s.4483-.9993.9993-.9993c.5511 0 .9993.4483.9993.9993 0 .5511-.4483.9997-.9993.9997m11.4045-6.02l1.9973-3.4592a.416.416 0 00-.1521-.5676.416.416 0 00-.5676.1521l-2.0223 3.503C15.5902 8.2439 13.8533 7.8508 12 7.8508s-3.5902.3931-5.1367 1.0989L4.841 5.4467a.4161.4161 0 00-.5677-.1521.4157.4157 0 00-.1521.5676l1.9973 3.4592C2.6889 11.1867.3432 14.6589 0 18.761h24c-.3435-4.1021-2.6892-7.5743-6.1185-9.4396"/></svg></span><p><strong>Android</strong><small>arm64 · 测试版</small></p></div>
+            <a data-dl="android" href="https://github.com/ZhengyiLuo/AgentsDock-Releases/releases/download/android-v0.1.1-beta.7/AgentsDock-0.1.1-android-arm64-beta.7.apk" target="_blank" rel="noopener" class="download-options-link">下载 APK</a>
+          </article>
+        </div>
+      </section>
+    </main>
+
+    <footer>
+      <div class="brand footer-brand"><img src="../assets/agentsdock-icon.png" alt="" /><span>AgentsDock</span></div>
+      <p>为 agentic AI 研究而设计的 IDE。<span class="footer-copyright">&copy; 2026 AgentsDock</span></p>
+      <div>
+        <a href="./setup.html">文档</a>
+        <a href="../support.html">支持</a>
+        <a href="./report-issue.html">反馈问题</a>
+        <a href="../privacy.html">隐私</a>
+        <a href="https://discord.gg/ZGDrhEWqPt" target="_blank" rel="noopener">Discord &#8599;</a>
+      </div>
+    </footer>
+
+    <script src="../app.js?v=4b67ee60" type="module"></script>
+    <script>
+      // IDE panel: the code sits static; only the last line types itself in, on a loop.
+      (function () {
+        var el = document.querySelector('.ide-type');
+        if (!el) return;
+        el.style.width = 'auto';
+        var full = el.offsetWidth;
+        el.style.width = '0px';
+        if (!full || (window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches)) {
+          el.style.width = 'auto';
+          el.style.borderRight = '0';
+          return;
+        }
+        var steps = 32, w = 0, i = 0, timer, started = false;
+        function type() {
+          i++; w = Math.min(full, (full / steps) * i);
+          el.style.width = w + 'px';
+          if (i < steps) { timer = setTimeout(type, 75); }
+          else { timer = setTimeout(reset, 2400); }
+        }
+        function reset() { i = 0; w = 0; el.style.width = '0px'; timer = setTimeout(type, 350); }
+        function start() { if (!started) { started = true; type(); } }
+        if ('IntersectionObserver' in window) {
+          var io = new IntersectionObserver(function (entries) {
+            entries.forEach(function (e) { if (e.isIntersecting) start(); });
+          }, { threshold: 0.3 });
+          io.observe(el);
+        } else { start(); }
+      })();
+    </script>
+  </body>
+</html>
