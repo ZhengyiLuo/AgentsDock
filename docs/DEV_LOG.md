@@ -1,5 +1,26 @@
 # Public development log
 
+## 2026-09-22 — Validate unpublished desktop beta.3, build 1205
+
+- Build committed source `4c87d87f28735adedd20295fbb4db4f328c794b1` as
+  1.0.7-beta.3, build 1205. All 4,792 app tests, TypeScript and production
+  compilation pass. The universal macOS app and installer pass signing,
+  notarization, Gatekeeper, package parity, updater checksum and clean-launch
+  verification.
+- Personally exercise the actual signed app through native mouse and wheel
+  input, production IPC and authenticated HTTP against isolated synthetic
+  histories. First visits open at latest; returning to an older message in a
+  600-turn chat preserves its offset within one pixel. Repeated rapid chat
+  switches and scrolling immediately before switching preserve the same row
+  and offset. No renderer exceptions occur; the isolated app is closed and
+  its temporary credential is removed afterward.
+- The server tree is unchanged from the accepted 1.0.7-beta.2 server candidate.
+  Scrolling needs no server update. Claude Goals and the history/lifecycle
+  changes still require that server candidate; this entry does not record a
+  production deployment.
+- Keep the desktop candidate local and unpublished, with app updates
+  independent of server updates and no automatic npm migration.
+
 ## 2026-09-22 — Preserve chat reading positions
 
 - Restore the saved message and pixel offset when returning to a chat. First
