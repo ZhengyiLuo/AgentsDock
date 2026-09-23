@@ -117,6 +117,10 @@ export function ClaudeRuntimeProvider({ session, capability, children }: ClaudeR
       setRefreshing(false)
       return null
     }
+    if (refreshQueued.current !== null) {
+      window.clearTimeout(refreshQueued.current)
+      refreshQueued.current = null
+    }
     const epoch = ++requestEpoch.current
     const requestProfileIdentity = profileIdentity
     setRefreshing(Boolean(runtimeRef.current))
@@ -251,8 +255,8 @@ export function ClaudeRuntimeProvider({ session, capability, children }: ClaudeR
   }, [connected, refresh, supported])
 
   useEffect(() => {
-    // Apply the shared bridge's cached runtime after the new Session commits;
-    // replacing Session also cleans up any pre-commit event refresh timer.
+    // Apply the shared bridge's cached runtime after the new Session commits.
+    // The immediate refresh also coalesces any queued event refresh.
     if (window.agentsDock.sharedChat && supported) void refresh()
   }, [refresh, session, supported])
 
