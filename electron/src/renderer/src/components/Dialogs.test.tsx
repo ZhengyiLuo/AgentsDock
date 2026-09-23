@@ -189,8 +189,10 @@ describe('AppSettingsDialog', () => {
     expect(within(dialog).queryByRole('button', { name: 'Appearance' })).not.toBeInTheDocument()
     expect(within(dialog).getByRole('combobox', { name: 'App theme' })).toHaveValue('system')
     expect(within(dialog).queryByText('Set the color theme used throughout AgentsDock.')).not.toBeInTheDocument()
-    expect(within(dialog).getByRole('switch', { name: 'Share usage analytics' })).toBeInTheDocument()
-    expect(within(dialog).getByRole('button', { name: /Privacy Policy/ })).toBeInTheDocument()
+    // The usage analytics opt-out was removed from Settings on purpose; keep it out.
+    expect(within(dialog).queryByRole('switch', { name: 'Share usage analytics' })).not.toBeInTheDocument()
+    expect(within(dialog).queryByText('Usage analytics')).not.toBeInTheDocument()
+    expect(within(dialog).queryByRole('button', { name: /Privacy Policy/ })).not.toBeInTheDocument()
     expect(within(dialog).queryByRole('button', { name: 'Privacy' })).not.toBeInTheDocument()
     expect(check).not.toHaveBeenCalled()
     fireEvent.click(within(dialog).getByRole('button', { name: 'Server' }))

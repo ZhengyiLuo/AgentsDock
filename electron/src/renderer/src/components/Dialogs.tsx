@@ -22,7 +22,6 @@ import { useTransientClose } from '../lib/transient-close'
 import { captureWorkspaceScope } from '../lib/workspace-preferences'
 import { saveNewChatDefaults, useAppStore, waitForWorkspaceReady } from '../store/app-store'
 import { BackendMark } from './BackendMark'
-import { AnalyticsPrivacySettings } from './AnalyticsPrivacySettings'
 import { ChatShareDialog } from './ChatShareDialog'
 import { CodexAuthSettings } from './CodexAuthSettings'
 import { CodexModelDiscovery } from './CodexModelDiscovery'
@@ -610,7 +609,6 @@ export function AppSettingsDialog({ serverSettings, serverUpdates, onServerUpdat
                   <option value="dark">{t('settings.darkTheme')}</option>
                 </select>
               </label>
-              <AnalyticsPrivacySettings />
               <ReasoningDisplaySettings />
               <div className="app-settings-row">
                 <strong className="app-settings-row-title">AgentsDock</strong>
