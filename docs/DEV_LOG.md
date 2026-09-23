@@ -1,5 +1,23 @@
 # Public development log
 
+## 2026-09-23 — Publish the signed beta.8 server update
+
+- Publish the legacy signed server beta `1.0.7-beta.8` from canonical source
+  `8ee941e0d5469a939ffd453acbb42d8e8cfe6132` and exact standalone export
+  `2bdc10afcf3e203e8d56ecf2f8d5dbc2b1a9d4d9`. Preserve the separate OpenCode
+  release branch and existing stable release.
+- All eight server release test shards pass. Verify the Ed25519 signature,
+  all 108 packaged runtime files and the packaging policy's executable bits.
+  Anonymous downloads of the three published assets match the accepted
+  candidate byte-for-byte. Archive SHA256:
+  `e951e8782ec948fae8562be9980d777b1918c152094464e4fbaa776413f80333`.
+- The merged canonical source also passes Electron type checking, 4,803 active
+  tests, production compilation, mobile-source checks and all eight server CI
+  shards. This publication changes neither npm tags nor desktop releases.
+- Server installation uses the existing managed updater's durable when-idle
+  request. Publication and an accepted reservation do not establish completed
+  activation; observe each installation's status and authenticated health.
+
 ## 2026-09-23 — Integrate accepted desktop and server work into main
 
 - Merge the accepted release-line changes, including native Codex Side chat
