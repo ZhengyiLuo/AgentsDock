@@ -32,6 +32,7 @@ class CodexProviderReadinessTests(unittest.IsolatedAsyncioTestCase):
         self.ns = {"Any": object, "Path": Path, "re": re, "time": time, "json": json, "subprocess": subprocess,
             "asyncio": asyncio, "HTTPException": HTTPException, "codex_provider": codex_provider,
             "BACKEND_CODEX": "codex", "BACKEND_CLAUDE": "claude", "BACKEND_CURSOR": "cursor",
+            "BACKEND_OPENCODE": "opencode",
             "CODEX_PROVIDER_STORE": self.store, "CODEX_TRANSPORT": "app-server", "CODEX_TRANSPORT_EXEC": "exec",
             "runtime_display_name": lambda backend: backend, "runtime_action": lambda *args, **kwargs: None,
             "now_iso": lambda: "2026-09-17T00:00:00Z", "runtime_executable": lambda backend: backend,
@@ -40,7 +41,8 @@ class CodexProviderReadinessTests(unittest.IsolatedAsyncioTestCase):
             "runtime_diagnostic": Mock(return_value={"status": "unauthenticated", "installed": True}),
             "public_runtime_diagnostic": lambda value: value,
             "runtime_option": lambda value, label: {"value": value, "label": label},
-            "CURSOR_PERMISSION_MODES": [], "CURSOR_DEFAULT_PERMISSION_MODE": "default"}
+            "CURSOR_PERMISSION_MODES": [], "CURSOR_DEFAULT_PERMISSION_MODE": "default",
+            "OPENCODE_PERMISSION_MODES": ("default", "full_access", "plan"), "OPENCODE_DEFAULT_PERMISSION_MODE": "default"}
         exec(CODE, self.ns)
 
     def test_normal_codex_uses_its_login_despite_saved_or_broken_optional_provider(self):
