@@ -138,6 +138,26 @@ describe('Codex controls', () => {
     expect(screen.queryByRole('button', { name: 'Save permissions' })).not.toBeInTheDocument()
   })
 
+  it('keeps typing focus in the goal field after thread controls hand off, and restores focus on close', async () => {
+    runtimeResponse = { ...runtime, status: { type: 'idle' } }
+    renderControls()
+    const user = userEvent.setup()
+    const trigger = await screen.findByRole('button', { name: 'Codex controls: Idle' })
+    await user.click(trigger)
+    await user.click(screen.getByRole('button', { name: 'Goal…' }))
+    const field = screen.getByRole('textbox', { name: 'Completion condition' })
+    // Radix restores the departing content's focus in a deferred unmount task.
+    await act(async () => { await new Promise(resolve => setTimeout(resolve, 10)) })
+    expect(field).toHaveFocus()
+    await user.keyboard(' typing')
+    expect((field as HTMLTextAreaElement).value).toContain(' typing')
+    await user.click(screen.getByRole('button', { name: 'Close goal' }))
+    await waitFor(() => expect(trigger).toHaveFocus())
+    await user.click(trigger)
+    await user.click(screen.getByRole('button', { name: 'Close Codex controls' }))
+    await waitFor(() => expect(trigger).toHaveFocus())
+  })
+
   it('disables shared goal controls when access is lost, while keeping Close available', async () => {
     Object.assign(window.agentsDock, { sharedChat: true })
     useAppStore.setState({ connected: true })

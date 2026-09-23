@@ -350,10 +350,16 @@ export function CodexGoalBar() {
 }
 
 function CodexControlsDialog({ focusGoal, onOpenGoal }: { focusGoal: boolean; onOpenGoal(): void }) {
+  const focusGoalRef = useRef(focusGoal)
+  focusGoalRef.current = focusGoal
   if (focusGoal) return <CodexGoalDialogContent />
   return <Dialog.Portal>
     <Dialog.Overlay className="dialog-overlay codex-controls-overlay" />
-    <Dialog.Content className="codex-controls-dialog" aria-describedby="codex-controls-description">
+    <Dialog.Content className="codex-controls-dialog" aria-describedby="codex-controls-description" onCloseAutoFocus={event => {
+      // This content is being replaced inside the open dialog. Its deferred
+      // unmount must not steal focus from the goal field back to the trigger.
+      if (focusGoalRef.current) event.preventDefault()
+    }}>
       <CodexControlsPanel onOpenGoal={onOpenGoal} />
     </Dialog.Content>
   </Dialog.Portal>
