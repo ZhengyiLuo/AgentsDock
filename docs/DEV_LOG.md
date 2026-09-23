@@ -1,5 +1,25 @@
 # Public development log
 
+## 2026-09-23 — Publish the fresh-install npm beta
+
+- Publish `@agentsdock/server@1.0.7-beta.5` publicly from committed source
+  `5486cbcb096026e798f6b0bc20743b71d7b4a9c1`, available on
+  `release/npm-1.0.7-beta.5`. This is an opt-in fresh-install server beta;
+  no desktop release, existing-installation migration or server deployment.
+- Download the public tarball anonymously and verify it matches the tested
+  candidate byte-for-byte: SHA256
+  `9d9c6b3e69bdb56cae24c38fceb86ed5074d8b576ffbe4dcff384abd6c4a9f88`.
+  With Node 22.18.0 and npm 10.9.3, empty cache and no registry credentials,
+  execute the public beta CLI and confirm `1.0.7-beta.5`; independently pack
+  the public beta and verify its archive hash and bundled version.
+- Prior isolated runtime acceptance covers authenticated health and session
+  endpoints. Full managed-service installation and migration acceptance remain
+  unperformed; public CLI verification does not establish either boundary.
+- Publish explicitly with `--tag beta`. The registry also assigns `latest` to
+  this version; two authenticated removal attempts return HTTP 400. Both tags
+  still point to the beta. Use explicit `@beta` testing instructions and do not
+  describe this publication as a stable release or claim tag cleanup succeeded.
+
 ## 2026-09-23 — Unify goal editors and validate local beta.7, build 1210
 
 - Give Codex and Claude the same dedicated goal dialog, completion-condition
