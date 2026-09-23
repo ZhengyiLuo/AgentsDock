@@ -1,4 +1,29 @@
-# Mobile / Mac parity — 2026-09-18
+# Mobile / Mac parity — 2026-09-22
+
+## Unreleased: sidebar search and current cross-chat bubbles
+
+Reference: committed desktop `348cb07` (1.0.7-beta.1), rather than the earlier
+`6247a26` reference used for build 177. Uncommitted desktop work is excluded.
+
+- Search is a flat ranked list: matching names first, then history and metadata.
+  Pinned/folder grouping applies only when the query is empty. Local filtering,
+  match counts, history snippets, retry and exact-result navigation remain
+  distinct; changing the query cancels obsolete pending result navigation.
+- Cross-chat messages share the current purple bubble treatment in both
+  directions, including imported deliveries, one-shot handoffs and individual
+  legacy exchange legs. Source requests and long bodies remain folded with
+  explicit disclosure; scoped action/receipt semantics are unchanged.
+- Legacy exchange legs also receive independent chronological anchors. Activity
+  and assistant output between request/reply legs stay between their bubbles;
+  history navigation and sparse-history retention keep the corresponding
+  message identity rather than attributing the whole exchange to every leg.
+- Verification covers source/component regressions and production JavaScript
+  compilation separately from actual native interaction. Fresh simulator setup
+  checks failed before device boot; no native taps, pixel comparisons or
+  production client/server journeys have been accepted for these changes.
+- Availability is source only, not TestFlight. The latest released mobile build
+  remains 0.1.2 (177). Native compact-iPhone and iPad checks must pass before a
+  new release. This targeted work does not claim complete desktop parity.
 
 ## Build 177: picker recovery and live-work controls
 

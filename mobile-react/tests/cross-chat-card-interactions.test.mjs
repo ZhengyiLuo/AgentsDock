@@ -42,7 +42,7 @@ await build({
   } }],
 })
 after(async () => { await unlink(outfile); delete globalThis.__crossChatCardFixture })
-const { CrossChatExchangeCard, CrossChatConversationSurface, CROSS_CHAT_CONVERSATION_DARK } = await import(pathToFileURL(outfile).href)
+const { CrossChatExchangeCard, CrossChatMessageSurface } = await import(pathToFileURL(outfile).href)
 
 function deferred() {
   let resolve, reject
@@ -57,7 +57,7 @@ function event(exchangeId = 'exchange-1') {
     requester_session_id: 'source', responder_session_id: 'target',
     source_session_id: 'source', target_session_id: 'target',
     exchange_leg_id: 'leg-1', exchange_leg_kind: 'request', exchange_leg_status: 'queued',
-    exchange_ordinal: 1, queued_id: 'queued-1', handoff_preview: 'Question',
+    exchange_ordinal: 1, queued_id: 'queued-1', handoff_preview: 'Question', handoff_body_truncated: true,
   }
 }
 
@@ -100,16 +100,78 @@ function button(renderer, id) {
   return renderer.root.findAll(node => node.type === 'Pressable' && node.props.testID === id)[0]
 }
 
+test('legacy exchange uses the Mac per-message bubble, direction, and Markdown before expansion', async () => {
+  resetFixture()
+  const renderer = await render()
+  try {
+    assert.equal(renderer.root.findAllByType('LinearGradient').length, 0)
+    const surface = renderer.root.findAll(node => node.type === 'View' && node.props.testID === 'cross-chat-message-leg-1-surface')[0]
+    assert.ok(surface, 'Each exchange leg has its own message surface')
+    const style = Object.assign({}, ...surface.props.style.flat(Infinity).filter(Boolean))
+    assert.equal(style.backgroundColor, '#332444')
+    assert.equal(style.alignSelf, 'flex-end', 'Incoming is relative to the displayed chat, not the requester')
+    assert.equal(renderer.root.findByType('MarkdownContent').props.children, 'Question')
+    assert.doesNotMatch(JSON.stringify(renderer.toJSON()), /Agent conversation|Conversation with/)
+  } finally { await act(async () => renderer.unmount()) }
+})
+
+test('exchange leg without preview metadata retains on-demand body loading', async () => {
+  resetFixture()
+  let reads = 0
+  client.crossChatExchange = async () => { reads += 1; return exchange() }
+  const renderer = await render({ event: { ...event(), handoff_preview: '', handoff_body_truncated: undefined } })
+  try {
+    assert.match(JSON.stringify(renderer.toJSON()), /Message body available on demand/)
+    await act(async () => button(renderer, 'cross-chat-message-toggle-leg-1').props.onPress())
+    assert.equal(reads, 1)
+    assert.equal(renderer.root.findByType('MarkdownContent').props.children, 'Complete question')
+    assert.equal(button(renderer, 'cross-chat-message-toggle-leg-1'), undefined)
+  } finally { await act(async () => renderer.unmount()) }
+})
+
+test('individually anchored exchange rows retain one directional bubble each after detail loading', async () => {
+  resetFixture()
+  const first = event()
+  const second = { ...first, id: 'reply-event', seq: 3, exchange_leg_id: 'leg-2', exchange_ordinal: 2,
+    exchange_leg_kind: 'reply', source_session_id: 'target', target_session_id: 'source',
+    handoff_preview: 'Reply preview', handoff_body_truncated: false }
+  let reads = 0
+  client.crossChatExchange = async () => {
+    reads += 1
+    return { ...exchange(), legs: [exchange().legs[0], { ...exchange().legs[0], id: 'leg-2', kind: 'reply', ordinal: 2,
+      source_session_id: 'target', target_session_id: 'source', body: 'Full reply', status: 'delivered' }] }
+  }
+  let renderer
+  await act(async () => {
+    renderer = TestRenderer.create(React.createElement(React.Fragment, null,
+      React.createElement(CrossChatExchangeCard, { event: second, events: [first, second], rowKey: 'request-row', legId: 'leg-1', sessionId: 'target' }),
+      React.createElement('Text', null, 'Activity between the messages'),
+      React.createElement(CrossChatExchangeCard, { event: second, events: [first, second], rowKey: 'reply-row', legId: 'leg-2', sessionId: 'target' })))
+  })
+  try {
+    for (const id of ['leg-1', 'leg-2']) assert.equal(renderer.root.findAll(node => node.type === 'View' && node.props.testID === `cross-chat-message-${id}-surface`).length, 1)
+    assert.deepEqual(renderer.root.findAllByType('MarkdownContent').map(node => node.props.children), ['Question', 'Reply preview'])
+    await act(async () => button(renderer, 'cross-chat-message-toggle-leg-1').props.onPress())
+    assert.equal(reads, 1)
+    assert.deepEqual(renderer.root.findAllByType('MarkdownContent').map(node => node.props.children), ['Complete question', 'Reply preview'])
+    for (const [id, direction] of [['leg-1', 'flex-end'], ['leg-2', 'flex-start']]) {
+      const surface = renderer.root.findAll(node => node.type === 'View' && node.props.testID === `cross-chat-message-${id}-surface`)
+      assert.equal(surface.length, 1, 'Loading one row cannot add its sibling messages')
+      assert.equal(Object.assign({}, ...surface[0].props.style.flat(Infinity)).alignSelf, direction)
+    }
+  } finally { await act(async () => renderer.unmount()) }
+})
+
 test('conversation surface renders shared presentation without store state or action controls', async () => {
   fixture.state = null
   let renderer
   await act(async () => {
-    renderer = TestRenderer.create(React.createElement(CrossChatConversationSurface, { testID: 'shared-conversation', palette: CROSS_CHAT_CONVERSATION_DARK }, React.createElement('Text', null, 'Imported content')))
+    renderer = TestRenderer.create(React.createElement(CrossChatMessageSurface, { identity: 'shared-conversation', sessionId: 'chat', title: 'Sender', incoming: true }, React.createElement('Text', null, 'Imported content')))
   })
   try {
     assert.equal(renderer.root.findAllByType('Pressable').length, 0)
     assert.equal(renderer.root.findAllByType('MessageSquareShare').length, 1)
-    assert.equal(renderer.root.findAllByType('LinearGradient').length, 1)
+    assert.equal(renderer.root.findAllByType('LinearGradient').length, 0)
     assert.equal(renderer.root.findAll(node => node.type === 'View' && node.props.testID === 'shared-conversation').length, 1)
     assert.ok(JSON.stringify(renderer.toJSON()).includes('Imported content'))
   } finally { await act(async () => renderer.unmount()) }
@@ -117,7 +179,7 @@ test('conversation surface renders shared presentation without store state or ac
 
 test('expanding a live exchange renders authenticated Markdown with conversation tint and original font scale', async () => {
   resetFixture()
-  const body = '# Result\n\n**Ready** with `code`, [details](https://example.com), and $x^2$.'
+  const body = '# Result\n\n**Ready** with `code`, [details](https://example.com), and $x^2$. ' + 'Long result. '.repeat(60)
   let reads = 0
   client.crossChatExchange = async () => {
     reads += 1
@@ -127,19 +189,19 @@ test('expanding a live exchange renders authenticated Markdown with conversation
   }
   const renderer = await render({ fontScale: 1.3 })
   try {
-    assert.equal(renderer.root.findAllByType('MarkdownContent').length, 0, 'Collapsed previews stay plaintext')
+    assert.equal(renderer.root.findByType('MarkdownContent').props.children, 'Question', 'Preview is Markdown before detail loading')
     await act(async () => {
-      const expand = button(renderer, 'cross-chat-toggle-conversation-exchange-1').props.onPress
+      const expand = button(renderer, 'cross-chat-message-toggle-leg-1').props.onPress
       expand(); expand()
     })
     assert.equal(reads, 1, 'Expansion retains the existing single-flight detail request')
     const markdown = renderer.root.findByType('MarkdownContent')
     assert.equal(markdown.props.children, body)
     assert.equal(markdown.props.compact, true)
-    assert.equal(markdown.props.color, CROSS_CHAT_CONVERSATION_DARK.body)
+    assert.equal(markdown.props.color, '#f4f4f5')
     assert.equal(markdown.props.fontScale, 1.3)
-    await act(async () => button(renderer, 'cross-chat-toggle-conversation-exchange-1').props.onPress())
-    assert.equal(renderer.root.findAllByType('MarkdownContent').length, 0)
+    await act(async () => button(renderer, 'cross-chat-message-toggle-leg-1').props.onPress())
+    assert.ok(renderer.root.findByType('MarkdownContent').props.children.length <= 641)
   } finally { await act(async () => renderer.unmount()) }
 })
 
@@ -151,7 +213,7 @@ test('individual Markdown expansion preserves bounded chunks, Show more, and Sho
   client.crossChatExchange = async () => { reads += 1; return exchange() }
   const renderer = await render({ event: longEvent })
   try {
-    assert.equal(renderer.root.findAllByType('MarkdownContent').length, 0)
+    assert.ok(renderer.root.findByType('MarkdownContent').props.children.length <= 641)
     await act(async () => button(renderer, 'cross-chat-message-toggle-leg-1').props.onPress())
     assert.equal(renderer.root.findByType('MarkdownContent').props.children, body.slice(0, 4_000) + '…')
     await act(async () => button(renderer, 'cross-chat-message-toggle-leg-1').props.onPress())
@@ -160,7 +222,7 @@ test('individual Markdown expansion preserves bounded chunks, Show more, and Sho
     assert.equal(renderer.root.findByType('MarkdownContent').props.children, body)
     assert.equal(button(renderer, 'cross-chat-message-toggle-leg-1').props.accessibilityLabel, 'Show less for message 1')
     await act(async () => button(renderer, 'cross-chat-message-toggle-leg-1').props.onPress())
-    assert.equal(renderer.root.findAllByType('MarkdownContent').length, 0)
+    assert.ok(renderer.root.findByType('MarkdownContent').props.children.length <= 641)
     assert.equal(reads, 0, 'Complete local bodies should not request detail while paging')
   } finally { await act(async () => renderer.unmount()) }
 })
@@ -172,7 +234,7 @@ for (const transition of ['validation', 'server instance']) test(`same-profile $
   client.crossChatExchange = () => (++reads === 1 ? oldRead.promise : freshRead.promise)
   const renderer = await render()
   try {
-    await act(async () => button(renderer, 'cross-chat-toggle-conversation-exchange-1').props.onPress())
+    await act(async () => button(renderer, 'cross-chat-message-toggle-leg-1').props.onPress())
     assert.equal(reads, 1)
     await act(async () => {
       if (transition === 'validation') { client.validationRevision += 1; publish() }
@@ -180,7 +242,7 @@ for (const transition of ['validation', 'server instance']) test(`same-profile $
     })
     assert.equal(reads, 2, 'The open card should reload after client validation changes')
     await act(async () => oldRead.reject(new Error('Old connection aborted')))
-    assert.equal(renderer.root.findAllByType('ActivityIndicator').length, 1, 'The old finally must not release the new request')
+    assert.equal(button(renderer, 'cross-chat-message-toggle-leg-1').props.disabled, true, 'The old finally must not release the new request')
     await act(async () => freshRead.resolve(exchange()))
     assert.equal(renderer.root.findAllByType('ActivityIndicator').length, 0)
     assert.ok(JSON.stringify(renderer.toJSON()).includes('Complete question'))
@@ -240,7 +302,7 @@ test('ending reconnect reloads an open card when connected stayed true and reval
   }
   const renderer = await render()
   try {
-    await act(async () => button(renderer, 'cross-chat-toggle-conversation-exchange-1').props.onPress())
+    await act(async () => button(renderer, 'cross-chat-message-toggle-leg-1').props.onPress())
     await act(async () => { client.validationRevision += 1; publish({ connecting: true }) })
     await act(async () => oldRead.reject(new Error('Old connection aborted')))
     assert.equal(validatedReads, 1)
@@ -301,7 +363,7 @@ test('an old detail read cannot restore active state after confirmed cancellatio
   client.crossChatExchange = () => oldRead.promise
   const renderer = await render()
   try {
-    await act(async () => button(renderer, 'cross-chat-toggle-conversation-exchange-1').props.onPress())
+    await act(async () => button(renderer, 'cross-chat-message-toggle-leg-1').props.onPress())
     await act(async () => button(renderer, 'cross-chat-cancel-exchange-exchange-1').props.onPress())
     await act(async () => oldRead.resolve(exchange('active')))
     assert.equal(button(renderer, 'cross-chat-cancel-exchange-exchange-1'), undefined)
@@ -337,7 +399,7 @@ test('failed promotion cancellation reloads terminal truth even when the earlier
   client.cancelCrossChatExchange = async id => { cancelIds.push(id); throw new Error('Conversation completed before cancellation') }
   const renderer = await render()
   try {
-    await act(async () => button(renderer, 'cross-chat-toggle-conversation-exchange-1').props.onPress())
+    await act(async () => button(renderer, 'cross-chat-message-toggle-leg-1').props.onPress())
     assert.deepEqual(readIds, ['exchange-1'])
     await act(async () => button(renderer, 'cross-chat-skip-delivery-queued-1').props.onPress())
     assert.deepEqual(cancelIds, ['exchange-1'])

@@ -1,7 +1,7 @@
 import type { AgentFile, CodexPendingInteraction, Event, JsonValue, Snapshot } from '../types'
 import { mergeEvents, mergeFiles, stripInjectedProviderAuthority } from './format'
 import { boundImportedCrossChatDeliveryPrompt } from './imported-cross-chat-delivery'
-import { crossChatSemanticKey, isAsyncCrossChatMessage } from './timeline'
+import { crossChatExchangeLegId, crossChatSemanticKey, isAsyncCrossChatMessage } from './timeline'
 import { isChatMailboxEvent } from './chat-mailbox'
 import { isImportedCodexGoalContext, isImportedProviderControlMetadata, mergeProviderInterruptionEvent } from './provider-origin'
 import { retainNativeGoalAcknowledgementFiles } from './native-goal-file-association'
@@ -125,9 +125,15 @@ export function historicalTimelineEvents(events: Event[], contextEvents: readonl
 function historicalCrossChatAnchors(events: readonly Event[]): number[] {
   const anchors = new Map<string, number>()
   const deleted = new Set<string>()
+  const legExchanges = new Set(events.filter(event => crossChatExchangeLegId(event)).map(crossChatSemanticKey))
   for (const event of events) {
-    const key = crossChatSemanticKey(event)
+    let key = crossChatSemanticKey(event)
     if (!key || !Number.isFinite(event.seq)) continue
+    if (legExchanges.has(key)) {
+      const legId = crossChatExchangeLegId(event)
+      if (!legId) continue
+      key = `${key}:message:${legId}`
+    }
     const incoming = event.target_session_id === event.session_id && event.source_session_id !== event.session_id
     if (isChatMailboxEvent(event) && incoming && event.inbox_state === 'deleted') deleted.add(key)
     if (isAsyncCrossChatMessage(event) && incoming) {

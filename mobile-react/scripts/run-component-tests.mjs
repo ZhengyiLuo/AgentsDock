@@ -19,6 +19,7 @@ const aliases = new Map(Object.entries({
   'react-native-keyboard-controller': 'tests/component-mocks/native-wrappers.ts',
   'lucide-react-native': 'tests/component-mocks/icons.ts',
   'expo-file-system': 'tests/mocks/expo-file-system.ts',
+  '@expo/ui/community/menu': 'tests/component-mocks/native-wrappers.ts',
 }).map(([name, path]) => [name, resolve(projectRoot, path)]))
 
 try {
@@ -30,6 +31,7 @@ try {
     format: 'esm',
     platform: 'node',
     jsx: 'automatic',
+    loader: { '.png': 'dataurl' },
     logLevel: 'silent',
     banner: {
       js: `import { createRequire } from 'node:module'; const require = createRequire(${JSON.stringify(import.meta.url)});\n`

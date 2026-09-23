@@ -39,6 +39,8 @@ export interface SystemRow {
   importedDelivery?: ImportedCrossChatDelivery
   /** Independent async messages use delivery-time placement and ordinary replies. */
   crossChatMessage?: boolean
+  /** One chronological legacy message; events still retain its exchange lifecycle. */
+  crossChatLegId?: string
   anchorTs?: string
   /** Adjacent passive messages from the exact same sender/recipient pair. */
   mailboxMessages?: SystemRow[]
@@ -690,8 +692,38 @@ export function projectTimeline(events: Event[], knownFiles: AgentFile[]): Timel
   }> = []
   // Pending incoming messages belong exclusively to the ordinary queue. Once
   // admitted, anchor them at execution start before ordering around user work.
-  const displayItems = items.flatMap(item => {
-    if (!('kind' in item) || item.kind !== 'system' || !(item.events ?? [item.event]).some(isAsyncCrossChatMessage)) return [item]
+  const displayItems = items.flatMap<Turn | SystemRow | JobRow>(item => {
+    if (!('kind' in item) || item.kind !== 'system') return [item]
+    if (!(item.events ?? [item.event]).some(isAsyncCrossChatMessage)) {
+      const byLeg = new Map<string, Event[]>()
+      for (const event of item.events ?? [item.event]) {
+        const legId = crossChatExchangeLegId(event)
+        if (legId) byLeg.set(legId, [...byLeg.get(legId) ?? [], event])
+      }
+      if (!byLeg.size) return [item]
+      const legEntries = [...byLeg]
+      const representedByLeg = new Map(legEntries.map(([id, events]) => [id, [...events]]))
+      for (const event of item.events ?? [item.event]) {
+        if (crossChatExchangeLegId(event)) continue
+        const namedLeg = event.exchange_leg_id?.trim() || event.cross_chat_exchange_leg_id?.trim() || ''
+        const owner = byLeg.has(namedLeg) ? namedLeg
+          : [...legEntries].reverse().find(([, events]) => events[0].seq <= event.seq)?.[0] ?? legEntries[0][0]
+        // Exchange-wide receipts remain seekable once, on the message most
+        // recently placed before them; they never move its visual anchor.
+        representedByLeg.get(owner)!.push(event)
+      }
+      // Keep aggregate status/participant data for the card, but place and
+      // seek each message using only its own immutable lifecycle anchors.
+      return legEntries.map(([legId, events]): SystemRow => {
+        const represented = representedByLeg.get(legId)!.sort((left, right) => left.seq - right.seq)
+        return {
+          ...item, key: `${item.key}:message:${legId}`, crossChatLegId: legId,
+          seq: events[0].seq, anchorTs: events[0].ts,
+          representedEventIds: represented.map(event => event.id),
+          representedEventSeqs: represented.map(event => event.seq),
+        }
+      })
+    }
     // A later legacy compatibility receipt must not replace the negotiated
     // async lifecycle's status, identity, or body provenance (same as Mac).
     const asyncLifecycle = (item.events ?? [item.event]).filter(isAsyncCrossChatMessage)
@@ -1630,6 +1662,11 @@ function isInternalDeliveryTurn(event: Event): boolean {
 }
 
 /** Match the server/Mac semantic identity for cross-chat lifecycle packets. */
+export function crossChatExchangeLegId(event: Event): string {
+  if (!event.type.startsWith('cross_chat_exchange_') || event.exchange_leg_kind === 'status') return ''
+  return event.exchange_leg_id?.trim() || event.cross_chat_exchange_leg_id?.trim() || ''
+}
+
 export function crossChatSemanticKey(event: Event): string | null {
   if (isAsyncCrossChatMessage(event)) {
     const envelopeId = event.cross_chat_envelope_id?.trim() || event.handoff_id?.trim() || event.message_id?.trim()

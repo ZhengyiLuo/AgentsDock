@@ -122,8 +122,8 @@ const terminalExchangeEvents = [
 const terminalExchangeFirst = projectTimeline(terminalExchangeEvents, [])
 const terminalExchangeProjectedAgain = projectTimeline(terminalExchangeEvents, [])
 assert.equal(
-  terminalExchangeProjectedAgain.find(row => row.key === 'cross-chat-exchange:exchange-stable')?.event,
-  terminalExchangeFirst.find(row => row.key === 'cross-chat-exchange:exchange-stable')?.event,
+  terminalExchangeProjectedAgain.find(row => row.key === 'cross-chat-exchange:exchange-stable:message:leg-stable')?.event,
+  terminalExchangeFirst.find(row => row.key === 'cross-chat-exchange:exchange-stable:message:leg-stable')?.event,
   'terminal normalization should cache its clone by immutable packet and status',
 )
 const terminalExchangeSecond = reuseStableTimelineRows(
@@ -131,8 +131,8 @@ const terminalExchangeSecond = reuseStableTimelineRows(
   terminalExchangeProjectedAgain,
 )
 assert.equal(
-  terminalExchangeSecond.find(row => row.key === 'cross-chat-exchange:exchange-stable'),
-  terminalExchangeFirst.find(row => row.key === 'cross-chat-exchange:exchange-stable'),
+  terminalExchangeSecond.find(row => row.key === 'cross-chat-exchange:exchange-stable:message:leg-stable'),
+  terminalExchangeFirst.find(row => row.key === 'cross-chat-exchange:exchange-stable:message:leg-stable'),
   'terminal-status normalization must not remount an unchanged conversation on every live append',
 )
 
@@ -143,6 +143,8 @@ const crossChatSystemRow: TimelineRow = {
   seq: 7,
   event: { ...event('large-cross-chat', 7), type: 'cross_chat_handoff_queued', handoff_preview: largeCrossChatPreview },
 }
+assert.equal(sameTimelineRow(crossChatSystemRow, { ...crossChatSystemRow, crossChatLegId: 'other-leg' }), false,
+  'changing the displayed legacy message invalidates the row even with the same aggregate lifecycle')
 assert.equal(
   sameTimelineRow(crossChatSystemRow, { ...crossChatSystemRow, event: { ...crossChatSystemRow.event } }),
   false,

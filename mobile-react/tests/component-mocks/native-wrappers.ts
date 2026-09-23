@@ -10,3 +10,4 @@ export const Polyline = 'Polyline'
 export const Polygon = 'Polygon'
 export const G = 'G'
 export const KeyboardController = { async dismiss(_options?: unknown) {} }
+export const MenuView = 'MenuView'

@@ -1,5 +1,29 @@
 # Public development log
 
+## Mobile search and cross-chat presentation — unreleased
+
+- Keep sidebar search in one ranked list, matching committed desktop
+  `348cb07`: exact/prefix/name hits precede history and metadata matches.
+  Folder and pinned ordering no longer bury matching chat names. Show match
+  counts, distinguish history snippets and preserve exact-event navigation.
+- Cancel a pending history-result navigation when the query changes. A late
+  completion cannot open the obsolete result or block a new name selection.
+  Preserve debounced history requests, server-scope guards and retry feedback.
+- Align async, imported, one-shot and legacy exchange messages with desktop's
+  individual purple bubbles, direction, bounded width and compact headers.
+  Retain long-body/source disclosure, on-demand loading, scoped navigation,
+  exact queued-message controls, cancellation and visible errors.
+- Anchor each legacy exchange message at its own timeline position instead of
+  showing later replies beside the initial request. Preserve per-message
+  history targets, sparse activity anchors and terminal exchange state.
+- Source verification passed 113 library/API/store modules, 507 rendered/
+  contract checks, the Sidebar component regressions, TypeScript and production
+  iOS JavaScript export. These checks do not certify native touch or layout.
+- Availability: source only. Native simulator interaction acceptance is
+  blocked by test-environment setup and external-volume permission failures.
+  Component regressions are not native touch/pixel or real-service acceptance.
+  No new TestFlight build is released over this blocked acceptance gate.
+
 ## Mobile picker recovery, goal controls and live forks — 0.1.2 (177)
 
 - Apple validation, upload and processing completed successfully. Build 177
