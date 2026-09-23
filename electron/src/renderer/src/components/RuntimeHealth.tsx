@@ -4,6 +4,8 @@ import { useLocale } from '../lib/i18n'
 import { AlertTriangle, CheckCircle2, CircleHelp, RefreshCw, XCircle } from 'lucide-react'
 import type { Backend, CodexProvider, Event, RuntimeCatalog, RuntimeDiagnostic } from '@shared/types'
 import {
+  opencodeBackendAvailable,
+  opencodeBackendUnavailableReason,
   cursorBackendAvailable,
   cursorBackendUnavailableReason,
   runtimeDiagnosticCurrentError,
@@ -39,6 +41,7 @@ export function RuntimeHealthPanel() {
       <RuntimeStatus backend="claude" />
       <RuntimeStatus backend="codex" />
       {cursorAdvertised && <RuntimeStatus backend="cursor" />}
+      <RuntimeStatus backend="opencode" />
     </div>
   </section>
 }
@@ -125,7 +128,7 @@ function RuntimeStatus({
   useLocale()
   const health = useAppStore(state => state.health)
   const catalog = useAppStore(state => state.runtimeCatalog)
-  const cursorCapability = health?.capabilities?.cursor_backend
+  const cursorCapability = backend === 'opencode' ? health?.capabilities?.opencode_backend : health?.capabilities?.cursor_backend
   // Keep compact notices independent from ordinary live timeline growth. The
   // selector still observes a newly relevant run error, but its stable string
   // prevents every event append from rerendering this subtree.
@@ -134,7 +137,7 @@ function RuntimeStatus({
   ))
   const customCatalog = useAppStore(state => state.sessions.find(session => session.id === sessionId)?.codex_provider_catalog)
   const diagnostic = runtimeDiagnosticFor(health, catalog, backend, codexProvider, customCatalog)
-  const cursorUnavailable = backend === 'cursor' && !cursorBackendAvailable(health, catalog)
+  const cursorUnavailable = backend === 'cursor' && !cursorBackendAvailable(health, catalog) || backend === 'opencode' && !opencodeBackendAvailable(health, catalog)
   // Provider last_error is backend-wide, not session-scoped. Keep it in the
   // full Settings panel so a failure from one chat cannot leak into another
   // chat's compact composer notice.
@@ -144,9 +147,9 @@ function RuntimeStatus({
   if (compact && !chatError && !providerNeedsAttention) return null
   const tone = chatError ? 'warning' : cursorUnavailable ? 'error' : runtimeDiagnosticTone(diagnostic)
   const Icon = tone === 'ready' ? CheckCircle2 : tone === 'error' ? XCircle : tone === 'warning' ? AlertTriangle : CircleHelp
-  const provider = backend === 'claude' ? 'Claude Code' : backend === 'cursor' ? 'Cursor' : codexProvider === 'custom' ? t('codexProvider.label') : 'Codex'
+  const provider = backend === 'claude' ? 'Claude Code' : backend === 'cursor' ? 'Cursor' : backend === 'opencode' ? 'OpenCode' : codexProvider === 'custom' ? t('codexProvider.label') : 'Codex'
   const cursorUnavailableDetail = cursorUnavailable
-    ? cursorBackendUnavailableReason(health, catalog) || ''
+    ? (backend === 'opencode' ? opencodeBackendUnavailableReason(health, catalog) : cursorBackendUnavailableReason(health, catalog)) || ''
     : ''
   const detail = chatError
     || cursorUnavailableDetail

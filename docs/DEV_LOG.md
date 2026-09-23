@@ -1,5 +1,40 @@
 # Public development log
 
+## 2026-09-22 — Prepare OpenCode desktop/server beta candidate
+
+- Integrate OpenCode into the maintained desktop and server sources for
+  `1.0.7-beta.6`, preserving the newer Claude Goals, thinking, scrolling,
+  reconnect and mailbox-history corrections. Keep desktop installation
+  independent of server updates; no automatic npm migration is introduced.
+- Add desktop backend/model selection, permission controls and their context
+  reset warning, uploads, local skills and native session/reset projection.
+  The matching server supports OpenCode CLI 1.18.29, bounded native execution,
+  follow-ups, queued turns and Stop. Unsupported features remain explicit.
+- Cover enforced-resume Stop/error cleanup against the original durable
+  provider binding, preserving newer run ownership. Redact exact run-private
+  helper capability material before live/history projection without changing
+  public receipts. Recheck the local CLI contract at actual turn admission so
+  an in-place upgrade cannot reuse a stale compatible-version diagnostic.
+- Pass the full desktop suite (4,820 active tests; five existing skips),
+  TypeScript and production compilation. Additional permission/localization
+  checks pass after adding the context-reset warning. Server provider,
+  history/mailbox, packaging and recovery regressions pass.
+- Personally use an isolated native offscreen Electron app with production
+  IPC and authenticated HTTP/WebSocket transport: create an OpenCode chat,
+  select a model, write a disposable file, receive a contextual follow-up,
+  stop a live shell tool and verify its delayed write never occurs, then upload
+  a text attachment through the normal file action and receive its exact
+  contents. Reload retains the attachment, answer and context-reset markers.
+  Inspect the permission warning in light/dark themes at a narrow desktop width.
+- The real free-model endpoint rejects Plan-mode requests. The app displays
+  that provider error and clears the failed resume binding; absence of a file
+  after this rejection is not successful Plan-mode acceptance. Authenticated
+  provider checks for enforced permissions and selected skills remain pending.
+- Preserve native build reservations 1206/1207 from the local beta.4/beta.5
+  candidates; public preparation run 21 next reserves 1208. Recheck the counter
+  before dispatch. No new signed package, publication, production installation
+  or server deployment is recorded by this source-preparation entry.
+
 ## 2026-09-22 — Keep interrupted mail checks out of user history
 
 - Correct Claude mailbox-input ownership proof for stopped and failed runs.

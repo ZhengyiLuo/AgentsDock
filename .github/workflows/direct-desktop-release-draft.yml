@@ -8,7 +8,7 @@ on:
         required: true
         type: string
       build_number:
-        description: "Explicit native build reservation: exactly 1185 + public workflow run number"
+        description: "Explicit native build reservation: 1185 + run through run 20; 1187 + run from run 21"
         required: true
         type: string
       source_sha:

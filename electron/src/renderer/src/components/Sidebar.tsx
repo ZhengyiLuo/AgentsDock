@@ -415,7 +415,7 @@ function SessionContextMenu({ session, unread, folders }: { session: Session; un
   const running = useAppStore(state => state.activeSessionIds.has(session.id))
   const admitting = useAppStore(state => Boolean(state.turnAdmissionTokens[session.id]))
   const liveForkSupported = useAppStore(state => completedPrefixForkAvailable(state.health, session.backend))
-  const forkBlocked = (running || admitting) && !liveForkSupported
+  const forkBlocked = session?.backend === 'opencode' || (running || admitting) && !liveForkSupported
   return (
     <ContextMenu.Portal>
       <ContextMenu.Content className="menu-content">
@@ -433,7 +433,7 @@ function SessionContextMenu({ session, unread, folders }: { session: Session; un
           icon={Undo2}
           label={t("ui.Sidebar.SessionContextMenu.fork_chat_bc15630")}
           disabled={forkBlocked}
-          title={forkBlocked ? t('sessionFork.runningUnavailable') : running || admitting ? t('sessionFork.runningDescription') : undefined}
+          title={session?.backend === 'opencode' ? t('opencode.forkUnavailable') : forkBlocked ? t('sessionFork.runningUnavailable') : running || admitting ? t('sessionFork.runningDescription') : undefined}
           onSelect={() => void useAppStore.getState().forkSession(session.id)}
         />
         <MenuItem icon={Trash2} label={t("ui.Sidebar.SessionContextMenu.delete_chat_19f9176")} danger onSelect={() => window.dispatchEvent(new CustomEvent('agentsdock:confirm-delete', { detail: session }))} />

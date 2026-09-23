@@ -36,7 +36,7 @@ describe('per-chat Codex provider selection', () => {
   } } }
 
   it('adds exactly one choice while preserving native Codex identity and legacy defaults', () => {
-    expect(selectableChatBackendChoices(health, catalog)).toEqual(['claude', 'codex', 'codex-custom'])
+    expect(selectableChatBackendChoices(health, catalog)).toEqual(['claude', 'codex', 'codex-custom', 'opencode'])
     expect(chatBackendChoice({ backend: 'codex' })).toBe('codex')
     expect(chatBackendChoice({ backend: 'codex', codex_provider: 'custom' })).toBe('codex-custom')
     expect(chatBackendSelection('codex-custom')).toEqual({ backend: 'codex', codex_provider: 'custom' })
