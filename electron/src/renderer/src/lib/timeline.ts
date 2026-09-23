@@ -165,7 +165,7 @@ const traceTypes = new Set([
 const hiddenTypes = new Set([
   'turn_queued', 'turn_unqueued', 'turn_queue_updated', 'turn_queue_reordered',
   'turn_queue_run_now', 'turn_queue_paused', 'turn_queue_delivery_fenced', 'queue_snapshot',
-  'subagent_state', 'claude_subagents_stopped', 'job_updated', 'job_deleted',
+  'subagent_state', 'claude_subagents_stopped', 'claude_goal_changed', 'job_updated', 'job_deleted',
   'codex_thread_status', 'codex_goal_updated', 'codex_goal_cleared', 'codex_token_usage',
   'emergency_alert_acknowledged',
   'claude_background_task_reconciliation_consumed',

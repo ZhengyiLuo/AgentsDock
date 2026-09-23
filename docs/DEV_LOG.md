@@ -1,5 +1,28 @@
 # Public development log
 
+## 2026-09-22 — Integrate native Claude Goals and repair turn transitions
+
+- Add desktop Claude Goal controls using the installed provider's native
+  `/goal` command. Read native goal-status records for active, achieved and
+  cleared state; retain completed details without inventing iteration counts.
+  Older servers continue normal chat without the new controls.
+- Clear a running goal through Claude's native priority command, which also
+  stops that turn. Keep the command receipt separate from the interrupted
+  result, and retire the exact connection if confirmation times out so a later
+  message can start normally.
+- Preserve interruption provenance across parallel tool-result branches, so
+  native interruption markers do not become ordinary user messages.
+- Normalize source-proven native goal commands when reopening history and
+  omit native synthetic placeholders and duplicate imported command rows.
+- Do not promote a queued message to Starting when Stop is still pending.
+  Preserve the queued message and use bounded, exact-run Stop for Claude's
+  Send now path.
+- Focused provider, runner, queue, transcript and desktop checks pass. The real
+  desktop app, production IPC and isolated server complete a native goal,
+  clear one during a long-running tool, and complete a normal follow-up. Live
+  Send now also completes the replacement turn with an empty queue. Release
+  artifacts are recorded separately; this entry does not claim a deployment.
+
 ## 2026-09-22 — Publish desktop 1.0.6, build 1201
 
 - Publish the accepted desktop package as stable 1.0.6 in the public source

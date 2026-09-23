@@ -3086,6 +3086,32 @@ describe('AgentServerClient live stream', () => {
     expect(JSON.parse(String(calls[13][1].body))).toEqual({ confirmed: true })
   })
 
+  it('sets and clears Claude goals through the actual native HTTP transport', async () => {
+    const calls: Array<{ method: string; url: string; headers: IncomingMessage['headers']; body: string }> = []
+    await withLocalHTTPServer(async (request, response) => {
+      calls.push({ method: request.method ?? '', url: request.url ?? '', headers: request.headers, body: await incomingBody(request) })
+      response.setHeader('Content-Type', 'application/json')
+      response.end(JSON.stringify({ available: true, features: { goals: true }, goal: null }))
+    }, async baseURL => {
+      const client = new AgentServerClient(baseURL, 'fixture-token')
+      await expect(client.setClaudeGoal('claude-chat', 'The application builds.')).resolves.toMatchObject({ features: { goals: true } })
+      await expect(client.clearClaudeGoal('claude-chat')).resolves.toMatchObject({ goal: null })
+      client.dispose()
+    })
+    expect(calls.map(call => [call.method, call.url])).toEqual([
+      ['PUT', '/api/sessions/claude-chat/claude/goal'],
+      ['DELETE', '/api/sessions/claude-chat/claude/goal']
+    ])
+    expect(JSON.parse(calls[0].body)).toEqual({ condition: 'The application builds.' })
+    expect(calls[1].body).toBe('')
+    for (const call of calls) {
+      expect(call.headers['x-agentsdock-token']).toBe('fixture-token')
+      expect(call.headers.origin).toBeUndefined()
+      expect(call.headers['sec-fetch-mode']).toBeUndefined()
+      expect(call.headers.cookie).toBeUndefined()
+    }
+  })
+
   it('uses authenticated, encoded routes for Claude SDK runtime, MCP controls, refresh, and interactions', async () => {
     const interaction = {
       id: 'permission-1',

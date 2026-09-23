@@ -4927,6 +4927,34 @@ describe('Composer', () => {
 
   it.each([
     ['keyboard selection', 'enter'],
+    ['send-button fallback', 'send']
+  ] as const)('opens native Claude goal controls by %s without creating a model turn', async (_label, path) => {
+    const send = vi.fn()
+    Object.defineProperty(window, 'agentsDock', { configurable: true, value: {
+      preferences: { get: vi.fn().mockResolvedValue(''), set: vi.fn().mockResolvedValue(undefined) },
+      turns: { send },
+      claude: { runtime: vi.fn().mockResolvedValue({ available: true, transport: 'sdk',
+        interactive_capability: 'claude_sdk_interactive_v1', session_loaded: true,
+        pending_interactions: [], features: { goals: true }, goal: null }), setGoal: vi.fn(), clearGoal: vi.fn() },
+      events: { on: vi.fn().mockReturnValue(() => undefined) }
+    } as unknown as AgentsDockAPI })
+    useAppStore.setState({ sessions: [{ id: 'chat-1', title: 'Chat', backend: 'claude' }] })
+    const user = userEvent.setup()
+    render(<ClaudeComposerHarness />)
+    expect(await screen.findByRole('button', { name: 'Claude goal' })).toBeInTheDocument()
+    const editor = screen.getByPlaceholderText('Message')
+    await user.type(editor, path === 'enter' ? '/goal' : '/goal  ')
+    if (path === 'enter') {
+      expect(screen.getByRole('option', { name: /Set or inspect a Claude completion condition/ })).toBeInTheDocument()
+      fireEvent.keyDown(editor, { key: 'Enter' })
+    } else await user.click(screen.getByRole('button', { name: 'Send message' }))
+    expect(await screen.findByRole('dialog', { name: 'Claude goal' })).toBeInTheDocument()
+    expect(editor).toHaveValue('')
+    expect(send).not.toHaveBeenCalled()
+  })
+
+  it.each([
+    ['keyboard selection', 'enter'],
     ['palette click', 'option'],
     ['send-button fallback', 'send']
   ] as const)('opens Claude MCP management by %s without creating a model turn', async (_label, path) => {

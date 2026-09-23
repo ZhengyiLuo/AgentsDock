@@ -1231,6 +1231,18 @@ export class AgentServerClient {
     return this.get(`/api/sessions/${encodeURIComponent(sessionId)}/claude/runtime`)
   }
 
+  setClaudeGoal(sessionId: string, condition: string): Promise<ClaudeRuntimeSnapshot> {
+    return this.privilegedNativeRequest(`/api/sessions/${encodeURIComponent(sessionId)}/claude/goal`, {
+      method: 'PUT', body: JSON.stringify({ condition })
+    })
+  }
+
+  clearClaudeGoal(sessionId: string): Promise<ClaudeRuntimeSnapshot> {
+    return this.privilegedNativeRequest(`/api/sessions/${encodeURIComponent(sessionId)}/claude/goal`, {
+      method: 'DELETE'
+    })
+  }
+
   refreshClaudeContextUsage(sessionId: string): Promise<ClaudeRuntimeSnapshot> {
     return this.post(
       `/api/sessions/${encodeURIComponent(sessionId)}/claude/context-usage/refresh`,
@@ -3065,6 +3077,9 @@ function isPrivilegedNativeControlTarget(
     || !target.pathname.startsWith(`${serverPrefix}/api/`)
   ) return false
   const path = target.pathname.slice(serverPrefix.length)
+  if (/^\/api\/sessions\/[A-Za-z0-9_-]{1,128}\/claude\/goal$/.test(path)) {
+    return !target.search && (method === 'PUT' || method === 'DELETE')
+  }
   const workspaceGit = /^\/api\/sessions\/[A-Za-z0-9_-]{1,128}\/workspace\/git(?:\/(diff|conflict|action))?$/.exec(path)
   if (workspaceGit) {
     const operation = workspaceGit[1]

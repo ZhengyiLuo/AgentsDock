@@ -3472,6 +3472,14 @@ export class AppService {
     return this.providerRequest(scope => scope.client.claudeRuntime(sessionId))
   }
 
+  async setClaudeGoal(sessionId: string, condition: string): Promise<ClaudeRuntimeSnapshot> {
+    return this.providerRequest(scope => scope.client.setClaudeGoal(sessionId, condition))
+  }
+
+  async clearClaudeGoal(sessionId: string): Promise<ClaudeRuntimeSnapshot> {
+    return this.providerRequest(scope => scope.client.clearClaudeGoal(sessionId))
+  }
+
   async refreshClaudeContextUsage(sessionId: string): Promise<ClaudeRuntimeSnapshot> {
     return this.providerRequest(scope => scope.client.refreshClaudeContextUsage(sessionId))
   }

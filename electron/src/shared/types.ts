@@ -90,6 +90,20 @@ export interface ClaudeRuntimeFeatures {
   context_usage_refresh?: boolean
   /** Native Claude Agent SDK MCP status and control endpoints are available. */
   mcp_management?: boolean
+  /** Native Claude completion-condition goals, with authoritative provider state. */
+  goals?: boolean
+}
+
+export interface ClaudeGoal {
+  condition: string
+  status: 'active' | 'achieved' | 'cleared' | 'failed'
+  iterations?: number
+  /** Native goal timestamp in milliseconds since the epoch. */
+  set_at?: number
+  tokens_at_start?: number
+  last_reason?: string
+  duration_ms?: number
+  tokens?: number
 }
 
 export interface ClaudeRuntimeSnapshot {
@@ -114,6 +128,12 @@ export interface ClaudeRuntimeSnapshot {
   usage_generation?: number | null
   /** True when this response includes a newly sampled SDK context value. */
   context_usage_refreshed?: boolean
+  /** Native Claude current/latest goal; absent on older servers. */
+  goal?: ClaudeGoal | null
+  /** Native command accepted; awaiting an authoritative goal status record. */
+  goal_starting?: boolean
+  /** The initial provider transcript goal projection is still loading. */
+  goal_loading?: boolean
 }
 
 export type ClaudeTokenUsage = Record<string, JsonValue>

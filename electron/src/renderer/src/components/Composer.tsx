@@ -116,6 +116,7 @@ import { ClaudeContextIndicator } from './ClaudeContextIndicator'
 import { ClaudePermissionMenu } from './ClaudePermissionMenu'
 import { useClaudeRuntime } from './ClaudeRuntimeContext'
 import { ClaudeMcpDialog, claudeMcpCapabilityAdvertised, claudeMcpCapabilitySupported } from './ClaudeMcpDialog'
+import { ClaudeGoalControls, useClaudeGoalsAvailable } from './ClaudeGoalControls'
 import { CodexPermissionMenu } from './CodexPermissionMenu'
 import { CursorPermissionMenu } from './CursorPermissionMenu'
 import { RuntimeHealthNotice } from './RuntimeHealth'
@@ -526,6 +527,7 @@ export const Composer = memo(function Composer({ dropActive = false, sessionId, 
   const activeCodexGoal = session?.backend === 'codex'
     && (codexRuntime.runtime ? codexRuntime.runtime.goal : session.codex_goal)?.status === 'active'
   const claudeRuntime = useClaudeRuntime()
+  const claudeGoalsAvailable = useClaudeGoalsAvailable()
   const workspaceKey = selectedId ? profileSessionKey(activeProfileId, selectedId, serverIdentity) : null
   const steeringScope = useMemo<SteeringScope | null>(() => selectedId ? {
     profileId: activeProfileId,
@@ -585,6 +587,7 @@ export const Composer = memo(function Composer({ dropActive = false, sessionId, 
   const [runtimeMenuSection, setRuntimeMenuSection] = useState<'model' | 'reasoning' | null>(null)
   const [permissionMenuOpen, setPermissionMenuOpen] = useState(false)
   const [mcpDialogOpen, setMcpDialogOpen] = useState(false)
+  const [claudeGoalOpen, setClaudeGoalOpen] = useState(false)
   const [workingDirectoryOpen, setWorkingDirectoryOpen] = useState(false)
   useEffect(() => {
     providerCommandRequestRef.current += 1
@@ -772,6 +775,7 @@ export const Composer = memo(function Composer({ dropActive = false, sessionId, 
     if (command.id === 'chat') return crossChatSupported
     if (command.id === 'mail') return !teamMessagesAdvertised
     if (command.id === 'goal') {
+      if (session.backend === 'claude') return claudeGoalsAvailable
       return session.backend === 'codex'
         && codexControls?.available === true
         && codexControls.features?.goals !== false
@@ -795,7 +799,7 @@ export const Composer = memo(function Composer({ dropActive = false, sessionId, 
     if (command.id === 'import') return localSessionImportSupported(health)
     if (command.id === 'split') return !splitOpen
     return true
-  }, [catalog, claudeControls?.permission_modes, claudeMcpAvailable, claudePermissionModes, claudePermissionsAvailable, codexControls?.available, codexControls?.features?.goals, codexPermissionsAvailable, codexRuntime.runtime?.goals_enabled, codexRuntime.supported, crossChatSupported, cursorPermissionsAvailable, healthRevision, session, splitOpen, teamMessagesAdvertised])
+  }, [catalog, claudeControls?.permission_modes, claudeGoalsAvailable, claudeMcpAvailable, claudePermissionModes, claudePermissionsAvailable, codexControls?.available, codexControls?.features?.goals, codexPermissionsAvailable, codexRuntime.runtime?.goals_enabled, codexRuntime.supported, crossChatSupported, cursorPermissionsAvailable, healthRevision, session, splitOpen, teamMessagesAdvertised])
   const activeProviderCommandState: ProviderCommandLoadState = providerCommandState.key === providerCommandsKey
     ? providerCommandState
     : { key: providerCommandsKey, status: 'idle', snapshot: null }
@@ -804,8 +808,9 @@ export const Composer = memo(function Composer({ dropActive = false, sessionId, 
     [activeProviderCommandState.snapshot, session?.backend]
   )
   const allComposerCommands = useMemo(
-    () => [...COMPOSER_COMMANDS, ...dynamicComposerCommands],
-    [dynamicComposerCommands, getLocale()]
+    () => [...COMPOSER_COMMANDS.map(command => command.id === 'goal' && session?.backend === 'claude'
+      ? { ...command, description: t('claudeGoal.commandDescription') } : command), ...dynamicComposerCommands],
+    [dynamicComposerCommands, getLocale(), session?.backend]
   )
   const commandCandidates = useMemo(
     () => commandTrigger ? filterComposerCommands(allComposerCommands, commandTrigger.query, commandAvailable) : [],
@@ -945,6 +950,7 @@ export const Composer = memo(function Composer({ dropActive = false, sessionId, 
     setRuntimeMenuSection(null)
     setPermissionMenuOpen(false)
     setMcpDialogOpen(false)
+    setClaudeGoalOpen(false)
     setWorkingDirectoryOpen(false)
     if (!selectedId) {
       draftRef.current = ''
@@ -1278,7 +1284,8 @@ export const Composer = memo(function Composer({ dropActive = false, sessionId, 
       useAppStore.getState().setError('/mcp is available in Claude chats only.')
       return
     }
-    if (consumeComposer && session.backend === 'claude' && isStandaloneMcpCommand(outgoing)) {
+    const claudeGoalCommand = session.backend === 'claude' && /^\s*\/goal\s*$/iu.test(outgoing)
+    if (consumeComposer && session.backend === 'claude' && (isStandaloneMcpCommand(outgoing) || claudeGoalCommand)) {
       draftRef.current = ''
       draftDirtyRef.current = true
       referencesRef.current = []
@@ -1303,7 +1310,8 @@ export const Composer = memo(function Composer({ dropActive = false, sessionId, 
           setWorkspacePreference(draftPreferenceScope(draftContextRef.current), teamReferencesPreferenceKey(selectedId), [])
         ]).catch(() => undefined)
       }
-      setMcpDialogOpen(true)
+      if (claudeGoalCommand) setClaudeGoalOpen(true)
+      else setMcpDialogOpen(true)
       return
     }
     const admissionToken = useAppStore.getState().beginTurnAdmission(session.id)
@@ -1665,9 +1673,10 @@ export const Composer = memo(function Composer({ dropActive = false, sessionId, 
     } else if (command.id === 'feedback') {
       void window.agentsDock.native.openExternal('https://github.com/ZhengyiLuo/AgentsDock/issues/new').catch(reportActionError)
     } else if (command.id === 'goal') {
-      window.dispatchEvent(new CustomEvent('agentsdock:open-codex-controls', {
-        detail: { sessionId: session.id, focus: 'goal' }
-      }))
+      if (session.backend === 'claude') setClaudeGoalOpen(true)
+      else window.dispatchEvent(new CustomEvent('agentsdock:open-codex-controls', {
+          detail: { sessionId: session.id, focus: 'goal' }
+        }))
     } else if (command.id === 'import') {
       useAppStore.getState().setModal('importChats', true)
     } else if (command.id === 'model' || command.id === 'reasoning') {
@@ -1800,6 +1809,7 @@ export const Composer = memo(function Composer({ dropActive = false, sessionId, 
         <WorkingDirectoryPopover session={session} />
       </div>}
       <fieldset className="composer-goal-controls" disabled={writeDisabled}><CodexGoalBar /></fieldset>
+      <ClaudeGoalControls open={claudeGoalOpen} onOpenChange={setClaudeGoalOpen} disabled={writeDisabled} />
       <div className={`composer ${dropActive ? 'drop-active' : ''}${writeDisabled ? ' write-disabled' : ''}`}>
       <div className="composer-scroll-region">
         <fieldset className="composer-queue-controls" disabled={writeDisabled}>
@@ -2155,6 +2165,7 @@ export const Composer = memo(function Composer({ dropActive = false, sessionId, 
             <DropdownMenu.Trigger asChild><button className="composer-icon composer-add-button" title={t("ui.Composer.Composer.add_9fd728c")} disabled={writeDisabled}><Plus size={18} /></button></DropdownMenu.Trigger>
             <DropdownMenu.Portal><DropdownMenu.Content className="menu-content" side="top" align="start">
               <DropdownMenu.Item className="menu-item" onSelect={() => void chooseFiles()}><Paperclip size={14} />{" "}{t("ui.Composer.Composer.attach_files_e697cc1")}</DropdownMenu.Item>
+              {claudeGoalsAvailable && <DropdownMenu.Item className="menu-item" onSelect={() => setClaudeGoalOpen(true)}><Goal size={14} />{t('claudeGoal.title')}</DropdownMenu.Item>}
               <DropdownMenu.Separator className="menu-separator" />
               <DropdownMenu.Label className="menu-label">{t("ui.Composer.Composer.frequent_phrases_e257acc")}</DropdownMenu.Label>
               {[t("ui.Composer.Composer.status_report_b784026"), t("ui.Composer.Composer.keep_going_8fc6411"), t("ui.Composer.Composer.verify_the_result_carefully_b07a805")].map(phrase => <DropdownMenu.Item key={phrase} className="menu-item" onSelect={() => void send(false, phrase, false)}>{phrase}</DropdownMenu.Item>)}
@@ -2176,6 +2187,7 @@ export const Composer = memo(function Composer({ dropActive = false, sessionId, 
           {session.backend === 'codex' && <CodexContextIndicator />}
           {session.backend === 'claude' && <ClaudePermissionMenu session={session} running={running} open={permissionMenuOpen} onOpenChange={setPermissionMenuOpen} />}
           {session.backend === 'claude' && <ClaudeContextIndicator />}
+          {claudeGoalsAvailable && <button type="button" className="composer-icon" aria-label={t('claudeGoal.title')} title={t('claudeGoal.title')} onClick={() => setClaudeGoalOpen(true)}><Goal size={15} /></button>}
           {session.backend === 'cursor' && <CursorPermissionMenu session={session} running={running} open={permissionMenuOpen} onOpenChange={setPermissionMenuOpen} />}
         </div>
         <div className="composer-actions">
