@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type {
   AgentCrossChatRoute, AgentFile, BootstrapPayload, ChatReference, Event, Health, NativeFileRef, ProfileBootstrapPayload, PublicServerProfile,
-  QueuedTurn, Session, SessionSnapshot, TimelinePage, TurnStopResult
+  QueuedTurn, Session, SessionSnapshot, TeamReference, TimelinePage, TurnStopResult
 } from '@shared/types'
 import type { AgentsDockAPI } from '@shared/ipc'
 import { RUNNING_FORK_UNAVAILABLE } from '@shared/session-fork'
@@ -2015,7 +2015,7 @@ describe('send rollback', () => {
     expect(useAppStore.getState().error).toBe(genericIpcError)
   })
 
-  it('preserves an identical next draft when the staged send fails', async () => {
+  it.each(['Continue', '  Continue\n'])('preserves an identical next draft %j when the staged send fails', async newerDraft => {
     let rejectSend!: (error: Error) => void
     const send = vi.fn(() => new Promise((_resolve, reject) => { rejectSend = reject }))
     Object.defineProperty(window, 'agentsDock', {
@@ -2029,11 +2029,81 @@ describe('send rollback', () => {
     })
 
     const pending = useAppStore.getState().sendPrompt()
-    useAppStore.setState({ drafts: { 'chat-a': 'Continue' } })
+    useAppStore.setState({ drafts: { 'chat-a': newerDraft } })
     rejectSend(new Error('connection closed'))
 
     await expect(pending).resolves.toBe(false)
-    expect(useAppStore.getState().drafts['chat-a']).toBe('Continue\n\nContinue')
+    expect(useAppStore.getState().drafts['chat-a']).toBe(newerDraft)
+    expect(send).toHaveBeenCalledTimes(1)
+  })
+
+  it('keeps current reference selections and attachments when identical preflight text is restored', () => {
+    const prompt = 'Ask @Target and @@Team'
+    const oldReference: ChatReference = {
+      session_id: 'old-target', display_title_snapshot: 'Target',
+      source_text_start: 4, source_text_end: 11, action: 'instruction'
+    }
+    const oldTeamReference: TeamReference = {
+      kind: 'recipient', recipient_kind: 'server', team_id: 'old-team', target_id: 'old-member',
+      display_name_snapshot: 'Team', source_text_start: 16, source_text_end: 22, grant_intent: true
+    }
+    const oldFile: AgentFile = { id: 'old-file', filename: 'old.txt', content_type: 'text/plain' }
+    const newFile: AgentFile = { id: 'new-file', filename: 'new.txt', content_type: 'text/plain' }
+    const oldPath: NativeFileRef = { path: '/tmp/old.txt', name: 'old.txt' }
+    const newPath: NativeFileRef = { path: '/tmp/new.txt', name: 'new.txt' }
+    useAppStore.setState({
+      activeProfileId: 'local', profileGeneration: 1, switchingProfileId: null,
+      selectedSessionId: 'chat-a', sessions: [sessionFor('chat-a')], snapshots: {},
+      drafts: { 'chat-a': prompt }, chatReferencesBySession: { 'chat-a': [oldReference] },
+      teamReferencesBySession: { 'chat-a': [oldTeamReference] },
+      uploadsBySession: { 'chat-a': [oldFile] }, uploadPathsBySession: { 'chat-a': [oldPath] },
+      turnAdmissionTokens: {}, pendingTurnSubmissions: {}, activeSessionIds: new Set()
+    })
+    const token = useAppStore.getState().beginTurnAdmission('chat-a')!
+    expect(useAppStore.getState().stagePendingTurnSubmission('chat-a', token, { prompt })).toBe(true)
+    const newerReference = { ...oldReference, session_id: 'new-target', source_text_start: 6, source_text_end: 13 }
+    useAppStore.setState({
+      drafts: { 'chat-a': `  ${prompt}  ` },
+      chatReferencesBySession: { 'chat-a': [newerReference] },
+      teamReferencesBySession: { 'chat-a': [] },
+      uploadsBySession: { 'chat-a': [newFile, oldFile] },
+      uploadPathsBySession: { 'chat-a': [newPath, oldPath] }
+    })
+
+    useAppStore.getState().rollbackPendingTurnSubmission('chat-a', token)
+
+    const state = useAppStore.getState()
+    expect(state.drafts['chat-a']).toBe(`  ${prompt}  `)
+    expect(state.chatReferencesBySession['chat-a']).toEqual([newerReference])
+    expect(state.teamReferencesBySession['chat-a']).toEqual([])
+    expect(state.uploadsBySession['chat-a']).toEqual([newFile, oldFile])
+    expect(state.uploadPathsBySession['chat-a']).toEqual([newPath, oldPath])
+    expect(state.pendingTurnSubmissions['chat-a']).toBeUndefined()
+  })
+
+  it('does not restore a failed send into another profile using the same chat ID', async () => {
+    const pendingSend = deferred<never>()
+    const send = vi.fn(() => pendingSend.promise)
+    Object.defineProperty(window, 'agentsDock', {
+      configurable: true, value: { turns: { send } } as unknown as AgentsDockAPI
+    })
+    useAppStore.setState({
+      activeProfileId: 'profile-a', profileGeneration: 1, switchingProfileId: null,
+      selectedSessionId: 'chat-a', chatPanes: { primary: 'chat-a', secondary: null },
+      sessions: [sessionFor('chat-a')], snapshots: {}, drafts: { 'chat-a': 'Old profile prompt' },
+      uploadsBySession: {}, uploadPathsBySession: {}, turnAdmissionTokens: {}, pendingTurnSubmissions: {}
+    })
+    const request = useAppStore.getState().sendPrompt()
+    useAppStore.setState({
+      activeProfileId: 'profile-b', profileGeneration: 2, drafts: { 'chat-a': 'New profile draft' },
+      turnAdmissionTokens: {}, pendingTurnSubmissions: {}, error: null
+    })
+    pendingSend.reject(new Error('old connection closed'))
+
+    await expect(request).resolves.toBe(false)
+    expect(useAppStore.getState().drafts['chat-a']).toBe('New profile draft')
+    expect(useAppStore.getState().error).toBeNull()
+    expect(send).toHaveBeenCalledTimes(1)
   })
 
   it('turns the screenshot-shaped FastAPI Team reference failure into upgrade guidance', async () => {
@@ -2525,6 +2595,45 @@ describe('selected live timeline', () => {
       { capture: true, passive: true }
     )
     addEventListener.mockRestore()
+  })
+
+  it.each([false, true])('keeps a live-accepted prompt consumed when its HTTP response fails (steer=%s)', async steer => {
+    vi.useFakeTimers()
+    try {
+      const handlers = await initializeLiveEventHandlers()
+      const pendingSend = deferred<never>()
+      const send = vi.fn(() => pendingSend.promise)
+      const runNow = vi.fn().mockResolvedValue(true)
+      Object.defineProperty(window, 'agentsDock', {
+        configurable: true,
+        value: { ...window.agentsDock, turns: { send }, queue: { runNow, list: vi.fn().mockResolvedValue([]) } }
+      })
+      useAppStore.setState({
+        drafts: { 'chat-a': 'Already accepted' }, uploadsBySession: {}, uploadPathsBySession: {},
+        chatReferencesBySession: {}, teamReferencesBySession: {},
+        turnAdmissionTokens: {}, pendingTurnSubmissions: {}, error: null
+      })
+      const request = useAppStore.getState().sendPrompt(undefined, steer)
+      handlers.get('server:event')?.({
+        profileId: null, profileGeneration: 0,
+        event: eventFor('chat-a', 2, {
+          type: steer ? 'turn_queued' : 'turn_started', prompt: 'Already accepted', file_ids: [],
+          ...(steer ? { queued_id: 'accepted-queue', position: 1 } : {})
+        })
+      })
+      pendingSend.reject(new Error('HTTP response connection closed'))
+
+      await expect(request).resolves.toBe(true)
+      expect(useAppStore.getState().drafts['chat-a']).toBe('')
+      expect(useAppStore.getState().pendingTurnSubmissions['chat-a']).toBeUndefined()
+      expect(useAppStore.getState().turnAdmissionTokens['chat-a']).toBeUndefined()
+      expect(useAppStore.getState().error).toBeNull()
+      expect(send).toHaveBeenCalledTimes(1)
+      if (steer) expect(runNow).toHaveBeenCalledWith('chat-a', 'accepted-queue')
+      else expect(runNow).not.toHaveBeenCalled()
+    } finally {
+      vi.useRealTimers()
+    }
   })
 
   it('lets emergency alerts interrupt input without pulling an unrelated input batch', async () => {

@@ -242,12 +242,29 @@ describe('direct release contract', () => {
         publishWorkflow.indexOf('      - name: Publish reviewed release'),
         publishWorkflow.indexOf('      - name: Verify public updater metadata')
       )
+      const releaseWriteCheck = draftValidationJob.slice(
+        draftValidationJob.indexOf('      - name: Require release-write access for draft creation'),
+        draftValidationJob.indexOf('      - name: Require a version newer than every public desktop release')
+      )
+      const releaseHistoryCheck = draftValidationJob.slice(
+        draftValidationJob.indexOf('      - name: Require a version newer than every public desktop release')
+      )
+      const createDraftJob = draftWorkflow.slice(draftWorkflow.indexOf('  create-draft:'))
       expect(draftWorkflow).toContain('node scripts/validate_electron_release_version.mjs "$RELEASE_VERSION" "$RELEASE_TRACK"')
       expect(`${draftWorkflow}\n${publishWorkflow}`).toContain('AgentsDock-Releases/releases?per_page=100')
       expect(draftValidationJob).toContain('GH_TOKEN: ${{ secrets.AGENTSDOCK_RELEASE_TOKEN }}')
       expect(draftValidationJob).toContain('environment: direct-production')
-      expect(draftValidationJob).not.toContain('github.token')
+      expect(releaseWriteCheck).toContain('if: ${{ !inputs.artifacts_only }}')
+      expect(releaseWriteCheck).toContain('GH_TOKEN: ${{ secrets.AGENTSDOCK_RELEASE_TOKEN }}')
+      expect(releaseWriteCheck).not.toContain('github.token')
+      expect(releaseHistoryCheck).toContain('GH_TOKEN: ${{ inputs.artifacts_only && github.token || secrets.AGENTSDOCK_RELEASE_TOKEN }}')
+      expect(releaseHistoryCheck).toContain('gh api --paginate "repos/ZhengyiLuo/AgentsDock/releases?per_page=100"')
+      expect(releaseHistoryCheck).toContain('gh api --paginate "repos/ZhengyiLuo/AgentsDock-Releases/releases?per_page=100"')
+      expect(createDraftJob).toContain('&& !inputs.artifacts_only')
+      expect(createDraftJob).toContain('GH_TOKEN: ${{ secrets.AGENTSDOCK_RELEASE_TOKEN }}')
+      expect(createDraftJob).not.toContain('github.token')
       expect(finalPublishStep).toContain('GH_TOKEN: ${{ secrets.AGENTSDOCK_RELEASE_TOKEN }}')
+      expect(finalPublishStep).not.toContain('github.token')
       // The mirror helper now owns version revalidation and immutable publication.
       expect(publishWorkflow).toContain('node scripts/direct-release-mirror.mjs inspect')
       expect(finalPublishStep).toContain('node scripts/direct-release-mirror.mjs publish')

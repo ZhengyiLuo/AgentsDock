@@ -1,7 +1,7 @@
-import { act, cleanup, fireEvent, render as renderView, screen, waitFor } from '@testing-library/react'
+import { act, cleanup, fireEvent, render as renderView, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { AgentsDockAPI } from '@shared/ipc'
-import type { ServerUpdateStatus } from '@shared/types'
+import type { AppUpdateStatus, ServerUpdateStatus } from '@shared/types'
 import { useAppStore } from '../store/app-store'
 import { SettingsDialog } from './Dialogs'
 import { serverUpdateIntentKey } from '../lib/server-update-intent'
@@ -100,6 +100,10 @@ function render(ui: Parameters<typeof renderView>[0]) {
 }
 
 function installBridge(serverUpdates: Partial<AgentsDockAPI['serverUpdates']>) {
+  // App-only releases return an empty list of coordinated server updates.
+  const appUpdateStatus: AppUpdateStatus = {
+    state: 'not-available', channel: 'direct', track: 'stable', currentVersion: '1.0.6', serverUpdates: []
+  }
   Object.defineProperty(window, 'agentsDock', {
     configurable: true,
     value: {
@@ -111,14 +115,29 @@ function installBridge(serverUpdates: Partial<AgentsDockAPI['serverUpdates']>) {
         ...serverUpdates
       },
       updates: {
-        status: vi.fn().mockResolvedValue(null),
-        check: vi.fn(),
+        status: vi.fn().mockResolvedValue(appUpdateStatus),
+        check: vi.fn().mockResolvedValue(appUpdateStatus),
         install: vi.fn(),
         setTrack: vi.fn()
       },
       events: { on: vi.fn().mockReturnValue(() => undefined) }
     } as unknown as AgentsDockAPI
   })
+}
+
+function serverUpdateSurface() {
+  const panel = document.querySelector('.app-settings-server-updates')
+  expect(panel).not.toBeNull()
+  return within(panel as HTMLElement)
+}
+
+function serverUpdateChannel() {
+  return within(serverUpdateSurface().getByRole('group', { name: 'Server update channel' }))
+}
+
+async function findServerUpdateChannelButton(name: 'Stable' | 'Beta') {
+  const group = await screen.findByRole('group', { name: 'Server update channel' })
+  return within(group).findByRole('button', { name })
 }
 
 describe('SettingsDialog server updates', () => {
@@ -422,6 +441,7 @@ describe('SettingsDialog server updates', () => {
     showSettings()
     useAppStore.setState(state => ({ profiles: state.profiles.map(profile => ({ ...profile, serverIdentity: 'test-server' })) }))
     render(<SettingsDialog />)
+    await act(async () => { await Promise.resolve() })
     await act(async () => { vi.advanceTimersByTime(1_500); await Promise.resolve() })
     expect(status).toHaveBeenCalledOnce()
     act(() => useAppStore.setState(state => ({ modals: { ...state.modals, appSettings: false } })))
@@ -569,7 +589,7 @@ describe('SettingsDialog server updates', () => {
     const start = vi.fn().mockImplementation(() => new Promise(resolve => { resolveStart = resolve }))
     installBridge({
       status: vi.fn().mockResolvedValue(failed),
-      check: vi.fn().mockResolvedValueOnce(failed).mockResolvedValue(checked),
+      check: vi.fn().mockResolvedValue(checked),
       start
     })
     showSettings()
@@ -577,6 +597,7 @@ describe('SettingsDialog server updates', () => {
     const warning = await screen.findByText('Native listener was not ready. Retry the update.')
     await waitFor(() => expect(screen.getByRole('button', { name: 'Check server' })).toBeEnabled())
     expect(screen.queryByRole('button', { name: /Retry update/ })).not.toBeInTheDocument()
+    expect(window.agentsDock.serverUpdates.check).not.toHaveBeenCalled()
 
     fireEvent.click(screen.getByRole('button', { name: 'Check server' }))
     const retry = await screen.findByRole('button', { name: 'Retry update (0.1.26-beta.51)' })
@@ -645,14 +666,16 @@ describe('SettingsDialog server updates', () => {
 
     render(<SettingsDialog />)
     await waitFor(() => expect(check).toHaveBeenCalledWith('stable'))
-    expect(screen.getByText('This is the latest one.')).toBeInTheDocument()
-    const betaButton = await screen.findByRole('button', { name: 'Beta' })
+    expect(await serverUpdateSurface().findByText('This is the latest one.')).toBeInTheDocument()
+    const betaButton = await findServerUpdateChannelButton('Beta')
+    await waitFor(() => expect(betaButton).toBeEnabled())
     fireEvent.click(betaButton)
 
     await waitFor(() => expect(check).toHaveBeenCalledWith('beta'))
-    expect(betaButton).toHaveClass('active')
+    await waitFor(() => expect(betaButton).toHaveClass('active'))
 
     const install = await screen.findByRole('button', { name: /Install 0.1.19-beta.7/ })
+    await waitFor(() => expect(install).toBeEnabled())
     expect(screen.getByText(/Checked \d{1,2}:\d{2}:\d{2}/)).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Check server' })).toBeEnabled()
     fireEvent.click(install)
@@ -684,15 +707,20 @@ describe('SettingsDialog server updates', () => {
     showSettings()
 
     render(<SettingsDialog />)
-    await waitFor(() => expect(check).toHaveBeenCalledTimes(1))
-    expect(screen.getByText('This is the latest one.')).toBeInTheDocument()
+    // The IPC call starts before its response commits to the panel. Wait for
+    // the displayed result and usable control before requesting another check.
+    await waitFor(() => {
+      expect(check).toHaveBeenCalledTimes(1)
+      expect(serverUpdateSurface().getByText('This is the latest one.')).toBeInTheDocument()
+      expect(screen.getByRole('button', { name: 'Check server' })).toBeEnabled()
+    })
 
     fireEvent.click(screen.getByRole('button', { name: 'Check server' }))
 
     await waitFor(() => expect(check).toHaveBeenNthCalledWith(2, 'stable'))
-    expect(await screen.findByRole('button', { name: 'Install 0.1.19' })).toBeEnabled()
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Install 0.1.19' })).toBeEnabled())
     expect(screen.getByText(/Checked \d{1,2}:\d{2}:\d{2}/)).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: 'Stable' })).toHaveClass('active')
+    expect(serverUpdateChannel().getByRole('button', { name: 'Stable' })).toHaveClass('active')
   })
 
   it('switches to a current Beta without starting or offering an update', async () => {
@@ -719,11 +747,12 @@ describe('SettingsDialog server updates', () => {
 
     render(<SettingsDialog />)
     await waitFor(() => expect(check).toHaveBeenCalledWith('stable'))
-    fireEvent.click(screen.getByRole('button', { name: 'Beta' }))
+    await waitFor(() => expect(serverUpdateChannel().getByRole('button', { name: 'Beta' })).toBeEnabled())
+    fireEvent.click(serverUpdateChannel().getByRole('button', { name: 'Beta' }))
 
     await waitFor(() => expect(check).toHaveBeenCalledWith('beta'))
-    expect(screen.getByRole('button', { name: 'Beta' })).toHaveClass('active')
-    expect(screen.getByText('This is the latest one.')).toBeInTheDocument()
+    await waitFor(() => expect(serverUpdateChannel().getByRole('button', { name: 'Beta' })).toHaveClass('active'))
+    expect(serverUpdateSurface().getByText('This is the latest one.')).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: 'Install 0.1.19-beta.8' })).not.toBeInTheDocument()
     expect(start).not.toHaveBeenCalled()
   })
@@ -745,13 +774,15 @@ describe('SettingsDialog server updates', () => {
 
     render(<SettingsDialog />)
     await waitFor(() => expect(check).toHaveBeenCalledTimes(1))
-    fireEvent.click(screen.getByRole('button', { name: 'Beta' }))
+    await waitFor(() => expect(serverUpdateChannel().getByRole('button', { name: 'Beta' })).toBeEnabled())
+    fireEvent.click(serverUpdateChannel().getByRole('button', { name: 'Beta' }))
 
+    await waitFor(() => expect(check).toHaveBeenNthCalledWith(2, 'beta'))
     await waitFor(() => expect(useAppStore.getState().error).toBe('Beta release service is unavailable.'))
-    expect(screen.getByRole('button', { name: 'Stable' })).toHaveClass('active')
-    expect(screen.getByRole('button', { name: 'Beta' })).not.toHaveClass('active')
+    expect(serverUpdateChannel().getByRole('button', { name: 'Stable' })).toHaveClass('active')
+    expect(serverUpdateChannel().getByRole('button', { name: 'Beta' })).not.toHaveClass('active')
     expect(screen.getByRole('button', { name: 'Check server' })).toBeEnabled()
-    expect(screen.getByText('This is the latest one.')).toBeInTheDocument()
+    expect(serverUpdateSurface().getByText('This is the latest one.')).toBeInTheDocument()
   })
 
   it('keeps known status and shows an inline warning when the automatic release check fails', async () => {
@@ -774,12 +805,12 @@ describe('SettingsDialog server updates', () => {
     expect(warning).toHaveClass('server-update-warning')
     expect(check).toHaveBeenCalledOnce()
     expect(check).toHaveBeenCalledWith('stable')
-    expect(screen.getByRole('button', { name: 'Stable' })).toHaveClass('active')
+    expect(serverUpdateChannel().getByRole('button', { name: 'Stable' })).toHaveClass('active')
     expect(screen.getByRole('button', { name: 'Check server' })).toBeEnabled()
     expect(useAppStore.getState().error).toBeNull()
   })
 
-  it('routes an available Beta on a pre-v9 server to guided setup without a duplicate Beta action', async () => {
+  it('installs an available Beta on a remote v7 server through its native idle scheduler', async () => {
     const available: ServerUpdateStatus = {
       phase: 'available',
       current_version: '0.1.18',
@@ -788,7 +819,7 @@ describe('SettingsDialog server updates', () => {
       update_available: true,
       message: 'AgentsServer 0.1.19-beta.8 is available.'
     }
-    const start = vi.fn()
+    const start = vi.fn().mockResolvedValue({ ...installingStatus, track: 'beta', target_version: available.latest_version })
     installBridge({ status: vi.fn().mockResolvedValue(available), check: vi.fn(), start })
     const setup = vi.fn()
     window.addEventListener('agentsdock:server-setup', setup)
@@ -802,24 +833,24 @@ describe('SettingsDialog server updates', () => {
 
     try {
       render(<SettingsDialog />)
-      const guidedUpdate = await screen.findByRole('button', { name: 'Open guided Beta update' })
+      const install = await screen.findByRole('button', { name: `Install ${available.latest_version}` })
       expect(screen.queryByRole('button', { name: /Update server to Beta/ })).not.toBeInTheDocument()
       expect(screen.queryByRole('button', { name: /Install or update AgentsServer|Set up your server/ })).not.toBeInTheDocument()
-      fireEvent.click(guidedUpdate)
+      fireEvent.click(install)
 
-      await waitFor(() => expect(setup).toHaveBeenCalledOnce())
-      expect((setup.mock.calls[0]?.[0] as CustomEvent).detail).toEqual({ intent: 'update-beta' })
-      expect(start).not.toHaveBeenCalled()
-      expect(useAppStore.getState().modals.appSettings).toBe(false)
+      await waitFor(() => expect(start).toHaveBeenCalledWith(available.latest_version, 'beta', true))
+      expect(setup).not.toHaveBeenCalled()
+      expect(useAppStore.getState().modals.appSettings).toBe(true)
     } finally {
       window.removeEventListener('agentsdock:server-setup', setup)
     }
   })
 
-  it('installs an available update directly on a legacy loopback server', async () => {
+  it.each(['http://test-server.test:7850', 'https://test-server.test', 'http://127.0.0.1:7850'])(
+    'installs an available update directly on a v3 server at %s', async serverUrl => {
     const available: ServerUpdateStatus = {
       phase: 'available',
-      current_version: '0.1.26-beta.16',
+      current_version: '0.1.25',
       latest_version: '0.1.26-beta.48',
       track: 'beta',
       update_available: true,
@@ -834,10 +865,10 @@ describe('SettingsDialog server updates', () => {
       health: state.health ? {
         ...state.health,
         server_version: available.current_version,
-        capabilities: { ...state.health.capabilities, server_updates: durableReservationServerUpdates }
+        capabilities: { ...state.health.capabilities, server_updates: queueSafeServerUpdates }
       } : state.health,
       profiles: state.profiles.map(profile => profile.id === state.activeProfileId
-        ? { ...profile, serverUrl: 'http://127.0.0.1:7850' }
+        ? { ...profile, serverUrl }
         : profile)
     }))
 
@@ -847,11 +878,48 @@ describe('SettingsDialog server updates', () => {
       expect(screen.queryByRole('button', { name: /Open guided Beta update/ })).not.toBeInTheDocument()
       fireEvent.click(install)
 
-      await waitFor(() => expect(start).toHaveBeenCalledWith(available.latest_version, 'beta', true))
+      await waitFor(() => expect(start).toHaveBeenCalledExactlyOnceWith(available.latest_version, 'beta'))
       expect(setup).not.toHaveBeenCalled()
     } finally {
       window.removeEventListener('agentsdock:server-setup', setup)
     }
+  })
+
+  it('keeps a busy remote v3 update local until idle and preserves its check across health refreshes', async () => {
+    const available: ServerUpdateStatus = {
+      phase: 'available', current_version: '0.1.25', latest_version: '0.1.26',
+      track: 'stable', update_available: true
+    }
+    let resolveIdleCheck!: (status: ServerUpdateStatus) => void
+    const check = vi.fn().mockResolvedValueOnce(available).mockImplementationOnce(
+      () => new Promise<ServerUpdateStatus>(resolve => { resolveIdleCheck = resolve })
+    )
+    const start = vi.fn().mockResolvedValue({ ...installingStatus, target_version: available.latest_version })
+    installBridge({ status: vi.fn().mockResolvedValue(available), check, start })
+    showSettings()
+    useAppStore.setState(state => ({ health: {
+      ...state.health!, active: ['chat-1'],
+      capabilities: { ...state.health!.capabilities, server_updates: queueSafeServerUpdates }
+    } }))
+
+    render(<SettingsDialog />)
+    const install = await screen.findByRole('button', { name: 'Install latest Stable when idle' })
+    await waitFor(() => expect(install).toBeEnabled())
+    fireEvent.click(install)
+    expect(start).not.toHaveBeenCalled()
+    expect(JSON.parse(window.localStorage.getItem('agentsdock:deferred-server-updates:v1')!))
+      .toMatchObject({ 'profile-1': { version: '0.1.26', serverIdentity: 'test-server' } })
+    expect(await screen.findByRole('button', { name: 'Cancel queued update' })).toBeEnabled()
+
+    act(() => useAppStore.setState(state => ({ health: { ...state.health!, active: [] } })))
+    await waitFor(() => expect(check).toHaveBeenCalledTimes(2))
+    act(() => useAppStore.setState(state => ({ health: {
+      ...state.health!, capabilities: { ...state.health!.capabilities, server_updates: { ...queueSafeServerUpdates } }
+    } })))
+    await act(async () => { resolveIdleCheck(available); await Promise.resolve() })
+    await waitFor(() => expect(start).toHaveBeenCalledExactlyOnceWith('0.1.26', 'stable'))
+    expect(check).toHaveBeenLastCalledWith('stable')
+    expect(window.localStorage.getItem('agentsdock:deferred-server-updates:v1')).toBeNull()
   })
 
   it('delegates a busy v9 update to the server once without creating a local retry', async () => {
@@ -1024,7 +1092,8 @@ describe('SettingsDialog server updates', () => {
 
     try {
       render(<SettingsDialog />)
-      const beta = await screen.findByRole('button', { name: 'Beta' })
+      await waitFor(() => expect(check).toHaveBeenCalledWith('stable'))
+      const beta = await findServerUpdateChannelButton('Beta')
       await waitFor(() => expect(beta).toBeEnabled())
       fireEvent.click(beta)
 
@@ -1057,8 +1126,9 @@ describe('SettingsDialog server updates', () => {
 
     try {
       render(<SettingsDialog />)
-      const stableButton = await screen.findByRole('button', { name: 'Stable' })
-      await waitFor(() => expect(screen.getByRole('button', { name: 'Beta' })).toHaveClass('active'))
+      const stableButton = await findServerUpdateChannelButton('Stable')
+      await waitFor(() => expect(serverUpdateChannel().getByRole('button', { name: 'Beta' })).toHaveClass('active'))
+      await waitFor(() => expect(stableButton).toBeEnabled())
       fireEvent.click(stableButton)
       await waitFor(() => expect(check).toHaveBeenCalledWith('stable'))
       await waitFor(() => expect(setup).toHaveBeenCalledOnce())
@@ -1088,6 +1158,7 @@ describe('SettingsDialog server updates', () => {
 
     try {
       render(<SettingsDialog />)
+      await act(async () => { await Promise.resolve() })
       fireEvent.click(await screen.findByRole('button', { name: 'Check server' }))
 
       await waitFor(() => expect(check).toHaveBeenCalledWith('beta'))
@@ -1147,7 +1218,7 @@ describe('SettingsDialog server updates', () => {
 
     expect(screen.getByText('0.1.19-beta.8')).toBeInTheDocument()
     expect(screen.queryByText('0.1.18')).not.toBeInTheDocument()
-    expect(screen.getByRole('button', { name: 'Beta' })).toHaveClass('active')
+    expect(serverUpdateChannel().getByRole('button', { name: 'Beta' })).toHaveClass('active')
   })
 
   it('loads fresh status after reopening while the previous view was polling an active update', async () => {
@@ -1188,7 +1259,7 @@ describe('SettingsDialog server updates', () => {
     })
 
     expect(status).toHaveBeenCalledTimes(2)
-    expect(screen.getByText('This is the latest one.')).toBeInTheDocument()
+    expect(serverUpdateSurface().getByText('This is the latest one.')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Check server' })).toBeEnabled()
   })
 
@@ -1202,8 +1273,8 @@ describe('SettingsDialog server updates', () => {
 
     render(<SettingsDialog />)
 
-    expect(await screen.findByRole('button', { name: 'Stable' })).toBeDisabled()
-    expect(screen.getByRole('button', { name: 'Beta' })).toBeDisabled()
+    await waitFor(() => expect(serverUpdateChannel().getByRole('button', { name: 'Stable' })).toBeDisabled())
+    expect(serverUpdateChannel().getByRole('button', { name: 'Beta' })).toBeDisabled()
   })
 
   it('keeps channel recovery clickable when the initial update status fails', async () => {
@@ -1227,13 +1298,13 @@ describe('SettingsDialog server updates', () => {
 
     render(<SettingsDialog />)
 
-    const beta = await screen.findByRole('button', { name: 'Beta' })
+    expect(await screen.findByText(/Choose a channel or Check server to retry/)).toBeInTheDocument()
+    const beta = await findServerUpdateChannelButton('Beta')
     await waitFor(() => expect(beta).toBeEnabled())
     expect(beta).toHaveClass('active')
-    expect(screen.getByText(/Choose a channel or Check server to retry/)).toBeInTheDocument()
 
     fireEvent.click(beta)
     await waitFor(() => expect(check).toHaveBeenCalledWith('beta'))
-    expect(screen.getByText('This is the latest one.')).toBeInTheDocument()
+    expect(await serverUpdateSurface().findByText('This is the latest one.')).toBeInTheDocument()
   })
 })

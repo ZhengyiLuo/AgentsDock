@@ -16,7 +16,7 @@ import signal
 import time
 from collections import deque
 from contextlib import suppress
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, Awaitable, Callable, Sequence
 
 
@@ -348,6 +348,12 @@ class CodexAppServerTurn:
     transport_generation: int = 0
     _closed: bool = False
     _completed: bool = False
+    # Goal owners can keep the routed stream after this initial turn ends.
+    # The caller still closes the handle when it releases the thread owner.
+    _retain_thread_stream: bool = False
+    # Native turn identities are retained only for this owner's lifetime.
+    # Delayed duplicate starts must not resurrect one of its finished turns.
+    _completed_turn_ids: set[str] = field(default_factory=set)
 
     async def next_notification(self, timeout: float | None = None) -> dict[str, Any]:
         return await self._subscription.next_notification(timeout)
@@ -388,6 +394,100 @@ class CodexAppServerTurn:
     async def interrupt(self) -> None:
         await self.client.interrupt_turn(self.thread_id, self.turn_id)
 
+    async def continue_after_subagents(
+        self,
+        *,
+        before_send: Callable[[], bool],
+        client_user_message_id: str | None = None,
+        responsesapi_client_metadata: dict[str, str] | None = None,
+    ) -> str | None:
+        """Collect native child notifications without inserting a user message.
+
+        The runner establishes child ownership and attempts this once per
+        completed native turn. A spontaneous continuation or Stop wins at the
+        stdin boundary and returns None without sending anything. An ambiguous
+        delivery raises without closing this stream or replaying the request.
+        """
+        completed_id = self.turn_id
+        generation = self.transport_generation
+        guard_lost = False
+        delivery_attempted = False
+
+        def owns_completed_turn() -> bool:
+            nonlocal guard_lost
+            allowed = (
+                self._retain_thread_stream
+                and not self._closed
+                and self._completed
+                and bool(completed_id)
+                and self.turn_id == completed_id
+                and completed_id in self._completed_turn_ids
+                and generation == self.client.generation
+                and self.client._turns_by_thread.get(self.thread_id) is self
+                and before_send() is True
+            )
+            guard_lost = not allowed
+            return allowed
+
+        if not owns_completed_turn():
+            return None
+        params: dict[str, Any] = {"threadId": self.thread_id, "input": []}
+        if client_user_message_id is not None:
+            params["clientUserMessageId"] = _require_nonempty_string(
+                client_user_message_id, "client_user_message_id"
+            )
+        if responsesapi_client_metadata is not None:
+            params["responsesapiClientMetadata"] = dict(responsesapi_client_metadata)
+
+        def write_guard() -> bool:
+            nonlocal delivery_attempted
+            # _send performs stdin.write immediately after this guard, with no
+            # intervening await. Cancellation before the lock sends no bytes;
+            # cancellation after this point must reconcile native acceptance.
+            delivery_attempted = owns_completed_turn()
+            return delivery_attempted
+
+        try:
+            result = await self.client._request_connected(
+                "turn/start", params, before_send=write_guard,
+                transport_turn=self,
+            )
+        except asyncio.CancelledError as exc:
+            exc.request_sent = delivery_attempted
+            exc.pending_turn = self if delivery_attempted else None
+            raise
+        except CodexAppServerProtocolError as exc:
+            if guard_lost and not exc.request_sent:
+                return None
+            raise
+        turn = result.get("turn") if isinstance(result, dict) else None
+        accepted_id = turn.get("id") if isinstance(turn, dict) else None
+        if not isinstance(accepted_id, str) or not accepted_id or accepted_id == completed_id:
+            raise CodexAppServerProtocolError(
+                "child continuation did not return a new turn id",
+                request_sent=True, safe_to_retry=False,
+            )
+        if (
+            self._closed
+            or generation != self.client.generation
+            or self.client._turns_by_thread.get(self.thread_id) is not self
+        ):
+            raise CodexAppServerProtocolError(
+                "child continuation owner changed after delivery",
+                request_sent=True, safe_to_retry=False,
+            )
+        if self.turn_id == completed_id:
+            self.turn_id = accepted_id
+            self._completed = False
+        elif self.turn_id != accepted_id and accepted_id not in self._completed_turn_ids:
+            raise CodexAppServerProtocolError(
+                "child continuation response did not match its early notifications",
+                request_sent=True, safe_to_retry=False,
+            )
+        # If B completed (and possibly C started) before acknowledgement B,
+        # retain the receive-order state rather than reviving B here.
+        return accepted_id
+
     def adopt_turn_id(self, turn_id: str) -> None:
         """Bind a provisional turn after an ambiguous ``turn/start`` response."""
         resolved = str(turn_id or "")
@@ -398,7 +498,8 @@ class CodexAppServerTurn:
                 f"provisional turn already bound to {self.turn_id}, not {resolved}"
             )
         self.turn_id = resolved
-        self._subscription.turn_id = resolved
+        if not self._retain_thread_stream:
+            self._subscription.turn_id = resolved
 
     async def close(self) -> None:
         if self._closed:
@@ -459,14 +560,20 @@ class CodexAppServerClient:
         json_parse_thread_threshold: int = 1024 * 1024,
         fork_cleanup_grace: float = 30.0,
         process_factory: ProcessFactory | None = None,
+        before_start: Callable[[], Awaitable[Any]] | None = None,
         server_request_handler: ServerRequestHandler | None = None,
         initialize_params: dict[str, Any] | None = None,
         on_process_started: ProcessLifecycleHook | None = None,
         on_process_exited: ProcessLifecycleHook | None = None,
+        sensitive_values: Sequence[str] = (),
+        protected_env_keys: Sequence[str] = (),
     ) -> None:
         self.codex_bin = codex_bin
         self.cwd = cwd
         self.env_factory = env_factory
+        self._before_start = before_start
+        self._sensitive_values = tuple(value for value in sensitive_values if isinstance(value, str) and value)
+        self._protected_env_keys = tuple(protected_env_keys)
         # Lifecycle hooks receive ``(pid, process_group_id)``. The group id is
         # None whenever start() could not prove it owns the child's session,
         # so a hook must never derive a signal target from the pid alone.
@@ -525,6 +632,7 @@ class CodexAppServerClient:
         # process. Fork cleanup uses this to distinguish a newly-created child
         # from an existing child that another operation merely resumed.
         self._known_thread_ids: set[str] = set()
+        self._thread_names: dict[str, str] = {}
         self._subscriptions: set[CodexAppServerSubscription] = set()
         self._notification_handlers: set[NotificationHandler] = set()
         self._callback_tasks: set[asyncio.Task[Any]] = set()
@@ -534,6 +642,9 @@ class CodexAppServerClient:
         ] = {}
         self._server_request_tasks: dict[Any, asyncio.Task[None]] = {}
         self._stderr_tail: deque[str] = deque(maxlen=40)
+        # Native authentication can emit delayed diagnostics. Once credentials
+        # have crossed this transport, never retain unstructured stderr from it.
+        self._authentication_submitted = bool(self._sensitive_values)
         # Diagnostic-only record of notifications _route_notification could
         # not match to any live subscription (see its docstring) - these are
         # otherwise dropped with no trace, which is exactly what makes a
@@ -581,6 +692,23 @@ class CodexAppServerClient:
     def is_thread_loaded(self, thread_id: str) -> bool:
         return thread_id in self._loaded_threads
 
+    def cached_thread_name(self, thread_id: str) -> str | None:
+        """Metadata already received from Codex; never starts a request."""
+        return self._thread_names.get(thread_id)
+
+    def _cache_thread_name(self, thread: Any) -> None:
+        if not isinstance(thread, dict):
+            return
+        thread_id, name = thread.get("id"), thread.get("name")
+        if not isinstance(thread_id, str) or not thread_id or len(thread_id) > 512:
+            return
+        if not isinstance(name, str) or not name.strip() or len(name) > 4096:
+            return
+        self._thread_names.pop(thread_id, None)
+        self._thread_names[thread_id] = name
+        if len(self._thread_names) > 1024:
+            self._thread_names.pop(next(iter(self._thread_names)))
+
     async def start(self) -> None:
         """Start and initialize the process once, or reuse the live process."""
 
@@ -601,6 +729,8 @@ class CodexAppServerClient:
                 await self._discard_process()
             self._closing = False
             try:
+                if self._before_start is not None:
+                    await self._before_start()
                 proc = await self._process_factory(
                     self.codex_bin,
                     "app-server",
@@ -728,6 +858,11 @@ class CodexAppServerClient:
         turn_id: str | None = None,
         include_thread_subscription: bool = False,
     ) -> None:
+        if include_thread_subscription:
+            retained = self._turns_by_thread.pop(thread_id, None)
+            if retained is not None:
+                retained._completed = True
+                retained._closed = True
         for subscription in tuple(self._subscriptions):
             if subscription.thread_id != thread_id:
                 continue
@@ -881,6 +1016,7 @@ class CodexAppServerClient:
         self._turns_by_thread.clear()
         self._loaded_threads.clear()
         self._known_thread_ids.clear()
+        self._thread_names.clear()
         for subscription in tuple(self._subscriptions):
             subscription._finish(error)
 
@@ -891,8 +1027,16 @@ class CodexAppServerClient:
         *,
         timeout: float | None = None,
     ) -> Any:
+        if method == "account/login/start":
+            self._authentication_submitted = True
+            self._stderr_tail.clear()
         await self.start()
-        return await self._request_connected(method, params, timeout=timeout)
+        return await self._request_connected(
+            method, params, timeout=timeout,
+            # A status refresh must not retire an active shared provider if its
+            # small control write stalls. Auth mutations are never replayed.
+            discard_on_send_timeout=not method.startswith("account/"),
+        )
 
     async def _request_connected(
         self,
@@ -903,7 +1047,23 @@ class CodexAppServerClient:
         notification_boundary_subscription: CodexAppServerSubscription | None = None,
         discard_on_send_timeout: bool = True,
         transport_turn: CodexAppServerTurn | None = None,
+        before_send: Callable[[], bool] | None = None,
     ) -> Any:
+        if self._protected_env_keys and method in {"thread/start", "thread/resume", "thread/fork"}:
+            effective = await self._request_connected("config/read", {
+                "includeLayers": False, "cwd": params.get("cwd") or self.cwd,
+            }, discard_on_send_timeout=False)
+            config = effective.get("config") if isinstance(effective, dict) else None
+            policy = config.get("shell_environment_policy") if isinstance(config, dict) else None
+            if not isinstance(config, dict) or policy is not None and not isinstance(policy, dict):
+                raise CodexAppServerProtocolError("Native shell environment policy could not be verified", request_sent=False, safe_to_retry=False)
+            exclusions = (policy or {}).get("exclude") or []
+            overrides = dict(params.get("config") or {})
+            requested = overrides.get("shell_environment_policy.exclude") or []
+            if not all(isinstance(values, list) and all(isinstance(value, str) for value in values) for values in (exclusions, requested)):
+                raise CodexAppServerProtocolError("Native shell environment exclusions could not be verified", request_sent=False, safe_to_retry=False)
+            overrides["shell_environment_policy.exclude"] = list(dict.fromkeys([*exclusions, *requested, *self._protected_env_keys]))
+            params = {**params, "config": overrides}
         proc = self._proc
         if not proc or proc.returncode is not None or not proc.stdin:
             raise CodexAppServerDisconnected(
@@ -931,6 +1091,7 @@ class CodexAppServerClient:
                 expected_process=proc,
                 discard_on_send_timeout=discard_on_send_timeout,
                 transport_turn=transport_turn,
+                before_send=before_send,
             )
             try:
                 return await asyncio.wait_for(
@@ -994,6 +1155,7 @@ class CodexAppServerClient:
         expected_process: asyncio.subprocess.Process | None = None,
         discard_on_send_timeout: bool = True,
         transport_turn: CodexAppServerTurn | None = None,
+        before_send: Callable[[], bool] | None = None,
     ) -> None:
         loop = asyncio.get_running_loop()
         effective_timeout = self.request_timeout if timeout is None else timeout
@@ -1038,6 +1200,23 @@ class CodexAppServerClient:
                 if loop.time() >= deadline:
                     send_timeout = asyncio.TimeoutError()
                 else:
+                    # A control request can wait behind another writer after
+                    # its caller checked ownership. Recheck synchronously at
+                    # the actual write boundary; there is no await between
+                    # this decision and stdin.write. Rejection sends no bytes.
+                    if before_send is not None:
+                        try:
+                            allowed = before_send() is True
+                        except Exception as exc:
+                            raise CodexAppServerProtocolError(
+                                "app-server send guard failed before delivery",
+                                request_sent=False, safe_to_retry=True,
+                            ) from exc
+                        if not allowed:
+                            raise CodexAppServerProtocolError(
+                                "app-server control owner changed before delivery",
+                                request_sent=False, safe_to_retry=True,
+                            )
                     try:
                         if transport_turn is not None:
                             transport_turn.transport_generation = self._generation
@@ -1074,6 +1253,17 @@ class CodexAppServerClient:
             request_sent=request_sent,
         ) from send_timeout
 
+    def _redact_sensitive(self, value):
+        if isinstance(value, str):
+            for secret in self._sensitive_values:
+                value = value.replace(secret, "[REDACTED]")
+            return value
+        if isinstance(value, list):
+            return [self._redact_sensitive(item) for item in value]
+        if isinstance(value, dict):
+            return {self._redact_sensitive(key): self._redact_sensitive(item) for key, item in value.items()}
+        return value
+
     async def _reader_loop(self, proc: asyncio.subprocess.Process) -> None:
         error: BaseException | None = None
         try:
@@ -1100,6 +1290,8 @@ class CodexAppServerClient:
                 if not isinstance(message, dict):
                     continue
 
+                if self._sensitive_values:
+                    message = self._redact_sensitive(message)
                 request_id = message.get("id")
                 if request_id is not None and ("result" in message or "error" in message):
                     pending = self._pending.get(request_id)
@@ -1114,7 +1306,9 @@ class CodexAppServerClient:
                                 future.set_exception(
                                     CodexAppServerRequestError(
                                         request_method,
-                                        message.get("error"),
+                                        {"message": "Native Codex authentication request failed"}
+                                        if request_method.startswith("account/")
+                                        else message.get("error"),
                                     )
                                 )
                             else:
@@ -1199,11 +1393,15 @@ class CodexAppServerClient:
             if not line:
                 return
             text = line.decode("utf-8", "replace").strip()
-            if text:
+            if text and not self._authentication_submitted:
                 self._stderr_tail.append(text)
 
     def _route_notification(self, notification: dict[str, Any]) -> None:
         method = str(notification.get("method") or "")
+        # Authentication notifications are not chat events. Do not expose
+        # account metadata or upstream login errors to event subscribers.
+        if method in {"account/login/completed", "account/updated"}:
+            return
         params = notification.get("params")
         if not isinstance(params, dict):
             return
@@ -1215,22 +1413,36 @@ class CodexAppServerClient:
                 task.cancel()
 
         thread_id, turn_id = _notification_scope(notification)
+        if method == "thread/name/updated":
+            self._thread_names.pop(thread_id, None)
+            self._cache_thread_name({"id": thread_id, "name": params.get("threadName")})
+        elif method == "thread/started":
+            self._cache_thread_name(params.get("thread"))
         if method == "thread/started" and thread_id:
             self._loaded_threads.add(thread_id)
         elif method == "thread/closed" and thread_id:
             self._loaded_threads.discard(thread_id)
 
         active_turn = self._turns_by_thread.get(thread_id)
+        if (
+            active_turn is not None
+            and method == "turn/started"
+            and turn_id in active_turn._completed_turn_ids
+        ):
+            return
         if active_turn and turn_id:
             # A provisional turn may receive an item notification before the
             # turn/start response binds its id.  Once bound, only an explicit
             # turn/started notification may move the handle to another turn.
-            # Native goals continue a thread by starting follow-up turns, so
+            # Native goals and subagent results can start follow-up turns, so
             # keeping this id current is required for both event routing and
             # turn/interrupt to target the work that is actually running.
             if not active_turn.turn_id or method == "turn/started":
                 active_turn.turn_id = turn_id
-                active_turn._subscription.turn_id = turn_id
+                if method == "turn/started":
+                    active_turn._completed = False
+                if not active_turn._retain_thread_stream:
+                    active_turn._subscription.turn_id = turn_id
 
         matched = False
         for subscription in tuple(self._subscriptions):
@@ -1284,9 +1496,18 @@ class CodexAppServerClient:
         if method == "turn/completed" and active_turn:
             if not turn_id or not active_turn.turn_id or turn_id == active_turn.turn_id:
                 active_turn._completed = True
-                if self._turns_by_thread.get(thread_id) is active_turn:
+                if turn_id:
+                    active_turn._completed_turn_ids.add(turn_id)
+                # A retained handle owns the thread stream until close(), not
+                # just its first native turn. Keep it available for the next
+                # turn/started so Stop/steer cannot target the finished turn.
+                if (
+                    not active_turn._retain_thread_stream
+                    and self._turns_by_thread.get(thread_id) is active_turn
+                ):
                     self._turns_by_thread.pop(thread_id, None)
-                active_turn._subscription._finish()
+                if not active_turn._retain_thread_stream:
+                    active_turn._subscription._finish()
         if method == "turn/completed" and thread_id and turn_id:
             self._finish_scoped_subscriptions(thread_id, turn_id=turn_id)
         elif method == "thread/closed" and thread_id:
@@ -1404,6 +1625,7 @@ class CodexAppServerClient:
             timeout=self.lifecycle_timeout,
         )
         thread_id = self._thread_id_from_result("thread/start", result)
+        self._cache_thread_name(result.get("thread"))
         self._known_thread_ids.add(thread_id)
         self._loaded_threads.add(thread_id)
         return thread_id
@@ -1433,6 +1655,7 @@ class CodexAppServerClient:
                 request_sent=True,
                 safe_to_retry=False,
             )
+        self._cache_thread_name(result.get("thread"))
         self._loaded_threads.add(resolved)
         return resolved
 
@@ -1499,7 +1722,8 @@ class CodexAppServerClient:
                 # fork resumed after an app-server reconnect can share the same
                 # ancestry but cannot share this creation window.
                 and expected_cwd
-                and child_cwd == expected_cwd
+                and child_cwd
+                and os.path.realpath(child_cwd) == os.path.realpath(expected_cwd)
                 and isinstance(created_at, int)
                 and not isinstance(created_at, bool)
                 and fork_started_at - 1 <= created_at <= int(time.time()) + 1
@@ -1653,6 +1877,58 @@ class CodexAppServerClient:
             {"threadId": thread_id, "items": items},
         )
 
+    async def inject_items_guarded(
+        self,
+        thread_id: str,
+        items: list[dict[str, Any]],
+        *,
+        expected_generation: int,
+        before_send: Callable[[], bool],
+        timeout: float | None = None,
+    ) -> None:
+        """Append one runtime notice to an already-loaded, exact-owned thread.
+
+        Never starts/reconnects a provider or changes its turn. The caller owns
+        notice coalescing; a sent request with no definite acknowledgement (or
+        cancellation during delivery) must not be blindly replayed. A notice
+        write timeout must not retire the busy provider shared by other work.
+        """
+        thread_id = _require_nonempty_string(thread_id, "thread_id")
+        if type(expected_generation) is not int or expected_generation < 1 or not callable(before_send):
+            raise ValueError("exact generation and synchronous ownership guard are required")
+        if not isinstance(items, list) or len(items) != 1 or not isinstance(items[0], dict):
+            raise ValueError("one generated developer notice is required")
+        item = items[0]
+        content = item.get("content")
+        if (item.get("type") != "message" or item.get("role") != "developer"
+                or not isinstance(content, list) or len(content) != 1 or not isinstance(content[0], dict)
+                or content[0].get("type") != "input_text" or not isinstance(content[0].get("text"), str)
+                or not content[0]["text"].strip()
+                or len(content[0]["text"].encode("utf-8", "surrogatepass")) > 2048):
+            raise ValueError("runtime notices require bounded generated developer input_text")
+        # Copy the only allowed fields before waiting for the shared writer.
+        notice = {"type": "message", "role": "developer", "content": [
+            {"type": "input_text", "text": content[0]["text"]},
+        ]}
+
+        def owns_loaded_thread() -> bool:
+            return (self.ready and self._generation == expected_generation
+                    and thread_id in self._loaded_threads)
+
+        if not owns_loaded_thread():
+            raise CodexAppServerProtocolError(
+                "runtime notice owner is unavailable", request_sent=False, safe_to_retry=True,
+            )
+        result = await self._request_connected(
+            "thread/inject_items", {"threadId": thread_id, "items": [notice]},
+            timeout=timeout, discard_on_send_timeout=False,
+            before_send=lambda: owns_loaded_thread() and before_send() is True,
+        )
+        if not isinstance(result, dict):
+            raise CodexAppServerProtocolError(
+                "runtime notice acknowledgement is invalid", request_sent=True, safe_to_retry=False,
+            )
+
     async def read_thread(
         self,
         thread_id: str,
@@ -1681,6 +1957,7 @@ class CodexAppServerClient:
                 request_sent=True,
                 safe_to_retry=False,
             )
+        self._cache_thread_name(thread)
         return thread
 
     async def delete_thread(self, thread_id: str) -> None:
@@ -2158,7 +2435,31 @@ class CodexAppServerClient:
         )
 
     async def unsubscribe_thread(self, thread_id: str) -> str:
-        result = await self.request("thread/unsubscribe", {"threadId": thread_id})
+        await self.start()
+        generation = self._generation
+        owner = self._turns_by_thread.get(thread_id)
+        owner_turn_id = owner.turn_id if owner is not None else None
+        subscriptions = {
+            subscription for subscription in self._subscriptions
+            if subscription.thread_id == thread_id
+        }
+
+        def same_scope() -> bool:
+            return (
+                self._generation == generation
+                and self._turns_by_thread.get(thread_id) is owner
+                and (owner is None or owner.turn_id == owner_turn_id)
+                and not any(
+                    subscription.thread_id == thread_id
+                    and subscription not in subscriptions
+                    for subscription in self._subscriptions
+                )
+            )
+
+        result = await self._request_connected(
+            "thread/unsubscribe", {"threadId": thread_id},
+            before_send=same_scope,
+        )
         status = str(result.get("status") or "") if isinstance(result, dict) else ""
         if status not in {"notLoaded", "notSubscribed", "unsubscribed"}:
             raise CodexAppServerProtocolError(
@@ -2166,11 +2467,21 @@ class CodexAppServerClient:
                 request_sent=True,
                 safe_to_retry=False,
             )
-        self._loaded_threads.discard(thread_id)
-        self._finish_scoped_subscriptions(
-            thread_id,
-            include_thread_subscription=True,
-        )
+        # An old unsubscribe response must not retire a successor installed
+        # while the request was in flight, or one on a reconnected transport.
+        if self._generation == generation and not (
+            owner is not None
+            and self._turns_by_thread.get(thread_id) is owner
+            and owner.turn_id != owner_turn_id
+        ):
+            if same_scope():
+                self._loaded_threads.discard(thread_id)
+            if owner is not None and self._turns_by_thread.get(thread_id) is owner:
+                self._turns_by_thread.pop(thread_id, None)
+                owner._completed = True
+                owner._closed = True
+            for subscription in subscriptions:
+                subscription._finish()
         return status
 
     async def steer_turn(
@@ -2206,6 +2517,7 @@ class CodexAppServerClient:
         *,
         client_user_message_id: str | None = None,
         notification_subscription: CodexAppServerSubscription | None = None,
+        before_send: Callable[[], bool] | None = None,
     ) -> tuple[str, int]:
         """Return the exact receive-order boundary of the steer response.
 
@@ -2235,6 +2547,7 @@ class CodexAppServerClient:
             "turn/steer",
             params,
             notification_boundary_subscription=notification_subscription,
+            before_send=before_send,
         )
         if (
             not isinstance(response, tuple)
@@ -2268,6 +2581,7 @@ class CodexAppServerClient:
         input_items: list[dict[str, Any]],
         *,
         overrides: dict[str, Any] | None = None,
+        retain_thread_stream: bool = False,
     ) -> CodexAppServerTurn:
         # Initialize before installing the provisional turn subscription.
         # Otherwise the first lazy start would correctly discard it as stale
@@ -2279,7 +2593,10 @@ class CodexAppServerClient:
             )
 
         subscription = self.subscribe(thread_id=thread_id)
-        provisional = CodexAppServerTurn(self, thread_id, "", subscription)
+        provisional = CodexAppServerTurn(
+            self, thread_id, "", subscription,
+            _retain_thread_stream=retain_thread_stream,
+        )
         self._turns_by_thread[thread_id] = provisional
 
         params = dict(overrides or {})
@@ -2300,13 +2617,26 @@ class CodexAppServerClient:
                     safe_to_retry=False,
                 )
             if provisional.turn_id and provisional.turn_id != turn_id:
+                if (
+                    retain_thread_stream
+                    and turn_id in provisional._completed_turn_ids
+                    and self._turns_by_thread.get(thread_id) is provisional
+                    and provisional.transport_generation == self._generation
+                    and not provisional._closed
+                ):
+                    # The initial accepted turn can finish and natively
+                    # continue before its delayed start response is read.
+                    # Acceptance of that exact completed ID is proven; leave
+                    # the handle bound to the newer live turn, not the reply.
+                    return provisional
                 raise CodexAppServerProtocolError(
                     "turn/start response did not match its early notifications",
                     request_sent=True,
                     safe_to_retry=False,
                 )
             provisional.turn_id = turn_id
-            provisional._subscription.turn_id = turn_id
+            if not retain_thread_stream:
+                provisional._subscription.turn_id = turn_id
             return provisional
         except asyncio.CancelledError as exc:
             # turn/start may already have reached app-server. Transfer the
@@ -2342,7 +2672,10 @@ class CodexAppServerClient:
         turn._subscription._finish()
 
     def active_turn(self, thread_id: str) -> CodexAppServerTurn | None:
-        return self._turns_by_thread.get(thread_id)
+        turn = self._turns_by_thread.get(thread_id)
+        # Retaining stream ownership does not mean the provider is executing
+        # between turns. A new native turn/started makes this handle active.
+        return turn if turn is not None and not turn._completed else None
 
 
 class CodexAppServerManager:
@@ -2361,10 +2694,13 @@ class CodexAppServerManager:
         notification_queue_limit: int = 8192,
         json_parse_thread_threshold: int = 1024 * 1024,
         process_factory: ProcessFactory | None = None,
+        before_start: Callable[[], Awaitable[Any]] | None = None,
         server_request_handler: ServerRequestHandler | None = None,
         initialize_params: dict[str, Any] | None = None,
         on_process_started: ProcessLifecycleHook | None = None,
         on_process_exited: ProcessLifecycleHook | None = None,
+        sensitive_values: Sequence[str] = (),
+        protected_env_keys: Sequence[str] = (),
     ) -> None:
         self.client = CodexAppServerClient(
             codex_bin,
@@ -2377,10 +2713,13 @@ class CodexAppServerManager:
             notification_queue_limit=notification_queue_limit,
             json_parse_thread_threshold=json_parse_thread_threshold,
             process_factory=process_factory,
+            before_start=before_start,
             server_request_handler=server_request_handler,
             initialize_params=initialize_params,
             on_process_started=on_process_started,
             on_process_exited=on_process_exited,
+            sensitive_values=sensitive_values,
+            protected_env_keys=protected_env_keys,
         )
 
     @property
@@ -2397,6 +2736,9 @@ class CodexAppServerManager:
 
     def is_thread_loaded(self, thread_id: str) -> bool:
         return self.client.is_thread_loaded(thread_id)
+
+    def cached_thread_name(self, thread_id: str) -> str | None:
+        return self.client.cached_thread_name(thread_id)
 
     async def start(self) -> None:
         await self.client.start()
@@ -2494,6 +2836,20 @@ class CodexAppServerManager:
         items: list[dict[str, Any]],
     ) -> None:
         await self.client.inject_items(thread_id, items)
+
+    async def inject_items_guarded(
+        self,
+        thread_id: str,
+        items: list[dict[str, Any]],
+        *,
+        expected_generation: int,
+        before_send: Callable[[], bool],
+        timeout: float | None = None,
+    ) -> None:
+        await self.client.inject_items_guarded(
+            thread_id, items, expected_generation=expected_generation,
+            before_send=before_send, timeout=timeout,
+        )
 
     async def read_thread(
         self,
@@ -2624,11 +2980,13 @@ class CodexAppServerManager:
         input_items: list[dict[str, Any]],
         *,
         overrides: dict[str, Any] | None = None,
+        retain_thread_stream: bool = False,
     ) -> CodexAppServerTurn:
         return await self.client.start_turn(
             thread_id,
             input_items,
             overrides=overrides,
+            retain_thread_stream=retain_thread_stream,
         )
 
     async def steer_turn(
@@ -2644,6 +3002,25 @@ class CodexAppServerManager:
             turn_id,
             input_items,
             client_user_message_id=client_user_message_id,
+        )
+
+    async def steer_turn_with_notification_watermark(
+        self,
+        thread_id: str,
+        turn_id: str,
+        input_items: list[dict[str, Any]],
+        *,
+        client_user_message_id: str | None = None,
+        notification_subscription: CodexAppServerSubscription | None = None,
+        before_send: Callable[[], bool] | None = None,
+    ) -> tuple[str, int]:
+        return await self.client.steer_turn_with_notification_watermark(
+            thread_id,
+            turn_id,
+            input_items,
+            client_user_message_id=client_user_message_id,
+            notification_subscription=notification_subscription,
+            before_send=before_send,
         )
 
     async def interrupt_turn(self, thread_id: str, turn_id: str) -> None:

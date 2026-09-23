@@ -1,5 +1,5 @@
 import { app, BrowserWindow, dialog, nativeImage, Notification, shell } from 'electron'
-import { chmodSync, createWriteStream, existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
+import { chmodSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
 import { open, rename, rm, stat, writeFile } from 'node:fs/promises'
 import { createHash, randomUUID } from 'node:crypto'
 import { Readable } from 'node:stream'
@@ -11,6 +11,7 @@ import type { WorkspaceGitAction, WorkspaceGitView } from '../shared/workspace-g
 import { parseMailHintPageAcknowledgment, TEAM_MAIL_HINTS_ENABLED, type MailHintPageAcknowledgment, type MailHintScope } from '../shared/team-mail-hints'
 import { TeamMailHintController } from './team-mail-hint-controller'
 import { ActivityHealthProjection, type ActivityHealthRequest } from './activity-health'
+import type { CoordinatedConnection, CoordinatedProfile } from './coordinated-updates'
 import { SideQuestionRequests } from './side-question-requests'
 import { sideQuestionLimit, sideQuestionsAvailable, validateSideQuestionInput, type SideQuestionAnswer, type SideQuestionCancellation, type SideQuestionInput, type SideQuestionScope } from '../shared/side-questions'
 import { parseBulletinHintRefresh } from '../shared/team-bulletin-hints'
@@ -133,7 +134,7 @@ import type {
 } from '../shared/types'
 import { updateQueuedTurns } from '../shared/queue'
 import { runtimeCatalogHasSelectableModels } from '../shared/runtime-catalog'
-import { incompleteLeadingRunId } from '../shared/semantic-timeline'
+import { incompleteLeadingRunId, isNativeGoalSteerEvent } from '../shared/semantic-timeline'
 import { normalizeServerURL } from '../shared/server-url'
 import { isLoopbackHostname, normalizeDirectIPTeamHubURL, normalizeTailscaleServeTeamHubURL } from '../shared/team-hub-url'
 import { agentFileBelongsToSession, isolateSessionEvent } from '../shared/session-files'
@@ -333,6 +334,9 @@ interface SemanticTimelineCapability {
 }
 
 export interface AppServiceOptions {
+  /** Reconcile authorized updates on existing health observations, without another polling loop. */
+  onServerReachable?: (profileId: string, health: Health) => void
+  onServerUnavailable?: (profileId: string) => void
   /** Test seam only. Production remains disabled until full-path acceptance. */
   mailHintsEnabled?: boolean
   settings?: SettingsStore
@@ -418,6 +422,8 @@ export class AppService {
   private jobsPollTimer: NodeJS.Timeout | null = null
   private searchBackfillTimer: NodeJS.Timeout | null = null
   private health: Health | null = null
+  private readonly onServerReachable?: AppServiceOptions['onServerReachable']
+  private readonly onServerUnavailable?: AppServiceOptions['onServerUnavailable']
   private sessions: Session[] = []
   private jobs: Job[] = []
   private runtimeCatalog: RuntimeCatalog | null = null
@@ -474,6 +480,8 @@ export class AppService {
     this.portTunnels.setChangeListener?.(ports => this.emitForwardedPorts(ports))
     appLog('startup', 'local cache ready')
     this.clientFactory = options.clientFactory ?? ((serverUrl, accessToken) => new AgentServerClient(serverUrl, accessToken))
+    this.onServerReachable = options.onServerReachable
+    this.onServerUnavailable = options.onServerUnavailable
     this.serverRestartReconnectTimeoutMs = options.serverRestartReconnectTimeoutMs ?? SERVER_RESTART_RECONNECT_TIMEOUT_MS
     this.serverRestartPollDelayMs = options.serverRestartPollDelayMs ?? SERVER_RESTART_POLL_DELAY_MS
     this.serverRestartHealthTimeoutMs = options.serverRestartHealthTimeoutMs ?? SERVER_RESTART_HEALTH_TIMEOUT_MS
@@ -2043,6 +2051,30 @@ export class AppService {
     return status
   }
 
+  coordinatedUpdateProfiles(): CoordinatedProfile[] {
+    return this.settings.listProfiles().map(profile => ({ id: profile.id, name: profile.name,
+      serverIdentity: profile.serverIdentity ?? null, active: profile.id === this.activeProfileId }))
+  }
+
+  async coordinatedUpdateConnection(profile: CoordinatedProfile): Promise<CoordinatedConnection> {
+    this.requireProfileNotRemoving(profile.id)
+    const metadata = this.settings.getProfileMetadata(profile.id)
+    if (!metadata || metadata.serverIdentity !== profile.serverIdentity
+      || this.pendingProfileAuthorityNamespaces.has(profile.id)) throw staleProfileError()
+    const revision = this.settings.connectionRevision(profile.id)
+    const assertCurrent = (): void => {
+      const current = this.settings.getProfileMetadata(profile.id)
+      if (!current || current.serverUrl !== metadata.serverUrl || current.serverIdentity !== profile.serverIdentity
+        || this.settings.connectionRevision(profile.id) !== revision
+        || this.profileRemovals.has(profile.id) || this.pendingProfileAuthorityNamespaces.has(profile.id)) throw staleProfileError()
+    }
+    const token = await this.settings.accessTokenForConnectionAsync(profile.id)
+    assertCurrent()
+    const url = new URL(metadata.serverUrl)
+    return { client: this.clientFactory(metadata.serverUrl, token), assertCurrent,
+      loopback: url.protocol === 'http:' && isLoopbackHostname(url.hostname) }
+  }
+
   async checkServerUpdate(track?: ServerUpdateTrack): Promise<ServerUpdateStatus> {
     const scope = this.captureScope()
     await this.ensureValidatedScope(scope)
@@ -2058,7 +2090,10 @@ export class AppService {
     const target = this.serverUpdateTarget(scope, true)
     let status: ServerUpdateStatus
     try {
-      status = await scope.client.startServerUpdate(version, track, whenIdle, target)
+      // Older signed updaters admit only an immediate, idle-checked request.
+      // Keep their request shape intact; a busy response is returned to the UI.
+      const supportsWhenIdle = serverCapabilityVersion(this.health?.capabilities?.server_updates) >= 7
+      status = await scope.client.startServerUpdate(version, track, whenIdle && supportsWhenIdle, target)
     } catch (error) {
       // Electron IPC preserves the message but not ServerError.status. Retain
       // authoritative HTTP evidence without relabeling transport failures.
@@ -2082,7 +2117,7 @@ export class AppService {
     this.assertCurrentScope(scope)
     const capabilityVersion = serverCapabilityVersion(this.health?.capabilities?.server_updates)
     if (capabilityVersion < 9) {
-      if (required && !this.legacyLoopbackServerUpdateAllowed(scope, capabilityVersion)) {
+      if (required && !this.legacyServerUpdateAllowed(scope, capabilityVersion)) {
         throw new Error('Update or reconnect AgentsServer before starting or canceling a managed update.')
       }
       return undefined
@@ -2097,10 +2132,10 @@ export class AppService {
     }
   }
 
-  private legacyLoopbackServerUpdateAllowed(scope: ConnectionScope, capabilityVersion: number): boolean {
+  private legacyServerUpdateAllowed(scope: ConnectionScope, capabilityVersion: number): boolean {
     // v2-v8 can install signed channel releases but cannot bind the mutation
-    // to a server identity/boot. Keep that compatibility exception on the
-    // exact HTTP loopback connection captured when this scope was activated.
+    // to a server identity/boot. Use their authenticated update route on the
+    // exact connection captured when this scope was activated.
     if (capabilityVersion < 2 || capabilityVersion >= 9) return false
     const capability = this.health?.capabilities?.server_updates
     if (
@@ -2109,13 +2144,7 @@ export class AppService {
       || Array.isArray(capability)
       || (capability as { available?: unknown }).available !== true
     ) return false
-    try {
-      if (this.settings.serverUrl(scope.profileId) !== scope.serverUrl) return false
-      const serverURL = new URL(scope.serverUrl)
-      return serverURL.protocol === 'http:' && isLoopbackHostname(serverURL.hostname)
-    } catch {
-      return false
-    }
+    return this.settings.serverUrl(scope.profileId) === scope.serverUrl
   }
 
   private assertServerUpdateTarget(
@@ -3204,7 +3233,7 @@ export class AppService {
     return lease
   }
 
-  private activateTimelineStream(scope: ConnectionScope, sessionId: string, after: number, lease: number): void {
+  private activateTimelineStream(scope: ConnectionScope, sessionId: string, after: number, lease: number, acceptReconcileEvent?: (event: Event) => boolean): void {
     if (!this.isCurrentTimeline(scope, sessionId, lease)) return
     const subscription = this.timelineSubscriptions.get(sessionId)
     if (!subscription) return
@@ -3218,11 +3247,13 @@ export class AppService {
       const subagentState = this.subagentProjector.project(event)
       if (event.type === 'raw_event') {
         if (subagentState) {
+          if (acceptReconcileEvent && !acceptReconcileEvent(subagentState)) return
           this.emitAgentEvent(scope, subagentState)
           this.enqueueEventCache(scope, subagentState)
         }
         return
       }
+      if (acceptReconcileEvent && !acceptReconcileEvent(event)) return
       this.emitAgentEvent(scope, event)
       this.enqueueEventCache(scope, event)
       if (JOB_REFRESH_EVENT_TYPES.has(event.type) && !isImportedProviderControlMetadata(event)) void this.refreshJobs(scope)
@@ -3231,6 +3262,7 @@ export class AppService {
       const current = this.timelineSubscriptions.get(sessionId)
       if (!current) return
       current.connected = connected
+      if (!connected && !this.isValidatedScope(scope)) this.suspendTimelineSubscriptions(true)
       this.emitSync(scope, sessionId, connected ? 'live' : 'reconnecting', error)
       if (connected) void this.refreshPinsFromNotice(scope, sessionId)
     }, event => {
@@ -3277,9 +3309,10 @@ export class AppService {
     if (firstError) throw firstError
   }
 
-  private suspendTimelineSubscriptions(): void {
+  private suspendTimelineSubscriptions(preserveConnected = false): void {
     const subscriptions = [...this.timelineSubscriptions]
     for (const [sessionId, subscription] of subscriptions) {
+      if (preserveConnected && subscription.connected) continue
       this.timelineSubscriptions.set(sessionId, {
         lease: ++this.timelineLeaseSequence,
         stop: null,
@@ -3439,6 +3472,14 @@ export class AppService {
 
   async claudeRuntime(sessionId: string): Promise<ClaudeRuntimeSnapshot> {
     return this.providerRequest(scope => scope.client.claudeRuntime(sessionId))
+  }
+
+  async setClaudeGoal(sessionId: string, condition: string): Promise<ClaudeRuntimeSnapshot> {
+    return this.providerRequest(scope => scope.client.setClaudeGoal(sessionId, condition))
+  }
+
+  async clearClaudeGoal(sessionId: string): Promise<ClaudeRuntimeSnapshot> {
+    return this.providerRequest(scope => scope.client.clearClaudeGoal(sessionId))
   }
 
   async refreshClaudeContextUsage(sessionId: string): Promise<ClaudeRuntimeSnapshot> {
@@ -4777,7 +4818,7 @@ export class AppService {
   private scheduleBackgroundRefresh(scope: ConnectionScope): void {
     if (!this.running || !this.isCurrentScope(scope)) return
     const now = Date.now()
-    if (now - this.lastForegroundInteractionAt >= FOREGROUND_INTERACTION_QUIET_MS) {
+    if (!this.isValidatedScope(scope) || now - this.lastForegroundInteractionAt >= FOREGROUND_INTERACTION_QUIET_MS) {
       void this.runBackgroundRefresh(false, scope)
       return
     }
@@ -4809,7 +4850,7 @@ export class AppService {
     }
     const now = Date.now()
     const quietAt = this.lastForegroundInteractionAt + FOREGROUND_INTERACTION_QUIET_MS
-    if (now < quietAt) {
+    if (this.isValidatedScope(pending) && now < quietAt) {
       this.armDeferredBackgroundRefresh()
       return
     }
@@ -4933,11 +4974,15 @@ export class AppService {
     deferApplyDuringInteraction: boolean
   ): Promise<void> {
     const started = Date.now()
-    const [health, sessions, jobs] = await Promise.allSettled([
-      this.readActivityHealth(scope, () => scope.client.health()),
+    const healthResult = Promise.allSettled([
+      this.readActivityHealth(scope, () => scope.client.health())
+    ])
+    const metadataResults = Promise.allSettled([
       scope.client.sessions(),
       includeJobs ? scope.client.jobs() : Promise.resolve(this.jobs)
     ])
+    // A slow chat list must not delay health validation or live-stream recovery.
+    const [health] = await healthResult
     if (!this.isCurrentScope(scope)) return
 
     let activeScope = scope
@@ -4977,22 +5022,23 @@ export class AppService {
         this.emitConnection(scope, false, undefined, message)
       }
     } else {
-      // A rejected health request cannot authenticate the process currently
-      // listening at this profile. Drop the cached capability fence on the
-      // first failure so Team Hub never reuses credentials against an
-      // unverified or replaced server while the ordinary reconnect UI is
-      // still in its transient `retrying` state.
+      // Revalidate privileged requests after failed health, but a transient
+      // HTTP failure does not invalidate an already authenticated chat socket.
+      // Let that transport report its own disconnect instead of closing it.
+      const transient = health.reason instanceof TypeError
+        || health.reason instanceof Error && health.reason.name === 'TimeoutError'
+        || health.reason instanceof ServerError && health.reason.status >= 500
       this.portTunnels.disposeAll()
       this.health = null
       this.validatedGeneration = null
-      this.suspendTimelineSubscriptions()
+      this.suspendTimelineSubscriptions(transient)
       this.stopEmergencyStream()
       this.mailHints.suspend()
       this.healthFailureCount += 1
       const message = errorText(health.reason)
       announcedError = health.reason
       this.setProfileRuntime(scope.profileId, {
-        connectionState: this.healthFailureCount < 2 ? 'retrying' : 'offline',
+        connectionState: this.healthFailureCount < 2 || this.hasConnectedTimelineSubscription() ? 'retrying' : 'offline',
         lastConnectionError: message,
         lastConnectionCheckedAt: Date.now()
       })
@@ -5020,6 +5066,7 @@ export class AppService {
         queueMicrotask(() => void this.reconcileTimelineAndStream(activeScope, sessionId, cachedLast, lease))
       }
     }
+    const [sessions, jobs] = await metadataResults
     if (
       deferApplyDuringInteraction
       && Date.now() - this.lastForegroundInteractionAt < FOREGROUND_INTERACTION_QUIET_MS
@@ -5217,6 +5264,7 @@ export class AppService {
     }
     this.health = health
     this.validatedGeneration = scope.generation
+    this.onServerReachable?.(scope.profileId, health)
     if (identity) {
       const verifiedScope = scope
       try {
@@ -5255,6 +5303,9 @@ export class AppService {
     const reconcileKey = `${scope.generation}:${sessionId}:${lease}`
     if (this.timelineReconcileInFlight.has(reconcileKey)) return
     this.timelineReconcileInFlight.add(reconcileKey)
+    let liveDuringReconcile: Event[] | null = []
+    let streamStarted = false
+    let reconciledThrough: number | null = null
     try {
       const before = this.cache.snapshot(scope.namespace, sessionId)
       const timelineState = this.cache.timelineState(scope.namespace, sessionId)
@@ -5270,6 +5321,19 @@ export class AppService {
           )
         )
       )
+      // Cached chats can receive replay and new output immediately. Keep HTTP
+      // for imports, metadata, queues and cache-schema repairs. Empty first
+      // opens still wait for their authoritative page.
+      if (before?.events.length && cachedLast > 0) {
+        this.activateTimelineStream(scope, sessionId, cachedLast, lease, event => {
+          // Once HTTP has supplied this range, a slower socket replay must not
+          // reapply old queue mutations over its newer authoritative snapshot.
+          if (reconciledThrough !== null && event.seq <= reconciledThrough) return false
+          liveDuringReconcile?.push(event)
+          return true
+        })
+        streamStarted = true
+      }
       const pageRequest = cachedLast > 0
         ? scope.client.sessionPage(sessionId, { after: cachedLast, limit: DELTA_EVENT_LIMIT, tail: false, visible: true })
         : this.semanticTimelinePage(scope, sessionId, {
@@ -5313,6 +5377,25 @@ export class AppService {
         pageWasSemanticAttempt = true
         if (!this.isCurrentTimeline(scope, sessionId, lease)) return
         mode = 'replace'
+      }
+      // Settle old socket writes before either a refresh or a log reset. A
+      // delayed cache batch must not reinsert the retired log after replacement.
+      if (streamStarted) this.flushEventCache()
+      // A replaced/truncated server log needs a socket with its new cursor.
+      if (streamStarted && (page.latest_seq ?? cachedLast) < cachedLast) streamStarted = false
+      if (streamStarted) {
+        // A delayed HTTP snapshot can predate messages or queue changes already
+        // delivered by the socket. Retain that newer tail in either merge or
+        // replacement mode.
+        const pageThrough = page.latest_seq ?? page.events.at(-1)?.seq ?? cachedLast
+        reconciledThrough = pageThrough
+        const newerLive = liveDuringReconcile!.filter(event => event.seq > pageThrough)
+        if (newerLive.length) page = {
+          ...page,
+          events: mergeEventsBySequence(page.events, newerLive),
+          queued_turns: newerLive.reduce(updateQueuedTurns, page.queued_turns ?? []),
+          latest_seq: Math.max(pageThrough, ...newerLive.map(event => event.seq))
+        }
       }
       this.cache.putSession(scope.namespace, page.session)
       this.rememberSessionDetail(scope, page.session)
@@ -5381,14 +5464,15 @@ export class AppService {
         sessionId, snapshot, source: 'server', mode, profileId: scope.profileId, profileGeneration: scope.generation
       })
       const streamAfter = page.latest_seq ?? page.events.at(-1)?.seq ?? cachedLast
-      this.activateTimelineStream(scope, sessionId, streamAfter, lease)
+      if (!streamStarted) this.activateTimelineStream(scope, sessionId, streamAfter, lease)
       this.scheduleSubagentSnapshotRefresh(scope, sessionId, lease)
       queueMicrotask(() => void this.refreshTimelineFiles(scope, sessionId))
     } catch (error) {
       reportStorageError(error)
       appLog('timeline', 'tail refresh failed; keeping cached transcript', { sessionId, error: errorText(error) })
-      if (this.isCurrentTimeline(scope, sessionId, lease)) this.activateTimelineStream(scope, sessionId, cachedLast, lease)
+      if (!streamStarted && this.isCurrentTimeline(scope, sessionId, lease)) this.activateTimelineStream(scope, sessionId, cachedLast, lease)
     } finally {
+      liveDuringReconcile = null
       this.finishTimelineInitialization(sessionId, lease)
       this.timelineReconcileInFlight.delete(reconcileKey)
     }
@@ -5563,7 +5647,7 @@ export class AppService {
     let files: Map<string, AgentFile> | null = null
 
     for (const event of events) {
-      if (QUEUE_CACHE_EVENT_TYPES.has(event.type) || event.positions) {
+      if (QUEUE_CACHE_EVENT_TYPES.has(event.type) || isNativeGoalSteerEvent(event) || event.positions) {
         if (!queued) {
           queued = this.cache.queuedTurns(scope.namespace, sessionId)
           nextQueued = queued
@@ -6281,6 +6365,7 @@ export class AppService {
         ...(serverVersion ? { serverVersion } : {})
       })
       if (expectedIdentity && actualIdentity === expectedIdentity) {
+        this.onServerReachable?.(profileId, health)
         this.ensureInactiveEmergencyStream(
           profileId,
           revision,
@@ -6424,6 +6509,7 @@ export class AppService {
 
   private setProfileRuntime(profileId: string, patch: ServerProfileRuntimeState): void {
     this.profileRuntime.set(profileId, { ...this.profileRuntime.get(profileId), ...patch })
+    if (patch.connectionState === 'offline') this.onServerUnavailable?.(profileId)
   }
 
   private refreshProfileUnread(scope: ConnectionScope): void {
@@ -6718,11 +6804,15 @@ export class AppService {
 
   private async downloadResponse(response: Response, path: string): Promise<void> {
     mkdirSync(dirname(path), { recursive: true })
-    const partial = `${path}.part-${process.pid}-${Date.now()}`
+    const partial = `${path}.part-${randomUUID()}`
+    // Only clean up a file this download created; another save may target the
+    // same destination concurrently, including within the same millisecond.
+    const output = await open(partial, 'wx', 0o600)
     try {
-      await pipeline(Readable.fromWeb(response.body as never), createWriteStream(partial))
+      await pipeline(Readable.fromWeb(response.body as never), output.createWriteStream())
       await rename(partial, path)
     } catch (error) {
+      await output.close().catch(() => undefined)
       await rm(partial, { force: true }).catch(() => undefined)
       throw error
     }

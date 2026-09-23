@@ -1380,7 +1380,8 @@ describe('Composer', () => {
     expect(screen.getByRole('menuitemcheckbox', { name: 'Codex' })).toBeInTheDocument()
     await user.click(screen.getByRole('menuitemcheckbox', { name: 'Codex runtime · Custom endpoint' }))
     await waitFor(() => expect(update).toHaveBeenCalledWith('chat-1', expect.objectContaining({ backend: 'codex', codex_provider: 'custom', model: null, effort: null })))
-    expect(screen.getByTitle('Change backend')).toHaveTextContent('Codex runtime · Custom endpoint')
+    expect(screen.getByTitle('Change backend')).toHaveTextContent('Codex · Custom')
+    expect(screen.getByTitle('Change backend')).toHaveAccessibleName('Codex runtime · Custom endpoint')
     await user.click(screen.getByTitle('Change backend'))
     await user.click(screen.getByRole('menuitemcheckbox', { name: 'Codex' }))
     await waitFor(() => expect(update).toHaveBeenLastCalledWith('chat-1', expect.objectContaining({ backend: 'codex', codex_provider: 'default' })))
@@ -1402,7 +1403,8 @@ describe('Composer', () => {
     render(<Composer />)
     const chip = screen.getByTitle('Backend is fixed after the provider session starts')
     expect(chip).toBeDisabled()
-    expect(chip).toHaveTextContent('Codex runtime · Custom endpoint')
+    expect(chip).toHaveTextContent('Codex · Custom')
+    expect(chip).toHaveAccessibleName('Codex runtime · Custom endpoint')
   })
 
   it('changes custom endpoint models and effort in the usual picker and permits an unlisted model', async () => {
@@ -4286,7 +4288,11 @@ describe('Composer', () => {
     await waitFor(() => expect(screen.queryByText('Sending now…')).not.toBeInTheDocument())
   })
 
-  it('preserves text typed while a failed send is still in flight', async () => {
+  it.each([
+    ['Next request', 'First request\n\nNext request'],
+    ['First request', 'First request'],
+    ['  First request  ', '  First request  ']
+  ])('preserves next draft %j while a failed send is still in flight', async (newerDraft, restoredDraft) => {
     let rejectSend!: (error: Error) => void
     Object.defineProperty(window, 'agentsDock', {
       configurable: true,
@@ -4302,12 +4308,45 @@ describe('Composer', () => {
     await user.type(editor, 'First request')
     await user.click(screen.getByRole('button', { name: 'Send message' }))
     expect(screen.getByTitle('Wait for the message to be accepted before changing backend')).toBeDisabled()
-    await user.type(editor, 'Next request')
+    await user.type(editor, newerDraft)
     await act(async () => rejectSend(new Error('offline')))
 
-    await waitFor(() => expect(editor).toHaveValue('First request\n\nNext request'))
+    await waitFor(() => expect(editor).toHaveValue(restoredDraft))
+    expect(useAppStore.getState().drafts['chat-1']).toBe(restoredDraft)
+    expect(window.agentsDock.turns.send).toHaveBeenCalledTimes(1)
     expect(screen.getByTitle('Change backend')).toBeEnabled()
     expect(useAppStore.getState().turnAdmissionTokens['chat-1']).toBeUndefined()
+  })
+
+  it('does not restore an accepted prompt when the HTTP response is lost', async () => {
+    const pendingSend = deferred<never>()
+    const send = vi.fn(() => pendingSend.promise)
+    Object.defineProperty(window, 'agentsDock', {
+      configurable: true,
+      value: {
+        preferences: { get: vi.fn().mockResolvedValue(''), set: vi.fn().mockResolvedValue(undefined) },
+        turns: { send }
+      } as unknown as AgentsDockAPI
+    })
+    const user = userEvent.setup()
+    render(<Composer />)
+    const editor = screen.getByPlaceholderText('Message')
+    await user.type(editor, 'Accepted request')
+    await user.click(screen.getByRole('button', { name: 'Send message' }))
+    await act(async () => {
+      useAppStore.setState({ snapshots: { 'chat-1': {
+        session: { id: 'chat-1', title: 'Chat', backend: 'codex' },
+        events: [{ id: 'accepted', session_id: 'chat-1', seq: 1, type: 'turn_started', ts: '2026-09-22T00:00:00Z', prompt: 'Accepted request', file_ids: [] }],
+        queuedTurns: [], files: [], filesTotal: 0, hasMoreEvents: false, cachedAt: 0
+      } } })
+      pendingSend.reject(new Error('HTTP response lost'))
+    })
+
+    await waitFor(() => expect(useAppStore.getState().turnAdmissionTokens['chat-1']).toBeUndefined())
+    expect(editor).toHaveValue('')
+    expect(useAppStore.getState().drafts['chat-1']).toBe('')
+    expect(useAppStore.getState().error).toBeNull()
+    expect(send).toHaveBeenCalledTimes(1)
   })
 
   it('uses Command-Enter to steer a new message immediately', async () => {
@@ -4884,6 +4923,34 @@ describe('Composer', () => {
     expect(screen.getByRole('option', { name: /Plan mode.*On/ })).toBeInTheDocument()
     expect(screen.getByRole('option', { name: /^MCP servers/ })).toBeInTheDocument()
     expect(screen.queryByRole('option', { name: /^Goal/ })).not.toBeInTheDocument()
+  })
+
+  it.each([
+    ['keyboard selection', 'enter'],
+    ['send-button fallback', 'send']
+  ] as const)('opens native Claude goal controls by %s without creating a model turn', async (_label, path) => {
+    const send = vi.fn()
+    Object.defineProperty(window, 'agentsDock', { configurable: true, value: {
+      preferences: { get: vi.fn().mockResolvedValue(''), set: vi.fn().mockResolvedValue(undefined) },
+      turns: { send },
+      claude: { runtime: vi.fn().mockResolvedValue({ available: true, transport: 'sdk',
+        interactive_capability: 'claude_sdk_interactive_v1', session_loaded: true,
+        pending_interactions: [], features: { goals: true }, goal: null }), setGoal: vi.fn(), clearGoal: vi.fn() },
+      events: { on: vi.fn().mockReturnValue(() => undefined) }
+    } as unknown as AgentsDockAPI })
+    useAppStore.setState({ sessions: [{ id: 'chat-1', title: 'Chat', backend: 'claude' }] })
+    const user = userEvent.setup()
+    render(<ClaudeComposerHarness />)
+    expect(await screen.findByRole('button', { name: 'Claude goal' })).toBeInTheDocument()
+    const editor = screen.getByPlaceholderText('Message')
+    await user.type(editor, path === 'enter' ? '/goal' : '/goal  ')
+    if (path === 'enter') {
+      expect(screen.getByRole('option', { name: /Set or inspect a Claude completion condition/ })).toBeInTheDocument()
+      fireEvent.keyDown(editor, { key: 'Enter' })
+    } else await user.click(screen.getByRole('button', { name: 'Send message' }))
+    expect(await screen.findByRole('dialog', { name: 'Claude goal' })).toBeInTheDocument()
+    expect(editor).toHaveValue('')
+    expect(send).not.toHaveBeenCalled()
   })
 
   it.each([

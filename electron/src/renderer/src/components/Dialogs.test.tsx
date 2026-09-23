@@ -62,11 +62,82 @@ describe('AppSettingsDialog', () => {
   afterEach(cleanup)
   beforeEach(() => useAppStore.setState({ connected: false, health: null, profiles: [], activeProfileId: null }))
 
+  async function renderAppUpdate(status: AppUpdateStatus, overrides: Partial<AgentsDockAPI['updates']> = {}) {
+    const updates = {
+      status: vi.fn().mockResolvedValue(status),
+      check: vi.fn().mockResolvedValue(status),
+      install: vi.fn().mockResolvedValue(true),
+      cancel: vi.fn().mockResolvedValue(status),
+      setTrack: vi.fn().mockResolvedValue(status),
+      ...overrides
+    }
+    Object.defineProperty(window, 'agentsDock', {
+      configurable: true,
+      value: { updates, events: { on: vi.fn().mockReturnValue(() => undefined) } } as unknown as AgentsDockAPI
+    })
+    useAppStore.setState({ modals: { ...useAppStore.getState().modals, settings: false, appSettings: true }, error: null })
+    render(<AppSettingsDialog />)
+    fireEvent.click(screen.getByRole('button', { name: 'Updates' }))
+    await screen.findByText(status.message!)
+    return updates
+  }
+
+  it.each(['checking', 'downloading', 'installing', 'downloaded'] as const)('cancels a %s update through the updater and clears the pending UI', async state => {
+    const status: AppUpdateStatus = {
+      state, channel: 'direct', track: 'stable', currentVersion: '1.0.6-beta.1',
+      availableVersion: '1.0.6', message: 'Update in progress', progress: 42,
+      cancelable: state === 'downloaded' ? undefined : true
+    }
+    let resolveCancel!: (status: AppUpdateStatus) => void
+    const cancel = vi.fn(() => new Promise<AppUpdateStatus>(resolve => { resolveCancel = resolve }))
+    await renderAppUpdate(status, { cancel })
+
+    if (state === 'checking' || state === 'downloading') expect(screen.getByRole('button', { name: 'Check for updates' })).toBeDisabled()
+    if (state === 'installing') expect(screen.getByText('Restarting…')).toBeInTheDocument()
+    const button = screen.getByRole('button', { name: state === 'downloaded' ? 'Discard update' : 'Cancel update' })
+    expect(button).toBeEnabled()
+    fireEvent.click(button)
+    expect(cancel).toHaveBeenCalledOnce()
+    expect(screen.getByRole('button', { name: 'Cancelling…' })).toBeDisabled()
+    expect(screen.getByText('Update in progress')).toBeInTheDocument()
+
+    await act(async () => resolveCancel({ ...status, state: 'idle', cancelable: false, availableVersion: undefined, progress: undefined, message: 'Update cancelled.' }))
+    expect(screen.getByText('Update cancelled.')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Check for updates' })).toBeEnabled()
+    expect(screen.getByRole('button', { name: 'Beta' })).toBeEnabled()
+    expect(screen.queryByRole('button', { name: /Cancel update|Discard update|Cancelling/ })).not.toBeInTheDocument()
+    expect(screen.queryByText('Restarting…')).not.toBeInTheDocument()
+    expect(screen.queryByRole('progressbar')).not.toBeInTheDocument()
+  })
+
+  it('allows changing channels after download and renders the replacement updater state', async () => {
+    const status: AppUpdateStatus = {
+      state: 'downloaded', channel: 'direct', track: 'stable', currentVersion: '1.0.6-beta.1',
+      availableVersion: '1.0.3', cancelable: true, message: 'AgentsDock 1.0.3 is ready to install.'
+    }
+    const setTrack = vi.fn().mockResolvedValue({ ...status, track: 'beta', state: 'idle', availableVersion: undefined, cancelable: false, message: 'Beta channel selected.' })
+    const updates = await renderAppUpdate(status, { setTrack })
+
+    expect(screen.getByRole('button', { name: 'Beta' })).toBeEnabled()
+    fireEvent.click(screen.getByRole('button', { name: 'Beta' }))
+    await screen.findByText('Beta channel selected.')
+    expect(setTrack).toHaveBeenCalledWith('beta')
+    expect(screen.queryByText('AgentsDock 1.0.3 is ready to install.')).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Update AgentsDock' })).not.toBeInTheDocument()
+    expect(updates.install).not.toHaveBeenCalled()
+  })
+
+  it('does not offer cancellation after the native installer takes over', async () => {
+    await renderAppUpdate({ state: 'installing', channel: 'direct', track: 'stable', currentVersion: '1.0.6-beta.1', message: 'Restarting to install…', cancelable: false })
+    expect(screen.getByText('Restarting…')).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /Cancel update|Discard update/ })).not.toBeInTheDocument()
+  })
+
   it('keeps app preferences, server controls, and updates in one settings dialog', async () => {
-    const updateStatus = { state: 'not-available' as const, channel: 'direct' as const, track: 'stable' as const, currentVersion: '0.2.0', message: 'AgentsDock is up to date.' }
-    const check = vi.fn()
-      .mockResolvedValueOnce(updateStatus)
-      .mockResolvedValue({ ...updateStatus, state: 'downloaded', message: 'Ready to install' })
+    const updateStatus = { state: 'not-available' as const, channel: 'direct' as const, track: 'stable' as const, currentVersion: '0.2.0', message: 'AgentsDock is up to date.',
+      serverUpdates: [{ profileId: 'server-a', serverIdentity: 'identity-a', name: 'Research server', targetVersion: '1.2.0', phase: 'pending' as const, message: 'Queued until idle.' },
+        { profileId: 'server-b', serverIdentity: 'identity-b', name: 'Laptop server', targetVersion: '1.2.0', phase: 'offline' as const, message: 'The paired update will resume on reconnect.' }] }
+    const check = vi.fn().mockResolvedValue({ ...updateStatus, state: 'downloaded', message: 'Ready to install' })
     const install = vi.fn().mockResolvedValue(true)
     let resolveSetTrack!: (status: AppUpdateStatus) => void
     const setTrack = vi.fn(() => new Promise<AppUpdateStatus>(resolve => { resolveSetTrack = resolve }))
@@ -88,7 +159,8 @@ describe('AppSettingsDialog', () => {
       modals: { settings: false, appSettings: true, newChat: false, resume: false, folder: false, digest: false, job: false, search: false, review: false, importChats: false }
     })
 
-    render(<AppSettingsDialog serverSettings={<div>Existing server controls</div>} serverUpdates={<div>Existing server updates</div>} />)
+    const recoveryVisible = vi.fn()
+    render(<AppSettingsDialog serverSettings={<div>Existing server controls</div>} serverUpdates={<div>Existing server updates</div>} onServerUpdatesVisible={recoveryVisible} />)
     const dialog = screen.getByRole('dialog', { name: 'Settings' })
     expect(within(dialog).getByRole('button', { name: 'General' })).toHaveAttribute('aria-current', 'page')
     expect(await within(dialog).findByText('Version 0.2.0')).toBeInTheDocument()
@@ -107,6 +179,9 @@ describe('AppSettingsDialog', () => {
     expect(within(dialog).queryByText('Usage analytics')).not.toBeInTheDocument()
     expect(within(dialog).queryByRole('button', { name: /Privacy Policy/ })).not.toBeInTheDocument()
     expect(within(dialog).queryByRole('button', { name: 'Privacy' })).not.toBeInTheDocument()
+    expect(check).not.toHaveBeenCalled()
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Server' }))
+    expect(check).not.toHaveBeenCalled()
 
     fireEvent.click(within(dialog).getByRole('button', { name: 'Keyboard shortcuts' }))
     expect(within(dialog).getByRole('button', { name: 'Keyboard shortcuts' })).toHaveAttribute('aria-current', 'page')
@@ -120,7 +195,13 @@ describe('AppSettingsDialog', () => {
 
     fireEvent.click(within(dialog).getByRole('button', { name: 'Updates' }))
     expect(within(dialog).getByText('This is the latest one.')).toBeInTheDocument()
-    expect(check).toHaveBeenCalledOnce()
+    expect(within(dialog).getByText('Research server')).toBeInTheDocument()
+    expect(within(dialog).getByText('Waiting for idle')).toBeInTheDocument()
+    expect(within(dialog).getByText('Laptop server')).toBeInTheDocument()
+    expect(within(dialog).getByText('Reconnect to resume')).toBeInTheDocument()
+    expect(within(dialog).queryByText('Existing server updates')).not.toBeInTheDocument()
+    expect(recoveryVisible).toHaveBeenLastCalledWith(false)
+    expect(check).not.toHaveBeenCalled()
     const appUpdateChannel = within(dialog).getByRole('group', { name: 'App update channel' })
     expect(within(appUpdateChannel).getByRole('button', { name: 'Stable' })).toHaveAttribute('aria-pressed', 'true')
     expect(within(appUpdateChannel).getByRole('button', { name: 'Beta' })).toHaveAttribute('aria-pressed', 'false')
@@ -131,15 +212,18 @@ describe('AppSettingsDialog', () => {
     await act(async () => resolveSetTrack({ ...updateStatus, track: 'beta' }))
     expect(within(appUpdateChannel).getByRole('button', { name: 'Beta' })).toHaveAttribute('aria-pressed', 'true')
     fireEvent.click(within(dialog).getByRole('button', { name: 'Check for updates' }))
-    expect(check).toHaveBeenCalledTimes(2)
-    fireEvent.click(await within(dialog).findByRole('button', { name: 'Restart to update' }))
+    expect(check).toHaveBeenCalledOnce()
+    fireEvent.click(await within(dialog).findByRole('button', { name: 'Update AgentsDock' }))
     expect(install).toHaveBeenCalledOnce()
     expect(within(dialog).queryByRole('button', { name: 'Check for updates' })).not.toBeInTheDocument()
-    expect(within(dialog).getByText('Existing server updates')).toBeInTheDocument()
+    expect(within(dialog).queryByText('Advanced server recovery')).not.toBeInTheDocument()
+    expect(within(dialog).queryByText('Existing server updates')).not.toBeInTheDocument()
+    expect(recoveryVisible).toHaveBeenLastCalledWith(false)
 
     fireEvent.click(within(dialog).getByRole('button', { name: 'Server' }))
     expect(within(dialog).getByRole('button', { name: 'Server' })).toHaveAttribute('aria-current', 'page')
     expect(within(dialog).getByText('Existing server controls')).toBeInTheDocument()
+    expect(check).toHaveBeenCalledOnce()
     expect(useAppStore.getState().modals).toMatchObject({ appSettings: true, settings: false })
   })
 
@@ -149,7 +233,7 @@ describe('AppSettingsDialog', () => {
     Object.defineProperty(window, 'agentsDock', {
       configurable: true,
       value: {
-        updates: { check: vi.fn().mockResolvedValue(updateStatus), install },
+        updates: { status: vi.fn().mockResolvedValue(updateStatus), check: vi.fn().mockResolvedValue(updateStatus), install },
         events: { on: vi.fn().mockReturnValue(() => undefined) }
       } as unknown as AgentsDockAPI
     })
@@ -228,11 +312,11 @@ describe('AppSettingsDialog', () => {
 
     await waitFor(() => expect(setTrack).toHaveBeenCalledWith('beta'))
     expect(within(dialog).queryByRole('button', { name: /Download 0\.2\.13-beta\.13/ })).not.toBeInTheDocument()
-    expect(within(dialog).queryByRole('button', { name: 'Restart to update' })).not.toBeInTheDocument()
+    expect(within(dialog).queryByRole('button', { name: 'Update AgentsDock' })).not.toBeInTheDocument()
     const checkButton = within(dialog).getByRole('button', { name: 'Check for updates' })
     expect(checkButton).toBeEnabled()
     fireEvent.click(checkButton)
-    await waitFor(() => expect(check).toHaveBeenCalledTimes(2))
+    await waitFor(() => expect(check).toHaveBeenCalledOnce())
   })
 })
 

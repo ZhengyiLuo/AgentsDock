@@ -201,6 +201,8 @@ export function registerIpc(
   handle('updates:status', () => updater.status())
   handle('updates:check', () => updater.check(true))
   handle('updates:install', () => updater.install())
+  handle('updates:cancel', () => updater.cancel())
+  handle('updates:retry-servers', profileId => updater.retryServers(profileId))
   handle('updates:set-track', track => updater.setTrack(track))
   handle('settings:get', () => service.publicSettings())
   handle('settings:apply', settings => service.applySettings(settings))
@@ -308,6 +310,8 @@ export function registerIpc(
   ))
 
   handle('claude:runtime', sessionId => service.claudeRuntime(sessionId))
+  handle('claude:goal:set', (sessionId, condition) => service.setClaudeGoal(sessionId, condition))
+  handle('claude:goal:clear', sessionId => service.clearClaudeGoal(sessionId))
   handle('claude:context-usage:refresh', sessionId => service.refreshClaudeContextUsage(sessionId))
   handle('claude:mcp', sessionId => service.claudeMcp(sessionId))
   handle('claude:mcp:control', (sessionId, input) => service.controlClaudeMcp(sessionId, input))

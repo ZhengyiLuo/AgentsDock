@@ -59,6 +59,7 @@ if /usr/bin/grep -Eiq '\.(map|ts|tsx|d\.ts|d\.mts|d\.cts)$' "$TEMP_DIR/asar-file
 fi
 
 node "$ASAR_CLI" extract "$ASAR_PATH" "$TEMP_DIR/app"
+node "$ROOT/scripts/verify_coordinated_resources.mjs" "$APP_PATH/Contents/Resources" "$TEMP_DIR/app/package.json"
 AUDIT_TARGETS=("$TEMP_DIR/app/out" "$TEMP_DIR/app/package.json")
 LEGACY_PRODUCT="$(printf '%s%s' 'Zeni' 'th')"
 FORBIDDEN_PATTERN="${LEGACY_PRODUCT}"

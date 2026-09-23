@@ -330,6 +330,8 @@ export interface AgentsDockAPI {
     status(): Promise<AppUpdateStatus>
     check(): Promise<AppUpdateStatus>
     install(): Promise<boolean>
+    cancel(): Promise<AppUpdateStatus>
+    retryServers(profileId: string): Promise<AppUpdateStatus>
     setTrack(track: AppUpdateTrack): Promise<AppUpdateStatus>
   }
   settings: {
@@ -448,6 +450,8 @@ export interface AgentsDockAPI {
   }
   claude: {
     runtime(sessionId: string): Promise<ClaudeRuntimeSnapshot>
+    setGoal(sessionId: string, condition: string): Promise<ClaudeRuntimeSnapshot>
+    clearGoal(sessionId: string): Promise<ClaudeRuntimeSnapshot>
     refreshContextUsage(sessionId: string): Promise<ClaudeRuntimeSnapshot>
     mcp(sessionId: string): Promise<ClaudeMcpSnapshot>
     controlMcp(sessionId: string, input: ClaudeMcpControlInput): Promise<ClaudeMcpSnapshot>

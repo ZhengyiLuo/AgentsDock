@@ -46,6 +46,11 @@ on:
         required: true
         default: false
         type: boolean
+      artifacts_only:
+        description: Build verified Linux and unsigned Windows artifacts only; macOS is built locally and no release drafts are created
+        required: true
+        default: false
+        type: boolean
 
 concurrency:
   group: agentsdock-direct-release
@@ -53,6 +58,10 @@ concurrency:
 
 permissions:
   contents: read
+
+env:
+  # Bound test concurrency so native packaging runners do not starve UI timers.
+  VITEST_MAX_WORKERS: "4"
 
 jobs:
   validate-request:
@@ -137,22 +146,28 @@ jobs:
           if-no-files-found: error
           retention-days: 14
 
-      - name: Require a version newer than every public desktop release
+      - name: Require release-write access for draft creation
+        if: ${{ !inputs.artifacts_only }}
         env:
           GH_TOKEN: ${{ secrets.AGENTSDOCK_RELEASE_TOKEN }}
-          RELEASE_VERSION: ${{ inputs.version }}
-          RELEASE_TRACK: ${{ inputs.track }}
         run: |
           for repository in ZhengyiLuo/AgentsDock ZhengyiLuo/AgentsDock-Releases; do
             test "$(gh api "repos/$repository" --jq '.permissions.push')" = true || { echo "Release token requires Contents write access to $repository." >&2; exit 1; }
           done
+
+      - name: Require a version newer than every public desktop release
+        env:
+          GH_TOKEN: ${{ inputs.artifacts_only && github.token || secrets.AGENTSDOCK_RELEASE_TOKEN }}
+          RELEASE_VERSION: ${{ inputs.version }}
+          RELEASE_TRACK: ${{ inputs.track }}
+        run: |
           gh api --paginate "repos/ZhengyiLuo/AgentsDock/releases?per_page=100" > "$RUNNER_TEMP/primary-releases.json"
           gh api --paginate "repos/ZhengyiLuo/AgentsDock-Releases/releases?per_page=100" > "$RUNNER_TEMP/legacy-releases.json"
           jq -s 'add' "$RUNNER_TEMP/primary-releases.json" "$RUNNER_TEMP/legacy-releases.json" > "$RUNNER_TEMP/public-releases.json"
           node scripts/validate_electron_release_version.mjs "$RELEASE_VERSION" "$RELEASE_TRACK" "$RUNNER_TEMP/public-releases.json"
 
   build-macos:
-    if: github.event_name == 'workflow_dispatch' && github.repository == 'ZhengyiLuo/AgentsDock' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/release/'))
+    if: github.event_name == 'workflow_dispatch' && github.repository == 'ZhengyiLuo/AgentsDock' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/release/')) && !inputs.artifacts_only
     needs: validate-request
     environment: direct-production
     runs-on: macos-15
@@ -425,6 +440,9 @@ jobs:
     environment: direct-production
     runs-on: windows-2025
     timeout-minutes: 40
+    env:
+      # Serialize disk-heavy suites on hosted Windows to avoid I/O contention.
+      VITEST_MAX_WORKERS: "1"
     outputs:
       signing_policy: ${{ steps.windows-signing.outputs.signing_policy }}
     steps:
@@ -471,8 +489,8 @@ jobs:
         env:
           RELEASE_TRACK: ${{ inputs.track }}
           ALLOW_UNSIGNED_WINDOWS: ${{ inputs.allow_unsigned_windows }}
-          WINDOWS_CERTIFICATE_PFX_BASE64: ${{ secrets.WINDOWS_CERTIFICATE_PFX_BASE64 }}
-          WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
+          WINDOWS_CERTIFICATE_PFX_BASE64: ${{ !inputs.artifacts_only && secrets.WINDOWS_CERTIFICATE_PFX_BASE64 || '' }}
+          WINDOWS_CERTIFICATE_PASSWORD: ${{ !inputs.artifacts_only && secrets.WINDOWS_CERTIFICATE_PASSWORD || '' }}
         shell: pwsh
         run: |
           $HasCertificate = -not [string]::IsNullOrWhiteSpace($env:WINDOWS_CERTIFICATE_PFX_BASE64)
@@ -519,7 +537,7 @@ jobs:
 
       - name: Verify Windows x64
         env:
-          WINDOWS_EXPECTED_PUBLISHER: ${{ secrets.WINDOWS_EXPECTED_PUBLISHER }}
+          WINDOWS_EXPECTED_PUBLISHER: ${{ !inputs.artifacts_only && secrets.WINDOWS_EXPECTED_PUBLISHER || '' }}
         shell: pwsh
         run: ./scripts/verify_electron_windows.ps1 dist/windows "${{ inputs.version }}" "${{ inputs.track }}" x64 "$env:AGENTSDOCK_WINDOWS_SIGNING_POLICY" "$env:WINDOWS_EXPECTED_PUBLISHER"
 
@@ -542,7 +560,7 @@ jobs:
           retention-days: 14
 
   create-draft:
-    if: github.event_name == 'workflow_dispatch' && github.repository == 'ZhengyiLuo/AgentsDock' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/release/'))
+    if: github.event_name == 'workflow_dispatch' && github.repository == 'ZhengyiLuo/AgentsDock' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/release/')) && !inputs.artifacts_only
     needs:
       - validate-request
       - build-macos

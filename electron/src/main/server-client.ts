@@ -123,6 +123,8 @@ import { parseAgentTeamMessagesCapability, parseTeamBulletinAliasCapability, par
 import { PinRevisionConflictError } from './pin-sync'
 import { PORT_TUNNEL_SUBPROTOCOL } from './port-tunnel-manager'
 import { SecurePeerRequestAdmission } from './secure-peer-request-admission'
+import { appLog } from './logger'
+import { networkErrorDetails } from './network-error'
 import {
   parseMailHintPacket, TEAM_MAIL_HINTS_MAX_PACKET_CHARS, TEAM_MAIL_HINTS_PATH, TEAM_MAIL_HINTS_PROTOCOL,
   type MailboxCoverage, type MailHintMailbox, type MailHintPacket
@@ -438,6 +440,16 @@ export class AgentServerClient {
     return this.privilegedNativeRequest<ServerUpdateStatus>(
       '/api/admin/update/start',
       { method: 'POST', body: JSON.stringify(body) },
+      SERVER_UPDATE_REQUEST_TIMEOUT_MS
+    ).then(normalizeServerUpdateStatus)
+  }
+  async ensureServerUpdate(
+    envelope: { manifest_base64: string; signature_base64: string },
+    target: ServerUpdateTarget
+  ): Promise<ServerUpdateStatus> {
+    return this.privilegedNativeRequest<ServerUpdateStatus>(
+      '/api/admin/update/ensure',
+      { method: 'POST', body: JSON.stringify({ ...envelope, ...target }) },
       SERVER_UPDATE_REQUEST_TIMEOUT_MS
     ).then(normalizeServerUpdateStatus)
   }
@@ -1217,6 +1229,18 @@ export class AgentServerClient {
 
   claudeRuntime(sessionId: string): Promise<ClaudeRuntimeSnapshot> {
     return this.get(`/api/sessions/${encodeURIComponent(sessionId)}/claude/runtime`)
+  }
+
+  setClaudeGoal(sessionId: string, condition: string): Promise<ClaudeRuntimeSnapshot> {
+    return this.privilegedNativeRequest(`/api/sessions/${encodeURIComponent(sessionId)}/claude/goal`, {
+      method: 'PUT', body: JSON.stringify({ condition })
+    })
+  }
+
+  clearClaudeGoal(sessionId: string): Promise<ClaudeRuntimeSnapshot> {
+    return this.privilegedNativeRequest(`/api/sessions/${encodeURIComponent(sessionId)}/claude/goal`, {
+      method: 'DELETE'
+    })
   }
 
   refreshClaudeContextUsage(sessionId: string): Promise<ClaudeRuntimeSnapshot> {
@@ -2553,15 +2577,33 @@ export class AgentServerClient {
     const headers = new Headers(init.headers)
     this.applyAuth(headers, configuration)
     if (init.body && !(init.body instanceof FormData) && !headers.has('Content-Type')) headers.set('Content-Type', 'application/json')
-    const response = await fetch(configurationURL(configuration, path), {
-      ...init,
-      headers,
-      // Never allow a profile credential to be replayed to a redirect target.
-      // Even same-origin redirects are rejected so an intermediary cannot
-      // silently rewrite the authenticated method or request body.
-      redirect: 'error',
-      signal: combineAbortSignals(configuration.abortController.signal, init.signal ?? AbortSignal.timeout(DEFAULT_REQUEST_TIMEOUT_MS))
-    })
+    const target = new URL(configurationURL(configuration, path))
+    const started = performance.now()
+    let response: Response
+    try {
+      response = await fetch(target.toString(), {
+        ...init,
+        headers,
+        // Never allow a profile credential to be replayed to a redirect target.
+        // Even same-origin redirects are rejected so an intermediary cannot
+        // silently rewrite the authenticated method or request body.
+        redirect: 'error',
+        signal: combineAbortSignals(configuration.abortController.signal, init.signal ?? AbortSignal.timeout(DEFAULT_REQUEST_TIMEOUT_MS))
+      })
+    } catch (error) {
+      // Profile retirement is expected cancellation. Preserve unexpected socket
+      // failures that otherwise become only "fetch failed" across Electron IPC.
+      if (!configuration.abortController.signal.aborted) {
+        appLog('transport', 'server request failed', {
+          origin: target.origin,
+          path: target.pathname,
+          method: init.method ?? 'GET',
+          durationMs: Math.round(performance.now() - started),
+          error: networkErrorDetails(error)
+        })
+      }
+      throw error
+    }
     if (!response.ok) {
       let detail = `${response.status} ${response.statusText}`
       let rawDetail: unknown
@@ -3035,6 +3077,9 @@ function isPrivilegedNativeControlTarget(
     || !target.pathname.startsWith(`${serverPrefix}/api/`)
   ) return false
   const path = target.pathname.slice(serverPrefix.length)
+  if (/^\/api\/sessions\/[A-Za-z0-9_-]{1,128}\/claude\/goal$/.test(path)) {
+    return !target.search && (method === 'PUT' || method === 'DELETE')
+  }
   const workspaceGit = /^\/api\/sessions\/[A-Za-z0-9_-]{1,128}\/workspace\/git(?:\/(diff|conflict|action))?$/.exec(path)
   if (workspaceGit) {
     const operation = workspaceGit[1]
@@ -3071,6 +3116,7 @@ function isPrivilegedNativeControlTarget(
   return !target.search && method === 'POST' && (
     path === '/api/admin/update/check'
     || path === '/api/admin/update/start'
+    || path === '/api/admin/update/ensure'
     || path === '/api/admin/update/cancel'
     || path === '/api/admin/team-hub/host/enable'
     || path === '/api/admin/team-hub/host/disable'

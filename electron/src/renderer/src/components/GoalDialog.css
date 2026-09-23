@@ -1,0 +1,34 @@
+.goal-dialog { width: min(520px, calc(100vw - 32px)); max-height: calc(100vh - 48px); overflow-y: auto; }
+.goal-dialog > header { display: flex; align-items: flex-start; gap: var(--space-4); }
+.goal-dialog > header > div { flex: 1; min-width: 0; }
+.goal-dialog > header > svg { flex-shrink: 0; color: var(--accent); }
+.goal-dialog form { display: flex; flex-direction: column; gap: var(--space-6); padding: var(--space-7); }
+.goal-field { display: flex; flex-direction: column; gap: var(--space-3); font-size: var(--text-size-ui); }
+.goal-field textarea {
+  resize: vertical;
+  min-height: 100px;
+  width: 100%;
+  box-sizing: border-box;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-control);
+  padding: var(--space-4);
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+  line-height: var(--line-height-body);
+}
+.goal-field small { align-self: flex-end; color: var(--muted); font-size: var(--text-size-meta); }
+.goal-progress { padding: var(--space-5); border: 1px solid var(--border); border-radius: var(--radius-control); }
+.goal-progress strong { font-size: var(--text-size-label); font-weight: var(--text-weight-label); }
+.goal-progress p { margin: var(--space-2) 0 var(--space-4); white-space: pre-wrap; overflow-wrap: anywhere; font-size: var(--text-size-ui); }
+.goal-progress dl { display: flex; gap: var(--space-7); margin: 0; font-size: var(--text-size-meta); }
+.goal-progress dt { color: var(--muted); }
+.goal-progress dd { margin: var(--space-1) 0 0; font-variant-numeric: tabular-nums; }
+.goal-reason { margin-top: var(--space-5); }
+.goal-reason p { margin-bottom: 0; color: var(--muted); }
+.goal-feedback { margin: 0 var(--space-3) var(--space-3); color: var(--muted); font-size: var(--text-size-meta); overflow-wrap: anywhere; }
+.goal-dialog .goal-feedback { margin: 0; }
+.goal-dialog-message { padding: var(--space-7); }
+.goal-feedback.error { color: var(--danger); }
+.goal-dialog footer { display: flex; justify-content: flex-end; gap: var(--space-4); }
+.goal-dialog footer .quiet-button { margin-right: auto; }

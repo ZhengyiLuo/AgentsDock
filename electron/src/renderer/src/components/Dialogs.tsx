@@ -2,13 +2,12 @@
 import { getLocale } from '@shared/i18n'
 import { localeOptions } from '@shared/locales'
 import { useLocale } from '../lib/i18n'
-import { forwardRef, useEffect, useLayoutEffect, useMemo, useRef, useState, type FormEvent, type KeyboardEvent, type ReactNode } from 'react'
+import { forwardRef, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type FormEvent, type KeyboardEvent, type ReactNode } from 'react'
 import * as Dialog from '@radix-ui/react-dialog'
 import { ArrowRight, Check, ChevronDown, ChevronRight, CircleAlert, Clock3, Command, Copy, Download, ExternalLink, FileText, FolderOpen, GitFork, Import, KeyRound, Laptop, LoaderCircle, Network, RefreshCw, RotateCcw, Search, Server, Sparkles, X } from 'lucide-react'
-import type { AppUpdateStatus, AppUpdateTrack, Backend, BulkImportSessionItem, BulkImportSessionResult, ChatReference, ChatReferenceAction, CreateJobInput, Health, Job, JobContextMode, JobScheduleKind, LocalSessionCandidate, ServerRestartBlockerSnapshot, ServerSetupCapabilities, ServerSetupProgress, ServerUpdateStatus, ServerUpdateTrack, Session, TeamReference, UpdateJobInput, WorkspaceProfileScope } from '@shared/types'
+import type { AppUpdateStatus, AppUpdateTrack, Backend, BulkImportSessionItem, BulkImportSessionResult, ChatReference, ChatReferenceAction, CoordinatedServerUpdate, CreateJobInput, Health, Job, JobContextMode, JobScheduleKind, LocalSessionCandidate, ServerRestartBlockerSnapshot, ServerSetupCapabilities, ServerSetupProgress, ServerUpdateStatus, ServerUpdateTrack, Session, TeamReference, UpdateJobInput, WorkspaceProfileScope } from '@shared/types'
 import { localSessionImportKey, localSessionImportSupported } from '@shared/local-session-import'
 import { chatBackendSelection, codexCustomProviderAvailable, cursorBackendAvailable, cursorBackendUnavailableReason, runtimeCatalogOptions, runtimeEffortAfterModelChange, runtimeEffortOptions, runtimeSelectionError, selectableChatBackendChoices, selectableChatBackends, type ChatBackendChoice } from '@shared/runtime-catalog'
-import { isLoopbackHostname } from '@shared/team-hub-url'
 import { trackEvent } from '../lib/analytics'
 import { readAppearance, setAppearanceMode, type AppearanceMode } from '../lib/appearance'
 import { t, useLanguagePreference, type LanguagePreference } from '../lib/i18n'
@@ -27,6 +26,7 @@ import { ChatShareDialog } from './ChatShareDialog'
 import { CodexAuthSettings } from './CodexAuthSettings'
 import { CodexModelDiscovery } from './CodexModelDiscovery'
 import { ReasoningDisplaySettings } from './ReasoningDisplaySettings'
+import { CoordinatedServerUpdateRow } from './CoordinatedServerUpdateRow'
 import { CodexServerSettings } from './CodexServerSettings'
 import { CodexSubagentSettings } from './CodexSubagentSettings'
 import { RuntimeHealthPanel } from './RuntimeHealth'
@@ -107,7 +107,6 @@ type RestartAfterUpdateTarget = Pick<
 const SERVER_RESTART_COUNT_LIMIT = 1_000_000
 const SERVER_RESTART_REVISION_PATTERN = /^[0-9a-f]{64}$/
 const SERVER_UPDATE_SCHEDULE_ID_PATTERN = /^[0-9a-f]{32}$/
-const SCOPED_SERVER_UPDATE_CAPABILITY_VERSION = 9
 
 function readDeferredServerUpdates(): DeferredServerUpdates {
   try {
@@ -183,17 +182,10 @@ function serverSupportsPassiveUpdateReservation(health: Health | null | undefine
   return serverUpdateCapabilityVersion(health?.capabilities?.server_updates) >= 7
 }
 
-function supportsLegacyLoopbackServerUpdate(health: Health | null | undefined, serverUrl: string | null | undefined): boolean {
+function serverSupportsManagedUpdate(health: Health | null | undefined): boolean {
   const capability = health?.capabilities?.server_updates
-  const capabilityVersion = serverUpdateCapabilityVersion(capability)
-  if (capabilityVersion < 2 || capabilityVersion >= SCOPED_SERVER_UPDATE_CAPABILITY_VERSION || !serverUrl) return false
-  if (!capability || typeof capability !== 'object' || Array.isArray(capability) || (capability as { available?: unknown }).available !== true) return false
-  try {
-    const parsed = new URL(serverUrl)
-    return parsed.protocol === 'http:' && isLoopbackHostname(parsed.hostname)
-  } catch {
-    return false
-  }
+  return Boolean(capability && typeof capability === 'object' && !Array.isArray(capability)
+    && (capability as { available?: unknown }).available === true)
 }
 
 function serverUpdateStartWasAccepted(
@@ -467,7 +459,11 @@ export function Dialogs() {
 
 type AppSettingsSection = 'general' | 'shortcuts' | 'server' | 'updates'
 
-export function AppSettingsDialog({ serverSettings, serverUpdates }: { serverSettings?: ReactNode; serverUpdates?: ReactNode } = {}) {
+export function AppSettingsDialog({ serverSettings, serverUpdates, onServerUpdatesVisible, onServerReleaseChecksVisible, onCoordinatedServerUpdate }: {
+  serverSettings?: ReactNode; serverUpdates?: ReactNode; onServerUpdatesVisible?: (visible: boolean) => void
+  onServerReleaseChecksVisible?: (visible: boolean) => void
+  onCoordinatedServerUpdate?: (status: CoordinatedServerUpdate | null) => void
+} = {}) {
   useLocale()
   const language = useLanguagePreference()
   const appSettingsOpen = Boolean(useAppStore(state => state.modals.appSettings))
@@ -481,6 +477,7 @@ export function AppSettingsDialog({ serverSettings, serverUpdates }: { serverSet
   const [appearance, setAppearance] = useState<AppearanceMode>('system')
   const [update, setUpdate] = useState<AppUpdateStatus | null>(null)
   const [updateTrackBusy, setUpdateTrackBusy] = useState(false)
+  const [updateCancelBusy, setUpdateCancelBusy] = useState(false)
   const activeSectionRef = useRef<HTMLButtonElement | null>(null)
 
   const closeSettings = () => {
@@ -502,6 +499,18 @@ export function AppSettingsDialog({ serverSettings, serverUpdates }: { serverSet
   useEffect(() => {
     if (legacyServerSettingsOpen) setSection('server')
   }, [legacyServerSettingsOpen])
+  const activeCoordinatedUpdate = update?.serverUpdates?.find(server => server.profileId === activeProfileId) || null
+  const manualServerUpdates = !update?.serverUpdates?.length || Boolean(activeProfileId && !activeCoordinatedUpdate)
+  useEffect(() => {
+    // An app-only release has no paired server operation. Keep the selected
+    // server's manual update controls independent of that app release.
+    const visible = open && update !== null && manualServerUpdates
+    onServerUpdatesVisible?.(visible && (section === 'server' || section === 'updates'))
+    onServerReleaseChecksVisible?.(visible && section === 'updates')
+  }, [open, section, update !== null, manualServerUpdates, onServerUpdatesVisible, onServerReleaseChecksVisible])
+  useEffect(() => {
+    onCoordinatedServerUpdate?.(activeCoordinatedUpdate)
+  }, [activeCoordinatedUpdate, onCoordinatedServerUpdate])
   useEffect(() => {
     if (!open) return
     let active = true
@@ -509,8 +518,9 @@ export function AppSettingsDialog({ serverSettings, serverUpdates }: { serverSet
     const unsubscribe = window.agentsDock.events.on('app:update', status => {
       if (active) setUpdate(status)
     })
-    void Promise.resolve(window.agentsDock.updates.check()).then(status => {
-      if (active && status) setUpdate(status)
+    void Promise.resolve(window.agentsDock.updates.status()).then(status => {
+      if (!active) return undefined
+      if (status) setUpdate(status)
     }).catch(error => {
       if (active) useAppStore.getState().setError(message(error))
     })
@@ -539,13 +549,19 @@ export function AppSettingsDialog({ serverSettings, serverUpdates }: { serverSet
     try { await window.agentsDock.updates.install() }
     catch (error) { useAppStore.getState().setError(message(error)) }
   }
+  const cancelUpdate = async () => {
+    setUpdateCancelBusy(true)
+    try { setUpdate(await window.agentsDock.updates.cancel()) }
+    catch (error) { useAppStore.getState().setError(message(error)) }
+    finally { setUpdateCancelBusy(false) }
+  }
   const updateBusy = Boolean(update && (
     update.state === 'checking'
     || (update.channel === 'direct' && ['available', 'downloading'].includes(update.state))
   ))
   const updateTrackLocked = Boolean(update && (
     update.state === 'checking'
-    || (update.channel === 'direct' && ['available', 'downloading', 'downloaded', 'installing'].includes(update.state))
+    || (update.channel === 'direct' && ['available', 'downloading', 'installing'].includes(update.state))
   ))
   const developmentUpdateCheckEnabled = update?.channel === 'development' && update.state !== 'disabled'
   const appUpdateCheckedAt = updateCheckedAtLabel(update?.checkedAt)
@@ -615,19 +631,22 @@ export function AppSettingsDialog({ serverSettings, serverUpdates }: { serverSet
                 <div className="app-settings-row-copy"><strong>AgentsDock {update?.currentVersion ? <small>v{update.currentVersion}</small> : null}</strong><span role="status" aria-live="polite">{[update?.state === 'not-available' ? t("ui.Dialogs.AppSettingsDialog.this_is_the_latest_one_0791214") : update?.message || t("ui.Dialogs.AppSettingsDialog.checking_for_updates_497a199"), appUpdateCheckedAt].filter(Boolean).join(' · ')}</span></div>
                 <div className="app-settings-actions">
                   {(update?.channel === 'direct' || update?.channel === 'development') && <div className="segmented update-track-picker" role="group" aria-label={t("ui.Dialogs.AppSettingsDialog.app_update_channel_95487e7")}>
-                    <button type="button" className={update.track === 'stable' ? 'active' : ''} aria-pressed={update.track === 'stable'} disabled={updateTrackBusy || updateTrackLocked} onClick={() => void chooseUpdateTrack('stable')}>{t("ui.Dialogs.AppSettingsDialog.stable_90ee305")}</button>
-                    <button type="button" className={update.track === 'beta' ? 'active' : ''} aria-pressed={update.track === 'beta'} disabled={updateTrackBusy || updateTrackLocked} onClick={() => void chooseUpdateTrack('beta')}>{t("ui.Dialogs.AppSettingsDialog.beta_7033903")}</button>
+                    <button type="button" className={update.track === 'stable' ? 'active' : ''} aria-pressed={update.track === 'stable'} disabled={updateTrackBusy || updateTrackLocked || updateCancelBusy} onClick={() => void chooseUpdateTrack('stable')}>{t("ui.Dialogs.AppSettingsDialog.stable_90ee305")}</button>
+                    <button type="button" className={update.track === 'beta' ? 'active' : ''} aria-pressed={update.track === 'beta'} disabled={updateTrackBusy || updateTrackLocked || updateCancelBusy} onClick={() => void chooseUpdateTrack('beta')}>{t("ui.Dialogs.AppSettingsDialog.beta_7033903")}</button>
                   </div>}
                   {update?.channel === 'app-store' && <span className="app-settings-value">App Store</span>}
                   {update?.channel === 'development' && <button type="button" className="quiet-button" disabled={!developmentUpdateCheckEnabled || updateBusy || updateTrackBusy} title={developmentUpdateCheckEnabled ? undefined : update.message || t("ui.Dialogs.AppSettingsDialog.app_update_checks_are_unavailable_for_this_86d2da7")} onClick={() => void checkForUpdates()}>{updateBusy || updateTrackBusy ? <LoaderCircle className="spin" size={13} /> : <RefreshCw size={13} />}{updateBusy || updateTrackBusy ? t("ui.Dialogs.AppSettingsDialog.checking_ec963ff") : t("ui.Dialogs.AppSettingsDialog.check_for_updates_f26f327")}</button>}
-                  {update?.channel === 'direct' && update.state !== 'downloaded' && update.state !== 'installing' && <button type="button" className="quiet-button" disabled={updateBusy || updateTrackBusy} onClick={() => void checkForUpdates()}>{updateBusy || updateTrackBusy ? <LoaderCircle className="spin" size={13} /> : <RefreshCw size={13} />}{t("ui.Dialogs.AppSettingsDialog.check_for_updates_f26f327")}</button>}
-                  {update?.channel === 'direct' && update.state === 'downloaded' && <button type="button" className="primary-button" disabled={updateTrackBusy} onClick={() => void installUpdate()}><RotateCcw size={13} />{t("ui.Dialogs.AppSettingsDialog.restart_to_update_451d3a7")}</button>}
+                  {update?.channel === 'direct' && update.state !== 'downloaded' && update.state !== 'installing' && <button type="button" className="quiet-button" disabled={updateBusy || updateTrackBusy || updateCancelBusy} onClick={() => void checkForUpdates()}>{updateBusy || updateTrackBusy ? <LoaderCircle className="spin" size={13} /> : <RefreshCw size={13} />}{t("ui.Dialogs.AppSettingsDialog.check_for_updates_f26f327")}</button>}
+                  {update?.channel === 'direct' && update.state === 'downloaded' && <button type="button" className="primary-button" disabled={updateCancelBusy || updateTrackBusy} onClick={() => void installUpdate()}><Download size={13} />{t("ui.Dialogs.AppSettingsDialog.restart_to_update_451d3a7")}</button>}
                   {update?.channel === 'direct' && update.state === 'installing' && <span className="app-settings-value"><LoaderCircle className="spin" size={13} />{t("ui.Dialogs.AppSettingsDialog.restarting_75d0f14")}</span>}
+                  {update?.channel === 'direct' && (update.state === 'downloaded' || update.cancelable) && <button type="button" className="quiet-button" disabled={updateCancelBusy} onClick={() => void cancelUpdate()}>{updateCancelBusy ? <LoaderCircle className="spin" size={13} /> : <X size={13} />}{updateCancelBusy ? t('appUpdate.cancelling') : update.state === 'downloaded' ? t('appUpdate.discard') : t('appUpdate.cancel')}</button>}
                 </div>
               </div>
               {update?.state === 'downloading' && <div className="app-settings-update-progress" role="progressbar" aria-label={t("ui.Dialogs.AppSettingsDialog.update_download_1c20b42")} aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round(update.progress ?? 0)}><span style={{ width: `${update.progress ?? 0}%` }} /></div>}
+              {update?.serverUpdates?.map(server => <CoordinatedServerUpdateRow key={server.profileId} server={server} onUpdate={setUpdate} />)}
+              {update?.serverUpdateMessage && <p role="status">{update.serverUpdateMessage}</p>}
             </div>
-            {serverUpdates}
+            {manualServerUpdates && serverUpdates}
             <div className="app-settings-server-inventory">
               {profiles.map(profile => {
                 const currentVersion = profile.id === activeProfileId
@@ -1173,6 +1192,11 @@ export function SettingsDialog() {
   useLocale()
   const open = useAppStore(state => state.modals.settings)
   const appSettingsOpen = Boolean(useAppStore(state => state.modals.appSettings))
+  const [legacyServerUpdatesVisible, setLegacyServerUpdatesVisible] = useState(false)
+  const legacyServerReleaseChecksVisible = useRef(false)
+  const setLegacyServerReleaseChecksVisible = useCallback((visible: boolean) => {
+    legacyServerReleaseChecksVisible.current = visible
+  }, [])
   const connected = useAppStore(state => state.connected)
   const health = useAppStore(state => state.health)
   const activeProfileId = useAppStore(state => state.activeProfileId)
@@ -1189,6 +1213,7 @@ export function SettingsDialog() {
   const [serverUpdateTrack, setServerUpdateTrack] = useState<ServerUpdateTrack>('stable')
   const [serverUpdateBusy, setServerUpdateBusy] = useState(false)
   const [serverUpdateWarning, setServerUpdateWarning] = useState<string | null>(null)
+  const [coordinatedServerUpdate, setCoordinatedServerUpdate] = useState<CoordinatedServerUpdate | null>(null)
   const [submittedServerUpdates, setSubmittedServerUpdates] = useState(readSubmittedServerUpdates)
   const submittedServerUpdatesRef = useRef(submittedServerUpdates)
   const submittedUpdateChecksRef = useRef(new Set<string>())
@@ -1218,6 +1243,7 @@ export function SettingsDialog() {
   const [addServerRequest, setAddServerRequest] = useState(0)
   const [manageServersRequest, setManageServersRequest] = useState(0)
   const serverUpdateRequestRef = useRef(0)
+  const serverUpdateSurfaceRef = useRef<string | null>(null)
   const serverUpdatePollRef = useRef(0)
   const deferredServerUpdateAttemptRef = useRef<string | null>(null)
   const deferredServerUpdateGenerationRef = useRef(0)
@@ -1230,10 +1256,20 @@ export function SettingsDialog() {
   const restartAfterUpdateRetryTimerRef = useRef<number | null>(null)
   const restartDecisionRef = useRef(false)
   const serverUpdateOperationsRef = useRef<Set<Promise<void>>>(new Set())
-  const updateSurfaceOpen = open || appSettingsOpen
+  const settingsOpen = open || appSettingsOpen
+  const updateSurfaceOpen = settingsOpen && legacyServerUpdatesVisible
   const serverUpdateScopeId = activeProfileId || ''
   const updateBindingIdentity = activeProfile?.serverIdentity || health?.server_identity || ''
   const submittedUpdateKey = serverUpdateIntentKey(serverUpdateScopeId, updateBindingIdentity, activeProfileServerUrl || '')
+  const coordinatedServerUpdateRevision = coordinatedServerUpdate?.profileId === activeProfileId
+    && coordinatedServerUpdate.serverIdentity === updateBindingIdentity
+    ? JSON.stringify([
+        coordinatedServerUpdate.phase, coordinatedServerUpdate.targetVersion,
+        coordinatedServerUpdate.operationId, coordinatedServerUpdate.scheduleId,
+        coordinatedServerUpdate.serverInstanceId, coordinatedServerUpdate.gatewayVersion,
+        coordinatedServerUpdate.executionVersion
+      ])
+    : ''
   const submittedServerUpdate = submittedServerUpdates[submittedUpdateKey] || null
   const deferredServerUpdate = serverUpdateScopeId ? deferredServerUpdates[serverUpdateScopeId] || null : null
   const deferredQueuedServerUpdateBlockers = deferredServerUpdate?.waitForQueuedTurns
@@ -1540,12 +1576,12 @@ export function SettingsDialog() {
     }
   }, [])
   useEffect(() => {
-    if (updateSurfaceOpen) {
+    if (settingsOpen) {
       closeRestartConfirmation()
       closeUpdateNowConfirmation()
       setRestartNotice(null)
     }
-  }, [updateSurfaceOpen])
+  }, [settingsOpen])
   useEffect(() => {
     restartInspectionRef.current += 1
     updateNowInspectionRef.current += 1
@@ -1572,10 +1608,18 @@ export function SettingsDialog() {
     }
   }, [restartConfirmationMode, restartConfirmationOpen, restartInspectionBusy, restartingServer])
   useEffect(() => {
-    if (!updateSurfaceOpen) return
+    if (!updateSurfaceOpen) {
+      serverUpdateSurfaceRef.current = null
+      return
+    }
+    const surface = JSON.stringify([activeProfileId, activeProfileServerUrl, updateBindingIdentity, profileGeneration])
+    const refreshOnly = serverUpdateSurfaceRef.current === surface
+    serverUpdateSurfaceRef.current = surface
     const requestId = ++serverUpdateRequestRef.current
     const deferredGeneration = deferredServerUpdateGenerationRef.current
-    setServerUpdate(null)
+    // Keep failure evidence visible until an authoritative status replaces it.
+    // A new worker or coordinated retry must not silently run a mutating check.
+    if (!refreshOnly) setServerUpdate(null)
     setServerUpdateWarning(null)
     setServerUpdateTrack(String(health?.server_version || '').split('+', 1)[0].includes('-') ? 'beta' : 'stable')
     const unresolved = submittedServerUpdatesRef.current[submittedUpdateKey]
@@ -1595,7 +1639,9 @@ export function SettingsDialog() {
       setServerUpdate(status)
       const track = serverTrackForStatus(status)
       setServerUpdateTrack(track)
-      if (serverUpdateIsActive(status) || deferredServerUpdate || submittedServerUpdatesRef.current[submittedUpdateKey]) return
+      // Legacy checks replace the durable failed row. Opening recovery must
+      // preserve that evidence; only the explicit Check server action may check.
+      if (!legacyServerReleaseChecksVisible.current || refreshOnly || status.phase === 'failed' || serverUpdateIsActive(status) || deferredServerUpdate || submittedServerUpdatesRef.current[submittedUpdateKey]) return
       try {
         const checked = await window.agentsDock.serverUpdates.check(track)
         if (
@@ -1621,8 +1667,10 @@ export function SettingsDialog() {
           || deferredServerUpdateAttemptRef.current
           || deferredServerUpdateGenerationRef.current !== deferredGeneration
         ) return
-        setServerUpdate(null)
-        setServerUpdateWarning('Could not load update status. Choose a channel or Check server to retry.')
+        if (!refreshOnly || !serverUpdate) {
+          setServerUpdate(null)
+          setServerUpdateWarning('Could not load update status. Choose a channel or Check server to retry.')
+        }
       })
       .finally(() => {
         if (serverRequestIsCurrent(requestId)) setServerUpdateBusy(false)
@@ -1630,7 +1678,8 @@ export function SettingsDialog() {
     return () => {
       if (serverUpdateRequestRef.current === requestId) serverUpdateRequestRef.current += 1
     }
-  }, [activeProfileId, activeProfileServerUrl, updateBindingIdentity, updateSurfaceOpen, health?.managed_updates, profileGeneration])
+  }, [activeProfileId, activeProfileServerUrl, updateBindingIdentity, updateSurfaceOpen, health?.managed_updates,
+    health?.server_instance_id, health?.server_version, coordinatedServerUpdateRevision, profileGeneration])
   useEffect(() => {
     setSubmittedUpdateChecking(false)
   }, [activeProfileId, activeProfileServerUrl, updateBindingIdentity, profileGeneration, updateSurfaceOpen])
@@ -1869,7 +1918,7 @@ export function SettingsDialog() {
     deferredServerUpdate?.waitForQueuedTurns,
     deferredServerUpdateRetry,
     health?.server_identity,
-    health?.capabilities?.server_updates,
+    serverUpdateCapabilityVersion(health?.capabilities?.server_updates),
     profileGeneration,
     restartingServer,
     deferredQueuedServerUpdateBlockers,
@@ -1920,7 +1969,8 @@ export function SettingsDialog() {
       if (timer !== undefined) window.clearTimeout(timer)
       if (serverUpdatePollRef.current === requestId) serverUpdatePollRef.current += 1
     }
-  }, [activeProfileId, activeProfileServerUrl, updateBindingIdentity, connected, updateSurfaceOpen, profileGeneration, restartAfterUpdateTarget, serverUpdate?.phase, submittedServerUpdate?.attemptId, serverUpdateBusy, activeDeferredServerUpdateAttempt])
+  }, [activeProfileId, activeProfileServerUrl, updateBindingIdentity, connected, updateSurfaceOpen, profileGeneration, restartAfterUpdateTarget, serverUpdate?.phase, submittedServerUpdate?.attemptId, serverUpdateBusy, activeDeferredServerUpdateAttempt,
+    health?.server_instance_id, health?.server_version, coordinatedServerUpdateRevision])
   const openServerSetup = (intent: ServerSetupIntent = 'setup') => {
     const store = useAppStore.getState()
     store.setModal('settings', false)
@@ -1993,10 +2043,7 @@ export function SettingsDialog() {
       return
     }
     const currentHealth = useAppStore.getState().health
-    if (
-      serverUpdateCapabilityVersion(currentHealth?.capabilities?.server_updates) < SCOPED_SERVER_UPDATE_CAPABILITY_VERSION
-      && !supportsLegacyLoopbackServerUpdate(currentHealth, activeProfileServerUrl)
-    ) {
+    if (!serverSupportsManagedUpdate(currentHealth)) {
       setServerUpdateBusy(false)
       openServerSetupWhenSafe(serverUpdateTrack === 'beta' ? 'update-beta' : 'setup')
       return
@@ -2111,8 +2158,7 @@ export function SettingsDialog() {
   const activeServerInstanceId = health?.server_instance_id?.trim() || null
   const serverControlBusy = restartingServer || restartInspectionBusy || updateNowInspectionBusy || Boolean(switchingProfileId)
   const serverUpdateControlsBusy = serverControlBusy || restartConfirmationOpen || updateNowConfirmationOpen
-  const guidedServerUpdateRequired = serverUpdateCapabilityVersion(health?.capabilities?.server_updates) < SCOPED_SERVER_UPDATE_CAPABILITY_VERSION
-    && !supportsLegacyLoopbackServerUpdate(health, activeProfileServerUrl)
+  const guidedServerUpdateRequired = !serverSupportsManagedUpdate(health)
   const restartDisabledReason = !restartCapability?.available
     ? restartCapability?.message || 'Managed restart is unavailable on this server.'
     : !connected
@@ -2784,7 +2830,7 @@ export function SettingsDialog() {
     <footer><button type="button" className="primary-button" onClick={closeSettings}>{t("ui.Dialogs.SettingsDialog.done_11a6767")}</button></footer>
   </div>
   return <>
-  <AppSettingsDialog serverSettings={serverSettingsContent} serverUpdates={serverUpdatesContent} />
+  <AppSettingsDialog serverSettings={serverSettingsContent} serverUpdates={serverUpdatesContent} onServerUpdatesVisible={setLegacyServerUpdatesVisible} onServerReleaseChecksVisible={setLegacyServerReleaseChecksVisible} onCoordinatedServerUpdate={setCoordinatedServerUpdate} />
   <Shell
     open={updateNowConfirmationOpen}
     onOpenChange={value => { if (!value && !restartingServer) closeUpdateNowConfirmation() }}

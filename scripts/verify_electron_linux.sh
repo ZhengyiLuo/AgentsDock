@@ -210,6 +210,8 @@ if grep -Eiq '\.(map|ts|tsx|d\.ts|d\.mts|d\.cts)$' "$TEMP_DIR/asar-files.txt"; t
   exit 2
 fi
 node "$ASAR_CLI" extract "$APPIMAGE_ASAR" "$TEMP_DIR/app"
+node "$ROOT/scripts/verify_coordinated_resources.mjs" "$APP_ROOT/resources" "$TEMP_DIR/app/package.json"
+node "$ROOT/scripts/verify_coordinated_resources.mjs" "$TAR_ROOT/resources" "$TEMP_DIR/app/package.json"
 PACKAGE_VERSION="$(node -p "require(process.argv[1]).version" "$TEMP_DIR/app/package.json")"
 [[ "$PACKAGE_VERSION" == "$EXPECTED_VERSION" ]] || { echo "Packaged version $PACKAGE_VERSION does not match $EXPECTED_VERSION" >&2; exit 2; }
 if [[ -n "${AGENTSDOCK_EXPECTED_BUILD_NUMBER:-}" ]]; then

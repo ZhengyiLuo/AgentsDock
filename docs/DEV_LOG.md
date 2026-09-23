@@ -1,5 +1,18 @@
 # Public development log
 
+## 2026-09-23 — Integrate accepted desktop and server work into main
+
+- Merge the accepted release-line changes, including native Codex Side chat
+  inspection and latest-message navigation, while preserving main's removal
+  of the Usage analytics screen and clearer saved-server update settings.
+- Resolve update-control conflicts by retaining cancellation behavior, channel
+  selection state, saved-server inventory and setup only when unconfigured.
+- Pass 268 focused Settings, restart, coordinated-update and timeline tests,
+  TypeScript, production compilation and the compile-output audit. Personally
+  open General and Updates with native input in an isolated offscreen app;
+  confirm analytics removal, saved server/version display and channel state.
+  This merge check does not exercise an actual update installation.
+
 ## 2026-09-23 — Clarify update settings on the main desktop line
 
 - List saved servers and their known versions beneath the server update
@@ -13,6 +26,1096 @@
   pass. These checks use component fixtures; native click-through and real
   update transport acceptance remain pending. Availability: source/local
   compilation only, with no release or server deployment.
+
+## 2026-09-23 — Validate local beta.8, build 1211
+
+- Build local macOS arm64 `1.0.7-beta.8` from committed source
+  `8a9605aaa4c036061a4912cf5b9ef883d45e5b3a`. Package checks, bundle audit
+  and deep Developer ID signature verification pass. This local build has
+  automatic updates disabled and is not a notarized public release.
+- Personally exercise the exact packaged app with native input, isolated
+  profiles and real IPC/HTTP. Codex Side chat reads a newly created workspace
+  file, recalls its unpredictable value on follow-up, and clears successfully.
+  The parent gains no conversation turns; normal provider-load metadata is
+  permitted. The provider runs against the corrected isolated server.
+- On a 600-turn synthetic conversation, scroll upward and use the floating
+  bottom button; navigate into older history and return to the latest message;
+  fork through the real HTTP memory-fork route and verify the child opens at
+  the bottom. Each bottom check measures zero remaining scroll distance.
+  No renderer exceptions occur. Stop all owned test apps and servers.
+- Packaged archive SHA256:
+  `8b94bf826ed2e3d848f83650f1b8e79c836419b4218ee51af79a6463640ca7fe`.
+  Production server activation and public distribution are separate from this
+  local acceptance; Side chat tool access requires the corrected server.
+
+## 2026-09-23 — Restore side-chat inspection and reliable latest navigation
+
+- Match native Codex Side chat: retain the parent workspace and permission
+  settings, allow file inspection and ordinary tools, and keep side questions
+  separate from inherited tasks. Route side approvals through the existing
+  controls without borrowing the main run's helper authority. Stopping the main
+  turn leaves side approvals intact; closing Side chat cleans up its own work.
+- Verify real Codex reads a file created after the parent turn, remembers the
+  result on follow-up, and performs a separately requested local write. Parent
+  provider history, settings, goals and queues remain unchanged. Personally
+  exercise the app's Side chat with native input through production IPC and
+  HTTP: read another new file, verify its unpredictable value, follow up, and
+  Clear. The native test window is isolated and offscreen.
+- Keep the floating Jump to latest action visible in older-history windows.
+  Reproduce the missing control in the actual app with a 600-turn fixture, then
+  verify the corrected button reaches the latest message. Verify a new fork
+  opens at the end and ordinary saved reading positions remain intact. These
+  timeline checks use synthetic history and the real HTTP memory-fork path.
+- Reapply the existing bounded initial bottom alignment when virtualized row
+  heights settle. A focused regression covers a delayed height change and user
+  scrolling cancellation; ordinary fork landing already worked in the baseline
+  native fixture, so it does not establish the intermittent failure's frequency.
+- Validation: 4,804 active Electron tests, eight stock Node checks, TypeScript,
+  production compilation, and focused server adapter/provider/approval checks
+  pass. Package acceptance is recorded separately. Side-chat tool access needs
+  the server change; the scrolling corrections are app-only.
+
+## 2026-09-23 — Publish the fresh-install npm beta
+
+- Publish `@agentsdock/server@1.0.7-beta.5` publicly from committed source
+  `5486cbcb096026e798f6b0bc20743b71d7b4a9c1`, available on
+  `release/npm-1.0.7-beta.5`. This is an opt-in fresh-install server beta;
+  no desktop release, existing-installation migration or server deployment.
+- Download the public tarball anonymously and verify it matches the tested
+  candidate byte-for-byte: SHA256
+  `9d9c6b3e69bdb56cae24c38fceb86ed5074d8b576ffbe4dcff384abd6c4a9f88`.
+  With Node 22.18.0 and npm 10.9.3, empty cache and no registry credentials,
+  execute the public beta CLI and confirm `1.0.7-beta.5`; independently pack
+  the public beta and verify its archive hash and bundled version.
+- Prior isolated runtime acceptance covers authenticated health and session
+  endpoints. Full managed-service installation and migration acceptance remain
+  unperformed; public CLI verification does not establish either boundary.
+- Publish explicitly with `--tag beta`. The registry also assigns `latest` to
+  this version; two authenticated removal attempts return HTTP 400. Both tags
+  still point to the beta. Use explicit `@beta` testing instructions and do not
+  describe this publication as a stable release or claim tag cleanup succeeded.
+
+## 2026-09-23 — Unify goal editors and validate local beta.7, build 1210
+
+- Give Codex and Claude the same dedicated goal dialog, completion-condition
+  field, progress styling and footer. Open Codex goals directly from the slash
+  command and Edit action; keep other thread controls separate. Preserve native
+  provider behavior and Codex status, token budget and time limit.
+- Commit app source `c0b233346e513c436ce98967789abf09b2b13320` before building
+  local 1.0.7-beta.7, build 1210. TypeScript, all 4,801 active app tests,
+  production compilation, bundle audit and Developer ID signing pass; five
+  existing tests remain skipped.
+- Exercise the source UI with native input, production IPC, authenticated HTTP
+  and actual providers. Codex retains paused status and both budgets through
+  edit/save/reopen, then clears. Claude achieves a short goal and clears/stops
+  a second goal. The shared layout fits a narrow light viewport. An initial
+  offscreen renderer loss is not reproduced by the successful sequential retry.
+- Reject the first local candidate, build 1209, after the actual packaged app
+  exposes a keyboard-focus error when opening Goal from thread controls.
+  Add a regression that fails before the correction, then personally verify
+  build 1210: immediate typing targets the goal field, Escape restores the
+  trigger, both providers open the shared dialog, and switching chats does not
+  preserve an abandoned Codex draft. No renderer exceptions occur in the final
+  packaged check. Close the test app and remove its temporary credential.
+- Availability is a local Apple silicon app, signed but not notarized, with
+  automatic updates disabled. No upload, installed-app replacement or server
+  deployment. This UI correction requires no server update. Keep public build
+  reservation 1208 separate from these local candidates; builds 1209 and 1210
+  are consumed locally.
+
+## 2026-09-22 — Keep interrupted mail checks out of user history
+
+- Correct Claude mailbox-input ownership proof for stopped and failed runs.
+  A recorded interruption does not change a generated instruction into user
+  input. Keep the exact input hash, provider identity, source checkpoint,
+  unique occurrence and time bounds; assistant replay checks are unchanged.
+- Cover existing sanitized imports and first imports, stopped and failed
+  terminals, and genuine human quotations. Focused server checks pass.
+- Reproduce the leak through authenticated HTTP on an isolated server with a
+  persisted provider-transcript fixture. Personally open it in the signed
+  desktop package, update only the isolated server to a new advertised version,
+  and reopen the already-cached chat. The generated input disappears while the
+  identical human quotation and both assistant replies remain. Repeated chat
+  switching stays correct; persisted source and event files are unchanged.
+- Test transport and history repair are real; the disposable provider transcript
+  is synthetic and no provider inference runs. Missing-terminal or unowned
+  history is outside this correction. A server update with a new version is
+  required to refresh existing desktop caches. No production deployment.
+
+## 2026-09-22 — Validate local desktop beta.5, build 1207
+
+- Build committed app source `92ab2320c1b6b0e41d9cb59fc3887cb3ff90e3ba` as
+  1.0.7-beta.5, build 1207. TypeScript, all 4,798 active app tests, production
+  compilation, bundle audit and Developer ID signing pass; five tests are
+  skipped by the existing suite. Retain the compact Claude thinking correction.
+- Personally exercise the exact signed app with native mouse input, production
+  IPC and authenticated HTTP/WebSocket transport. With a real history response
+  held for eight seconds, a cached chat reaches live 30 milliseconds after the
+  click. A new streamed reply arrives before that stale response, remains
+  exactly once afterward, and remains after switching away and back.
+- No renderer exceptions occur. Close the isolated app and remove its temporary
+  credential. Synthetic persisted messages exercise transport and reconciliation,
+  not provider inference. The separate server history-repair acceptance above
+  uses this unchanged app package.
+- Availability is a local Apple silicon app, signed but not notarized, with
+  automatic updates disabled. No publication, installed-app replacement or
+  production server deployment. The syncing and thinking corrections are
+  app-only; the mailbox-input correction requires the server change above.
+
+## 2026-09-22 — Reconnect cached chats without waiting for history
+
+- Open the live connection immediately when switching to a cached chat, while
+  the existing history refresh checks imports, metadata, queues and repairs in
+  the background. First opens still load their authoritative history page.
+- Preserve newer live messages and queue changes when a delayed history reply
+  arrives. Reset the stream cursor when server history is replaced, and prevent
+  buffered events from the previous log from returning afterward.
+- Reproduce the delay in an isolated native desktop app through authenticated
+  HTTP and WebSocket transport: an eight-second history response kept the old
+  app syncing for eight seconds. With the correction, the cached switch reaches
+  live in 28 milliseconds while that response is still pending. A new message
+  arrives before the response and remains visible exactly once after refresh
+  and switching away and back. No renderer exceptions occur.
+- Focused service, transport and store checks, TypeScript and production
+  compilation pass. The controlled test uses persisted synthetic messages,
+  not provider inference. Package acceptance is recorded separately.
+- This correction is app-only and requires no server update.
+
+## 2026-09-22 — Validate local desktop beta.4, build 1206
+
+- Build committed source `230f946912c0cdf4f05da0c87e0f106973c0e5b5` as
+  1.0.7-beta.4, build 1206. TypeScript, all 4,794 active app tests, production
+  compilation, bundle audit and Developer ID signing pass. The first packaging
+  attempt omitted the beta-track environment; correcting that local build
+  configuration passes the unchanged suite. Five tests are skipped by the suite.
+- Personally exercise a real Claude turn through the isolated native app,
+  production IPC and authenticated server: compact thinking, live setting on/off,
+  completion collapse with the setting enabled, and retained manual history.
+  A 7,206-character received thinking event remains available. Verify long-text
+  fixtures and bounded dark/light rendering, including a narrow viewport.
+- Open the exact signed package and verify the compact disclosure, full-text
+  expansion, native wheel scrolling and settings behavior on completed history.
+  The panel is capped at 320 pixels, or 40 percent of the viewport height.
+  No renderer exceptions occur; close the isolated test app and remove its
+  temporary credential afterward.
+- Availability is a local Apple silicon `.app` only, signed but not notarized,
+  with automatic updates disabled by the local-build workflow. No publication,
+  installed-app replacement or server deployment. This correction needs no
+  server update.
+
+## 2026-09-22 — Make Claude thinking compact and optional
+
+- Keep Claude thinking in a single-line disclosure by default. Apply the
+  existing thinking visibility setting to active Claude turns as well as Codex;
+  completed and stopped turns collapse while retaining manually readable text.
+- Bound expanded Claude thinking to a scrollable panel, preserve the user's
+  chat font size, and replace the large colored card with subdued styling.
+  Update the setting's English and Chinese descriptions.
+- Targeted timeline checks, TypeScript and production compilation pass.
+  Reproduce the oversized panel in an isolated native app and verify the
+  corrected long-text display through production IPC and authenticated HTTP.
+  Local package and live-provider acceptance are recorded separately.
+- This is an app-only correction. No server update is required.
+
+## 2026-09-22 — Validate unpublished desktop beta.3, build 1205
+
+- Build committed source `4c87d87f28735adedd20295fbb4db4f328c794b1` as
+  1.0.7-beta.3, build 1205. All 4,792 app tests, TypeScript and production
+  compilation pass. The universal macOS app and installer pass signing,
+  notarization, Gatekeeper, package parity, updater checksum and clean-launch
+  verification. Both Linux architectures and Windows pass their release
+  jobs. Windows first encounters a timeout in an unchanged history-cache
+  test; the single retry passes with the same source and unchanged limits.
+  All 14 assets and updater checksums are verified. Windows remains unsigned.
+- Personally exercise the actual signed app through native mouse and wheel
+  input, production IPC and authenticated HTTP against isolated synthetic
+  histories. First visits open at latest; returning to an older message in a
+  600-turn chat preserves its offset within one pixel. Repeated rapid chat
+  switches and scrolling immediately before switching preserve the same row
+  and offset. No renderer exceptions occur; the isolated app is closed and
+  its temporary credential is removed afterward.
+- The server tree is unchanged from the accepted 1.0.7-beta.2 server candidate.
+  Scrolling needs no server update. Claude Goals and the history/lifecycle
+  changes still require that server candidate; this entry does not record a
+  production deployment.
+- Keep the desktop candidate local and unpublished, with app updates
+  independent of server updates and no automatic npm migration.
+
+## 2026-09-22 — Preserve chat reading positions
+
+- Restore the saved message and pixel offset when returning to a chat. First
+  visits and readers already at the bottom still open at the latest message.
+- Save the message sequence alongside the existing position. If that message
+  has left the in-memory cache, use the existing history-window request to
+  reload it before displaying the conversation. Do not save the interim tail.
+- Keep user scrolling and explicit navigation in control of delayed restores.
+  Empty or failed history requests leave the current history usable; saved
+  positions from older apps remain compatible.
+- Reproduce the old jump in an isolated native desktop app. Verify rapid chat
+  switching and restore the exact message and offset in a 600-turn history
+  beyond the cache limit through production IPC and authenticated HTTP.
+  Delayed history replies do not override a newer chat selection or wheel
+  input. All 4,792 app tests, TypeScript and production compilation pass.
+- This is an app-only correction for desktop 1.0.7-beta.3; the prepared server
+  remains 1.0.7-beta.2. Package acceptance and availability are recorded
+  separately.
+
+## 2026-09-22 — Validate unpublished desktop beta.2, build 1204
+
+- Build committed source `5fb88e8a09e013eff13f37a706de020aa74ca0d9` as
+  1.0.7-beta.2, build 1204. All 4,789 app tests pass. Universal macOS signing,
+  notarization, clean launch and the stock artifact verifier pass. Windows
+  and both Linux architectures pass their release jobs; all 14 assets and
+  updater checksums are verified. Windows remains unsigned.
+- In the actual signed macOS app, complete a native Claude goal, observe
+  Start goal automatically become available without reopening the dialog,
+  and send a normal follow-up that appears exactly once. The isolated server
+  runs 1.0.7-beta.2; no runtime refresh or renderer reload is used.
+- Prepare the signed 1.0.7-beta.2 server package from source `9ae743b`; its
+  server tree exactly matches the desktop source. All eight test shards,
+  signatures and archive checks pass, with identical runtime files in the npm
+  and legacy packages.
+- Keep these candidates unpublished while correcting chat-switch reading
+  positions in the next desktop beta. No npm publication or production server
+  deployment is part of this acceptance.
+
+## 2026-09-22 — Correct goal completion refresh and compaction history
+
+- Keep Claude runtime subscriptions stable when timeline updates replace the
+  selected chat's session snapshot. A queued completion refresh now survives,
+  so Start goal becomes available when the turn returns to idle. Reproduced
+  the failure in packaged build 1202 and verified the correction through the
+  real desktop IPC, isolated server and native Claude provider.
+  Coalesce immediate shared-chat refreshes with queued event refreshes.
+- Recognize Codex compaction output using its native response receipt and
+  typed replacement history. Omit the proven summary during the existing
+  parsing pass and repair affected imported rows on read. Ordinary assistant
+  imports do not gain an additional source-prefix scan, and genuine replies
+  with the same text remain visible.
+- Verify the affected history through the production HTTP and semantic APIs
+  and an isolated native desktop app. The compaction handoff disappears and
+  the surrounding genuine replies retain their text and order.
+- Preserve beta.1 artifacts as an unpublished candidate. The corrected
+  candidate is 1.0.7-beta.2; package acceptance and availability are recorded
+  separately.
+
+## 2026-09-22 — Integrate native Claude Goals and repair turn transitions
+
+- Add desktop Claude Goal controls using the installed provider's native
+  `/goal` command. Read native goal-status records for active, achieved and
+  cleared state; retain completed details without inventing iteration counts.
+  Older servers continue normal chat without the new controls.
+- Clear a running goal through Claude's native priority command, which also
+  stops that turn. Keep the command receipt separate from the interrupted
+  result, and retire the exact connection if confirmation times out so a later
+  message can start normally.
+- Preserve interruption provenance across parallel tool-result branches, so
+  native interruption markers do not become ordinary user messages.
+- Normalize source-proven native goal commands when reopening history and
+  omit native synthetic placeholders and duplicate imported command rows.
+- Do not promote a queued message to Starting when Stop is still pending.
+  Preserve the queued message and use bounded, exact-run Stop for Claude's
+  Send now path.
+- Focused provider, runner, queue, transcript and desktop checks pass. The real
+  desktop app, production IPC and isolated server complete a native goal,
+  clear one during a long-running tool, and complete a normal follow-up. Live
+  Send now also completes the replacement turn with an empty queue. Release
+  artifacts are recorded separately; this entry does not claim a deployment.
+
+## 2026-09-22 — Publish desktop 1.0.6, build 1201
+
+- Publish the accepted desktop package as stable 1.0.6 in the public source
+  repository and desktop release mirror, with the same 14 verified assets.
+- Verify public download links, checksum manifests, Stable updater metadata
+  and Beta discovery of the stable release. Authenticated release metadata
+  checks confirm the source pin after anonymous API requests hit GitHub's
+  rate limit. Withdrawn 1.0.4 and 1.0.5 releases remain absent.
+- Keep server/npm publication unchanged; stable AgentsServer remains 1.0.3.
+  Stop the owned acceptance VMs and forwards after preserving their evidence.
+
+## 2026-09-22 — Validate desktop 1.0.6, build 1201
+
+- Build committed source `564f38a64a9e748f810de64668e860a4c7badcca` as
+  desktop 1.0.6, build 1201. macOS signing, notarization, clean launch and the
+  stock release verifier pass. Windows and both Linux architectures pass
+  their complete release jobs; all 14 release assets and updater checksums
+  are verified. Windows remains unsigned.
+- In an isolated macOS VM, the unchanged published 1.0.3 and 1.0.6-beta.1
+  apps each update through the native updater and automatically relaunch the
+  exact accepted package. Saved connections and the respective Stable/Beta
+  preferences survive. The original authenticated 0.1.25 server keeps its
+  process, identity, credentials, chats and runtime files, with no mutation
+  requests during either app replacement.
+- The signed package passes native Cancel during checking, download,
+  pre-install refresh and the restart delay; Discard, explicit retry and
+  channel switching also pass. The app process stays alive and late results
+  do not restore the canceled update. These cancellation checks use isolated
+  future-version metadata pointing at the accepted ZIP, without handing that
+  substituted version to the native installer.
+- Native connection recovery retains the authenticated chat socket during an
+  injected health failure and restores Online before delayed metadata, even
+  during continuous native typing and scrolling. A separate real Claude
+  round trip succeeds. The original intermittent socket trigger remains
+  unconfirmed. Native send-failure checks also preserve drafts and accepted
+  turns without resending, including the Send now queue action.
+- Finally, the accepted signed app's restored Install button upgrades the
+  isolated original 0.1.25 server to the public, production-signed 1.0.3
+  archive through one authenticated update request. All 82 runtime files
+  match; the original identity, token, chat and event bytes survive. The app
+  reconnects and shows the retained chat and installed/healthy status.
+- These are desktop-only artifacts. No npm/server publication or production
+  server restart is part of this release acceptance.
+
+## 2026-09-22 — Cancel desktop updates and recover live chat promptly
+
+- Add Cancel during app update preparation/download and Discard after download.
+  Discarded updates no longer lock channel selection. Cancellation stops the
+  download when supported, invalidates late callbacks and prevents a pending
+  restart; native installation handoff remains the final boundary. Normal quit
+  does not install a downloaded update. Focused updater and Settings checks
+  pass; signed-package cancellation acceptance is recorded separately.
+- Keep existing authenticated chat sockets through transient health failures,
+  while retaining fresh validation for reconnecting sockets and privileged
+  requests. Process health before slow session/job metadata, and allow the
+  existing recovery poll during typing or scrolling without adding a poll loop.
+- In an isolated native Electron app using real authenticated HTTP/WebSockets,
+  an injected health rejection leaves chat sockets open. Successful health
+  restores Online before an eight-second delayed chat-list response. Focused
+  service/client checks, TypeScript and production compilation pass.
+- Prevent failed sends from duplicating text already retyped in the composer,
+  preserving current references and attachments. An authoritative live event
+  can confirm acceptance when the HTTP reply is lost; the existing success and
+  steering behavior then runs without resending the prompt. Focused store and
+  Composer checks include lost replies and profile changes. Native UI checks
+  use an authenticated protocol fixture with controlled HTTP/WebSocket faults,
+  not provider inference.
+- These changes address app recovery and draft handling. The original cause of
+  the intermittent socket failures remains unconfirmed; bounded native error
+  diagnostics preserve evidence for a recurrence. No server deployment or
+  desktop publication is recorded by this entry.
+
+## 2026-09-22 — Preserve native connection failure diagnostics
+
+- Record request duration and bounded native socket error codes when desktop
+  server requests fail. Exclude credentials, request bodies, query strings and
+  exception messages; retain the original error and do not retry mutations.
+- Validate focused client tests, TypeScript and production compilation. In an
+  isolated native Electron app, real server switching and a Claude send/reply
+  succeed; an unavailable local endpoint records `ECONNREFUSED` and the app
+  reconnects after switching back to the healthy server.
+- This adds diagnostics for intermittent failures. It does not establish the
+  cause of a past disconnect or claim that diagnostics alone fix recovery.
+
+## 2026-09-22 — Bound Windows release test concurrency
+
+- Run the Windows release tests with one worker after concurrent disk-heavy
+  suites exceeded their existing deadlines on hosted Windows. Settings suites
+  that previously completed in about one second took about one minute during
+  the affected run.
+- Retain every assertion and timeout. Product behavior and other platform
+  jobs are unchanged; acceptance requires a fresh complete release build.
+
+## 2026-09-22 — Accept native legacy server update recovery
+
+- Exercise the corrected desktop Settings through real UI interaction, production
+  IPC and authenticated HTTP against original 0.1.25 installations with 0755
+  and 0750 installation roots. Both install the unchanged, publicly downloaded,
+  production-signed 1.0.3 archive through the original server updater.
+- “Install when idle” waits while a disposable chat runs, then submits exactly
+  one request using the old server's supported fields. Server identity, access
+  token and existing chats survive; all 82 shipped runtime files match the
+  verified archive. A protocol fixture supplies the busy chat lifecycle; this
+  verifies update behavior, not live model inference.
+- The 0750 installation is an actual managed Team Hub host. Its original owner,
+  team, membership, message, device session, refresh credential and managed host
+  binding survive. The existing access token can read the old message and post
+  a new one after migration, and the maintenance fence is cleared.
+- An installer failure before takeover preserves the old server and Hub data,
+  clears its exact maintenance fence, and leaves a usable retry path. The retry
+  completes through the native app. A release-check rate limit also leaves the
+  incumbent server healthy.
+- These are isolated native source-app acceptance runs. Signed desktop package
+  replacement and release verification remain separate, pending checks; this
+  entry does not record publication or a production server deployment.
+
+## 2026-09-22 — Restore updates for existing servers
+
+- Restore manual server updates in Settings → Updates when the desktop release
+  has no bundled server operation, including the app-only 1.0.6 beta.
+- Allow older servers with an authenticated update API to update over remote
+  connections. Their lack of newer request identity fields no longer removes
+  the install action or causes the desktop backend to reject it.
+- Preserve the app's existing idle-waiting flow for servers without native
+  update scheduling. Send the request format supported by those servers and
+  retain connection ownership, authentication and signed package verification.
+- Focused settings tests pass, along with update service/client/coordinator
+  checks and TypeScript. Native existing-installation acceptance and release
+  package verification are recorded separately before publication.
+
+## 2026-09-22 — Give the composer model picker available space
+
+- Remove fixed model/effort chip width caps so the full selection can use the
+  available toolbar width. Keep the dropdown arrow and send controls visible,
+  and expose the full selection on hover when a narrow pane still truncates it.
+- Shorten the custom-provider toolbar label to “Codex · Custom”; retain the
+  complete provider name in the menu and accessible button label. English and
+  Chinese are covered. No provider selection or server behavior changes.
+- Reproduced the clipped model and effort in an isolated native Electron app,
+  then verified the complete label at the same width after the change. Exercised
+  the actual picker twice through production IPC and authenticated HTTP into an
+  isolated 1.0.6-beta.1 server; both effort changes persisted. Checked dark/light,
+  narrow layouts, keyboard focus return, and send control visibility.
+- Validation: 4,736 desktop tests passed (five existing skips), followed by 221
+  focused tests after the compact-label refinement; eight build/license checks,
+  TypeScript, and production compilation pass. Synthetic endpoint metadata was
+  used; model inference and a release package were not exercised. All isolated
+  test processes exited. Availability: source only for a subsequent desktop beta.
+
+## 2026-09-22 — Resolve guided server setup from signed release metadata
+
+- Remove obsolete Stable/Beta installer pins. Local and SSH guided setup now
+  discover the selected published channel and verify its immutable signed
+  manifest before downloading the exact verified archive.
+- Keep release discovery cancellable and report its failure before starting
+  an installer. Preserve the existing server channel semantics and check an
+  installed server's version before selecting an older Beta.
+- Validate focused setup/resolver checks, TypeScript and the production desktop
+  compilation. Live public metadata checks select the published releases;
+  no server version is inferred from an app-only release.
+- Native Electron guided SSH setup completes against a disposable macOS server:
+  the production renderer selects published Stable 1.0.3, verifies and installs
+  the real archive, reconnects, and displays both saved chats. Server identity,
+  access token, saved histories, protected files and release trust key remain
+  unchanged. This checks an existing 1.0.3 server with Team Network hosting
+  disabled; it does not certify Team Network reactivation or the packaged
+  application updater. This source change does not itself publish a release.
+
+## 2026-09-22 — Publish app-only 1.0.6-beta.1 (1196)
+
+- Publish the accepted artifacts unchanged to the [public beta release](https://github.com/ZhengyiLuo/AgentsDock/releases/tag/v1.0.6-beta.1)
+  and [legacy desktop mirror](https://github.com/ZhengyiLuo/AgentsDock-Releases/releases/tag/v1.0.6-beta.1).
+  Both are prereleases with exactly 14 desktop assets and no server descriptor.
+- Independent anonymous readback verifies all eight beta platform feeds select
+  1.0.6-beta.1, both direct macOS DMG links respond successfully, and both public
+  checksum manifests match the accepted seal. All stable feeds and latest stable
+  release APIs remain on 1.0.3.
+- Server and npm publication remain held. Neither a 1.0.6-beta.1 standalone
+  server release nor an npm version is published. Existing server installations
+  are not updated by this desktop beta.
+- Users on withdrawn app versions 1.0.4/1.0.5 should install the direct desktop
+  download once to replace the old updater. The native 1.0.3 update journey and
+  1.0.5 direct-install recovery are recorded in the acceptance entry below.
+
+## 2026-09-22 — Accept app-only 1.0.6-beta.1 (1196)
+
+- Accepted product source: `d36e1637e6fa6a7cec1b11cf7ffbaf70cff8e17e`.
+  This desktop beta includes no server descriptor or enrollment and cannot
+  resume an older app's saved server-update plan. Server publication remains
+  held; this release does not install the server-side repairs below.
+- Desktop validation passes 4,736 tests with five existing skips, TypeScript,
+  production compilation and native platform package verification. The universal
+  macOS ZIP and DMG pass Developer ID signing, notarization, Gatekeeper, updater
+  metadata, checksum, package parity and clean-launch checks. Windows remains
+  explicitly unsigned. The 14-file app-only checksum seal is
+  `f7bdb3ebc6cb503839b69c5855b41812d1ce6b36b895e3115b1508db7a11e547`.
+- The unchanged published 1.0.3 app opts into Beta, downloads the exact signed
+  package, installs through its native updater and automatically relaunches as
+  build 1196. Its existing server remains on 1.0.3 with the same process; a
+  legacy 0755 root and retained rollback journal are unchanged.
+- The unchanged 1.0.5 app reproduces its old pre-install failure because this
+  app-only release has no server descriptor. Direct replacement with the same
+  signed app then succeeds, preserving its profile and the old update-plan file
+  byte for byte. Users on withdrawn 1.0.4/1.0.5 should use the direct installer.
+  This is not a claim that their old in-app updater was retroactively repaired.
+- Both native macOS journeys preserve server/runtime files, chats, provider and
+  authority files, Hub records, bootstrap claims and existing mTLS access. No
+  update, restart or stop request reaches either server. A real server-owned
+  terminal worker keeps its process identity and advancing heartbeat through
+  app replacement. This continuity test does not exercise model inference.
+- Tests use disposable native machines and private feed routing of the exact
+  production-signed bytes. Stable does not offer the beta without opt-in. This
+  entry accepts the unchanged artifacts before upload; publication and public
+  feed readback follow separately.
+
+## 2026-09-22 — Prepare app-only 1.0.6-beta.1; hold the server release
+
+- Prepare an opt-in desktop beta with independent app updates and clearer
+  Settings. The server release is held; no npm or standalone server release is
+  included. Previously prepared paired desktop artifacts are superseded.
+- An app without a bundled server target does not resume a saved server-update
+  plan, contact the update endpoint, or change that saved plan. App updates can
+  proceed independently of existing servers; server repairs below remain
+  unreleased and are not claimed as installed by this app-only beta.
+- Preserve stable 1.0.3 availability. Verify unchanged 1.0.3 and withdrawn 1.0.5
+  clients against the signed app-only beta, retaining server processes, versions,
+  chats and Hub data. Verify direct desktop replacement for any old updater
+  whose installed gate prevents self-update.
+- The app-only behavior passes 316 focused desktop tests and TypeScript checks,
+  including pending, failed, newer and unreadable saved update plans. This entry
+  records preparation only; native package acceptance is pending.
+
+## 2026-09-22 — Repair update blocking after withdrawing 1.0.4 and 1.0.5
+
+- Post-withdrawal checks found both public desktop repositories and the
+  standalone server's stable feed back on 1.0.3. The 1.0.4/1.0.5 release pages
+  and checked assets were unavailable, as were the public npm package metadata
+  and tarballs. Withdrawal does not repair already installed apps or servers.
+  Publication entries below describe the earlier state, not a current upgrade
+  recommendation.
+- Remove the desktop installation gate entirely: a saved server's release
+  channel, API version, connectivity or failed update cannot prevent an app
+  update. After relaunch, the installed app's signed bundle selects the server
+  target. Ignore stale pre-install plans and an older target's failed operation
+  receipt; keep already newer servers unchanged.
+  Old apps that still contain the gate may need the corrected direct desktop
+  installer once. Publishing npm alone cannot change their updater code.
+- Remove the artificial Stable/Beta server-channel veto. For older servers that
+  return that exact rejection, use their existing authenticated update route
+  with the bundled target. Other authentication and update failures retain their
+  own handling. Avoid a redundant latest-release lookup for a known target.
+- Fix the Team Hub operation collision: a new update's maintenance fence could
+  be confused with an older retained rollback journal. Recover the old terminal
+  operation, then continue the same new request automatically. Clean up only
+  the unstarted request when recovery cannot proceed. An already-absent restore
+  receipt no longer requires stopping the live Hub to acquire its runtime lease.
+- Stop the release-check request burst. Share simultaneous checks, cache recent
+  results, respect GitHub's retry interval and remove the multi-page HTML
+  fallback after HTTP 429. Show the cause and retry delay. Opening Settings no
+  longer triggers app release discovery or unrelated server release checks.
+- Simplify paired Updates to one app update control, per-server progress and a
+  Retry action. Show concrete causes and keep protocol diagnostics expandable.
+  Remove duplicate server-channel/recovery controls from paired releases. A
+  downloaded withdrawn app is no longer offered when a fresh feed response
+  confirms a different release.
+- Validation: 196 focused server tests and 103 Hub/activation tests pass, along
+  with installer succession and rollback regressions. The collision regression
+  fails against the withdrawn source. A real native macOS 1.0.3 update API run
+  starts with a 0755 installation root, retained terminal rollback journal and
+  newly admitted Hub operation; it completes both services without a remaining
+  journal or fence. All 107 candidate runtime files match; existing Codex/Claude
+  histories, authority files, synthetic credentials, Hub records and bootstrap
+  claims survive. An existing mTLS peer reads old data and writes/reads new data.
+- The native migration uses a private QA feed/signing key and a captured source
+  candidate retaining its 1.0.5 test label. The later retry-delay wording change
+  passes nine targeted request tests separately. The 266 focused desktop tests,
+  TypeScript and production compilation cover the installation gate removal.
+  Native desktop UI checks exercise production IPC and authenticated HTTP, scoped Retry and
+  readable dark/narrow layouts with no implicit release checks; that fixture
+  deliberately rejects its test signing key and does not claim an app binary
+  replacement or successful server migration. A subsequent change preserves
+  the server's concrete failure text in two coordinator branches; all 55
+  coordinator tests, TypeScript and production compilation pass afterward.
+- This records source repair, not a new release. No live service was restarted
+  or redeployed. A corrected signed desktop package still needs its complete
+  update/relaunch and publication validation before shipping.
+
+## 2026-09-22 — Publish coordinated AgentsDock 1.0.5 (1194)
+
+- Publish the accepted build unchanged to the [public desktop release](https://github.com/ZhengyiLuo/AgentsDock/releases/tag/v1.0.5)
+  and legacy desktop mirror. Both stable update feeds now offer 1.0.5.
+- Publish `@agentsdock/server@1.0.5` through trusted npm publishing and verify
+  that `latest` resolves to 1.0.5 and the public tarball matches the signed
+  descriptor. Publish the [standalone server bridge](https://github.com/ZhengyiLuo/AgentsServer/releases/tag/v1.0.5)
+  and verify its production signature, archive and 107-file runtime parity.
+- Independently read both public desktop feeds without credentials. All four
+  platform feeds, checksums and signed server descriptors match the accepted
+  seal; all 16 uploaded asset digests match. The public release page and macOS
+  ZIP/DMG download links respond successfully.
+- Native acceptance covers the unchanged stable 1.0.3 app's single-update
+  migration and recovery from a genuine failed 1.0.4 migration. Already
+  stranded servers require `npx @agentsdock/server@1.0.5 recover` on the server
+  computer, followed by Settings → Updates → Retry server update.
+- The 1.0.4 desktop release remains withdrawn. npm 1.0.4 still exists as an
+  immutable version, but is no longer `latest`; no npm deprecation is claimed.
+
+## 2026-09-22 — Accept direct AgentsDock 1.0.5 (1194)
+
+- Accepted product source: `321448f7ac5f7ae393a61660ec6168eedc9791b0`.
+  The paired standalone server is `144d2eaf1690185d6fae1386f793ced32ce18e3f`;
+  its runtime matches the signed npm package byte for byte across 107 files.
+- Desktop validation passes 4,699 tests with five existing skips. All eight
+  server test shards pass (5,031 cases), together with focused CLI, packaging
+  and publication checks. Windows and Linux x64/ARM64 builds pass their native
+  verification jobs. The universal macOS app and DMG pass Developer ID,
+  notarization, Gatekeeper, exact updater metadata, checksums and launch checks.
+  Windows installers remain unsigned.
+- The unchanged published 1.0.3 app updates to signed 1.0.5/build 1194 through
+  the real updater, automatically relaunches, and migrates an existing 1.0.3
+  server with a `0755` installation root. One app-update click completes both;
+  no separate server-update action is used.
+- The unchanged published 1.0.4 app updates and automatically relaunches into
+  the same accepted package with a genuinely stranded 1.0.4 server migration.
+  Settings displays the pinned recovery command and copies it correctly. The
+  exact npm package recovers the missing-stage transaction without restarting
+  the incumbent. One native Retry click then completes the paired update, and
+  reopening Settings shows both components current with no recovery prompt.
+- Both paths retain server identity, Codex and Claude histories, authority and
+  credential files, Hub data and bootstrap claims. An existing mutual-TLS peer
+  can read retained data and exchange a new message. Both use original
+  production signatures and the unchanged trust key. Private feed routing
+  supplies the exact signed bytes; public registry/feed verification follows
+  publication. An interrupted VM/VNC harness attempt is retained separately
+  and is not used as upgrade evidence.
+- Sixteen verified release assets are sealed with matching platform feeds and
+  the same signed server descriptor. This entry accepts build 1194 before
+  upload; publication is performed separately using these exact bytes.
+
+## 2026-09-22 — Prepare coordinated 1.0.5 correction
+
+- Remove the withdrawn 1.0.4 legacy desktop mirror after preserving and
+  checksum-verifying its artifacts. Both public stable feeds remain on 1.0.3
+  until replacement validation finishes. npm 1.0.4 remains published.
+- Include the dismissible error notification, isolated concurrent downloads,
+  consumed follow-up recovery and merged sidebar version-label removal.
+- Reproduce the exact published installer failure against an existing 1.0.3
+  server with a `0755` installation root. The old API stays in `installing`
+  and rejects a new update before downloading its installer. Add an explicit
+  `npx @agentsdock/server@1.0.5 recover` command for this stranded state;
+  conditional Settings guidance names the server computer and copies the
+  pinned command. Retry remains scoped to that server profile.
+- Verify the packaged recovery command on the untouched failed installation:
+  retire only its exact unfinished transaction, preserving the running process,
+  server identity, trust key and Hub database inode. Recovery cannot start a
+  native recovery owner or restart a service, including a phase-change race.
+  Then complete ordinary authenticated API migration to paired 1.0.5 services
+  and verify all 107 installed runtime files, existing histories, credentials,
+  authority and an existing mutual-TLS peer's new write/read. Candidate delivery
+  uses an isolated QA signing key; final production artifacts remain a gate.
+- Real Codex steering, test-server restart and a fresh desktop service/window
+  retain an empty consumed queue, authenticated helper access and the visible
+  final answer. Native download overlap and failure-isolation checks pass.
+- Focused Settings/coordinator tests (88), native history tests (30), and
+  TypeScript checks pass. Correct test-only stale mailbox-text assumptions,
+  macOS temporary-path canonicalization and fixture garbage collection before
+  timed websocket assertions, without changing production deadlines.
+- This entry records source validation, not release acceptance. Final signed
+  package and desktop update/relaunch checks are required before publication.
+
+## 2026-09-21 — Withdraw 1.0.4 from stable feeds and repair migration and queue recovery
+
+- Withdraw the canonical desktop and standalone server 1.0.4 releases to
+  drafts. Return both stable desktop feeds to 1.0.3. The immutable legacy
+  mirror is marked withdrawn and prerelease; its direct downloads remain
+  available pending removal. The npm package remains published while registry
+  authentication for the withdrawal warning is pending. These actions do not
+  change already installed applications or servers.
+- Correct the acceptance scope recorded below: the previous macOS 1.0.3
+  migration fixture created its installation under umask `077`, so its root
+  was already private. It missed the normal existing-installation case with a
+  `0755` root. Release validation now explicitly requires legacy `0755` and
+  `0750` permissions, early failure with a live incumbent, and recovery after
+  an older failed installer has already deleted its candidate stage.
+- Tighten a safely owned legacy installation root to `0700` under its exact
+  installation lock. When activation fails before taking over services,
+  preserve the running incumbent and Hub database, retire only the owned
+  maintenance fence, and verify authenticated health before retiring recovery
+  state. Keep the strict ownership, original-link, configuration and native
+  recovery-service checks intact. Preserve the staged runtime while an
+  activation journal remains unfinished, including the crash window before
+  the installer receives its transaction ID; clean it only after settlement.
+- Consume durably acknowledged native-goal follow-ups during server queue
+  recovery and in the desktop's persisted queue cache. Retain uncertain
+  deliveries as paused and preserve ordinary queued work. A consumed follow-up
+  must not become a new request after a server restart or chat reopening.
+- Reproduce the queue failure through an isolated native offscreen Electron
+  app and real server transport, then verify no replay after the fix. A separate
+  genuine Codex goal accepts a typed follow-up, survives server restart without
+  replay, and resumes the same provider thread with a successful authenticated
+  helper read and visible final answer. Recreate the desktop service and reopen
+  the window to check persisted state. Controlled-provider and genuine-provider
+  evidence remain separate.
+- Verify the frozen installer source on disposable native macOS installations:
+  reproduce the published failure, recover its stranded transaction without a
+  retained candidate, inject a fresh failure before service takeover, and retry
+  the same archive successfully. Preserve the incumbent PID and Hub database
+  inode during rollback, then verify paired services, all 107 installed runtime
+  files, existing identity/history/authority, and an existing mutual-TLS peer's
+  new write and read. This lane uses authenticated server APIs and native
+  services with a guest-only QA signing key; it does not establish final
+  production-signature or app update UI acceptance. A subsequent stage-retention
+  guard passes its focused cleanup regressions; its additional native failure
+  window remains under validation.
+- Availability: source corrections under validation. This entry does not
+  accept a replacement release; final signed-package migration and desktop
+  relaunch acceptance remain required before publication.
+
+## 2026-09-21 — Keep download errors dismissible and isolate simultaneous saves
+
+- Wrap long error paths within the window and reserve a fixed-size close
+  button with a translated label and tooltip. Confirm native mouse, Tab/Enter
+  and Tab/Space dismissal, including repeated errors, in dark and light themes
+  at wide and narrow window sizes. The isolated offscreen app reproduces the
+  previous offscreen close button and passes all six corrected layout cases.
+- Give each download an exclusively created UUID temporary file. Concurrent
+  saves to the same destination no longer share a partial file, and an
+  interrupted save cannot remove another save's in-progress file. Real
+  AppService/filesystem regressions fail with the previous implementation and
+  pass with the correction, including failure isolation and complete output.
+- Validation: 384 service/file-action tests, 49 app/design-system tests, and
+  TypeScript checks pass. Production compilation and the toast's native
+  offscreen interaction pass. Error text in the toast check is a fixture;
+  separate native download/HTTP and final packaged acceptance remain pending.
+- Availability: source only. The sidebar version-label removal from PR #34
+  is included in the coordinated correction; no replacement is published yet.
+
+## 2026-09-21 — Publish stable 1.0.4 build 1193
+
+- Publish and verify `@agentsdock/server@1.0.4` on npm `latest`, retaining
+  `1.0.4-beta.12` on `beta`. Verify the exact signed tarball's size, SHA-256 and
+  SHA-512 integrity from the public registry. Publish and verify the matching
+  signed standalone bridge, then the unchanged desktop build 1193 on both
+  existing stable feeds. Keep accepted product source
+  `b3bf411c8feea751285a7c9b4e397ec526a61e30`, standalone export
+  `8664a9399f2c282aea7a113771506e2528e6d559`, descriptor and artifact seal unchanged.
+- Preserve publication run `35681737578`, which stopped at private candidate
+  draft lookup before npm preflight, OIDC authentication or publication. Correct
+  only the publish job's draft-access permission and explicit workflow/source
+  pins. The publishing revision is
+  `52ff3e3a0ee33b1c7106d5924fcf31bfdb01debf`; the accepted product source remains
+  b3bf411. No product rebuild or repacking accompanies this workflow correction.
+- In corrected run `35682355490`, attempt 1 successfully publishes through npm
+  OIDC, then fails immediate readback while npm processes the package. Preserve
+  that result. Once independent exact-byte registry verification passes,
+  attempt 2 completes with preflight `publish=false`, npm publication skipped,
+  and the unchanged public verifier passing. The package is published once.
+- Add a follow-up visibility wait for future runs: retry only the unchanged
+  read-only registry verifier, at most 61 attempts with 10-second gaps and an
+  11-minute step limit. Exhaustion still fails; signature, source, archive and
+  channel requirements remain intact. This polling correction changes no
+  accepted product artifact and was not used by the successful publication run.
+  The follow-up workflow commits are `5f1b503` and `2281c02`.
+- npm provenance identifies the publishing workflow revision. The original
+  signed descriptor and unchanged tarball identify the accepted product source.
+  Check the public attestation's subject digest and workflow/run identity;
+  independent full Sigstore trust-chain verification is outside this receipt.
+- Existing stable 1.0.3 users retain one app-update action, followed by automatic
+  server migration. Initial migration and execution replacement wait for idle.
+  macOS is signed and notarized; Windows installers remain unsigned.
+
+## 2026-09-21 — Accept stable 1.0.4 build 1193
+
+- Accept desktop build 1193 from source
+  `b3bf411c8feea751285a7c9b4e397ec526a61e30`, paired with standalone export
+  `8664a9399f2c282aea7a113771506e2528e6d559` and signed npm descriptor SHA-256
+  `851055682343f7cd97cca1f0341f0b18ffb8ce841807bd0a18409c9300855618`.
+  Verify both original signatures and all 107 runtime files and modes against
+  the committed source and both server archives.
+- Canonical and standalone server suites each pass 4,995 tests with six existing
+  skips across all eight shards. Native workflow `35679650749` passes Linux x64
+  and arm64 with 4,656 tests and five skips each, and Windows x64 with 4,620 tests
+  and 11 skips; all stock package verifiers pass. Windows remains unsigned.
+  The universal Mac release passes 4,656 tests with five skips on its first
+  attempt using four workers and unchanged timeouts, then type checking,
+  compilation, Developer ID signing, notarization and stapling, Gatekeeper,
+  mounted-DMG/ZIP parity, updater metadata checks and isolated startup.
+- Verify the exact signed candidate on native macOS and Linux, including a
+  positively observed candidate worker, induced activation failure, automatic
+  rollback and explicit retry of the same archive. Begin from a preserved dead
+  candidate receipt, retain it through rollback, and verify retry without manual
+  cleanup. Preserve identity, credentials, chats/events, synthetic provider and
+  terminal credential/configuration files, Hub authority/messages and an existing
+  mutual-TLS peer; authenticate preserved content and new peer reads/writes.
+  Installed permissions follow the signed installer, including its Linux
+  `agent_server.py` normalization from mode `0644` to `0755`.
+- The macOS native server gate starts with the original signed
+  `0.1.26-beta.29` runtime and explicitly selects Stable for this test. It accepts
+  that native migration route, including rollback and retry; it does not promote
+  beta users automatically or establish every historical desktop/feed path.
+  The Linux gate starts with the original stable 1.0.3 managed server.
+- Verify one actual Update action in the unchanged stable 1.0.3 desktop with
+  its genuine 1.0.3 server. The signed app replaces and relaunches itself, then
+  migrates the server automatically. Both components reach 1.0.4, admission is
+  released, and populated data and the existing peer remain usable.
+- Verify a separate archive-only HTTP 503 failure before the old server stops.
+  Its PID and boot identity remain unchanged. Normal health callbacks observe
+  the failed operation despite absent legacy health progress; opening and
+  reopening recovery preserves the failure. One explicit coordinated Retry
+  succeeds with Advanced recovery continuously open, updating both status rows
+  without Check or reopening Settings.
+- Deliver these exact signed packages through an isolated HTTPS discovery
+  fixture. After native app relaunch drops process-only TLS overrides, a feed
+  check exposes the fixture certificate boundary. These results do not establish
+  public feed propagation, which remains a separate publication check.
+- Retain earlier real Codex/Claude gateway-loss evidence separately: the eight
+  tested execution/provider modules are byte-identical, but these migration
+  checks make no new model calls. Earlier process-loss/reboot and fresh-install
+  proofs retain their original source scope. Execution replacement waits for
+  idle; simultaneous execution generations and live-turn survival through
+  execution-process death or reboot are not claimed.
+- Seal the 16 distribution assets with SHA256SUMS SHA-256
+  `e945a6bf07d256e517291774188f282260ee4ce83c0c7c82371b86b118443b89`.
+  Availability: published and verified, with the exact accepted artifacts
+  unchanged. Verify npm `latest`, then the signed standalone bridge, before
+  exposing both existing stable desktop feeds, as recorded above.
+
+## 2026-09-21 — Correct retry after a failed split-runtime migration
+
+- Classify the installed runtime before authorizing shutdown or seeding recovery.
+  After a verified rollback to the original server, a candidate's leftover
+  process receipt is accepted as stale only under its private worker lock,
+  with a conclusively absent process and matching authenticated legacy health.
+  Preserve the receipt and all existing native identity, idle and update-owner
+  checks; never send credentials to the stale callback endpoint.
+- Acquire the installer's authenticated legacy proof when no split execution
+  layout is installed, including after rollback leaves a dead worker receipt.
+  The native failure test exposed this separate shell-path omission before
+  shutdown; retain the Python classifier and its ownership checks.
+- Pass 62 focused activation, recovery-intent, transaction and management tests,
+  including a real process lease followed by abrupt process death, rollback,
+  and a new admitted retry. Exercise the actual installer shell function feeding
+  both Python admission checks. Cover active or malformed receipts, held or unsafe
+  locks, changed ownership and published-layout races.
+- Correct an asynchronous Team Network test to await the recovered host-address
+  control independently of bulletin loading. The 119 related renderer tests and
+  type checking pass; product behavior is unchanged by this test correction.
+- Availability: source corrections awaiting official signing and fresh native
+  macOS/Linux rollback-retry acceptance. Build 1192 remains unpublished and is
+  retained only as preparatory test evidence.
+
+## 2026-09-21 — Correct stable migration recovery found by native testing
+
+- Keep expanded server recovery in sync with the active server's coordinated
+  update, boot and version changes. Refresh only authoritative status; preserve
+  the original failure while a refresh is pending or unavailable, without
+  implicitly checking for a new release.
+- Accept the additional command-display quoting used by newer tmux versions
+  when proving an older macOS updater's ownership. Decode at most one extra
+  serialization layer, then retain exact kernel argument, executable, ancestry,
+  operation and authenticated idle checks before stopping the old service.
+- Five renderer regressions fail before the fix; 285 related tests and type
+  checking pass afterward. The real private tmux launch regression reproduces
+  the old proof failure on tmux 3.7 and passes with the correction. All 23 helper
+  tests pass on the native framework-Python host; the release interpreter and
+  separate native guest pass with one framework-specific skip.
+- Availability: committed corrections awaiting a new signed candidate and its
+  packaged migration, failure/retry and rollback acceptance. No stable 1.0.4
+  release is published from the superseded candidate.
+
+## 2026-09-21 — Prepare the stable coordinated-update bridge
+
+- Target the existing stable 1.0.3 app and managed server. The user keeps one
+  app-update action; the updated app requests the matching server automatically,
+  with npm handled by the managed updater. Retain both old stable download
+  channels and the actual app version in About.
+- Reproduce an older macOS migration rejection through the unchanged published
+  app and an original signed beta.29 server. Verify that its original process,
+  runtime, identity, chats, credentials, Hub data and peer connection survive.
+  Add a read-only native ownership proof for old updaters without a recorded
+  process ID, including the exact Homebrew Python framework launcher mapping.
+  Retain all existing authenticated identity, idle and service ownership checks.
+- Fix the reproduced stale Updating row for legacy servers that omit update
+  progress from health. Observe an owned active operation through existing
+  health callbacks, and stop when it pauses. Preserve a failed status when
+  opening recovery; checking again remains an explicit action.
+- Validate the focused coordinator and renderer regressions, TypeScript and
+  production compilation. Native process/tmux proof tests cover ordinary and
+  framework Python. Isolate inherited Hub configuration in four installer test
+  fixtures after reproducing their failures on unchanged published source.
+- Availability: source candidate. Exact signed stable package, native stable
+  1.0.3 upgrade, failure/rollback, and public distribution acceptance remain
+  required before release. Beta.12 publication is not stable rollout acceptance.
+
+## 2026-09-21 — Clarify the bridge to npm updates
+
+- Document the first coordinated release as a bridge delivered through the
+  existing desktop feeds and signed standalone server updater. Existing managed
+  users update the app; they do not run the fresh npm installer over their data.
+- Separate the accepted beta.8-app/beta.9-server journey from older unsupported
+  installations, pre-1.0 feed migrations and custom-path macOS prerequisites.
+  Preserve stable/beta channels and retain legacy downloads during transition.
+- Correct the migration guide and beta.12 release notes to reflect publication.
+  Check the instructions against the shipped coordinator, updater, original
+  one-click acceptance and public-distribution verification. No runtime or
+  released artifact changes accompany this documentation update.
+- Replay the released beta.29 updater contract in an isolated fixture. Its
+  macOS runner lacks the new installer's admitted ownership proof, and its
+  latest-only selection prevents using the old API to pin an intermediate
+  release. The Linux managed-update environment passes this admission check;
+  neither result establishes a complete native beta.29 migration. Keep that
+  older starting point outside the accepted automatic-migration claim.
+
+## 2026-09-21 — Publish coordinated desktop/server beta.12
+
+- Publish direct desktop `1.0.4-beta.12` build `1189` on the public AgentsDock
+  repository and its compatibility release mirror, with the accepted artifacts
+  from source `2741c05a0772849f6da82f944789060b77ecb91d` unchanged.
+- Publish `@agentsdock/server@1.0.4-beta.12` to the npm beta channel and the
+  signed standalone migration bridge to AgentsServer. Verify the public npm
+  archive against its signed size, SHA-256 and SHA-512 integrity, then verify
+  all 106 runtime files and modes against the public legacy archive before
+  exposing either desktop release. Both desktop mirrors retain the accepted
+  checksum manifest and signed paired-server descriptor.
+- Configure npm trusted publishing for the public repository's protected
+  `server-npm-publish.yml` workflow and `npm-release` environment. Existing
+  installations retain the signed legacy migration path; the packaged app
+  requests its matching server automatically after updating.
+- macOS is signed and notarized; Windows remains unsigned. Initial migration
+  and execution-runtime replacement wait for idle. Running native goals on old
+  servers can retain execution ownership between replies, so a final reply
+  alone does not guarantee an idle migration window.
+
+## 2026-09-21 — Accepted desktop beta.12 build 1189 candidate
+
+- Accept the direct desktop 1.0.4-beta.12 build 1189 from committed source
+  `2741c05a0772849f6da82f944789060b77ecb91d`. Native workflow
+  `35661716190` passes Linux x64, Linux arm64 and Windows x64 build and package
+  verification. Windows remains unsigned. The local universal Mac release
+  passes 4,646 tests, type checking, compilation, Developer ID signing, Apple
+  notarization and stapling, Gatekeeper, mounted-DMG/ZIP parity, updater metadata
+  and blockmap checks, and an isolated startup. Five existing tests are skipped.
+- Retain all release checks. Fix two asynchronous UI tests to wait for their
+  rendered result or effect callback, compare signing keys independently of
+  checkout line endings, and cap release test concurrency at four workers.
+- Bind the app to signed npm descriptor SHA-256
+  `18a4bc7c54dc749b93235bda4e0c3247123e03d85d7b2e2dc525087b7014b5b5`.
+  The npm archive is byte-identical to the server candidate that passed all
+  eight CI shards (4,971 cases), real Codex and Claude foreground/subagent
+  gateway-loss checks, and native Linux/macOS migration and recovery checks.
+  Both signed distributions contain the same 106 runtime files and modes.
+- Verify the production-signed legacy archive with the original trust key on
+  native Linux and macOS. Preserve identity, credentials and saved state through
+  forward migration, updater/installer loss and automatic rollback. An abrupt
+  macOS VM power loss at the durable activation boundary recovers automatically
+  after reboot without an HTTP recovery trigger or manual repair.
+- Verify one real update click in the unchanged published beta.8 app: Squirrel
+  replaces it with the exact build 1189 ZIP and relaunches it automatically.
+  The new packaged coordinator migrates the genuine beta.9 server to beta.12
+  without a separate server-update click. Check the installed signature,
+  executable, application archive and descriptor against the accepted package;
+  retain the same saved profile, server identity and credential, with both
+  components current and execution admission released. Discovery uses a private
+  HTTPS fixture; public release propagation remains a separate publication check.
+- Close the populated-data acceptance gap before publication. A genuine Linux
+  beta.9 Hub host survives an interrupted signed upgrade, automatic rollback and
+  retry with its saved chat/events, Hub records, approved peer, keys, provider
+  paths and credential files preserved. A separate joined-server migration keeps
+  its active mutual-TLS connection and content access without pairing again.
+  The Mac host migration preserves both Codex and Claude histories, Hub messages,
+  board content and peer authority; existing peer credentials authenticate saved
+  reads and new writes. Provider credential contents are synthetic preservation
+  fixtures, while Hub/peer authentication runs against the actual native services.
+  Verify retired bootstrap authority remains retired; a revoked proof file is
+  not required to survive snapshot recovery. These checks need no product edits.
+- This records accepted build artifacts before desktop upload. Public publication
+  and the live Studio upgrade are still pending. Execution-runtime replacement
+  waits for idle; simultaneous execution generations are not claimed.
+
+## 2026-09-21 — Prepare updates during work and recover interrupted activation
+
+- Stage and verify server dependencies while agents continue working. Preserve
+  the existing pending-update protocol for older clients, then acquire the exact
+  idle execution hold before activating the prepared candidate.
+- Extend the existing installer transaction to both native services, retaining
+  configuration, previous runtime and state recovery. Bind automatic recovery
+  to the admitted candidate and journal. Register an independent native recovery
+  job before stopping the main services, so recovery also runs while the app
+  cannot connect. Join that owner through the existing update action. Keep
+  incomplete recovery fenced and distinguish verified rollback from successful
+  installation.
+- Require both component versions and released execution admission before
+  reporting completion. Exercise the coordinator and existing updater endpoints,
+  exact transaction recovery, failed launch, stale ownership and rollback results.
+- Verify one real Codex turn and one real Claude turn while actual dependency
+  preparation and receipt validation run. Each original foreground command and
+  provider stays alive and completes exactly once, with ordered event delivery;
+  execution admission remains open. These isolated tests do not activate an
+  installed release or establish signed delivery acceptance.
+- Real fresh installations and migration from the released legacy updater have
+  passed on disposable Linux systemd and macOS launchd hosts. A Linux fault test
+  kills the updater and installer after service shutdown, then verifies that the
+  independent native owner restores the previous installation and reports a
+  failed, retryable update without an HTTP trigger. Native testing exposed and
+  fixed directory permissions, generated-cache validation and recovery ownership.
+- Repeat native acceptance with credentials pinned to the connected process
+  before transmission and runtime durability checked before service shutdown.
+  An abrupt macOS VM shutdown during activation restores the previous release
+  automatically after reboot, retaining identity, credentials and saved state.
+  Correct enablement parsing for both launchd output formats found during testing.
+- Exercise the production renderer, preload, native transport and coordinator in
+  an isolated offscreen Electron app against an installed Linux server. Add and
+  authenticate it through the UI, request the signed npm candidate, and verify
+  automatic reconnection, both updated components, released admission and the
+  Up to date result. Registry, signing key, version enrollment and credential
+  storage are controlled QA boundaries; no app binary replacement is asserted.
+- Repeat a genuine beta.9 migration after a prior rollback, then abruptly stop
+  the Linux VM after the old service is disabled. After reboot, the independent
+  systemd owner automatically restores beta.9, retains identity, credentials and
+  saved state, and retires its recovery job without an HTTP recovery trigger.
+  Cover carried-over legacy intent and pre-arm retry failures with regressions.
+- Fix the Linux lock-inode reuse and closed-transport races exposed by the full
+  CI suite; rerun their regressions on both Linux and macOS. Final signed-package
+  acceptance remains pending. These results do not establish simultaneous
+  execution generations. No release has been published or deployed by this entry.
+
+## 2026-09-21 — Verify both server components before update completion
+
+- Keep a coordinated update incomplete until both the gateway and execution
+  runtime report the paired release. Reject inconsistent component health,
+  retain failed-operation recovery, and observe gateway changes independently
+  of the execution process's boot identity. Existing single-process servers
+  retain their compatibility path.
+- Pass focused coordinator, update and restart settings regressions, TypeScript
+  checking and production compilation. Exercise the current production renderer,
+  preload, service, native transport and coordinator in an isolated offscreen
+  Electron window against real worker and gateway processes from the committed
+  execution foundation, with controlled release version files and a QA signing
+  key. Add and authenticate the isolated server through the UI, open Updates,
+  verify the incomplete result, replace only the gateway, and explicitly refresh.
+  Verify the same worker and server boot, both current component versions and
+  the resulting Up to date row. All owned processes exit and no model turn runs.
+- The QA harness substitutes credential storage and release enrollment. This
+  establishes component-status handling, not installed migration, app binary
+  replacement, automatic reconnect-only behavior or production signing. The
+  installer and runtime migration integration remains in development; this
+  change is source only and no release has been accepted or deployed.
+
+## 2026-09-21 — Persistent execution foundation (source only)
+
+- Separate the public gateway from the process owning chats, provider transports,
+  pending approvals and tool execution. Preserve authenticated request semantics,
+  event ordering and private provider callbacks during gateway replacement.
+- Give gateway and execution independent process/release identities. Keep the
+  actual execution version visible while an older runtime remains active.
+  Retirement requires an idle worker and a durable admission hold; an API
+  restart does not close provider managers or cancel accepted commands.
+- Complete one disposable real turn each with Codex and Claude. Their foreground
+  tools survive both graceful and forced gateway termination, then the original
+  turns complete without duplicate execution. Reconnected WebSockets receive
+  the complete ordered event sequence. Check both CLI logins remain valid.
+- Verify separate native subagent runs for both providers: one child continues
+  through both gateway replacement modes and completes its tool once. Claude's
+  unanswered tool approval retains its request identity through another restart
+  and resolves once after reconnect.
+- Lock chat state before loading it or sweeping provider children, across both
+  maintained entry points. Test both startup orders with actual processes: a
+  competing server is refused while the incumbent and its registered controlled
+  child remain intact. Retain ownership through shutdown stragglers.
+- Start a copied production runtime through a real pending activation journal.
+  Verify recovered queued turns and due jobs reach their admission checks and
+  remain deferred, with no provider launch. Reject an incorrect release of the
+  admission hold; permit a normal zero-turn mutation after the exact release.
+- Add transport, admission, recovery, controlled subprocess and production
+  application regressions. Verify existing managed-service proof and pending
+  update admission behavior in isolated state. Package the seven execution modules
+  in both server distributions and retain explicit single-service installer
+  protection for experimental split installations.
+- Exercise real launchd and user systemd replacement with controlled application
+  and child-process fixtures: gateway upgrade, failed gateway rollback, busy
+  worker refusal and exactly one approved side effect. Retain the worker and
+  chat identities. Fix systemd working-directory rendering and exact file-mode
+  restoration exposed by these native tests; restore the disposable baseline.
+- Exercise the existing built desktop through an isolated offscreen Electron
+  window with production renderer, preload, IPC and server transport. Connect a
+  server, create a Claude chat without a turn, navigate owned history and use
+  explicit reconnect after both gateway replacements. Keep selected chat and
+  final text. Credential storage is substituted in this QA harness; this does
+  not establish automatic reconnect-only or packaged-feature-build acceptance.
+- These changes do not yet enable rolling execution generations or the normal
+  npm/app migration path. The application routes still live in the retained
+  execution process. Native service fixtures and desktop checks do not establish
+  production state/Team Hub migration. No release build is accepted, published
+  or deployed by this entry.
+  See [the implementation boundary](PERSISTENT_EXECUTION.md).
 
 ## 2026-09-21 — Integrate completed desktop work into main
 
@@ -57,6 +1160,225 @@
 - Availability: accepted source correction for the coordinated desktop release.
   A separate compatible server optimization avoids redundant full-history fork
   scans on timeline refreshes. Production apps and servers remain unchanged.
+
+## 2026-09-20 — Revised beta.12 package and public release validation
+
+- Build the revised server package from clean committed source `751c1e0`.
+  Its SHA-256 is
+  `bc69cb8817d3f085330306a463f61b0353186193b2357600f1613f56288995ea`.
+  The standalone export preserves upstream history and all 88 runtime files;
+  packaging that export through npm produces the identical archive.
+- Pass native macOS fresh-install retry over the exact failed candidate's empty
+  folders without cleanup. Refuse another install without changing the running
+  process, identity, token or synthetic provider files. Pass candidate activation
+  and forced incompatible-API rollback with the exact prior runtime and plist.
+- Pass the app-driven Linux update and rollback through the production renderer,
+  preload, IPC, coordinator, systemd service and detached installer. Verify all
+  88 installed runtime files, identity, token and six synthetic state/history
+  files. The failed update remains paused after repeated health refreshes, and
+  the isolated HTTPS registry records only the two intended package downloads.
+  Inspect dark and light layouts, including the minimum supported window width.
+- These results cover disposable native services and controlled app-replacement,
+  signing-key and distribution endpoints. Production-signed app replacement,
+  public registry transport and live provider work are not established by them.
+- Exercise the complete legacy bridge route from an old managed server without
+  npm update support. The production app checks and starts a signed legacy
+  update; the old detached updater installs the paired runtime and reconnects
+  with npm update capability. The app marks the equal-version bridge current
+  without a redundant npm download. Discovery and signing endpoints are controlled
+  within the disposable guest; no public legacy release was published.
+- Correct source CI to use runner paths in step environment variables and run
+  for maintained release branches. All eight public server test shards pass.
+  Update legacy release assertions for protected public workflows and reviewed
+  source-branch ancestry; retain release identity and mirroring checks.
+- Correct settings test fixtures to provide the required typed app-update status,
+  settle initial loading and distinguish app controls from server controls.
+  Pass 4,630 Electron tests with five existing skips, eight script tests and type
+  checking. Retain all server operation and recovery assertions.
+- Reproduce delayed app-update status dismissing an already open server restart
+  confirmation or clearing a restart error. Reset these controls when Settings
+  opens, preserving user actions while status finishes loading. Keep server
+  polling and profile/boot checks unchanged; add regressions for both cases.
+- No released app build or public npm version is accepted by this entry.
+  Native signing credentials still need to be supplied to the public release
+  environment, and signed publication checks remain pending.
+
+## 2026-09-20 — Current server integration and transition signing — candidate follow-up
+
+- Merge the six newer commits from the maintained standalone release branch,
+  preserving automatic Codex/Cursor chat titles and the shared-chat Cursor fix.
+  Preserve the updated shared-browser bundle. The earlier `8a52b14` archives
+  below are historical QA artifacts and are superseded for release preparation.
+- Include automatic title requests in update and restart blockers. Prevent new
+  optional title requests after update admission closes, and allow unstarted
+  queued requests to retry on a later turn. Verify an actual disposable provider
+  subprocess delays update advancement and that shutdown reaps its process group.
+- Pass 291 targeted title, provider-background, update and restart tests. Pass
+  another 189 focused provider-isolation, storage, shared-chat, terminal and
+  packaging checks, plus 33 Node publication/staging/CLI checks. Reproduce the
+  terminal cancellation regression with a single-worker executor.
+- Make npm packaging work in both the combined repository and standalone
+  compatibility export. Select legal notices from the checkout boundary, reject
+  unrelated parent files and retain exact canonical license copies in the export.
+  Nine packaging tests include real offline npm archives in both layouts.
+- Include the license and notice in both published server distributions and
+  installed runtimes. Pass 16 focused packaging/manifest tests, including actual
+  npm and legacy archive comparison of the legal files and their permissions.
+- Reproduce macOS device-number changes across reboot breaking interrupted
+  activation recovery. New journals bind their filesystem coordinates to a
+  persistent volume UUID while retaining inode, ownership, content and live race
+  checks. Negotiate the new guard-path option with older recovery helpers.
+  Pass 75 activation/UUID tests and 17 installer recovery tests. In a disposable
+  macOS VM, interrupt the real installer, reboot across an actual device-number
+  change and verify unchanged installer retry restores the previous runtime,
+  exact service plist, identity, token and six synthetic state/history files.
+  A second orderly reboot retains that rollback and starts the restored service.
+  Legacy journals without saved volume proof still require manual recovery if
+  their device numbers changed; specialized interrupted Hub reactivation after
+  remount remains unsupported. Do not describe those boundaries as accepted.
+- Prepare transitional signing through the standalone repository's existing
+  release secret. Its prepare-only workflow can produce both signed server
+  distributions after all server test shards pass, without publishing them or
+  moving the private key. Publication and native acceptance remain separate.
+- Move desktop signing and publication automation into public AgentsDock.
+  Keep signing credentials in the branch-restricted `direct-production`
+  environment and npm OIDC in `npm-release`; ordinary CI and fork pull requests
+  receive neither. Rebase the public workflow's native build counter above 1185
+  and retain exact source, signature, immutable-asset and server-runtime checks.
+  Preserve the private repository's history and retire its release workflows
+  when the public pipeline becomes the active publisher. Secret values must be
+  supplied again from their original source; they have not been copied or logged.
+- Pass 60 release-orchestration tests, parse both public native workflows and
+  check all 50 shell steps. Verify manual/canonical/trusted-branch guards on all
+  13 jobs and the release environment on all seven jobs that use secrets.
+- Reject the packaged `d9c1f50` candidate after a pristine macOS install exposes
+  a missing LaunchAgents parent during volume binding. Bind a safe existing
+  ancestor until publication creates and verifies the destination directory.
+  Pass 77 activation tests, including missing-parent recovery checks.
+- Allow retry after that failure without deleting the empty configuration and
+  state/admin directories it leaves behind. Both launcher and locked installer
+  reject existing data, credentials, links, locks and registered services;
+  fresh installation creates no legacy migration alias. Pass 12 CLI tests,
+  14 installer admission tests and two actual installer regressions from a
+  clean source snapshot. Exact-package macOS retry acceptance remains pending.
+- Availability: committed source candidate. Updated packaged migration and
+  recovery verification are in progress; no public release or production service
+  has changed.
+
+## 2026-09-20 — npm publication and native migration validation — beta.12 candidate
+
+- Reserve `1.0.4-beta.12` for the coordinated candidate. Do not publish the
+  earlier beta.9 QA package under an already-used server release version.
+- Add manual unsigned preparation and protected OIDC publication of an exact
+  signed npm candidate. Verify reviewed source, accepted descriptor hash,
+  signature, package identity, immutable version, channel and registry bytes.
+  Keep private signing separate; inspecting or signing a candidate does not
+  establish native acceptance or publish a desktop release.
+- Reproduce a failed fresh installation leaving only empty runtime folders.
+  Allow the npm launcher to retry only safely owned empty scaffolding, while
+  retaining rejection of state, configuration, files, links, releases, locks
+  and registered services. Delete no existing data and retain the installer's
+  repeated admission check under its lock.
+- Exercise Update through the actual production renderer, preload, IPC,
+  service, coordinator and native HTTP in isolated offscreen Electron against
+  a disposable Linux systemd service. Verify the detached updater downloads a
+  signed HTTPS archive, validates it, activates the candidate and reconnects
+  with the same identity and token. Preserve six synthetic state/history files.
+- Send an intentionally incompatible signed API contract through the same
+  desktop path. Observe candidate activation, rejection and real rollback to
+  the prior runtime. Verify the UI pauses with an explicit retry action and
+  repeated health refreshes do not download or install it again. Preserve an
+  independent offline profile and inspect light/dark minimum-width layouts.
+- Separately exercise real macOS launchd in disposable virtual machines:
+  legacy installer to candidate, wrong-API health rejection and restoration of
+  the previous runtime and exact service plist. Verify identity, token and
+  six synthetic provider/configuration/history files remain unchanged. Fresh
+  installation through actual offline npx succeeds; a second installation is
+  refused without changing the running service.
+- Test boundaries: ephemeral signing key and guest-only HTTPS registry for
+  Linux; controlled app download/replacement; synthetic provider data rather
+  than live model work. macOS dependency caches are preloaded after guest
+  outbound network failure. These tests do not establish public npm transport,
+  production-signed packaged-app acceptance or actual app replacement.
+- Pass 33 focused Node tests covering publication, packaged metadata and the
+  npm CLI, plus five actual npm packaging tests and nine installer admission
+  tests. Preserve explicit unsupported-boundary notes instead of treating
+  a dry run or simulated app replacement as an accepted public release.
+- Prepare the exact beta.12 npm archive from committed source `8a52b14` in a
+  clean detached checkout. Its SHA-256 is
+  `ce392cf842774eb55fcd889a36e5c875d18e7a70551a77163744413fd9252241`.
+  On a third pristine macOS VM, reproduce the actual failed first install and
+  retry with this unchanged archive through npx, without removing the leftover
+  folders. Verify beta.12/API 28 activation, then refuse repeated installation
+  while preserving the running process, identity, token and provider sentinels.
+- Keep native build/draft staging possible before registry publication.
+  Final release verification requires both the signed npm package and matching
+  legacy bridge to be public, with identical runtime files and executable bits.
+- Verify the compatibility export preserves the standalone repository's ancestry
+  and exact server tree. Build the beta.12 legacy archive from that export and
+  compare it with the committed npm archive: all 85 runtime files and their
+  executable permissions match. Both manifests remain unsigned until production
+  signing; these local archives have not been made available to installed users.
+- Availability: committed source candidate after focused validation. Registry
+  publication, trusted-publisher execution and the complete signed native
+  release remain pending. Production services and CLI credentials are untouched.
+
+## 2026-09-20 — Coordinated npm updates — source candidate
+
+- Import the maintained server under `server/` with its complete history.
+  Retire the frozen snapshot and its legacy Swift server-text assertions.
+  Verify that the initial subtree export reproduces the original standalone
+  commit; require subsequent compatibility exports to preserve ancestry and
+  exact contents. Keep legacy signed downloads available during migration.
+- Prepare `@agentsdock/server` from the exact runtime allowlist, with no npm
+  installation hooks. Stage a separate signed descriptor tying the app's
+  public version to an immutable npm archive, integrity hashes and API contract.
+  Keep source package metadata private and publication disabled in preparation.
+- Add authenticated, identity-bound reconciliation through the existing managed
+  updater. Persist signed bytes across queued work and restart, queue while busy,
+  and validate candidate identity, version and API before activation commits.
+  Fresh npm installation refuses existing state and services, including a
+  repeated check under the installer lock.
+- Add desktop coordination with durable per-server receipts, independent offline
+  recovery, explicit enrollment, exact downloaded app version pinning and a
+  compatibility gate before restart. Ordinary unenrolled builds keep the existing
+  update behavior. The app and server retain their native packaging formats.
+  Failed or canceled owned attempts stay paused until an explicit scoped retry;
+  enrolled releases keep legacy controls under Advanced server recovery.
+- Pass 233 focused server checks, including real HTTP authentication and
+  identity guards, signed metadata, queued-work recovery, installer protection
+  and candidate health rejection. Verify actual offline npm packing, CLI native
+  transport, exact payload bytes and executable permissions, paired artifact
+  staging and Git export rejection on divergent history.
+- Pass 722 affected desktop tests, TypeScript validation and production
+  compilation. Exercise the production renderer, preload, IPC, profile service,
+  updater, coordinator and native HTTP against an isolated production FastAPI
+  server in native offscreen Electron. Click Update, reopen a second process,
+  preserve the queued receipt, display an independent offline profile, pause on
+  failure/cancellation and retry explicitly. Verify dark/light minimum-width
+  layouts and no automatic legacy release lookup. Feed/download, signing key,
+  provider work, server activation and app quit are controlled test boundaries;
+  simulated completion is not recorded as a real managed update.
+- Separately exercise the real installer in a disposable Ubuntu systemd VM:
+  legacy beta.9 to guest-stamped beta.12, then a deliberately incompatible
+  beta.13 candidate rolls back to beta.12. Authenticated health verifies exact
+  version and API, stable identity and preserved token. Six synthetic provider,
+  configuration and history/state files remain byte-identical. This validates
+  Linux service activation and rollback, not real provider sessions or the full
+  registry-to-app update journey.
+- Install the committed local npm tarball through actual offline `npx` in a
+  second disposable Linux user account. Verify its independent real systemd
+  service, identity and token; a second fresh-install attempt is refused and
+  both services remain unchanged. Package retrieval from the public registry
+  and same-user multiple-server installation are not claimed by this test.
+- Compile the legacy Swift guardrail executable successfully. Its unchanged
+  React mobile source-text assertion still fails before later checks; this is
+  not recorded as a passing full Swift guardrail run.
+- Availability: source candidate only. macOS launchd migration and rollback,
+  active real-provider work and retained live chat data, registry publication,
+  the complete coordinated upgrade and packaged native acceptance remain
+  required before a coordinated release. No production service or published
+  release is changed by this source work.
 
 ## 2026-09-20 — Side chat scroll memory — 1.0.4-beta.16 local acceptance
 

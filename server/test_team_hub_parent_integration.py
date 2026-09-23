@@ -1,5 +1,8 @@
 import asyncio
+from contextlib import suppress
+import hashlib
 from pathlib import Path
+import sqlite3
 import tempfile
 import unittest
 from unittest.mock import patch
@@ -8,10 +11,11 @@ import agent_server
 from fastapi.testclient import TestClient
 
 from team_hub_host import TEAM_HUB_MODE_HOST, ManagedTeamHubHost
+from secure_peer_runtime import SecurePeerRuntime
 
 
 HOST_ID = "server-parent-integration-12345678"
-TAILNET_HOST = "atlas.example.ts.net"
+TAILNET_HOST = "sonic.example.ts.net"
 TAILNET_HUB_URL = f"https://{TAILNET_HOST}:8444/api/team-hub"
 TAILNET_HEADERS = {
     "X-Forwarded-Host": f"{TAILNET_HOST}:8444",
@@ -263,7 +267,7 @@ class TeamHubParentIntegrationTests(unittest.TestCase):
                     direct = TestClient(
                         agent_server.app,
                         base_url=f"http://{TAILNET_HOST}:7850",
-                        client=("100.64.0.1", 41001),
+                        client=("100.73.184.23", 41001),
                     ).post(
                         "/api/admin/team-hub/bootstrap-proof",
                         headers={
@@ -379,7 +383,7 @@ class TeamHubParentIntegrationTests(unittest.TestCase):
                 asyncio.run(runtime.shutdown())
 
     def test_parent_bootstrap_grant_supports_only_explicit_exact_direct_ip(self) -> None:
-        direct_ip = "100.64.0.1"
+        direct_ip = "100.73.184.23"
         direct_url = f"http://{direct_ip}:7850/api/team-hub"
         with tempfile.TemporaryDirectory() as temporary:
             runtime = ManagedTeamHubHost(
@@ -716,6 +720,137 @@ class TeamHubParentIntegrationTests(unittest.TestCase):
                     self.assertEqual(joined.status_code, 200, joined.text)
                     self.assertEqual(joined.json()["teams"][0]["role"], "member")
 
+                    message = client.post(
+                        f"/api/team-hub-server/v1/teams/{team_id}/network/messages",
+                        headers=headers,
+                        json={
+                            "kind": "message",
+                            "body": "server-session deletion",
+                            "body_format": "plain",
+                            "recipients": [{"kind": "all"}],
+                            "idempotency_key": "server-session-message-create-1",
+                        },
+                    )
+                    self.assertEqual(message.status_code, 200, message.text)
+                    message_id = message.json()["message"]["id"]
+                    deleted_message = client.request(
+                        "DELETE",
+                        f"/api/team-hub-server/v1/teams/{team_id}/network/messages/{message_id}",
+                        headers=headers,
+                        json={"idempotency_key": "server-session-message-delete-1"},
+                    )
+                    self.assertEqual(
+                        deleted_message.status_code,
+                        200,
+                        deleted_message.text,
+                    )
+                    self.assertEqual(
+                        deleted_message.json(),
+                        {"deleted": True, "message_id": message_id},
+                    )
+                    bulletin = client.post(
+                        f"/api/team-hub-server/v1/teams/{team_id}/network/bulletin",
+                        headers=headers,
+                        json={
+                            "body": "server-session bulletin deletion",
+                            "body_format": "plain",
+                            "idempotency_key": "server-session-bulletin-create-1",
+                        },
+                    )
+                    self.assertEqual(bulletin.status_code, 200, bulletin.text)
+                    post_id = bulletin.json()["post"]["id"]
+                    deleted_bulletin = client.request(
+                        "DELETE",
+                        f"/api/team-hub-server/v1/teams/{team_id}/network/bulletin/{post_id}",
+                        headers=headers,
+                        json={"idempotency_key": "server-session-bulletin-delete-1"},
+                    )
+                    self.assertEqual(
+                        deleted_bulletin.status_code,
+                        200,
+                        deleted_bulletin.text,
+                    )
+                    self.assertEqual(
+                        deleted_bulletin.json(),
+                        {"deleted": True, "post_id": post_id},
+                    )
+                    journal = client.get(
+                        f"/api/team-hub-server/v1/teams/{team_id}/network/deletions"
+                        "?after_sequence=0&limit=10",
+                        headers=headers,
+                    )
+                    self.assertEqual(journal.status_code, 200, journal.text)
+                    self.assertEqual(
+                        [(item["kind"], item["id"]) for item in journal.json()["deletions"]],
+                        [("message", message_id), ("bulletin", post_id)],
+                    )
+                    disallowed_delete = client.request(
+                        "DELETE",
+                        f"/api/team-hub-server/v1/teams/{team_id}/network/messages",
+                        headers=headers,
+                        json={"idempotency_key": "server-session-wrong-route-1"},
+                    )
+                    self.assertEqual(
+                        disallowed_delete.status_code,
+                        404,
+                        disallowed_delete.text,
+                    )
+
+                    attachment_bytes = b"server-session attachment"
+                    attachment = client.post(
+                        f"/api/team-hub-server/v1/teams/{team_id}/network/attachments",
+                        headers=headers,
+                        json={
+                            "file_name": "proof.bin",
+                            "media_type": "application/octet-stream",
+                            "byte_size": len(attachment_bytes),
+                            "sha256": hashlib.sha256(attachment_bytes).hexdigest(),
+                            "idempotency_key": "server-session-attachment-1",
+                        },
+                    )
+                    self.assertEqual(attachment.status_code, 200, attachment.text)
+                    attachment_id = attachment.json()["attachment"]["id"]
+                    content_path = (
+                        f"/api/team-hub-server/v1/teams/{team_id}/network/"
+                        f"attachments/{attachment_id}/content"
+                    )
+                    uploaded = client.put(
+                        content_path,
+                        headers={
+                            **headers,
+                            "Content-Type": "application/octet-stream",
+                            "Content-Range": (
+                                f"bytes 0-{len(attachment_bytes) - 1}/"
+                                f"{len(attachment_bytes)}"
+                            ),
+                        },
+                        content=attachment_bytes,
+                    )
+                    self.assertEqual(uploaded.status_code, 200, uploaded.text)
+                    downloaded = client.get(content_path, headers=headers)
+                    self.assertEqual(downloaded.status_code, 200, downloaded.text)
+                    self.assertEqual(downloaded.content, attachment_bytes)
+                    ranged = client.get(
+                        content_path,
+                        headers={**headers, "Range": "bytes=1-5"},
+                    )
+                    self.assertEqual(ranged.status_code, 206, ranged.text)
+                    self.assertEqual(ranged.content, attachment_bytes[1:6])
+                    headed = client.head(content_path, headers=headers)
+                    self.assertEqual(headed.status_code, 200, headed.text)
+                    self.assertEqual(headed.content, b"")
+                    query_rejected = client.get(
+                        content_path + "?download=1",
+                        headers=headers,
+                    )
+                    self.assertEqual(query_rejected.status_code, 422)
+                    malformed_upload = client.put(
+                        content_path,
+                        headers={**headers, "Content-Type": "application/json"},
+                        content=b"{}",
+                    )
+                    self.assertEqual(malformed_upload.status_code, 415)
+
                     for request_headers, expected in (
                         ({}, 401),
                         ({"X-AgentsDock-Token": "wrong"}, 401),
@@ -769,8 +904,8 @@ class TeamHubParentIntegrationTests(unittest.TestCase):
                     # ordinary Hub mount keeps its strict Host allowlist.
                     remote = TestClient(
                         agent_server.app,
-                        base_url="http://100.64.0.1:7850",
-                        client=("100.64.0.2", 41001),
+                        base_url="http://100.73.184.23:7850",
+                        client=("100.73.184.24", 41001),
                     )
                     try:
                         remote_session = remote.get(
@@ -809,6 +944,77 @@ class TeamHubParentIntegrationTests(unittest.TestCase):
                 hub_mount.app = original_hub_mount
                 server_mount.app = original_server_mount
                 asyncio.run(runtime.shutdown())
+
+
+class TeamHubHealthResponsivenessTests(unittest.IsolatedAsyncioTestCase):
+    async def test_sqlite_lock_does_not_block_health_capability_heartbeat(self) -> None:
+        class DisabledHost:
+            designated_host = False
+
+            @staticmethod
+            def capability() -> dict[str, object]:
+                return {
+                    "available": False,
+                    "designated_host": False,
+                    "version": 1,
+                    "base_path": None,
+                    "transport": None,
+                    "hub_url": None,
+                    "routes": [],
+                    "hub_id": None,
+                    "host_server_identity": None,
+                    "message": "This server is not the designated host.",
+                    "action": None,
+                }
+
+        with tempfile.TemporaryDirectory() as temporary:
+            runtime = SecurePeerRuntime(
+                Path(temporary) / "secure-peers",
+                server_identity="health-source-server",
+                server_instance_id="health-source-instance",
+                display_name="Health source",
+            )
+            blocker = sqlite3.connect(
+                runtime.client.db_path,
+                timeout=1,
+                isolation_level=None,
+            )
+            blocker.execute("PRAGMA journal_mode=DELETE")
+            blocker.execute("BEGIN EXCLUSIVE")
+            state: dict[str, object | None] = {"loop": None, "task": None}
+            loop = asyncio.get_running_loop()
+            started = loop.time()
+            try:
+                with (
+                    patch.object(agent_server, "TEAM_HUB_RUNTIME", DisabledHost()),
+                    patch.object(agent_server, "SECURE_PEER_RUNTIME", runtime),
+                    patch.object(
+                        agent_server,
+                        "TEAM_HUB_HEALTH_CAPABILITY_STATE",
+                        state,
+                    ),
+                    patch.object(
+                        agent_server,
+                        "HEALTH_TEAM_HUB_CAPABILITY_TIMEOUT_SECONDS",
+                        0.02,
+                    ),
+                ):
+                    heartbeat = asyncio.create_task(asyncio.sleep(0.01))
+                    capability = await agent_server.team_hub_capability_for_health()
+                    await asyncio.wait_for(heartbeat, timeout=0.05)
+                    elapsed = loop.time() - started
+                    self.assertFalse(capability["available"])
+                    self.assertLess(elapsed, 0.1)
+
+                    worker = state.get("task")
+                    self.assertIsInstance(worker, asyncio.Task)
+                    blocker.rollback()
+                    blocker.close()
+                    await asyncio.wait_for(worker, timeout=1)  # type: ignore[arg-type]
+            finally:
+                with suppress(sqlite3.Error):
+                    blocker.rollback()
+                blocker.close()
 
 
 if __name__ == "__main__":

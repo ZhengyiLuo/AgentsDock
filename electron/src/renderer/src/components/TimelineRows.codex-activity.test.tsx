@@ -97,9 +97,39 @@ describe('native Codex activity presentation', () => {
     useAppStore.setState({ sessions: [{ id: 'chat-1', title: 'Claude', backend: 'claude' }] })
     const { container } = render(row(item([{ ...latest, backend: 'claude' }])))
     expect(container.querySelector('.codex-native-activity')).not.toBeInTheDocument()
+    expect(container.querySelector('.claude-native-activity')).toBeInTheDocument()
+    expect(container.querySelector('.trace-reasoning-toggle')).toHaveAttribute('aria-expanded', 'false')
+    expect(container.querySelector('.trace-reasoning-body')).not.toBeInTheDocument()
+    fireEvent.click(container.querySelector('.trace-reasoning-toggle')!)
     expect(screen.getByRole('button', { name: 'Thinking summary' })).toBeInTheDocument()
     expect(screen.getByText('The full current explanation.')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Load available activity' })).toBeInTheDocument()
+  })
+
+  it.each(['completed', 'stopped'] as const)('applies the live thinking setting to Claude and collapses it when %s', terminal => {
+    useAppStore.setState({ sessions: [{ id: 'chat-1', title: 'Claude', backend: 'claude' }] })
+    const thinking: Event = { ...latest, backend: 'claude', text: `Thinking detail. ${'Received text. '.repeat(500)}END_OF_CLAUDE_THINKING` }
+    const renderRow = (value: ProgressItem) => <><ReasoningDisplaySettings />{row(value)}</>
+    const view = render(renderRow(item([thinking])))
+    expect(view.container.querySelector('.trace-reasoning-body')).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole('switch', { name: 'Show reasoning traces' }))
+    expect(view.container.querySelector('.trace-reasoning-body')).toHaveTextContent('END_OF_CLAUDE_THINKING')
+    fireEvent.click(screen.getByRole('switch', { name: 'Show reasoning traces' }))
+    expect(view.container.querySelector('.trace-reasoning-body')).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole('switch', { name: 'Show reasoning traces' }))
+
+    view.rerender(renderRow(item([thinking], { active: false,
+      ...(terminal === 'completed' ? { finishedAt: thinking.ts, hasFinalResponse: true } : { stoppedAt: thinking.ts, hasFinalResponse: false })
+    })))
+    expect(view.container.querySelector('.run-activity-summary')).toHaveAttribute('aria-expanded', 'false')
+    expect(view.container.querySelector('.trace-reasoning-body')).not.toBeInTheDocument()
+    fireEvent.click(view.container.querySelector('.run-activity-summary')!)
+    expect(view.container.querySelector('.trace-reasoning-toggle')).toHaveAttribute('aria-expanded', 'false')
+    fireEvent.click(view.container.querySelector('.trace-reasoning-toggle')!)
+    expect(view.container.querySelector('.trace-reasoning-body')).toHaveTextContent('END_OF_CLAUDE_THINKING')
+    fireEvent.click(screen.getByRole('switch', { name: 'Show reasoning traces' }))
+    expect(view.container.querySelector('.trace-reasoning-body')).toHaveTextContent('END_OF_CLAUDE_THINKING')
+    expect(window.agentsDock.timeline.trace).toHaveBeenCalledTimes(1)
   })
 
   it('persists optional full reasoning, keeps both native channels, and restores the compact default on request', () => {

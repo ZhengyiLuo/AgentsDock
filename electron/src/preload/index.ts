@@ -121,6 +121,8 @@ const api: AgentsDockAPI = {
     status: () => ipcRenderer.invoke('updates:status'),
     check: () => ipcRenderer.invoke('updates:check'),
     install: () => ipcRenderer.invoke('updates:install'),
+    cancel: () => ipcRenderer.invoke('updates:cancel'),
+    retryServers: profileId => ipcRenderer.invoke('updates:retry-servers', profileId),
     setTrack: track => ipcRenderer.invoke('updates:set-track', track)
   },
   settings: {
@@ -233,6 +235,8 @@ const api: AgentsDockAPI = {
   },
   claude: {
     runtime: sessionId => ipcRenderer.invoke('claude:runtime', sessionId),
+    setGoal: (sessionId, condition) => ipcRenderer.invoke('claude:goal:set', sessionId, condition),
+    clearGoal: sessionId => ipcRenderer.invoke('claude:goal:clear', sessionId),
     refreshContextUsage: sessionId => ipcRenderer.invoke('claude:context-usage:refresh', sessionId),
     mcp: sessionId => ipcRenderer.invoke('claude:mcp', sessionId),
     controlMcp: (sessionId, input) => ipcRenderer.invoke('claude:mcp:control', sessionId, input),

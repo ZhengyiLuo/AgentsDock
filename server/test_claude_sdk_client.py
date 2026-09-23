@@ -1,5 +1,6 @@
 import asyncio
 import gc
+import json
 import unittest
 from collections.abc import AsyncIterable, AsyncIterator
 from importlib.metadata import version
@@ -7,6 +8,8 @@ from typing import Any
 
 from claude_sdk_client import (
     CLAUDE_NON_DURABLE_SCHEDULER_TOOLS,
+    CLAUDE_PROVIDER_MCP_SERVER_NAME,
+    CLAUDE_PROVIDER_MCP_TOOL_NAME,
     CLAUDE_SDK_LITERAL_MESSAGE_PREFIX,
     CLAUDE_SDK_MCP_STATUS_SCAN_LIMIT,
     CLAUDE_SDK_MCP_STATUS_TRUNCATED_KEY,
@@ -17,6 +20,7 @@ from claude_sdk_client import (
     ClaudeSDKMCPServerNotFound,
     ClaudeSDKQueryError,
     ClaudeSDKRunActive,
+    ClaudeSDKSupervisorError,
     ClaudeSDKSupervisorClosed,
     ClaudeSDKSupervisorManager,
     ClaudeSDKUnavailable,
@@ -24,7 +28,9 @@ from claude_sdk_client import (
     claude_nondurable_scheduler_reason,
     claude_untracked_background_reason,
     reject_nondurable_scheduler_hook,
+    reject_subagent_provider_tool_hook,
     reject_untracked_background_hook,
+    _parse_claude_sdk_message,
 )
 
 
@@ -67,6 +73,20 @@ class FakeClaudeClient:
             {"name": "login", "status": "needs-auth"},
             {"name": "disabled", "status": "disabled"},
         ]
+        self.server_info: dict[str, Any] = {
+            "commands": [
+                {
+                    "name": "review",
+                    "description": "Review the current changes",
+                    "argumentHint": "[focus]",
+                }
+            ],
+            "account": {
+                "email": "private@example.test",
+                "organization": "Private Org",
+            },
+            "pid": 12345,
+        }
 
     def _record(self, *call: Any) -> None:
         loop = asyncio.get_running_loop()
@@ -117,6 +137,10 @@ class FakeClaudeClient:
     async def get_mcp_status(self) -> dict[str, Any]:
         self._record("get_mcp_status")
         return {"mcpServers": [dict(item) for item in self.mcp_servers]}
+
+    async def get_server_info(self) -> dict[str, Any]:
+        self._record("get_server_info")
+        return dict(self.server_info)
 
     async def reconnect_mcp_server(self, server_name: str) -> None:
         self._record("reconnect_mcp_server", server_name)
@@ -301,12 +325,42 @@ class CancellationHostileConnectClient(FakeClaudeClient):
         self.connected = True
 
 
+class DisconnectSettledHostileConnectClient(CancellationHostileConnectClient):
+    """A hostile connect that settles only when its transport is disconnected."""
+
+    async def connect(self) -> None:
+        await super().connect()
+        if self.disconnected:
+            self.connected = False
+
+    async def disconnect(self) -> None:
+        await super().disconnect()
+        # A real SDK disconnect tears down the transport that connect() is
+        # awaiting. The connect coroutine remains cancellation-hostile, but
+        # must settle once its exact process has been disconnected.
+        self.release_connect.set()
+
+
 class HostileConnectFactory:
     def __init__(self) -> None:
         self.clients: list[CancellationHostileConnectClient] = []
 
     def __call__(self, options: Any) -> CancellationHostileConnectClient:
         client = CancellationHostileConnectClient(options)
+        self.clients.append(client)
+        return client
+
+
+class HostileConnectThenNormalFactory:
+    def __init__(self) -> None:
+        self.clients: list[FakeClaudeClient] = []
+
+    def __call__(self, options: Any) -> FakeClaudeClient:
+        client: FakeClaudeClient
+        if self.clients:
+            client = FakeClaudeClient(options)
+        else:
+            client = DisconnectSettledHostileConnectClient(options)
         self.clients.append(client)
         return client
 
@@ -480,6 +534,301 @@ class ClaudeSDKSupervisorTests(unittest.IsolatedAsyncioTestCase):
     async def asyncTearDown(self) -> None:
         await self.manager.close_all()
 
+    async def test_native_busy_goal_clear_reserves_receipt_after_aborted_run(self) -> None:
+        for background in (False, True):
+            with self.subTest(background=background):
+                chat = f"goal-{background}"
+                handle = await self.manager.start_run(
+                    chat, "/goal finish the task", run_id="goal-run", options={},
+                    configuration_key="same", validated_provider_command_name="goal",
+                )
+                client = self.factory.clients[-1]
+                if background:
+                    await client.emit({"type": "system", "subtype": "task_started",
+                        "task_id": "child", "task_type": "local_agent"})
+                    await asyncio.wait_for(handle.__anext__(), 1)
+                generation = self.manager._supervisors[chat].control_generation
+                clear = asyncio.create_task(self.manager.clear_goal(
+                    chat, run_id="goal-run", expected_generation=generation,
+                ))
+                for _ in range(100):
+                    if len(client.query_envelopes) == 2:
+                        break
+                    await asyncio.sleep(0)
+                self.assertEqual(client.query_envelopes[1][0]["priority"], "now")
+                self.assertEqual(client.query_envelopes[1][0]["message"]["content"], "/goal clear")
+                clear_call = next(index for index, call in enumerate(client.calls)
+                    if call[:2] == ("query", "/goal clear"))
+                self.assertEqual(client.calls[clear_call - 1], ("interrupt",))
+                aborted = {"type": "result",
+                    "subtype": "error_during_execution" if background else "success",
+                    "is_error": background,
+                    "terminal_reason": "aborted_tools" if background else "aborted_streaming",
+                    "result": "partial"}
+                await client.emit(aborted)
+                self.assertEqual(await asyncio.wait_for(handle.wait_result(), 1), aborted)
+                self.assertFalse(clear.done())
+                self.assertFalse(client.disconnected)
+                with self.assertRaises(ClaudeSDKRunActive):
+                    await self.manager.start_run(chat, "next", run_id="next", options={}, configuration_key="same")
+                await client.emit({"type": "assistant", "local_command_run": {
+                    "command": "goal", "args": "clear"}, "content": []})
+                await client.emit({"type": "result", "subtype": "success", "is_error": False,
+                    "local_command": "goal", "result": "Goal cleared: finish the task"})
+                result, returned_generation = await asyncio.wait_for(clear, 1)
+                self.assertEqual(returned_generation, generation)
+                self.assertEqual(result["result"], "Goal cleared: finish the task")
+                self.assertEqual(client.disconnected, background)
+                next_handle = await self.manager.start_run(chat, "next", run_id="next", options={}, configuration_key="same")
+                self.assertFalse(next_handle.done)
+
+    async def test_goal_clear_rejects_stale_owner_without_query(self) -> None:
+        await self.manager.start_run("goal", "work", run_id="current", options={}, configuration_key="same")
+        for arguments in ({"run_id": "previous"}, {"run_id": "current", "expected_generation": "previous"}):
+            with self.assertRaises(ClaudeSDKGenerationChanged):
+                await self.manager.clear_goal("goal", **arguments)
+        self.assertEqual(len(self.factory.clients[0].query_envelopes), 1)
+
+    async def test_goal_clear_before_replay_ack_ends_uncertain_run(self) -> None:
+        self.factory.auto_ack = False
+        handle = await self.manager.start_run("goal", "work", run_id="current", options={}, configuration_key="same")
+        client = self.factory.clients[0]
+        clear = asyncio.create_task(self.manager.clear_goal("goal", run_id="current"))
+        for _ in range(100):
+            if len(client.query_envelopes) == 2:
+                break
+            await asyncio.sleep(0)
+        await client.emit({"type": "result", "terminal_reason": "aborted_streaming"})
+        with self.assertRaises(ClaudeSDKQueryError):
+            await asyncio.wait_for(handle.wait_result(), 1)
+        self.assertFalse(client.disconnected)
+        await client.emit({"type": "assistant", "local_command_run": {"command": "goal", "args": "clear"}})
+        await client.emit({"type": "result", "local_command": "goal", "is_error": False, "result": "Goal cleared"})
+        result, _ = await asyncio.wait_for(clear, 1)
+        self.assertFalse(result["is_error"])
+        self.assertTrue(client.disconnected)
+
+    async def test_goal_clear_timeout_retires_exact_owner(self) -> None:
+        await self.manager.start_run("goal", "work", run_id="current", options={}, configuration_key="same")
+        self.manager._supervisors["goal"]._control_timeout_seconds = 0.01
+        with self.assertRaises(ClaudeSDKControlTimeout):
+            await self.manager.clear_goal("goal", run_id="current")
+        self.assertTrue(self.factory.clients[0].disconnected)
+        self.assertNotIn("goal", self.manager._supervisors)
+        resumed = await self.manager.start_run(
+            "goal", "continue", run_id="after-timeout", options={}, configuration_key="same",
+        )
+        await self.factory.clients[1].emit({"type": "result", "result": "resumed"})
+        result = await asyncio.wait_for(resumed.wait_result(), 1)
+        self.assertEqual(result["result"], "resumed")
+
+    def test_sdk_parser_preserves_native_local_goal_provenance(self) -> None:
+        message = _parse_claude_sdk_message({"type": "result", "subtype": "success",
+            "duration_ms": 1, "duration_api_ms": 0, "is_error": False, "num_turns": 0,
+            "session_id": "provider", "total_cost_usd": 0, "usage": {}, "result": "Goal cleared",
+            "local_command": "goal", "terminal_reason": "completed"})
+        self.assertEqual(message.local_command, "goal")
+        self.assertEqual(message.terminal_reason, "completed")
+        event = {"type": "active_goal", "value": None}
+        self.assertEqual(_parse_claude_sdk_message(event), event)
+
+    async def test_pending_mail_hint_is_exact_root_checkpoint_without_new_query(self) -> None:
+        calls = []
+        def notice() -> str | None:
+            calls.append("notice")
+            return "Pending replies are available in the inbox."
+        options = {"hooks": claude_background_tracking_hooks(), "resume": "provider"}
+        handle = await self.manager.start_run("mail-chat", "continue work", run_id="run-one",
+            options=options, configuration_key="same", pending_mail_hint=notice)
+        client = self.factory.clients[0]
+        hook = client.options["hooks"]["PostToolUse"][0].hooks[0]
+        self.assertIs(hook, client.options["hooks"]["PostToolUseFailure"][0].hooks[0])
+        tool = {"hook_event_name": "PostToolUse", "session_id": "provider", "tool_use_id": "tool-one",
+                "tool_name": "Read", "tool_input": {"private": "never copied"}, "tool_response": "never copied"}
+        self.assertEqual(await hook(tool, "tool-one", {}), {})
+        await client.emit({"type": "assistant", "session_id": "provider", "content": [
+            {"type": "tool_use", "id": "tool-one", "name": "Read", "input": {}}]})
+        await asyncio.wait_for(handle.__anext__(), 1)
+        for changed in ({"agent_id": "child"}, {"session_id": "other"}, {"tool_name": "Bash"},
+                        {"tool_use_id": "other"}, {"is_interrupt": True}):
+            self.assertEqual(await hook({**tool, **changed}, "tool-one", {}), {})
+        result = await hook(tool, "tool-one", {})
+        self.assertEqual(result, {"hookSpecificOutput": {"hookEventName": "PostToolUse",
+            "additionalContext": "Pending replies are available in the inbox."}})
+        self.assertEqual(await hook(tool, "tool-one", {}), {})
+        self.assertEqual(calls, ["notice"])
+        self.assertFalse(handle.done)
+        self.assertEqual([call[0] for call in client.calls if call[0] in {"query", "interrupt"}], ["query"])
+        self.assertIn(("query", "continue work", {}), client.calls)
+
+    async def test_pending_mail_hint_failure_bounds_and_retired_hook_fences(self) -> None:
+        calls = []
+        options = {"hooks": claude_background_tracking_hooks(), "resume": "provider"}
+        first = await self.manager.start_run("mail-chat", "first", run_id="run-one", options=options,
+            configuration_key="first", pending_mail_hint=lambda: calls.append("old") or "Old pending notice")
+        old_client = self.factory.clients[0]
+        old_hook = old_client.options["hooks"]["PostToolUse"][0].hooks[0]
+        await old_client.emit({"type": "assistant", "session_id": "provider", "content": [
+            {"type": "tool_use", "id": "old-tool", "name": "Read", "input": {}}]})
+        await asyncio.wait_for(first.__anext__(), 1)
+        await old_client.emit({"type": "result", "result": "finished"})
+        await asyncio.wait_for(collect(first), 1)
+        second = await self.manager.start_run("mail-chat", "second", run_id="run-two", options=options,
+            configuration_key="second", pending_mail_hint=lambda: calls.append("new") or "x" * 2049)
+        client = self.factory.clients[-1]
+        hook = client.options["hooks"]["PostToolUseFailure"][0].hooks[0]
+        old_input = {"hook_event_name": "PostToolUseFailure", "session_id": "provider",
+                     "tool_use_id": "old-tool", "tool_name": "Read", "error": "private"}
+        self.assertEqual(await old_hook(old_input, "old-tool", {}), {})
+        self.assertEqual(await hook(old_input, "old-tool", {}), {})
+        await client.emit({"type": "assistant", "session_id": "provider", "content": [
+            {"type": "tool_use", "id": "new-tool", "name": "Read", "input": {}}]})
+        await asyncio.wait_for(second.__anext__(), 1)
+        self.assertEqual(await hook({**old_input, "tool_use_id": "new-tool"}, "new-tool", {}), {})
+        self.assertEqual(calls, ["new"])
+        self.assertFalse(second.done)
+
+    async def test_pending_mail_hint_without_hook_or_before_ack_is_silent(self) -> None:
+        self.factory.auto_ack = False
+        calls = []
+        handle = await self.manager.start_run("mail-chat", "continue", run_id="one",
+            options={"hooks": claude_background_tracking_hooks(), "resume": "provider"},
+            configuration_key="first", pending_mail_hint=lambda: calls.append("hint") or "Pending replies")
+        client = self.factory.clients[0]
+        hook = client.options["hooks"]["PostToolUse"][0].hooks[0]
+        await client.emit({"type": "assistant", "session_id": "provider", "content": [
+            {"type": "tool_use", "id": "tool", "name": "Read", "input": {}}]})
+        await asyncio.sleep(0)
+        self.assertEqual(await hook({"hook_event_name": "PostToolUse", "session_id": "provider",
+            "tool_use_id": "tool", "tool_name": "Read"}, "tool", {}), {})
+        self.assertFalse(handle.acknowledged)
+        self.assertEqual(calls, [])
+        ordinary = await self.manager.start_run("no-hooks", "ordinary", run_id="two", options={},
+            configuration_key="none", pending_mail_hint=lambda: calls.append("missing") or "Pending replies")
+        self.assertTrue(ordinary.accepted)
+        self.assertEqual(calls, [])
+
+    async def test_task_receipts_survive_interruption_without_inventing_cancellation(self) -> None:
+        handle = await self.manager.start_run("chat-receipts", "Work", run_id="old-run",
+                                              options={}, configuration_key="same")
+        client = self.factory.clients[0]
+        for task in ("completed", "stopped", "pending"):
+            await client.emit({"type": "system", "subtype": "task_started", "task_id": task,
+                               "task_type": "local_workflow", "session_id": "provider-one",
+                               "tool_use_id": "tool-one", "description": "must not be retained"})
+        await client.emit({"type": "system", "subtype": "task_updated", "task_id": "completed",
+                           "patch": {"status": "completed", "result": "must not be retained"}})
+        await client.emit({"type": "system", "subtype": "task_notification", "task_id": "stopped", "status": "stopped"})
+        await client.emit({"type": "result", "terminal_reason": "aborted_tools", "is_error": False})
+        await asyncio.wait_for(collect(handle), 1)
+        receipts = handle.background_task_receipts
+        self.assertEqual([item["status"] for item in receipts], ["completed", "stopped", "tracking_lost"])
+        self.assertTrue(all(item["owner_run_id"] == "old-run" for item in receipts))
+        self.assertNotIn("must not be retained", repr(receipts))
+        with self.assertRaises(TypeError):
+            receipts[0]["status"] = "running"
+        self.assertEqual(handle.background_task_overflow_count, 0)
+
+    async def test_reconciliation_hook_is_query_scoped_and_old_generation_cannot_consume_it(self) -> None:
+        options = {"hooks": claude_background_tracking_hooks(), "resume": "provider-one"}
+        reconciliation = {"tasks": [{"task_id": "prior-task", "task_type": "local_workflow",
+                                     "owner_run_id": "prior-run", "status": "tracking_lost"}]}
+        first = await self.manager.start_run("chat-hooks", "same prompt", run_id="first",
+            options=options, configuration_key="same", background_task_reconciliation=reconciliation)
+        old_client = self.factory.clients[0]
+        old_hook = old_client.options["hooks"]["UserPromptSubmit"][0].hooks[0]
+        await first.interrupt()
+        hook_input = {"hook_event_name": "UserPromptSubmit", "prompt": "same prompt", "session_id": "provider-one"}
+        self.assertEqual(await old_hook(hook_input, None, {}), {})
+        self.assertFalse(first.background_task_reconciliation_consumed)
+        await old_client.emit({"type": "result", "terminal_reason": "aborted_tools"})
+        await asyncio.wait_for(collect(first), 1)
+        second = await self.manager.start_run("chat-hooks", "same prompt", run_id="second",
+            options=options, configuration_key="same", background_task_reconciliation=reconciliation)
+        new_client = self.factory.clients[-1]
+        self.assertIsNot(new_client, old_client)
+        hook = new_client.options["hooks"]["UserPromptSubmit"][0].hooks[0]
+        self.assertEqual(await old_hook(hook_input, None, {}), {})
+        for patch in ({"session_id": "other"}, {"agent_id": "child"}, {"prompt": "other"}):
+            self.assertEqual(await hook({**hook_input, **patch}, None, {}), {})
+        self.assertFalse(second.background_task_reconciliation_consumed)
+        result = await hook(hook_input, None, {})
+        self.assertIn('"status":"tracking_lost"', result["hookSpecificOutput"]["additionalContext"])
+        self.assertFalse(second.background_task_reconciliation_consumed)
+        await new_client.emit({"type": "assistant", "text": "Observed task status"})
+        await asyncio.wait_for(second.__anext__(), 1)
+        self.assertTrue(second.background_task_reconciliation_consumed)
+        self.assertEqual(second.background_task_receipts, ())
+        self.assertEqual(await hook(hook_input, None, {}), {})
+        self.assertIn(("query", "same prompt", {}), new_client.calls)
+        await new_client.emit({"type": "result", "result": "done"})
+        await asyncio.wait_for(collect(second), 1)
+        ordinary = await self.manager.start_run("chat-hooks", "same prompt", run_id="ordinary",
+                                               options=options, configuration_key="same")
+        self.assertEqual(await hook(hook_input, None, {}), {})
+        self.assertFalse(ordinary.background_task_reconciliation_consumed)
+
+    async def test_hook_emission_before_ack_then_abort_does_not_consume_reconciliation(self) -> None:
+        self.factory.auto_ack = False
+        handle = await self.manager.start_run("chat-pre-ack", "check", run_id="unacknowledged",
+            options={"hooks": claude_background_tracking_hooks()}, configuration_key="same",
+            background_task_reconciliation={"tasks": [{"task_id": "old-task", "task_type": "local_workflow",
+                                                       "owner_run_id": "old-run", "status": "tracking_lost"}]})
+        hook = self.factory.clients[0].options["hooks"]["UserPromptSubmit"][0].hooks[0]
+        result = await hook({"hook_event_name": "UserPromptSubmit", "prompt": "check"}, None, {})
+        self.assertIn("additionalContext", result["hookSpecificOutput"])
+        self.assertFalse(handle.background_task_reconciliation_consumed)
+        await handle.interrupt()
+        with self.assertRaises(ClaudeSDKQueryError):
+            await asyncio.wait_for(collect(handle), 1)
+        self.assertFalse(handle.background_task_reconciliation_consumed)
+
+    async def test_task_receipt_bound_keeps_later_active_work_over_old_terminals(self) -> None:
+        handle = await self.manager.start_run("chat-receipt-bound", "Work", run_id="old-run",
+                                              options={}, configuration_key="same")
+        client = self.factory.clients[0]
+        for index in range(64):
+            await client.emit({"type": "system", "subtype": "task_started", "task_id": str(index), "task_type": "local_agent"})
+            await client.emit({"type": "system", "subtype": "task_notification", "task_id": str(index), "status": "completed"})
+        await client.emit({"type": "system", "subtype": "task_started", "task_id": "later-workflow", "task_type": "local_workflow"})
+        await client.emit({"type": "result", "terminal_reason": "aborted_tools"})
+        await asyncio.wait_for(collect(handle), 1)
+        receipts = handle.background_task_receipts
+        self.assertEqual(len(receipts), 64)
+        self.assertEqual(handle.background_task_overflow_count, 1)
+        self.assertEqual(receipts[-1]["task_id"], "later-workflow")
+        self.assertEqual(receipts[-1]["status"], "tracking_lost")
+
+    async def test_reconciliation_is_bounded_and_missing_hook_does_not_deliver_query(self) -> None:
+        tasks = [{"task_id": str(index) + "x" * 250, "task_type": "local_workflow",
+                  "owner_run_id": "o" * 256, "provider_session_id": "p" * 256,
+                  "tool_use_id": "t" * 256, "status": "completed"} for index in range(66)]
+        tasks[63]["status"] = "tracking_lost"
+        with self.assertRaises(ClaudeSDKConfigurationConflict):
+            await self.manager.start_run("no-hook", "unchanged", run_id="missing", options={},
+                configuration_key="same", background_task_reconciliation={"tasks": tasks})
+        self.assertFalse(any(call[0] == "query" for call in self.factory.clients[0].calls))
+        prompt = "literal \ud800 text"
+        handle = await self.manager.start_run("bounded-hook", prompt, run_id="bounded",
+            options={"hooks": claude_background_tracking_hooks()}, configuration_key="same",
+            background_task_reconciliation={"tasks": tasks})
+        client = self.factory.clients[-1]
+        hook = client.options["hooks"]["UserPromptSubmit"][0].hooks[0]
+        output = await hook({"hook_event_name": "UserPromptSubmit", "prompt": prompt}, None, {})
+        context = output["hookSpecificOutput"]["additionalContext"]
+        self.assertLessEqual(len(context.encode("utf-8")), 8192)
+        payload = json.loads(context.rsplit("\n", 1)[1])
+        self.assertEqual(len(payload["tasks"]) + payload["overflow_count"], 66)
+        self.assertEqual(payload["tasks"][0]["status"], "tracking_lost")
+        for index in range(66):
+            await client.emit({"type": "system", "subtype": "task_started", "task_id": str(index), "task_type": "local_agent"})
+        await client.emit(RuntimeError("stream ended"))
+        with self.assertRaises(Exception):
+            await asyncio.wait_for(collect(handle), 1)
+        self.assertEqual(len(handle.background_task_receipts), 64)
+        self.assertEqual(handle.background_task_overflow_count, 2)
+        self.assertTrue(all(item["status"] == "tracking_lost" for item in handle.background_task_receipts))
+
     async def test_start_run_returns_only_after_query_and_streams_through_result(self) -> None:
         handle = await self.manager.start_run(
             "chat-1",
@@ -534,6 +883,197 @@ class ClaudeSDKSupervisorTests(unittest.IsolatedAsyncioTestCase):
                 result = {"type": "result", "result": "done"}
                 await client.emit(result)
                 await handle.wait_result()
+
+    async def test_validated_local_command_is_raw_and_streams_without_replay_ack(self) -> None:
+        await self.manager.close_all()
+        self.factory = FakeFactory()
+        self.factory.auto_ack = False
+        assistant = {"type": "assistant", "text": "command output"}
+        result = {
+            "type": "result",
+            "is_error": False,
+            "result": "done",
+            "terminal_reason": None,
+        }
+        self.factory.query_prefix_messages = [assistant, result]
+        self.manager = ClaudeSDKSupervisorManager(
+            client_factory=self.factory,
+            max_clients=4,
+            idle_ttl_seconds=None,
+            ack_timeout_seconds=0.01,
+        )
+        _info, generation = await self.manager.get_server_info(
+            "command-chat",
+            options={"cwd": "/tmp"},
+            configuration_key="config-a",
+        )
+
+        handle = await self.manager.start_run(
+            "command-chat",
+            "/review staged files",
+            run_id="run-command",
+            options={"cwd": "/tmp"},
+            configuration_key="config-a",
+            validated_provider_command_name="review",
+            expected_provider_command_generation=generation,
+        )
+
+        self.assertTrue(handle.accepted)
+        self.assertTrue(handle.acknowledged)
+        self.assertIn(
+            ("query", "/review staged files", {}),
+            self.factory.clients[0].calls,
+        )
+        self.assertEqual(
+            await asyncio.wait_for(collect(handle), 1),
+            [assistant, result],
+        )
+        self.assertEqual(await handle.wait_result(), result)
+        await asyncio.sleep(0.02)
+
+    async def test_validated_local_command_matches_reconciliation_hook_prompt(self) -> None:
+        options = {
+            "cwd": "/tmp",
+            "hooks": claude_background_tracking_hooks(),
+        }
+        _info, generation = await self.manager.get_server_info(
+            "command-reconciliation-chat",
+            options=options,
+            configuration_key="config-a",
+        )
+        handle = await self.manager.start_run(
+            "command-reconciliation-chat",
+            "/review staged files",
+            run_id="run-command-reconciliation",
+            options=options,
+            configuration_key="config-a",
+            validated_provider_command_name="review",
+            expected_provider_command_generation=generation,
+            background_task_reconciliation={
+                "tasks": [
+                    {
+                        "task_id": "prior-task",
+                        "task_type": "local_workflow",
+                        "owner_run_id": "prior-run",
+                        "status": "tracking_lost",
+                    }
+                ]
+            },
+        )
+        client = self.factory.clients[0]
+        hook = client.options["hooks"]["UserPromptSubmit"][0].hooks[0]
+        output = await hook(
+            {
+                "hook_event_name": "UserPromptSubmit",
+                "prompt": "/review staged files",
+            },
+            None,
+            {},
+        )
+
+        self.assertIn(
+            '"status":"tracking_lost"',
+            output["hookSpecificOutput"]["additionalContext"],
+        )
+        await client.emit({"type": "result", "result": "done"})
+        await asyncio.wait_for(collect(handle), 1)
+
+    async def test_command_discovery_reconnects_an_idle_pending_hook(self) -> None:
+        options = {
+            "cwd": "/tmp",
+            "hooks": claude_background_tracking_hooks(),
+        }
+        _info, first_generation = await self.manager.get_server_info(
+            "pending-reconciliation-chat",
+            options=options,
+            configuration_key="config-a",
+        )
+        first = await self.manager.start_run(
+            "pending-reconciliation-chat",
+            "Check background work",
+            run_id="run-background-check",
+            options=options,
+            configuration_key="config-a",
+            background_task_reconciliation={
+                "tasks": [
+                    {
+                        "task_id": "prior-task",
+                        "task_type": "local_workflow",
+                        "owner_run_id": "prior-run",
+                        "status": "tracking_lost",
+                    }
+                ]
+            },
+        )
+        first_client = self.factory.clients[0]
+        await first_client.emit({"type": "result", "result": "done"})
+        await asyncio.wait_for(collect(first), 1)
+
+        _info, current_generation = await self.manager.get_server_info(
+            "pending-reconciliation-chat",
+            options=options,
+            configuration_key="config-a",
+        )
+        self.assertNotEqual(current_generation, first_generation)
+        self.assertEqual(len(self.factory.clients), 2)
+        second = await self.manager.start_run(
+            "pending-reconciliation-chat",
+            "/review staged files",
+            run_id="run-command-after-reconnect",
+            options=options,
+            configuration_key="config-a",
+            validated_provider_command_name="review",
+            expected_provider_command_generation=current_generation,
+        )
+        second_client = self.factory.clients[1]
+        self.assertIn(
+            ("query", "/review staged files", {}),
+            second_client.calls,
+        )
+        await second_client.emit({"type": "result", "result": "done"})
+        await asyncio.wait_for(collect(second), 1)
+
+    async def test_validated_local_command_rejects_changed_generation_before_query(self) -> None:
+        _info, generation = await self.manager.get_server_info(
+            "generation-chat",
+            options={"cwd": "/tmp"},
+            configuration_key="config-a",
+        )
+        client = self.factory.clients[0]
+
+        with self.assertRaises(ClaudeSDKGenerationChanged):
+            await self.manager.start_run(
+                "generation-chat",
+                "/review",
+                run_id="run-stale-generation",
+                options={"cwd": "/tmp"},
+                configuration_key="config-a",
+                validated_provider_command_name="review",
+                expected_provider_command_generation=generation + "-stale",
+            )
+
+        self.assertFalse(any(call[0] == "query" for call in client.calls))
+
+    async def test_validated_local_command_requires_exact_byte_zero_token(self) -> None:
+        for index, prompt in enumerate((
+            "/review-more",
+            " /review",
+            "\ufeff/review",
+            "/other",
+            "/review\vdetails",
+        )):
+            with self.subTest(prompt=prompt):
+                with self.assertRaises(ClaudeSDKSupervisorError):
+                    await self.manager.start_run(
+                        f"command-mismatch-{index}",
+                        prompt,
+                        run_id=f"run-mismatch-{index}",
+                        options={},
+                        configuration_key="config-a",
+                        validated_provider_command_name="review",
+                    )
+
+        self.assertFalse(self.factory.clients)
 
     async def test_delegated_task_keeps_run_open_until_followup_result(self) -> None:
         handle = await self.manager.start_run(
@@ -1291,6 +1831,174 @@ class ClaudeSDKSupervisorTests(unittest.IsolatedAsyncioTestCase):
             )
         self.assertTrue(raised.exception.safe_to_fallback)
 
+    async def test_cold_connect_timeout_retires_owner_and_reconnects_cleanly(self) -> None:
+        factory = HostileConnectThenNormalFactory()
+        manager = ClaudeSDKSupervisorManager(
+            client_factory=factory,
+            idle_ttl_seconds=None,
+            connect_timeout_seconds=0.02,
+            disconnect_timeout_seconds=0.02,
+        )
+        try:
+            with self.assertRaisesRegex(
+                ClaudeSDKUnavailable,
+                r"connect timed out after 0\.02s",
+            ):
+                await asyncio.wait_for(manager.start_run(
+                    "chat-connect-timeout",
+                    "Never delivered",
+                    run_id="run-timeout",
+                    options={},
+                    configuration_key="a",
+                ), 0.5)
+
+            hostile = factory.clients[0]
+            self.assertIsInstance(hostile, CancellationHostileConnectClient)
+            self.assertTrue(hostile.disconnected)
+            self.assertFalse(any(call[0] == "query" for call in hostile.calls))
+            self.assertFalse(manager.snapshots())
+            await asyncio.sleep(0)
+            self.assertFalse([
+                task
+                for task in asyncio.all_tasks()
+                if task is not asyncio.current_task()
+                and not task.done()
+                and "chat-connect-timeout" in task.get_name()
+            ])
+
+            replacement = await asyncio.wait_for(manager.start_run(
+                "chat-connect-timeout",
+                "Retry",
+                run_id="run-retry",
+                options={},
+                configuration_key="a",
+            ), 0.5)
+            self.assertEqual(len(factory.clients), 2)
+            await factory.clients[1].emit({"type": "result", "result": "done"})
+            await replacement.wait_result()
+        finally:
+            await manager.close_all()
+
+    async def test_late_connect_is_disconnected_again_after_owner_retirement(self) -> None:
+        factory = HostileConnectFactory()
+        manager = ClaudeSDKSupervisorManager(
+            client_factory=factory,
+            idle_ttl_seconds=None,
+            connect_timeout_seconds=0.02,
+            disconnect_timeout_seconds=0.01,
+        )
+        try:
+            with self.assertRaisesRegex(
+                ClaudeSDKUnavailable,
+                r"connect timed out after 0\.02s",
+            ):
+                await asyncio.wait_for(manager.start_run(
+                    "chat-late-connect",
+                    "Never delivered",
+                    run_id="run-timeout",
+                    options={},
+                    configuration_key="a",
+                ), 0.5)
+
+            hostile = factory.clients[0]
+            self.assertFalse(hostile.connected)
+            self.assertEqual(
+                sum(call[0] == "disconnect" for call in hostile.calls),
+                1,
+            )
+            self.assertFalse(manager.snapshots())
+
+            # The SDK ignored cancellation and established its transport only
+            # after its supervisor had been retired. The retained exact-client
+            # cleanup must observe that late completion and disconnect again.
+            hostile.release_connect.set()
+            for _ in range(50):
+                if (
+                    not hostile.connected
+                    and sum(
+                        call[0] == "disconnect" for call in hostile.calls
+                    ) >= 2
+                ):
+                    break
+                await asyncio.sleep(0.01)
+            self.assertFalse(hostile.connected)
+            self.assertGreaterEqual(
+                sum(call[0] == "disconnect" for call in hostile.calls),
+                2,
+            )
+            self.assertFalse([
+                task
+                for task in asyncio.all_tasks()
+                if task is not asyncio.current_task()
+                and not task.done()
+                and "chat-late-connect" in task.get_name()
+            ])
+        finally:
+            for client in factory.clients:
+                client.release_connect.set()
+            await asyncio.sleep(0)
+            await manager.close_all()
+
+    async def test_cancelled_cold_start_retires_owner_without_ready_callback(self) -> None:
+        factory = HostileConnectThenNormalFactory()
+        manager = ClaudeSDKSupervisorManager(
+            client_factory=factory,
+            idle_ttl_seconds=None,
+            connect_timeout_seconds=1,
+            disconnect_timeout_seconds=0.02,
+        )
+        ready_owners: list[str] = []
+
+        async def capture_owner(ownership_token: str) -> None:
+            ready_owners.append(ownership_token)
+
+        try:
+            start_task = asyncio.create_task(manager.start_run(
+                "chat-cancelled-connect",
+                "Never delivered",
+                run_id="run-cancelled",
+                options={},
+                configuration_key="a",
+                on_supervisor_ready=capture_owner,
+            ))
+            while not factory.clients:
+                await asyncio.sleep(0)
+            hostile = factory.clients[0]
+            assert isinstance(hostile, CancellationHostileConnectClient)
+            await asyncio.wait_for(hostile.connect_started.wait(), 0.5)
+
+            start_task.cancel()
+            with self.assertRaises(asyncio.CancelledError):
+                await asyncio.wait_for(start_task, 0.5)
+
+            self.assertFalse(ready_owners)
+            self.assertTrue(hostile.disconnected)
+            self.assertFalse(any(call[0] == "query" for call in hostile.calls))
+            self.assertFalse(manager.snapshots())
+            await asyncio.sleep(0)
+            self.assertFalse([
+                task
+                for task in asyncio.all_tasks()
+                if task is not asyncio.current_task()
+                and not task.done()
+                and "chat-cancelled-connect" in task.get_name()
+            ])
+
+            replacement = await asyncio.wait_for(manager.start_run(
+                "chat-cancelled-connect",
+                "Retry",
+                run_id="run-retry",
+                options={},
+                configuration_key="a",
+                on_supervisor_ready=capture_owner,
+            ), 0.5)
+            self.assertEqual(len(factory.clients), 2)
+            self.assertEqual(len(ready_owners), 1)
+            await factory.clients[1].emit({"type": "result", "result": "done"})
+            await replacement.wait_result()
+        finally:
+            await manager.close_all()
+
     async def test_query_failure_is_delivery_uncertain_and_retires_only_chat(self) -> None:
         self.factory.query_error = RuntimeError("pipe broke")
         with self.assertRaises(ClaudeSDKQueryError) as raised:
@@ -1397,6 +2105,46 @@ class ClaudeSDKSupervisorTests(unittest.IsolatedAsyncioTestCase):
         await self.factory.clients[0].emit({"type": "result", "result": "done"})
         await active.wait_result()
         await manager.close_all()
+
+    async def test_subagent_limit_reconfiguration_waits_for_background_agent_completion(self) -> None:
+        cap_name = "CLAUDE_CODE_MAX_CONCURRENT_SUBAGENTS"
+        handle = await self.manager.start_run(
+            "chat-limited", "Delegate", run_id="run-limited",
+            options={"env": {cap_name: "3"}}, configuration_key="limit-3",
+        )
+        client = self.factory.clients[0]
+        started = {
+            "type": "system", "subtype": "task_started",
+            "task_id": "agent-still-running", "task_type": "local_agent",
+        }
+        progress = {"type": "assistant", "text": "Still waiting for the agent"}
+        await client.emit(started)
+        await client.emit({"type": "result", "is_error": False, "result": "parent milestone"})
+        await client.emit(progress)
+        self.assertEqual(await asyncio.wait_for(handle.__anext__(), 1), started)
+        self.assertEqual(await asyncio.wait_for(handle.__anext__(), 1), progress)
+        self.assertFalse(handle.done)
+
+        with self.assertRaises(ClaudeSDKConfigurationConflict):
+            await self.manager.get(
+                "chat-limited", options={"env": {cap_name: "1"}},
+                configuration_key="limit-1",
+            )
+        self.assertFalse(client.disconnected)
+        self.assertEqual(len(self.factory.clients), 1)
+
+        await client.emit({
+            "type": "system", "subtype": "task_notification",
+            "task_id": "agent-still-running", "status": "completed",
+        })
+        await client.emit({"type": "result", "is_error": False, "result": "all done"})
+        await asyncio.wait_for(handle.wait_result(), 1)
+        replacement = await self.manager.get(
+            "chat-limited", options={"env": {cap_name: "1"}},
+            configuration_key="limit-1",
+        )
+        self.assertEqual(replacement.configuration_key, "limit-1")
+        self.assertTrue(client.disconnected)
 
     async def test_evict_disconnects_only_selected_chat(self) -> None:
         run = await self.manager.start_run(
@@ -1620,11 +2368,75 @@ class ClaudeSDKMCPControlTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(version("claude-agent-sdk"), "0.2.130")
         for method in (
+            "get_server_info",
             "get_mcp_status",
             "reconnect_mcp_server",
             "toggle_mcp_server",
         ):
             self.assertTrue(callable(getattr(ClaudeSDKClient, method, None)))
+
+    async def test_server_info_projects_only_bounded_commands_and_keeps_active_run(self) -> None:
+        factory = FakeFactory()
+        manager = ClaudeSDKSupervisorManager(
+            client_factory=factory,
+            idle_ttl_seconds=None,
+        )
+        try:
+            handle = await manager.start_run(
+                "command-info-chat",
+                "Keep working",
+                run_id="run-active",
+                options={},
+                configuration_key="profile-a",
+            )
+            client = factory.clients[0]
+            client.server_info = {
+                "commands": [
+                    {
+                        "name": "_private-command",
+                        "description": "Useful command",
+                        "argumentHint": "[value]",
+                        "untrusted": {"path": "/Users/private/secret"},
+                    },
+                    {"name": "plugin:task", "description": "Plugin task"},
+                ],
+                "account": {"email": "private@example.test"},
+                "models": [{"id": "secret-model-metadata"}],
+                "pid": 999,
+            }
+
+            info, generation = await manager.get_server_info(
+                "command-info-chat",
+                options={},
+                configuration_key="profile-a",
+            )
+
+            self.assertTrue(generation.startswith("claudemcp_"))
+            self.assertEqual(
+                info,
+                {
+                    "commands": [
+                        {
+                            "name": "_private-command",
+                            "description": "Useful command",
+                            "argumentHint": "[value]",
+                        },
+                        {
+                            "name": "plugin:task",
+                            "description": "Plugin task",
+                        },
+                    ],
+                    "_agentsdock_provider_commands_truncated": False,
+                },
+            )
+            self.assertFalse(handle.done)
+            self.assertNotIn(("interrupt",), client.calls)
+
+            result = {"type": "result", "result": "done"}
+            await client.emit(result)
+            self.assertEqual(await handle.wait_result(), result)
+        finally:
+            await manager.close_all()
 
     async def test_status_is_lazy_and_mutations_return_same_opaque_generation(self) -> None:
         factory = FakeFactory()
@@ -1793,6 +2605,16 @@ class ClaudeSDKMCPControlTests(unittest.IsolatedAsyncioTestCase):
                 options={},
                 configuration_key="profile-a",
             )
+            factory.clients[0].mcp_servers.extend([
+                {
+                    "name": CLAUDE_PROVIDER_MCP_SERVER_NAME,
+                    "status": "failed",
+                },
+                {
+                    "name": "agentsdock",
+                    "status": "failed",
+                },
+            ])
             updated, _generation = await manager.mutate_mcp_server(
                 "mcp-chat",
                 action="reconnect_all",
@@ -1807,7 +2629,12 @@ class ClaudeSDKMCPControlTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(reconnects, [
                 ("reconnect_mcp_server", "dayone"),
                 ("reconnect_mcp_server", "login"),
+                ("reconnect_mcp_server", "agentsdock"),
             ])
+            self.assertNotIn(
+                ("reconnect_mcp_server", CLAUDE_PROVIDER_MCP_SERVER_NAME),
+                reconnects,
+            )
             statuses = {
                 item["name"]: item["status"]
                 for item in updated["mcpServers"]
@@ -2162,6 +2989,31 @@ class ClaudeSDKLoopOwnershipTests(unittest.TestCase):
 
 
 class ClaudeSDKBackgroundTrackingHookTests(unittest.IsolatedAsyncioTestCase):
+    async def test_provider_tool_hook_allows_root_and_denies_subagent(self) -> None:
+        root = await reject_subagent_provider_tool_hook(
+            {
+                "tool_name": CLAUDE_PROVIDER_MCP_TOOL_NAME,
+                "tool_input": {},
+            },
+            "tool-root",
+            {"signal": None},
+        )
+        self.assertEqual(root, {})
+
+        child = await reject_subagent_provider_tool_hook(
+            {
+                "tool_name": CLAUDE_PROVIDER_MCP_TOOL_NAME,
+                "tool_input": {},
+                "agent_id": "child-1",
+                "agent_type": "general-purpose",
+            },
+            "tool-child",
+            {"signal": None},
+        )
+        output = child["hookSpecificOutput"]
+        self.assertEqual(output["permissionDecision"], "deny")
+        self.assertIn("top-level live turn", output["permissionDecisionReason"])
+
     def test_rejects_common_untracked_shell_detachment(self) -> None:
         for command in (
             "nohup python sweep.py > sweep.log 2>&1 &",
@@ -2237,7 +3089,7 @@ class ClaudeSDKBackgroundTrackingHookTests(unittest.IsolatedAsyncioTestCase):
                 reason = claude_nondurable_scheduler_reason(tool_name)
                 self.assertIsNotNone(reason)
                 self.assertIn(tool_name, str(reason))
-                self.assertIn("AgentsDock Jobs CLI", str(reason))
+                self.assertIn("AgentsDock provider tool", str(reason))
                 self.assertIn("explicitly requested", str(reason))
         for tool_name in (
             "CronList",
@@ -2263,7 +3115,11 @@ class ClaudeSDKBackgroundTrackingHookTests(unittest.IsolatedAsyncioTestCase):
                 output = result["hookSpecificOutput"]
                 self.assertEqual(output["hookEventName"], "PreToolUse")
                 self.assertEqual(output["permissionDecision"], "deny")
-                self.assertIn("provider-authority block", output["permissionDecisionReason"])
+                self.assertIn("AgentsDock provider tool", output["permissionDecisionReason"])
+                self.assertNotIn(
+                    "provider-authority block",
+                    output["permissionDecisionReason"],
+                )
         for tool_name in ("CronList", "CronDelete", "MonitorStatus", "monitor"):
             with self.subTest(tool_name=tool_name):
                 self.assertEqual(
@@ -2285,17 +3141,18 @@ class ClaudeSDKBackgroundTrackingHookTests(unittest.IsolatedAsyncioTestCase):
             {},
         )
         hooks = claude_background_tracking_hooks()
-        self.assertEqual(set(hooks), {"PreToolUse"})
+        self.assertEqual(set(hooks), {"PreToolUse", "UserPromptSubmit", "PostToolUse", "PostToolUseFailure"})
         matchers = hooks["PreToolUse"]
         self.assertEqual(
             [matcher.matcher for matcher in matchers],
-            ["Bash", *CLAUDE_NON_DURABLE_SCHEDULER_TOOLS],
+            [CLAUDE_PROVIDER_MCP_TOOL_NAME, "Bash", *CLAUDE_NON_DURABLE_SCHEDULER_TOOLS],
         )
         self.assertTrue(all(matcher.timeout == 5.0 for matcher in matchers))
-        self.assertEqual(matchers[0].hooks, [reject_untracked_background_hook])
+        self.assertEqual(matchers[0].hooks, [reject_subagent_provider_tool_hook])
+        self.assertEqual(matchers[1].hooks, [reject_untracked_background_hook])
         self.assertTrue(all(
             matcher.hooks == [reject_nondurable_scheduler_hook]
-            for matcher in matchers[1:]
+            for matcher in matchers[2:]
         ))
 
 

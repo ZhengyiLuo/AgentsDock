@@ -1,9 +1,11 @@
 import asyncio
 import json
 import signal
+import tempfile
 import time
 import unittest
 from collections.abc import Callable
+from pathlib import Path
 from typing import Any
 from unittest.mock import AsyncMock, patch
 
@@ -124,6 +126,45 @@ async def wait_until(predicate: Callable[[], bool], timeout: float = 1.0) -> Non
 
 
 class CodexAppServerClientTests(unittest.IsolatedAsyncioTestCase):
+    async def test_native_thread_names_are_cached_without_extra_requests(self) -> None:
+        factory = FakeProcessFactory()
+        client = self.make_client(factory)
+        self.addAsyncCleanup(client.close)
+        self.assertIsNone(client.cached_thread_name("thread"))
+        self.assertEqual(factory.calls, [])
+        factory.process.responders.update({
+            "thread/start": lambda _: {"thread": {"id": "thread", "name": "Started name"}},
+            "thread/resume": lambda _: {"thread": {"id": "thread", "name": "Resumed name"}},
+            "thread/read": lambda _: {"thread": {"id": "thread", "name": "Read name"}},
+        })
+        await client.start_thread({})
+        self.assertEqual(client.cached_thread_name("thread"), "Started name")
+        await client.resume_thread("thread")
+        self.assertEqual(client.cached_thread_name("thread"), "Resumed name")
+        await client.read_thread("thread")
+        self.assertEqual(client.cached_thread_name("thread"), "Read name")
+        requests = len(factory.process.messages)
+        client._route_notification({"method": "thread/name/updated", "params": {
+            "threadId": "thread", "threadName": "Updated name",
+        }})
+        self.assertEqual(client.cached_thread_name("thread"), "Updated name")
+        self.assertEqual(len(factory.process.messages), requests)
+        client._route_notification({"method": "thread/name/updated", "params": {
+            "threadId": "thread", "threadName": None,
+        }})
+        self.assertIsNone(client.cached_thread_name("thread"))
+
+    async def test_thread_title_cache_is_bounded_and_ignores_bad_values(self) -> None:
+        client = self.make_client(FakeProcessFactory())
+        for index in range(1100):
+            client._cache_thread_name({"id": f"thread-{index}", "name": "Name"})
+        self.assertEqual(len(client._thread_names), 1024)
+        self.assertIsNone(client.cached_thread_name("thread-0"))
+        self.assertEqual(client.cached_thread_name("thread-1099"), "Name")
+        for value in (None, {}, "", "x" * 4097):
+            client._cache_thread_name({"id": "bad", "name": value})
+            self.assertIsNone(client.cached_thread_name("bad"))
+
     def make_client(
         self,
         factory: FakeProcessFactory,
@@ -137,6 +178,94 @@ class CodexAppServerClientTests(unittest.IsolatedAsyncioTestCase):
             request_timeout=1,
             **kwargs,
         )
+
+    async def test_guarded_notice_is_connected_only_and_preserves_active_turn(self) -> None:
+        factory = FakeProcessFactory()
+        client = self.make_client(factory)
+        self.addAsyncCleanup(client.close)
+        items = [{"type": "message", "role": "developer", "content": [
+            {"type": "input_text", "text": "Pending replies are available in the inbox."}]}]
+        with self.assertRaises(CodexAppServerProtocolError) as raised:
+            await client.inject_items_guarded("thread", items, expected_generation=1, before_send=lambda: True)
+        self.assertFalse(raised.exception.request_sent)
+        self.assertEqual(factory.calls, [])
+        factory.process.responders.update({
+            "thread/start": lambda _: {"thread": {"id": "thread"}},
+            "turn/start": lambda _: {"turn": {"id": "turn"}},
+            "thread/inject_items": lambda _: {},
+        })
+        await client.start_thread({})
+        turn = await client.start_turn("thread", [{"type": "text", "text": "Continue work"}])
+        count = len(factory.process.messages)
+        await client.inject_items_guarded("thread", items,
+            expected_generation=client.generation, before_send=lambda: True)
+        self.assertEqual([message["method"] for message in factory.process.messages[count:]], ["thread/inject_items"])
+        self.assertEqual(factory.process.messages[-1]["params"], {"threadId": "thread", "items": items})
+        self.assertIs(client.active_turn("thread"), turn)
+        self.assertFalse(turn._subscription._closed)
+
+    async def test_guarded_notice_rechecks_owner_generation_and_load_under_writer_lock(self) -> None:
+        for change in ("owner", "generation", "loaded"):
+            with self.subTest(change=change):
+                factory = FakeProcessFactory()
+                client = self.make_client(factory)
+                self.addAsyncCleanup(client.close)
+                await client.start()
+                client._loaded_threads.add("thread")
+                owner = True
+                await client._write_lock.acquire()
+                pending = asyncio.create_task(client.inject_items_guarded("thread", [{
+                    "type": "message", "role": "developer", "content": [{"type": "input_text", "text": "Pending replies."}],
+                }], expected_generation=client.generation, before_send=lambda: owner))
+                await wait_until(lambda: bool(client._pending))
+                if change == "owner":
+                    owner = False
+                elif change == "generation":
+                    client._generation += 1
+                else:
+                    client._loaded_threads.clear()
+                client._write_lock.release()
+                with self.assertRaises(CodexAppServerProtocolError) as raised:
+                    await pending
+                self.assertFalse(raised.exception.request_sent)
+                self.assertFalse(any(message.get("method") == "thread/inject_items" for message in factory.process.messages))
+                self.assertTrue(client.ready)
+
+    async def test_guarded_notice_unknown_ack_and_drain_timeout_never_retire_or_retry(self) -> None:
+        for outcome in ("no_ack", "drain", "invalid_ack"):
+            with self.subTest(outcome=outcome):
+                factory = FakeProcessFactory()
+                client = self.make_client(factory)
+                self.addAsyncCleanup(client.close)
+                await client.start()
+                client._loaded_threads.add("thread")
+                if outcome == "drain":
+                    async def blocked_drain() -> None:
+                        await asyncio.Event().wait()
+                    factory.process.stdin.drain = blocked_drain
+                elif outcome == "invalid_ack":
+                    factory.process.responders["thread/inject_items"] = lambda _: None
+                with self.assertRaises((CodexAppServerTimeout, CodexAppServerProtocolError)) as raised:
+                    await client.inject_items_guarded("thread", [{
+                        "type": "message", "role": "developer", "content": [{"type": "input_text", "text": "Pending replies."}],
+                    }], expected_generation=client.generation, before_send=lambda: True, timeout=0.01)
+                self.assertTrue(raised.exception.request_sent)
+                self.assertFalse(raised.exception.safe_to_retry)
+                self.assertTrue(client.ready)
+                self.assertIs(client.process, factory.process)
+                self.assertIsNone(factory.process.returncode)
+                self.assertEqual(sum(message.get("method") == "thread/inject_items" for message in factory.process.messages), 1)
+
+    async def test_guarded_notice_rejects_user_input_and_oversized_context(self) -> None:
+        factory = FakeProcessFactory()
+        client = self.make_client(factory)
+        self.addAsyncCleanup(client.close)
+        for role, text in (("user", "hello"), ("developer", "x" * 2049)):
+            with self.assertRaises(ValueError):
+                await client.inject_items_guarded("thread", [{"type": "message", "role": role,
+                    "content": [{"type": "input_text", "text": text}]}],
+                    expected_generation=1, before_send=lambda: True)
+        self.assertEqual(factory.calls, [])
 
     async def test_async_notification_handler_preserves_wire_order(self) -> None:
         factory = FakeProcessFactory()
@@ -513,6 +642,12 @@ class CodexAppServerClientTests(unittest.IsolatedAsyncioTestCase):
     async def test_timed_out_fork_deletes_child_from_late_started_notification(
         self,
     ) -> None:
+        temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(temporary.cleanup)
+        workspace = Path(temporary.name) / "workspace"
+        workspace.mkdir()
+        alias = Path(temporary.name) / "alias"
+        alias.symlink_to(workspace, target_is_directory=True)
         factory = FakeProcessFactory()
         process = factory.process
 
@@ -526,7 +661,7 @@ class CodexAppServerClientTests(unittest.IsolatedAsyncioTestCase):
                         "thread": {
                             "id": "thr_late_child",
                             "forkedFromId": "thr_source",
-                            "cwd": "/repo",
+                            "cwd": str(workspace.resolve()),
                             "createdAt": int(time.time()),
                         }
                     },
@@ -544,7 +679,7 @@ class CodexAppServerClientTests(unittest.IsolatedAsyncioTestCase):
         self.addAsyncCleanup(client.close)
 
         with self.assertRaises(CodexAppServerTimeout) as raised:
-            await client.fork_thread("thr_source", {"cwd": "/repo"})
+            await client.fork_thread("thr_source", {"cwd": str(alias)})
 
         self.assertEqual(raised.exception.method, "thread/fork")
         self.assertFalse(
@@ -1368,6 +1503,363 @@ class CodexAppServerClientTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(steer["params"]["clientUserMessageId"], "message-a")
         self.assertNotIn("additionalContext", steer["params"])
 
+    async def _completed_retained_parent(self):
+        factory = FakeProcessFactory()
+        client = self.make_client(factory)
+        self.addAsyncCleanup(client.close)
+        factory.process.responders["turn/start"] = lambda _: {"turn": {"id": "first"}}
+        turn = await client.start_turn("parent", [{"type": "text", "text": "original"}], retain_thread_stream=True)
+        factory.process.feed({"method": "turn/completed", "params": {
+            "threadId": "parent", "turn": {"id": "first", "status": "completed"}}})
+        await turn.next_notification(timeout=1)
+        return client, factory.process, turn
+
+    async def test_child_continuation_empty_input_preserves_owner_metadata(self) -> None:
+        client, process, turn = await self._completed_retained_parent()
+        subscription = turn._subscription
+        process.responders["turn/start"] = lambda _: {"turn": {"id": "collected"}}
+        result = await turn.continue_after_subagents(
+            before_send=lambda: True, client_user_message_id="same-run",
+            responsesapi_client_metadata={"agentsdock_run_id": "same-run", "agentsdock_run_proof": "proof"})
+        self.assertEqual(result, "collected")
+        self.assertEqual(process.messages[-1]["params"], {
+            "threadId": "parent", "input": [], "clientUserMessageId": "same-run",
+            "responsesapiClientMetadata": {"agentsdock_run_id": "same-run", "agentsdock_run_proof": "proof"}})
+        self.assertIs(turn._subscription, subscription)
+        self.assertIs(client.active_turn("parent"), turn)
+        self.assertIsNone(await turn.continue_after_subagents(before_send=lambda: True))
+        self.assertEqual(sum(m.get("method") == "turn/start" for m in process.messages), 2)
+
+    async def test_child_continuation_stop_or_native_start_wins_at_stdin(self) -> None:
+        for reason in ("stop", "native", "new-child", "close"):
+            with self.subTest(reason=reason):
+                client, process, turn = await self._completed_retained_parent()
+                allowed = True
+                await client._write_lock.acquire()
+                task = asyncio.create_task(turn.continue_after_subagents(before_send=lambda: allowed))
+                await asyncio.sleep(0)
+                if reason == "native":
+                    process.feed({"method": "turn/started", "params": {
+                        "threadId": "parent", "turn": {"id": "spontaneous"}}})
+                    await turn.next_notification(timeout=1)
+                elif reason == "close":
+                    await turn.close()
+                else:
+                    allowed = False
+                client._write_lock.release()
+                self.assertIsNone(await task)
+                self.assertEqual(sum(m.get("method") == "turn/start" for m in process.messages), 1)
+                if reason == "native":
+                    self.assertEqual(turn.turn_id, "spontaneous")
+                    self.assertIs(client.active_turn("parent"), turn)
+
+    async def test_child_continuation_does_not_rebind_delayed_ack_over_native_events(self) -> None:
+        client, process, turn = await self._completed_retained_parent()
+        def start(_):
+            for method, turn_id in (("turn/started", "second"),
+                                    ("turn/completed", "second"),
+                                    ("turn/started", "third")):
+                process.feed({"method": method, "params": {
+                    "threadId": "parent", "turn": {"id": turn_id, "status": "completed"}}})
+            return {"turn": {"id": "second"}}
+        process.responders["turn/start"] = start
+        self.assertEqual(await turn.continue_after_subagents(before_send=lambda: True), "second")
+        self.assertEqual(turn.turn_id, "third")
+        self.assertFalse(turn._completed)
+        self.assertIs(client.active_turn("parent"), turn)
+
+    async def test_child_continuation_ambiguous_reply_does_not_replay_or_close(self) -> None:
+        client, process, turn = await self._completed_retained_parent()
+        client.request_timeout = 0.01
+        process.responders["turn/start"] = lambda _: NO_RESPONSE
+        with self.assertRaises(CodexAppServerTimeout) as caught:
+            await turn.continue_after_subagents(before_send=lambda: True)
+        self.assertTrue(caught.exception.request_sent)
+        self.assertFalse(caught.exception.safe_to_retry)
+        self.assertFalse(turn._closed)
+        self.assertIs(client._turns_by_thread.get("parent"), turn)
+        self.assertEqual(sum(m.get("method") == "turn/start" for m in process.messages), 2)
+        process.feed({"method": "turn/started", "params": {
+            "threadId": "parent", "turn": {"id": "late-accepted"}}})
+        await turn.next_notification(timeout=1)
+        self.assertEqual(turn.turn_id, "late-accepted")
+
+    async def test_child_continuation_invalid_ack_is_not_safe_to_replay(self) -> None:
+        for response in ({}, {"turn": {"id": "first"}}, {"turn": {"id": 7}}):
+            with self.subTest(response=response):
+                client, process, turn = await self._completed_retained_parent()
+                process.responders["turn/start"] = lambda _: response
+                with self.assertRaises(CodexAppServerProtocolError) as caught:
+                    await turn.continue_after_subagents(before_send=lambda: True)
+                self.assertTrue(caught.exception.request_sent)
+                self.assertFalse(caught.exception.safe_to_retry)
+                self.assertFalse(turn._closed)
+
+    async def test_child_continuation_cancellation_proves_before_or_after_write(self) -> None:
+        for before_write in (True, False):
+            with self.subTest(before_write=before_write):
+                client, process, turn = await self._completed_retained_parent()
+                process.responders["turn/start"] = lambda _: NO_RESPONSE
+                if before_write:
+                    await client._write_lock.acquire()
+                task = asyncio.create_task(turn.continue_after_subagents(before_send=lambda: True))
+                if before_write:
+                    await wait_until(lambda: any(value[0] == "turn/start" for value in client._pending.values()))
+                else:
+                    await wait_until(lambda: sum(m.get("method") == "turn/start" for m in process.messages) == 2)
+                task.cancel()
+                with self.assertRaises(asyncio.CancelledError) as caught:
+                    await task
+                if before_write:
+                    client._write_lock.release()
+                self.assertEqual(caught.exception.request_sent, not before_write)
+                self.assertEqual(sum(m.get("method") == "turn/start" for m in process.messages), 1 if before_write else 2)
+                self.assertFalse(turn._closed)
+
+    async def test_retained_turn_stream_receives_goal_continuation_after_completion(self) -> None:
+        factory = FakeProcessFactory()
+        process = factory.process
+        started = {
+            "method": "turn/started",
+            "params": {"threadId": "thread_goal", "turn": {"id": "turn_initial"}},
+        }
+        goal_updated = {
+            "method": "thread/goal/updated",
+            "params": {"threadId": "thread_goal", "goal": {"status": "active"}},
+        }
+
+        def start_turn(_message: dict[str, Any]) -> dict[str, Any]:
+            process.feed(started)
+            process.feed(goal_updated)
+            return {"turn": {"id": "turn_initial"}}
+
+        process.responders["turn/start"] = start_turn
+        process.responders["turn/steer"] = lambda message: {
+            "turnId": message["params"]["expectedTurnId"],
+        }
+        process.responders["turn/interrupt"] = lambda _: {}
+        manager = CodexAppServerManager(
+            "codex", cwd="/tmp", env_factory=lambda: {"PATH": "/usr/bin"},
+            process_factory=factory, request_timeout=1,
+        )
+        self.addAsyncCleanup(manager.close)
+        turn = await manager.start_turn(
+            "thread_goal", [{"type": "text", "text": "Start goal"}],
+            retain_thread_stream=True,
+        )
+        self.assertEqual(await turn.next_notification(timeout=1), started)
+        self.assertEqual(await turn.next_notification(timeout=1), goal_updated)
+        turn.adopt_turn_id("turn_initial")
+        completed = {
+            "method": "turn/completed",
+            "params": {
+                "threadId": "thread_goal",
+                "turn": {"id": "turn_initial", "status": "completed"},
+            },
+        }
+        continued = {
+            "method": "turn/started",
+            "params": {"threadId": "thread_goal", "turn": {"id": "turn_continued"}},
+        }
+        first_turn_events = manager.client.subscribe_turn("thread_goal", "turn_initial")
+        self.addCleanup(first_turn_events.close)
+        process.feed(completed)
+        self.assertEqual(await turn.next_notification(timeout=1), completed)
+        self.assertIsNone(manager.client.active_turn("thread_goal"))
+        self.assertTrue(turn._completed)
+        self.assertEqual(await first_turn_events.next_notification(timeout=1), completed)
+        with self.assertRaises(CodexAppServerSubscriptionClosed):
+            await first_turn_events.next_notification(timeout=1)
+        process.feed(continued)
+        self.assertEqual(await turn.next_notification(timeout=1), continued)
+        self.assertIs(manager.client.active_turn("thread_goal"), turn)
+        self.assertFalse(turn._completed)
+        self.assertEqual(turn.turn_id, "turn_continued")
+        # A delayed terminal packet from the previous turn cannot retire or
+        # retarget the current native continuation.
+        process.feed(completed)
+        self.assertEqual(await turn.next_notification(timeout=1), completed)
+        self.assertIs(manager.client.active_turn("thread_goal"), turn)
+        self.assertFalse(turn._completed)
+        self.assertEqual(turn.turn_id, "turn_continued")
+        await turn.steer([{"type": "text", "text": "Follow up"}])
+        await turn.interrupt()
+        controls = [message for message in process.messages
+                    if message.get("method") in {"turn/steer", "turn/interrupt"}]
+        self.assertEqual(controls[0]["params"]["expectedTurnId"], "turn_continued")
+        self.assertEqual(controls[1]["params"]["turnId"], "turn_continued")
+        process.feed({**goal_updated, "params": {"threadId": "thread_other"}})
+        process.feed(goal_updated)
+        self.assertEqual(await turn.next_notification(timeout=1), goal_updated)
+        await turn.close()
+        self.assertIsNone(manager.client.active_turn("thread_goal"))
+        self.assertNotIn("thread_goal", manager.client._turns_by_thread)
+        with self.assertRaises(CodexAppServerSubscriptionClosed):
+            await turn.next_notification(timeout=1)
+
+    async def test_retained_completed_stream_closes_with_thread_or_process(self) -> None:
+        for cleanup in ("thread", "process", "unsubscribe"):
+            with self.subTest(cleanup=cleanup):
+                factory = FakeProcessFactory()
+                process = factory.process
+                process.responders["turn/start"] = lambda _: {"turn": {"id": "turn_initial"}}
+                client = self.make_client(factory)
+                self.addAsyncCleanup(client.close)
+                turn = await client.start_turn(
+                    "thread_goal", [], retain_thread_stream=True,
+                )
+                process.feed({
+                    "method": "turn/completed",
+                    "params": {"threadId": "thread_goal", "turn": {"id": "turn_initial"}},
+                })
+                await turn.next_notification(timeout=1)
+                if cleanup == "thread":
+                    process.feed({"method": "thread/closed", "params": {"threadId": "thread_goal"}})
+                    self.assertEqual((await turn.next_notification(timeout=1))["method"], "thread/closed")
+                    expected_error = CodexAppServerSubscriptionClosed
+                elif cleanup == "unsubscribe":
+                    process.responders["thread/unsubscribe"] = lambda _: {"status": "unsubscribed"}
+                    await client.unsubscribe_thread("thread_goal")
+                    expected_error = CodexAppServerSubscriptionClosed
+                else:
+                    process.crash()
+                    expected_error = CodexAppServerDisconnected
+                with self.assertRaises(expected_error):
+                    await turn.next_notification(timeout=1)
+                self.assertNotIn("thread_goal", client._turns_by_thread)
+
+    async def test_retained_stream_does_not_resurrect_completed_native_turn(self) -> None:
+        factory = FakeProcessFactory()
+        process = factory.process
+        process.responders["turn/start"] = lambda _: {"turn": {"id": "first"}}
+        client = self.make_client(factory)
+        self.addAsyncCleanup(client.close)
+        turn = await client.start_turn("parent", [], retain_thread_stream=True)
+        for finished in ("first", "second"):
+            if finished == "second":
+                process.feed({"method": "turn/started", "params": {
+                    "threadId": "parent", "turn": {"id": finished},
+                }})
+                await turn.next_notification(timeout=1)
+            completed = {"method": "turn/completed", "params": {
+                "threadId": "parent", "turn": {"id": finished, "status": "completed"},
+            }}
+            process.feed(completed)
+            await turn.next_notification(timeout=1)
+            process.feed({"method": "turn/started", "params": {
+                "threadId": "parent", "turn": {"id": "first"},
+            }})
+            # A real notification after the duplicate is a deterministic read
+            # barrier: no elapsed-time assumption and no duplicate in stream.
+            barrier = {"method": "thread/status/changed", "params": {
+                "threadId": "parent", "status": {"type": "idle"},
+            }}
+            process.feed(barrier)
+            self.assertEqual(await turn.next_notification(timeout=1), barrier)
+            self.assertIsNone(client.active_turn("parent"))
+            self.assertTrue(turn._completed)
+            self.assertEqual(turn.turn_id, finished)
+
+    async def test_retained_native_continuation_before_initial_start_ack(self) -> None:
+        factory = FakeProcessFactory()
+        process = factory.process
+
+        def start(_message):
+            for method, turn_id in (("turn/started", "first"),
+                                    ("turn/completed", "first"),
+                                    ("turn/started", "continued")):
+                process.feed({"method": method, "params": {
+                    "threadId": "parent", "turn": {"id": turn_id},
+                }})
+            return {"turn": {"id": "first"}}
+
+        process.responders["turn/start"] = start
+        process.responders["turn/interrupt"] = lambda _: {}
+        client = self.make_client(factory)
+        self.addAsyncCleanup(client.close)
+        turn = await client.start_turn("parent", [], retain_thread_stream=True)
+        self.assertEqual(turn.turn_id, "continued")
+        self.assertFalse(turn._completed)
+        self.assertIs(client.active_turn("parent"), turn)
+        self.assertEqual([((await turn.next_notification(timeout=1))["params"]["turn"]["id"])
+                          for _ in range(3)], ["first", "first", "continued"])
+        await turn.interrupt()
+        self.assertEqual(process.messages[-1]["params"]["turnId"], "continued")
+
+    async def test_unsubscribe_response_does_not_close_successor_turn(self) -> None:
+        factory = FakeProcessFactory()
+        process = factory.process
+        ids = iter(("first", "successor"))
+        process.responders["turn/start"] = lambda _: {"turn": {"id": next(ids)}}
+        process.responders["thread/unsubscribe"] = lambda _: NO_RESPONSE
+        client = self.make_client(factory)
+        self.addAsyncCleanup(client.close)
+        first = await client.start_turn("parent", [], retain_thread_stream=True)
+        unsubscribe = asyncio.create_task(client.unsubscribe_thread("parent"))
+        await wait_until(lambda: any(message.get("method") == "thread/unsubscribe"
+                                    for message in process.messages))
+        request = next(message for message in process.messages
+                       if message.get("method") == "thread/unsubscribe")
+        await first.close()
+        successor = await client.start_turn("parent", [], retain_thread_stream=True)
+        process.feed({"id": request["id"], "result": {"status": "unsubscribed"}})
+        self.assertEqual(await unsubscribe, "unsubscribed")
+        self.assertIs(client.active_turn("parent"), successor)
+        self.assertFalse(successor._closed)
+        self.assertFalse(successor._completed)
+        event = {"method": "item/agentMessage/delta", "params": {
+            "threadId": "parent", "turnId": "successor", "delta": "Still live",
+        }}
+        process.feed(event)
+        self.assertEqual(await successor.next_notification(timeout=1), event)
+
+    async def test_unsubscribe_scope_change_before_write_sends_nothing(self) -> None:
+        factory = FakeProcessFactory()
+        process = factory.process
+        process.responders["turn/start"] = lambda _: {"turn": {"id": "first"}}
+        client = self.make_client(factory)
+        self.addAsyncCleanup(client.close)
+        first = await client.start_turn("parent", [], retain_thread_stream=True)
+        await client._write_lock.acquire()
+        unsubscribe = asyncio.create_task(client.unsubscribe_thread("parent"))
+        try:
+            await wait_until(lambda: any(value[0] == "thread/unsubscribe"
+                                        for value in client._pending.values()))
+            await first.close()
+        finally:
+            client._write_lock.release()
+        with self.assertRaises(CodexAppServerProtocolError):
+            await unsubscribe
+        self.assertFalse(any(message.get("method") == "thread/unsubscribe"
+                             for message in process.messages))
+
+    async def test_unsubscribe_cannot_close_same_handle_native_continuation(self) -> None:
+        for before_write in (True, False):
+            with self.subTest(before_write=before_write):
+                client, process, turn = await self._completed_retained_parent()
+                process.responders["thread/unsubscribe"] = lambda _: NO_RESPONSE
+                if before_write:
+                    await client._write_lock.acquire()
+                task = asyncio.create_task(client.unsubscribe_thread("parent"))
+                await wait_until(lambda: any(value[0] == "thread/unsubscribe"
+                                            for value in client._pending.values()))
+                process.feed({"method": "turn/started", "params": {
+                    "threadId": "parent", "turn": {"id": "continued"}}})
+                await turn.next_notification(timeout=1)
+                if before_write:
+                    client._write_lock.release()
+                    with self.assertRaises(CodexAppServerProtocolError) as caught:
+                        await task
+                    self.assertFalse(caught.exception.request_sent)
+                    self.assertFalse(any(m.get("method") == "thread/unsubscribe" for m in process.messages))
+                else:
+                    message = next(m for m in process.messages if m.get("method") == "thread/unsubscribe")
+                    process.feed({"id": message["id"], "result": {"status": "unsubscribed"}})
+                    self.assertEqual(await task, "unsubscribed")
+                self.assertIs(client.active_turn("parent"), turn)
+                self.assertFalse(turn._closed)
+                self.assertIn(turn._subscription, client._subscriptions)
+
     async def test_goal_continuation_retargets_active_turn_and_interrupt(self) -> None:
         factory = FakeProcessFactory()
         process = factory.process
@@ -1594,6 +2086,301 @@ class CodexAppServerClientTests(unittest.IsolatedAsyncioTestCase):
             await client.request("turn/start", {"threadId": "thr", "input": []})
         self.assertTrue(raised.exception.request_sent)
         self.assertFalse(raised.exception.safe_to_retry)
+        self.assertTrue(client.ready)
+        self.assertIs(client.process, factory.process)
+
+    async def test_cancelled_turn_start_transfers_provisional_for_cleanup(self) -> None:
+        factory = FakeProcessFactory()
+        process = factory.process
+        client = self.make_client(factory)
+        self.addAsyncCleanup(client.close)
+        # Exercise lazy start: the transport generation is still zero when the
+        # caller begins, then initialize advances it before turn/start is
+        # written. Cleanup must use the generation captured at that write.
+        self.assertEqual(client.generation, 0)
+
+        start = asyncio.create_task(
+            client.start_turn(
+                "thr_cancelled_start",
+                [{"type": "text", "text": "hello"}],
+            )
+        )
+        await wait_until(
+            lambda: any(
+                message.get("method") == "turn/start"
+                for message in process.messages
+            )
+        )
+        start.cancel()
+        try:
+            await start
+        except asyncio.CancelledError as exc:
+            provisional = getattr(exc, "pending_turn", None)
+        else:
+            self.fail("turn/start cancellation did not propagate")
+
+        self.assertIsNotNone(provisional)
+        self.assertIs(
+            client.active_turn("thr_cancelled_start"),
+            provisional,
+        )
+        self.assertEqual(provisional.transport_generation, client.generation)
+        self.assertEqual(provisional.transport_generation, 1)
+        accepted_event = {
+            "method": "turn/started",
+            "params": {
+                "threadId": "thr_cancelled_start",
+                "turn": {"id": "turn_late_after_cancel"},
+            },
+        }
+        process.feed(accepted_event)
+        self.assertEqual(
+            await provisional.next_notification(timeout=1),
+            accepted_event,
+        )
+        self.assertEqual(provisional.turn_id, "turn_late_after_cancel")
+        await provisional.close()
+        self.assertIsNone(client.active_turn("thr_cancelled_start"))
+
+    async def test_retire_generation_cannot_stop_a_replacement_transport(self) -> None:
+        factory = FakeProcessFactory()
+        client = self.make_client(factory)
+        self.addAsyncCleanup(client.close)
+        await client.start()
+
+        generation = client.generation
+        self.assertFalse(await client.retire_generation(generation + 1))
+        self.assertTrue(client.ready)
+        self.assertTrue(await client.retire_generation(generation))
+        self.assertFalse(client.ready)
+
+    async def test_request_timeout_waiting_for_write_lock_is_retry_safe(self) -> None:
+        factory = FakeProcessFactory()
+        process = factory.process
+        process.responders["test/recovered"] = lambda _: {"ok": True}
+        client = self.make_client(factory)
+        client.request_timeout = 0.01
+        self.addAsyncCleanup(client.close)
+        await client.start()
+
+        await client._write_lock.acquire()
+        try:
+            with self.assertRaises(CodexAppServerTimeout) as raised:
+                await client.request("test/blocked-before-write", {})
+        finally:
+            client._write_lock.release()
+
+        self.assertFalse(raised.exception.request_sent)
+        self.assertTrue(raised.exception.safe_to_retry)
+        self.assertFalse(any(
+            message.get("method") == "test/blocked-before-write"
+            for message in process.messages
+        ))
+        self.assertTrue(client.ready)
+        self.assertIs(client.process, process)
+        self.assertEqual(
+            await client.request("test/recovered", {}),
+            {"ok": True},
+        )
+
+    async def test_blocked_drain_retires_process_and_next_request_recovers(
+        self,
+    ) -> None:
+        first_process = FakeProcess()
+        second_process = FakeProcess()
+        second_process.responders["test/recovered"] = lambda _: {"ok": True}
+        factory = FakeProcessFactory(first_process, second_process)
+        client = self.make_client(factory)
+        client.request_timeout = 0.01
+        self.addAsyncCleanup(client.close)
+        await client.start()
+
+        drain_started = asyncio.Event()
+        never_drain = asyncio.Event()
+
+        async def blocked_drain() -> None:
+            drain_started.set()
+            await never_drain.wait()
+
+        first_process.stdin.drain = blocked_drain
+        wedged_request = asyncio.create_task(
+            client.request("test/wedged-write", {})
+        )
+        await asyncio.wait_for(drain_started.wait(), timeout=1)
+        queued_request = asyncio.create_task(
+            client.request("test/queued-behind-wedge", {})
+        )
+        with self.assertRaises(CodexAppServerTimeout) as raised:
+            await wedged_request
+        with self.assertRaises(
+            (CodexAppServerTimeout, CodexAppServerDisconnected)
+        ):
+            await asyncio.wait_for(queued_request, timeout=1)
+
+        self.assertTrue(drain_started.is_set())
+        self.assertTrue(raised.exception.request_sent)
+        self.assertFalse(raised.exception.safe_to_retry)
+        self.assertFalse(client._write_lock.locked())
+        self.assertIsNone(client.process)
+        self.assertFalse(client.ready)
+        self.assertEqual(first_process.returncode, -signal.SIGTERM)
+
+        self.assertEqual(
+            await client.request("test/recovered", {}),
+            {"ok": True},
+        )
+        self.assertIs(client.process, second_process)
+        self.assertEqual(client.generation, 2)
+
+        await client.close()
+        self.assertIsNone(client.process)
+        self.assertEqual(second_process.returncode, -signal.SIGTERM)
+
+    async def test_repeated_cancellation_cannot_abandon_write_timeout_cleanup(
+        self,
+    ) -> None:
+        process = FakeProcess()
+        exit_hooks: list[tuple[int, int | None]] = []
+        client = self.make_client(
+            FakeProcessFactory(process),
+            on_process_exited=lambda pid, group_id: exit_hooks.append(
+                (pid, group_id)
+            ),
+        )
+        client._proc = process
+        client._initialized = True
+
+        wait_started = asyncio.Event()
+        release_first_wait = asyncio.Event()
+        original_wait = process.wait
+        original_kill = process.kill
+        wait_calls = 0
+        terminate_calls = 0
+        kill_calls = 0
+
+        async def stalled_wait() -> int:
+            nonlocal wait_calls
+            wait_calls += 1
+            if wait_calls == 1:
+                wait_started.set()
+                await release_first_wait.wait()
+                return -signal.SIGTERM
+            return await original_wait()
+
+        def stalled_terminate() -> None:
+            nonlocal terminate_calls
+            terminate_calls += 1
+
+        def recording_kill() -> None:
+            nonlocal kill_calls
+            kill_calls += 1
+            original_kill()
+
+        process.wait = stalled_wait
+        process.terminate = stalled_terminate
+        process.kill = recording_kill
+
+        owner = asyncio.create_task(
+            client._discard_process_after_write_timeout(process)
+        )
+        await asyncio.wait_for(wait_started.wait(), timeout=1)
+        owner.cancel("first cancellation")
+        await asyncio.sleep(0)
+        self.assertFalse(owner.done())
+        owner.cancel("second cancellation")
+        await asyncio.sleep(0)
+        self.assertFalse(owner.done())
+
+        release_first_wait.set()
+        with self.assertRaises(asyncio.CancelledError):
+            await asyncio.wait_for(owner, timeout=1)
+
+        self.assertIsNone(client.process)
+        self.assertEqual(process.returncode, -signal.SIGKILL)
+        self.assertEqual(terminate_calls, 1)
+        self.assertEqual(kill_calls, 1)
+        self.assertEqual(exit_hooks, [(process.pid, None)])
+
+    async def test_response_wait_uses_remaining_end_to_end_deadline(self) -> None:
+        factory = FakeProcessFactory()
+        process = factory.process
+        client = self.make_client(factory)
+        self.addAsyncCleanup(client.close)
+        await client.start()
+
+        original_drain = process.stdin.drain
+
+        async def slow_drain() -> None:
+            await asyncio.sleep(0.03)
+            await original_drain()
+
+        process.stdin.drain = slow_drain
+        recorded_timeouts: list[float | None] = []
+        real_wait_for = asyncio.wait_for
+
+        async def recording_wait_for(
+            awaitable: Any,
+            timeout: float | None,
+        ) -> Any:
+            recorded_timeouts.append(timeout)
+            return await real_wait_for(awaitable, timeout=timeout)
+
+        with patch("codex_app_server.asyncio.wait_for", recording_wait_for):
+            with self.assertRaises(CodexAppServerTimeout):
+                await client.request("test/no-response", {}, timeout=0.1)
+
+        self.assertGreaterEqual(len(recorded_timeouts), 3)
+        first_timeout = recorded_timeouts[0]
+        response_timeout = recorded_timeouts[-1]
+        self.assertIsNotNone(first_timeout)
+        self.assertIsNotNone(response_timeout)
+        assert first_timeout is not None
+        assert response_timeout is not None
+        self.assertLess(response_timeout, first_timeout - 0.015)
+        self.assertTrue(client.ready)
+        self.assertIs(client.process, process)
+
+    async def test_blocked_server_response_drain_cleans_up_without_self_wait(
+        self,
+    ) -> None:
+        first_process = FakeProcess()
+        second_process = FakeProcess()
+        second_process.responders["test/recovered"] = lambda _: {"ok": True}
+        factory = FakeProcessFactory(first_process, second_process)
+
+        async def handler(
+            _request_id: Any,
+            _method: str,
+            _params: dict[str, Any],
+        ) -> dict[str, Any]:
+            return {"ok": True}
+
+        client = self.make_client(factory, server_request_handler=handler)
+        client.request_timeout = 0.01
+        self.addAsyncCleanup(client.close)
+        await client.start()
+
+        never_drain = asyncio.Event()
+
+        async def blocked_drain() -> None:
+            await never_drain.wait()
+
+        first_process.stdin.drain = blocked_drain
+        first_process.feed({
+            "id": "server-request",
+            "method": "test/server-request",
+            "params": {},
+        })
+        await wait_until(lambda: client.process is None)
+        await wait_until(lambda: not client._server_request_tasks)
+
+        self.assertEqual(first_process.returncode, -signal.SIGTERM)
+        self.assertFalse(client._server_request_tasks)
+        self.assertEqual(
+            await client.request("test/recovered", {}),
+            {"ok": True},
+        )
+        self.assertIs(client.process, second_process)
 
     async def test_ambiguous_turn_start_keeps_a_routed_provisional_handle(self) -> None:
         factory = FakeProcessFactory()
@@ -1933,6 +2720,74 @@ class CodexAppServerClientTests(unittest.IsolatedAsyncioTestCase):
             factory.process.messages[-1]["method"],
             "thread/compact/start",
         )
+
+    async def test_manager_prepares_each_process_before_spawn_but_not_ready_reuse(self) -> None:
+        factory = FakeProcessFactory()
+        entered = asyncio.Event()
+        release = asyncio.Event()
+        spawn_counts = []
+
+        async def prepare() -> None:
+            spawn_counts.append(len(factory.calls))
+            entered.set()
+            await release.wait()
+
+        manager = CodexAppServerManager("codex", cwd="/tmp",
+            env_factory=lambda: {}, process_factory=factory, before_start=prepare)
+        self.addAsyncCleanup(manager.close)
+        opening = asyncio.create_task(manager.start())
+        try:
+            await asyncio.wait_for(entered.wait(), timeout=1)
+            self.assertEqual(factory.calls, [])
+        finally:
+            release.set()
+            await opening
+        await manager.start()
+        self.assertEqual(spawn_counts, [0])
+        self.assertEqual(len(factory.calls), 1)
+        await manager.retire_generation(manager.generation)
+        await manager.start()
+        self.assertEqual(spawn_counts, [0, 1])
+        self.assertEqual(len(factory.calls), 2)
+
+    async def test_failed_preparation_prevents_spawn_and_allows_retry(self) -> None:
+        factory = FakeProcessFactory()
+        prepare = AsyncMock(side_effect=[RuntimeError("catalog unavailable"), None])
+        client = self.make_client(factory, before_start=prepare)
+        self.addAsyncCleanup(client.close)
+        with self.assertRaises(CodexAppServerDisconnected) as failure:
+            await client.start()
+        self.assertFalse(failure.exception.request_sent)
+        self.assertTrue(failure.exception.safe_to_retry)
+        self.assertEqual(factory.calls, [])
+        self.assertFalse(client.ready)
+        await client.start()
+        self.assertEqual(prepare.await_count, 2)
+        self.assertEqual(len(factory.calls), 1)
+
+    async def test_cancelled_preparation_prevents_spawn_and_releases_start_lock(self) -> None:
+        factory = FakeProcessFactory()
+        entered = asyncio.Event()
+        release = asyncio.Event()
+
+        async def prepare() -> None:
+            entered.set()
+            await release.wait()
+
+        client = self.make_client(factory, before_start=prepare)
+        self.addAsyncCleanup(client.close)
+        opening = asyncio.create_task(client.start())
+        try:
+            await asyncio.wait_for(entered.wait(), timeout=1)
+        finally:
+            opening.cancel()
+            with self.assertRaises(asyncio.CancelledError):
+                await opening
+        self.assertEqual(factory.calls, [])
+        self.assertFalse(client.ready)
+        release.set()
+        await asyncio.wait_for(client.start(), timeout=1)
+        self.assertEqual(len(factory.calls), 1)
 
 
 if __name__ == "__main__":

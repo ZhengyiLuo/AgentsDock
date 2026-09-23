@@ -90,6 +90,20 @@ export interface ClaudeRuntimeFeatures {
   context_usage_refresh?: boolean
   /** Native Claude Agent SDK MCP status and control endpoints are available. */
   mcp_management?: boolean
+  /** Native Claude completion-condition goals, with authoritative provider state. */
+  goals?: boolean
+}
+
+export interface ClaudeGoal {
+  condition: string
+  status: 'active' | 'achieved' | 'cleared' | 'failed'
+  iterations?: number
+  /** Native goal timestamp in milliseconds since the epoch. */
+  set_at?: number
+  tokens_at_start?: number
+  last_reason?: string
+  duration_ms?: number
+  tokens?: number
 }
 
 export interface ClaudeRuntimeSnapshot {
@@ -114,6 +128,12 @@ export interface ClaudeRuntimeSnapshot {
   usage_generation?: number | null
   /** True when this response includes a newly sampled SDK context value. */
   context_usage_refreshed?: boolean
+  /** Native Claude current/latest goal; absent on older servers. */
+  goal?: ClaudeGoal | null
+  /** Native command accepted; awaiting an authoritative goal status record. */
+  goal_starting?: boolean
+  /** The initial provider transcript goal projection is still loading. */
+  goal_loading?: boolean
 }
 
 export type ClaudeTokenUsage = Record<string, JsonValue>
@@ -1707,6 +1727,24 @@ export interface HealthCapabilities {
   [key: string]: SideQuestionsCapability | ServerCapability | ServerRestartCapability | TeamHubV1Capability | TeamHubHostControlCapability | LocalSessionImportCapability | SessionForkCompletedPrefixCapability | AgentEmergencyAlertsCapability | TeamMailHintsCapability | TeamActivityHintsCapability | AgentTeamMailCapability | AgentTeamMessagesCapability | TeamBulletinAliasCapability | TeamAllServersAliasCapability | PinnedItemsCapability | JsonValue | undefined
 }
 
+export type ServerComponentHealth = {
+  protocol: number
+  instance_id: string
+  pid: number
+  version: string
+}
+
+export type ExecutionServiceHealth = ServerComponentHealth & {
+  worker_upgrade_policy: 'when_idle'
+  rolling_worker_upgrade: boolean
+  /** A healthy candidate can still be held until its installer commits. */
+  maintenance_held?: boolean
+}
+
+export type GatewayHealth = ServerComponentHealth & {
+  restart_preserves_execution: boolean
+}
+
 export interface Health {
   ok: boolean
   state_dir?: string
@@ -1715,6 +1753,9 @@ export interface Health {
   /** Opaque boot identifier. A successful managed restart must change it. */
   server_instance_id?: string
   server_version?: string
+  /** Separate component versions; server_version still describes execution. */
+  gateway?: GatewayHealth
+  execution_service?: ExecutionServiceHealth
   api_contract_version?: number
   active?: string[]
   active_sessions?: string[]
@@ -1918,6 +1959,8 @@ export interface ServerUpdateStatus {
   /** Pending reservations can be cancelled until the detached updater starts. */
   cancelable?: boolean
   pending_at?: string
+  /** Preparation keeps phase pending and allows existing and manual work. */
+  preparation_phase?: 'checking' | 'downloading' | 'staging' | 'ready'
   blocker_counts?: ServerUpdateBlockerCounts
   message?: string
   /** Stable public failure code for actionable managed-update recovery. */
@@ -1934,6 +1977,23 @@ export interface ServerUpdateStatus {
 export type AppUpdateState = 'disabled' | 'idle' | 'checking' | 'available' | 'downloading' | 'downloaded' | 'installing' | 'not-available' | 'error'
 export type AppUpdateChannel = 'development' | 'direct' | 'app-store'
 export type AppUpdateTrack = 'stable' | 'beta'
+export interface CoordinatedServerUpdate {
+  profileId: string
+  name: string
+  serverIdentity: string | null
+  targetVersion: string
+  phase: 'checking' | 'pending' | 'updating' | 'current' | 'offline' | 'blocked' | 'failed'
+  message: string
+  apiContractVersion?: number
+  serverInstanceId?: string
+  gatewayVersion?: string
+  executionVersion?: string
+  operationId?: string
+  scheduleId?: string
+  operationTargetVersion?: string
+  operationOwned?: boolean
+  paused?: boolean
+}
 export interface AppUpdateStatus {
   state: AppUpdateState
   channel: AppUpdateChannel
@@ -1944,6 +2004,10 @@ export interface AppUpdateStatus {
   message?: string
   checkedAt?: string
   downloadedAt?: string
+  /** Whether the pending app update can still be canceled before native installation. */
+  cancelable?: boolean
+  serverUpdates?: CoordinatedServerUpdate[]
+  serverUpdateMessage?: string
 }
 
 export interface TimelinePage {
@@ -2183,6 +2247,7 @@ export interface ReasoningSummaryStreamSnapshot {
 export interface ViewState {
   sessionId: string
   topItemId?: string | null
+  topItemSeq?: number | null
   topOffset?: number
   distanceFromBottom?: number
   atBottom?: boolean
