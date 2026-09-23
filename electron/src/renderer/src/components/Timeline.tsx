@@ -682,7 +682,7 @@ function TimelineSession({ profileId, profileGeneration, serverIdentity, session
     previousLastKey.current = last
   }, [items])
 
-  useEffect(() => {
+  const settleLatestLayout = useCallback(() => {
     if (!openSettlingRef.current) return
     const finishSettling = () => {
       if (openSettleTimer.current != null) window.clearTimeout(openSettleTimer.current)
@@ -715,7 +715,9 @@ function TimelineSession({ profileId, profileGeneration, serverIdentity, session
     })
     if (openSettleTimer.current != null) window.clearTimeout(openSettleTimer.current)
     openSettleTimer.current = window.setTimeout(finishSettling, OPEN_SETTLE_QUIET_MS)
-  }, [historicalWindow, items, scrollToLatest])
+  }, [historicalWindow, scrollToLatest])
+
+  useEffect(() => { settleLatestLayout() }, [items, settleLatestLayout])
 
   useEffect(() => () => {
     if (openSettleTimer.current != null) window.clearTimeout(openSettleTimer.current)
@@ -1084,6 +1086,7 @@ function TimelineSession({ profileId, profileGeneration, serverIdentity, session
         scrollerRef={setScroller}
         skipAnimationFrameInResizeObserver
         followOutput={false}
+        totalListHeightChanged={settleLatestLayout}
         atBottomThreshold={80}
         atBottomStateChange={value => {
           atBottomRef.current = value
@@ -1166,7 +1169,7 @@ function TimelineSession({ profileId, profileGeneration, serverIdentity, session
           {searchResults.length > 12 && <p>{t('timeline.search.range', { start: searchWindowStart + 1, end: Math.min(searchResults.length, searchWindowStart + 12), count: searchResults.length })}</p>}
         </div>}
       </div>}
-      {!historicalWindow && !atBottom && <ShortcutTooltip shortcut="jumpLatest" side="left"><button className={`latest-button ${newBelow ? 'has-new' : ''}`} aria-label={t('timeline.ui.jumpToLatest')} onClick={jumpToLatest}><ArrowDown size={14} />{newBelow ? t('timeline.ui.new') : ''}</button></ShortcutTooltip>}
+      {(historicalWindow || !atBottom) && <ShortcutTooltip shortcut="jumpLatest" side="left"><button className={`latest-button ${newBelow ? 'has-new' : ''}`} aria-label={t('timeline.ui.jumpToLatest')} onClick={historicalWindow ? returnToLatest : jumpToLatest}><ArrowDown size={14} />{newBelow ? t('timeline.ui.new') : ''}</button></ShortcutTooltip>}
       {seekingHistory && <div className="timeline-seeking"><LoaderCircle className="spin" size={13} />  {t('timeline.ui.openingThatPoint')}</div>}
     </div>
   )

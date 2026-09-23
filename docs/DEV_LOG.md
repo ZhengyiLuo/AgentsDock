@@ -1,5 +1,32 @@
 # Public development log
 
+## 2026-09-23 — Restore side-chat inspection and reliable latest navigation
+
+- Match native Codex Side chat: retain the parent workspace and permission
+  settings, allow file inspection and ordinary tools, and keep side questions
+  separate from inherited tasks. Route side approvals through the existing
+  controls without borrowing the main run's helper authority. Stopping the main
+  turn leaves side approvals intact; closing Side chat cleans up its own work.
+- Verify real Codex reads a file created after the parent turn, remembers the
+  result on follow-up, and performs a separately requested local write. Parent
+  provider history, settings, goals and queues remain unchanged. Personally
+  exercise the app's Side chat with native input through production IPC and
+  HTTP: read another new file, verify its unpredictable value, follow up, and
+  Clear. The native test window is isolated and offscreen.
+- Keep the floating Jump to latest action visible in older-history windows.
+  Reproduce the missing control in the actual app with a 600-turn fixture, then
+  verify the corrected button reaches the latest message. Verify a new fork
+  opens at the end and ordinary saved reading positions remain intact. These
+  timeline checks use synthetic history and the real HTTP memory-fork path.
+- Reapply the existing bounded initial bottom alignment when virtualized row
+  heights settle. A focused regression covers a delayed height change and user
+  scrolling cancellation; ordinary fork landing already worked in the baseline
+  native fixture, so it does not establish the intermittent failure's frequency.
+- Validation: 4,804 active Electron tests, eight stock Node checks, TypeScript,
+  production compilation, and focused server adapter/provider/approval checks
+  pass. Package acceptance is recorded separately. Side-chat tool access needs
+  the server change; the scrolling corrections are app-only.
+
 ## 2026-09-23 — Publish the fresh-install npm beta
 
 - Publish `@agentsdock/server@1.0.7-beta.5` publicly from committed source
