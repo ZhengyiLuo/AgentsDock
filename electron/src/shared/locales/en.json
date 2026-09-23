@@ -228,7 +228,7 @@
   "sessionFork.runningDescription": "Fork through the last completed turn; the source chat keeps running.",
   "sessionFork.runningUnavailable": "Update AgentsServer to fork a running chat through its last completed turn, or wait for this turn to finish.",
   "settings.reasoningDisplay": "Show reasoning traces",
-  "settings.reasoningDisplayHelp": "Show Codex summaries and reasoning text during active turns. Completed turns stay collapsed.",
+  "settings.reasoningDisplayHelp": "Expand Codex and Claude thinking during active turns. Completed turns stay collapsed; open their activity to read the details.",
   "timeline.activity.partialProviderReasoning": "Partial provider-supplied reasoning",
   "timeline.activity.providerReasoning": "Provider-supplied reasoning",
   "timeline.activity.reasoningSummary": "Reasoning summary",

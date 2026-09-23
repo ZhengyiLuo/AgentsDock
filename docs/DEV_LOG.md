@@ -1,5 +1,19 @@
 # Public development log
 
+## 2026-09-22 — Make Claude thinking compact and optional
+
+- Keep Claude thinking in a single-line disclosure by default. Apply the
+  existing thinking visibility setting to active Claude turns as well as Codex;
+  completed and stopped turns collapse while retaining manually readable text.
+- Bound expanded Claude thinking to a scrollable panel, preserve the user's
+  chat font size, and replace the large colored card with subdued styling.
+  Update the setting's English and Chinese descriptions.
+- Targeted timeline checks, TypeScript and production compilation pass.
+  Reproduce the oversized panel in an isolated native app and verify the
+  corrected long-text display through production IPC and authenticated HTTP.
+  Local package and live-provider acceptance are recorded separately.
+- This is an app-only correction. No server update is required.
+
 ## 2026-09-22 — Validate unpublished desktop beta.3, build 1205
 
 - Build committed source `4c87d87f28735adedd20295fbb4db4f328c794b1` as

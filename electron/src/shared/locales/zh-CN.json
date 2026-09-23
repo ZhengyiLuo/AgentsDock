@@ -228,7 +228,7 @@
   "sessionFork.runningDescription": "从上一个已完成的轮次创建会话分支；原会话继续运行。",
   "sessionFork.runningUnavailable": "更新 AgentsServer，以便从正在运行的会话中上一个已完成的轮次创建分支，或等待本轮结束。",
   "settings.reasoningDisplay": "显示 Reasoning 过程",
-  "settings.reasoningDisplayHelp": "仅在当前轮次运行时显示 Codex 提供的摘要和 Reasoning 文本。结束后自动折叠。",
+  "settings.reasoningDisplayHelp": "在当前轮次运行时展开 Codex 和 Claude 的思考内容。结束后自动折叠，可展开活动记录查看详情。",
   "timeline.activity.partialProviderReasoning": "部分提供方 Reasoning",
   "timeline.activity.providerReasoning": "提供方提供的 Reasoning",
   "timeline.activity.reasoningSummary": "Reasoning 摘要",

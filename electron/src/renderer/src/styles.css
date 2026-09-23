@@ -998,6 +998,12 @@ button.run-activity-summary:hover { color: #d3d0c9; background: #252525; }
 .trace-reasoning-update + .trace-reasoning-update { margin-top: 8px; padding-top: 8px; border-top: 1px solid #36323f; }
 .trace-reasoning-body .markdown { font-size: var(--chat-font-size); line-height: 1.5; }
 .trace-reasoning-body .markdown p { white-space: pre-line; }
+/* Claude keeps its thinking disclosure, with bounded, readable detail. */
+.claude-native-activity .trace-reasoning-toggle { width: 100%; color: var(--muted); }
+.claude-native-activity .trace-reasoning-preview { display: block; font-size: var(--chat-font-size); font-weight: 400; white-space: nowrap; text-overflow: ellipsis; }
+:root .claude-native-activity .trace-reasoning > .trace-reasoning-body { max-height: min(320px, 40vh); overflow-y: auto; scrollbar-gutter: stable; color: var(--muted); background: transparent; border: 0; border-left: 2px solid var(--border); border-radius: 0; }
+.claude-native-activity .trace-reasoning-body .markdown { color: inherit; }
+.claude-native-activity .trace-reasoning-body .markdown :is(h1, h2, h3, h4, h5, h6) { font-size: inherit; line-height: inherit; }
 /* Codex's live activity is one quiet status line, not a stack of summary cards. */
 .codex-native-activity .run-activity-summary { width: 100%; padding: 5px 4px 9px; margin-bottom: 9px; border-bottom: 1px solid var(--border); border-radius: 0; font-size: var(--chat-font-size); }
 .codex-native-activity .run-activity-summary > strong { font-weight: 400; }
