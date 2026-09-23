@@ -90,4 +90,4 @@ Never add message or prompt text, chat/job/agent/folder names, skill or command 
 
 ## User control
 
-Settings > General includes a Usage analytics switch and a link to the published Privacy Policy. Turning analytics off aborts pending requests, deletes the anonymous per-install identifier, and prevents subsequent events. A previously stored opt-out remains off after an update.
+Settings does not expose a usage analytics switch; it was removed on purpose and must not be reintroduced (Dialogs.test.tsx guards this). A previously stored opt-out from an older build is still honored: it aborts pending requests, deletes the anonymous per-install identifier, and prevents subsequent events.
