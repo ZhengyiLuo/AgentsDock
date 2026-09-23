@@ -334,6 +334,19 @@ describe('SettingsDialog managed server restart', () => {
     expect(updatesSurface().queryByRole('button', { name: 'Force restart server' })).not.toBeInTheDocument()
   })
 
+  it('keeps an offline server heading and saved version without advertising unsupported actions', async () => {
+    installBridge()
+    showSettings({ ok: true, capabilities: {} }, false)
+    useAppStore.setState(state => ({ profiles: state.profiles.map(profile => ({ ...profile, serverVersion: '0.1.26' })) }))
+    render(<SettingsDialog />)
+    openAppUpdates()
+    await act(async () => { await Promise.resolve() })
+
+    expect(updatesSurface().getByText('AgentsServer', { exact: false, selector: 'strong' })).toHaveTextContent('AgentsServer 0.1.26')
+    expect(screen.getByText('Production east')).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /Check server|Restart server|Force restart server|Install or update AgentsServer|Set up your server/ })).not.toBeInTheDocument()
+  })
+
   it.each(['unavailable', 'offline', 'switching'] as const)('keeps Updates Restart disabled when %s', async state => {
     installBridge(vi.fn().mockResolvedValue(currentServerUpdate))
     const health = recoveryHealth()
@@ -1511,7 +1524,7 @@ describe('SettingsDialog managed server restart', () => {
 
     await waitFor(() => expect(screen.getByRole('button', { name: 'Restarting…' })).toBeDisabled())
     openAppUpdates()
-    expect(screen.getByRole('button', { name: 'Install or update AgentsServer', hidden: true })).toBeDisabled()
+    expect(updatesSurface().getByRole('button', { name: 'Restarting…', hidden: true })).toBeDisabled()
     await waitFor(() => expect(restartServer).toHaveBeenCalled())
     await act(async () => { resolveRestart(true) })
     expect(await screen.findByText('AgentsServer restarted and reconnected.')).toHaveAttribute('role', 'status')

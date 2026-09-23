@@ -804,7 +804,7 @@ describe('SettingsDialog server updates', () => {
       render(<SettingsDialog />)
       const guidedUpdate = await screen.findByRole('button', { name: 'Open guided Beta update' })
       expect(screen.queryByRole('button', { name: /Update server to Beta/ })).not.toBeInTheDocument()
-      expect(screen.getByRole('button', { name: /Install or update AgentsServer/ })).toBeInTheDocument()
+      expect(screen.queryByRole('button', { name: /Install or update AgentsServer|Set up your server/ })).not.toBeInTheDocument()
       fireEvent.click(guidedUpdate)
 
       await waitFor(() => expect(setup).toHaveBeenCalledOnce())

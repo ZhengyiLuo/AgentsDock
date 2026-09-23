@@ -1,5 +1,19 @@
 # Public development log
 
+## 2026-09-23 — Clarify update settings on the main desktop line
+
+- List saved servers and their known versions beneath the server update
+  controls. Retain the server heading when a saved server is offline.
+- Offer setup only before any server is configured, including when an inactive
+  saved server is offline. Selected update channels expose their pressed state,
+  and app update actions wait for a pending channel change.
+- Adapt the Settings change to this line's existing manual server updater;
+  no server update or backend contract change is required.
+- Focused Settings component checks, TypeScript and production compilation
+  pass. These checks use component fixtures; native click-through and real
+  update transport acceptance remain pending. Availability: source/local
+  compilation only, with no release or server deployment.
+
 ## 2026-09-21 — Integrate completed desktop work into main
 
 - Merge the completed desktop branch through `8d7745d` with main `33f9355`,
