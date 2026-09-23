@@ -908,3 +908,28 @@ footer a:hover { color: var(--text); }
   .download-button:hover { transform: none; }
   .trusted-logos span { animation: none; }
 }
+
+/* ── FAQ page: search + expandable questions ── */
+.faq-page .legal { max-width: 760px; }
+.faq-search { display: flex; align-items: center; gap: 10px; margin: 0 0 28px; padding: 0 14px; height: 48px; border: 1px solid var(--line); border-radius: 12px; background: rgba(255,255,255,.02); color: var(--muted); transition: border-color .15s ease, background-color .15s ease; }
+.faq-search:focus-within { border-color: var(--blue); background: rgba(91,157,255,.05); color: var(--text); }
+.faq-search svg { flex-shrink: 0; }
+.faq-search input { flex: 1; min-width: 0; height: 100%; border: 0; outline: 0; background: transparent; color: var(--text); font: inherit; font-size: 16px; }
+.faq-search input::placeholder { color: var(--muted); }
+.faq-search input::-webkit-search-cancel-button { -webkit-appearance: none; }
+.faq-count { font-size: 13px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.faq-list { border-top: 1px solid var(--line); }
+.faq-item { border-bottom: 1px solid var(--line); }
+.faq-item[hidden] { display: none; }
+.faq-item summary { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 18px 4px; cursor: pointer; list-style: none; color: var(--text); font-family: var(--display); font-size: 17px; font-weight: 600; letter-spacing: -.01em; line-height: 1.35; transition: color .15s ease; }
+.faq-item summary::-webkit-details-marker { display: none; }
+.faq-item summary:hover { color: var(--blue); }
+.faq-chev { flex-shrink: 0; color: var(--muted); transition: transform .18s ease; }
+.faq-item[open] .faq-chev { transform: rotate(180deg); color: var(--blue); }
+.faq-a { padding: 0 4px 22px; animation: docsNavIn .16s ease; }
+.faq-a > :last-child { margin-bottom: 0; }
+.faq-a ol { margin: 0 0 16px; padding-left: 22px; }
+.faq-a pre { margin: 10px 0 12px; }
+.faq-page mark { background: rgba(91,157,255,.28); color: inherit; border-radius: 3px; padding: 0 1px; }
+.faq-empty { color: var(--muted-2); padding: 28px 4px 0; }
+@media (max-width: 560px) { .faq-item summary { font-size: 16px; padding: 16px 2px; } }

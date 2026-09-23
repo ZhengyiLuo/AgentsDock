@@ -190,4 +190,18 @@
     <xhtml:link rel="alternate" hreflang="zh-CN" href="https://agentsdock.net/zh/update.html" />
     <xhtml:link rel="alternate" hreflang="x-default" href="https://agentsdock.net/update.html" />
   </url>
+  <url>
+    <loc>https://agentsdock.net/faq.html</loc>
+    <lastmod>2026-09-22</lastmod>
+    <xhtml:link rel="alternate" hreflang="en" href="https://agentsdock.net/faq.html" />
+    <xhtml:link rel="alternate" hreflang="zh-CN" href="https://agentsdock.net/zh/faq.html" />
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://agentsdock.net/faq.html" />
+  </url>
+  <url>
+    <loc>https://agentsdock.net/zh/faq.html</loc>
+    <lastmod>2026-09-22</lastmod>
+    <xhtml:link rel="alternate" hreflang="en" href="https://agentsdock.net/faq.html" />
+    <xhtml:link rel="alternate" hreflang="zh-CN" href="https://agentsdock.net/zh/faq.html" />
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://agentsdock.net/faq.html" />
+  </url>
 </urlset>

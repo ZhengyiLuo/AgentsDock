@@ -1,0 +1,223 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="description" content="Frequently asked questions about AgentsDock — including why the latest Codex or Claude models may not appear, and how to update the provider CLIs on your server." />
+    <!-- Social preview (Open Graph / Twitter) -->
+    <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="AgentsDock" />
+    <meta property="og:title" content="FAQ · AgentsDock" />
+    <meta property="og:description" content="Answers to common AgentsDock questions, starting with how to get the latest Codex and Claude models." />
+    <meta property="og:url" content="https://agentsdock.net/faq.html" />
+    <meta property="og:image" content="https://agentsdock.net/assets/og-card.png?v=82a3bdda" />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+    <meta property="og:image:alt" content="AgentsDock — an IDE designed for agentic AI research" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="FAQ · AgentsDock" />
+    <meta name="twitter:description" content="Answers to common AgentsDock questions, starting with how to get the latest Codex and Claude models." />
+    <meta name="twitter:image" content="https://agentsdock.net/assets/og-card.png?v=82a3bdda" />
+    <meta name="theme-color" content="#0d1013" />
+    <meta name="robots" content="index,follow" />
+    <title>FAQ · AgentsDock</title>
+    <link rel="icon" href="./favicon.ico" sizes="any" />
+    <link rel="icon" type="image/png" href="./assets/favicon-96.png" sizes="96x96" />
+    <link rel="apple-touch-icon" href="./assets/apple-touch-icon.png" />
+    <!-- Google Analytics (GA4) -->
+    <script async src="https://www.googletagmanager.com/gtag/js?id=G-G3XRBEHKVD"></script>
+    <script>
+      window.dataLayer = window.dataLayer || [];
+      function gtag(){dataLayer.push(arguments);}
+      gtag('js', new Date());
+      gtag('config', 'G-G3XRBEHKVD');
+    </script>
+    <script src="./analytics.js" defer></script>
+    <script src="./site-nav.js?v=e6b98484" defer></script>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Instrument+Sans:wght@400;500;600;700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
+    <link rel="alternate" hreflang="en" href="https://agentsdock.net/faq.html" />
+    <link rel="alternate" hreflang="zh-CN" href="https://agentsdock.net/zh/faq.html" />
+    <link rel="alternate" hreflang="x-default" href="https://agentsdock.net/faq.html" />
+    <link rel="stylesheet" href="./styles.css?v=360f364f" />
+  </head>
+  <body>
+    <header class="site-header">
+      <a class="brand" href="./index.html" aria-label="AgentsDock home">
+        <img src="./assets/agentsdock-icon.png" alt="" />
+        <span>AgentsDock</span>
+      </a>
+      <nav aria-label="Primary navigation">
+        <a href="./index.html">Home</a>
+        <a href="./setup.html">Docs</a>
+        <a href="./faq.html">FAQ</a>
+        <a class="nav-discord" href="https://discord.gg/ZGDrhEWqPt" target="_blank" rel="noopener"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M20.317 4.369a19.79 19.79 0 0 0-4.885-1.515.074.074 0 0 0-.079.037c-.211.375-.446.865-.608 1.249a18.27 18.27 0 0 0-5.487 0 12.6 12.6 0 0 0-.617-1.25.077.077 0 0 0-.079-.036A19.74 19.74 0 0 0 3.677 4.37a.07.07 0 0 0-.032.027C.533 9.046-.32 13.58.099 18.057a.082.082 0 0 0 .031.057 19.9 19.9 0 0 0 5.993 3.03.078.078 0 0 0 .084-.028 14.2 14.2 0 0 0 1.226-1.994.076.076 0 0 0-.041-.106 13.1 13.1 0 0 1-1.872-.892.077.077 0 0 1-.008-.128 10 10 0 0 0 .372-.291.074.074 0 0 1 .077-.01c3.928 1.793 8.18 1.793 12.062 0a.074.074 0 0 1 .078.009q.181.15.373.292a.077.077 0 0 1-.006.127 12.3 12.3 0 0 1-1.873.891.077.077 0 0 0-.041.107c.36.698.772 1.362 1.225 1.993a.076.076 0 0 0 .084.028 19.84 19.84 0 0 0 6.002-3.03.077.077 0 0 0 .032-.054c.5-5.177-.838-9.674-3.549-13.66a.06.06 0 0 0-.031-.03zM8.02 15.331c-1.183 0-2.157-1.085-2.157-2.419 0-1.333.956-2.419 2.157-2.419 1.21 0 2.176 1.096 2.157 2.42 0 1.333-.956 2.418-2.157 2.418m7.975 0c-1.183 0-2.157-1.085-2.157-2.419 0-1.333.955-2.419 2.157-2.419 1.21 0 2.176 1.096 2.157 2.42 0 1.333-.946 2.418-2.157 2.418"/></svg>Discord</a>
+      </nav>
+      <div class="lang-switch header-lang">
+        <button type="button" class="lang-switch-btn" aria-haspopup="listbox" aria-expanded="false" aria-label="Language"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18"/></svg><span class="lang-switch-label">English</span><svg class="lang-switch-chev" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg></button>
+        <ul class="lang-switch-menu" role="listbox" hidden>
+          <li><a role="option" class="is-current" aria-selected="true" aria-current="true" lang="en">English<svg class="lang-switch-check" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12l5 5L20 7"/></svg></a></li>
+          <li><a role="option" href="./zh/faq.html" hreflang="zh-CN" lang="zh-CN">简体中文</a></li>
+        </ul>
+      </div>
+    </header>
+
+    <main class="faq-page">
+      <article class="legal">
+        <p class="section-kicker">Support</p>
+        <h1>Frequently asked questions</h1>
+        <p class="legal-lead">Common questions about AgentsDock — click a question to expand the answer. Can't find yours? <a href="./report-issue.html">Ask us</a> and we'll add it here.</p>
+        <label class="faq-search" aria-label="Search the FAQ">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg>
+          <input type="search" placeholder="Search questions, e.g. models, Tailscale, token" autocomplete="off" spellcheck="false" />
+          <span class="faq-count" aria-live="polite"></span>
+        </label>
+        <div class="faq-list">
+          <details class="faq-item" id="latest-models">
+            <summary><span class="faq-q">Why can't I see the latest Codex or Claude models in AgentsDock?</span><svg class="faq-chev" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg></summary>
+            <div class="faq-a">
+<p>AgentsDock talks to the agent runtimes installed on the machine that runs your <strong>AgentsServer</strong>. The model list in the app comes from the Codex and Claude Code CLIs <em>on that machine</em>, so updating the AgentsDock app on your phone or laptop does not add new models.</p>
+<p><strong>How to get the latest models</strong></p>
+<ol>
+<li>On the machine that runs AgentsServer (not the device you're connecting from), update the provider CLI:
+<pre><code># Codex
+codex update
+codex --version
+
+# Claude Code
+claude update
+claude --version</code></pre></li>
+<li>Back in AgentsDock, open <strong>Settings</strong> and click <strong>Recheck CLIs</strong> to refresh the model list. No server restart is needed.</li>
+<li>Still missing? Check that you're connected to the server you just updated, then check the provider side: your account or plan, your workspace's admin settings, and whether the model has rolled out to you yet. Updating the CLI makes a model visible; it doesn't grant access to it.</li>
+</ol>
+<p>If you run more than one server, repeat the update on each — every server keeps its own CLIs.</p>
+            </div>
+          </details>
+          <details class="faq-item" id="platforms">
+            <summary><span class="faq-q">Which platforms does AgentsDock run on?</span><svg class="faq-chev" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg></summary>
+            <div class="faq-a">
+<p>The client runs on <strong>macOS, Windows, Linux, iPhone, iPad, and Android</strong>. The server side, AgentsServer, runs on macOS (Apple silicon) or Linux. See the <a href="./iphone.html">client install guide</a> for each platform.</p>
+            </div>
+          </details>
+          <details class="faq-item" id="data">
+            <summary><span class="faq-q">Does AgentsDock see my code, prompts, or model requests?</span><svg class="faq-chev" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg></summary>
+            <div class="faq-a">
+<p>No. AgentsDock runs the Claude Code, Codex, and Cursor CLIs <strong>on your own machine, with your own accounts</strong>. It never proxies your model requests. Optional, anonymous usage analytics are off by default and can be turned on in Settings. Details are in the <a href="./privacy.html">privacy policy</a>.</p>
+            </div>
+          </details>
+          <details class="faq-item" id="tailscale">
+            <summary><span class="faq-q">Do I need Tailscale?</span><svg class="faq-chev" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg></summary>
+            <div class="faq-a">
+<p>Only to reach your server from outside its local network. On the same Wi-Fi you can use the machine's local IP address. Tailscale gives the server a private <code>100.x.x.x</code> address you can reach from anywhere without opening ports. See <a href="./setup.html#remote-tailscale">the setup guide</a>.</p>
+            </div>
+          </details>
+          <details class="faq-item" id="multi-server">
+            <summary><span class="faq-q">Can I connect to more than one server?</span><svg class="faq-chev" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg></summary>
+            <div class="faq-a">
+<p>Yes. Add each server from the server menu at the top of the sidebar with <strong>Add Server</strong>, then switch between them any time. Each server keeps its own chats.</p>
+            </div>
+          </details>
+          <details class="faq-item" id="token">
+            <summary><span class="faq-q">Where do I find my access token?</span><svg class="faq-chev" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg></summary>
+            <div class="faq-a">
+<p>The installer prints it once when it finishes. To show it again, run this on the server machine:</p>
+<pre><code>./install.sh --show-token</code></pre>
+<p>Paste it into the <strong>Access token</strong> field when adding the server in the app.</p>
+            </div>
+          </details>
+          <details class="faq-item" id="resume">
+            <summary><span class="faq-q">Can I resume a chat I started outside AgentsDock?</span><svg class="faq-chev" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg></summary>
+            <div class="faq-a">
+<p>Yes. Open <strong>Import chat</strong> from the <code>/</code> menu to pick from every Claude Code or Codex session on that machine, or choose <strong>Resume by session ID</strong> and paste the ID. Either way the full history comes with it. See <a href="./features.html#feat-resume">Resume other chats</a>.</p>
+            </div>
+          </details>
+          <details class="faq-item" id="update">
+            <summary><span class="faq-q">How do I update AgentsDock and the server?</span><svg class="faq-chev" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg></summary>
+            <div class="faq-a">
+<p>Both update from the app's <strong>Settings</strong>: click <strong>Check now</strong>, then <strong>Restart to update</strong>. The app and the server each have their own Stable / Beta switch. See <a href="./update.html">Updates</a>.</p>
+            </div>
+          </details>
+          <details class="faq-item" id="open-source">
+            <summary><span class="faq-q">Is AgentsDock open source?</span><svg class="faq-chev" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg></summary>
+            <div class="faq-a">
+<p>Yes. The client is on <a href="https://github.com/ZhengyiLuo/AgentsDock" target="_blank" rel="noopener">GitHub</a> and the server is at <a href="https://github.com/ZhengyiLuo/AgentsServer" target="_blank" rel="noopener">AgentsServer</a>. Stars are welcome.</p>
+            </div>
+          </details>
+        </div>
+        <p class="faq-empty" hidden>No matching questions. Try another keyword, or <a href="./report-issue.html">ask us directly</a>.</p>
+      </article>
+    </main>
+
+    <footer>
+      <div class="brand footer-brand"><img src="./assets/agentsdock-icon.png" alt="" /><span>AgentsDock</span></div>
+      <p>An IDE designed for agentic AI research.<span class="footer-copyright">&copy; 2026 AgentsDock</span></p>
+      <div>
+        <a href="./setup.html">Docs</a>
+        <a href="./support.html">Support</a>
+        <a href="./report-issue.html">Report an issue</a>
+        <a href="./privacy.html">Privacy</a>
+        <a href="https://discord.gg/ZGDrhEWqPt" target="_blank" rel="noopener">Discord &#8599;</a>
+      </div>
+    </footer>
+
+    <script>
+      // Highlight the current section in the sidebar as you scroll.
+      (function () {
+        var links = Array.prototype.slice.call(document.querySelectorAll('.docs-nav a[href^="#"]'));
+        var map = {};
+        links.forEach(function (a) { map[a.getAttribute('href').slice(1)] = a; });
+        var targets = links.map(function (a) { return document.getElementById(a.getAttribute('href').slice(1)); }).filter(Boolean);
+        if (!('IntersectionObserver' in window) || !targets.length) return;
+        var current = null;
+        var obs = new IntersectionObserver(function (entries) {
+          entries.forEach(function (e) {
+            if (e.isIntersecting) {
+              if (current) current.classList.remove('active');
+              current = map[e.target.id];
+              if (current) current.classList.add('active');
+            }
+          });
+        }, { rootMargin: '-80px 0px -70% 0px' });
+        targets.forEach(function (t) { obs.observe(t); });
+      })();
+    </script>
+    <script>
+      // FAQ: client-side keyword search over questions and answers; opens matches, highlights hits.
+      (function () {
+        var input = document.querySelector('.faq-search input');
+        var items = Array.prototype.slice.call(document.querySelectorAll('.faq-item'));
+        var empty = document.querySelector('.faq-empty');
+        var count = document.querySelector('.faq-count');
+        if (!input || !items.length) return;
+        var originals = items.map(function (d) { return { q: d.querySelector('.faq-q').innerHTML, a: d.querySelector('.faq-a').innerHTML }; });
+        function esc(s) { return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); }
+        function mark(html, terms) {
+          if (!terms.length) return html;
+          var re = new RegExp('(' + terms.map(esc).join('|') + ')(?![^<]*>)', 'gi');
+          return html.replace(re, '<mark>$1</mark>');
+        }
+        function apply() {
+          var q = input.value.trim().toLowerCase();
+          var terms = q ? q.split(/\s+/) : [];
+          var shown = 0;
+          items.forEach(function (d, i) {
+            var text = (originals[i].q + ' ' + originals[i].a).replace(/<[^>]+>/g, ' ').toLowerCase();
+            var hit = terms.every(function (t) { return text.indexOf(t) !== -1; });
+            d.hidden = !hit;
+            d.querySelector('.faq-q').innerHTML = mark(originals[i].q, terms);
+            d.querySelector('.faq-a').innerHTML = mark(originals[i].a, terms);
+            if (hit) { shown++; if (terms.length) d.open = true; }
+          });
+          if (empty) empty.hidden = shown !== 0;
+          if (count) count.textContent = terms.length ? shown + ' / ' + items.length : '';
+        }
+        input.addEventListener('input', apply);
+        input.addEventListener('keydown', function (e) { if (e.key === 'Escape') { input.value = ''; apply(); } });
+        // Deep links (#question-id) open that question.
+        function openHash() { var t = location.hash && document.querySelector(location.hash + '.faq-item'); if (t) { t.open = true; } }
+        window.addEventListener('hashchange', openHash); openHash();
+      })();
+    </script>
+  </body>
+</html>
