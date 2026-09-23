@@ -1,5 +1,33 @@
 # Public development log
 
+## 2026-09-23 — Unify goal editors and validate local beta.7, build 1210
+
+- Give Codex and Claude the same dedicated goal dialog, completion-condition
+  field, progress styling and footer. Open Codex goals directly from the slash
+  command and Edit action; keep other thread controls separate. Preserve native
+  provider behavior and Codex status, token budget and time limit.
+- Commit app source `c0b233346e513c436ce98967789abf09b2b13320` before building
+  local 1.0.7-beta.7, build 1210. TypeScript, all 4,801 active app tests,
+  production compilation, bundle audit and Developer ID signing pass; five
+  existing tests remain skipped.
+- Exercise the source UI with native input, production IPC, authenticated HTTP
+  and actual providers. Codex retains paused status and both budgets through
+  edit/save/reopen, then clears. Claude achieves a short goal and clears/stops
+  a second goal. The shared layout fits a narrow light viewport. An initial
+  offscreen renderer loss is not reproduced by the successful sequential retry.
+- Reject the first local candidate, build 1209, after the actual packaged app
+  exposes a keyboard-focus error when opening Goal from thread controls.
+  Add a regression that fails before the correction, then personally verify
+  build 1210: immediate typing targets the goal field, Escape restores the
+  trigger, both providers open the shared dialog, and switching chats does not
+  preserve an abandoned Codex draft. No renderer exceptions occur in the final
+  packaged check. Close the test app and remove its temporary credential.
+- Availability is a local Apple silicon app, signed but not notarized, with
+  automatic updates disabled. No upload, installed-app replacement or server
+  deployment. This UI correction requires no server update. Keep public build
+  reservation 1208 separate from these local candidates; builds 1209 and 1210
+  are consumed locally.
+
 ## 2026-09-22 — Keep interrupted mail checks out of user history
 
 - Correct Claude mailbox-input ownership proof for stopped and failed runs.
