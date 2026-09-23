@@ -1,5 +1,44 @@
 # Public development log
 
+## 2026-09-22 — Keep interrupted mail checks out of user history
+
+- Correct Claude mailbox-input ownership proof for stopped and failed runs.
+  A recorded interruption does not change a generated instruction into user
+  input. Keep the exact input hash, provider identity, source checkpoint,
+  unique occurrence and time bounds; assistant replay checks are unchanged.
+- Cover existing sanitized imports and first imports, stopped and failed
+  terminals, and genuine human quotations. Focused server checks pass.
+- Reproduce the leak through authenticated HTTP on an isolated server with a
+  persisted provider-transcript fixture. Personally open it in the signed
+  desktop package, update only the isolated server to a new advertised version,
+  and reopen the already-cached chat. The generated input disappears while the
+  identical human quotation and both assistant replies remain. Repeated chat
+  switching stays correct; persisted source and event files are unchanged.
+- Test transport and history repair are real; the disposable provider transcript
+  is synthetic and no provider inference runs. Missing-terminal or unowned
+  history is outside this correction. A server update with a new version is
+  required to refresh existing desktop caches. No production deployment.
+
+## 2026-09-22 — Validate local desktop beta.5, build 1207
+
+- Build committed app source `92ab2320c1b6b0e41d9cb59fc3887cb3ff90e3ba` as
+  1.0.7-beta.5, build 1207. TypeScript, all 4,798 active app tests, production
+  compilation, bundle audit and Developer ID signing pass; five tests are
+  skipped by the existing suite. Retain the compact Claude thinking correction.
+- Personally exercise the exact signed app with native mouse input, production
+  IPC and authenticated HTTP/WebSocket transport. With a real history response
+  held for eight seconds, a cached chat reaches live 30 milliseconds after the
+  click. A new streamed reply arrives before that stale response, remains
+  exactly once afterward, and remains after switching away and back.
+- No renderer exceptions occur. Close the isolated app and remove its temporary
+  credential. Synthetic persisted messages exercise transport and reconciliation,
+  not provider inference. The separate server history-repair acceptance above
+  uses this unchanged app package.
+- Availability is a local Apple silicon app, signed but not notarized, with
+  automatic updates disabled. No publication, installed-app replacement or
+  production server deployment. The syncing and thinking corrections are
+  app-only; the mailbox-input correction requires the server change above.
+
 ## 2026-09-22 — Reconnect cached chats without waiting for history
 
 - Open the live connection immediately when switching to a cached chat, while
