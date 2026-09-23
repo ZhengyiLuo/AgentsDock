@@ -1,5 +1,24 @@
 # Public development log
 
+## 2026-09-22 — Reconnect cached chats without waiting for history
+
+- Open the live connection immediately when switching to a cached chat, while
+  the existing history refresh checks imports, metadata, queues and repairs in
+  the background. First opens still load their authoritative history page.
+- Preserve newer live messages and queue changes when a delayed history reply
+  arrives. Reset the stream cursor when server history is replaced, and prevent
+  buffered events from the previous log from returning afterward.
+- Reproduce the delay in an isolated native desktop app through authenticated
+  HTTP and WebSocket transport: an eight-second history response kept the old
+  app syncing for eight seconds. With the correction, the cached switch reaches
+  live in 28 milliseconds while that response is still pending. A new message
+  arrives before the response and remains visible exactly once after refresh
+  and switching away and back. No renderer exceptions occur.
+- Focused service, transport and store checks, TypeScript and production
+  compilation pass. The controlled test uses persisted synthetic messages,
+  not provider inference. Package acceptance is recorded separately.
+- This correction is app-only and requires no server update.
+
 ## 2026-09-22 — Validate local desktop beta.4, build 1206
 
 - Build committed source `230f946912c0cdf4f05da0c87e0f106973c0e5b5` as

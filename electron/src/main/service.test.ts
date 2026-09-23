@@ -4065,6 +4065,81 @@ describe('split-chat timeline subscriptions', () => {
     await refreshing
   })
 
+  it.each(['merge', 'replace', 'schema audit'] as const)('connects cached chat before history and preserves newer live events and queues across %s', async mode => {
+    const response = deferred<TimelinePage>()
+    const session: Session = { id: 'chat', title: 'Cached chat', backend: 'claude' }
+    const old: Event = { id: 'old', session_id: 'chat', seq: 10, type: 'assistant_text', ts: 'now', text: 'Cached answer' }
+    const queued = { queued_id: 'queued-old', session_id: 'chat', prompt: 'Queued prompt', file_ids: [], created_at: 'now' }
+    const page: TimelinePage = { session, events: [old], queued_turns: [queued], has_more: false, latest_seq: 12, semantic_item_count: 1 }
+    let receive!: (event: Event) => void
+    const stop = vi.fn()
+    const client = fakeClient({
+      sessionPage: async (_id, options) => options?.pageMode === 'semantic' ? page : response.promise,
+      stream: (_id, _after, onEvent, onState) => { receive = onEvent; onState(true); return stop }
+    })
+    const { service, cache } = createProfileService({ 'http://a.test:7850': [client] }, value => {
+      value.putSession('profile:a', session)
+      value.putEvents('profile:a', session.id, [old])
+      if (mode !== 'schema audit') value.putTimelineState('profile:a', session.id, false, 10, 1, null, true)
+      value.putQueuedTurns('profile:a', session.id, [queued])
+    })
+    Object.assign(service, { validatedGeneration: 1 })
+    const send = vi.fn()
+    service.addWindow({ isDestroyed: () => false, on: vi.fn(), webContents: { send } } as never)
+    expect((await service.openTimeline(session.id)).events).toEqual([old])
+    await settleBackgroundWork()
+    expect(client.stream).toHaveBeenCalledOnce()
+    expect(send).toHaveBeenCalledWith('server:sync', expect.objectContaining({ sessionId: 'chat', state: 'live' }))
+
+    const unqueued: Event = { id: 'unqueued', session_id: 'chat', seq: 13, type: 'turn_unqueued', queued_id: queued.queued_id, ts: 'now' }
+    const answer: Event = { id: 'new', session_id: 'chat', seq: 14, type: 'assistant_text', ts: 'now', text: 'Arrived before HTTP' }
+    receive(unqueued)
+    receive(answer)
+    expect(send).toHaveBeenCalledWith('server:event', expect.objectContaining({ event: answer }))
+    response.resolve({ ...page, events_omitted_after: mode === 'replace' ? 1 : 0 })
+    await settleBackgroundWork()
+    expect(cache.snapshot('profile:a', 'chat')?.events.map(event => event.id)).toEqual(['old', 'unqueued', 'new'])
+    expect(cache.queuedTurns('profile:a', 'chat')).toEqual([])
+    expect(send).toHaveBeenCalledWith('server:timeline', expect.objectContaining({ mode: mode === 'merge' ? 'merge' : 'replace', snapshot: expect.objectContaining({
+      events: expect.arrayContaining([answer]), queuedTurns: []
+    }) }))
+    // A socket backlog delivered after the authoritative HTTP snapshot cannot
+    // restore a queue item that snapshot already superseded.
+    receive({ id: 'old-queue-replay', session_id: 'chat', seq: 11, type: 'turn_queued', queued_id: queued.queued_id, prompt: queued.prompt, ts: 'now' })
+    ;(service as unknown as { flushEventCache(): void }).flushEventCache()
+    expect(cache.queuedTurns('profile:a', 'chat')).toEqual([])
+    expect(client.stream).toHaveBeenCalledOnce()
+    expect(stop).not.toHaveBeenCalled()
+  })
+
+  it('resets the early cached socket cursor when the server history was replaced', async () => {
+    const response = deferred<TimelinePage>()
+    const session: Session = { id: 'chat', title: 'Cached chat', backend: 'codex' }
+    const old: Event = { id: 'old', session_id: 'chat', seq: 90, type: 'assistant_text', ts: 'now', text: 'Old history' }
+    const fresh: Event = { ...old, id: 'fresh', seq: 2, text: 'Replacement history' }
+    const page: TimelinePage = { session, events: [fresh], queued_turns: [], has_more: false, latest_seq: 2, semantic_item_count: 1 }
+    const stop = vi.fn()
+    let receive!: (event: Event) => void
+    const client = fakeClient({ sessionPage: async (_id, options) => options?.pageMode === 'semantic' ? page : response.promise,
+      stream: (_id, _after, onEvent) => { receive = onEvent; return stop } })
+    const { service, cache } = createProfileService({ 'http://a.test:7850': [client] }, value => {
+      value.putSession('profile:a', session)
+      value.putEvents('profile:a', 'chat', [old])
+      value.putTimelineState('profile:a', 'chat', false, 90, 1, null, true)
+    })
+    Object.assign(service, { validatedGeneration: 1 })
+    await service.openTimeline('chat')
+    await settleBackgroundWork()
+    expect(client.stream.mock.calls[0]?.[1]).toBe(90)
+    receive({ ...old, id: 'old-tail', seq: 91, text: 'Old log event buffered before reset' })
+    response.resolve(page)
+    await settleBackgroundWork()
+    expect(client.stream.mock.calls[1]?.[1]).toBe(2)
+    expect(stop).toHaveBeenCalledOnce()
+    ;(service as unknown as { flushEventCache(): void }).flushEventCache()
+    expect(cache.snapshot('profile:a', 'chat')?.events).toEqual([fresh])
+  })
+
   it.each([false, true])('waits for fresh health before a disconnected chat socket retries (initially connected: %s)', async connected => {
     const stop = vi.fn()
     let emitState!: (connected: boolean, error?: string) => void
