@@ -396,18 +396,20 @@ function TraceDisclosure({
   const runActivityMode = Boolean(runActivity)
   const sessionBackend = useAppStore(state => state.snapshots[sessionId]?.session.backend
     ?? state.sessions.find(session => session.id === sessionId)?.backend)
-  const nativeCodex = (sessionBackend ?? events.find(event => event.backend)?.backend) === 'codex'
+  const backend = sessionBackend ?? events.find(event => event.backend)?.backend
+  const nativeCodex = backend === 'codex'
+  const nativeClaude = backend === 'claude'
   const reasoningDisplay = useReasoningDisplay()
   const activityLive = Boolean(runActivity) && runActivity?.active !== false && !runActivity?.stoppedAt
   // The preference reveals traces only during the active turn. Completed and
-  // stopped Codex turns use the same compact history under either setting.
+  // stopped turns use the same compact history under either setting.
   const expandedReasoning = activityLive && reasoningDisplay === 'expanded'
   const [open, setOpen] = useState(() => activityLive)
   const [reasoningHistoryOpen, setReasoningHistoryOpen] = useState(false)
   useEffect(() => {
-    if (nativeCodex && expandedReasoning) setOpen(true)
+    if ((nativeCodex || nativeClaude) && expandedReasoning) setOpen(true)
     setReasoningHistoryOpen(false)
-  }, [expandedReasoning, nativeCodex])
+  }, [expandedReasoning, nativeCodex, nativeClaude])
   const previousActivity = useRef({
     key: runActivity?.key,
     live: activityLive
@@ -471,11 +473,11 @@ function TraceDisclosure({
       setExpandedDiffScope(diffScope)
       setOpen(true)
     }
-    else if (nativeCodex && previous.live && !activityLive) {
+    else if ((nativeCodex || nativeClaude) && previous.live && !activityLive) {
       setOpen(false)
       setReasoningHistoryOpen(false)
     }
-  }, [activityLive, diffScope, nativeCodex, runActivityMode, runActivity?.key])
+  }, [activityLive, diffScope, nativeCodex, nativeClaude, runActivityMode, runActivity?.key])
   const displayEvents = useMemo(() => {
     const promotedIds = new Set(promotedCommentaryIds)
     const merged = loadedEvents ? mergeTraceEvents(runActivity?.sourceEvents ?? events, loadedEvents) : events
@@ -618,7 +620,7 @@ function TraceDisclosure({
     ? <RunActivityHeader item={runActivity} events={events} open={open} detailsId={detailsId} onToggle={toggleDetails} nativeCodex={nativeCodex} />
     : null
   return (
-    <div className={`trace${runActivity ? ' run-activity' : ''}${nativeCodex ? ' codex-native-activity' : ''} ${open ? 'open' : ''}`}>
+    <div className={`trace${runActivity ? ' run-activity' : ''}${nativeCodex ? ' codex-native-activity' : ''}${nativeClaude ? ' claude-native-activity' : ''} ${open ? 'open' : ''}`}>
       {activityHeader ?? <button
         type="button"
         className="trace-summary"
@@ -642,7 +644,7 @@ function TraceDisclosure({
                   ? segment.kind === 'reasoning'
                     ? nativeCodex
                       ? (expandedReasoning || reasoningHistoryOpen) && <CodexReasoningEvent key={segment.key} entry={{ ...segment.entry, events: segment.entry.events.filter(event => expandedReasoning || !activityLive || (event !== latestReasoning && event.phase !== 'reasoning')) }} sessionId={sessionId} expanded activeKey={expandedReasoning ? activeReasoningKey : null} labeled />
-                      : <TraceReasoningEvent key={segment.key} entry={segment.entry} sessionId={sessionId} />
+                      : <TraceReasoningEvent key={segment.key} entry={segment.entry} sessionId={sessionId} expanded={nativeClaude ? expandedReasoning : true} />
                     : <RunActivitySupportGroup key={segment.key} parts={segment.parts} sessionId={sessionId} profileScope={profileScope} nativeCodex={nativeCodex} activeToolKey={activeToolKey} runLive={activityLive} />
                   : null)
             : activityParts.map(part => <TracePartView key={tracePartKey(part)} part={part} sessionId={sessionId} profileScope={profileScope} nativeCodex={nativeCodex} showPlaintext />)}
@@ -844,9 +846,10 @@ function CodexReasoningUpdate({ event, sessionId, active, expanded, labeled }: {
   </li>
 }
 
-function TraceReasoningEvent({ entry, sessionId }: { entry: TraceReasoningEntry; sessionId: string }) {
+function TraceReasoningEvent({ entry, sessionId, expanded = true }: { entry: TraceReasoningEntry; sessionId: string; expanded?: boolean }) {
   useLocale()
-  const [open, setOpen] = useState(true)
+  const [open, setOpen] = useState(expanded)
+  useEffect(() => setOpen(expanded), [expanded])
   const detailsId = useId()
   const preview = boundedTracePreview(
     entry.events.map(event => traceSummaryPreview(traceReasoningText(event))).filter(Boolean).join('\n'),
@@ -862,7 +865,7 @@ function TraceReasoningEvent({ entry, sessionId }: { entry: TraceReasoningEntry;
         {!open && entry.events.length > 1 && <small>{timelineCount('updates', entry.events.length)}</small>}
         <ChevronRight size={12} aria-hidden="true" />
       </button>
-      {open && <div id={detailsId} className="trace-reasoning-body">
+      {open && <div id={detailsId} className="trace-reasoning-body" tabIndex={0}>
         {entry.events.map(event => <div className="trace-reasoning-update" key={reasoningItemKey(event)}>
           {event.partial === true && <small className="muted">{t('timeline.ui.partialThinkingSummary')}</small>}
           <MarkdownContent text={traceReasoningText(event)} sessionId={sessionId} fold={false} />

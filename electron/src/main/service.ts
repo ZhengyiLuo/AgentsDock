@@ -1,4 +1,5 @@
 import { app, BrowserWindow, dialog, nativeImage, Notification, shell } from 'electron'
+import { applyOpenCodeSessionEvent } from '../shared/opencode'
 import { chmodSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
 import { open, rename, rm, stat, writeFile } from 'node:fs/promises'
 import { createHash, randomUUID } from 'node:crypto'
@@ -3233,7 +3234,7 @@ export class AppService {
     return lease
   }
 
-  private activateTimelineStream(scope: ConnectionScope, sessionId: string, after: number, lease: number): void {
+  private activateTimelineStream(scope: ConnectionScope, sessionId: string, after: number, lease: number, acceptReconcileEvent?: (event: Event) => boolean): void {
     if (!this.isCurrentTimeline(scope, sessionId, lease)) return
     const subscription = this.timelineSubscriptions.get(sessionId)
     if (!subscription) return
@@ -3247,11 +3248,13 @@ export class AppService {
       const subagentState = this.subagentProjector.project(event)
       if (event.type === 'raw_event') {
         if (subagentState) {
+          if (acceptReconcileEvent && !acceptReconcileEvent(subagentState)) return
           this.emitAgentEvent(scope, subagentState)
           this.enqueueEventCache(scope, subagentState)
         }
         return
       }
+      if (acceptReconcileEvent && !acceptReconcileEvent(event)) return
       this.emitAgentEvent(scope, event)
       this.enqueueEventCache(scope, event)
       if (JOB_REFRESH_EVENT_TYPES.has(event.type) && !isImportedProviderControlMetadata(event)) void this.refreshJobs(scope)
@@ -5301,6 +5304,9 @@ export class AppService {
     const reconcileKey = `${scope.generation}:${sessionId}:${lease}`
     if (this.timelineReconcileInFlight.has(reconcileKey)) return
     this.timelineReconcileInFlight.add(reconcileKey)
+    let liveDuringReconcile: Event[] | null = []
+    let streamStarted = false
+    let reconciledThrough: number | null = null
     try {
       const before = this.cache.snapshot(scope.namespace, sessionId)
       const timelineState = this.cache.timelineState(scope.namespace, sessionId)
@@ -5316,6 +5322,19 @@ export class AppService {
           )
         )
       )
+      // Cached chats can receive replay and new output immediately. Keep HTTP
+      // for imports, metadata, queues and cache-schema repairs. Empty first
+      // opens still wait for their authoritative page.
+      if (before?.events.length && cachedLast > 0) {
+        this.activateTimelineStream(scope, sessionId, cachedLast, lease, event => {
+          // Once HTTP has supplied this range, a slower socket replay must not
+          // reapply old queue mutations over its newer authoritative snapshot.
+          if (reconciledThrough !== null && event.seq <= reconciledThrough) return false
+          liveDuringReconcile?.push(event)
+          return true
+        })
+        streamStarted = true
+      }
       const pageRequest = cachedLast > 0
         ? scope.client.sessionPage(sessionId, { after: cachedLast, limit: DELTA_EVENT_LIMIT, tail: false, visible: true })
         : this.semanticTimelinePage(scope, sessionId, {
@@ -5359,6 +5378,25 @@ export class AppService {
         pageWasSemanticAttempt = true
         if (!this.isCurrentTimeline(scope, sessionId, lease)) return
         mode = 'replace'
+      }
+      // Settle old socket writes before either a refresh or a log reset. A
+      // delayed cache batch must not reinsert the retired log after replacement.
+      if (streamStarted) this.flushEventCache()
+      // A replaced/truncated server log needs a socket with its new cursor.
+      if (streamStarted && (page.latest_seq ?? cachedLast) < cachedLast) streamStarted = false
+      if (streamStarted) {
+        // A delayed HTTP snapshot can predate messages or queue changes already
+        // delivered by the socket. Retain that newer tail in either merge or
+        // replacement mode.
+        const pageThrough = page.latest_seq ?? page.events.at(-1)?.seq ?? cachedLast
+        reconciledThrough = pageThrough
+        const newerLive = liveDuringReconcile!.filter(event => event.seq > pageThrough)
+        if (newerLive.length) page = {
+          ...page,
+          events: mergeEventsBySequence(page.events, newerLive),
+          queued_turns: newerLive.reduce(updateQueuedTurns, page.queued_turns ?? []),
+          latest_seq: Math.max(pageThrough, ...newerLive.map(event => event.seq))
+        }
       }
       this.cache.putSession(scope.namespace, page.session)
       this.rememberSessionDetail(scope, page.session)
@@ -5427,14 +5465,15 @@ export class AppService {
         sessionId, snapshot, source: 'server', mode, profileId: scope.profileId, profileGeneration: scope.generation
       })
       const streamAfter = page.latest_seq ?? page.events.at(-1)?.seq ?? cachedLast
-      this.activateTimelineStream(scope, sessionId, streamAfter, lease)
+      if (!streamStarted) this.activateTimelineStream(scope, sessionId, streamAfter, lease)
       this.scheduleSubagentSnapshotRefresh(scope, sessionId, lease)
       queueMicrotask(() => void this.refreshTimelineFiles(scope, sessionId))
     } catch (error) {
       reportStorageError(error)
       appLog('timeline', 'tail refresh failed; keeping cached transcript', { sessionId, error: errorText(error) })
-      if (this.isCurrentTimeline(scope, sessionId, lease)) this.activateTimelineStream(scope, sessionId, cachedLast, lease)
+      if (!streamStarted && this.isCurrentTimeline(scope, sessionId, lease)) this.activateTimelineStream(scope, sessionId, cachedLast, lease)
     } finally {
+      liveDuringReconcile = null
       this.finishTimelineInitialization(sessionId, lease)
       this.timelineReconcileInFlight.delete(reconcileKey)
     }
@@ -5603,6 +5642,11 @@ export class AppService {
 
   private applyEventsToCaches(scope: ConnectionScope, sessionId: string, events: readonly Event[]): void {
     if (!events.length) return
+    const session = this.sessions.find(candidate => candidate.id === sessionId)
+    if (session && this.isCurrentScope(scope)) {
+      const updated = events.reduce(applyOpenCodeSessionEvent, session)
+      if (updated !== session) this.upsertSession(scope, updated)
+    }
     let queued: QueuedTurn[] | null = null
     let nextQueued: QueuedTurn[] | null = null
     let shouldRefreshQueue = false

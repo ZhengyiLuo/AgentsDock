@@ -7,7 +7,7 @@ import * as Dialog from '@radix-ui/react-dialog'
 import { ArrowRight, Check, ChevronDown, ChevronRight, CircleAlert, Clock3, Command, Copy, Download, ExternalLink, FileText, FolderOpen, GitFork, Import, KeyRound, Laptop, LoaderCircle, Network, RefreshCw, RotateCcw, Search, Server, Sparkles, X } from 'lucide-react'
 import type { AppUpdateStatus, AppUpdateTrack, Backend, BulkImportSessionItem, BulkImportSessionResult, ChatReference, ChatReferenceAction, CoordinatedServerUpdate, CreateJobInput, Health, Job, JobContextMode, JobScheduleKind, LocalSessionCandidate, ServerRestartBlockerSnapshot, ServerSetupCapabilities, ServerSetupProgress, ServerUpdateStatus, ServerUpdateTrack, Session, TeamReference, UpdateJobInput, WorkspaceProfileScope } from '@shared/types'
 import { localSessionImportKey, localSessionImportSupported } from '@shared/local-session-import'
-import { chatBackendSelection, codexCustomProviderAvailable, cursorBackendAvailable, cursorBackendUnavailableReason, runtimeCatalogOptions, runtimeEffortAfterModelChange, runtimeEffortOptions, runtimeSelectionError, selectableChatBackendChoices, selectableChatBackends, type ChatBackendChoice } from '@shared/runtime-catalog'
+import { opencodeBackendAvailable, opencodeBackendUnavailableReason, chatBackendSelection, codexCustomProviderAvailable, cursorBackendAvailable, cursorBackendUnavailableReason, runtimeCatalogOptions, runtimeEffortAfterModelChange, runtimeEffortOptions, runtimeSelectionError, selectableChatBackendChoices, selectableChatBackends, type ChatBackendChoice } from '@shared/runtime-catalog'
 import { trackEvent } from '../lib/analytics'
 import { readAppearance, setAppearanceMode, type AppearanceMode } from '../lib/appearance'
 import { t, useLanguagePreference, type LanguagePreference } from '../lib/i18n'
@@ -2935,7 +2935,7 @@ export function SessionDialog({ mode }: { mode: 'newChat' | 'resume' }) {
   const [systemPrompt, setSystemPrompt] = useState('')
   const [saving, setSaving] = useState(false)
   const folders = useMemo(() => [...new Set(sessions.map(session => session.folder || 'General'))].sort(), [sessions])
-  const backendOptions = useMemo(() => selectableChatBackendChoices(health, catalog), [catalog, health])
+  const backendOptions = useMemo(() => selectableChatBackendChoices(health, catalog).filter(choice => mode !== 'resume' || choice !== 'opencode'), [catalog, health, mode])
   useEffect(() => {
     if (!open) return
     setTitle(mode === 'newChat' ? 'New chat' : 'Resumed chat')
@@ -2960,7 +2960,7 @@ export function SessionDialog({ mode }: { mode: 'newChat' | 'resume' }) {
       if (!selectableChatBackends(state.health, state.runtimeCatalog).includes(backend)) throw new Error(`${backendLabel(backend)} is unavailable on this AgentsServer.`)
       const runtimeError = runtimeSelectionError(state.health, state.runtimeCatalog, backend, model, codex_provider)
       if (runtimeError) throw new Error(runtimeError)
-      const input = { title: title.trim() || 'New chat', folder: folder.trim() || 'General', cwd: cwd.trim(), backend, codex_provider, model: model || null, effort: effort || null, system_prompt: systemPrompt.trim() || null, cursor_permission_mode: backend === 'cursor' ? 'default' as const : null }
+      const input = { title: title.trim() || 'New chat', folder: folder.trim() || 'General', cwd: cwd.trim(), backend, codex_provider, model: model || null, effort: effort || null, system_prompt: systemPrompt.trim() || null, cursor_permission_mode: backend === 'cursor' ? 'default' as const : null, opencode_permission_mode: backend === 'opencode' ? 'default' as const : null }
       const session = mode === 'resume' ? await window.agentsDock.sessions.resume({ ...input, providerId: providerId.trim() }) : await window.agentsDock.sessions.create(input)
       if (mode === 'newChat') {
         trackEvent('chat_created')
@@ -2973,7 +2973,7 @@ export function SessionDialog({ mode }: { mode: 'newChat' | 'resume' }) {
   }
   const modelOptions = runtimeCatalogOptions(catalog, backend, 'models', model, codex_provider)
   const effortOptions = runtimeEffortOptions(catalog, backend, model, effort, codex_provider)
-  const hasReasoning = backend !== 'cursor' && effortOptions.some(option => Boolean(option.value))
+  const hasReasoning = backend !== 'cursor' && backend !== 'opencode' && effortOptions.some(option => Boolean(option.value))
   const selectModel = (value: string) => {
     setModel(value)
     setEffort(runtimeEffortAfterModelChange(catalog, backend, value || null, effort, codex_provider) || '')
@@ -2998,8 +2998,8 @@ export function SessionDialog({ mode }: { mode: 'newChat' | 'resume' }) {
       <fieldset className="span-two"><legend>{t("ui.Dialogs.SessionDialog.backend_2fb4019")}</legend><div className="segmented session-backend-choices">{backendOptions.map(value => {
         const selection = chatBackendSelection(value)
         const needsConfiguration = value === 'codex-custom' && !codexCustomProviderAvailable(health, catalog)
-        const unavailable = value === 'cursor' && !cursorAvailable
-        return <button type="button" className={backendChoice === value ? 'active' : ''} key={value} aria-pressed={backendChoice === value} title={needsConfiguration ? t('codexProvider.configure') : unavailable ? cursorUnavailableReason ?? undefined : undefined} onClick={() => {
+        const unavailable = value === 'cursor' && !cursorAvailable || value === 'opencode' && !opencodeBackendAvailable(health, catalog)
+        return <button type="button" className={backendChoice === value ? 'active' : ''} key={value} aria-pressed={backendChoice === value} title={needsConfiguration ? t('codexProvider.configure') : unavailable ? (value === 'opencode' ? opencodeBackendUnavailableReason(health, catalog) : cursorUnavailableReason) ?? undefined : undefined} onClick={() => {
           if (needsConfiguration) {
             useAppStore.getState().setModal(mode, false)
             window.dispatchEvent(new CustomEvent('agentsdock:app-settings-section', { detail: 'server' }))
@@ -3073,7 +3073,7 @@ interface ResumeByIdMatch {
 }
 
 function sessionProviderIds(session: Session): string[] {
-  return [session.session_id, session.claude_session_id, session.codex_thread_id, session.cursor_session_id]
+  return [session.session_id, session.claude_session_id, session.codex_thread_id, session.cursor_session_id, session.opencode_session_id]
     .map(value => value?.trim())
     .filter((value): value is string => Boolean(value))
 }
@@ -3132,8 +3132,8 @@ export function ImportChatsDialog() {
     if (!open) return () => { requestEpoch.current += 1 }
     const state = useAppStore.getState()
     const seed = state.sessions.find(session => session.id === state.selectedSessionId && !session.archived)
-    const availableBackends = selectableChatBackends(state.health, state.runtimeCatalog)
-    setResumeBackend(seed && availableBackends.includes(seed.backend) ? seed.backend : availableBackends.includes('codex') ? 'codex' : availableBackends[0] ?? 'codex')
+    const availableBackends = selectableChatBackends(state.health, state.runtimeCatalog).filter(backend => backend !== 'opencode')
+    setResumeBackend(seed && seed.backend !== 'opencode' && availableBackends.includes(seed.backend) ? seed.backend : availableBackends.includes('codex') ? 'codex' : availableBackends[0] ?? 'codex')
     setResumeCwd(seed?.cwd?.trim() || state.health?.default_cwd?.trim() || '')
     if (!supported) {
       setLoadError('Import Chat requires AgentsServer API 15 with local session import support.')
@@ -3411,7 +3411,7 @@ export function ImportChatsDialog() {
         </div>}
         {resumeNeedsDetails && resumeMatches.length === 0 && <div className="import-chats-resume-details">
           <small>{t("ui.Dialogs.ImportChatsDialog.this_id_was_not_found_in_local_history_con_dca866c")}</small>
-          <label><span>Agent</span><select aria-label="Agent" value={resumeBackend} disabled={operationBusy} onChange={event => setResumeBackend(event.target.value as Backend)}>{selectableChatBackends(health, useAppStore.getState().runtimeCatalog).map(backend => <option value={backend} key={backend}>{backendLabel(backend)}</option>)}</select></label>
+          <label><span>Agent</span><select aria-label="Agent" value={resumeBackend} disabled={operationBusy} onChange={event => setResumeBackend(event.target.value as Backend)}>{selectableChatBackends(health, useAppStore.getState().runtimeCatalog).filter(backend => backend !== 'opencode').map(backend => <option value={backend} key={backend}>{backendLabel(backend)}</option>)}</select></label>
           <label><span>{t("ui.Dialogs.ImportChatsDialog.working_directory_865e85c")}</span><input aria-label={t("ui.Dialogs.ImportChatsDialog.working_directory_865e85c")} value={resumeCwd} disabled={operationBusy} onChange={event => setResumeCwd(event.target.value)} placeholder={health?.default_cwd || '/path/to/project'} /></label>
         </div>}
         {resumeError && <small className="import-chats-resume-error" role="alert">{resumeError}</small>}
@@ -4354,6 +4354,11 @@ export function JobDialog() {
     const leadingWhitespace = prompt.length - prompt.trimStart().length
     const cleanPrompt = prompt.trim()
     const sameServerChatReferences = chatReferences.filter(reference => reference.target_kind !== 'secure_peer')
+    if (selectedBackend === 'opencode' && sameServerChatReferences.length) {
+      currentState.setError(t('opencode.crossChatUnavailable'))
+      setSaving(false)
+      return
+    }
     if (preservesChatReferences && sameServerChatReferences.length > MAX_SCHEDULED_CHAT_REFERENCES) {
       useAppStore.getState().setError(MAX_SCHEDULED_CHAT_REFERENCES_MESSAGE)
       setSaving(false)
@@ -4471,11 +4476,12 @@ export function JobDialog() {
     <form onSubmit={submit} className="dialog-form job-form">
       <label><span>{t("ui.Dialogs.JobDialog.title_7e8cd20")}</span><input value={title} onChange={event => setTitle(event.target.value)} required /></label>
       <fieldset><legend>{t("ui.Dialogs.JobDialog.backend_2fb4019")}</legend><div className="segmented">{selectableBackends.map(value => {
-        const unavailable = value === 'cursor' && !cursorBackendAvailable(health, catalog)
-        return <button type="button" key={value} className={backend === value ? 'active' : ''} aria-pressed={backend === value} aria-describedby={unavailable ? 'job-cursor-runtime-help' : undefined} disabled={unavailable} title={unavailable ? cursorUnavailableReason ?? undefined : undefined} onClick={() => setBackend(value)}><BackendMark backend={value} size={14} />{backendLabel(value, value === session?.backend ? session.codex_provider : undefined)}{unavailable ? t("ui.Dialogs.unavailable_77649d6") : ''}</button>
+        const unavailable = value === 'cursor' && !cursorBackendAvailable(health, catalog) || value === 'opencode' && !opencodeBackendAvailable(health, catalog)
+        return <button type="button" key={value} className={backend === value ? 'active' : ''} aria-pressed={backend === value} aria-describedby={unavailable ? `job-${value}-runtime-help` : undefined} disabled={unavailable} title={unavailable ? (value === 'opencode' ? opencodeBackendUnavailableReason(health, catalog) : cursorUnavailableReason) ?? undefined : undefined} onClick={() => setBackend(value)}><BackendMark backend={value} size={14} />{backendLabel(value, value === session?.backend ? session.codex_provider : undefined)}{unavailable ? t("ui.Dialogs.unavailable_77649d6") : ''}</button>
       })}</div>{selectableBackends.includes('cursor') && !cursorBackendAvailable(health, catalog) && cursorUnavailableReason
         ? <small id="job-cursor-runtime-help" className="runtime-option-help">{cursorUnavailableReason}</small>
-        : null}</fieldset>
+        : null}{selectableBackends.includes('opencode') && !opencodeBackendAvailable(health, catalog)
+          && <small id="job-opencode-runtime-help" className="runtime-option-help">{opencodeBackendUnavailableReason(health, catalog)}</small>}</fieldset>
       <fieldset className="job-context-fieldset"><legend>{t("ui.Dialogs.JobDialog.run_context_20887b3")}</legend><div className={`job-context-picker${supportsIndependentRuns ? '' : ' single'}`} role="group" aria-label={t("ui.Dialogs.JobDialog.run_context_20887b3")}>
         <button type="button" className={contextMode === 'chat' ? 'active' : ''} aria-pressed={contextMode === 'chat'} onClick={() => selectContextMode('chat')}><strong>{t("ui.Dialogs.JobDialog.continue_in_this_chat_eed3ae3")}</strong><small>{t("ui.Dialogs.JobDialog.use_this_chat_s_existing_context_and_add_e_d7db2e4")}</small></button>
         {supportsIndependentRuns && <button type="button" className={contextMode === 'standalone' ? 'active' : ''} aria-pressed={contextMode === 'standalone'} onClick={() => selectContextMode('standalone')}><strong>{t("ui.Dialogs.JobDialog.independent_runs_3d32d40")}</strong><small>{t('ui.job.independentHelp', { backend: backendLabel(backend, backend === session?.backend ? session.codex_provider : undefined) })}</small></button>}
@@ -4496,7 +4502,7 @@ export function JobDialog() {
         health={health}
         sessions={sessions}
         folderOrder={folderOrder}
-        chatSupported={scheduledJobMentionActionsAvailable(health)}
+        chatSupported={selectedBackend !== 'opencode' && scheduledJobMentionActionsAvailable(health)}
         teamSupported={teamMessagesAvailable(health)}
         value={prompt}
         chatReferences={chatReferences}

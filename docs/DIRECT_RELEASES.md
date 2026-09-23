@@ -91,9 +91,13 @@ reviewed release branch. Registering the workflows does not replace application
 source on a diverged default branch.
 
 The public workflow has a separate run counter from the former private workflow.
-Reserve its native build number explicitly; the first public run starts above
-the last accepted local build, 1185, and every later run increments the number.
-Never reuse the old private counter formula or a previously accepted build.
+Reserve its native build number explicitly. Runs 1–20 retain `1185 + run`, with
+run 20 reserving build 1205. Local `1.0.7-beta.4` and `1.0.7-beta.5` subsequently
+used builds 1206 and 1207 without public preparation runs. Starting at run 21,
+reserve `1187 + run`: run 21 uses 1208, run 22 uses 1209, and each later run
+increments the number. Historical reruns retain their original reservation.
+Recheck the public run counter before dispatch; never reuse the old private
+counter formula or a previously accepted build.
 
 When macOS signing is performed locally, dispatch the same preparation workflow
 with `artifacts_only=true`. It retains the source ancestry, release version,

@@ -37,7 +37,11 @@ export function runtimeBackendCatalogFor(catalog: RuntimeCatalog | null | undefi
 }
 
 export function selectableChatBackendChoices(health: Health | null | undefined, catalog: RuntimeCatalog | null | undefined): ChatBackendChoice[] {
-  return selectableChatBackends(health, catalog).flatMap(backend => backend === 'codex' ? ['codex', 'codex-custom'] as ChatBackendChoice[] : [backend])
+  const supported = selectableChatBackends(health, catalog)
+  // Keep the new provider discoverable on old servers; runtimeSelectionError
+  // still blocks admission and explains the required server upgrade.
+  if (!supported.includes('opencode')) supported.push('opencode')
+  return supported.flatMap(backend => backend === 'codex' ? ['codex', 'codex-custom'] as ChatBackendChoice[] : [backend])
 }
 
 // Claude and Codex are always expected on every server; Cursor is optional
@@ -87,9 +91,31 @@ export function selectableChatBackends(
   health: Health | null | undefined,
   _catalog: RuntimeCatalog | null | undefined
 ): Backend[] {
-  return cursorBackendSupported(health)
-    ? ['claude', 'codex', 'cursor']
-    : ['claude', 'codex']
+  return ['claude', 'codex', ...(cursorBackendSupported(health) ? ['cursor' as const] : []),
+    ...(opencodeBackendSupported(health) ? ['opencode' as const] : [])]
+}
+
+/** Server contract support is independent of the optional CLI's readiness. */
+export function opencodeBackendSupported(health: Health | null | undefined): boolean {
+  const capability = health?.capabilities?.opencode_backend
+  return capability?.available === true && Number.isInteger(capability.version) && capability.version >= 1
+}
+
+export function opencodeBackendAvailable(health: Health | null | undefined, catalog: RuntimeCatalog | null | undefined): boolean {
+  const backend = catalog?.backends?.opencode
+  if (!opencodeBackendSupported(health) || !backend) return false
+  const diagnostic = runtimeDiagnosticFor(health, catalog, 'opencode')
+  return diagnostic ? diagnostic.status === 'ready' && diagnostic.available === true : backend.available === true
+}
+
+export function opencodeBackendUnavailableReason(health: Health | null | undefined, catalog: RuntimeCatalog | null | undefined): string | null {
+  if (opencodeBackendAvailable(health, catalog)) return null
+  if (!opencodeBackendSupported(health)) return t('opencode.unsupportedServer')
+  const diagnostic = runtimeDiagnosticFor(health, catalog, 'opencode')
+  if (!catalog?.backends?.opencode && diagnostic?.status === 'ready') return t('opencode.modelsLoading')
+  if (diagnostic?.message?.trim() || diagnostic?.action?.trim()) return [t('opencode.unavailable'), diagnostic.message?.trim(), diagnostic.action?.trim()].filter(Boolean).join(' ')
+  if (!catalog?.backends?.opencode) return t('opencode.statusLoading')
+  return t('opencode.setupRequired')
 }
 
 export function cursorBackendUnavailableReason(
@@ -125,7 +151,9 @@ export function runtimeCatalogOptions(
   const available = backendCatalog?.[type] ?? []
   const configuredDefault = type === 'models' ? backendCatalog?.default_model : backendCatalog?.default_effort
   const advertisedDefault = available.find(option => option.value === '')
-  const defaultLabel = advertisedDefault?.label?.trim()
+  const defaultLabel = (backend === 'opencode' && type === 'models'
+    ? configuredDefault?.trim() ? `${t('opencode.defaultModel')} (${configuredDefault.trim()})` : t('opencode.defaultModel') : '')
+    || advertisedDefault?.label?.trim()
     || (configuredDefault?.trim() ? `Server default (${configuredDefault.trim()})` : '')
     || (catalog ? 'Server default' : type === 'models' ? 'Loading model choices…' : 'Loading reasoning choices…')
   const options: RuntimeOption[] = [
@@ -190,9 +218,13 @@ export function runtimeSelectionError(
   if (backend === 'cursor' && !cursorBackendAvailable(health, catalog)) {
     return cursorBackendUnavailableReason(health, catalog)
   }
+  if (backend === 'opencode' && !opencodeBackendAvailable(health, catalog)) return opencodeBackendUnavailableReason(health, catalog)
   const selected = model?.trim()
   if (backend === 'cursor' && selected && !catalog?.backends.cursor?.models.some(option => option.value === selected)) {
     return `${selected} is not offered by Cursor on this AgentsServer. Choose an available model before running Cursor work.`
+  }
+  if (backend === 'opencode' && selected && !catalog?.backends.opencode?.models.some(option => option.value === selected)) {
+    return t('opencode.modelUnavailable', { model: selected })
   }
   return runtimeModelLockReason(catalog, backend, model)
 }
@@ -244,7 +276,7 @@ export function runtimeEffortAfterModelChange(
   codexProvider?: CodexProvider,
   customCatalog?: RuntimeBackendCatalog['custom_provider']
 ): string | null {
-  if (backend === 'cursor') return null
+  if (backend === 'cursor' || backend === 'opencode') return null
   const selected = current?.trim() || ''
   const scoped = modelEfforts(catalog, backend, model, codexProvider, customCatalog)
   if (scoped === null || !selected) return selected || null

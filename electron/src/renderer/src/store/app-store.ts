@@ -8,6 +8,8 @@ import { updateQueuedTurns as reduceQueuedTurns } from '@shared/queue'
 import type { TeamHubScope } from '@shared/team-hub'
 import { mailHintPending, type MailArrivalCursor, type MailboxCoverage, type MailHintProjection, type MailHintScope } from '@shared/team-mail-hints'
 import { bulletinHintPending, type BulletinHintRefresh } from '@shared/team-bulletin-hints'
+import { applyOpenCodeSessionEvent, openCodeProviderCommandsAvailable } from '@shared/opencode'
+import { t } from '@shared/i18n'
 import { runtimeSelectionError, selectableChatBackends } from '@shared/runtime-catalog'
 import { isAsyncCrossChatMessage, isNativeGoalSteerEvent, isNativeSteerTransitionStop, timelineSemanticUnits } from '@shared/semantic-timeline'
 import { turnSendErrorMessage } from '@shared/server-errors'
@@ -310,7 +312,7 @@ function parseNewChatDefaults(value: unknown): NewChatDefaults | null {
   const candidate = value as Partial<NewChatDefaults>
   if (
     candidate.version !== 1
-    || !['claude', 'codex', 'cursor'].includes(String(candidate.backend))
+    || !['claude', 'codex', 'cursor', 'opencode'].includes(String(candidate.backend))
     || candidate.codex_provider !== undefined && !['default', 'custom'].includes(candidate.codex_provider)
     || typeof candidate.folder !== 'string'
     || typeof candidate.cwd !== 'string'
@@ -371,6 +373,7 @@ function directChatPlaceholderFingerprint(session: Session): string {
     codexApprovalsReviewer: session.codex_approvals_reviewer ?? null,
     claudePermissionMode: session.claude_permission_mode ?? null,
     cursorPermissionMode: session.cursor_permission_mode ?? null,
+    ...(session.backend === 'opencode' ? { opencodePermissionMode: session.opencode_permission_mode ?? null } : {}),
     providerJobsAccess: session.provider_jobs_access ?? null
   })
 }
@@ -1488,7 +1491,7 @@ export const useAppStore = create<AppState>((set, get) => ({
 
   async refreshAgentRoutes(sessionId) {
     const current = get()
-    if (!agentCrossChatRoutesAvailable(current.health)) {
+    if (!agentCrossChatRoutesAvailable(current.health) || current.sessions.find(session => session.id === sessionId)?.backend === 'opencode') {
       set(state => {
         const agentRoutesBySession = { ...state.agentRoutesBySession }
         const agentRouteErrorsBySession = { ...state.agentRouteErrorsBySession }
@@ -1698,6 +1701,9 @@ export const useAppStore = create<AppState>((set, get) => ({
     )
     const chatReferences = validatedReferences.chatReferences
     const teamReferences = validatedReferences.teamReferences
+    if (chatReferences.length && get().sessions.find(session => session.id === sessionId)?.backend === 'opencode') {
+      set({ error: t('opencode.crossChatUnavailable') }); return false
+    }
     if (requestedReferences.length !== chatReferences.length) {
       set({ error: 'A chat reference was edited or is no longer valid. Remove it and select the chat again.' })
       return false
@@ -1774,6 +1780,9 @@ export const useAppStore = create<AppState>((set, get) => ({
       set({ error: runtimeError })
       return false
     }
+    if (steer && currentTarget.backend === 'opencode' && get().activeSessionIds.has(sessionId)) {
+      set({ error: t('opencode.steerUnavailable') }); return false
+    }
     const admissionToken = options?.admissionToken ?? get().beginTurnAdmission(sessionId)
     if (!admissionToken || get().turnAdmissionTokens[sessionId] !== admissionToken) return false
     const session = currentTarget
@@ -1819,7 +1828,7 @@ export const useAppStore = create<AppState>((set, get) => ({
         fileIds: uploads.map(file => file.id),
         model: session?.model,
         effort: session?.effort,
-        clientCapabilities: interactiveClientCapabilities(session, get().health),
+        clientCapabilities: interactiveClientCapabilities(session, get().health, Boolean(options?.skillSelection)),
         chatReferences,
         teamReferences,
         ...(options?.skillSelection ? { skillSelection: options.skillSelection } : {})
@@ -2085,7 +2094,8 @@ export const useAppStore = create<AppState>((set, get) => ({
         model: defaults.model,
         effort: defaults.effort,
         system_prompt: null,
-        cursor_permission_mode: defaults.backend === 'cursor' ? 'default' : null
+        cursor_permission_mode: defaults.backend === 'cursor' ? 'default' : null,
+        opencode_permission_mode: defaults.backend === 'opencode' ? 'default' : null
       }
       const session = await window.agentsDock.sessions.create(input)
       if (!workspaceScopeMatches(preferenceScope, get()) || !profileScopeMatches(profileScope, get())) return
@@ -2188,6 +2198,7 @@ export const useAppStore = create<AppState>((set, get) => ({
     const current = get()
     if (current.switchingProfileId) return
     const source = current.sessions.find(session => session.id === sessionId)
+    if (source?.backend === 'opencode') { set({ error: t('opencode.forkUnavailable') }); return }
     if ((current.activeSessionIds.has(sessionId) || current.turnAdmissionTokens[sessionId])
       && !completedPrefixForkAvailable(current.health, source?.backend)) {
       set({ error: RUNNING_FORK_UNAVAILABLE })
@@ -2345,6 +2356,9 @@ export const useAppStore = create<AppState>((set, get) => ({
   },
   async importHistory(sessionId) {
     if (get().switchingProfileId) return
+    if (get().sessions.find(session => session.id === sessionId)?.backend === 'opencode') {
+      set({ error: t('opencode.importUnavailable') }); return
+    }
     const scope = captureProfileScope(get())
     try {
       // Refresh is incremental by default. A forced import can replay an
@@ -4466,6 +4480,7 @@ function flushLiveEvents(forceAll = false): void {
   }
   useAppStore.setState(state => {
     let activeSessionIds = state.activeSessionIds
+    let sessions = state.sessions
     let health = state.health
     let snapshots = state.snapshots
     let pendingTurnSubmissions = state.pendingTurnSubmissions
@@ -4488,6 +4503,9 @@ function flushLiveEvents(forceAll = false): void {
         return merged
       })
       const pendingSubmission = pendingTurnSubmissions[sessionId]
+      const owner = sessions.find(session => session.id === sessionId)
+      const updatedOwner = owner ? events.reduce(applyOpenCodeSessionEvent, owner) : undefined
+      if (updatedOwner && updatedOwner !== owner) sessions = sessions.map(session => session.id === sessionId ? updatedOwner : session)
       if (pendingSubmission && pendingTurnSubmissionAccepted(pendingSubmission, events)) {
         pendingTurnSubmissions = removePendingTurnSubmission(
           pendingTurnSubmissions,
@@ -4548,6 +4566,7 @@ function flushLiveEvents(forceAll = false): void {
       ) continue
       const nextSnapshot = {
         ...snapshot,
+        ...(updatedOwner && updatedOwner !== owner ? { session: updatedOwner } : {}),
         events: mergedEvents,
         generation: nextTimelineGeneration(
           snapshot,
@@ -4570,6 +4589,7 @@ function flushLiveEvents(forceAll = false): void {
       : state.connectionGeneration
     if (
       activeSessionIds === state.activeSessionIds
+      && sessions === state.sessions
       && health === state.health
       && snapshots === state.snapshots
       && pendingTurnSubmissions === state.pendingTurnSubmissions
@@ -4581,6 +4601,7 @@ function flushLiveEvents(forceAll = false): void {
     ) return state
     return {
       activeSessionIds,
+      sessions,
       health,
       snapshots,
       pendingTurnSubmissions,
@@ -4819,6 +4840,7 @@ function normalizeSessionPatch(patch: Partial<Session>) { return {
   codex_approvals_reviewer: patch.codex_approvals_reviewer,
   claude_permission_mode: patch.claude_permission_mode,
   cursor_permission_mode: patch.cursor_permission_mode,
+  opencode_permission_mode: patch.opencode_permission_mode,
   provider_jobs_access: patch.provider_jobs_access ?? undefined,
   pinned: patch.pinned ?? undefined,
   archived: patch.archived ?? undefined
@@ -4826,8 +4848,10 @@ function normalizeSessionPatch(patch: Partial<Session>) { return {
 
 export function interactiveClientCapabilities(
   session: Session | undefined,
-  health: Health | null
+  health: Health | null,
+  selectedSkill = false
 ): string[] {
+  if (session?.backend === 'opencode') return selectedSkill && openCodeProviderCommandsAvailable(health) ? ['opencode_provider_commands_v1'] : []
   const capabilities = ['codex_interactive_v1', 'codex_goal_steer_v1']
   if (crossChatHandoffsAvailable(health)) capabilities.push('cross_chat_handoffs_v1')
   if (

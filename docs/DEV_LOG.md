@@ -13,6 +13,135 @@
   Native click-through acceptance is pending computer-use permissions; this
   records source/local-build validation, not a release or server deployment.
 
+## 2026-09-22 — Prepare OpenCode desktop/server beta candidate
+
+- Integrate OpenCode into the maintained desktop and server sources for
+  `1.0.7-beta.6`, preserving the newer Claude Goals, thinking, scrolling,
+  reconnect and mailbox-history corrections. Keep desktop installation
+  independent of server updates; no automatic npm migration is introduced.
+- Add desktop backend/model selection, permission controls and their context
+  reset warning, uploads, local skills and native session/reset projection.
+  The matching server supports OpenCode CLI 1.18.29, bounded native execution,
+  follow-ups, queued turns and Stop. Unsupported features remain explicit.
+- Cover enforced-resume Stop/error cleanup against the original durable
+  provider binding, preserving newer run ownership. Redact exact run-private
+  helper capability material before live/history projection without changing
+  public receipts. Recheck the local CLI contract at actual turn admission so
+  an in-place upgrade cannot reuse a stale compatible-version diagnostic.
+- Pass the full desktop suite (4,820 active tests; five existing skips),
+  TypeScript and production compilation. Additional permission/localization
+  checks pass after adding the context-reset warning. Server provider,
+  history/mailbox, packaging and recovery regressions pass.
+- Personally use an isolated native offscreen Electron app with production
+  IPC and authenticated HTTP/WebSocket transport: create an OpenCode chat,
+  select a model, write a disposable file, receive a contextual follow-up,
+  stop a live shell tool and verify its delayed write never occurs, then upload
+  a text attachment through the normal file action and receive its exact
+  contents. Reload retains the attachment, answer and context-reset markers.
+  Inspect the permission warning in light/dark themes at a narrow desktop width.
+- The real free-model endpoint rejects Plan-mode requests. The app displays
+  that provider error and clears the failed resume binding; absence of a file
+  after this rejection is not successful Plan-mode acceptance. Authenticated
+  provider checks for enforced permissions and selected skills remain pending.
+- Preserve native build reservations 1206/1207 from the local beta.4/beta.5
+  candidates; public preparation run 21 next reserves 1208. Recheck the counter
+  before dispatch. No new signed package, publication, production installation
+  or server deployment is recorded by this source-preparation entry.
+
+## 2026-09-22 — Keep interrupted mail checks out of user history
+
+- Correct Claude mailbox-input ownership proof for stopped and failed runs.
+  A recorded interruption does not change a generated instruction into user
+  input. Keep the exact input hash, provider identity, source checkpoint,
+  unique occurrence and time bounds; assistant replay checks are unchanged.
+- Cover existing sanitized imports and first imports, stopped and failed
+  terminals, and genuine human quotations. Focused server checks pass.
+- Reproduce the leak through authenticated HTTP on an isolated server with a
+  persisted provider-transcript fixture. Personally open it in the signed
+  desktop package, update only the isolated server to a new advertised version,
+  and reopen the already-cached chat. The generated input disappears while the
+  identical human quotation and both assistant replies remain. Repeated chat
+  switching stays correct; persisted source and event files are unchanged.
+- Test transport and history repair are real; the disposable provider transcript
+  is synthetic and no provider inference runs. Missing-terminal or unowned
+  history is outside this correction. A server update with a new version is
+  required to refresh existing desktop caches. No production deployment.
+
+## 2026-09-22 — Validate local desktop beta.5, build 1207
+
+- Build committed app source `92ab2320c1b6b0e41d9cb59fc3887cb3ff90e3ba` as
+  1.0.7-beta.5, build 1207. TypeScript, all 4,798 active app tests, production
+  compilation, bundle audit and Developer ID signing pass; five tests are
+  skipped by the existing suite. Retain the compact Claude thinking correction.
+- Personally exercise the exact signed app with native mouse input, production
+  IPC and authenticated HTTP/WebSocket transport. With a real history response
+  held for eight seconds, a cached chat reaches live 30 milliseconds after the
+  click. A new streamed reply arrives before that stale response, remains
+  exactly once afterward, and remains after switching away and back.
+- No renderer exceptions occur. Close the isolated app and remove its temporary
+  credential. Synthetic persisted messages exercise transport and reconciliation,
+  not provider inference. The separate server history-repair acceptance above
+  uses this unchanged app package.
+- Availability is a local Apple silicon app, signed but not notarized, with
+  automatic updates disabled. No publication, installed-app replacement or
+  production server deployment. The syncing and thinking corrections are
+  app-only; the mailbox-input correction requires the server change above.
+
+## 2026-09-22 — Reconnect cached chats without waiting for history
+
+- Open the live connection immediately when switching to a cached chat, while
+  the existing history refresh checks imports, metadata, queues and repairs in
+  the background. First opens still load their authoritative history page.
+- Preserve newer live messages and queue changes when a delayed history reply
+  arrives. Reset the stream cursor when server history is replaced, and prevent
+  buffered events from the previous log from returning afterward.
+- Reproduce the delay in an isolated native desktop app through authenticated
+  HTTP and WebSocket transport: an eight-second history response kept the old
+  app syncing for eight seconds. With the correction, the cached switch reaches
+  live in 28 milliseconds while that response is still pending. A new message
+  arrives before the response and remains visible exactly once after refresh
+  and switching away and back. No renderer exceptions occur.
+- Focused service, transport and store checks, TypeScript and production
+  compilation pass. The controlled test uses persisted synthetic messages,
+  not provider inference. Package acceptance is recorded separately.
+- This correction is app-only and requires no server update.
+
+## 2026-09-22 — Validate local desktop beta.4, build 1206
+
+- Build committed source `230f946912c0cdf4f05da0c87e0f106973c0e5b5` as
+  1.0.7-beta.4, build 1206. TypeScript, all 4,794 active app tests, production
+  compilation, bundle audit and Developer ID signing pass. The first packaging
+  attempt omitted the beta-track environment; correcting that local build
+  configuration passes the unchanged suite. Five tests are skipped by the suite.
+- Personally exercise a real Claude turn through the isolated native app,
+  production IPC and authenticated server: compact thinking, live setting on/off,
+  completion collapse with the setting enabled, and retained manual history.
+  A 7,206-character received thinking event remains available. Verify long-text
+  fixtures and bounded dark/light rendering, including a narrow viewport.
+- Open the exact signed package and verify the compact disclosure, full-text
+  expansion, native wheel scrolling and settings behavior on completed history.
+  The panel is capped at 320 pixels, or 40 percent of the viewport height.
+  No renderer exceptions occur; close the isolated test app and remove its
+  temporary credential afterward.
+- Availability is a local Apple silicon `.app` only, signed but not notarized,
+  with automatic updates disabled by the local-build workflow. No publication,
+  installed-app replacement or server deployment. This correction needs no
+  server update.
+
+## 2026-09-22 — Make Claude thinking compact and optional
+
+- Keep Claude thinking in a single-line disclosure by default. Apply the
+  existing thinking visibility setting to active Claude turns as well as Codex;
+  completed and stopped turns collapse while retaining manually readable text.
+- Bound expanded Claude thinking to a scrollable panel, preserve the user's
+  chat font size, and replace the large colored card with subdued styling.
+  Update the setting's English and Chinese descriptions.
+- Targeted timeline checks, TypeScript and production compilation pass.
+  Reproduce the oversized panel in an isolated native app and verify the
+  corrected long-text display through production IPC and authenticated HTTP.
+  Local package and live-provider acceptance are recorded separately.
+- This is an app-only correction. No server update is required.
+
 ## 2026-09-22 — Validate unpublished desktop beta.3, build 1205
 
 - Build committed source `4c87d87f28735adedd20295fbb4db4f328c794b1` as
