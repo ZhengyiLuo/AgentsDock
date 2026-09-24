@@ -1,5 +1,20 @@
 # Public development log
 
+## 2026-09-24 — Preserve existing Python permissions during server updates
+
+- Accept same-user external Python interpreters and bounded uv runtime trees
+  with group-write permissions during preparation and activation. Record the
+  interpreter's bytes and mode without altering a shared installation.
+- Reproduce the preparation and durability failures before the correction.
+  Verify candidate and retained releases sharing a `0775` uv prefix with
+  `0664` library files and internal links. Changed interpreter bytes or modes
+  still invalidate the preparation receipt.
+- Pass 81 focused macOS checks (one Linux-only check skipped) and 61 Linux
+  checks, including real isolated worker/gateway startup and native systemd
+  unit parsing. The corrected scanner also accepts an existing uv runtime
+  and retained release without changing their permissions or service process.
+  Complete installed-service activation remains a separate deployment check.
+
 ## 2026-09-23 — Publish the signed beta.8 server update
 
 - Publish the legacy signed server beta `1.0.7-beta.8` from canonical source
