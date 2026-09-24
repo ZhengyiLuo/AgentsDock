@@ -1,5 +1,23 @@
 # Public development log
 
+## 2026-09-24 — Publish the signed beta.9 server correction
+
+- Publish server `1.0.7-beta.9` from canonical source
+  `40902a58873b6a9e298a4c9a24f55b80ebe21b4a` and exact standalone export
+  `ae9d4373eaeeaf6555eefeb6c3b0243329b4f44d`. All eight release test shards
+  and the canonical server, Electron and mobile-source CI checks pass.
+- Correct incomplete provider-manager test fixtures exposed by the first
+  release validation attempt, then rerun the full suite before signing and
+  publication. No failing candidate is published.
+- Verify the Ed25519 signature, all 108 packaged runtime files and executable
+  modes against committed source. Anonymous downloads match all three signed
+  candidate assets byte-for-byte. Archive SHA256:
+  `cb442218c9e524bad126190ee1ceb89c28356f41c3d1e91a200c857d75970548`.
+- Deployment uses the existing managed updater with fresh preparation and
+  when-idle activation. A queued request is not completed installation;
+  running agents retain their current worker until its work finishes.
+  This release changes neither desktop builds nor npm tags.
+
 ## 2026-09-24 — Refresh an upgraded Codex CLI without stopping running chats
 
 - Recheck CLI and subsequent provider operations detect a replaced CLI.
