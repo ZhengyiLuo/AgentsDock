@@ -13,7 +13,17 @@
   former deadlines. Exercise a real local HTTP connection, native conversation
   retention, the full Claude manager/control path and cancellation without
   stopping the parent. Pass 282 affected desktop and 238 server checks and
-  desktop TypeScript. Native app acceptance and release packaging are pending.
+  desktop TypeScript.
+- Personally reproduce the old cutoff through an isolated native offscreen
+  app and real Codex. With the correction, a 225-second tool completes and the
+  app receives its answer after 234 seconds. The main chat answers concurrently;
+  a side follow-up retains inherited tool-result context. Stop acknowledges in
+  100 ms and its owned tool exits.
+- Close a private Codex process promptly when Stop arrives during stalled
+  startup or fork creation. Retain ownership of delayed spawns and avoid
+  restarting a closed transport after a late fork reply. All 172 affected
+  adapter/transport checks pass, including unchanged durable-fork cleanup.
+  Packaged-app acceptance and release publication remain separate checks.
 
 ## 2026-09-24 — Publish the signed beta.9 server correction
 
