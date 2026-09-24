@@ -137,7 +137,7 @@ export function timelineSemanticUnits(events: Event[]): TimelineSemanticUnit[] {
     // A team send receipt has its own durable system-row identity. It carries
     // the originating run_id for auditability, but must never be folded into
     // that run (or its scheduled-job card) when semantic history is rebuilt.
-    if (event.type === 'team_message_sent') {
+    if (event.type === 'team_message_sent' || event.type === 'provider_session_reset') {
       key = `event:${event.id || event.seq}`
     } else if (jobId) {
       const occurrenceGroupId = jobGroupByOccurrence.get(occurrenceKey) || ''

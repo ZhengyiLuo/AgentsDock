@@ -6,6 +6,7 @@ export function backendLabel(backend: Backend, codexProvider?: CodexProvider): s
   if (backend === 'codex' && codexProvider === 'custom') return t('codexProvider.label')
   if (backend === 'codex') return 'Codex'
   if (backend === 'cursor') return 'Cursor'
+  if (backend === 'opencode') return 'OpenCode'
   return 'Claude'
 }
 
@@ -40,12 +41,12 @@ export function runtimeLabel(session: Session, catalog?: RuntimeCatalog | null):
   const backend = runtimeBackendCatalogFor(catalog, session.backend, session.codex_provider, session.codex_provider_catalog)
   const custom = session.backend === 'codex' && session.codex_provider === 'custom'
   const model = session.model?.trim()
-  const effort = session.backend === 'cursor' ? '' : session.effort?.trim()
+  const effort = session.backend === 'cursor' || session.backend === 'opencode' ? '' : session.effort?.trim()
   const modelLabel = model
     ? backend?.models.find(option => option.value === model)?.label ?? model
-    : backend?.models.find(option => option.value === (backend.default_model ?? ''))?.label ?? (backend?.default_model?.trim() || (custom ? t('codexProvider.chooseModel') : session.backend === 'claude' ? 'Sonnet' : session.backend === 'codex' ? 'GPT' : 'Auto'))
+    : backend?.models.find(option => option.value === (backend.default_model ?? ''))?.label ?? (backend?.default_model?.trim() || (custom ? t('codexProvider.chooseModel') : session.backend === 'claude' ? 'Sonnet' : session.backend === 'codex' ? 'GPT' : session.backend === 'opencode' ? t('opencode.defaultModel') : 'Auto'))
   const supportedEfforts = custom ? runtimeEffortOptions(catalog, session.backend, session.model, null, session.codex_provider, session.codex_provider_catalog) : null
-  const effortLabel = session.backend === 'cursor'
+  const effortLabel = session.backend === 'cursor' || session.backend === 'opencode'
     ? null
     : effort
       ? supportedEfforts ? supportedEfforts.find(option => option.value === effort)?.label : backend?.efforts.find(option => option.value === effort)?.label ?? effort
