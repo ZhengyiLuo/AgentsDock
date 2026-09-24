@@ -1,5 +1,24 @@
 # Public development log
 
+## 2026-09-24 — Discover current and older Claude model choices
+
+- Resolve versioned Claude labels from native SDK initialization while retaining
+  alias values and existing chat selections. Restore selectable older versions
+  through a disposable native picker, not an unfiltered union of static IDs.
+- Preserve native restrictions, custom gateways and curated picker settings.
+  Metadata probes send no user prompt, disable tools/hooks/MCP, use bounded
+  process lifetimes and output, and never return account metadata.
+- Include the new runtime module in npm packages and legacy signed-package
+  inputs, installer validation and direct-deploy validation.
+- Verification: 189 focused server regressions pass. A real Claude Code
+  2.1.281 metadata probe through the isolated server catalog returns current and
+  older choices without duplicate IDs in 1.78 seconds; user settings are
+  unchanged. A full local npm package contains the exact module bytes and all
+  78 packaged Python sources compile.
+- Boundaries: metadata-only native verification, not billed inference or
+  Electron UI acceptance of this monorepo build. This is a source PR; no npm
+  publication, release or service restart is part of this change.
+
 ## 2026-09-23 — Publish the signed beta.8 server update
 
 - Publish the legacy signed server beta `1.0.7-beta.8` from canonical source
