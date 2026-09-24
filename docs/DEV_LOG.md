@@ -1,5 +1,32 @@
 # Public development log
 
+## 2026-09-24 — Refresh an upgraded Codex CLI without stopping running chats
+
+- Recheck CLI and subsequent provider operations detect a replaced CLI.
+  New chats use a new process while existing turns, goals, approvals and
+  background work retain their original owner. Idle chats resume their native
+  thread history on the current process. Rechecking the same version does not
+  restart it, and read-only inspection cannot retain an old process forever.
+- Keep late notifications and approval requests tied to their emitting
+  process. Include manager identity in goal reconciliation and close every
+  retained process during provider shutdown.
+- Pass 376 affected checks, then 67 targeted checks after the final inspection
+  correction. The new regression cases cover concurrent routing, idle resume,
+  pending work, delayed callbacks, shutdown and inspection-task lifetime.
+- Exercise Settings > Server > Recheck CLIs in an isolated native offscreen
+  app through real IPC/HTTP. A fresh GPT-6 Sol chat using ChatGPT authentication
+  completes while the older process continues its existing turn. That turn
+  finishes normally; its old process exits and a contextual follow-up returns
+  the remembered phrase using the same native thread ID on the new process.
+  A repeated same-version recheck creates no additional process. No renderer
+  exceptions or changes to the production authentication file are observed.
+- The live test changes a wrapper's reported version while both processes use
+  the installed native CLI. It validates handoff and continuity, not historical
+  compatibility between two different CLI executables. The final read-only
+  inspection correction is covered by its focused lifetime regression.
+- Prepare server `1.0.7-beta.9`; public signing, publication and installed
+  activation are separate checks. No desktop or npm release is included.
+
 ## 2026-09-24 — Preserve existing Python permissions during server updates
 
 - Accept same-user external Python interpreters and bounded uv runtime trees
