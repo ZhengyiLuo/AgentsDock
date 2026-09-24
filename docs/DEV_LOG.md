@@ -23,7 +23,19 @@
   startup or fork creation. Retain ownership of delayed spawns and avoid
   restarting a closed transport after a late fork reply. All 172 affected
   adapter/transport checks pass, including unchanged durable-fork cleanup.
-  Packaged-app acceptance and release publication remain separate checks.
+- Accept local desktop `1.0.7-beta.10` build `1212`, arm64, from app source
+  `183083a5`, paired with server source `240e2941`. The actual signed package
+  completes native Codex and Claude first questions, contextual follow-ups,
+  Stop and Clear followed by another answer through production IPC/HTTP.
+  The isolated packaged window reports no renderer exceptions. Claude's
+  beyond-deadline control behavior is covered deterministically; the actual
+  225-second tool check uses Codex. No mocked provider is used for these app
+  acceptance checks.
+- Pass all 4,804 active desktop tests, TypeScript, production compilation and
+  compiled-package audit, plus all eight server release test shards. Verify
+  the local app's Developer ID signature. This local app is not notarized or
+  publicly published, and its automatic updater is disabled. Both app and
+  server corrections are required to remove both answer deadlines.
 
 ## 2026-09-24 — Publish the signed beta.9 server correction
 
