@@ -345,12 +345,11 @@ export class AgentServerClient {
 
   async askSideQuestion(sessionId: string, input: SideQuestionInput, signal?: AbortSignal): Promise<SideQuestionAnswer> {
     const body = validateSideQuestionInput(input)
-    // Native side questions have a 150-second server deadline.
-    // Keep transport headroom and never retry or turn this into a chat turn.
+    // A native side turn can keep thinking, using tools, or awaiting approval.
+    // Its owner controls cancellation; elapsed time alone must not end it.
     const response = await this.privilegedNativeRequest<unknown>(`/api/sessions/${encodeURIComponent(sessionId)}/side-questions`, {
-      method: 'POST', body: JSON.stringify(body),
-      signal: combineAbortSignals(signal, this.timeoutSignal(210_000))
-    }, 210_000, 200, 2 * 1024 * 1024)
+      method: 'POST', body: JSON.stringify(body), signal
+    }, null, 200, 2 * 1024 * 1024)
     return parseSideQuestionAnswer(response, sessionId, body.request_id)
   }
 
@@ -2476,7 +2475,7 @@ export class AgentServerClient {
   private async privilegedNativeRequest<T>(
     path: string,
     init: RequestInit = {},
-    timeoutMs = DEFAULT_REQUEST_TIMEOUT_MS,
+    timeoutMs: number | null = DEFAULT_REQUEST_TIMEOUT_MS,
     expectedStatus?: number,
     maxResponseBytes?: number
   ): Promise<T> {
@@ -2500,7 +2499,7 @@ export class AgentServerClient {
       signal: combineAbortSignals(
         configuration.abortController.signal,
         init.signal,
-        AbortSignal.timeout(timeoutMs)
+        timeoutMs === null ? undefined : AbortSignal.timeout(timeoutMs)
       )
     })
     if (!response.ok || expectedStatus !== undefined && response.status !== expectedStatus) {

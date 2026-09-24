@@ -1,5 +1,20 @@
 # Public development log
 
+## 2026-09-24 — Remove side-chat answer deadlines
+
+- Remove the 150-second answer cutoff from the shared side-chat runtime and
+  Claude's native control path, and the desktop's 210-second HTTP deadline.
+  Long answers retain their native conversation and follow-up context.
+  Codex side chats inherit ordinary Codex transport settings.
+- Preserve Stop, Clear, request-owner cancellation, disconnection and shutdown
+  cleanup. Remove timeout copy that promised a retry would work on an older
+  server after its native side conversation had already closed.
+- Regressions fail before the correction and pass after advancing beyond the
+  former deadlines. Exercise a real local HTTP connection, native conversation
+  retention, the full Claude manager/control path and cancellation without
+  stopping the parent. Pass 282 affected desktop and 238 server checks and
+  desktop TypeScript. Native app acceptance and release packaging are pending.
+
 ## 2026-09-24 — Publish the signed beta.9 server correction
 
 - Publish server `1.0.7-beta.9` from canonical source

@@ -76,7 +76,7 @@
   "sideQuestion.unavailableContext": "Native conversation context is not available yet, or another side question is running. Wait for it to finish before asking again.",
   "sideQuestion.busy": "The server is already answering the maximum number of side questions. Try again after one finishes.",
   "sideQuestion.providerUnavailable": "The provider could not answer a side question. Check its connection and try again.",
-  "sideQuestion.timeout": "The side question timed out. Your main task continues; you can ask again when ready.",
+  "sideQuestion.timeout": "The side question timed out before an answer arrived. Your main task continues.",
   "sideQuestion.failed": "The side question could not be answered. Check the server connection and try again. Your main task continues.",
   "codexAuth.title": "Codex account",
   "codexAuth.accountReadOnly": "Normal Codex uses the server’s existing login. Manage that login with Codex on the server. Custom endpoint settings do not change it.",

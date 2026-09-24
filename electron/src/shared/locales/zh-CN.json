@@ -76,7 +76,7 @@
   "sideQuestion.unavailableContext": "原生对话上下文暂不可用，或另一个侧边问题正在运行。请稍后再试。",
   "sideQuestion.busy": "服务器正在处理的单独提问已达上限，请等待其他提问完成后重试。",
   "sideQuestion.providerUnavailable": "提供方无法回答此问题，请检查其连接后重试。",
-  "sideQuestion.timeout": "本次提问已超时。主任务继续执行，你可以稍后再次提问。",
+  "sideQuestion.timeout": "本次提问在收到回答前超时。主任务继续执行。",
   "sideQuestion.failed": "无法回答此问题，请检查服务器连接后重试。主任务继续执行。",
   "codexAuth.title": "Codex 账户",
   "codexAuth.accountReadOnly": "普通 Codex 使用服务器现有的登录状态。请在服务器上通过 Codex 管理登录。自定义端点设置不会更改该登录状态。",
