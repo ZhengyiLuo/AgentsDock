@@ -1,5 +1,19 @@
 # Public development log
 
+## 2026-09-24 — Publish the signed beta.10 server correction
+
+- Publish server `1.0.7-beta.10` from canonical source
+  `240e29414a8cc843d593d699d7252e0b7df0c401` and standalone export
+  `2d84e17f8dc7d23f6ef2da8ecc8f0faeb8be6ba0` after all eight release test
+  shards and the paired local app acceptance pass.
+- Independently verify the Ed25519 signature and all 108 packaged runtime
+  files against committed source. Anonymous downloads match all three signed
+  candidate assets byte-for-byte. Archive SHA256:
+  `ef5f0418ab6e0890c87b346653fcb570256e1f9bb17d0da0afd292650dfec608`.
+- Managed updates prepare while agents keep working and activate when idle.
+  An accepted update request does not establish completed installation.
+  This publication changes neither desktop releases nor npm tags.
+
 ## 2026-09-24 — Remove side-chat answer deadlines
 
 - Remove the 150-second answer cutoff from the shared side-chat runtime and
