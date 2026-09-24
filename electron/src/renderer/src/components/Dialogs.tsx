@@ -6,7 +6,7 @@ import { forwardRef, useCallback, useEffect, useLayoutEffect, useMemo, useRef, u
 import * as Dialog from '@radix-ui/react-dialog'
 import { ArrowRight, Check, ChevronDown, ChevronRight, CircleAlert, Clock3, Command, Copy, Download, ExternalLink, FileText, FolderOpen, GitFork, Import, KeyRound, Laptop, LoaderCircle, Network, RefreshCw, RotateCcw, Search, Server, Sparkles, X } from 'lucide-react'
 import type { AppUpdateStatus, AppUpdateTrack, Backend, BulkImportSessionItem, BulkImportSessionResult, ChatReference, ChatReferenceAction, CoordinatedServerUpdate, CreateJobInput, Health, Job, JobContextMode, JobScheduleKind, LocalSessionCandidate, ServerRestartBlockerSnapshot, ServerSetupCapabilities, ServerSetupProgress, ServerUpdateStatus, ServerUpdateTrack, Session, TeamReference, UpdateJobInput, WorkspaceProfileScope } from '@shared/types'
-import { localSessionImportKey, localSessionImportSupported } from '@shared/local-session-import'
+import { cursorLocalSessionImportSupported, localSessionImportKey, localSessionImportSupported } from '@shared/local-session-import'
 import { opencodeBackendAvailable, opencodeBackendUnavailableReason, chatBackendSelection, codexCustomProviderAvailable, cursorBackendAvailable, cursorBackendUnavailableReason, runtimeCatalogOptions, runtimeEffortAfterModelChange, runtimeEffortOptions, runtimeSelectionError, selectableChatBackendChoices, selectableChatBackends, type ChatBackendChoice } from '@shared/runtime-catalog'
 import { trackEvent } from '../lib/analytics'
 import { readAppearance, setAppearanceMode, type AppearanceMode } from '../lib/appearance'
@@ -2979,7 +2979,7 @@ export function SessionDialog({ mode }: { mode: 'newChat' | 'resume' }) {
     <form onSubmit={submit} className="dialog-form two-column-form">
       {importSupported && <button type="button" className="import-chats-entry span-two" onClick={() => { const store = useAppStore.getState(); store.setModal(mode, false); store.setModal('importChats', true) }}>
         <Import size={16} aria-hidden="true" />
-        <span className="import-chats-entry-copy"><strong>{t("ui.Dialogs.SessionDialog.import_an_existing_chat_from_your_computer_d8901ee")}</strong><small>{mode === 'resume' ? t("ui.Dialogs.SessionDialog.pick_from_your_local_claude_code_codex_his_15e10b3") : t("ui.Dialogs.SessionDialog.bring_in_your_local_claude_code_codex_hist_9108394")}</small></span>
+        <span className="import-chats-entry-copy"><strong>{t("ui.Dialogs.SessionDialog.import_an_existing_chat_from_your_computer_d8901ee")}</strong><small>{cursorLocalSessionImportSupported(health) ? t('ui.Dialogs.ImportChatsDialog.supported_cli_history') : mode === 'resume' ? t("ui.Dialogs.SessionDialog.pick_from_your_local_claude_code_codex_his_15e10b3") : t("ui.Dialogs.SessionDialog.bring_in_your_local_claude_code_codex_hist_9108394")}</small></span>
         <ArrowRight size={14} aria-hidden="true" />
       </button>}
       {mode === 'resume' && <label className="span-two"><span>{backendOptions.includes('cursor') ? t("ui.Dialogs.SessionDialog.claude_session_codex_thread_or_cursor_sess_d3b661c") : t("ui.Dialogs.SessionDialog.claude_session_or_codex_thread_id_55530f4")}</span><input value={providerId} onChange={event => setProviderId(event.target.value)} placeholder={t("ui.Dialogs.SessionDialog.session_id_cb9ac5c")} required /></label>}
@@ -3366,7 +3366,7 @@ export function ImportChatsDialog() {
 
   const operationBusy = importing || resumingById
 
-  return <Shell open={open} onOpenChange={value => useAppStore.getState().setModal('importChats', value)} title={t("ui.Dialogs.ImportChatsDialog.import_chat_ed32942")} description={t("ui.Dialogs.ImportChatsDialog.bring_in_your_local_claude_code_and_codex__0ffcba9")}>
+  return <Shell open={open} onOpenChange={value => useAppStore.getState().setModal('importChats', value)} title={t("ui.Dialogs.ImportChatsDialog.import_chat_ed32942")} description={cursorLocalSessionImportSupported(health) ? t('ui.Dialogs.ImportChatsDialog.cursor_snapshot_history') : t("ui.Dialogs.ImportChatsDialog.bring_in_your_local_claude_code_and_codex__0ffcba9")}>
     <div className="dialog-form import-chats-dialog">
       <form className="import-chats-resume" onSubmit={event => void submitResumeById(event)}>
         <div className="import-chats-resume-heading">

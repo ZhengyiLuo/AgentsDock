@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import type { Health } from './types'
 import {
+  cursorLocalSessionImportSupported,
   localSessionImportBatchLimit,
   localSessionImportCapability,
   localSessionImportListLimit,
@@ -29,6 +30,32 @@ function supportedHealth(overrides: Partial<Health> = {}): Health {
 }
 
 describe('local session import contract', () => {
+  it('requires the explicit Cursor public-snapshot capability', () => {
+    const base = supportedHealth()
+    expect(cursorLocalSessionImportSupported(base)).toBe(false)
+    for (const [override, expected] of [
+      [{}, true], [{ available: false }, false], [{ version: 0 }, false],
+      [{ history_mode: 'unknown' }, false]
+    ] as const) {
+      expect(cursorLocalSessionImportSupported({ ...base, capabilities: {
+        ...base.capabilities,
+        local_session_import_cursor_v1: { available: true, version: 1, history_mode: 'initial_text_snapshot', ...override }
+      } })).toBe(expected)
+    }
+  })
+
+  it('accepts Cursor candidates, requests and durable results without weakening identity validation', () => {
+    const item = { provider_session_id: 'cursor-native', backend: 'cursor' as const, cwd: '/work' }
+    expect(parseBulkImportSessionItems([item])).toEqual([item])
+    expect(parseLocalSessionCandidatesResponse({ sessions: [{
+      ...item, label: 'Native title', updated_at: '2026-09-20T00:00:00Z'
+    }] })[0].backend).toBe('cursor')
+    expect(parseBulkImportSessionResultsResponse({ results: [{
+      ...item, session_id: 'imported', ok: true, imported: 2
+    }] }, [item])[0].ok).toBe(true)
+    expect(() => parseBulkImportSessionItems([{ ...item, backend: 'other' }])).toThrow()
+  })
+
   it('requires API 15 and accepts additive capability versions at or above version 1', () => {
     expect(localSessionImportCapability(supportedHealth())).not.toBeNull()
     expect(localSessionImportCapability(supportedHealth({ api_contract_version: 14 }))).toBeNull()

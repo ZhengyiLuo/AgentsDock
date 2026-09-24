@@ -17,6 +17,7 @@ import { SideQuestionRequests } from './side-question-requests'
 import { sideQuestionLimit, sideQuestionsAvailable, validateSideQuestionInput, type SideQuestionAnswer, type SideQuestionCancellation, type SideQuestionInput, type SideQuestionScope } from '../shared/side-questions'
 import { parseBulletinHintRefresh } from '../shared/team-bulletin-hints'
 import {
+  cursorLocalSessionImportSupported,
   localSessionImportBatchLimit,
   localSessionImportListLimit,
   parseBulkImportSessionItems,
@@ -2360,7 +2361,9 @@ export class AppService {
     const scope = this.captureScope()
     await this.ensureValidatedScope(scope)
     const capability = requireLocalSessionImportCapability(this.health)
-    const candidates = await scope.client.listLocalSessions(localSessionImportListLimit(capability))
+    const candidates = cursorLocalSessionImportSupported(this.health)
+      ? await scope.client.listLocalSessions(localSessionImportListLimit(capability), true)
+      : await scope.client.listLocalSessions(localSessionImportListLimit(capability))
     this.assertCurrentScope(scope)
     return candidates
   }
@@ -2370,6 +2373,9 @@ export class AppService {
     await this.ensureValidatedScope(scope)
     const capability = requireLocalSessionImportCapability(this.health)
     const normalized = parseBulkImportSessionItems(items, localSessionImportListLimit(capability))
+    if (normalized.some(item => item.backend === 'cursor') && !cursorLocalSessionImportSupported(this.health)) {
+      throw new Error('Cursor Import Chat requires a server with Cursor local import support.')
+    }
     const batchLimit = localSessionImportBatchLimit(capability)
     const results: BulkImportSessionResult[] = []
     for (let offset = 0; offset < normalized.length; offset += batchLimit) {

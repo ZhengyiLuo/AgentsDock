@@ -1606,6 +1606,8 @@
   "ui.Dialogs.FolderDialog.folder_name_14d34ed": "Folder name",
   "ui.Dialogs.FolderDialog.new_folder_cf28f49": "New folder",
   "ui.Dialogs.ImportChatsDialog.bring_in_your_local_claude_code_and_codex__0ffcba9": "Bring in your local Claude Code and Codex history.",
+  "ui.Dialogs.ImportChatsDialog.supported_cli_history": "Choose from local Claude Code, Codex and Cursor CLI chats.",
+  "ui.Dialogs.ImportChatsDialog.cursor_snapshot_history": "Import local Claude Code, Codex and Cursor CLI chats. Cursor imports a text snapshot; earlier tools and later native edits are not synced.",
   "ui.Dialogs.ImportChatsDialog.choose_the_matching_agent_b4392a9": "Choose the matching agent:",
   "ui.Dialogs.ImportChatsDialog.close_7d9eb7a": "Close",
   "ui.Dialogs.ImportChatsDialog.collapse_all_25f7b37": "Collapse all",
