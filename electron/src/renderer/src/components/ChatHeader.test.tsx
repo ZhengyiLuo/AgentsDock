@@ -96,6 +96,7 @@ describe('ChatHeader', () => {
     const { container } = render(<ChatHeader sidebarVisible={false} onSidebarToggle={() => undefined} onTerminalToggle={() => undefined} />)
 
     expect(container.querySelector('.header-actions > :first-child')).toBe(screen.getByRole('button', { name: 'Chat actions' }))
+    expect(screen.queryByRole('button', { name: 'Side chat' })).not.toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Show chat list' })).toBeInTheDocument()
   })
 

@@ -442,7 +442,7 @@ class AgentCrossChatRouteTests(unittest.IsolatedAsyncioTestCase):
             [],
         )
 
-    async def test_durable_grant_upsert_is_idempotent_and_directional(self) -> None:
+    async def test_durable_grant_upsert_is_idempotent_and_paired(self) -> None:
         reference = self.grant_reference()
         with (
             self.native_transports(),
@@ -486,14 +486,19 @@ class AgentCrossChatRouteTests(unittest.IsolatedAsyncioTestCase):
         ]
         self.assertEqual(len(routes), 1)
         self.assertEqual(routes[0]["actions"], ["instruction", "request_reply"])
-        self.assertEqual(
-            agent_server.STORE.sessions["target"]["provider_cross_chat_routes"],
-            [],
-        )
-        self.assertNotIn(
-            agent_server.PENDING_PROVIDER_CROSS_CHAT_GRANT_KEY,
-            agent_server.STORE.sessions["source"],
-        )
+        reverse_routes = agent_server.STORE.sessions["target"]["provider_cross_chat_routes"]
+        self.assertEqual(len(reverse_routes), 1)
+        self.assertEqual(reverse_routes[0]["actions"], ["instruction", "request_reply"])
+        self.assertEqual(routes[0]["target_session_id"], "target")
+        self.assertEqual(reverse_routes[0]["target_session_id"], "source")
+        self.assertEqual(routes[0]["pair_id"], reverse_routes[0]["pair_id"])
+        self.assertEqual(routes[0]["paired_route_id"], reverse_routes[0]["route_id"])
+        self.assertEqual(reverse_routes[0]["paired_route_id"], routes[0]["route_id"])
+        for session_id in ("source", "target"):
+            self.assertNotIn(
+                agent_server.PENDING_PROVIDER_CROSS_CHAT_GRANT_KEY,
+                agent_server.STORE.sessions[session_id],
+            )
 
     async def test_pending_grant_restart_reconciles_exact_admission_event(
         self,
@@ -539,6 +544,7 @@ class AgentCrossChatRouteTests(unittest.IsolatedAsyncioTestCase):
                         "session_id": "source",
                         "type": "turn_started",
                         "provider_cross_chat_grant_admission_id": admission_id,
+                        "provider_cross_chat_route_snapshot": mutation["routes"],
                     }) + "\n", encoding="utf-8")
                 recovered = agent_server.SessionStore()
                 with (
@@ -573,6 +579,7 @@ class AgentCrossChatRouteTests(unittest.IsolatedAsyncioTestCase):
             "session_id": "source",
             "type": "turn_started",
             "provider_cross_chat_grant_admission_id": admission_id,
+            "provider_cross_chat_route_snapshot": mutation["routes"],
         }) + "\n", encoding="utf-8")
         recovered = agent_server.SessionStore()
         with (
@@ -794,10 +801,11 @@ class AgentCrossChatRouteTests(unittest.IsolatedAsyncioTestCase):
                 mutation,
             )
         self.assertEqual(save.await_count, 3)
-        self.assertEqual(
-            agent_server.STORE.sessions["source"]["provider_cross_chat_routes"],
-            [],
-        )
+        for session_id in ("source", "target"):
+            session = agent_server.STORE.sessions[session_id]
+            self.assertEqual(session["provider_cross_chat_routes"], [])
+            self.assertEqual(session["provider_cross_chat_route_audit"], [])
+            self.assertNotIn(agent_server.PENDING_PROVIDER_CROSS_CHAT_GRANT_KEY, session)
 
     async def test_durable_session_save_fsyncs_file_rename_and_directory(
         self,
@@ -1549,7 +1557,7 @@ class AgentCrossChatRouteTests(unittest.IsolatedAsyncioTestCase):
             [],
         )
 
-    async def test_admin_create_rejects_self_duplicate_alias_target_and_limit(self) -> None:
+    async def test_admin_create_rejects_self_duplicates_but_allows_more_than_16_routes(self) -> None:
         with self.native_transports(), patch.object(
             agent_server.STORE, "save", AsyncMock()
         ), patch.object(agent_server, "append_durable_event", AsyncMock()):
@@ -1604,14 +1612,19 @@ class AgentCrossChatRouteTests(unittest.IsolatedAsyncioTestCase):
             agent_server.STORE.sessions["target3"] = {
                 "id": "target3", "title": "Third", "backend": "codex"
             }
-            with self.assertRaises(HTTPException) as maximum:
-                await agent_server.create_agent_handoff_route(
-                    "source",
-                    agent_server.AgentHandoffRouteCreateRequest(
-                        alias="overflow", target_session_id="target3"
-                    ),
-                )
-            self.assertEqual(maximum.exception.status_code, 409)
+            added = await agent_server.create_agent_handoff_route(
+                "source",
+                agent_server.AgentHandoffRouteCreateRequest(
+                    alias="overflow", target_session_id="target3"
+                ),
+            )
+            self.assertEqual(added["route"]["alias"], "overflow")
+            current = await agent_server.list_agent_handoff_routes("source", unlimited_routes=True)
+            legacy = await agent_server.list_agent_handoff_routes("source")
+            self.assertEqual(len(current["routes"]), 17)
+            self.assertEqual(current["routes"], legacy["routes"])
+            self.assertIsNone(current["max_routes"])
+            self.assertEqual(legacy["max_routes"], 16)  # Compatibility hint, not a ceiling.
 
     async def test_route_journal_is_atomic_private_and_survives_timeline_failure(self) -> None:
         with (
@@ -3204,7 +3217,7 @@ class AgentCrossChatRouteTests(unittest.IsolatedAsyncioTestCase):
                 )
                 self.assertNotIn("archived", errors[0][1])
 
-    async def test_durable_route_rate_limit_is_atomic_concurrent_and_restart_safe(self) -> None:
+    async def test_configured_route_messages_have_no_hourly_quota_after_restart(self) -> None:
         path = self.root / "rate.sqlite3"
         store = agent_server.CrossChatStore(path)
         await store.initialize()
@@ -3222,48 +3235,35 @@ class AgentCrossChatRouteTests(unittest.IsolatedAsyncioTestCase):
                 authorization_route_id=route_id,
             )
 
-        for index in range(agent_server.PROVIDER_CROSS_CHAT_ROUTE_RATE_LIMIT):
+        for index in range(40):
             await create(index, source="one-source", target=f"target-{index}")
-        with self.assertRaises(HTTPException) as source_limited:
-            await create(99, source="one-source", target="target-overflow")
-        self.assertEqual(source_limited.exception.status_code, 429)
-        self.assertEqual(
-            source_limited.exception.headers["Retry-After"],
-            str(agent_server.PROVIDER_CROSS_CHAT_ROUTE_RATE_WINDOW_SECONDS),
-        )
+        self.assertTrue((await create(99, source="one-source", target="target-overflow"))[1])
 
-        # A new process/store instance still sees the durable source window.
+        # Reopening storage does not restore the removed traffic quota.
         reopened = agent_server.CrossChatStore(path)
         await reopened.initialize()
-        with self.assertRaises(HTTPException) as restart_limited:
-            await reopened.create_instruction(
-                envelope_id="handoff_after_restart",
-                source_session_id="one-source",
-                source_run_id="run_after_restart",
-                target_session_id="fresh-target",
-                body="bounded",
-                idempotency_key="restart-rate-key",
-                authorization_kind="configured_route",
-                authorization_route_id=route_id,
-            )
-        self.assertEqual(restart_limited.exception.status_code, 429)
+        self.assertTrue((await reopened.create_instruction(
+            envelope_id="handoff_after_restart",
+            source_session_id="one-source",
+            source_run_id="run_after_restart",
+            target_session_id="fresh-target",
+            body="bounded",
+            idempotency_key="restart-rate-key",
+            authorization_kind="configured_route",
+            authorization_route_id=route_id,
+        ))[1])
 
-        for index in range(agent_server.PROVIDER_CROSS_CHAT_ROUTE_RATE_LIMIT):
+        for index in range(40):
             await create(index, source=f"many-source-{index}", target="one-target")
-        with self.assertRaises(HTTPException) as target_limited:
-            await create(99, source="many-source-overflow", target="one-target")
-        self.assertEqual(target_limited.exception.status_code, 429)
+        self.assertTrue((await create(99, source="many-source-overflow", target="one-target"))[1])
 
         results = await asyncio.gather(*(
             create(index, source="concurrent-source", target=f"concurrent-{index}")
-            for index in range(agent_server.PROVIDER_CROSS_CHAT_ROUTE_RATE_LIMIT + 1)
-        ), return_exceptions=True)
-        self.assertEqual(
-            sum(isinstance(result, HTTPException) and result.status_code == 429 for result in results),
-            1,
-        )
+            for index in range(40)
+        ))
+        self.assertTrue(all(created for _record, created in results))
 
-        # Exact durable replay is returned before rate accounting.
+        # Exact durable replay still returns the one original effect.
         replay, replay_created = await store.create_instruction(
             envelope_id="unused-replay-id",
             source_session_id="one-source",
@@ -3277,11 +3277,11 @@ class AgentCrossChatRouteTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(replay_created)
         self.assertTrue(replay["id"].startswith("handoff_rate_"))
 
-    async def test_rate_rejection_unreserves_and_revoke_blocks_retry(self) -> None:
+    async def test_prior_traffic_does_not_create_authority_after_route_revoke(self) -> None:
         route = self.route("a")
         agent_server.STORE.sessions["source"]["provider_cross_chat_routes"] = [route]
-        # Fill the durable source window without consuming this run's route quota.
-        for index in range(agent_server.PROVIDER_CROSS_CHAT_ROUTE_RATE_LIMIT):
+        # Earlier traffic has no hourly ceiling and never authorizes this run.
+        for index in range(40):
             await agent_server.CROSS_CHAT.create_instruction(
                 envelope_id=f"handoff_prefill_{index}",
                 source_session_id="source",
@@ -3293,20 +3293,6 @@ class AgentCrossChatRouteTests(unittest.IsolatedAsyncioTestCase):
                 authorization_route_id=route["route_id"],
             )
         token, request = await self.issue("run_rate_reject", [route])
-        with self.native_transports():
-            with self.assertRaises(HTTPException) as limited:
-                await agent_server.submit_provider_route_handoff(
-                    route["route_id"],
-                    agent_server.AgentRouteHandoffRequest(
-                        body="blocked", idempotency_key="limited-route-key"
-                    ),
-                    request,
-                )
-        self.assertEqual(limited.exception.status_code, 429)
-        token_hash = agent_server.hashlib.sha256(token.encode()).hexdigest()
-        capability = agent_server.CROSS_CHAT_CAPABILITIES[token_hash]
-        self.assertEqual(capability["provider_route_handoff_count"], 0)
-        self.assertEqual(capability["provider_route_consumed"], {})
         agent_server.STORE.sessions["source"]["provider_cross_chat_routes"] = []
         with self.native_transports():
             with self.assertRaises(HTTPException) as revoked:
@@ -3318,6 +3304,10 @@ class AgentCrossChatRouteTests(unittest.IsolatedAsyncioTestCase):
                     request,
                 )
         self.assertEqual(revoked.exception.status_code, 403)
+        token_hash = agent_server.hashlib.sha256(token.encode()).hexdigest()
+        capability = agent_server.CROSS_CHAT_CAPABILITIES[token_hash]
+        self.assertEqual(capability["provider_route_handoff_count"], 0)
+        self.assertEqual(capability["provider_route_consumed"], {})
 
     async def test_sql_failure_reservation_cannot_bypass_later_revoke(self) -> None:
         route = self.route("a")
@@ -4809,7 +4799,7 @@ class AgentCrossChatRouteTests(unittest.IsolatedAsyncioTestCase):
                     "stale-source",
                     "stale-target",
                     time.time()
-                    - agent_server.PROVIDER_CROSS_CHAT_ROUTE_RATE_WINDOW_SECONDS
+                    - agent_server.PROVIDER_CROSS_CHAT_LEGACY_RATE_RETENTION_SECONDS
                     - 1,
                 ),
             )

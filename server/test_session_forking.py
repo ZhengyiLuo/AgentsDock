@@ -376,7 +376,7 @@ class ForkSessionFallbackTests(unittest.IsolatedAsyncioTestCase):
         provider_id = "claude-provider-sanitized"
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
-            cwd = root / "code" / "robot_ws"
+            cwd = root / "code" / "gr00t_ws"
             cwd.mkdir(parents=True)
             projects_root = root / "claude-projects"
             current_cli_name = str(cwd).replace("/", "-").replace("_", "-")
@@ -416,7 +416,7 @@ class ForkSessionFallbackTests(unittest.IsolatedAsyncioTestCase):
         provider_id = "claude-provider-wrong-cwd"
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
-            cwd = root / "code" / "robot_ws"
+            cwd = root / "code" / "gr00t_ws"
             other_cwd = root / "code" / "another_workspace"
             cwd.mkdir(parents=True)
             other_cwd.mkdir(parents=True)
@@ -487,6 +487,7 @@ class ForkSessionFallbackTests(unittest.IsolatedAsyncioTestCase):
                     "session_id": None,
                     "claude_session_id": None,
                     "fork_from": resolved,
+                    "fork_resume_session_at": "completed-message-uuid",
                 }
                 print_cmd = agent_server.build_claude_cmd(
                     child["id"],
@@ -525,8 +526,10 @@ class ForkSessionFallbackTests(unittest.IsolatedAsyncioTestCase):
             provider_id,
         )
         self.assertIn("--fork-session", print_cmd)
+        self.assertEqual(print_cmd[print_cmd.index("--resume-session-at") + 1], "completed-message-uuid")
         self.assertEqual(captured_options["resume"], provider_id)
         self.assertIs(captured_options["fork_session"], True)
+        self.assertEqual(captured_options["extra_args"]["resume-session-at"], "completed-message-uuid")
 
     async def test_claude_fork_missing_transcript_is_rejected_before_child_creation(
         self,
@@ -714,6 +717,7 @@ class ForkSessionFallbackTests(unittest.IsolatedAsyncioTestCase):
             frozenset({
                 "cwd",
                 "backend",
+                "codex_provider",
                 "model",
                 "effort",
                 "system_prompt",
@@ -762,6 +766,7 @@ class ForkSessionFallbackTests(unittest.IsolatedAsyncioTestCase):
             "folder": "General",
             "cwd": "/tmp",
             "backend": agent_server.BACKEND_CLAUDE,
+            "subagent_limit": 3,
         }
         child = {
             "id": child_id,
@@ -773,8 +778,9 @@ class ForkSessionFallbackTests(unittest.IsolatedAsyncioTestCase):
         }
         sessions = {parent_id: parent}
 
-        async def create_child(*_args, **kwargs) -> dict:
+        async def create_child(request, **kwargs) -> dict:
             self.assertTrue(kwargs["initializing_fork"])
+            self.assertEqual(request.subagent_limit, parent["subagent_limit"])
             sessions[child_id] = child
             return child
 
@@ -2230,13 +2236,13 @@ class ForkSessionFallbackTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertIn("fresh provider session", history_event["message"])
 
-    async def test_active_parent_is_rejected_before_provider_fork(self) -> None:
+    async def test_unsupported_active_parent_is_rejected_before_provider_fork(self) -> None:
         parent_id = "busy-parent"
         parent = {
             "id": parent_id,
             "title": "Busy",
             "cwd": "/tmp",
-            "backend": agent_server.BACKEND_CODEX,
+            "backend": agent_server.BACKEND_CURSOR,
             "codex_thread_id": "thread-parent",
         }
         with patch.object(agent_server.STORE, "sessions", {parent_id: parent}), patch.object(
@@ -2386,7 +2392,7 @@ class NativeCodexForkSafetyTests(unittest.IsolatedAsyncioTestCase):
         manager = Mock()
         manager.delete_thread = AsyncMock()
 
-        async def get_manager() -> Mock:
+        async def get_manager(_thread_id: str) -> Mock:
             self.assertNotIn(thread_id, thread_index)
             return manager
 
@@ -2396,7 +2402,7 @@ class NativeCodexForkSafetyTests(unittest.IsolatedAsyncioTestCase):
             thread_index,
         ), patch.object(
             agent_server,
-            "codex_app_server_manager",
+            "codex_app_server_manager_for_thread",
             new_callable=AsyncMock,
             side_effect=get_manager,
         ):
@@ -2680,7 +2686,7 @@ class NativeCodexForkSafetyTests(unittest.IsolatedAsyncioTestCase):
             with self.assertRaises(asyncio.CancelledError):
                 await asyncio.wait_for(task, timeout=1)
 
-        cleanup.assert_awaited_once_with("thread-child")
+        cleanup.assert_awaited_once_with("thread-child", manager=manager)
         manager.read_thread.assert_not_awaited()
 
     async def test_cancelled_failed_journal_never_loses_provider_id(self) -> None:
@@ -2724,7 +2730,7 @@ class NativeCodexForkSafetyTests(unittest.IsolatedAsyncioTestCase):
                 await asyncio.wait_for(task, timeout=1)
 
         self.assertEqual(raised.exception.thread_id, "thread-child")
-        cleanup.assert_awaited_once_with("thread-child")
+        cleanup.assert_awaited_once_with("thread-child", manager=manager)
         manager.read_thread.assert_not_awaited()
 
     async def test_unverifiable_provider_fork_is_deleted(self) -> None:
@@ -3097,6 +3103,95 @@ class ForkMemoryTests(unittest.TestCase):
         self.assertIn("Continue with the fix", memory)
         self.assertIn("The fix is ready.", memory)
         self.assertNotIn("tool output 499", memory)
+
+    def test_legacy_provider_prompts_do_not_enter_fork_memory(self) -> None:
+        parent_id = "legacy-memory-parent"
+        authority = agent_server.cross_chat_provider_authority_block(
+            [],
+            agent_server.cross_chat_authority_path(
+                "run_memory_projection",
+                "fedcba0987654321fedcba0987654321",
+            ),
+            parent_id,
+            {"publish"},
+            "blocked",
+            compact=True,
+        )
+        notice = (
+            "<task-notification>\n"
+            "<task-id>task_mem01</task-id>\n"
+            "<tool-use-id>toolu_memory_projection_123</tool-use-id>\n"
+            "<status>completed</status>\n"
+            "<summary>Private memory notification</summary>\n"
+            "</task-notification>"
+        )
+        common = {
+            "session_id": parent_id,
+            "run_id": "import_memory_projection",
+            "backend": agent_server.BACKEND_CLAUDE,
+            "imported": True,
+        }
+        events = [
+            {
+                **common,
+                "type": "turn_started",
+                "prompt": "Retained memory request" + authority,
+            },
+            {
+                **common,
+                "type": "turn_started",
+                "prompt": notice,
+            },
+            {
+                **common,
+                "type": "assistant_text",
+                "text": "Retained answer after empty boundary",
+            },
+        ]
+        parent = {
+            "id": parent_id,
+            "title": "Parent",
+            "cwd": "/tmp",
+            "backend": agent_server.BACKEND_CLAUDE,
+        }
+        with patch.object(
+            agent_server,
+            "iter_session_events",
+            side_effect=lambda _session_id: iter(events),
+        ):
+            memory = agent_server.build_fork_memory(parent, parent_id)
+
+        self.assertIn("Retained memory request", memory)
+        self.assertIn("Retained answer after empty boundary", memory)
+        self.assertNotIn("AgentsDock provider authority", memory)
+        self.assertNotIn("Private memory notification", memory)
+
+    def test_provider_only_notice_is_not_claude_fork_conversation(self) -> None:
+        parent_id = "legacy-providerless-parent"
+        notice = (
+            "<task-notification>\n"
+            "<task-id>task_fork2</task-id>\n"
+            "<tool-use-id>toolu_providerless_fork_123</tool-use-id>\n"
+            "<status>completed</status>\n"
+            "<summary>Private providerless notification</summary>\n"
+            "</task-notification>"
+        )
+        event = {
+            "session_id": parent_id,
+            "type": "turn_started",
+            "run_id": "import_providerless_projection",
+            "backend": agent_server.BACKEND_CLAUDE,
+            "imported": True,
+            "prompt": notice,
+        }
+        with patch.object(
+            agent_server,
+            "iter_session_events",
+            return_value=iter([event]),
+        ):
+            self.assertFalse(
+                agent_server.claude_fork_has_conversation(parent_id)
+            )
 
 
 if __name__ == "__main__":

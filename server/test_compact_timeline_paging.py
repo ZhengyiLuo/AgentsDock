@@ -9,6 +9,28 @@ import agent_server
 
 
 class CompactTimelinePagingTests(unittest.IsolatedAsyncioTestCase):
+    def test_plaintext_is_retained_in_trace_without_displacing_summary_preview(self):
+        for scheduled in (False, True):
+            with self.subTest(scheduled=scheduled):
+                metadata = {"run_id": "channel-run"}
+                if scheduled:
+                    metadata.update(job_id="job-channel", job_title="Check", purpose="scheduled_job")
+                self.write_events([
+                    self.event(1, "turn_started", prompt="Question", **metadata),
+                    self.event(2, "reasoning_summary", phase="summary", text="Public summary", **metadata),
+                    self.event(3, "reasoning_text", phase="reasoning", text="Provider plaintext", **metadata),
+                    self.event(4, "assistant_text", text="Answer", **metadata),
+                    self.event(5, "turn_finished", result_text="Answer", **metadata),
+                ])
+                agent_server.TIMELINE_INDEX_CACHE.clear()
+                page = agent_server.read_semantic_timeline_page(self.session_id, limit=2, tail=True)
+                if not scheduled:
+                    self.assertTrue(any(event["type"] == "reasoning_summary" for event in page["events"]))
+                self.assertFalse(any(event["type"] == "reasoning_text" for event in page["events"]))
+                trace = agent_server.read_indexed_run_trace(self.session_id, "channel-run", anchor_seq=5)
+                self.assertEqual([event["type"] for event in trace["events"]], ["reasoning_summary", "reasoning_text"])
+                self.assertEqual(agent_server.timeline_index_event_text(trace["events"][1]), "")
+
     def setUp(self) -> None:
         self.temporary = tempfile.TemporaryDirectory()
         self.previous_state_dir = agent_server.STATE_DIR
@@ -104,6 +126,220 @@ class CompactTimelinePagingTests(unittest.IsolatedAsyncioTestCase):
         persisted = json.loads(agent_server.events_path(self.session_id).read_text(encoding="utf-8").splitlines()[-1])
         self.assertNotIn("prompt", persisted["job"])
 
+    def test_all_raw_event_readers_project_legacy_imported_provider_prompts(self) -> None:
+        authority = agent_server.cross_chat_provider_authority_block(
+            [],
+            agent_server.cross_chat_authority_path(
+                "run_raw_egress",
+                "0123456789abcdef0123456789abcdef",
+            ),
+            self.session_id,
+            {"publish"},
+            "blocked",
+            compact=True,
+        )
+        notice = (
+            "<task-notification>\n"
+            "<task-id>task_raw1</task-id>\n"
+            "<tool-use-id>toolu_raw_egress_123</tool-use-id>\n"
+            "<status>completed</status>\n"
+            "<summary>Provider-only completion</summary>\n"
+            "</task-notification>"
+        )
+        marked_notice = notice.replace("Provider-only", "User-pasted")
+        native_prompt = "Native user evidence" + authority
+        stored = [
+            self.event(
+                1,
+                "turn_started",
+                run_id="import_raw_projection",
+                backend=agent_server.BACKEND_CLAUDE,
+                imported=True,
+                prompt="Imported question" + authority,
+            ),
+            self.event(
+                2,
+                "assistant_text",
+                run_id="import_raw_projection",
+                backend=agent_server.BACKEND_CLAUDE,
+                imported=True,
+                text="Imported answer",
+            ),
+            self.event(
+                3,
+                "turn_started",
+                run_id="import_raw_projection",
+                backend=agent_server.BACKEND_CLAUDE,
+                imported=True,
+                prompt=notice,
+            ),
+            self.event(
+                4,
+                "assistant_text",
+                run_id="import_raw_projection",
+                backend=agent_server.BACKEND_CLAUDE,
+                imported=True,
+                text="Answer after provider-only boundary",
+            ),
+            self.event(
+                5,
+                "turn_started",
+                run_id="import_raw_projection",
+                backend=agent_server.BACKEND_CLAUDE,
+                imported=True,
+                provider_history_sanitized=True,
+                prompt=marked_notice,
+            ),
+            self.event(
+                6,
+                "turn_started",
+                run_id="native_user",
+                backend=agent_server.BACKEND_CLAUDE,
+                prompt=native_prompt,
+            ),
+        ]
+        self.write_events(stored)
+
+        direct_authority = agent_server.client_safe_event(stored[0])
+        direct_notice = agent_server.client_safe_event(stored[2])
+        self.assertEqual(direct_authority["prompt"], "Imported question")
+        self.assertEqual(direct_notice["prompt"], "")
+        self.assertNotIn(
+            agent_server.TIMELINE_IMPORTED_PROMPT_HIDDEN_FIELD,
+            direct_notice,
+        )
+
+        pages = (
+            agent_server.read_events(self.session_id, limit=20),
+            agent_server.read_client_events_page(self.session_id, limit=20)[0],
+            agent_server.read_visible_events_page(self.session_id, limit=20)[0],
+            agent_server.read_visible_events_after_page(
+                self.session_id,
+                after=0,
+                limit=20,
+            )[0],
+        )
+        for page in pages:
+            with self.subTest(reader=len(page)):
+                by_seq = {event["seq"]: event for event in page}
+                self.assertEqual(by_seq[1]["prompt"], "Imported question")
+                self.assertEqual(by_seq[3]["prompt"], "")
+                self.assertEqual(by_seq[4]["text"], "Answer after provider-only boundary")
+                self.assertEqual(by_seq[5]["prompt"], marked_notice)
+                self.assertEqual(by_seq[6]["prompt"], native_prompt)
+                self.assertNotIn("AgentsDock provider authority", by_seq[1]["prompt"])
+                self.assertNotIn(
+                    agent_server.TIMELINE_IMPORTED_PROMPT_HIDDEN_FIELD,
+                    by_seq[3],
+                )
+
+        head_at_empty_boundary = agent_server.read_client_events_page(
+            self.session_id,
+            after=2,
+            limit=1,
+        )
+        tail_at_empty_boundary = agent_server.read_client_events_page(
+            self.session_id,
+            before=4,
+            limit=1,
+            tail=True,
+        )
+        self.assertEqual(
+            [(event["seq"], event.get("prompt")) for event in head_at_empty_boundary[0]],
+            [(3, "")],
+        )
+        self.assertEqual(head_at_empty_boundary[2:], (4, 0, 3))
+        self.assertEqual(
+            [(event["seq"], event.get("prompt")) for event in tail_at_empty_boundary[0]],
+            [(3, "")],
+        )
+        self.assertEqual(tail_at_empty_boundary[2:], (3, 2, 0))
+
+    def test_catchup_keeps_empty_provider_boundary_and_advances_cursor(self) -> None:
+        notice = (
+            "<task-notification>\n"
+            "<task-id>task_ws1</task-id>\n"
+            "<tool-use-id>toolu_ws_egress_123</tool-use-id>\n"
+            "<output-file>/tmp/ws-result.json</output-file>\n"
+            "<status>completed</status>\n"
+            "<summary><result>done</result><usage>1</usage></summary>\n"
+            "</task-notification>"
+        )
+        self.write_events([
+            self.event(
+                1,
+                "turn_started",
+                run_id="import_ws_projection",
+                backend=agent_server.BACKEND_CLAUDE,
+                imported=True,
+                prompt=notice,
+            ),
+            self.event(
+                2,
+                "assistant_text",
+                run_id="import_ws_projection",
+                backend=agent_server.BACKEND_CLAUDE,
+                imported=True,
+                text="Answer remains routed after the empty boundary",
+            ),
+        ])
+
+        first, continuation, exhausted = agent_server.read_event_catchup_batch(
+            self.session_id,
+            after=0,
+            through=2,
+            limit=1,
+        )
+        self.assertFalse(exhausted)
+        self.assertEqual([event["seq"] for event in first], [1])
+        self.assertEqual(first[0]["prompt"], "")
+        self.assertEqual(continuation[4], 1)
+
+        second, continuation, exhausted = agent_server.read_event_catchup_batch(
+            self.session_id,
+            after=1,
+            through=2,
+            offset=continuation,
+            limit=1,
+        )
+        self.assertTrue(exhausted)
+        self.assertEqual([event["seq"] for event in second], [2])
+        self.assertEqual(
+            second[0]["text"],
+            "Answer remains routed after the empty boundary",
+        )
+        self.assertEqual(continuation[4], 2)
+
+    async def test_live_broadcast_projects_legacy_imported_provider_prompt(self) -> None:
+        notice = (
+            "<task-notification>\n"
+            "<task-id>task_live</task-id>\n"
+            "<tool-use-id>toolu_live_egress_123</tool-use-id>\n"
+            "<status>completed</status>\n"
+            "<summary>Provider-only completion</summary>\n"
+            "</task-notification>"
+        )
+        broadcast = AsyncMock()
+        with patch.object(agent_server.HUB, "broadcast", new=broadcast):
+            stored = await agent_server.append_event(
+                self.session_id,
+                "turn_started",
+                {
+                    "run_id": "import_live_projection",
+                    "backend": agent_server.BACKEND_CLAUDE,
+                    "imported": True,
+                    "prompt": notice,
+                },
+            )
+
+        self.assertEqual(stored["prompt"], notice)
+        projected = broadcast.await_args.args[1]
+        self.assertEqual(projected["prompt"], "")
+        self.assertNotIn(
+            agent_server.TIMELINE_IMPORTED_PROMPT_HIDDEN_FIELD,
+            projected,
+        )
+
     def test_compact_filter_preserves_conversation_system_job_and_file_events(self) -> None:
         default_page = agent_server.read_visible_events_page(
             self.session_id,
@@ -159,6 +395,29 @@ class CompactTimelinePagingTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual([event["seq"] for event in after_page[0]], [12, 14, 16])
         self.assertEqual(after_page[1:], (22, 6, 0, 3))
 
+    def test_empty_delta_skips_fork_scan_and_preserves_rollback_sequence(self) -> None:
+        with patch.object(agent_server, "fork_internal_run_ids") as fork_scan:
+            for after in (22, 30):
+                with self.subTest(after=after):
+                    self.assertEqual(
+                        agent_server.read_visible_events_after_page(self.session_id, after=after),
+                        ([], 22, 0, 0, 0),
+                    )
+            fork_scan.assert_not_called()
+
+    def test_ordinary_delta_and_visible_catchup_skip_fork_scan(self) -> None:
+        with patch.object(agent_server, "fork_internal_run_ids") as fork_scan:
+            delta = agent_server.read_visible_events_after_page(self.session_id, after=18)
+            catchup, continuation, exhausted = agent_server.read_event_catchup_batch(
+                self.session_id, after=18, through=22, visible=True,
+            )
+            fork_scan.assert_not_called()
+        self.assertEqual([event["seq"] for event in delta[0]], [19, 20, 21, 22])
+        self.assertEqual(delta[1:], (22, 4, 0, 0))
+        self.assertEqual([event["seq"] for event in catchup], [19, 20, 21, 22])
+        self.assertEqual(continuation[4], 22)
+        self.assertTrue(exhausted)
+
     def test_legacy_fork_digest_runs_do_not_count_as_visible_page_events(self) -> None:
         path = agent_server.events_path(self.session_id)
         events = [
@@ -172,13 +431,19 @@ class CompactTimelinePagingTests(unittest.IsolatedAsyncioTestCase):
         agent_server.FORK_INTERNAL_RUN_CACHE.clear()
 
         page = agent_server.read_visible_events_page(self.session_id, limit=100, tail=False)
-        after_page = agent_server.read_visible_events_after_page(self.session_id, after=0, limit=100)
+        after_page = agent_server.read_visible_events_after_page(self.session_id, after=1, limit=100)
+        catchup, continuation, exhausted = agent_server.read_event_catchup_batch(
+            self.session_id, after=1, through=5, visible=True,
+        )
         generic = agent_server.read_events(self.session_id, limit=100, visible=True)
 
         self.assertEqual([event["seq"] for event in page[0]], [4, 5])
         self.assertEqual(page[1:], (5, 2, 0, 0))
         self.assertEqual([event["seq"] for event in after_page[0]], [4, 5])
         self.assertEqual(after_page[1:], (5, 2, 0, 0))
+        self.assertEqual([event["seq"] for event in catchup], [4, 5])
+        self.assertEqual(continuation[4], 5)
+        self.assertTrue(exhausted)
         self.assertEqual([event["seq"] for event in generic], [4, 5])
 
     def test_semantic_page_counts_a_recurring_job_once_and_bounds_its_history(self) -> None:
@@ -454,6 +719,59 @@ class CompactTimelinePagingTests(unittest.IsolatedAsyncioTestCase):
             len(page["events"]),
             base_budget
             + agent_server.SEMANTIC_TIMELINE_ESSENTIAL_PAGE_OVERFLOW_LIMIT,
+        )
+
+    def test_emergency_alerts_remain_exact_semantic_landmarks_inside_turns_and_jobs(self) -> None:
+        events = [
+            self.event(1, "turn_started", run_id="chat-run", prompt="Watch production"),
+            self.event(
+                2,
+                "emergency_alert_raised",
+                run_id="chat-run",
+                emergency_alert_id="emergency_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                message="Chat run needs acknowledgement.",
+            ),
+            self.event(3, "turn_finished", run_id="chat-run", result_text="Paused."),
+            self.event(4, "job_started", run_id="job-run", job_id="job-1", job_title="Watchdog"),
+            self.event(
+                5,
+                "emergency_alert_raised",
+                run_id="job-run",
+                purpose="scheduled_job",
+                job_id="job-1",
+                emergency_alert_id="emergency_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+                message="Scheduled run needs acknowledgement.",
+            ),
+            self.event(6, "job_finished", run_id="job-run", job_id="job-1", job_title="Watchdog"),
+        ]
+        self.write_events(events)
+
+        index = agent_server.build_timeline_index(self.session_id)
+        emergency_landmarks = [
+            landmark
+            for landmark in index["landmarks"]
+            if landmark["title"] == "Emergency Alert Raised"
+        ]
+        self.assertEqual(
+            [(landmark["key"], landmark["start_seq"]) for landmark in emergency_landmarks],
+            [("event:event-2", 2), ("event:event-5", 5)],
+        )
+
+        page = agent_server.read_semantic_timeline_page(
+            self.session_id,
+            limit=10,
+            tail=False,
+        )
+        self.assertEqual(
+            [
+                event["emergency_alert_id"]
+                for event in page["events"]
+                if event["type"] == "emergency_alert_raised"
+            ],
+            [
+                "emergency_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                "emergency_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+            ],
         )
 
     def test_semantic_cursor_keeps_interleaved_job_segments_chronological(self) -> None:
@@ -1964,6 +2282,102 @@ class CompactTimelinePagingTests(unittest.IsolatedAsyncioTestCase):
             "run-a",
         )
 
+    def test_stopped_finish_native_steer_preserves_completed_commentary_in_semantic_page(
+        self,
+    ) -> None:
+        self.write_events([
+            self.event(1, "turn_started", run_id="run-a", prompt="Initial request"),
+            self.event(2, "reasoning_summary", run_id="run-a", text="Private reasoning"),
+            self.event(
+                3,
+                "reasoning_summary",
+                run_id="run-a",
+                item_id="commentary-1",
+                phase="commentary",
+                text="Completed commentary 1.",
+            ),
+            self.event(4, "tool_started", run_id="run-a", tool={"name": "exec"}),
+            self.event(
+                5,
+                "reasoning_summary",
+                run_id="run-a",
+                item_id="commentary-2",
+                phase="commentary",
+                text="Completed commentary 2.",
+            ),
+            self.event(6, "tool_finished", run_id="run-a", tool={"name": "exec"}),
+            self.event(
+                7,
+                "reasoning_summary",
+                run_id="run-a",
+                item_id="commentary-3",
+                phase="commentary",
+                text="Completed commentary 3.",
+            ),
+            self.event(
+                8,
+                "reasoning_summary",
+                run_id="run-a",
+                item_id="commentary-4",
+                phase="commentary",
+                text="Completed commentary 4.",
+            ),
+            self.event(
+                9,
+                "turn_finished",
+                run_id="run-a",
+                result_text="",
+                stopped=True,
+            ),
+            self.event(
+                10,
+                "turn_started",
+                run_id="run-b",
+                native_steer=True,
+                steer_interrupted_run_id="run-a",
+                prompt="Steered request",
+            ),
+        ])
+
+        page = agent_server.read_semantic_timeline_page(
+            self.session_id,
+            limit=2,
+            tail=True,
+        )
+
+        commentary = [
+            event
+            for event in page["events"]
+            if event["type"] == "reasoning_summary"
+            and event.get("phase") == "commentary"
+        ]
+        self.assertEqual(
+            [event["item_id"] for event in commentary],
+            [
+                "commentary-1",
+                "commentary-2",
+                "commentary-3",
+                "commentary-4",
+            ],
+        )
+        stopped_finish = next(
+            event
+            for event in page["events"]
+            if event["type"] == "turn_finished"
+            and event.get("run_id") == "run-a"
+        )
+        self.assertIs(stopped_finish.get("stopped"), True)
+        self.assertEqual(stopped_finish.get("result_text"), "")
+        self.assertEqual(
+            next(
+                event
+                for event in page["events"]
+                if event["type"] == "turn_started"
+                and event.get("run_id") == "run-b"
+            )["steer_interrupted_run_id"],
+            "run-a",
+        )
+
     def test_active_turn_preserves_completed_commentary_after_compaction(
         self,
     ) -> None:
@@ -2179,11 +2593,16 @@ class CompactTimelinePagingTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("reasoning_summary", [event["type"] for event in visible_response["events"]])
         self.assertNotIn("raw_event", [event["type"] for event in visible_response["events"]])
         self.assertEqual([event["seq"] for event in compact_response["events"]], [12, 14, 16])
-        self.assertEqual(offload.await_count, 3)
-        self.assertIs(offload.await_args_list[0].args[0], agent_server.read_client_events_page)
-        self.assertIs(offload.await_args_list[1].args[0], agent_server.read_visible_events_page)
-        self.assertIs(offload.await_args_list[2].args[0], agent_server.read_visible_events_after_page)
-        self.assertTrue(offload.await_args_list[2].kwargs["compact"])
+        self.assertEqual(offload.await_count, 6)
+        for index in (0, 2, 4):
+            self.assertEqual(offload.await_args_list[index].args, (
+                agent_server.prepare_provider_history_metadata_repair, self.session_id,
+            ))
+            self.assertEqual(offload.await_args_list[index].kwargs, {})
+        self.assertIs(offload.await_args_list[1].args[0], agent_server.read_client_events_page)
+        self.assertIs(offload.await_args_list[3].args[0], agent_server.read_visible_events_page)
+        self.assertIs(offload.await_args_list[5].args[0], agent_server.read_visible_events_after_page)
+        self.assertTrue(offload.await_args_list[5].kwargs["compact"])
 
     async def test_endpoint_exposes_additive_semantic_paging_fields(self) -> None:
         session = {
@@ -2212,6 +2631,196 @@ class CompactTimelinePagingTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsNone(response["next_semantic_before"])
         self.assertEqual(response["event_count"], 1)
         self.assertEqual([event["seq"] for event in response["events"]], [1, 2])
+
+    def test_semantic_index_projects_legacy_imported_provider_prompts(self) -> None:
+        authority = agent_server.cross_chat_provider_authority_block(
+            [],
+            agent_server.cross_chat_authority_path(
+                "run_timeline_sanitizer",
+                "fedcba9876543210fedcba9876543210",
+            ),
+            self.session_id,
+            {"publish"},
+            "blocked",
+            compact=True,
+        )
+        generated_notice = (
+            "<task-notification>\n"
+            "<task-id>task_generated</task-id>\n"
+            "<tool-use-id>toolu_task_generated</tool-use-id>\n"
+            "<status>completed</status>\n"
+            "<summary>Provider-only completion</summary>\n"
+            "</task-notification>"
+        )
+        human_notice = generated_notice.replace(
+            "Provider-only completion",
+            "Human pasted evidence",
+        )
+        events = [
+            self.event(
+                1,
+                "turn_started",
+                run_id="import_legacy_prompts",
+                backend=agent_server.BACKEND_CLAUDE,
+                imported=True,
+                prompt="Actual imported question" + authority,
+            ),
+            self.event(
+                2,
+                "assistant_text",
+                run_id="import_legacy_prompts",
+                backend=agent_server.BACKEND_CLAUDE,
+                imported=True,
+                text="First answer",
+            ),
+            self.event(
+                3,
+                "turn_started",
+                run_id="import_legacy_prompts",
+                backend=agent_server.BACKEND_CLAUDE,
+                imported=True,
+                prompt=generated_notice,
+            ),
+            self.event(
+                4,
+                "assistant_text",
+                run_id="import_legacy_prompts",
+                backend=agent_server.BACKEND_CLAUDE,
+                imported=True,
+                text="Background answer stays visible",
+            ),
+            self.event(
+                5,
+                "turn_started",
+                run_id="import_legacy_prompts",
+                backend=agent_server.BACKEND_CLAUDE,
+                imported=True,
+                provider_history_sanitized=True,
+                prompt=human_notice,
+            ),
+            self.event(
+                6,
+                "assistant_text",
+                run_id="import_legacy_prompts",
+                backend=agent_server.BACKEND_CLAUDE,
+                text="Human evidence response",
+            ),
+            self.event(
+                7,
+                "turn_started",
+                run_id="import_authority_only",
+                backend=agent_server.BACKEND_CLAUDE,
+                imported=True,
+                prompt=authority.strip(),
+            ),
+        ]
+        self.write_events(events)
+
+        index = agent_server.build_timeline_index(self.session_id)
+        page = agent_server.read_semantic_timeline_page(
+            self.session_id,
+            limit=10,
+            tail=False,
+        )
+        assistant_only_tail = agent_server.read_semantic_timeline_page(
+            self.session_id,
+            semantic_before=5,
+            limit=1,
+            tail=True,
+        )
+
+        self.assertEqual(index["event_count"], 5)
+        self.assertEqual(len(index["landmarks"]), 3)
+        serialized_landmarks = json.dumps(index["landmarks"])
+        self.assertNotIn("AgentsDock provider authority", serialized_landmarks)
+        self.assertNotIn("Provider-only completion", serialized_landmarks)
+        self.assertTrue(any(
+            str(landmark.get("title") or "").startswith("<task-notification>")
+            for landmark in index["landmarks"]
+        ))
+        self.assertEqual(
+            [event["seq"] for event in page["events"]],
+            [1, 2, 4, 5, 6],
+        )
+        imported_user = next(
+            event for event in page["events"] if event["seq"] == 1
+        )
+        self.assertEqual(imported_user["prompt"], "Actual imported question")
+        human_user = next(
+            event for event in page["events"] if event["seq"] == 5
+        )
+        self.assertEqual(human_user["prompt"], human_notice)
+        self.assertIn(
+            "Background answer stays visible",
+            [str(event.get("text") or "") for event in page["events"]],
+        )
+        self.assertEqual(
+            [event["seq"] for event in assistant_only_tail["events"]],
+            [4],
+        )
+
+        cached = agent_server.timeline_index_cached_entry(self.session_id)
+        self.assertIsNotNone(cached)
+        cached["projection_version"] = 1
+        cached["payload"] = {
+            "session_id": self.session_id,
+            "landmarks": [{"title": "stale-projection-sentinel"}],
+            "latest_seq": 7,
+            "event_count": 1,
+            "generated_at": "2026-07-19T00:00:00Z",
+        }
+        rebuilt = agent_server.build_timeline_index(self.session_id)
+        self.assertNotIn("stale-projection-sentinel", json.dumps(rebuilt))
+        self.assertEqual(len(rebuilt["landmarks"]), 3)
+
+    def test_hidden_imported_notice_before_real_turn_keeps_semantic_key_parity(self) -> None:
+        generated_notice = (
+            "<task-notification>\n"
+            "<task-id>task_first</task-id>\n"
+            "<tool-use-id>toolu_task_first</tool-use-id>\n"
+            "<status>completed</status>\n"
+            "<summary>Provider-only completion</summary>\n"
+            "</task-notification>"
+        )
+        run_id = "import_hidden_first"
+        self.write_events([
+            self.event(
+                1,
+                "turn_started",
+                run_id=run_id,
+                backend=agent_server.BACKEND_CLAUDE,
+                imported=True,
+                prompt=generated_notice,
+            ),
+            self.event(
+                2,
+                "turn_started",
+                run_id=run_id,
+                backend=agent_server.BACKEND_CLAUDE,
+                imported=True,
+                provider_history_sanitized=True,
+                prompt="Real imported question",
+            ),
+            self.event(
+                3,
+                "assistant_text",
+                run_id=run_id,
+                backend=agent_server.BACKEND_CLAUDE,
+                imported=True,
+                text="Real imported answer",
+            ),
+        ])
+
+        index = agent_server.build_timeline_index(self.session_id)
+        page = agent_server.read_semantic_timeline_page(
+            self.session_id,
+            limit=1,
+            tail=True,
+        )
+
+        self.assertEqual(len(index["landmarks"]), 1)
+        self.assertEqual(index["landmarks"][0]["key"], f"turn:{run_id}:start-2")
+        self.assertEqual([event["seq"] for event in page["events"]], [2, 3])
 
     def write_events(self, events: list[dict[str, object]]) -> None:
         agent_server.events_path(self.session_id).write_text(

@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs'
+import { resolve } from 'node:path'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 const TOKEN = '66b4fef625e5750d5527870f0ca96d5e'
@@ -35,6 +37,15 @@ describe('analytics privacy configuration', () => {
     const [, init] = request.mock.calls[0] as [string, RequestInit]
     const payload = JSON.parse(String(init.body)) as Array<{ properties: Record<string, unknown> }>
     expect(payload[0].properties.distinct_id).toBe('existing-install-id')
+  })
+
+  it('keeps the runtime event catalog in parity with the documented catalog', async () => {
+    const analytics = await loadAnalytics()
+    const documentation = readFileSync(resolve(process.cwd(), '../docs/ANALYTICS_EVENTS.md'), 'utf8')
+    const documented = [...documentation.matchAll(/^\| `([a-z][a-z0-9_]+)` \|/gm)].map(match => match[1]).sort()
+
+    expect(documented).toEqual([...analytics.ANALYTICS_EVENTS].sort())
+    expect(new Set(documented).size).toBe(documented.length)
   })
 
   it('treats a CI smoke-test launch (analyticsDisabled) as opted out, without touching storage', async () => {

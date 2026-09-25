@@ -13,6 +13,14 @@ export function automaticPairingCompletionAvailable(value: unknown): boolean {
     && capability.completion_path === '/api/admin/secure-peers/v1/pairings/{pairing_id}/completion'
     && capability.max_wait_seconds === 600
 }
+
+export function securePeerEndpointUpdateAvailable(value: unknown): boolean {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false
+  const capability = value as Record<string, unknown>
+  return capability.available === true && capability.version === 1
+    && capability.endpoint_update_version === 1
+    && capability.endpoint_update_path === '/api/admin/secure-peers/v1/connections/{connection_id}/endpoint'
+}
 import {
   SECURE_PEER_DEFAULT_HEARTBEAT_SECONDS,
   SECURE_PEER_DEFAULT_LEASE_SECONDS,

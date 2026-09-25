@@ -12,6 +12,8 @@ import {
   parseTeamNetworkPostBulletinInput,
   parseTeamNetworkProjection,
   parseTeamNetworkProjectionQuery,
+  parseTeamNetworkRenameServerInput,
+  parseTeamNetworkServerProfileResponse,
   parseTeamNetworkSendMailboxInput,
   parseAgentTeamMessagesCapability,
   parseTeamAttachmentDeclareInput,
@@ -26,6 +28,7 @@ import {
   parseTeamMessageRevisionInput,
   parseTeamMessageResponse,
   parseTeamMessagesCapability,
+  parseTeamMessageSearchCapability,
   parseTeamMailSubjectsCapability,
   parseTeamMailboxStateCapability,
   parseTeamMailboxStateInput,
@@ -40,6 +43,62 @@ import {
   teamBulletinAliasAvailable,
   teamAllServersAliasAvailable
 } from './team-network'
+
+describe('Team Messages indexed search contract', () => {
+  const search = { available: true, version: 1, fields: ['subject', 'body', 'sender'], max_query_chars: 200 }
+  const query = { teamId: 'team-1', box: 'sent' }
+
+  it('accepts only the exact separately negotiated capability', () => {
+    expect(parseTeamMessageSearchCapability(search)).toEqual(search)
+    for (const invalid of [null, { ...search, available: false }, { ...search, version: 2 },
+      { ...search, fields: ['body'] }, { ...search, max_query_chars: 201 }, { ...search, enabled: true }]) {
+      expect(() => parseTeamMessageSearchCapability(invalid)).toThrow()
+    }
+    expect(() => parseTeamMessagesCapability({ ...messagesCapability, search })).toThrow()
+  })
+
+  it('trims and forwards literal Unicode query text, omitting blank search', () => {
+    expect(parseTeamMessageQuery({ ...query, q: '  subject: "部署" & a+b  ' }).q).toBe('subject: "部署" & a+b')
+    for (const q of [undefined, '', '   ']) expect(parseTeamMessageQuery({ ...query, q })).not.toHaveProperty('q')
+    for (const q of ['a'.repeat(200), '😀'.repeat(200)]) expect(parseTeamMessageQuery({ ...query, q }).q).toBe(q)
+    for (const q of [null, 1, {}, 'a'.repeat(201), '😀'.repeat(201), '\ud800', 'a\u0000b', 'a\nb', 'a\u0085b']) {
+      expect(() => parseTeamMessageQuery({ ...query, q })).toThrow('search')
+    }
+  })
+
+  it('never treats a filtered search as full inbox coverage', () => {
+    const inbox = { teamId: 'team-1', box: 'inbox', addressKind: 'server', addressId: 'node-1', includeMailboxCoverage: true }
+    expect(() => parseTeamMessageQuery({ ...inbox, q: 'needle' })).toThrow('unfiltered')
+    expect(parseTeamMessageQuery({ ...inbox, q: '  ' })).not.toHaveProperty('q')
+  })
+})
+
+describe('member server profile rename contract', () => {
+  const input = { teamId: 'team-1', serverId: 'node-1', displayName: '  New name  ' }
+  const server = { id: 'node-1', server_identity: 'identity-1', display_name: 'New name' }
+
+  it('normalizes only surrounding whitespace and bounds UTF-8 bytes', () => {
+    expect(parseTeamNetworkRenameServerInput(input)).toEqual({ ...input, displayName: 'New name' })
+    for (const displayName of ['x'.repeat(160), '😀'.repeat(40)]) {
+      expect(parseTeamNetworkRenameServerInput({ ...input, displayName }).displayName).toBe(displayName)
+    }
+    for (const displayName of ['', '   ', 'x'.repeat(161), '😀'.repeat(41), 'a\nb', 'a\tb',
+      'a\u0000b', 'a\u0085b', '\ud800']) {
+      expect(() => parseTeamNetworkRenameServerInput({ ...input, displayName })).toThrow()
+    }
+    expect(() => parseTeamNetworkRenameServerInput({ ...input, role: 'host' })).toThrow()
+    expect(() => parseTeamNetworkRenameServerInput({ ...input, serverId: '' })).toThrow()
+  })
+
+  it('accepts only an exact identity/name subset receipt without normalization', () => {
+    expect(parseTeamNetworkServerProfileResponse({ server })).toEqual({ server })
+    for (const value of [{ server: { ...server, is_host: false } }, { server, ok: true },
+      { server: { ...server, display_name: ' New name ' } },
+      { server: { ...server, server_identity: '' } }, { server: { ...server, display_name: 'x'.repeat(161) } }]) {
+      expect(() => parseTeamNetworkServerProfileResponse(value)).toThrow()
+    }
+  })
+})
 
 describe('Team Mail coverage metadata', () => {
   const anchor = `tmsg_${'a'.repeat(32)}`

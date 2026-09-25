@@ -10,6 +10,7 @@ import type {
 import { normalizeSecurePeerJoinTarget } from '@shared/secure-peer'
 import { t, useLocale } from '../lib/i18n'
 import { canForgetSecurePeerPairing, reconcileSecurePeerPairings } from '../lib/secure-peer-lifecycle'
+import { SecurePeerHostAddressAction } from './SecurePeerHostAddress'
 
 const V1_SCOPES: SecurePeerScope[] = ['teamspace.read', 'teamspace.write']
 const CONSENT_PREFIX = 'agentsdock.secure-peer.connect-consent.v2:'
@@ -98,6 +99,9 @@ export function SecurePeerPanel({
   const visibleManagedPeers = useMemo(() => reconcileSecurePeerPairings(managedPeers, null), [managedPeers])
   const pending = useMemo(() => visiblePairings.filter(pairing => (
     pairing.direction === 'incoming' && pairing.status === 'pending_approval'
+  )), [visiblePairings])
+  const expired = useMemo(() => visiblePairings.filter(pairing => (
+    pairing.direction === 'incoming' && pairing.status === 'expired'
   )), [visiblePairings])
   const outgoing = useMemo(() => visiblePairings.filter(pairing => pairing.direction === 'outgoing'), [visiblePairings])
   const activePairing = outgoing.find(pairing => (
@@ -738,6 +742,7 @@ export function SecurePeerPanel({
       status={status}
       control={control}
       pending={pending}
+      expired={expired}
       managedPeers={visibleManagedPeers}
       canManage={canManage}
       busy={Boolean(busy)}
@@ -786,6 +791,10 @@ export function SecurePeerPanel({
       onCancelForget={() => setConfirmForget(null)}
       onForget={pairing => void forget(pairing)}
       onRetry={() => void retryConnection()}
+      onEndpointUpdated={async next => {
+        setControl(next)
+        await onConnectionChanged?.()
+      }}
     />}
 
     {panelError && <div className="teamspace-error network-panel-error" role="alert"><span>{panelError}</span><button type="button" className="quiet-button" onClick={() => void load()}>{t('teamNetwork.peer.retry')}</button></div>}
@@ -814,10 +823,11 @@ function sameSecurePeerPairings(
   return current === incoming || JSON.stringify(current) === JSON.stringify(incoming)
 }
 
-function HostConnectionView({ status, control, pending, managedPeers, canManage, busy, copied, hostAddress, confirmedSas, confirmingDisableHost, onCopy, onHostAddressChange, onConfirmSas, onApprove, onReject, onRevoke, onRequestDisableHost, onCancelDisableHost, onDisableHost }: {
+function HostConnectionView({ status, control, pending, expired, managedPeers, canManage, busy, copied, hostAddress, confirmedSas, confirmingDisableHost, onCopy, onHostAddressChange, onConfirmSas, onApprove, onReject, onRevoke, onRequestDisableHost, onCancelDisableHost, onDisableHost }: {
   status: TeamHubStatus
   control: SecurePeerControlStatus
   pending: SecurePeerPairing[]
+  expired: SecurePeerPairing[]
   managedPeers: SecurePeerPairing[]
   canManage: boolean
   busy: boolean
@@ -883,6 +893,15 @@ function HostConnectionView({ status, control, pending, managedPeers, canManage,
       })}
     </section>
 
+    {expired.length > 0 && <details className="network-more network-approval-list">
+      <summary>{t('teamNetwork.peer.expiredRequests', { count: expired.length })}</summary>
+      <p>{t('teamNetwork.peer.expiredRequestHelp')}</p>
+      {expired.map(pairing => <article className="secure-peer-pairing-card" key={pairing.id}>
+        <Server size={18} />
+        <div><strong>{pairing.peerDisplayName}</strong><span>{t('teamNetwork.peer.expiredRequestStatus')}</span></div>
+      </article>)}
+    </details>}
+
     {livePeers.length > 0 && <section className="network-approval-list" aria-label={t('teamNetwork.peer.serverConnections')}>
       <header><h3>{t('teamNetwork.peer.serverConnections')}</h3></header>
       {livePeers.map(pairing => <article className={`secure-peer-pairing-card ${pairing.trustState === 'revoked' ? 'danger' : ''}`} key={pairing.id}>
@@ -916,7 +935,7 @@ function HostConnectionView({ status, control, pending, managedPeers, canManage,
   </>
 }
 
-function PeerConnectionView({ control, outgoing, activePairing, connected, connectionError, invite, busy, confirmForget, automaticallyFinishing, onInviteChange, onPaste, onConnect, onCancel, onCheckApproval, onReconnect, onDisconnect, onRequestForget, onCancelForget, onForget, onRetry }: {
+function PeerConnectionView({ control, outgoing, activePairing, connected, connectionError, invite, busy, confirmForget, automaticallyFinishing, onInviteChange, onPaste, onConnect, onCancel, onCheckApproval, onReconnect, onDisconnect, onRequestForget, onCancelForget, onForget, onRetry, onEndpointUpdated }: {
   control: SecurePeerControlStatus
   outgoing: SecurePeerPairing[]
   activePairing: SecurePeerPairing | null
@@ -937,6 +956,7 @@ function PeerConnectionView({ control, outgoing, activePairing, connected, conne
   onCancelForget: () => void
   onForget: (pairing: SecurePeerPairing) => void
   onRetry: () => void
+  onEndpointUpdated: (control: SecurePeerControlStatus) => Promise<void> | void
 }) {
   useLocale()
   const connectionCards = outgoing.filter(pairing => (
@@ -990,6 +1010,7 @@ function PeerConnectionView({ control, outgoing, activePairing, connected, conne
         <p>{degradedDescription}</p>
       </div>
       <div className="network-state-actions">
+        {activePairing && <SecurePeerHostAddressAction control={control} pairing={activePairing} disabled={busy} onUpdated={onEndpointUpdated} />}
         {!activeRevoked && <button type="button" className="primary-button" disabled={busy} onClick={onRetry}><RefreshCw className={busy ? 'spin' : ''} size={15} />{t('teamNetwork.peer.tryAgain')}</button>}
         {!activeRevoked && activePairing?.connectionId && activePairing.hubIdentity && <button type="button" className="quiet-button" disabled={busy} onClick={() => onDisconnect(activePairing)}>{t('teamNetwork.peer.disconnect')}</button>}
         {activePairing && canForgetSecurePeerPairing(activePairing) && <button type="button" className="quiet-button danger" disabled={busy} onClick={() => onRequestForget(activePairing.id)}>{activeRevoked ? t('teamNetwork.peer.forgetLocal') : t('teamNetwork.peer.leaveNetwork')}</button>}
@@ -1001,7 +1022,7 @@ function PeerConnectionView({ control, outgoing, activePairing, connected, conne
     {connected && <article className="network-connection-state is-connected" role="status">
       <span className="network-state-icon"><ShieldCheck size={24} /></span>
       <div className="network-state-copy"><span className="network-state-label">{t('teamNetwork.peer.connected')}</span><h3>{connected.peerDisplayName}</h3><p>{t('teamNetwork.peer.connectedDescription')}</p></div>
-      <div className="network-state-actions"><button type="button" className="quiet-button" disabled={busy} onClick={() => onDisconnect(connected)}>{t('teamNetwork.peer.disconnect')}</button>{canForgetSecurePeerPairing(connected) && <button type="button" className="quiet-button danger" disabled={busy} onClick={() => onRequestForget(connected.id)}>{t('teamNetwork.peer.leaveNetwork')}</button>}</div>
+      <div className="network-state-actions"><SecurePeerHostAddressAction control={control} pairing={connected} disabled={busy} onUpdated={onEndpointUpdated} /><button type="button" className="quiet-button" disabled={busy} onClick={() => onDisconnect(connected)}>{t('teamNetwork.peer.disconnect')}</button>{canForgetSecurePeerPairing(connected) && <button type="button" className="quiet-button danger" disabled={busy} onClick={() => onRequestForget(connected.id)}>{t('teamNetwork.peer.leaveNetwork')}</button>}</div>
       <details className="network-more network-state-details"><summary>{t('teamNetwork.peer.connectionDetails')}</summary><ConnectionDetails pairing={connected} /></details>
       {confirmForget === connected.id && <ForgetConfirmation pairing={connected} busy={busy} onConfirm={onForget} onCancel={onCancelForget} />}
     </article>}
@@ -1019,6 +1040,7 @@ function PeerConnectionView({ control, outgoing, activePairing, connected, conne
         {confirmForget === pairing.id && <ForgetConfirmation pairing={pairing} busy={busy} onConfirm={onForget} onCancel={onCancelForget} />}
       </div>
       <div className="secure-peer-card-actions">
+        <SecurePeerHostAddressAction control={control} pairing={pairing} disabled={busy} onUpdated={onEndpointUpdated} />
         {pairing.trustState === 'pending' && <>{!automaticallyFinishing.has(pairing.id) && <button type="button" className="primary-button" disabled={busy} onClick={() => onCheckApproval(pairing)}>{t('teamNetwork.peer.checkApproval')}</button>}<button type="button" className="quiet-button" disabled={busy} onClick={() => onCancel(pairing)}>{t('teamNetwork.peer.cancel')}</button></>}
         {pairing.trustState === 'approved' && !automaticallyFinishing.has(pairing.id) && <button type="button" className="primary-button" disabled={busy || Boolean(control.activeConnectionId)} onClick={() => onReconnect(pairing)}>{t('teamNetwork.peer.reconnect')}</button>}
         {['approved', 'revoked'].includes(pairing.trustState) && canForgetSecurePeerPairing(pairing) && <button type="button" className="quiet-button danger" disabled={busy} onClick={() => onRequestForget(pairing.id)}>{pairing.trustState === 'revoked' ? t('teamNetwork.peer.forgetLocal') : t('teamNetwork.peer.leaveNetwork')}</button>}

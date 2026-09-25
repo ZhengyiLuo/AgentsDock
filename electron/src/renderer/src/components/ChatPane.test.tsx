@@ -154,7 +154,7 @@ describe('ChatPane', () => {
     const composer = screen.getByTestId('composer')
 
     expect(children.indexOf(dock)).toBeGreaterThan(children.indexOf(timeline))
-    expect(children.indexOf(dock)).toBe(children.indexOf(composer) - 1)
+    expect(children.indexOf(dock)).toBe(children.indexOf(composer.closest('.chat-workspace-composer')!) - 1)
   })
 
   it('stages a drop for the explicit session and uploads only to that pane', async () => {

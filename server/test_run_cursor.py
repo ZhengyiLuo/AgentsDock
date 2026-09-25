@@ -1288,17 +1288,67 @@ while True:
         error = next(event for event in events if event["type"] == "error")
         self.assertIn("absolute turn timeout", error["message"])
 
+    async def test_pending_live_cross_chat_wait_pauses_cursor_watchdogs(self) -> None:
+        agent_server.CURSOR_STARTUP_TIMEOUT_SECONDS = 0.05
+        agent_server.CURSOR_TURN_TIMEOUT_SECONDS = 0.05
+        agent_server.CURSOR_IDLE_WARN_SECONDS = 0.01
+        agent_server.CURSOR_IDLE_TIMEOUT_SECONDS = 0.03
+        with patch.object(
+            agent_server,
+            "provider_run_owns_pending_cross_chat_live_wait",
+            return_value=True,
+        ):
+            events = await self._run_script(
+                """#!/usr/bin/env python3
+import json, sys, time
+sys.stdin.read()
+session_id = "cursor-sess-test"
+print(json.dumps({"type":"system","subtype":"init","session_id":session_id,"cwd":".","model":"Auto"}), flush=True)
+time.sleep(0.12)
+print(json.dumps({"type":"result","subtype":"success","is_error":False,"result":"peer answered","session_id":session_id}), flush=True)
+"""
+            )
+
+        terminal = next(
+            event for event in events if event["type"] == "turn_finished"
+        )
+        self.assertFalse(terminal["is_error"])
+        self.assertEqual(terminal["result_text"], "peer answered")
+        self.assertFalse(any(
+            event["type"] in {"error", "idle_warning"}
+            for event in events
+        ))
+
     async def test_idle_warning_is_emitted_once_per_idle_period(self) -> None:
-        agent_server.CURSOR_IDLE_WARN_SECONDS = 0.02
-        agent_server.CURSOR_IDLE_TIMEOUT_SECONDS = 0.12
-        events = await self._run_script(
-            """#!/usr/bin/env python3
+        # Process/guard startup is a separate idle period. Arm the short
+        # thresholds only after init so slow CI startup cannot add a warning
+        # before the single post-init idle period this test exercises.
+        startup_idle_deadline = (
+            agent_server.CURSOR_STARTUP_TIMEOUT_SECONDS
+            + agent_server.CURSOR_TURN_TIMEOUT_SECONDS
+        )
+        agent_server.CURSOR_IDLE_WARN_SECONDS = startup_idle_deadline
+        agent_server.CURSOR_IDLE_TIMEOUT_SECONDS = startup_idle_deadline
+        mark_ready = agent_server.mark_provider_turn_ready
+
+        async def arm_idle_after_ready(session_id, run_id, provider_session_id=None):
+            await mark_ready(session_id, run_id, provider_session_id)
+            self.assertTrue(agent_server.ACTIVE[session_id]["provider_turn_ready"])
+            agent_server.CURSOR_IDLE_WARN_SECONDS = 0.02
+            agent_server.CURSOR_IDLE_TIMEOUT_SECONDS = 0.12
+
+        with patch.object(
+            agent_server, "mark_provider_turn_ready", side_effect=arm_idle_after_ready,
+        ) as ready:
+            events = await self._run_script(
+                """#!/usr/bin/env python3
 import json, sys, time
 sys.stdin.read()
 print(json.dumps({"type":"system","subtype":"init","session_id":"cursor-sess-test","cwd":".","model":"Auto"}), flush=True)
 time.sleep(5)
 """
-        )
+            )
+        ready.assert_awaited_once_with(self.session_id, "run-cursor-1", "cursor-sess-test")
         warnings = [event for event in events if event["type"] == "idle_warning"]
         self.assertEqual(len(warnings), 1)
         terminal = next(event for event in events if event["type"] == "turn_finished")
@@ -1805,6 +1855,21 @@ class CursorFileDeliveryInstructionTests(unittest.TestCase):
         self.assertIn('{"files":["/absolute/path.ext"]}', instructions)
         self.assertIn("needs no shell", instructions)
         self.assertIn("generated images", instructions)
+        self.assertNotIn(
+            agent_server.CLAUDE_PROVIDER_MCP_TOOL_NAME,
+            instructions,
+        )
+        self.assertNotIn("Use the `agentsdock` provider tool", instructions)
+        self.assertIn("generated per-turn authority block", instructions)
+
+        authority = agent_server.cross_chat_provider_authority_block(
+            [],
+            Path("/tmp/run_cursor-authority.json"),
+            "chat-x",
+            {"publish"},
+        )
+        self.assertIn('"$AGENTSDOCK_PUBLISH_CLI"', authority)
+        self.assertIn("--authority-file", authority)
 
     def test_instruction_hash_changes_so_live_sessions_reinject(self) -> None:
         # Instructions are only re-sent when their hash changes, so a policy
@@ -1820,6 +1885,17 @@ class CursorFileDeliveryInstructionTests(unittest.TestCase):
                 "chat-x", {}, manifest
             )
         current = agent_server.cursor_instruction_hash("chat-x", {}, manifest)
+        self.assertNotEqual(previous, current)
+
+    def test_policy_version_changes_so_resumed_sessions_reinject(self) -> None:
+        manifest = Path("/tmp/agentsdock-state/sessions/chat-x/manifest.json")
+        with patch.object(agent_server, "CURSOR_PROMPT_POLICY_VERSION", "2"):
+            previous = agent_server.cursor_instruction_hash(
+                "chat-x", {}, manifest
+            )
+        current = agent_server.cursor_instruction_hash("chat-x", {}, manifest)
+
+        self.assertEqual(agent_server.CURSOR_PROMPT_POLICY_VERSION, "5")
         self.assertNotEqual(previous, current)
 
 

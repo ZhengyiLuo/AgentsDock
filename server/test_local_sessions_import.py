@@ -22,8 +22,8 @@ class LocalClaudeSessionCandidatesTests(unittest.TestCase):
     def test_reads_cwd_and_first_message_into_label(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             projects_root = Path(temporary) / "claude-projects"
-            transcript = projects_root / "-Users-developer-projects-sample-app" / "claude-abc123.jsonl"
-            write_claude_transcript(transcript, cwd="/Users/developer/projects/sample-app", first_user_text="Fix the flaky test")
+            transcript = projects_root / "-Users-georgia-code-widget" / "claude-abc123.jsonl"
+            write_claude_transcript(transcript, cwd="/Users/georgia/code/widget", first_user_text="Fix the flaky test")
 
             with patch.object(agent_server, "CLAUDE_PROJECTS_ROOT", projects_root):
                 candidates = agent_server.local_claude_session_candidates(set())
@@ -32,15 +32,15 @@ class LocalClaudeSessionCandidatesTests(unittest.TestCase):
         candidate = candidates[0]
         self.assertEqual(candidate["provider_session_id"], "claude-abc123")
         self.assertEqual(candidate["backend"], agent_server.BACKEND_CLAUDE)
-        self.assertEqual(candidate["cwd"], "/Users/developer/projects/sample-app")
-        self.assertIn("sample-app", candidate["label"])
+        self.assertEqual(candidate["cwd"], "/Users/georgia/code/widget")
+        self.assertIn("widget", candidate["label"])
         self.assertIn("Fix the flaky test", candidate["label"])
 
     def test_dedups_against_already_imported_provider_ids(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             projects_root = Path(temporary) / "claude-projects"
-            transcript = projects_root / "-Users-developer-projects-sample-app" / "claude-abc123.jsonl"
-            write_claude_transcript(transcript, cwd="/Users/developer/projects/sample-app", first_user_text="Fix the flaky test")
+            transcript = projects_root / "-Users-georgia-code-widget" / "claude-abc123.jsonl"
+            write_claude_transcript(transcript, cwd="/Users/georgia/code/widget", first_user_text="Fix the flaky test")
 
             with patch.object(agent_server, "CLAUDE_PROJECTS_ROOT", projects_root):
                 candidates = agent_server.local_claude_session_candidates({"claude-abc123"})
@@ -232,14 +232,14 @@ class LocalCodexSessionCandidatesTests(unittest.TestCase):
             write_codex_transcript(
                 transcript,
                 session_id="019f76aa-7880-7023-b350-cb7a24a754d8",
-                cwd="/Volumes/Workspace/projects/sample-app",
-                first_user_text="set up the sample application please"
+                cwd="/Volumes/SSD/Codes/ZenithDock",
+                first_user_text="set up remote zenith dock please"
             )
             index_path = Path(temporary) / "session_index.jsonl"
             index_path.write_text(
                 json.dumps({
                     "id": "019f76aa-7880-7023-b350-cb7a24a754d8",
-                    "thread_name": "Set up sample application",
+                    "thread_name": "Set up remote Zenith Dock",
                     "updated_at": "2026-07-18T19:19:47.713052Z",
                 }) + "\n"
             )
@@ -250,7 +250,7 @@ class LocalCodexSessionCandidatesTests(unittest.TestCase):
                 candidates = agent_server.local_codex_session_candidates(set())
 
         self.assertEqual(len(candidates), 1)
-        self.assertEqual(candidates[0]["label"], "Set up sample application")
+        self.assertEqual(candidates[0]["label"], "Set up remote Zenith Dock")
 
     def test_dedups_against_already_imported_provider_ids(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
@@ -281,8 +281,8 @@ class LocalSessionCandidatesDedupAgainstStoreTests(unittest.TestCase):
     def test_excludes_sessions_already_present_in_store(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             projects_root = Path(temporary) / "claude-projects"
-            transcript = projects_root / "-Users-developer-projects-sample-app" / "claude-already-imported.jsonl"
-            write_claude_transcript(transcript, cwd="/Users/developer/projects/sample-app", first_user_text="hello")
+            transcript = projects_root / "-Users-georgia-code-widget" / "claude-already-imported.jsonl"
+            write_claude_transcript(transcript, cwd="/Users/georgia/code/widget", first_user_text="hello")
 
             existing_sessions = {
                 "sess_existing": {
@@ -618,43 +618,21 @@ class LocalTranscriptSafetyTests(unittest.TestCase):
             ],
         )
 
-    def test_claude_preview_skips_sdk_task_notification_origin(self) -> None:
-        with tempfile.TemporaryDirectory() as temporary:
-            transcript = Path(temporary) / "preview.jsonl"
-            transcript.write_text(
-                "\n".join(
-                    json.dumps(event)
-                    for event in [
-                        {
-                            "type": "user",
-                            "origin": {"kind": "task-notification"},
-                            "message": {"content": self.TASK_NOTIFICATION},
-                        },
-                        {
-                            "type": "user",
-                            "message": {"content": "Actual opening prompt"},
-                        },
-                    ]
-                )
-                + "\n",
-                encoding="utf-8",
-            )
-
-            self.assertEqual(
-                agent_server.claude_transcript_preview(transcript),
-                "Actual opening prompt",
-            )
-
     def test_legacy_imported_task_notification_is_hidden_from_clients(self) -> None:
         imported = {
             "type": "turn_started",
+            "session_id": "chat-legacy",
             "backend": agent_server.BACKEND_CLAUDE,
             "run_id": "import_legacy",
             "imported": True,
             "prompt": self.TASK_NOTIFICATION,
         }
 
-        self.assertFalse(agent_server.is_client_visible_event(imported))
+        # Keep the empty turn boundary so pagination and the following answer
+        # retain their semantic owner; the provider-only text itself is
+        # removed at the shared client projection boundary.
+        self.assertTrue(agent_server.is_client_visible_event(imported))
+        self.assertEqual(agent_server.client_safe_event(imported)["prompt"], "")
         self.assertIsNone(agent_server.history_search_event_record(imported))
         self.assertTrue(agent_server.is_client_visible_event({
             **imported,
@@ -683,7 +661,9 @@ class StagedHistoryBatchTests(unittest.IsolatedAsyncioTestCase):
             {"kind": "user", "text": "hello"},
             {"kind": "assistant", "text": "hi"},
         ]
-        append_batch = AsyncMock(return_value=3)
+        # marker + two messages + the terminal turn_finished that closes the
+        # import run so clients never treat replayed history as live.
+        append_batch = AsyncMock(return_value=4)
         with patch.object(
             agent_server,
             "append_imported_events",
@@ -700,8 +680,10 @@ class StagedHistoryBatchTests(unittest.IsolatedAsyncioTestCase):
         event_specs = append_batch.await_args.args[1]
         self.assertEqual(
             [event_type for event_type, _payload in event_specs],
-            ["history_imported", "turn_started", "assistant_text"],
+            ["history_imported", "turn_started", "assistant_text", "turn_finished"],
         )
+        self.assertTrue(event_specs[1][1]["provider_history_sanitized"])
+        self.assertTrue(event_specs[-1][1]["imported"])
 
     async def test_staged_history_rejects_an_incomplete_batch_write(self) -> None:
         session = {

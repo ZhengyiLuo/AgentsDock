@@ -2,13 +2,12 @@
 import { getLocale } from '@shared/i18n'
 import { localeOptions } from '@shared/locales'
 import { useLocale } from '../lib/i18n'
-import { forwardRef, useEffect, useLayoutEffect, useMemo, useRef, useState, type FormEvent, type KeyboardEvent, type ReactNode } from 'react'
+import { forwardRef, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type FormEvent, type KeyboardEvent, type ReactNode } from 'react'
 import * as Dialog from '@radix-ui/react-dialog'
 import { ArrowRight, Check, ChevronDown, ChevronRight, CircleAlert, Clock3, Command, Copy, Download, ExternalLink, FileText, FolderOpen, GitFork, Import, KeyRound, Laptop, LoaderCircle, Network, RefreshCw, RotateCcw, Search, Server, Sparkles, X } from 'lucide-react'
-import type { AppUpdateStatus, AppUpdateTrack, Backend, BulkImportSessionItem, BulkImportSessionResult, ChatReference, ChatReferenceAction, CreateJobInput, Health, Job, JobContextMode, JobScheduleKind, LocalSessionCandidate, ServerRestartBlockerSnapshot, ServerSetupCapabilities, ServerSetupProgress, ServerUpdateStatus, ServerUpdateTrack, Session, TeamReference, UpdateJobInput, WorkspaceProfileScope } from '@shared/types'
+import type { AppUpdateStatus, AppUpdateTrack, Backend, BulkImportSessionItem, BulkImportSessionResult, ChatReference, ChatReferenceAction, CoordinatedServerUpdate, CreateJobInput, Health, Job, JobContextMode, JobScheduleKind, LocalSessionCandidate, ServerRestartBlockerSnapshot, ServerSetupCapabilities, ServerSetupProgress, ServerUpdateStatus, ServerUpdateTrack, Session, TeamReference, UpdateJobInput, WorkspaceProfileScope } from '@shared/types'
 import { localSessionImportKey, localSessionImportSupported } from '@shared/local-session-import'
-import { cursorBackendAvailable, cursorBackendUnavailableReason, runtimeCatalogOptions, runtimeEffortAfterModelChange, runtimeEffortOptions, runtimeSelectionError, selectableChatBackends } from '@shared/runtime-catalog'
-import { isLoopbackHostname } from '@shared/team-hub-url'
+import { chatBackendSelection, codexCustomProviderAvailable, cursorBackendAvailable, cursorBackendUnavailableReason, runtimeCatalogOptions, runtimeEffortAfterModelChange, runtimeEffortOptions, runtimeSelectionError, selectableChatBackendChoices, selectableChatBackends, type ChatBackendChoice } from '@shared/runtime-catalog'
 import { trackEvent } from '../lib/analytics'
 import { readAppearance, setAppearanceMode, type AppearanceMode } from '../lib/appearance'
 import { t, useLanguagePreference, type LanguagePreference } from '../lib/i18n'
@@ -24,6 +23,10 @@ import { captureWorkspaceScope } from '../lib/workspace-preferences'
 import { saveNewChatDefaults, useAppStore, waitForWorkspaceReady } from '../store/app-store'
 import { BackendMark } from './BackendMark'
 import { ChatShareDialog } from './ChatShareDialog'
+import { CodexAuthSettings } from './CodexAuthSettings'
+import { CodexModelDiscovery } from './CodexModelDiscovery'
+import { ReasoningDisplaySettings } from './ReasoningDisplaySettings'
+import { CoordinatedServerUpdateRow } from './CoordinatedServerUpdateRow'
 import { CodexServerSettings } from './CodexServerSettings'
 import { CodexSubagentSettings } from './CodexSubagentSettings'
 import { RuntimeHealthPanel } from './RuntimeHealth'
@@ -104,7 +107,6 @@ type RestartAfterUpdateTarget = Pick<
 const SERVER_RESTART_COUNT_LIMIT = 1_000_000
 const SERVER_RESTART_REVISION_PATTERN = /^[0-9a-f]{64}$/
 const SERVER_UPDATE_SCHEDULE_ID_PATTERN = /^[0-9a-f]{32}$/
-const SCOPED_SERVER_UPDATE_CAPABILITY_VERSION = 9
 
 function readDeferredServerUpdates(): DeferredServerUpdates {
   try {
@@ -153,6 +155,18 @@ function serverUpdateHasStarted(status: ServerUpdateStatus | null | undefined): 
   return Boolean(status && status.phase !== 'pending' && serverUpdateIsActive(status))
 }
 
+function matchesPendingUpdateReservation(status: ServerUpdateStatus, reservation: PendingServerUpdateReservation): boolean {
+  return status.schedule_id?.trim() === reservation.scheduleId
+    && status.target_version?.trim() === reservation.targetVersion
+    && status.track === reservation.track
+}
+
+function forceUpdateReservationChanged(error: unknown): boolean {
+  // Older native bridges preserve the server's message/action, but not its
+  // structured error code. Either form permits a status READ, never a retry.
+  return /\bserver_force_update_changed\b|scheduled server update changed before force update confirmation/i.test(message(error))
+}
+
 function serverTrackForStatus(status: ServerUpdateStatus): ServerUpdateTrack {
   if (status.track) return status.track
   return status.current_version.split('+', 1)[0].includes('-') ? 'beta' : 'stable'
@@ -168,17 +182,10 @@ function serverSupportsPassiveUpdateReservation(health: Health | null | undefine
   return serverUpdateCapabilityVersion(health?.capabilities?.server_updates) >= 7
 }
 
-function supportsLegacyLoopbackServerUpdate(health: Health | null | undefined, serverUrl: string | null | undefined): boolean {
+function serverSupportsManagedUpdate(health: Health | null | undefined): boolean {
   const capability = health?.capabilities?.server_updates
-  const capabilityVersion = serverUpdateCapabilityVersion(capability)
-  if (capabilityVersion < 2 || capabilityVersion >= SCOPED_SERVER_UPDATE_CAPABILITY_VERSION || !serverUrl) return false
-  if (!capability || typeof capability !== 'object' || Array.isArray(capability) || (capability as { available?: unknown }).available !== true) return false
-  try {
-    const parsed = new URL(serverUrl)
-    return parsed.protocol === 'http:' && isLoopbackHostname(parsed.hostname)
-  } catch {
-    return false
-  }
+  return Boolean(capability && typeof capability === 'object' && !Array.isArray(capability)
+    && (capability as { available?: unknown }).available === true)
 }
 
 function serverUpdateStartWasAccepted(
@@ -452,11 +459,16 @@ export function Dialogs() {
 
 type AppSettingsSection = 'general' | 'shortcuts' | 'server' | 'updates'
 
-export function AppSettingsDialog({ serverSettings, serverUpdates }: { serverSettings?: ReactNode; serverUpdates?: ReactNode } = {}) {
+export function AppSettingsDialog({ serverSettings, serverUpdates, onServerUpdatesVisible, onServerReleaseChecksVisible, onCoordinatedServerUpdate }: {
+  serverSettings?: ReactNode; serverUpdates?: ReactNode; onServerUpdatesVisible?: (visible: boolean) => void
+  onServerReleaseChecksVisible?: (visible: boolean) => void
+  onCoordinatedServerUpdate?: (status: CoordinatedServerUpdate | null) => void
+} = {}) {
   useLocale()
   const language = useLanguagePreference()
   const appSettingsOpen = Boolean(useAppStore(state => state.modals.appSettings))
   const legacyServerSettingsOpen = Boolean(useAppStore(state => state.modals.settings))
+  const connected = useAppStore(state => state.connected)
   const health = useAppStore(state => state.health)
   const profiles = useAppStore(state => state.profiles)
   const activeProfileId = useAppStore(state => state.activeProfileId)
@@ -465,6 +477,7 @@ export function AppSettingsDialog({ serverSettings, serverUpdates }: { serverSet
   const [appearance, setAppearance] = useState<AppearanceMode>('system')
   const [update, setUpdate] = useState<AppUpdateStatus | null>(null)
   const [updateTrackBusy, setUpdateTrackBusy] = useState(false)
+  const [updateCancelBusy, setUpdateCancelBusy] = useState(false)
   const activeSectionRef = useRef<HTMLButtonElement | null>(null)
 
   const closeSettings = () => {
@@ -486,6 +499,18 @@ export function AppSettingsDialog({ serverSettings, serverUpdates }: { serverSet
   useEffect(() => {
     if (legacyServerSettingsOpen) setSection('server')
   }, [legacyServerSettingsOpen])
+  const activeCoordinatedUpdate = update?.serverUpdates?.find(server => server.profileId === activeProfileId) || null
+  const manualServerUpdates = !update?.serverUpdates?.length || Boolean(activeProfileId && !activeCoordinatedUpdate)
+  useEffect(() => {
+    // An app-only release has no paired server operation. Keep the selected
+    // server's manual update controls independent of that app release.
+    const visible = open && update !== null && manualServerUpdates
+    onServerUpdatesVisible?.(visible && (section === 'server' || section === 'updates'))
+    onServerReleaseChecksVisible?.(visible && section === 'updates')
+  }, [open, section, update !== null, manualServerUpdates, onServerUpdatesVisible, onServerReleaseChecksVisible])
+  useEffect(() => {
+    onCoordinatedServerUpdate?.(activeCoordinatedUpdate)
+  }, [activeCoordinatedUpdate, onCoordinatedServerUpdate])
   useEffect(() => {
     if (!open) return
     let active = true
@@ -493,8 +518,9 @@ export function AppSettingsDialog({ serverSettings, serverUpdates }: { serverSet
     const unsubscribe = window.agentsDock.events.on('app:update', status => {
       if (active) setUpdate(status)
     })
-    void Promise.resolve(window.agentsDock.updates.check()).then(status => {
-      if (active && status) setUpdate(status)
+    void Promise.resolve(window.agentsDock.updates.status()).then(status => {
+      if (!active) return undefined
+      if (status) setUpdate(status)
     }).catch(error => {
       if (active) useAppStore.getState().setError(message(error))
     })
@@ -523,17 +549,26 @@ export function AppSettingsDialog({ serverSettings, serverUpdates }: { serverSet
     try { await window.agentsDock.updates.install() }
     catch (error) { useAppStore.getState().setError(message(error)) }
   }
+  const cancelUpdate = async () => {
+    setUpdateCancelBusy(true)
+    try { setUpdate(await window.agentsDock.updates.cancel()) }
+    catch (error) { useAppStore.getState().setError(message(error)) }
+    finally { setUpdateCancelBusy(false) }
+  }
   const updateBusy = Boolean(update && (
     update.state === 'checking'
     || (update.channel === 'direct' && ['available', 'downloading'].includes(update.state))
   ))
   const updateTrackLocked = Boolean(update && (
     update.state === 'checking'
-    || (update.channel === 'direct' && ['available', 'downloading', 'downloaded', 'installing'].includes(update.state))
+    || (update.channel === 'direct' && ['available', 'downloading', 'installing'].includes(update.state))
   ))
   const developmentUpdateCheckEnabled = update?.channel === 'development' && update.state !== 'disabled'
   const appUpdateCheckedAt = updateCheckedAtLabel(update?.checkedAt)
   const serverVersion = health?.server_version || profiles.find(profile => profile.id === activeProfileId)?.serverVersion
+  const hasConfiguredServer = connected || Boolean(health?.server_identity) || profiles.some(profile =>
+    profile.serverSetupComplete || profile.hasAccessToken || Boolean(profile.serverIdentity)
+  )
 
   return <Dialog.Root open={open} onOpenChange={value => { if (!value) closeSettings() }}>
     <Dialog.Portal>
@@ -573,6 +608,7 @@ export function AppSettingsDialog({ serverSettings, serverUpdates }: { serverSet
                   <option value="dark">{t('settings.darkTheme')}</option>
                 </select>
               </label>
+              <ReasoningDisplaySettings />
               <div className="app-settings-row">
                 <strong className="app-settings-row-title">AgentsDock</strong>
                 <span className="app-settings-value">{update?.currentVersion ? t('settings.version', { version: update.currentVersion }) : t('settings.versionUnavailable')}</span>
@@ -595,19 +631,46 @@ export function AppSettingsDialog({ serverSettings, serverUpdates }: { serverSet
                 <div className="app-settings-row-copy"><strong>AgentsDock {update?.currentVersion ? <small>v{update.currentVersion}</small> : null}</strong><span role="status" aria-live="polite">{[update?.state === 'not-available' ? t("ui.Dialogs.AppSettingsDialog.this_is_the_latest_one_0791214") : update?.message || t("ui.Dialogs.AppSettingsDialog.checking_for_updates_497a199"), appUpdateCheckedAt].filter(Boolean).join(' · ')}</span></div>
                 <div className="app-settings-actions">
                   {(update?.channel === 'direct' || update?.channel === 'development') && <div className="segmented update-track-picker" role="group" aria-label={t("ui.Dialogs.AppSettingsDialog.app_update_channel_95487e7")}>
-                    <button type="button" className={update.track === 'stable' ? 'active' : ''} disabled={updateTrackBusy || updateTrackLocked} onClick={() => void chooseUpdateTrack('stable')}>{t("ui.Dialogs.AppSettingsDialog.stable_90ee305")}</button>
-                    <button type="button" className={update.track === 'beta' ? 'active' : ''} disabled={updateTrackBusy || updateTrackLocked} onClick={() => void chooseUpdateTrack('beta')}>{t("ui.Dialogs.AppSettingsDialog.beta_7033903")}</button>
+                    <button type="button" className={update.track === 'stable' ? 'active' : ''} aria-pressed={update.track === 'stable'} disabled={updateTrackBusy || updateTrackLocked || updateCancelBusy} onClick={() => void chooseUpdateTrack('stable')}>{t("ui.Dialogs.AppSettingsDialog.stable_90ee305")}</button>
+                    <button type="button" className={update.track === 'beta' ? 'active' : ''} aria-pressed={update.track === 'beta'} disabled={updateTrackBusy || updateTrackLocked || updateCancelBusy} onClick={() => void chooseUpdateTrack('beta')}>{t("ui.Dialogs.AppSettingsDialog.beta_7033903")}</button>
                   </div>}
                   {update?.channel === 'app-store' && <span className="app-settings-value">App Store</span>}
                   {update?.channel === 'development' && <button type="button" className="quiet-button" disabled={!developmentUpdateCheckEnabled || updateBusy || updateTrackBusy} title={developmentUpdateCheckEnabled ? undefined : update.message || t("ui.Dialogs.AppSettingsDialog.app_update_checks_are_unavailable_for_this_86d2da7")} onClick={() => void checkForUpdates()}>{updateBusy || updateTrackBusy ? <LoaderCircle className="spin" size={13} /> : <RefreshCw size={13} />}{updateBusy || updateTrackBusy ? t("ui.Dialogs.AppSettingsDialog.checking_ec963ff") : t("ui.Dialogs.AppSettingsDialog.check_for_updates_f26f327")}</button>}
-                  {update?.channel === 'direct' && update.state !== 'downloaded' && update.state !== 'installing' && <button type="button" className="quiet-button" disabled={updateBusy} onClick={() => void checkForUpdates()}>{updateBusy ? <LoaderCircle className="spin" size={13} /> : <RefreshCw size={13} />}{t("ui.Dialogs.AppSettingsDialog.check_for_updates_f26f327")}</button>}
-                  {update?.channel === 'direct' && update.state === 'downloaded' && <button type="button" className="primary-button" onClick={() => void installUpdate()}><RotateCcw size={13} />{t("ui.Dialogs.AppSettingsDialog.restart_to_update_451d3a7")}</button>}
+                  {update?.channel === 'direct' && update.state !== 'downloaded' && update.state !== 'installing' && <button type="button" className="quiet-button" disabled={updateBusy || updateTrackBusy || updateCancelBusy} onClick={() => void checkForUpdates()}>{updateBusy || updateTrackBusy ? <LoaderCircle className="spin" size={13} /> : <RefreshCw size={13} />}{t("ui.Dialogs.AppSettingsDialog.check_for_updates_f26f327")}</button>}
+                  {update?.channel === 'direct' && update.state === 'downloaded' && <button type="button" className="primary-button" disabled={updateCancelBusy || updateTrackBusy} onClick={() => void installUpdate()}><Download size={13} />{t("ui.Dialogs.AppSettingsDialog.restart_to_update_451d3a7")}</button>}
                   {update?.channel === 'direct' && update.state === 'installing' && <span className="app-settings-value"><LoaderCircle className="spin" size={13} />{t("ui.Dialogs.AppSettingsDialog.restarting_75d0f14")}</span>}
+                  {update?.channel === 'direct' && (update.state === 'downloaded' || update.cancelable) && <button type="button" className="quiet-button" disabled={updateCancelBusy} onClick={() => void cancelUpdate()}>{updateCancelBusy ? <LoaderCircle className="spin" size={13} /> : <X size={13} />}{updateCancelBusy ? t('appUpdate.cancelling') : update.state === 'downloaded' ? t('appUpdate.discard') : t('appUpdate.cancel')}</button>}
                 </div>
               </div>
               {update?.state === 'downloading' && <div className="app-settings-update-progress" role="progressbar" aria-label={t("ui.Dialogs.AppSettingsDialog.update_download_1c20b42")} aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round(update.progress ?? 0)}><span style={{ width: `${update.progress ?? 0}%` }} /></div>}
+              {update?.serverUpdates?.map(server => <CoordinatedServerUpdateRow key={server.profileId} server={server} onUpdate={setUpdate} />)}
+              {update?.serverUpdateMessage && <p role="status">{update.serverUpdateMessage}</p>}
             </div>
-            {serverUpdates}
+            {manualServerUpdates && serverUpdates}
+            <div className="app-settings-server-inventory">
+              {profiles.map(profile => {
+                const currentVersion = profile.id === activeProfileId
+                  ? health?.server_version || profile.serverVersion
+                  : profile.serverVersion
+                return <div className="app-settings-row" key={profile.id}>
+                  <div className="app-settings-row-copy">
+                    <strong>{profile.name}</strong>
+                    <span>{profile.serverUrl}</span>
+                  </div>
+                  <span className="app-settings-value">{currentVersion ? `AgentsServer ${currentVersion}` : t('settings.versionUnavailable')}</span>
+                </div>
+              })}
+            </div>
+            {!hasConfiguredServer && <div className="app-settings-server-actions">
+              <button type="button" className="server-setup-guide compact" onClick={() => {
+                closeSettings()
+                window.dispatchEvent(new CustomEvent('agentsdock:server-setup', { detail: { intent: 'setup' } }))
+              }}>
+                <span className="server-setup-icon"><Server size={18} /></span>
+                <span><strong>{t('ui.WelcomeChat.WelcomeChat.set_up_your_server_8e99107')}</strong></span>
+                <ArrowRight size={15} />
+              </button>
+            </div>}
           </section>}
         </div>
       </Dialog.Content>
@@ -1129,6 +1192,11 @@ export function SettingsDialog() {
   useLocale()
   const open = useAppStore(state => state.modals.settings)
   const appSettingsOpen = Boolean(useAppStore(state => state.modals.appSettings))
+  const [legacyServerUpdatesVisible, setLegacyServerUpdatesVisible] = useState(false)
+  const legacyServerReleaseChecksVisible = useRef(false)
+  const setLegacyServerReleaseChecksVisible = useCallback((visible: boolean) => {
+    legacyServerReleaseChecksVisible.current = visible
+  }, [])
   const connected = useAppStore(state => state.connected)
   const health = useAppStore(state => state.health)
   const activeProfileId = useAppStore(state => state.activeProfileId)
@@ -1145,6 +1213,7 @@ export function SettingsDialog() {
   const [serverUpdateTrack, setServerUpdateTrack] = useState<ServerUpdateTrack>('stable')
   const [serverUpdateBusy, setServerUpdateBusy] = useState(false)
   const [serverUpdateWarning, setServerUpdateWarning] = useState<string | null>(null)
+  const [coordinatedServerUpdate, setCoordinatedServerUpdate] = useState<CoordinatedServerUpdate | null>(null)
   const [submittedServerUpdates, setSubmittedServerUpdates] = useState(readSubmittedServerUpdates)
   const submittedServerUpdatesRef = useRef(submittedServerUpdates)
   const submittedUpdateChecksRef = useRef(new Set<string>())
@@ -1162,7 +1231,10 @@ export function SettingsDialog() {
   const [updateNowDialogError, setUpdateNowDialogError] = useState<string | null>(null)
   const [updateNowInspectionBusy, setUpdateNowInspectionBusy] = useState(false)
   const [restartingServer, setRestartingServer] = useState(false)
-  const [restartNotice, setRestartNotice] = useState<{ kind: 'success' | 'error'; message: string } | null>(null)
+  const [restartNotice, setRestartNotice] = useState<{ kind: 'success' | 'error'; message: string; source?: 'force-update-recovery' } | null>(null)
+  const clearForceUpdateRecoveryNotice = () => setRestartNotice(current => (
+    current?.source === 'force-update-recovery' ? null : current
+  ))
   const [restartAfterUpdateTarget, setRestartAfterUpdateTarget] = useState<RestartAfterUpdateTarget | null>(null)
   const [restartAfterUpdateRetry, setRestartAfterUpdateRetry] = useState(0)
   const [deferredServerUpdates, setDeferredServerUpdates] = useState<DeferredServerUpdates>(readDeferredServerUpdates)
@@ -1171,6 +1243,7 @@ export function SettingsDialog() {
   const [addServerRequest, setAddServerRequest] = useState(0)
   const [manageServersRequest, setManageServersRequest] = useState(0)
   const serverUpdateRequestRef = useRef(0)
+  const serverUpdateSurfaceRef = useRef<string | null>(null)
   const serverUpdatePollRef = useRef(0)
   const deferredServerUpdateAttemptRef = useRef<string | null>(null)
   const deferredServerUpdateGenerationRef = useRef(0)
@@ -1183,10 +1256,20 @@ export function SettingsDialog() {
   const restartAfterUpdateRetryTimerRef = useRef<number | null>(null)
   const restartDecisionRef = useRef(false)
   const serverUpdateOperationsRef = useRef<Set<Promise<void>>>(new Set())
-  const updateSurfaceOpen = open || appSettingsOpen
+  const settingsOpen = open || appSettingsOpen
+  const updateSurfaceOpen = settingsOpen && legacyServerUpdatesVisible
   const serverUpdateScopeId = activeProfileId || ''
   const updateBindingIdentity = activeProfile?.serverIdentity || health?.server_identity || ''
   const submittedUpdateKey = serverUpdateIntentKey(serverUpdateScopeId, updateBindingIdentity, activeProfileServerUrl || '')
+  const coordinatedServerUpdateRevision = coordinatedServerUpdate?.profileId === activeProfileId
+    && coordinatedServerUpdate.serverIdentity === updateBindingIdentity
+    ? JSON.stringify([
+        coordinatedServerUpdate.phase, coordinatedServerUpdate.targetVersion,
+        coordinatedServerUpdate.operationId, coordinatedServerUpdate.scheduleId,
+        coordinatedServerUpdate.serverInstanceId, coordinatedServerUpdate.gatewayVersion,
+        coordinatedServerUpdate.executionVersion
+      ])
+    : ''
   const submittedServerUpdate = submittedServerUpdates[submittedUpdateKey] || null
   const deferredServerUpdate = serverUpdateScopeId ? deferredServerUpdates[serverUpdateScopeId] || null : null
   const deferredQueuedServerUpdateBlockers = deferredServerUpdate?.waitForQueuedTurns
@@ -1493,15 +1576,16 @@ export function SettingsDialog() {
     }
   }, [])
   useEffect(() => {
-    if (updateSurfaceOpen) {
+    if (settingsOpen) {
       closeRestartConfirmation()
       closeUpdateNowConfirmation()
       setRestartNotice(null)
     }
-  }, [updateSurfaceOpen])
+  }, [settingsOpen])
   useEffect(() => {
     restartInspectionRef.current += 1
     updateNowInspectionRef.current += 1
+    clearForceUpdateRecoveryNotice()
     setRestartConfirmationOpen(false)
     setRestartConfirmationMode('safe')
     setRestartTarget(null)
@@ -1524,10 +1608,18 @@ export function SettingsDialog() {
     }
   }, [restartConfirmationMode, restartConfirmationOpen, restartInspectionBusy, restartingServer])
   useEffect(() => {
-    if (!updateSurfaceOpen) return
+    if (!updateSurfaceOpen) {
+      serverUpdateSurfaceRef.current = null
+      return
+    }
+    const surface = JSON.stringify([activeProfileId, activeProfileServerUrl, updateBindingIdentity, profileGeneration])
+    const refreshOnly = serverUpdateSurfaceRef.current === surface
+    serverUpdateSurfaceRef.current = surface
     const requestId = ++serverUpdateRequestRef.current
     const deferredGeneration = deferredServerUpdateGenerationRef.current
-    setServerUpdate(null)
+    // Keep failure evidence visible until an authoritative status replaces it.
+    // A new worker or coordinated retry must not silently run a mutating check.
+    if (!refreshOnly) setServerUpdate(null)
     setServerUpdateWarning(null)
     setServerUpdateTrack(String(health?.server_version || '').split('+', 1)[0].includes('-') ? 'beta' : 'stable')
     const unresolved = submittedServerUpdatesRef.current[submittedUpdateKey]
@@ -1547,7 +1639,9 @@ export function SettingsDialog() {
       setServerUpdate(status)
       const track = serverTrackForStatus(status)
       setServerUpdateTrack(track)
-      if (serverUpdateIsActive(status) || deferredServerUpdate || submittedServerUpdatesRef.current[submittedUpdateKey]) return
+      // Legacy checks replace the durable failed row. Opening recovery must
+      // preserve that evidence; only the explicit Check server action may check.
+      if (!legacyServerReleaseChecksVisible.current || refreshOnly || status.phase === 'failed' || serverUpdateIsActive(status) || deferredServerUpdate || submittedServerUpdatesRef.current[submittedUpdateKey]) return
       try {
         const checked = await window.agentsDock.serverUpdates.check(track)
         if (
@@ -1573,8 +1667,10 @@ export function SettingsDialog() {
           || deferredServerUpdateAttemptRef.current
           || deferredServerUpdateGenerationRef.current !== deferredGeneration
         ) return
-        setServerUpdate(null)
-        setServerUpdateWarning('Could not load update status. Choose a channel or Check server to retry.')
+        if (!refreshOnly || !serverUpdate) {
+          setServerUpdate(null)
+          setServerUpdateWarning('Could not load update status. Choose a channel or Check server to retry.')
+        }
       })
       .finally(() => {
         if (serverRequestIsCurrent(requestId)) setServerUpdateBusy(false)
@@ -1582,7 +1678,8 @@ export function SettingsDialog() {
     return () => {
       if (serverUpdateRequestRef.current === requestId) serverUpdateRequestRef.current += 1
     }
-  }, [activeProfileId, activeProfileServerUrl, updateBindingIdentity, updateSurfaceOpen, health?.managed_updates, profileGeneration])
+  }, [activeProfileId, activeProfileServerUrl, updateBindingIdentity, updateSurfaceOpen, health?.managed_updates,
+    health?.server_instance_id, health?.server_version, coordinatedServerUpdateRevision, profileGeneration])
   useEffect(() => {
     setSubmittedUpdateChecking(false)
   }, [activeProfileId, activeProfileServerUrl, updateBindingIdentity, profileGeneration, updateSurfaceOpen])
@@ -1821,7 +1918,7 @@ export function SettingsDialog() {
     deferredServerUpdate?.waitForQueuedTurns,
     deferredServerUpdateRetry,
     health?.server_identity,
-    health?.capabilities?.server_updates,
+    serverUpdateCapabilityVersion(health?.capabilities?.server_updates),
     profileGeneration,
     restartingServer,
     deferredQueuedServerUpdateBlockers,
@@ -1858,6 +1955,7 @@ export function SettingsDialog() {
         if (cancelled || !serverPollIsCurrent(requestId)) return
         setServerUpdate(next)
         setServerUpdateTrack(serverTrackForStatus(next))
+        if (next.phase !== 'pending') clearForceUpdateRecoveryNotice()
         if (serverUpdateIsActive(next)) timer = window.setTimeout(() => void poll(), 1_500)
       } catch {
         if (cancelled || !serverPollIsCurrent(requestId)) return
@@ -1871,7 +1969,8 @@ export function SettingsDialog() {
       if (timer !== undefined) window.clearTimeout(timer)
       if (serverUpdatePollRef.current === requestId) serverUpdatePollRef.current += 1
     }
-  }, [activeProfileId, activeProfileServerUrl, updateBindingIdentity, connected, updateSurfaceOpen, profileGeneration, restartAfterUpdateTarget, serverUpdate?.phase, submittedServerUpdate?.attemptId, serverUpdateBusy, activeDeferredServerUpdateAttempt])
+  }, [activeProfileId, activeProfileServerUrl, updateBindingIdentity, connected, updateSurfaceOpen, profileGeneration, restartAfterUpdateTarget, serverUpdate?.phase, submittedServerUpdate?.attemptId, serverUpdateBusy, activeDeferredServerUpdateAttempt,
+    health?.server_instance_id, health?.server_version, coordinatedServerUpdateRevision])
   const openServerSetup = (intent: ServerSetupIntent = 'setup') => {
     const store = useAppStore.getState()
     store.setModal('settings', false)
@@ -1888,6 +1987,7 @@ export function SettingsDialog() {
     return true
   }
   const applyCheckedServerUpdate = (next: ServerUpdateStatus, track: ServerUpdateTrack) => {
+    clearForceUpdateRecoveryNotice()
     setServerUpdateWarning(null)
     setServerUpdate(next)
     const legacyStableCurrent = (
@@ -1943,10 +2043,7 @@ export function SettingsDialog() {
       return
     }
     const currentHealth = useAppStore.getState().health
-    if (
-      serverUpdateCapabilityVersion(currentHealth?.capabilities?.server_updates) < SCOPED_SERVER_UPDATE_CAPABILITY_VERSION
-      && !supportsLegacyLoopbackServerUpdate(currentHealth, activeProfileServerUrl)
-    ) {
+    if (!serverSupportsManagedUpdate(currentHealth)) {
       setServerUpdateBusy(false)
       openServerSetupWhenSafe(serverUpdateTrack === 'beta' ? 'update-beta' : 'setup')
       return
@@ -2061,8 +2158,7 @@ export function SettingsDialog() {
   const activeServerInstanceId = health?.server_instance_id?.trim() || null
   const serverControlBusy = restartingServer || restartInspectionBusy || updateNowInspectionBusy || Boolean(switchingProfileId)
   const serverUpdateControlsBusy = serverControlBusy || restartConfirmationOpen || updateNowConfirmationOpen
-  const guidedServerUpdateRequired = serverUpdateCapabilityVersion(health?.capabilities?.server_updates) < SCOPED_SERVER_UPDATE_CAPABILITY_VERSION
-    && !supportsLegacyLoopbackServerUpdate(health, activeProfileServerUrl)
+  const guidedServerUpdateRequired = !serverSupportsManagedUpdate(health)
   const restartDisabledReason = !restartCapability?.available
     ? restartCapability?.message || 'Managed restart is unavailable on this server.'
     : !connected
@@ -2351,6 +2447,7 @@ export function SettingsDialog() {
     const target = updateNowTarget
     const reservation = updateNowReservation
     const snapshot = updateNowBlockerSnapshot
+    const inspectionId = updateNowInspectionRef.current
     if (
       !target
       || !reservation
@@ -2373,20 +2470,17 @@ export function SettingsDialog() {
       }
 
       const reconciled = await window.agentsDock.serverUpdates.status()
-      setServerUpdate(reconciled)
-      setServerUpdateTrack(serverTrackForStatus(reconciled))
       if (!restartTargetIsCurrent(target)) {
         throw new Error('The active AgentsServer changed while the queued update was being verified.')
       }
+      setServerUpdate(reconciled)
+      setServerUpdateTrack(serverTrackForStatus(reconciled))
       if (
         serverUpdateHasStarted(reconciled)
-        && reconciled.target_version?.trim() === reservation.targetVersion
+        && matchesPendingUpdateReservation(reconciled, reservation)
       ) {
         closeUpdateNowConfirmation()
-        setRestartNotice({
-          kind: 'success',
-          message: `${reservation.targetVersion} started before the restart was sent. AgentsDock is following its install and reconnect progress.`
-        })
+        setRestartNotice(null)
         return
       }
       const reconciledScheduleId = reconciled.phase === 'pending'
@@ -2438,7 +2532,51 @@ export function SettingsDialog() {
       })
     } catch (error) {
       const detail = message(error)
-      if (restartAttempted || !restartTargetIsCurrent(target)) {
+      if (!restartTargetIsCurrent(target) || updateNowInspectionRef.current !== inspectionId) return
+      if (restartAttempted && forceUpdateReservationChanged(error)) {
+        // The idle waiter can advance the SAME reservation between the read
+        // above and restart admission. A refusal proves no restart occurred;
+        // it does not prove that installing the approved update failed.
+        // Do not leave a sticky transient notice: the server may legitimately
+        // reboot during this read and invalidate the old response entirely.
+        setRestartNotice(null)
+        // The store also reports restart errors globally. This refusal is
+        // handled here; do not leave its obsolete message outside the dialog.
+        const state = useAppStore.getState()
+        if (state.error && message(state.error) === detail) state.setError(null)
+        try {
+          const latest = await window.agentsDock.serverUpdates.status()
+          if (!restartTargetIsCurrent(target) || updateNowInspectionRef.current !== inspectionId) return
+          if (!latest
+            || (latest.server_identity && latest.server_identity !== target.serverIdentity)
+            || (latest.server_instance_id && latest.server_instance_id !== target.serverInstanceId)) {
+            throw new Error('Mismatched update status')
+          }
+          setServerUpdate(latest)
+          setServerUpdateTrack(serverTrackForStatus(latest))
+          setServerUpdateWarning(null)
+          closeUpdateNowConfirmation()
+          const exactReservation = matchesPendingUpdateReservation(latest, reservation)
+          const installed = (latest.phase === 'complete' || latest.phase === 'current')
+            && latest.current_version === reservation.targetVersion
+          if (exactReservation && (serverUpdateHasStarted(latest) || installed)) {
+            // Let the live update status remain visible; a sticky restart
+            // notice would mask subsequent progress, completion or failure.
+            setRestartNotice(null)
+          } else if (latest.phase === 'failed' || latest.error_code) {
+            setRestartNotice({ kind: 'error', source: 'force-update-recovery', message: [latest.message || t('serverUpdate.failed'), latest.error_action].filter(Boolean).join(' ') })
+          } else {
+            setRestartNotice({ kind: 'error', source: 'force-update-recovery', message: t('serverUpdate.forceChangedReview') })
+          }
+        } catch {
+          if (!restartTargetIsCurrent(target) || updateNowInspectionRef.current !== inspectionId) return
+          closeUpdateNowConfirmation()
+          // Do not keep a stale pending state/spinner disabling Check server
+          // after the server explicitly rejected that reservation.
+          setServerUpdate(null)
+          setRestartNotice({ kind: 'error', source: 'force-update-recovery', message: t('serverUpdate.forceStateUnknown') })
+        }
+      } else if (restartAttempted) {
         closeUpdateNowConfirmation()
         setRestartNotice({
           kind: 'error',
@@ -2629,8 +2767,8 @@ export function SettingsDialog() {
   // cancelling an idle update. Never pretend legacy safe-only APIs can force.
   const restartServerButton = (force = false) => restartAdvertised && <button type="button" className="quiet-button server-restart-button" disabled={Boolean(restartDisabledReason)} title={restartDisabledReason || (force ? `Force restart ${activeProfile?.name || 'the active server'}. Active work will be interrupted.` : t("ui.Dialogs.SettingsDialog.safely_restart_2340480", { "server": String(activeProfile?.name || 'the active server') }))} onClick={() => openRestartConfirmation(force ? 'force' : 'safe')}>{serverControlBusy ? <LoaderCircle className="spin" size={13} /> : <RotateCcw size={13} />} {restartingServer ? t("ui.Dialogs.SettingsDialog.restarting_75d0f14") : force ? 'Force restart server' : t("ui.Dialogs.SettingsDialog.restart_server_51cd293")}</button>
   const serverUpdatesContent = <div className="app-settings-server-updates">
-    {(showServerUpdateControls || restartAdvertised) && <div className="app-settings-row app-settings-update-row server-update-panel">
-      <div className="app-settings-row-copy"><strong>AgentsServer <small>{serverUpdate?.current_version || String(health?.server_version || t("ui.Dialogs.SettingsDialog.version_unknown_ff5a99f"))}</small></strong><span className={restartNotice
+    {activeProfile && <div className="app-settings-row app-settings-update-row server-update-panel">
+      <div className="app-settings-row-copy"><strong>AgentsServer <small>{serverUpdate?.current_version || String(health?.server_version || activeProfile.serverVersion || t("ui.Dialogs.SettingsDialog.version_unknown_ff5a99f"))}</small></strong><span className={restartNotice
         ? `server-restart-notice ${restartNotice.kind}`
         : submittedServerUpdate || serverUpdateWarning || serverUpdateStatusWarning
           ? 'server-update-warning'
@@ -2647,8 +2785,8 @@ export function SettingsDialog() {
       <div className="app-settings-actions">
         {showServerUpdateControls && <>
         <div className="segmented update-track-picker" role="group" aria-label={t("ui.Dialogs.SettingsDialog.server_update_channel_e0e5ffe")}>
-          <button type="button" className={serverUpdateTrack === 'stable' ? 'active' : ''} disabled={serverUpdateControlsBusy || serverUpdateBusy || serverUpdateIsActive(serverUpdate) || Boolean(deferredServerUpdate) || Boolean(submittedServerUpdate)} onClick={() => void chooseServerUpdateTrack('stable')}>{t("ui.Dialogs.SettingsDialog.stable_90ee305")}</button>
-          <button type="button" className={serverUpdateTrack === 'beta' ? 'active' : ''} disabled={serverUpdateControlsBusy || serverUpdateBusy || serverUpdateIsActive(serverUpdate) || Boolean(deferredServerUpdate) || Boolean(submittedServerUpdate)} onClick={() => void chooseServerUpdateTrack('beta')}>{t("ui.Dialogs.SettingsDialog.beta_7033903")}</button>
+          <button type="button" className={serverUpdateTrack === 'stable' ? 'active' : ''} aria-pressed={serverUpdateTrack === 'stable'} disabled={serverUpdateControlsBusy || serverUpdateBusy || serverUpdateIsActive(serverUpdate) || Boolean(deferredServerUpdate) || Boolean(submittedServerUpdate)} onClick={() => void chooseServerUpdateTrack('stable')}>{t("ui.Dialogs.SettingsDialog.stable_90ee305")}</button>
+          <button type="button" className={serverUpdateTrack === 'beta' ? 'active' : ''} aria-pressed={serverUpdateTrack === 'beta'} disabled={serverUpdateControlsBusy || serverUpdateBusy || serverUpdateIsActive(serverUpdate) || Boolean(deferredServerUpdate) || Boolean(submittedServerUpdate)} onClick={() => void chooseServerUpdateTrack('beta')}>{t("ui.Dialogs.SettingsDialog.beta_7033903")}</button>
         </div>
         {submittedServerUpdate
           ? <button type="button" className="quiet-button" disabled={serverUpdateControlsBusy || serverUpdateBusy || submittedUpdateChecking || !connected} onClick={() => void checkSubmittedUpdateStatus(submittedServerUpdate, () => submittedUpdateIsCurrent(submittedServerUpdate) && Boolean(useAppStore.getState().modals.settings || useAppStore.getState().modals.appSettings))}>{submittedUpdateChecking ? <LoaderCircle className="spin" size={13} /> : <RefreshCw size={13} />} Check status</button>
@@ -2671,14 +2809,7 @@ export function SettingsDialog() {
           : null}
       </div>
     </div>}
-    <div className="app-settings-server-actions">
-      {restartNotice && !showServerUpdateControls && !restartAdvertised && <div className={`app-settings-server-notice ${restartNotice.kind}`} role={restartNotice.kind === 'error' ? 'alert' : 'status'} aria-live="polite">{restartNotice.message}</div>}
-      <button type="button" className="server-setup-guide compact" disabled={serverUpdateControlsBusy || Boolean(submittedServerUpdate)} onClick={() => openServerSetup()}>
-        <span className="server-setup-icon"><Server size={18} /></span>
-        <span><strong>{t("ui.Dialogs.SettingsDialog.install_or_update_agentsserver_d76fdc0")}</strong></span>
-        <ArrowRight size={15} />
-      </button>
-    </div>
+    {restartNotice && !showServerUpdateControls && !restartAdvertised && <div className={`app-settings-server-notice ${restartNotice.kind}`} role={restartNotice.kind === 'error' ? 'alert' : 'status'} aria-live="polite">{restartNotice.message}</div>}
   </div>
   const closeSettings = () => {
     const store = useAppStore.getState()
@@ -2689,6 +2820,7 @@ export function SettingsDialog() {
     <ServerManagement addRequest={addServerRequest} manageRequest={manageServersRequest} />
     <div className={`server-health ${connected ? degraded ? 'degraded' : 'online' : 'offline'}`}><span /><div className="server-health-copy"><strong>{connected ? degraded ? t("ui.Dialogs.SettingsDialog.connected_limited_a6733ca") : t("ui.Dialogs.SettingsDialog.connected_2296556") : t("ui.Dialogs.SettingsDialog.offline_a179478")}</strong><small>{health?.server_identity || t("ui.Dialogs.SettingsDialog.connection_settings_are_stored_on_this_mac_7348bfb")}</small>{restartNotice && <small className={`server-restart-notice ${restartNotice.kind}`} role={restartNotice.kind === 'error' ? 'alert' : 'status'} aria-live="polite">{restartNotice.message}</small>}</div>{restartServerButton()}</div>
     <RuntimeHealthPanel />
+    <CodexAuthSettings connected={connected} profileId={activeProfileId} profileGeneration={profileGeneration} serverTitle={activeProfile?.name} />
     <CodexServerSettings
       connected={connected}
       profileId={activeProfileId}
@@ -2698,7 +2830,7 @@ export function SettingsDialog() {
     <footer><button type="button" className="primary-button" onClick={closeSettings}>{t("ui.Dialogs.SettingsDialog.done_11a6767")}</button></footer>
   </div>
   return <>
-  <AppSettingsDialog serverSettings={serverSettingsContent} serverUpdates={serverUpdatesContent} />
+  <AppSettingsDialog serverSettings={serverSettingsContent} serverUpdates={serverUpdatesContent} onServerUpdatesVisible={setLegacyServerUpdatesVisible} onServerReleaseChecksVisible={setLegacyServerReleaseChecksVisible} onCoordinatedServerUpdate={setCoordinatedServerUpdate} />
   <Shell
     open={updateNowConfirmationOpen}
     onOpenChange={value => { if (!value && !restartingServer) closeUpdateNowConfirmation() }}
@@ -2786,13 +2918,15 @@ export function SessionDialog({ mode }: { mode: 'newChat' | 'resume' }) {
   const [folder, setFolder] = useState('General')
   const [cwd, setCwd] = useState('')
   const [providerId, setProviderId] = useState('')
-  const [backend, setBackend] = useState<Backend>('codex')
+  const [backendChoice, setBackendChoice] = useState<ChatBackendChoice>('codex')
+  const { backend, codex_provider } = chatBackendSelection(backendChoice)
   const [model, setModel] = useState('')
+  const [manualModel, setManualModel] = useState(false)
   const [effort, setEffort] = useState('')
   const [systemPrompt, setSystemPrompt] = useState('')
   const [saving, setSaving] = useState(false)
   const folders = useMemo(() => [...new Set(sessions.map(session => session.folder || 'General'))].sort(), [sessions])
-  const backendOptions = useMemo(() => selectableChatBackends(health, catalog), [catalog, health])
+  const backendOptions = useMemo(() => selectableChatBackendChoices(health, catalog), [catalog, health])
   useEffect(() => {
     if (!open) return
     setTitle(mode === 'newChat' ? 'New chat' : 'Resumed chat')
@@ -2800,23 +2934,24 @@ export function SessionDialog({ mode }: { mode: 'newChat' | 'resume' }) {
     setModel('')
     setEffort('')
     setSystemPrompt('')
+    setManualModel(false)
     setCwd(defaultCwd)
   }, [defaultCwd, mode, open])
   useEffect(() => {
-    if (!open || backendOptions.includes(backend)) return
-    setBackend('codex')
+    if (!open || backendOptions.includes(backendChoice)) return
+    setBackendChoice('codex')
     setModel('')
     setEffort('')
-  }, [backend, backendOptions, open])
+  }, [backendChoice, backendOptions, open])
   const submit = async (event: FormEvent) => {
     event.preventDefault(); setSaving(true)
     try {
       const state = useAppStore.getState()
       const preferenceScope = captureWorkspaceScope(state)
       if (!selectableChatBackends(state.health, state.runtimeCatalog).includes(backend)) throw new Error(`${backendLabel(backend)} is unavailable on this AgentsServer.`)
-      const runtimeError = runtimeSelectionError(state.health, state.runtimeCatalog, backend, model)
+      const runtimeError = runtimeSelectionError(state.health, state.runtimeCatalog, backend, model, codex_provider)
       if (runtimeError) throw new Error(runtimeError)
-      const input = { title: title.trim() || 'New chat', folder: folder.trim() || 'General', cwd: cwd.trim(), backend, model: model || null, effort: effort || null, system_prompt: systemPrompt.trim() || null, cursor_permission_mode: backend === 'cursor' ? 'default' as const : null }
+      const input = { title: title.trim() || 'New chat', folder: folder.trim() || 'General', cwd: cwd.trim(), backend, codex_provider, model: model || null, effort: effort || null, system_prompt: systemPrompt.trim() || null, cursor_permission_mode: backend === 'cursor' ? 'default' as const : null }
       const session = mode === 'resume' ? await window.agentsDock.sessions.resume({ ...input, providerId: providerId.trim() }) : await window.agentsDock.sessions.create(input)
       if (mode === 'newChat') {
         trackEvent('chat_created')
@@ -2827,14 +2962,14 @@ export function SessionDialog({ mode }: { mode: 'newChat' | 'resume' }) {
       await useAppStore.getState().refreshSessions(); useAppStore.getState().setModal(mode, false); await useAppStore.getState().selectSession(session.id)
     } catch (error) { useAppStore.getState().setError(message(error)) } finally { setSaving(false) }
   }
-  const modelOptions = runtimeCatalogOptions(catalog, backend, 'models', model)
-  const effortOptions = runtimeEffortOptions(catalog, backend, model, effort)
+  const modelOptions = runtimeCatalogOptions(catalog, backend, 'models', model, codex_provider)
+  const effortOptions = runtimeEffortOptions(catalog, backend, model, effort, codex_provider)
   const hasReasoning = backend !== 'cursor' && effortOptions.some(option => Boolean(option.value))
   const selectModel = (value: string) => {
     setModel(value)
-    setEffort(runtimeEffortAfterModelChange(catalog, backend, value || null, effort) || '')
+    setEffort(runtimeEffortAfterModelChange(catalog, backend, value || null, effort, codex_provider) || '')
   }
-  const runtimeError = runtimeSelectionError(health, catalog, backend, model)
+  const runtimeError = runtimeSelectionError(health, catalog, backend, model, codex_provider)
   const cursorAvailable = cursorBackendAvailable(health, catalog)
   const cursorUnavailableReason = cursorBackendUnavailableReason(health, catalog)
   const resumeDescription = backend === 'cursor'
@@ -2851,12 +2986,30 @@ export function SessionDialog({ mode }: { mode: 'newChat' | 'resume' }) {
       <label className="span-two"><span>{t("ui.Dialogs.SessionDialog.chat_name_09c3e4c")}</span><input value={title} onChange={event => setTitle(event.target.value)} autoFocus /></label>
       <label><span>{t("ui.Dialogs.SessionDialog.folder_74ccd43")}</span><input value={folder} onChange={event => setFolder(event.target.value)} list="folder-list" /><datalist id="folder-list">{folders.map(item => <option key={item}>{item}</option>)}</datalist></label>
       <WorkingDirectoryInput value={cwd} onChange={setCwd} defaultCwd={defaultCwd} available={directoryCompletionAvailable} showBrowseButton />
-      <fieldset className="span-two"><legend>{t("ui.Dialogs.SessionDialog.backend_2fb4019")}</legend><div className="segmented">{backendOptions.map(value => {
+      <fieldset className="span-two"><legend>{t("ui.Dialogs.SessionDialog.backend_2fb4019")}</legend><div className="segmented session-backend-choices">{backendOptions.map(value => {
+        const selection = chatBackendSelection(value)
+        const needsConfiguration = value === 'codex-custom' && !codexCustomProviderAvailable(health, catalog)
         const unavailable = value === 'cursor' && !cursorAvailable
-        return <button type="button" className={backend === value ? 'active' : ''} key={value} aria-pressed={backend === value} title={unavailable ? cursorUnavailableReason ?? undefined : undefined} onClick={() => { setBackend(value); setModel(''); setEffort('') }}><BackendMark backend={value} size={16} />{backendLabel(value)}{unavailable ? t("ui.Dialogs.unavailable_77649d6") : ''}</button>
+        return <button type="button" className={backendChoice === value ? 'active' : ''} key={value} aria-pressed={backendChoice === value} title={needsConfiguration ? t('codexProvider.configure') : unavailable ? cursorUnavailableReason ?? undefined : undefined} onClick={() => {
+          if (needsConfiguration) {
+            useAppStore.getState().setModal(mode, false)
+            window.dispatchEvent(new CustomEvent('agentsdock:app-settings-section', { detail: 'server' }))
+            useAppStore.getState().setModal('appSettings', true)
+            return
+          }
+          setBackendChoice(value); setModel(''); setEffort(''); setManualModel(false)
+        }}><BackendMark backend={selection.backend} size={16} />{backendLabel(selection.backend, selection.codex_provider)}{needsConfiguration ? ` · ${t('codexProvider.configure')}` : unavailable ? t("ui.Dialogs.unavailable_77649d6") : ''}</button>
       })}</div></fieldset>
-      <label className={hasReasoning ? undefined : 'span-two'}><span>{t("ui.Dialogs.SessionDialog.model_5e2c614")}</span><select value={model} onChange={event => selectModel(event.target.value)}>{modelOptions.map(option => <option value={option.value} key={option.value || 'default'} disabled={option.locked} title={option.locked ? option.locked_reason ?? undefined : undefined}>{option.label}{option.locked ? t("ui.Dialogs.upgrade_required_d38f0e0") : ''}</option>)}</select></label>
+      <label className={hasReasoning ? undefined : 'span-two'}><span>{t("ui.Dialogs.SessionDialog.model_5e2c614")}</span><select value={manualModel ? '__manual__' : model} onChange={event => {
+        const value = event.target.value
+        setManualModel(value === '__manual__')
+        if (value !== '__manual__') selectModel(value)
+      }}>{modelOptions.map(option => <option value={option.value} key={option.value || 'default'} disabled={option.locked} title={option.locked ? option.locked_reason ?? undefined : undefined}>{option.label}{option.locked && codex_provider !== 'custom' ? t("ui.Dialogs.upgrade_required_d38f0e0") : ''}</option>)}{codex_provider === 'custom' && <option value="__manual__">{t('codexProvider.manualModel')}</option>}</select></label>
       {hasReasoning && <label><span>Reasoning</span><select value={effort} onChange={event => setEffort(event.target.value)}>{effortOptions.map(option => <option value={option.value} key={option.value || 'default'}>{option.label}</option>)}</select></label>}
+      {codex_provider === 'custom' && <div className="span-two">
+        {manualModel && <label><span>{t('codexAuth.model')}</span><input aria-label={t('codexAuth.model')} value={model} maxLength={256} autoComplete="off" spellCheck={false} onChange={event => selectModel(event.target.value)} /><small>{t('codexProvider.manualModelHelp')}</small></label>}
+        <CodexModelDiscovery />
+      </div>}
       {runtimeError && <small className="span-two schedule-validation error" role="alert">{runtimeError}</small>}
       <label className="span-two"><span>{t("ui.Dialogs.SessionDialog.system_prompt_561257c")}</span><textarea rows={4} value={systemPrompt} onChange={event => setSystemPrompt(event.target.value)} placeholder={t("ui.Dialogs.SessionDialog.optional_per_chat_instructions_454671b")} /></label>
       <footer className="span-two"><button type="button" className="quiet-button" onClick={() => useAppStore.getState().setModal(mode, false)}>{t("ui.Dialogs.SessionDialog.cancel_19766ed")}</button><button className="primary-button" disabled={saving || Boolean(runtimeError) || mode === 'resume' && !providerId.trim()}>{saving && <LoaderCircle className="spin" size={14} />}{mode === 'newChat' ? t("ui.Dialogs.SessionDialog.create_chat_35e51d6") : t("ui.Dialogs.SessionDialog.resume_chat_790e1b9")}</button></footer>
@@ -4158,7 +4311,8 @@ export function JobDialog() {
     health,
     catalog,
     selectedBackend,
-    selectedBackend === session?.backend ? session?.model : null
+    selectedBackend === session?.backend ? session?.model : null,
+    selectedBackend === session?.backend ? session?.codex_provider : undefined, session?.codex_provider_catalog
   )
   const submit = async (event: FormEvent) => {
     event.preventDefault(); if (!session || scheduleError || nextRunError) return; setSaving(true)
@@ -4180,7 +4334,8 @@ export function JobDialog() {
       currentState.health,
       currentState.runtimeCatalog,
       selectedBackend,
-      selectedBackend === currentSession.backend ? currentSession.model : null
+      selectedBackend === currentSession.backend ? currentSession.model : null,
+      selectedBackend === currentSession.backend ? currentSession.codex_provider : undefined, currentSession.codex_provider_catalog
     )
     if (enabled && currentRuntimeError) {
       currentState.setError(currentRuntimeError)
@@ -4308,13 +4463,13 @@ export function JobDialog() {
       <label><span>{t("ui.Dialogs.JobDialog.title_7e8cd20")}</span><input value={title} onChange={event => setTitle(event.target.value)} required /></label>
       <fieldset><legend>{t("ui.Dialogs.JobDialog.backend_2fb4019")}</legend><div className="segmented">{selectableBackends.map(value => {
         const unavailable = value === 'cursor' && !cursorBackendAvailable(health, catalog)
-        return <button type="button" key={value} className={backend === value ? 'active' : ''} aria-pressed={backend === value} aria-describedby={unavailable ? 'job-cursor-runtime-help' : undefined} disabled={unavailable} title={unavailable ? cursorUnavailableReason ?? undefined : undefined} onClick={() => setBackend(value)}><BackendMark backend={value} size={14} />{backendLabel(value)}{unavailable ? t("ui.Dialogs.unavailable_77649d6") : ''}</button>
+        return <button type="button" key={value} className={backend === value ? 'active' : ''} aria-pressed={backend === value} aria-describedby={unavailable ? 'job-cursor-runtime-help' : undefined} disabled={unavailable} title={unavailable ? cursorUnavailableReason ?? undefined : undefined} onClick={() => setBackend(value)}><BackendMark backend={value} size={14} />{backendLabel(value, value === session?.backend ? session.codex_provider : undefined)}{unavailable ? t("ui.Dialogs.unavailable_77649d6") : ''}</button>
       })}</div>{selectableBackends.includes('cursor') && !cursorBackendAvailable(health, catalog) && cursorUnavailableReason
         ? <small id="job-cursor-runtime-help" className="runtime-option-help">{cursorUnavailableReason}</small>
         : null}</fieldset>
       <fieldset className="job-context-fieldset"><legend>{t("ui.Dialogs.JobDialog.run_context_20887b3")}</legend><div className={`job-context-picker${supportsIndependentRuns ? '' : ' single'}`} role="group" aria-label={t("ui.Dialogs.JobDialog.run_context_20887b3")}>
         <button type="button" className={contextMode === 'chat' ? 'active' : ''} aria-pressed={contextMode === 'chat'} onClick={() => selectContextMode('chat')}><strong>{t("ui.Dialogs.JobDialog.continue_in_this_chat_eed3ae3")}</strong><small>{t("ui.Dialogs.JobDialog.use_this_chat_s_existing_context_and_add_e_d7db2e4")}</small></button>
-        {supportsIndependentRuns && <button type="button" className={contextMode === 'standalone' ? 'active' : ''} aria-pressed={contextMode === 'standalone'} onClick={() => selectContextMode('standalone')}><strong>{t("ui.Dialogs.JobDialog.independent_runs_3d32d40")}</strong><small>{t('ui.job.independentHelp', { backend: backendLabel(backend) })}</small></button>}
+        {supportsIndependentRuns && <button type="button" className={contextMode === 'standalone' ? 'active' : ''} aria-pressed={contextMode === 'standalone'} onClick={() => selectContextMode('standalone')}><strong>{t("ui.Dialogs.JobDialog.independent_runs_3d32d40")}</strong><small>{t('ui.job.independentHelp', { backend: backendLabel(backend, backend === session?.backend ? session.codex_provider : undefined) })}</small></button>}
       </div>{!supportsIndependentRuns && <small className="job-context-unavailable">{t("ui.Dialogs.JobDialog.update_agentsserver_to_add_independent_run_6138641")}</small>}</fieldset>
       {runtimeError && <small className="schedule-validation error" role="alert">{runtimeError}{enabled ? t("ui.Dialogs.JobDialog.pause_this_job_or_choose_an_available_runt_1d574aa") : ''}</small>}
       <fieldset className="schedule-builder"><legend>{t("ui.Dialogs.JobDialog.schedule_f4830a1")}</legend><div className="segmented schedule-kind">{(['interval', 'cron', 'rrule'] as JobScheduleKind[]).map(kind => <button type="button" key={kind} className={scheduleKind === kind ? 'active' : ''} aria-pressed={scheduleKind === kind} onClick={() => setScheduleKind(kind)}>{kind === 'rrule' ? 'RRULE' : kind[0].toUpperCase() + kind.slice(1)}</button>)}</div>

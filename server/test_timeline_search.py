@@ -82,7 +82,7 @@ class TimelineSearchForkTests(unittest.TestCase):
             (self.session_id, 1, 1, 1),
         )
         connection.execute(
-            "UPDATE history_search_meta SET value = '1' WHERE key = 'index_version'"
+            "UPDATE history_search_meta SET value = '4' WHERE key = 'index_version'"
         )
         connection.commit()
         connection.close()
@@ -100,14 +100,142 @@ class TimelineSearchForkTests(unittest.TestCase):
         finally:
             migrated.close()
 
+    def test_search_sanitizes_only_structural_provider_import_records(self) -> None:
+        authority = agent_server.cross_chat_provider_authority_block(
+            [],
+            agent_server.cross_chat_authority_path(
+                "run_search_sanitizer",
+                "0123456789abcdef0123456789abcdef",
+            ),
+            self.session_id,
+            {"publish"},
+            "blocked",
+            compact=True,
+        )
+        generated_notice = (
+            "<task-notification>\n"
+            "<task-id>task_generated</task-id>\n"
+            "<tool-use-id>toolu_task_generated</tool-use-id>\n"
+            "<status>completed</status>\n"
+            "<summary>secretgeneratedneedle</summary>\n"
+            "</task-notification>"
+        )
+        human_notice = generated_notice.replace(
+            "secretgeneratedneedle",
+            "legitimatepastedneedle",
+        )
+        native_notice = generated_notice.replace(
+            "secretgeneratedneedle",
+            "nativepastedneedle",
+        )
+        events = [
+            self.event(
+                1,
+                "turn_started",
+                run_id="import_search_clean",
+                backend=agent_server.BACKEND_CLAUDE,
+                imported=True,
+                prompt="visiblecleanneedle" + authority,
+            ),
+            self.event(
+                2,
+                "turn_started",
+                run_id="import_search_notice",
+                backend=agent_server.BACKEND_CLAUDE,
+                imported=True,
+                prompt=generated_notice,
+            ),
+            self.event(
+                3,
+                "turn_started",
+                run_id="import_human_paste",
+                backend=agent_server.BACKEND_CLAUDE,
+                imported=True,
+                provider_history_sanitized=True,
+                prompt=human_notice,
+            ),
+            self.event(
+                4,
+                "turn_started",
+                run_id="import_authority_only",
+                backend=agent_server.BACKEND_CLAUDE,
+                imported=True,
+                prompt=authority.strip(),
+            ),
+            self.event(
+                5,
+                "turn_started",
+                run_id="import_native_lookalike",
+                backend=agent_server.BACKEND_CLAUDE,
+                prompt=native_notice,
+            ),
+        ]
+        agent_server.events_path(self.session_id).write_text(
+            "".join(
+                json.dumps(event, separators=(",", ":")) + "\n"
+                for event in events
+            ),
+            encoding="utf-8",
+        )
+
+        connection = agent_server.history_search_connection()
+        try:
+            indexed_sessions, indexed_events = (
+                agent_server.sync_history_search_index(
+                    connection,
+                    {self.session_id},
+                    {self.session_id},
+                )
+            )
+        finally:
+            connection.close()
+
+        self.assertEqual((indexed_sessions, indexed_events), (1, 3))
+        cleaned = agent_server.search_timeline_index(
+            self.session_id,
+            "visiblecleanneedle",
+        )
+        self.assertEqual(len(cleaned["results"]), 1)
+        self.assertEqual(cleaned["results"][0]["snippet"], "visiblecleanneedle")
+        self.assertEqual(
+            agent_server.search_timeline_index(
+                self.session_id,
+                "secretgeneratedneedle",
+            )["results"],
+            [],
+        )
+        preserved = agent_server.search_timeline_index(
+            self.session_id,
+            "legitimatepastedneedle",
+        )
+        self.assertEqual([result["seq"] for result in preserved["results"]], [3])
+        native = agent_server.search_timeline_index(
+            self.session_id,
+            "nativepastedneedle",
+        )
+        self.assertEqual([result["seq"] for result in native["results"]], [5])
+        self.assertEqual(
+            agent_server.search_timeline_index(
+                self.session_id,
+                "AgentsDock",
+            )["results"],
+            [],
+        )
+
     def test_version_migration_rebuild_excludes_imported_claude_task_notification(self) -> None:
         task_notification = (
             "<task-notification>\n"
             "<task-id>workflow-42</task-id>\n"
+            "<tool-use-id>toolu_workflow_42</tool-use-id>\n"
             "<status>stopped</status>\n"
             "<summary>internal control needle</summary>\n"
             "</task-notification>"
         )
+        # Migration must use the same complete provider fingerprint as every
+        # other history projection. An incomplete lookalike can be user text.
+        partial_notice = task_notification.replace(
+            "<tool-use-id>toolu_workflow_42</tool-use-id>\n", ""
+        ).replace("internal control needle", "partialpastedneedle")
         path = agent_server.events_path(self.session_id)
         with path.open("a", encoding="utf-8") as stream:
             stream.write(json.dumps(self.event(
@@ -124,6 +252,14 @@ class TimelineSearchForkTests(unittest.TestCase):
                 run_id="normal-run",
                 backend=agent_server.BACKEND_CLAUDE,
                 text="visible migration needle",
+            ), separators=(",", ":")) + "\n")
+            stream.write(json.dumps(self.event(
+                9,
+                "turn_started",
+                run_id="import_legacy_lookalike",
+                backend=agent_server.BACKEND_CLAUDE,
+                imported=True,
+                prompt=partial_notice,
             ), separators=(",", ":")) + "\n")
 
         connection = agent_server.history_search_connection()
@@ -175,6 +311,15 @@ class TimelineSearchForkTests(unittest.TestCase):
                 )["results"]
             ],
             [8],
+        )
+        self.assertEqual(
+            [
+                result["seq"]
+                for result in agent_server.search_timeline_index(
+                    self.session_id, "partialpastedneedle",
+                )["results"]
+            ],
+            [9],
         )
 
     def test_initializing_fork_is_not_eligible_for_history_indexing(self) -> None:

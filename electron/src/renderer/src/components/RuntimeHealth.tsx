@@ -2,7 +2,7 @@
 import { t, getLocale } from '@shared/i18n'
 import { useLocale } from '../lib/i18n'
 import { AlertTriangle, CheckCircle2, CircleHelp, RefreshCw, XCircle } from 'lucide-react'
-import type { Backend, Event, RuntimeCatalog, RuntimeDiagnostic } from '@shared/types'
+import type { Backend, CodexProvider, Event, RuntimeCatalog, RuntimeDiagnostic } from '@shared/types'
 import {
   cursorBackendAvailable,
   cursorBackendUnavailableReason,
@@ -16,10 +16,10 @@ import { memo, useState } from 'react'
 import { useAppStore } from '../store/app-store'
 import { eventErrorText, isTimelineError } from '../lib/timeline'
 
-export const RuntimeHealthNotice = memo(function RuntimeHealthNotice({ backend, sessionId }: { backend: Backend; sessionId: string }) {
+export const RuntimeHealthNotice = memo(function RuntimeHealthNotice({ backend, sessionId, codexProvider }: { backend: Backend; sessionId: string; codexProvider?: CodexProvider }) {
   useLocale()
   const { refreshing, recheck } = useRuntimeRecheck()
-  return <RuntimeStatus backend={backend} compact sessionId={sessionId} refreshing={refreshing} onRecheck={recheck} />
+  return <RuntimeStatus backend={backend} codexProvider={codexProvider} compact sessionId={sessionId} refreshing={refreshing} onRecheck={recheck} />
 })
 
 export function RuntimeHealthPanel() {
@@ -109,12 +109,14 @@ function TmuxStatus() {
 
 function RuntimeStatus({
   backend,
+  codexProvider,
   compact = false,
   sessionId,
   refreshing = false,
   onRecheck,
 }: {
   backend: Backend
+  codexProvider?: CodexProvider
   compact?: boolean
   sessionId?: string
   refreshing?: boolean
@@ -130,7 +132,8 @@ function RuntimeStatus({
   const chatError = useAppStore(state => (
     compact && sessionId ? latestChatRunError(state.snapshots[sessionId]?.events, backend) : ''
   ))
-  const diagnostic = runtimeDiagnosticFor(health, catalog, backend)
+  const customCatalog = useAppStore(state => state.sessions.find(session => session.id === sessionId)?.codex_provider_catalog)
+  const diagnostic = runtimeDiagnosticFor(health, catalog, backend, codexProvider, customCatalog)
   const cursorUnavailable = backend === 'cursor' && !cursorBackendAvailable(health, catalog)
   // Provider last_error is backend-wide, not session-scoped. Keep it in the
   // full Settings panel so a failure from one chat cannot leak into another
@@ -141,7 +144,7 @@ function RuntimeStatus({
   if (compact && !chatError && !providerNeedsAttention) return null
   const tone = chatError ? 'warning' : cursorUnavailable ? 'error' : runtimeDiagnosticTone(diagnostic)
   const Icon = tone === 'ready' ? CheckCircle2 : tone === 'error' ? XCircle : tone === 'warning' ? AlertTriangle : CircleHelp
-  const provider = backend === 'claude' ? 'Claude Code' : backend === 'cursor' ? 'Cursor' : 'Codex'
+  const provider = backend === 'claude' ? 'Claude Code' : backend === 'cursor' ? 'Cursor' : codexProvider === 'custom' ? t('codexProvider.label') : 'Codex'
   const cursorUnavailableDetail = cursorUnavailable
     ? cursorBackendUnavailableReason(health, catalog) || ''
     : ''

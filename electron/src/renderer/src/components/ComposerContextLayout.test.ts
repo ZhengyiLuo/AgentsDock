@@ -26,8 +26,8 @@ const styles = readFileSync(
   resolve(process.cwd(), 'src/renderer/src/styles.css'),
   'utf8'
 )
-const codexStyles = readFileSync(
-  resolve(process.cwd(), 'src/renderer/src/components/CodexControls.css'),
+const goalStyles = readFileSync(
+  resolve(process.cwd(), 'src/renderer/src/components/GoalDialog.css'),
   'utf8'
 )
 
@@ -51,31 +51,23 @@ describe('composer context layout', () => {
     expect(styles).toMatch(
       /\.composer-context-row \{[^}]*position: relative;[^}]*min-height: 26px;[^}]*margin: 0 auto 4px;[^}]*\}/s
     )
-    expect(codexStyles).toMatch(
-      /\.codex-goal-bar \{[^}]*margin: 0 auto 4px;[^}]*\}/s
+    expect(goalStyles).toMatch(
+      /\.goal-summary-bar \{[^}]*margin: 0 auto var\(--space-3\);[^}]*\}/s
     )
   })
 
-  it('uses the same rounded surface and typography for the folder and goal controls', () => {
+  it('uses one goal surface for both providers with theme tokens, readable labels and keyboard focus', () => {
+    const claude = readFileSync(resolve(process.cwd(), 'src/renderer/src/components/ClaudeGoalControls.tsx'), 'utf8')
     expect(workingDirectoryPopover).toContain('className="composer-context-control cwd-pill"')
-    expect(codexControls).toContain('className={`composer-context-control codex-goal-bar')
-    expect(styles).toMatch(
-      /\.composer-context-control \{[^}]*height: 26px;[^}]*background: var\(--surface-2\);[^}]*border: 1px solid var\(--border\);[^}]*border-radius: var\(--radius-control\);[^}]*font-family: inherit;[^}]*font-size: var\(--text-size-meta\);[^}]*font-weight: var\(--text-weight-body\);[^}]*\}/s
-    )
-    expect(codexStyles).toMatch(/\.codex-goal-bar-main > strong \{[^}]*font: inherit;/s)
-    expect(codexStyles).toMatch(/\.codex-goal-objective \{[^}]*font: inherit;/s)
-    expect(codexStyles).toMatch(/\.codex-goal-bar-main > time \{[^}]*font: inherit;/s)
-    expect(codexStyles).toMatch(
-      /\.codex-goal-bar\.expanded,\s*\.codex-goal-bar\.error \{ height: auto; border-radius: var\(--radius-dialog\); \}/
-    )
-    expect(codexStyles).toMatch(
-      /\.codex-goal-bar-main \{[^}]*height: 24px;[^}]*min-height: 24px;[^}]*gap: 5px;[^}]*padding: 0 4px 0 10px;[^}]*\}/s
-    )
-    expect(styles.match(/\.composer-context-row \{([^}]*)\}/)?.[1]).not.toContain('padding:')
-    expect(codexStyles).toMatch(/\.codex-goal-bar-main > button \{[^}]*width: 24px;[^}]*height: 24px;/s)
-    expect(codexStyles).toMatch(/\.codex-goal-bar-main > button:focus-visible \{[^}]*box-shadow: inset 0 0 0 2px/s)
-    expect(codexStyles).toMatch(
-      /@container chat-pane \(max-width: 340px\) \{[^}]*\.codex-goal-bar-main \{[^}]*gap: 3px;[^}]*\}/s
-    )
+    expect(codexControls).toContain('<GoalSummaryBar')
+    expect(claude).toContain('<GoalSummaryBar')
+    expect(codexControls).toContain('<GoalProgress')
+    expect(claude).toContain('<GoalProgress')
+    expect(goalStyles).toMatch(/\.goal-summary-bar \{[^}]*border: 1px solid var\(--border\);[^}]*border-radius: var\(--radius-control\);[^}]*background: var\(--surface\);/s)
+    expect(goalStyles).toMatch(/\.goal-summary-condition \{[^}]*font-size: var\(--text-size-label\);/s)
+    expect(goalStyles).toMatch(/\.goal-summary-meta \{[^}]*font-size: var\(--text-size-meta\);/s)
+    expect(goalStyles).toMatch(/\.goal-summary:focus-visible \{[^}]*outline: 2px solid var\(--accent\);/s)
+    expect(goalStyles).toMatch(/@container chat-pane \(max-width: 540px\) \{[^}]*\.goal-summary-bar \{ flex-wrap: wrap; \}/s)
+    expect(goalStyles).toMatch(/\.goal-summary-actions \{[^}]*flex-wrap: wrap;[^}]*max-width: 100%;/s)
   })
 })

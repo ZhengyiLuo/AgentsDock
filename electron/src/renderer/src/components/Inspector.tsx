@@ -1,7 +1,7 @@
 // Localized display strings use semantic catalog keys.
 import { t, getLocale } from '@shared/i18n'
 import { useLocale } from '../lib/i18n'
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import * as Dialog from '@radix-ui/react-dialog'
 import { Bot, ChevronDown, ChevronRight, Copy, Download, ExternalLink, File, FileCode2, FileStack, FolderOpen, LoaderCircle, Pin, Play, RefreshCw, Unplug, X } from 'lucide-react'
 import { effectiveFileContentType, isEditorTextFile, isPreviewableFile } from '@shared/file-content-type'
@@ -16,10 +16,11 @@ import { requestOpenAgentFile, requestOpenWorkspacePath, workspacePathForAgentFi
 import { useAppStore } from '../store/app-store'
 import { LazyVideoThumbnail, MediaPreviewDialog } from './MediaGrid'
 import { NativeFileDragSurface } from './NativeFileDragSurface'
+import { SessionSubagentSettings } from './SessionSubagentSettings'
 
 const EMPTY_FILES: AgentFile[] = []
 
-export function Inspector() {
+export function Inspector({ embedded = false, afterMedia }: { embedded?: boolean; afterMedia?: ReactNode } = {}) {
   useLocale()
   const activeProfileId = useAppStore(state => state.activeProfileId)
   const profileGeneration = useAppStore(state => state.profileGeneration)
@@ -115,7 +116,8 @@ export function Inspector() {
   }
   const toggleMedia = () => { const next = !mediaOpen; setMediaOpen(next); if (next && session && files.length === 0) void loadFiles(true) }
 
-  return <aside className="inspector">
+  const Container = embedded ? 'div' : 'aside'
+  return <Container className="inspector">
     <div className="inspector-drag-region" />
     <div className="inspector-scroll">
       {!session ? <div className="inspector-empty">{t("ui.Inspector.Inspector.select_a_chat_to_inspect_its_runtime_files_f5631ca")}</div> : <>
@@ -123,16 +125,21 @@ export function Inspector() {
           <SessionPromptField value={session.system_prompt || ''} onSave={value => useAppStore.getState().updateSession(session.id, { system_prompt: value || null })} />
         </section>
 
+        {pinProfileScope && (session.backend === 'codex' || session.backend === 'claude') && <SessionSubagentSettings
+          key={`subagent-limit:${activeProfileId}:${profileGeneration}:${serverIdentity}:${session.id}:${session.backend}`}
+          session={session} profileScope={pinProfileScope}
+        />}
         {pinProfileScope && <PinnedSection key={`pinned:${session.id}`} profileScope={pinProfileScope} sessionId={session.id} pins={pins} setPins={setPins} files={files} />}
         <SubagentsSection key={`subagents:${session.id}`} sessionId={session.id} />
         <section className="inspector-section collapsible-section">
           <div className="section-heading-row"><button className="section-toggle" onClick={toggleMedia}>{mediaOpen ? <ChevronDown size={14} /> : <ChevronRight size={14} />}<FileStack size={15} /><strong>{t("ui.Inspector.Inspector.media_files_9d2cd70")}</strong><small>{files.length}/{filesTotal || files.length}</small></button><button className="nested-icon" title={t("ui.Inspector.Inspector.refresh_0e91610")} onClick={() => void loadFiles(true)}><RefreshCw size={12} /></button></div>
           {mediaOpen && pinProfileScope && <MediaInspector profileScope={pinProfileScope} sessionId={session.id} workspaceRoot={session.cwd ?? null} files={files} total={filesTotal} loading={loadingFiles} loadMore={() => void loadFiles(false)} onPreview={setPreview} />}
         </section>
+        {afterMedia}
         <MediaPreviewDialog sessionId={session.id} file={preview} files={files} onSelect={setPreview} onClose={() => setPreview(null)} />
       </>}
     </div>
-  </aside>
+  </Container>
 
 }
 
@@ -332,12 +339,12 @@ function MediaInspector({ profileScope, sessionId, workspaceRoot, files, total, 
     const source = window.agentsDock.files.mediaURL(profileScope.profileId, profileScope.profileGeneration, sessionId, file.id)
     const type = effectiveFileContentType(file)
     const workspacePath = workspacePathForAgentFile(file, workspaceRoot)
-    return <NativeFileDragSurface key={file.id} sessionId={sessionId} file={file}><button type="button" className="inspector-thumb" onClick={() => { trackEvent('file_view_opened'); onPreview(file) }}>{type.startsWith('image/') ? <img src={source} loading="lazy" draggable={false} /> : source ? <LazyVideoThumbnail source={source} /> : null}{type.startsWith('video/') && <Play className="thumb-play" size={14} fill="currentColor" />}</button><strong title={file.title || file.filename}>{file.title || file.filename}</strong><small>{formatBytes(file.size)}</small><div data-native-drag-ignore><button type="button" title={t("ui.Inspector.find_in_chat_df9554c")} onClick={() => window.dispatchEvent(new CustomEvent('agentsdock:find-file', { detail: { sessionId, fileId: file.id } }))}><RefreshCw size={11} /></button>{workspacePath && <button type="button" title={t("ui.Inspector.open_in_editor_f395ae5")} onClick={() => requestOpenWorkspacePath(sessionId, workspacePath)}><FileCode2 size={11} /></button>}<button type="button" title={t("ui.Inspector.pin_ff1cee7")} onClick={() => runAction(pin(file))}><Pin size={11} /></button><button type="button" title={t("ui.Inspector.download_d6eafe8")} onClick={() => runAction(saveAgentFile(sessionId, file))}><Download size={11} /></button><button type="button" title={t("ui.Inspector.show_in_folder_3c4d9b8")} onClick={() => runAction(window.agentsDock.files.reveal(sessionId, file))}><FolderOpen size={11} /></button><button type="button" title={t("ui.Inspector.open_ed077f3")} onClick={() => runAction(window.agentsDock.files.open(sessionId, file))}><ExternalLink size={11} /></button></div></NativeFileDragSurface>
+    return <NativeFileDragSurface key={file.id} sessionId={sessionId} file={file}><button type="button" className="inspector-thumb" onClick={() => { trackEvent('file_view_opened'); onPreview(file) }}>{type.startsWith('image/') ? <img src={source} loading="lazy" draggable={false} /> : source ? <LazyVideoThumbnail source={source} /> : null}{type.startsWith('video/') && <Play className="thumb-play" size={14} fill="currentColor" />}</button><strong title={file.title || file.filename}>{file.title || file.filename}</strong><small>{formatBytes(file.size)}</small><div data-native-drag-ignore>{workspacePath && <button type="button" title={t("ui.Inspector.open_in_editor_f395ae5")} onClick={() => requestOpenWorkspacePath(sessionId, workspacePath)}><FileCode2 size={11} /></button>}<button type="button" title={t("ui.Inspector.pin_ff1cee7")} onClick={() => runAction(pin(file))}><Pin size={11} /></button><button type="button" title={t("ui.Inspector.download_d6eafe8")} onClick={() => runAction(saveAgentFile(sessionId, file))}><Download size={11} /></button><button type="button" title={t("ui.Inspector.show_in_folder_3c4d9b8")} onClick={() => runAction(window.agentsDock.files.reveal(sessionId, file))}><FolderOpen size={11} /></button><button type="button" title={t("ui.Inspector.open_ed077f3")} onClick={() => runAction(window.agentsDock.files.open(sessionId, file))}><ExternalLink size={11} /></button></div></NativeFileDragSurface>
   })}</div>{documents.length > 0 && <div className="document-list">{documents.map(file => {
     const workspacePath = workspacePathForAgentFile(file, workspaceRoot)
     const canOpenInEditor = Boolean(workspacePath) || isEditorTextFile(file)
     const openInEditor = () => requestOpenAgentFile(sessionId, file)
-    return <NativeFileDragSurface key={file.id} sessionId={sessionId} file={file}><File size={14} /><button type="button" className="inspector-document-title" data-native-drag-ignore onClick={() => canOpenInEditor ? openInEditor() : runAction(window.agentsDock.files.open(sessionId, file))}><strong title={file.filename}>{file.filename}</strong><small>{formatBytes(file.size)}</small></button><button type="button" data-native-drag-ignore title={t("ui.Inspector.find_in_chat_df9554c")} onClick={() => window.dispatchEvent(new CustomEvent('agentsdock:find-file', { detail: { sessionId, fileId: file.id } }))}><RefreshCw size={12} /></button>{canOpenInEditor && <button type="button" data-native-drag-ignore title={t("ui.Inspector.open_in_editor_f395ae5")} onClick={openInEditor}><FileCode2 size={12} /></button>}<button type="button" data-native-drag-ignore title={t("ui.Inspector.download_d6eafe8")} onClick={() => runAction(saveAgentFile(sessionId, file))}><Download size={12} /></button><button type="button" data-native-drag-ignore title={t("ui.Inspector.show_in_folder_3c4d9b8")} onClick={() => runAction(window.agentsDock.files.reveal(sessionId, file))}><FolderOpen size={12} /></button></NativeFileDragSurface>
+    return <NativeFileDragSurface key={file.id} sessionId={sessionId} file={file}><File size={14} /><button type="button" className="inspector-document-title" data-native-drag-ignore onClick={() => canOpenInEditor ? openInEditor() : runAction(window.agentsDock.files.open(sessionId, file))}><strong title={file.filename}>{file.filename}</strong><small>{formatBytes(file.size)}</small></button>{canOpenInEditor && <button type="button" data-native-drag-ignore title={t("ui.Inspector.open_in_editor_f395ae5")} onClick={openInEditor}><FileCode2 size={12} /></button>}<button type="button" data-native-drag-ignore title={t("ui.Inspector.download_d6eafe8")} onClick={() => runAction(saveAgentFile(sessionId, file))}><Download size={12} /></button><button type="button" data-native-drag-ignore title={t("ui.Inspector.show_in_folder_3c4d9b8")} onClick={() => runAction(window.agentsDock.files.reveal(sessionId, file))}><FolderOpen size={12} /></button></NativeFileDragSurface>
   })}</div>}{files.length < total && <button type="button" className="load-more" disabled={loading} onClick={loadMore}>{loading && <LoaderCircle className="spin" size={13} />}{" "}{t("ui.Inspector.MediaInspector.load_60_more_b3ee0b4")}</button>}</div>
 }
 

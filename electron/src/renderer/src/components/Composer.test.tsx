@@ -16,6 +16,7 @@ import { projectTeamMessageComposer } from '../lib/team-message-composer'
 import { Composer, TeamMentionPalette } from './Composer'
 import { ClaudeRuntimeProvider } from './ClaudeRuntimeContext'
 import { CodexRuntimeProvider } from './CodexRuntimeContext'
+import { CodexStatusButton } from './CodexControls'
 
 const secureConnectionId = '09d7bb2e-3b47-4be7-89fc-2cecd90f4434'
 const secureRouteId = '22e7bb2e-3b47-4be7-89fc-2cecd90f4434'
@@ -186,6 +187,7 @@ describe('Composer', () => {
       revokingAgentRouteIds: new Set(),
       activeSessionIds: new Set(),
       turnAdmissionTokens: {},
+      pendingTurnSubmissions: {},
       stoppingSessionIds: new Set(),
       runtimeCatalog: null,
       health: null,
@@ -196,6 +198,47 @@ describe('Composer', () => {
   it('mounts with empty per-chat upload state without an external-store render loop', () => {
     render(<Composer />)
     expect(screen.getByPlaceholderText('Message')).toBeInTheDocument()
+  })
+
+  it('shows an active-turn submission immediately in the queue shelf', () => {
+    useAppStore.setState({
+      activeSessionIds: new Set(['chat-1']),
+      pendingTurnSubmissions: {
+        'chat-1': {
+          token: 'queue-admission', prompt: 'Follow up after the current task', files: [], uploadPaths: [],
+          chatReferences: [], teamReferences: [], createdAt: Date.now(), afterSeq: 4,
+          mode: 'queue', phase: 'submitting', consumeComposer: true
+        }
+      }
+    })
+
+    const view = render(<Composer />)
+
+    expect(view.container.querySelector('.queue-shelf')).toHaveTextContent('Queued turns1')
+    expect(view.container.querySelector('.queued-row.local-pending')).toHaveTextContent('Follow up after the current task')
+    expect(view.container.querySelector('.queued-row.local-pending')).toHaveTextContent('Adding to queue…')
+    expect(view.container.querySelector('.queued-row.local-pending button')).toBeNull()
+  })
+
+  it('keeps an offline shared-chat draft editable while gating message and attachment writes', () => {
+    const send = vi.fn()
+    Object.defineProperty(window, 'agentsDock', { configurable: true, value: {
+      ...window.agentsDock,
+      sharedChat: true,
+      turns: { send } as unknown as AgentsDockAPI['turns']
+    } })
+    const view = render(<Composer writeDisabled />)
+    const editor = screen.getByRole('textbox', { name: 'Message' })
+    fireEvent.change(editor, { target: { value: 'Draft while offline' } })
+    expect(editor).toBeEnabled()
+    expect(editor).toHaveValue('Draft while offline')
+    expect(view.container.querySelector('.send-button')).toBeDisabled()
+    expect(view.container.querySelector('.composer-add-button')).toBeDisabled()
+    expect(view.container.querySelector('.composer-goal-controls')).toBeDisabled()
+    expect(view.container.querySelector('.composer-queue-controls')).toBeDisabled()
+    expect(view.container.querySelector('.composer-write-controls')).toBeDisabled()
+    fireEvent.keyDown(editor, { key: 'Enter' })
+    expect(send).not.toHaveBeenCalled()
   })
 
   it('does no Team Network work on ordinary chat mount, typing, or idle', async () => {
@@ -633,6 +676,39 @@ describe('Composer', () => {
     expect(useAppStore.getState().drafts['chat-1']).toBe('Fast typing')
     expect(appStoreChange).toHaveBeenCalled()
     unsubscribe()
+  })
+
+  it('does not restore a consumed message from a late persisted-draft read', async () => {
+    const persistedDraft = deferred<string>()
+    const send = vi.fn().mockResolvedValue({
+      session: { id: 'chat-1', title: 'Chat', backend: 'codex' }, queued: false
+    })
+    Object.defineProperty(window, 'agentsDock', {
+      configurable: true,
+      value: {
+        preferences: {
+          get: vi.fn((key: string, fallback: unknown) => key === 'draft:chat-1'
+            ? persistedDraft.promise
+            : Promise.resolve(fallback)),
+          set: vi.fn().mockResolvedValue(undefined)
+        },
+        turns: { send }
+      } as unknown as AgentsDockAPI
+    })
+    const user = userEvent.setup()
+    render(<Composer />)
+    const editor = screen.getByPlaceholderText('Message')
+
+    await user.type(editor, 'Already sent')
+    await user.click(screen.getByRole('button', { name: 'Send message' }))
+    await waitFor(() => expect(send).toHaveBeenCalledOnce())
+    expect(editor).toHaveValue('')
+    expect(useAppStore.getState().drafts['chat-1']).toBe('')
+
+    await act(async () => persistedDraft.resolve('Already sent'))
+
+    expect(editor).toHaveValue('')
+    expect(useAppStore.getState().drafts['chat-1']).toBe('')
   })
 
   it('leaves text paste native and preserves whitespace plus UTF-16 selection offsets', () => {
@@ -1291,6 +1367,90 @@ describe('Composer', () => {
     expect(screen.queryByRole('menuitemcheckbox', { name: /Cursor$/ })).not.toBeInTheDocument()
   })
 
+  it('offers normal and custom Codex separately and sends the explicit provider selection', async () => {
+    const update = vi.fn().mockImplementation(async (id, patch) => ({ id, title: 'Chat', ...patch }))
+    window.agentsDock.sessions = { update } as unknown as AgentsDockAPI['sessions']
+    useAppStore.setState({ health: { ok: true, capabilities: { codex_provider_v1: { per_chat: true, per_chat_models: true } } }, runtimeCatalog: {
+      backends: { codex: { models: [], efforts: [], custom_provider: {
+        configured: true, available: true, model: 'gpt-6-astra', base_url: 'https://inference.example/v1'
+      } } }
+    } })
+    const user = userEvent.setup()
+    render(<Composer />)
+    await user.click(screen.getByTitle('Change backend'))
+    expect(screen.getByRole('menuitemcheckbox', { name: 'Codex' })).toBeInTheDocument()
+    await user.click(screen.getByRole('menuitemcheckbox', { name: 'Codex runtime · Custom endpoint' }))
+    await waitFor(() => expect(update).toHaveBeenCalledWith('chat-1', expect.objectContaining({ backend: 'codex', codex_provider: 'custom', model: null, effort: null })))
+    expect(screen.getByTitle('Change backend')).toHaveTextContent('Codex · Custom')
+    expect(screen.getByTitle('Change backend')).toHaveAccessibleName('Codex runtime · Custom endpoint')
+    await user.click(screen.getByTitle('Change backend'))
+    await user.click(screen.getByRole('menuitemcheckbox', { name: 'Codex' }))
+    await waitFor(() => expect(update).toHaveBeenLastCalledWith('chat-1', expect.objectContaining({ backend: 'codex', codex_provider: 'default' })))
+  })
+
+  it('routes an unconfigured custom choice to Settings without changing the chat', async () => {
+    const update = vi.fn()
+    window.agentsDock.sessions = { update } as unknown as AgentsDockAPI['sessions']
+    const user = userEvent.setup()
+    render(<Composer />)
+    await user.click(screen.getByTitle('Change backend'))
+    await user.click(screen.getByRole('menuitem', { name: 'Codex runtime · Custom endpoint Configure in Settings' }))
+    expect(useAppStore.getState().modals.appSettings).toBe(true)
+    expect(update).not.toHaveBeenCalled()
+  })
+
+  it('keeps the custom provider fixed once the native thread starts', () => {
+    useAppStore.setState({ sessions: [{ id: 'chat-1', title: 'Chat', backend: 'codex', codex_provider: 'custom', codex_thread_id: 'native-custom' }] })
+    render(<Composer />)
+    const chip = screen.getByTitle('Backend is fixed after the provider session starts')
+    expect(chip).toBeDisabled()
+    expect(chip).toHaveTextContent('Codex · Custom')
+    expect(chip).toHaveAccessibleName('Codex runtime · Custom endpoint')
+  })
+
+  it('changes custom endpoint models and effort in the usual picker and permits an unlisted model', async () => {
+    const session: Session = { id: 'chat-1', title: 'Chat', backend: 'codex', codex_provider: 'custom', model: 'provider/first', effort: 'high' }
+    const update = vi.fn().mockImplementation(async (_id, patch) => ({ ...useAppStore.getState().sessions.find(item => item.id === session.id), ...Object.fromEntries(Object.entries(patch).filter(([, value]) => value !== undefined)) }))
+    window.agentsDock.sessions = { update } as unknown as AgentsDockAPI['sessions']
+    useAppStore.setState({ sessions: [session], runtimeCatalog: { backends: { codex: { models: [], efforts: [], custom_provider: {
+      configured: true, available: true, model: null, base_url: 'https://inference.example/v1',
+      models: [{ value: 'provider/first', label: 'First' }, { value: 'provider/next', label: 'Next' }],
+      efforts: [], model_efforts: { 'provider/next': [{ value: 'low', label: 'Low' }, { value: 'high', label: 'High' }] }
+    } } } } })
+    const user = userEvent.setup()
+    const { container } = render(<Composer />)
+    await user.click(container.querySelector<HTMLButtonElement>('.runtime-chip')!)
+    await user.click(screen.getByRole('menuitemcheckbox', { name: 'Next · Unverified' }))
+    await waitFor(() => expect(update).toHaveBeenLastCalledWith('chat-1', { model: 'provider/next', effort: 'high' }))
+    await user.click(container.querySelector<HTMLButtonElement>('.runtime-chip')!)
+    await user.click(screen.getByRole('menuitemcheckbox', { name: 'Low' }))
+    await waitFor(() => expect(update).toHaveBeenLastCalledWith('chat-1', { effort: 'low' }))
+    await user.click(container.querySelector<HTMLButtonElement>('.runtime-chip')!)
+    await user.click(screen.getByRole('menuitem', { name: 'Enter model ID…' }))
+    await user.clear(screen.getByLabelText('Model ID'))
+    await user.type(screen.getByLabelText('Model ID'), 'provider/unlisted')
+    await user.click(screen.getByRole('button', { name: 'Use model' }))
+    await waitFor(() => expect(update).toHaveBeenLastCalledWith('chat-1', { model: 'provider/unlisted', effort: null }))
+  })
+
+  it('sends a custom Codex chat independently of normal OpenAI sign-in', async () => {
+    const session: Session = { id: 'chat-1', title: 'Chat', backend: 'codex', codex_provider: 'custom', model: 'gpt-6-astra' }
+    const send = vi.fn().mockResolvedValue({ session: { ...session, backend_locked: true }, queued: false })
+    window.agentsDock.turns = { send } as unknown as AgentsDockAPI['turns']
+    useAppStore.setState({ sessions: [session], health: { ok: true, capabilities: { codex_provider_v1: { per_chat: true, per_chat_models: true } }, runtimes: {
+      codex: { backend: 'codex', status: 'unauthenticated', available: false, message: 'Sign in to normal Codex' }
+    } }, runtimeCatalog: { backends: { codex: { models: [], efforts: [], custom_provider: {
+      configured: true, available: true, model: 'gpt-6-astra', base_url: 'https://inference.example/v1'
+    } } } } })
+    const user = userEvent.setup()
+    render(<Composer />)
+    expect(screen.queryByText('Sign in to normal Codex')).not.toBeInTheDocument()
+    await user.type(screen.getByPlaceholderText('Message'), 'A custom endpoint message')
+    await user.click(screen.getByRole('button', { name: 'Send message' }))
+    await waitFor(() => expect(send).toHaveBeenCalledOnce())
+    expect(useAppStore.getState().error).toBeNull()
+  })
+
   it('offers ready Cursor backend switching when its runtime catalog is available', async () => {
     useAppStore.setState({
       health: {
@@ -1432,16 +1592,24 @@ describe('Composer', () => {
       } as unknown as AgentsDockAPI
     })
     useAppStore.setState({ sessions: [{ id: 'chat-1', title: 'Chat', backend: 'claude' }] })
-    const user = userEvent.setup()
     render(<Composer />)
 
-    await user.type(screen.getByPlaceholderText('Message'), 'Start the first turn')
-    await user.click(screen.getByRole('button', { name: 'Send message' }))
+    fireEvent.change(screen.getByPlaceholderText('Message'), { target: { value: 'Start the first turn' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Send message' }))
 
     await waitFor(() => expect(send).toHaveBeenCalledTimes(1))
-    expect(screen.getByTitle('Wait for the message to be accepted before changing backend')).toBeDisabled()
-    expect(screen.getByRole('button', { name: 'Send message' })).toBeDisabled()
+    expect((screen.getByTitle('Wait for the message to be accepted before changing backend') as HTMLButtonElement).disabled).toBe(true)
+    expect((screen.getByRole('button', { name: 'Send message' }) as HTMLButtonElement).disabled).toBe(true)
     expect(useAppStore.getState().turnAdmissionTokens['chat-1']).toBeTruthy()
+    expect(useAppStore.getState().pendingTurnSubmissions['chat-1']?.prompt).toBe('Start the first turn')
+    expect(screen.getByRole('status').textContent).toContain('Starting…')
+    act(() => useAppStore.setState({
+      activeSessionIds: new Set(['chat-1']),
+      pendingTurnSubmissions: {}
+    }))
+    expect(screen.getByRole('status').textContent).toContain('Running')
+    expect(screen.getByRole('status').textContent).not.toContain('Waiting to start')
+    act(() => useAppStore.setState({ activeSessionIds: new Set() }))
 
     await act(async () => resolveSend({
       session: { id: 'chat-1', title: 'Chat', backend: 'claude', backend_locked: true },
@@ -1449,8 +1617,9 @@ describe('Composer', () => {
     }))
 
     await waitFor(() => expect(useAppStore.getState().turnAdmissionTokens['chat-1']).toBeUndefined())
-    expect(screen.getByTitle('Backend is fixed after the provider session starts')).toBeDisabled()
-  })
+    expect(screen.queryByRole('status')).toBeNull()
+    expect((screen.getByTitle('Backend is fixed after the provider session starts') as HTMLButtonElement).disabled).toBe(true)
+  }, 15_000)
 
   it('reloads the selected chat provider from the composer runtime menu', async () => {
     const reloadProvider = vi.fn().mockResolvedValue({
@@ -1547,10 +1716,71 @@ describe('Composer', () => {
     confirm.mockRestore()
   })
 
+  it.each(['idle', 'cached', 'syncing', 'reconnecting', 'offline', 'error'] as const)(
+    'shows only a neutral sync status for an unknown active origin while chat sync is %s', status => {
+      useAppStore.setState({
+        activeSessionIds: new Set(['chat-1']),
+        syncBySession: { 'chat-1': { status, error: null } }
+      })
+      render(<Composer />)
+      const notice = screen.getByText('Syncing…')
+      expect(notice).toHaveAttribute('role', 'status')
+      expect(notice).toHaveClass('composer-sync-status')
+      expect(notice).not.toHaveClass('chat-reference-warning')
+      expect(screen.queryByText(/An active turn is running while chat sync is not live/)).not.toBeInTheDocument()
+
+      act(() => useAppStore.setState({ syncBySession: { 'chat-1': { status: 'live', error: null } } }))
+      expect(screen.queryByText('Syncing…')).not.toBeInTheDocument()
+      expect(useAppStore.getState().activeSessionIds).toContain('chat-1')
+      expect(screen.getByRole('button', { name: 'Stop' })).toBeInTheDocument()
+    }
+  )
+
+  it('localizes the neutral unknown-origin sync status without inventing activity for an idle chat', () => {
+    setLocale('zh-CN')
+    useAppStore.setState({ syncBySession: { 'chat-1': { status: 'syncing', error: null } } })
+    render(<Composer />)
+    expect(screen.queryByText('同步中…')).not.toBeInTheDocument()
+    act(() => useAppStore.setState({ activeSessionIds: new Set(['chat-1']) }))
+    expect(screen.getByText('同步中…')).toHaveClass('composer-sync-status')
+    act(() => useAppStore.setState({ activeSessionIds: new Set() }))
+    expect(screen.queryByText('同步中…')).not.toBeInTheDocument()
+  })
+
+  it('keeps explicit Stop and Send now confirmations for an unknown origin despite its neutral status', async () => {
+    const stop = vi.fn()
+    const runNow = vi.fn()
+    window.agentsDock.turns = { stop } as unknown as AgentsDockAPI['turns']
+    window.agentsDock.queue = { runNow } as unknown as AgentsDockAPI['queue']
+    useAppStore.setState({
+      activeSessionIds: new Set(['chat-1']),
+      syncBySession: { 'chat-1': { status: 'cached', error: null } },
+      snapshots: { 'chat-1': {
+        session: { id: 'chat-1', title: 'Chat', backend: 'codex' }, events: [],
+        queuedTurns: [{ queued_id: 'queued-user', session_id: 'chat-1', prompt: 'User follow-up', file_ids: [], position: 1 }],
+        files: [], hasMoreEvents: false, filesTotal: 0, cachedAt: 0
+      } }
+    })
+    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(false)
+    try {
+      render(<Composer />)
+      expect(screen.getByText('Syncing…')).toHaveClass('composer-sync-status')
+      await userEvent.click(screen.getByRole('button', { name: 'Stop' }))
+      await userEvent.click(screen.getByRole('button', { name: 'Send now' }))
+      expect(confirm).toHaveBeenCalledTimes(2)
+      expect(confirm.mock.calls[0]?.[0]).toMatch(/chat sync is not live.*Stop anyway\?/)
+      expect(confirm.mock.calls[1]?.[0]).toMatch(/chat sync is not live.*Send now anyway\?/)
+      expect(stop).not.toHaveBeenCalled()
+      expect(runNow).not.toHaveBeenCalled()
+    } finally { confirm.mockRestore() }
+  })
+
   it.each([
-    ['cross_chat_handoff_delivery', 'chat-to-chat'],
-    ['secure_peer_handoff_delivery', 'encrypted peer']
-  ])('warns and confirms before Stop or Send now interrupts an active %s run', async (purpose, label) => {
+    ['cross_chat_handoff_delivery', 'chat-to-chat', 'live'],
+    ['secure_peer_handoff_delivery', 'encrypted peer', 'live'],
+    ['cross_chat_handoff_delivery', 'chat-to-chat', 'reconnecting'],
+    ['secure_peer_handoff_delivery', 'encrypted peer', 'reconnecting']
+  ] as const)('warns and confirms before Stop or Send now interrupts an active %s (%s) run while sync is %s', async (purpose, label, syncStatus) => {
     const stop = vi.fn().mockResolvedValue({ stopped: true, pending: false, message: '' })
     const runNow = vi.fn().mockResolvedValue(true)
     const list = vi.fn().mockResolvedValue([])
@@ -1565,6 +1795,7 @@ describe('Composer', () => {
     useAppStore.setState({
       activeSessionIds: new Set(['chat-1']),
       stoppingSessionIds: new Set(),
+      syncBySession: { 'chat-1': { status: syncStatus, error: null } },
       snapshots: {
         'chat-1': {
           session: { id: 'chat-1', title: 'Chat', backend: 'codex' },
@@ -1587,7 +1818,8 @@ describe('Composer', () => {
     try {
       const user = userEvent.setup()
       render(<Composer />)
-      expect(screen.getByText(new RegExp(`incoming ${label} delivery is running`, 'i'))).toBeInTheDocument()
+      expect(screen.getByText(new RegExp(`incoming ${label} delivery is running`, 'i'))).toHaveClass('chat-reference-warning')
+      expect(screen.queryByText('Syncing…')).not.toBeInTheDocument()
 
       await user.click(screen.getByRole('button', { name: 'Stop' }))
       expect(stop).not.toHaveBeenCalled()
@@ -1937,13 +2169,17 @@ describe('Composer', () => {
     await user.click(screen.getByRole('button', { name: 'Send message' }))
 
     expect(send).not.toHaveBeenCalled()
-    expect(screen.getByPlaceholderText('Message')).toHaveValue('Use the new policy')
-    expect(screen.getByTitle('Wait for the message to be accepted before changing backend')).toBeDisabled()
+    expect(useAppStore.getState().pendingTurnSubmissions['chat-1']?.prompt).toBe('Use the new policy')
+    expect(screen.getByRole('status').textContent).toContain('Starting…')
+    expect((screen.getByPlaceholderText('Message') as HTMLTextAreaElement).value).toBe('')
+    expect((screen.getByTitle('Wait for the message to be accepted before changing backend') as HTMLButtonElement).disabled).toBe(true)
+    fireEvent.change(screen.getByPlaceholderText('Message'), { target: { value: 'Draft the next request' } })
     permissionResponse.resolve()
     await waitFor(() => expect(send).toHaveBeenCalledWith(expect.objectContaining({
       sessionId: 'chat-1', prompt: 'Use the new policy'
     })))
-  })
+    expect((screen.getByPlaceholderText('Message') as HTMLTextAreaElement).value).toBe('Draft the next request')
+  }, 30_000)
 
   it('restores the authoritative permission policy when auto-save fails', async () => {
     const update = vi.fn().mockRejectedValue(new Error('Policy update denied'))
@@ -2177,12 +2413,14 @@ describe('Composer', () => {
     await user.click(screen.getByRole('button', { name: 'Send message' }))
 
     expect(send).not.toHaveBeenCalled()
-    expect(screen.getByPlaceholderText('Message')).toHaveValue('Use the new Claude policy')
+    expect(useAppStore.getState().pendingTurnSubmissions['chat-1']?.prompt).toBe('Use the new Claude policy')
+    expect(screen.getByRole('status').textContent).toContain('Starting…')
+    expect((screen.getByPlaceholderText('Message') as HTMLTextAreaElement).value).toBe('')
     permissionResponse.resolve()
     await waitFor(() => expect(send).toHaveBeenCalledWith(expect.objectContaining({
       sessionId: 'chat-1', prompt: 'Use the new Claude policy'
     })))
-  })
+  }, 30_000)
 
   it('restores the authoritative Claude permission mode when auto-save fails', async () => {
     const update = vi.fn().mockRejectedValue(new Error('Claude policy update denied'))
@@ -4051,7 +4289,11 @@ describe('Composer', () => {
     await waitFor(() => expect(screen.queryByText('Sending now…')).not.toBeInTheDocument())
   })
 
-  it('preserves text typed while a failed send is still in flight', async () => {
+  it.each([
+    ['Next request', 'First request\n\nNext request'],
+    ['First request', 'First request'],
+    ['  First request  ', '  First request  ']
+  ])('preserves next draft %j while a failed send is still in flight', async (newerDraft, restoredDraft) => {
     let rejectSend!: (error: Error) => void
     Object.defineProperty(window, 'agentsDock', {
       configurable: true,
@@ -4067,12 +4309,45 @@ describe('Composer', () => {
     await user.type(editor, 'First request')
     await user.click(screen.getByRole('button', { name: 'Send message' }))
     expect(screen.getByTitle('Wait for the message to be accepted before changing backend')).toBeDisabled()
-    await user.type(editor, 'Next request')
+    await user.type(editor, newerDraft)
     await act(async () => rejectSend(new Error('offline')))
 
-    await waitFor(() => expect(editor).toHaveValue('First request\n\nNext request'))
+    await waitFor(() => expect(editor).toHaveValue(restoredDraft))
+    expect(useAppStore.getState().drafts['chat-1']).toBe(restoredDraft)
+    expect(window.agentsDock.turns.send).toHaveBeenCalledTimes(1)
     expect(screen.getByTitle('Change backend')).toBeEnabled()
     expect(useAppStore.getState().turnAdmissionTokens['chat-1']).toBeUndefined()
+  })
+
+  it('does not restore an accepted prompt when the HTTP response is lost', async () => {
+    const pendingSend = deferred<never>()
+    const send = vi.fn(() => pendingSend.promise)
+    Object.defineProperty(window, 'agentsDock', {
+      configurable: true,
+      value: {
+        preferences: { get: vi.fn().mockResolvedValue(''), set: vi.fn().mockResolvedValue(undefined) },
+        turns: { send }
+      } as unknown as AgentsDockAPI
+    })
+    const user = userEvent.setup()
+    render(<Composer />)
+    const editor = screen.getByPlaceholderText('Message')
+    await user.type(editor, 'Accepted request')
+    await user.click(screen.getByRole('button', { name: 'Send message' }))
+    await act(async () => {
+      useAppStore.setState({ snapshots: { 'chat-1': {
+        session: { id: 'chat-1', title: 'Chat', backend: 'codex' },
+        events: [{ id: 'accepted', session_id: 'chat-1', seq: 1, type: 'turn_started', ts: '2026-09-22T00:00:00Z', prompt: 'Accepted request', file_ids: [] }],
+        queuedTurns: [], files: [], filesTotal: 0, hasMoreEvents: false, cachedAt: 0
+      } } })
+      pendingSend.reject(new Error('HTTP response lost'))
+    })
+
+    await waitFor(() => expect(useAppStore.getState().turnAdmissionTokens['chat-1']).toBeUndefined())
+    expect(editor).toHaveValue('')
+    expect(useAppStore.getState().drafts['chat-1']).toBe('')
+    expect(useAppStore.getState().error).toBeNull()
+    expect(send).toHaveBeenCalledTimes(1)
   })
 
   it('uses Command-Enter to steer a new message immediately', async () => {
@@ -4649,6 +4924,137 @@ describe('Composer', () => {
     expect(screen.getByRole('option', { name: /Plan mode.*On/ })).toBeInTheDocument()
     expect(screen.getByRole('option', { name: /^MCP servers/ })).toBeInTheDocument()
     expect(screen.queryByRole('option', { name: /^Goal/ })).not.toBeInTheDocument()
+  })
+
+  it.each(['shortcut', 'add menu'] as const)('opens the selected Codex chat goal from the %s and only starts work on submission', async path => {
+    const send = vi.fn()
+    const setGoal = vi.fn().mockResolvedValue({
+      goal: { threadId: 'thread-2', objective: 'Finish the selected chat task', status: 'active',
+        tokensUsed: 0, timeUsedSeconds: 0, tokenBudget: null, updatedAt: 0 },
+      time_budget_seconds: null
+    })
+    Object.defineProperty(window, 'agentsDock', { configurable: true, value: {
+      preferences: { get: vi.fn().mockResolvedValue(''), set: vi.fn().mockResolvedValue(undefined) },
+      turns: { send },
+      codex: { ...composerCodexBridge(), setGoal, clearGoal: vi.fn() },
+      events: { on: vi.fn().mockReturnValue(() => undefined) }
+    } as unknown as AgentsDockAPI })
+    useAppStore.setState({
+      selectedSessionId: 'chat-2',
+      chatPanes: { primary: 'chat-2', secondary: null },
+      sessions: [
+        { id: 'chat-1', title: 'Other chat', backend: 'codex' },
+        { id: 'chat-2', title: 'Selected chat', backend: 'codex' }
+      ],
+      health: { ok: true, capabilities: { codex_controls: {
+        available: true, required: false, message: '', action: null, features: { goals: true }
+      } } }
+    })
+    const user = userEvent.setup()
+    render(<CodexGoalComposerHarness />)
+
+    const shortcut = await screen.findByRole('button', { name: 'Codex goal' })
+    const editor = screen.getByPlaceholderText('Message')
+    await user.type(editor, 'Keep this unsent Codex draft')
+    expect(shortcut).toHaveClass('composer-icon')
+    if (path === 'shortcut') await user.click(shortcut)
+    else {
+      await user.click(screen.getByTitle('Add'))
+      await user.click(await screen.findByRole('menuitem', { name: 'Codex goal' }))
+    }
+
+    const dialog = await screen.findByRole('dialog', { name: 'Codex goal' })
+    expect(editor).toHaveValue('Keep this unsent Codex draft')
+    await user.type(within(dialog).getByRole('textbox', { name: 'Completion condition' }), 'Finish the selected chat task')
+    expect(send).not.toHaveBeenCalled()
+    expect(setGoal).not.toHaveBeenCalled()
+    await user.click(within(dialog).getByRole('button', { name: 'Start goal' }))
+    await waitFor(() => expect(setGoal).toHaveBeenCalledExactlyOnceWith('chat-2', {
+      objective: 'Finish the selected chat task', status: 'active', token_budget: null, time_budget_seconds: null
+    }))
+    expect(send).not.toHaveBeenCalled()
+  })
+
+  it.each(['shortcut', 'add menu'] as const)('keeps the Claude goal %s equivalent to Codex without sending a model turn', async path => {
+    const send = vi.fn()
+    const setGoal = vi.fn()
+    Object.defineProperty(window, 'agentsDock', { configurable: true, value: {
+      preferences: { get: vi.fn().mockResolvedValue(''), set: vi.fn().mockResolvedValue(undefined) },
+      turns: { send },
+      claude: { runtime: vi.fn().mockResolvedValue({ available: true, transport: 'sdk',
+        interactive_capability: 'claude_sdk_interactive_v1', session_loaded: true,
+        pending_interactions: [], features: { goals: true }, goal: null }), setGoal, clearGoal: vi.fn() },
+      events: { on: vi.fn().mockReturnValue(() => undefined) }
+    } as unknown as AgentsDockAPI })
+    useAppStore.setState({ sessions: [{ id: 'chat-1', title: 'Chat', backend: 'claude' }] })
+    const user = userEvent.setup()
+    render(<ClaudeComposerHarness />)
+
+    const shortcut = await screen.findByRole('button', { name: 'Claude goal' })
+    const editor = screen.getByPlaceholderText('Message')
+    await user.type(editor, 'Keep this unsent Claude draft')
+    expect(shortcut).toHaveClass('composer-icon')
+    if (path === 'shortcut') await user.click(shortcut)
+    else {
+      await user.click(screen.getByTitle('Add'))
+      await user.click(await screen.findByRole('menuitem', { name: 'Claude goal' }))
+    }
+    const dialog = await screen.findByRole('dialog', { name: 'Claude goal' })
+    expect(editor).toHaveValue('Keep this unsent Claude draft')
+    expect(within(dialog).getByRole('textbox', { name: 'Completion condition' })).toBeVisible()
+    expect(send).not.toHaveBeenCalled()
+    expect(setGoal).not.toHaveBeenCalled()
+  })
+
+  it.each(['codex', 'claude'] as const)('removes the unvalidated %s account usage popup without requesting quota', async backend => {
+    const usage = vi.fn().mockResolvedValue({
+      backend, status: 'available', source: backend === 'codex' ? 'codex-account' : 'claude-events',
+      account_kind: 'subscription', observed_at: '2026-09-24T12:00:00Z',
+      windows: [{ id: 'primary', label: '5 hours', used_percent: 25, resets_at: 1790254800,
+        window_minutes: 300, observed_at: '2026-09-24T12:00:00Z' }]
+    })
+    Object.defineProperty(window, 'agentsDock', { configurable: true, value: {
+      preferences: { get: vi.fn().mockResolvedValue(''), set: vi.fn().mockResolvedValue(undefined) },
+      runtime: { usage },
+      events: { on: vi.fn().mockReturnValue(() => undefined) }
+    } as unknown as AgentsDockAPI })
+    useAppStore.setState({ connected: true,
+      sessions: [{ id: 'chat-1', title: 'Chat', backend }],
+      health: { ok: true, server_identity: 'server-a', server_instance_id: 'instance-a',
+        capabilities: { provider_usage: { available: true, version: 1 } } }
+    })
+    render(<Composer />)
+    await userEvent.setup().type(screen.getByPlaceholderText('Message'), 'Keep writing')
+    expect(screen.queryByRole('button', { name: /^Account usage:/ })).not.toBeInTheDocument()
+    expect(usage).not.toHaveBeenCalled()
+  })
+
+  it.each([
+    ['keyboard selection', 'enter'],
+    ['send-button fallback', 'send']
+  ] as const)('opens native Claude goal controls by %s without creating a model turn', async (_label, path) => {
+    const send = vi.fn()
+    Object.defineProperty(window, 'agentsDock', { configurable: true, value: {
+      preferences: { get: vi.fn().mockResolvedValue(''), set: vi.fn().mockResolvedValue(undefined) },
+      turns: { send },
+      claude: { runtime: vi.fn().mockResolvedValue({ available: true, transport: 'sdk',
+        interactive_capability: 'claude_sdk_interactive_v1', session_loaded: true,
+        pending_interactions: [], features: { goals: true }, goal: null }), setGoal: vi.fn(), clearGoal: vi.fn() },
+      events: { on: vi.fn().mockReturnValue(() => undefined) }
+    } as unknown as AgentsDockAPI })
+    useAppStore.setState({ sessions: [{ id: 'chat-1', title: 'Chat', backend: 'claude' }] })
+    const user = userEvent.setup()
+    render(<ClaudeComposerHarness />)
+    expect(await screen.findByRole('button', { name: 'Claude goal' })).toBeInTheDocument()
+    const editor = screen.getByPlaceholderText('Message')
+    await user.type(editor, path === 'enter' ? '/goal' : '/goal  ')
+    if (path === 'enter') {
+      expect(screen.getByRole('option', { name: /Set or inspect a Claude completion condition/ })).toBeInTheDocument()
+      fireEvent.keyDown(editor, { key: 'Enter' })
+    } else await user.click(screen.getByRole('button', { name: 'Send message' }))
+    expect(await screen.findByRole('dialog', { name: 'Claude goal' })).toBeInTheDocument()
+    expect(editor).toHaveValue('')
+    expect(send).not.toHaveBeenCalled()
   })
 
   it.each([
@@ -6143,6 +6549,14 @@ function deferred<T>() {
 function CodexComposerHarness() {
   const session = useAppStore(state => state.sessions.find(candidate => candidate.id === state.selectedSessionId) ?? null)
   return <CodexRuntimeProvider session={session} capability={{ available: true }}>
+    <Composer />
+  </CodexRuntimeProvider>
+}
+
+function CodexGoalComposerHarness() {
+  const session = useAppStore(state => state.sessions.find(candidate => candidate.id === state.selectedSessionId) ?? null)
+  return <CodexRuntimeProvider session={session} capability={{ available: true }}>
+    <CodexStatusButton />
     <Composer />
   </CodexRuntimeProvider>
 }

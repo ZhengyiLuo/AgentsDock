@@ -89,6 +89,7 @@ export interface SecurePeerPairing {
   certificateExpiresAt: string | null
   certificateFingerprint: string | null
   lastSeenAt: string | null
+  /** Null for a negotiated durable request; observation timeouts do not expire it. */
   expiresAt: string | null
   error: string | null
 }
@@ -96,6 +97,8 @@ export interface SecurePeerPairing {
 export interface SecurePeerControlStatus {
   version: 1 | 2
   automaticPairingCompletionAvailable?: boolean
+  /** Exact member-side endpoint migration contract advertised by authenticated health. */
+  endpointUpdateAvailable?: boolean
   /** Terminal observer receipt; ends auto-Join consent, not the retained peer trust. */
   pairingCompletion?: { pairingId: string; transcriptHash: string; state: 'cancelled' | 'expired' }
   heartbeatIntervalSeconds: number
@@ -183,6 +186,14 @@ export interface SecurePeerDeactivateInput {
 
 export interface SecurePeerForgetConnectionInput extends SecurePeerDeactivateInput {
   expectedCertificateFingerprint: string
+}
+
+export interface SecurePeerUpdateEndpointInput extends SecurePeerDeactivateInput {
+  expectedServerInstanceId: string
+  expectedRemoteEndpoint: string
+  /** Explicit replacement literal IPv4 address, optionally followed by :port. */
+  host: string
+  confirmed: true
 }
 
 export interface SecurePeerApproveInput {

@@ -14,11 +14,11 @@ vi.mock('@shared/i18n', () => ({ t: (key: string) => ({
 vi.mock('./SharedChatApp', () => ({ SharedChatApp: () => <div>Shared native chat</div> }))
 
 const token = 'a'.repeat(43)
-let bridge: { start: Mock<() => Promise<void>>; redeem: Mock<(token: string) => Promise<void>>; catalog: Mock<() => Promise<void>> }
+let bridge: { start: Mock<() => Promise<void>>; retry: Mock<() => Promise<void>>; redeem: Mock<(token: string) => Promise<void>>; catalog: Mock<() => Promise<void>> }
 beforeEach(() => {
   vi.clearAllMocks()
   fixture.state.initialized = false
-  bridge = { start: vi.fn().mockRejectedValue(new Error('No browser cookie')),
+  bridge = { start: vi.fn().mockRejectedValue(new Error('No browser cookie')), retry: vi.fn().mockResolvedValue(undefined),
     redeem: vi.fn().mockResolvedValue(undefined), catalog: vi.fn().mockResolvedValue(undefined) }
 })
 afterEach(() => { cleanup(); vi.restoreAllMocks(); history.replaceState(null, '', '/') })

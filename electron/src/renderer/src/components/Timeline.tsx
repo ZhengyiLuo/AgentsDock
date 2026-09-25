@@ -5,8 +5,8 @@ import { memo, useCallback, useEffect, useMemo, useRef, useState, type WheelEven
 import { Virtuoso, type VirtuosoHandle } from 'react-virtuoso'
 import { ArrowDown, ArrowUp, LoaderCircle, Search, X } from 'lucide-react'
 import type { CodexThreadStatus, Event as ServerEvent, PinnedItem, SessionSnapshot, TimelineIndex, TimelineIndexLandmark, TimelinePage, TimelineSearchResult, ViewState, WorkspaceProfileScope } from '@shared/types'
-import { isAgentVisibleEvent, reconcileRenderTimelineItems, settleInactiveTimelineItems, type RenderTimelineItem, type TimelineItem } from '../lib/timeline'
-import { snapshotNeedsAuthoritativeTail, useAppStore } from '../store/app-store'
+import { isAgentVisibleEvent, reconcileRenderTimelineItems, settleInactiveTimelineItems, type MessageItem, type RenderTimelineItem, type TimelineItem } from '../lib/timeline'
+import { pendingTurnSubmissionAccepted, snapshotNeedsAuthoritativeTail, useAppStore, type PendingTurnSubmission } from '../store/app-store'
 import { TimelineRowView } from './TimelineRows'
 import { TimelineMinimap, type TimelineMinimapHandle } from './TimelineMinimap'
 import { cachedTimelineLandmarks, countOlderTimelineLandmarks, hasOlderTimelineContent, mergeTimelineLandmarks, retainTimelineLandmarkSpine, type TimelineNavigatorLandmark } from '../lib/timeline-minimap'
@@ -24,6 +24,7 @@ import { pinnedItemsForSession } from '../lib/pinned-items'
 import { OPEN_HISTORY_RESULT_EVENT } from '../lib/session-history-search'
 import { TIMELINE_VIEWPORT_LAYOUT_EVENT, type TimelineViewportLayoutDetail } from '../lib/workspace-layout'
 import { cachedTimelineProjection } from '../lib/timeline-projection-cache'
+import { overlayReasoningStream } from '../lib/timeline-reasoning-stream'
 import { omitQueuedPendingTimelineItems } from '../lib/timeline-pending-queue'
 import { profileSessionKey } from '../lib/profile-scope'
 import { localSessionImportSupported } from '@shared/local-session-import'
@@ -49,12 +50,41 @@ const OPEN_SETTLE_MAX_MS = 4000
 interface HistoricalWindow {
   page: TimelinePage
   anchorSeq: number
+  restoredView?: ViewState
 }
 
 interface WorkspaceLayoutAnchor {
   atBottom: boolean
   itemKey: string | null
   topOffset: number
+}
+
+export function pendingTurnMessageItem(sessionId: string, pending: PendingTurnSubmission): MessageItem {
+  const id = `pending-turn:${pending.token}`
+  const event: ServerEvent = {
+    id,
+    session_id: sessionId,
+    seq: pending.afterSeq + 1,
+    type: 'turn_started',
+    ts: new Date(pending.createdAt).toISOString(),
+    prompt: pending.prompt,
+    file_ids: pending.files.map(file => file.id),
+    chat_references: pending.chatReferences,
+    team_references: pending.teamReferences,
+    provider_user_authored: true
+  }
+  return {
+    kind: 'message',
+    id,
+    key: id,
+    seq: event.seq,
+    event,
+    events: [event],
+    role: 'user',
+    files: pending.files,
+    pending: true,
+    pendingPhase: pending.phase
+  }
 }
 
 export const Timeline = memo(function Timeline({ sessionId, focused = true }: { sessionId?: string | null; focused?: boolean } = {}) {
@@ -68,6 +98,7 @@ export const Timeline = memo(function Timeline({ sessionId, focused = true }: { 
   const healthKnown = useAppStore(state => state.health !== null)
   const localSessionImportAvailable = useAppStore(state => localSessionImportSupported(state.health))
   const healthActive = useAppStore(state => resolvedSessionId ? state.activeSessionIds.has(resolvedSessionId) : false)
+  const pendingSubmission = useAppStore(state => resolvedSessionId ? state.pendingTurnSubmissions[resolvedSessionId] : undefined)
   const activeCodexRunId = useAppStore(state => {
     if (!resolvedSessionId) return null
     const run = state.health?.active_runs?.find(candidate => candidate.session_id === resolvedSessionId)
@@ -101,10 +132,10 @@ export const Timeline = memo(function Timeline({ sessionId, focused = true }: { 
     healthKnown,
     healthActive
   )
-  return <TimelineSession key={workspaceKey} profileId={activeProfileId} profileGeneration={profileGeneration} serverIdentity={serverIdentity} sessionId={resolvedSessionId} snapshot={snapshot} liveTurnState={liveTurnState} activeCodexRunId={activeCodexRunId} focused={focused} />
+  return <TimelineSession key={workspaceKey} profileId={activeProfileId} profileGeneration={profileGeneration} serverIdentity={serverIdentity} sessionId={resolvedSessionId} snapshot={snapshot} pendingSubmission={pendingSubmission} liveTurnState={liveTurnState} activeCodexRunId={activeCodexRunId} focused={focused} />
 })
 
-function TimelineSession({ profileId, profileGeneration, serverIdentity, sessionId, snapshot, liveTurnState, activeCodexRunId, focused }: { profileId: string | null; profileGeneration: number; serverIdentity: string | null; sessionId: string; snapshot: SessionSnapshot; liveTurnState: boolean | null; activeCodexRunId: string | null; focused: boolean }) {
+function TimelineSession({ profileId, profileGeneration, serverIdentity, sessionId, snapshot, pendingSubmission, liveTurnState, activeCodexRunId, focused }: { profileId: string | null; profileGeneration: number; serverIdentity: string | null; sessionId: string; snapshot: SessionSnapshot; pendingSubmission?: PendingTurnSubmission; liveTurnState: boolean | null; activeCodexRunId: string | null; focused: boolean }) {
   useLocale()
   const ref = useRef<VirtuosoHandle>(null)
   const minimapRef = useRef<TimelineMinimapHandle>(null)
@@ -118,6 +149,7 @@ function TimelineSession({ profileId, profileGeneration, serverIdentity, session
   const previousLastKey = useRef<string | null>(null)
   const atBottomRef = useRef(initialViewState?.atBottom ?? true)
   const topItemIdRef = useRef<string | null>(initialViewState?.topItemId ?? null)
+  const topItemSeqRef = useRef<number | null>(initialViewState?.topItemSeq ?? null)
   const topOffsetRef = useRef(initialViewState?.topOffset ?? 0)
   const distanceFromBottomRef = useRef(initialViewState?.distanceFromBottom ?? 0)
   const viewSaveTimer = useRef<number | null>(null)
@@ -293,8 +325,16 @@ function TimelineSession({ profileId, profileGeneration, serverIdentity, session
     semanticProjected.current = projection.semantic
     const presented = historicalWindow || liveTurnState === false
       ? settleInactiveTimelineItems(projection.rendered)
-      : projection.rendered
-    const next = reconcileRenderTimelineItems(previous, omitQueuedPendingTimelineItems(presented, snapshot.queuedTurns, sessionId))
+      : overlayReasoningStream(projection.rendered, projection.semantic, snapshot.reasoningStream?.items, sessionId)
+    const canonical = omitQueuedPendingTimelineItems(presented, snapshot.queuedTurns, sessionId)
+    const showPending = !historicalWindow
+      && pendingSubmission
+      && pendingSubmission.mode !== 'queue'
+      && !pendingTurnSubmissionAccepted(pendingSubmission, sourceEvents)
+    const displayed = showPending
+      ? [...canonical, pendingTurnMessageItem(sessionId, pendingSubmission)]
+      : canonical
+    const next = reconcileRenderTimelineItems(previous, displayed)
     firstItemIndex.current = shiftedTimelineFirstItemIndex(
       firstItemIndex.current,
       previous.map(item => item.key),
@@ -308,11 +348,13 @@ function TimelineSession({ profileId, profileGeneration, serverIdentity, session
     presentedActiveRunId,
     snapshot.files,
     snapshot.queuedTurns,
+    snapshot.reasoningStream,
     sessionId,
     snapshot.session.codex_thread_id,
     sourceEvents,
     listSourceKey,
     projectionSourceKey,
+    pendingSubmission,
     workspaceKey
   ])
   itemsLength.current = items.length
@@ -333,19 +375,32 @@ function TimelineSession({ profileId, profileGeneration, serverIdentity, session
     isAgentVisibleEvent(event) ? Math.max(latest, event.seq) : latest
   ), 0), [sourceEvents])
   const [initialLocation] = useState(() => initialTimelineLocation(initialViewState, items.map(item => item.key), unreadAtOpen))
+  const [restoringSavedView, setRestoringSavedView] = useState(() => Boolean(
+    initialViewState?.atBottom === false
+    && Number.isSafeInteger(initialViewState.topItemSeq)
+    && Number(initialViewState.topItemSeq) > 0
+    && !items.some(item => item.key === initialViewState.topItemId)
+  ))
+  const restoringSavedViewRef = useRef(restoringSavedView)
+  restoringSavedViewRef.current = restoringSavedView
   // True while a chat that opened at latest is still settling (see
   // OPEN_SETTLE_QUIET_MS). Cleared by quiet time or by the user scrolling up.
-  const openSettlingRef = useRef(isLatestTimelineLocation(initialLocation))
+  const openSettlingRef = useRef(!restoringSavedView && isLatestTimelineLocation(initialLocation))
   const openSettleTimer = useRef<number | null>(null)
   const openSettleStartedAt = useRef(Date.now())
   // Any explicit navigation (search result, landmark seek, New button) bumps
   // the history seek lease; that ends settling so it is never fought.
   const openSettleLease = useRef(historySeekLease.current)
+  const restoredAnchorIndex = historicalWindow?.restoredView?.topItemId
+    ? items.findIndex(item => item.key === historicalWindow.restoredView?.topItemId)
+    : -1
   const historicalAnchorIndex = historicalWindow
-    ? Math.max(0, items.findIndex(item => timelineItemSequenceRange(item)[1] >= historicalWindow.anchorSeq))
+    ? Math.max(0, restoredAnchorIndex >= 0 ? restoredAnchorIndex : items.findIndex(item => timelineItemSequenceRange(item)[1] >= historicalWindow.anchorSeq))
     : -1
   const historicalLocation: TimelineInitialLocation = historicalWindow
-    ? { index: historicalAnchorIndex, align: 'center' }
+    ? historicalWindow.restoredView
+      ? { index: historicalAnchorIndex, align: 'start', offset: -(historicalWindow.restoredView.topOffset ?? 0) }
+      : { index: historicalAnchorIndex, align: 'center' }
     : undefined
   const sourceLocationRef = useRef<{ sourceKey: string; location: TimelineInitialLocation }>({
     sourceKey: listSourceKey,
@@ -374,10 +429,43 @@ function TimelineSession({ profileId, profileGeneration, serverIdentity, session
   }
   const activeInitialLocation = historicalLocation ?? sourceLocationRef.current.location
 
+  const cancelSavedViewRestore = useCallback(() => {
+    if (!restoringSavedViewRef.current) return
+    restoringSavedViewRef.current = false
+    historySeekLease.current += 1
+    setRestoringSavedView(false)
+  }, [])
+
+  useEffect(() => {
+    if (!restoringSavedViewRef.current || !initialViewState?.topItemSeq) return
+    const lease = ++historySeekLease.current
+    void window.agentsDock.timeline.around(sessionId, initialViewState.topItemSeq, HISTORICAL_SEEK_EVENT_LIMIT).then(page => {
+      if (lease !== historySeekLease.current || page.events.length === 0) return
+      setHistoricalWindow({ page, anchorSeq: initialViewState.topItemSeq!, restoredView: initialViewState })
+    }).catch(error => {
+      if (lease === historySeekLease.current) useAppStore.getState().setError(error instanceof Error ? error.message : String(error))
+    }).finally(() => {
+      if (lease !== historySeekLease.current) return
+      restoringSavedViewRef.current = false
+      setRestoringSavedView(false)
+    })
+  }, [initialViewState, sessionId])
+
+  const scrollToLoadedIndex = useCallback((index: number, behavior: 'auto' | 'smooth' = 'auto') => {
+    const lease = ++historySeekLease.current
+    const navigate = () => {
+      if (lease === historySeekLease.current) ref.current?.scrollToIndex({ index, align: 'center', behavior })
+    }
+    // Cancelling a saved-history restore mounts the live list on the next render.
+    if (ref.current) navigate()
+    else window.requestAnimationFrame(navigate)
+  }, [])
+
   const scrollToLatest = useCallback(() => {
     ref.current?.scrollToIndex({ index: 'LAST', align: 'end', behavior: 'auto' })
   }, [])
   const startLatestNavigation = useCallback((deferFrames = 0) => {
+    cancelSavedViewRestore()
     const lease = ++historySeekLease.current
     historicalPagingRef.current = null
     if (workspaceLayoutFrame.current != null) window.cancelAnimationFrame(workspaceLayoutFrame.current)
@@ -411,27 +499,28 @@ function TimelineSession({ profileId, profileGeneration, serverIdentity, session
     }
 
     navigate(deferFrames)
-  }, [scrollToLatest])
+  }, [cancelSavedViewRestore, scrollToLatest])
   const jumpToLatest = useCallback(() => startLatestNavigation(), [startLatestNavigation])
 
   const captureVisiblePosition = useCallback(() => {
-    if (historicalWindow) return
+    if (restoringSavedViewRef.current) return
     const node = scroller.current
     if (!node) return
     const viewport = node.getBoundingClientRect()
     const rows = Array.from(node.querySelectorAll<HTMLElement>('[data-index]'))
     const row = rows.find(candidate => candidate.getBoundingClientRect().bottom > viewport.top + 1)
-    if (row) {
-      const semanticKey = row.querySelector<HTMLElement>('[data-timeline-key]')?.dataset.timelineKey
-      const raw = Number(row.dataset.index)
-      const index = raw >= firstItemIndex.current ? raw - firstItemIndex.current : raw
-      topItemIdRef.current = semanticKey ?? items[index]?.key ?? topItemIdRef.current
-      topOffsetRef.current = row.getBoundingClientRect().top - viewport.top
-    }
+    if (!row) return
+    const semanticKey = row.querySelector<HTMLElement>('[data-timeline-key]')?.dataset.timelineKey
+    const raw = Number(row.dataset.index)
+    const index = raw >= firstItemIndex.current ? raw - firstItemIndex.current : raw
+    topItemIdRef.current = semanticKey ?? items[index]?.key ?? topItemIdRef.current
+    const item = semanticKey ? items.find(candidate => candidate.key === semanticKey) : items[index]
+    if (item) topItemSeqRef.current = timelineItemSequenceRange(item)[0]
+    topOffsetRef.current = row.getBoundingClientRect().top - viewport.top
     const distanceFromBottom = Math.max(0, node.scrollHeight - node.scrollTop - node.clientHeight)
     distanceFromBottomRef.current = distanceFromBottom
     atBottomRef.current = distanceFromBottom <= 80
-  }, [historicalWindow, items])
+  }, [items])
   captureVisiblePositionRef.current = captureVisiblePosition
 
   const restoreWorkspaceLayoutAnchor = useCallback(() => {
@@ -455,13 +544,14 @@ function TimelineSession({ profileId, profileGeneration, serverIdentity, session
   const persistView = useCallback((): Promise<void> | null => {
     // A transient position captured while the opened chat is still settling
     // would be restored on the next open as a "strange landing point".
-    if (historicalWindow || openSettlingRef.current) return null
+    if (restoringSavedViewRef.current || openSettlingRef.current) return null
     const state: ViewState = {
       sessionId,
       topItemId: topItemIdRef.current,
+      topItemSeq: topItemSeqRef.current,
       topOffset: topOffsetRef.current,
       distanceFromBottom: distanceFromBottomRef.current,
-      atBottom: atBottomRef.current,
+      atBottom: historicalWindow ? false : atBottomRef.current,
       updatedAt: Date.now()
     }
     rememberViewState(workspaceKey, state)
@@ -592,7 +682,7 @@ function TimelineSession({ profileId, profileGeneration, serverIdentity, session
     previousLastKey.current = last
   }, [items])
 
-  useEffect(() => {
+  const settleLatestLayout = useCallback(() => {
     if (!openSettlingRef.current) return
     const finishSettling = () => {
       if (openSettleTimer.current != null) window.clearTimeout(openSettleTimer.current)
@@ -625,7 +715,9 @@ function TimelineSession({ profileId, profileGeneration, serverIdentity, session
     })
     if (openSettleTimer.current != null) window.clearTimeout(openSettleTimer.current)
     openSettleTimer.current = window.setTimeout(finishSettling, OPEN_SETTLE_QUIET_MS)
-  }, [historicalWindow, items, scrollToLatest])
+  }, [historicalWindow, scrollToLatest])
+
+  useEffect(() => { settleLatestLayout() }, [items, settleLatestLayout])
 
   useEffect(() => () => {
     if (openSettleTimer.current != null) window.clearTimeout(openSettleTimer.current)
@@ -715,13 +807,14 @@ function TimelineSession({ profileId, profileGeneration, serverIdentity, session
   }, [focused, sessionId, startLatestNavigation])
 
   const openSearchResult = useCallback(async (result: TimelineSearchResult) => {
+    cancelSavedViewRestore()
     const directIndex = projected.current.findIndex(item => {
       if (timelineItemHasEvent(item, result.event_id)) return true
       const [start, end] = timelineItemSequenceRange(item)
       return start <= result.seq && result.seq <= end
     })
     if (directIndex >= 0) {
-      ref.current?.scrollToIndex({ index: directIndex, align: 'center', behavior: 'auto' })
+      scrollToLoadedIndex(directIndex)
       return
     }
     const lease = ++historySeekLease.current
@@ -736,13 +829,14 @@ function TimelineSession({ profileId, profileGeneration, serverIdentity, session
     } finally {
       if (lease === historySeekLease.current) setSeekingHistory(false)
     }
-  }, [sessionId])
+  }, [cancelSavedViewRestore, scrollToLoadedIndex, sessionId])
 
   const openPinnedEvent = useCallback(async (eventId: string, query?: string) => {
+    cancelSavedViewRestore()
     const lease = ++historySeekLease.current
     const index = projected.current.findIndex(item => timelineItemHasEvent(item, eventId))
     if (index >= 0) {
-      ref.current?.scrollToIndex({ index, align: 'center', behavior: 'smooth' })
+      scrollToLoadedIndex(index, 'smooth')
       return
     }
     const clean = query?.trim()
@@ -754,7 +848,7 @@ function TimelineSession({ profileId, profileGeneration, serverIdentity, session
     } catch (error) {
       if (lease === historySeekLease.current) useAppStore.getState().setError(error instanceof Error ? error.message : String(error))
     }
-  }, [openSearchResult, sessionId])
+  }, [cancelSavedViewRestore, openSearchResult, scrollToLoadedIndex, sessionId])
 
   useEffect(() => {
     const openSearch = (event: Event) => { if (timelineEventTargetsSession(event, sessionId, focused)) setSearchOpen(true) }
@@ -812,7 +906,7 @@ function TimelineSession({ profileId, profileGeneration, serverIdentity, session
 
   const bootstrapCursor = snapshot.nextTimelineBefore ?? snapshot.events[0]?.seq ?? null
   useEffect(() => {
-    if (historicalWindow) return
+    if (historicalWindow || restoringSavedView) return
     const step = advanceTimelineHistoryBootstrap(historyBootstrapRef.current, {
       cursor: bootstrapCursor,
       hasMore: snapshot.hasMoreEvents,
@@ -823,9 +917,10 @@ function TimelineSession({ profileId, profileGeneration, serverIdentity, session
     })
     historyBootstrapRef.current = step.state
     if (step.loadLimit != null) void loadOlder(step.loadLimit)
-  }, [bootstrapCursor, historicalWindow, items.length, loadOlder, loadingOlder, projectionSourceKey, snapshot.hasMoreEvents, snapshot.semanticPaging])
+  }, [bootstrapCursor, historicalWindow, items.length, loadOlder, loadingOlder, projectionSourceKey, restoringSavedView, snapshot.hasMoreEvents, snapshot.semanticPaging])
 
   const requestOlderFromUserScroll = useCallback((event: WheelEvent<HTMLDivElement>) => {
+    cancelSavedViewRestore()
     if (event.deltaY >= 0) return
     // The user is scrolling up on purpose: stop holding the bottom.
     if (openSettlingRef.current) {
@@ -840,7 +935,7 @@ function TimelineSession({ profileId, profileGeneration, serverIdentity, session
       olderPagingArmedRef.current = false
       void loadOlder()
     }
-  }, [hasOlderMessages, historicalWindow, loadOlder])
+  }, [cancelSavedViewRestore, hasOlderMessages, historicalWindow, loadOlder])
 
   const findFile = useCallback(async (fileId: string) => {
     const event = await window.agentsDock.files.findEvent(sessionId, fileId)
@@ -877,12 +972,13 @@ function TimelineSession({ profileId, profileGeneration, serverIdentity, session
     syncMinimapToVisibleRange()
   }, [items, navigatorLandmarks, syncMinimapToVisibleRange])
   const seekTimeline = useCallback(async (landmark: TimelineNavigatorLandmark) => {
+    cancelSavedViewRestore()
     const directIndex = landmark.index ?? items.findIndex(item => {
       const [start, end] = timelineItemSequenceRange(item)
       return start <= landmark.end_seq && landmark.start_seq <= end
     })
     if (directIndex >= 0) {
-      ref.current?.scrollToIndex({ index: directIndex, align: 'center', behavior: 'auto' })
+      scrollToLoadedIndex(directIndex)
       return
     }
     const lease = ++historySeekLease.current
@@ -898,7 +994,7 @@ function TimelineSession({ profileId, profileGeneration, serverIdentity, session
     } finally {
       if (lease === historySeekLease.current) setSeekingHistory(false)
     }
-  }, [items, sessionId])
+  }, [cancelSavedViewRestore, items, scrollToLoadedIndex, sessionId])
   const returnToLatest = useCallback(() => {
     startLatestNavigation(2)
   }, [startLatestNavigation])
@@ -978,7 +1074,7 @@ function TimelineSession({ profileId, profileGeneration, serverIdentity, session
 
   return (
     <div className="timeline" onWheelCapture={requestOlderFromUserScroll}>
-      <Virtuoso
+      {restoringSavedView ? <div className="timeline-pending" /> : <Virtuoso
         key={listSourceKey}
         ref={ref}
         data={items}
@@ -990,6 +1086,7 @@ function TimelineSession({ profileId, profileGeneration, serverIdentity, session
         scrollerRef={setScroller}
         skipAnimationFrameInResizeObserver
         followOutput={false}
+        totalListHeightChanged={settleLatestLayout}
         atBottomThreshold={80}
         atBottomStateChange={value => {
           atBottomRef.current = value
@@ -1036,7 +1133,7 @@ function TimelineSession({ profileId, profileGeneration, serverIdentity, session
         endReached={() => { if (historicalWindow) void loadHistoricalEdge('newer') }}
         components={components}
         itemContent={itemContent}
-      />
+      />}
       {navigatorLandmarks.length > 2 && <TimelineMinimap
         ref={minimapRef}
         landmarks={navigatorLandmarks}
@@ -1072,7 +1169,7 @@ function TimelineSession({ profileId, profileGeneration, serverIdentity, session
           {searchResults.length > 12 && <p>{t('timeline.search.range', { start: searchWindowStart + 1, end: Math.min(searchResults.length, searchWindowStart + 12), count: searchResults.length })}</p>}
         </div>}
       </div>}
-      {!historicalWindow && !atBottom && <ShortcutTooltip shortcut="jumpLatest" side="left"><button className={`latest-button ${newBelow ? 'has-new' : ''}`} aria-label={t('timeline.ui.jumpToLatest')} onClick={jumpToLatest}><ArrowDown size={14} />{newBelow ? t('timeline.ui.new') : ''}</button></ShortcutTooltip>}
+      {(historicalWindow || !atBottom) && <ShortcutTooltip shortcut="jumpLatest" side="left"><button className={`latest-button ${newBelow ? 'has-new' : ''}`} aria-label={t('timeline.ui.jumpToLatest')} onClick={historicalWindow ? returnToLatest : jumpToLatest}><ArrowDown size={14} />{newBelow ? t('timeline.ui.new') : ''}</button></ShortcutTooltip>}
       {seekingHistory && <div className="timeline-seeking"><LoaderCircle className="spin" size={13} />  {t('timeline.ui.openingThatPoint')}</div>}
     </div>
   )

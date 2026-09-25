@@ -15,6 +15,7 @@ import agent_server
 from codex_app_server import (
     CodexAppServerDisconnected,
     CodexAppServerRequestError,
+    CodexAppServerTimeout,
 )
 
 
@@ -25,8 +26,10 @@ class FakeTurn:
         *,
         turn_id: str = "turn-native",
         steer_error: BaseException | None = None,
+        transport_generation: int = 1,
     ) -> None:
         self.turn_id = turn_id
+        self.transport_generation = transport_generation
         self.steer_error = steer_error
         self.notifications: asyncio.Queue[
             tuple[int, dict[str, object] | BaseException]
@@ -37,6 +40,10 @@ class FakeTurn:
         self.steer_calls: list[tuple[list[dict[str, object]], str | None]] = []
         self.interrupt_calls = 0
         self.close_calls = 0
+        self._subscription = Mock(
+            next_notification=self.next_notification,
+            next_notification_with_sequence=self.next_notification_with_sequence,
+        )
 
     async def next_notification(
         self,
@@ -158,6 +165,7 @@ class FakeManager:
         self.turns = list(turns or [])
         self.start_turn_error = start_turn_error
         self.read_thread_result = read_thread_result
+        self.generation = 1
         self.start_calls = 0
         self.read_thread_calls: list[tuple[str, bool]] = []
         self.list_turns_calls: list[tuple[str, int, str, str]] = []
@@ -165,9 +173,14 @@ class FakeManager:
             tuple[str, list[dict[str, object]], dict[str, object]]
         ] = []
         self.notification_barriers: list[tuple[object, str]] = []
+        self.retire_generation_calls: list[int] = []
+        self.retained_stream_calls: list[bool] = []
 
     async def start(self) -> None:
         self.start_calls += 1
+
+    def is_thread_loaded(self, thread_id: str) -> bool:
+        return any(call[0] == thread_id for call in self.turn_calls)
 
     async def wait_for_notification_handler(
         self,
@@ -182,8 +195,10 @@ class FakeManager:
         input_items: list[dict[str, object]],
         *,
         overrides: dict[str, object] | None = None,
+        retain_thread_stream: bool = False,
     ) -> FakeTurn:
         self.turn_calls.append((thread_id, input_items, dict(overrides or {})))
+        self.retained_stream_calls.append(retain_thread_stream)
         if self.start_turn_error is not None:
             raise self.start_turn_error
         if self.turns:
@@ -220,6 +235,10 @@ class FakeManager:
                     if isinstance(turn, dict)
                 ]
         return []
+
+    async def retire_generation(self, expected_generation: int) -> bool:
+        self.retire_generation_calls.append(expected_generation)
+        return expected_generation == self.generation
 
 
 def completed_notification(status: str = "completed") -> dict[str, object]:
@@ -282,6 +301,8 @@ class CodexAppServerRunnerTests(unittest.IsolatedAsyncioTestCase):
         self.previous_queued = agent_server.QUEUED_TURNS
         self.previous_run_now = agent_server.RUN_NOW_TURNS
         self.previous_steering = agent_server.STEERING_SESSIONS
+        self.previous_active_lock = agent_server.ACTIVE_LOCK
+        self.previous_lifecycle_locks = agent_server.SESSION_LIFECYCLE_LOCKS
         self.previous_run_now_requests = agent_server.RUN_NOW_REQUESTS
         self.previous_run_now_completed = agent_server.RUN_NOW_COMPLETED_RESULTS
         self.previous_run_metadata = agent_server.RUN_METADATA
@@ -319,6 +340,13 @@ class CodexAppServerRunnerTests(unittest.IsolatedAsyncioTestCase):
         agent_server.QUEUED_TURNS = {}
         agent_server.RUN_NOW_TURNS = {}
         agent_server.STEERING_SESSIONS = set()
+        # IsolatedAsyncioTestCase creates one loop per test. A test that
+        # deliberately contends the production lock binds it to that loop, so
+        # every case needs a fresh lock just like it gets fresh runtime maps.
+        agent_server.ACTIVE_LOCK = asyncio.Lock()
+        # Goal handoff now deliberately contends a per-chat lifecycle lock.
+        # It must not retain a binding to a preceding test's event loop.
+        agent_server.SESSION_LIFECYCLE_LOCKS = {}
         agent_server.RUN_NOW_REQUESTS = {}
         agent_server.RUN_NOW_COMPLETED_RESULTS = OrderedDict()
         agent_server.RUN_METADATA = {}
@@ -340,6 +368,8 @@ class CodexAppServerRunnerTests(unittest.IsolatedAsyncioTestCase):
         agent_server.QUEUED_TURNS = self.previous_queued
         agent_server.RUN_NOW_TURNS = self.previous_run_now
         agent_server.STEERING_SESSIONS = self.previous_steering
+        agent_server.ACTIVE_LOCK = self.previous_active_lock
+        agent_server.SESSION_LIFECYCLE_LOCKS = self.previous_lifecycle_locks
         agent_server.RUN_NOW_REQUESTS = self.previous_run_now_requests
         agent_server.RUN_NOW_COMPLETED_RESULTS = self.previous_run_now_completed
         agent_server.RUN_METADATA = self.previous_run_metadata
@@ -621,6 +651,500 @@ class CodexAppServerRunnerTests(unittest.IsolatedAsyncioTestCase):
             asyncio.CancelledError(),
         )
 
+    async def test_terminal_releases_slot_before_cross_chat_finalization(
+        self,
+    ) -> None:
+        turn = FakeTurn([
+            agent_message(
+                "msg-cross-chat-answer",
+                "The cross-chat answer is ready.",
+                "final_answer",
+            ),
+            completed_notification(),
+        ])
+        manager = FakeManager(turn)
+        metadata = {
+            "purpose": "cross_chat_handoff_delivery",
+            "source_session_id": "chat-source",
+            "target_session_id": "chat-native",
+            "cross_chat_exchange_id": "exchange-ordering",
+            "cross_chat_exchange_leg_id": "leg-ordering",
+        }
+        agent_server.CURRENT_TURNS["chat-native"].update(metadata)
+        agent_server.RUN_METADATA["run-original"] = dict(metadata)
+        terminal_started = asyncio.Event()
+        finish_terminal = asyncio.Event()
+        terminal_observations: list[tuple[bool, bool, bool, bool]] = []
+        schedule = Mock()
+
+        async def gated_terminal(
+            _session_id: str,
+            _payload: dict[str, object],
+        ) -> dict[str, object]:
+            terminal_observations.append((
+                "chat-native" in agent_server.ACTIVE,
+                "chat-native" in agent_server.BUSY_SESSIONS,
+                "chat-native" in agent_server.CURRENT_TURNS,
+                "run-original" in agent_server.RUN_METADATA,
+            ))
+            terminal_started.set()
+            await finish_terminal.wait()
+            return {}
+
+        real_release = agent_server.release_turn_slot
+        release_slot = AsyncMock(side_effect=real_release)
+        terminal = AsyncMock(side_effect=gated_terminal)
+        stack, _events, _finished, _exec_fallback = self.runner_patches(
+            manager
+        )
+        with stack, patch.multiple(
+            agent_server,
+            release_turn_slot=release_slot,
+            append_turn_finished_event=terminal,
+            should_schedule_queue_after_finish=Mock(return_value=True),
+            schedule_next_queued_turn=schedule,
+        ):
+            runner = asyncio.create_task(agent_server.run_codex_app_server(
+                "chat-native",
+                "run-original",
+                "Answer the incoming cross-chat exchange.",
+                dict(self.session),
+                Path(self.cwd) / ".runner-test-manifest.json",
+                allow_exec_fallback=False,
+                allow_resume_rollover=False,
+            ))
+            try:
+                await asyncio.wait_for(terminal_started.wait(), timeout=1)
+                self.assertEqual(
+                    terminal_observations,
+                    [(False, False, False, True)],
+                )
+                self.assertFalse(runner.done())
+                schedule.assert_not_called()
+            finally:
+                finish_terminal.set()
+                await asyncio.wait_for(runner, timeout=2)
+
+        release_slot.assert_awaited_once_with(
+            "chat-native",
+            expected_run_id="run-original",
+        )
+        terminal.assert_awaited_once()
+        self.assertNotIn("run-original", agent_server.RUN_METADATA)
+        schedule.assert_called_once_with("chat-native")
+
+    async def test_terminal_cross_chat_finalization_survives_repeated_cancellation(
+        self,
+    ) -> None:
+        turn = FakeTurn([
+            agent_message(
+                "msg-cross-chat-cancel",
+                "The answer remains durable during cancellation.",
+                "final_answer",
+            ),
+            completed_notification(),
+        ])
+        manager = FakeManager(turn)
+        metadata = {
+            "purpose": "cross_chat_handoff_delivery",
+            "source_session_id": "chat-source",
+            "target_session_id": "chat-native",
+            "cross_chat_exchange_id": "exchange-cancel",
+            "cross_chat_exchange_leg_id": "leg-cancel",
+        }
+        agent_server.CURRENT_TURNS["chat-native"].update(metadata)
+        agent_server.RUN_METADATA["run-original"] = dict(metadata)
+        terminal_started = asyncio.Event()
+        finish_terminal = asyncio.Event()
+        terminal_completed = asyncio.Event()
+        terminal_cancelled = False
+        join_started = asyncio.Event()
+        schedule = Mock()
+
+        async def gated_terminal(
+            _session_id: str,
+            _payload: dict[str, object],
+        ) -> dict[str, object]:
+            nonlocal terminal_cancelled
+            self.assertNotIn("chat-native", agent_server.BUSY_SESSIONS)
+            terminal_started.set()
+            try:
+                await finish_terminal.wait()
+            except asyncio.CancelledError:
+                terminal_cancelled = True
+                raise
+            finally:
+                terminal_completed.set()
+            return {}
+
+        real_release = agent_server.release_turn_slot
+        release_slot = AsyncMock(side_effect=real_release)
+        terminal = AsyncMock(side_effect=gated_terminal)
+        unpin = AsyncMock()
+        real_join = agent_server.join_task_despite_caller_cancellation
+
+        async def observed_join(task: asyncio.Task[object]) -> object:
+            join_started.set()
+            return await real_join(task)
+
+        stack, _events, _finished, _exec_fallback = self.runner_patches(
+            manager
+        )
+        with stack, patch.multiple(
+            agent_server,
+            release_turn_slot=release_slot,
+            append_turn_finished_event=terminal,
+            should_schedule_queue_after_finish=Mock(return_value=True),
+            schedule_next_queued_turn=schedule,
+            unpin_codex_app_server_thread=unpin,
+            join_task_despite_caller_cancellation=observed_join,
+        ):
+            runner = asyncio.create_task(agent_server.run_codex_app_server(
+                "chat-native",
+                "run-original",
+                "Answer the incoming cross-chat exchange.",
+                dict(self.session),
+                Path(self.cwd) / ".runner-test-manifest.json",
+                allow_exec_fallback=False,
+                allow_resume_rollover=False,
+            ))
+            try:
+                await asyncio.wait_for(terminal_started.wait(), timeout=1)
+                runner.cancel()
+                await asyncio.wait_for(join_started.wait(), timeout=1)
+                runner.cancel()
+                await asyncio.sleep(0)
+                self.assertFalse(runner.done())
+                self.assertFalse(terminal_completed.is_set())
+                self.assertFalse(terminal_cancelled)
+                self.assertIn("run-original", agent_server.RUN_METADATA)
+                schedule.assert_not_called()
+            finally:
+                finish_terminal.set()
+            with self.assertRaises(asyncio.CancelledError):
+                await asyncio.wait_for(runner, timeout=2)
+
+        self.assertTrue(terminal_completed.is_set())
+        self.assertFalse(terminal_cancelled)
+        release_slot.assert_awaited_once_with(
+            "chat-native",
+            expected_run_id="run-original",
+        )
+        terminal.assert_awaited_once()
+        unpin.assert_awaited_once_with(manager, "thread-native")
+        self.assertNotIn("run-original", agent_server.RUN_METADATA)
+        schedule.assert_called_once_with("chat-native")
+
+    async def test_runner_cancellation_joins_exact_slot_release_and_unpin(self) -> None:
+        turn = FakeTurn()
+        manager = FakeManager(turn)
+        stack, _events, _finished, _exec_fallback = self.runner_patches(manager)
+        release_slot = AsyncMock(return_value=True)
+        unpin_started = asyncio.Event()
+        finish_unpin = asyncio.Event()
+
+        async def gated_unpin(*_args: object, **_kwargs: object) -> None:
+            unpin_started.set()
+            await finish_unpin.wait()
+
+        unpin = AsyncMock(side_effect=gated_unpin)
+        with stack, patch.object(
+            agent_server,
+            "release_turn_slot",
+            release_slot,
+        ), patch.object(
+            agent_server,
+            "unpin_codex_app_server_thread",
+            unpin,
+        ):
+            runner = asyncio.create_task(agent_server.run_codex_app_server(
+                "chat-native",
+                "run-original",
+                "Current text",
+                dict(self.session),
+                Path(self.cwd) / ".runner-test-manifest.json",
+                allow_exec_fallback=False,
+            ))
+            while not manager.turn_calls:
+                await asyncio.sleep(0)
+
+            runner.cancel()
+            await asyncio.wait_for(unpin_started.wait(), timeout=0.5)
+            runner.cancel()  # repeated hard-Stop cancellation during cleanup
+            await asyncio.sleep(0)
+            self.assertFalse(runner.done())
+            finish_unpin.set()
+            with self.assertRaises(asyncio.CancelledError):
+                await runner
+
+        release_slot.assert_awaited_once_with(
+            "chat-native",
+            expected_run_id="run-original",
+        )
+        unpin.assert_awaited_once_with(manager, "thread-native")
+
+    async def test_cancellation_during_turn_start_releases_provisional(self) -> None:
+        turn = FakeTurn()
+        manager = FakeManager(turn)
+        start_entered = asyncio.Event()
+        keep_start_pending = asyncio.Event()
+
+        async def pending_start(
+            thread_id: str,
+            input_items: list[dict[str, object]],
+            *,
+            overrides: dict[str, object] | None = None,
+            retain_thread_stream: bool = False,
+        ) -> FakeTurn:
+            manager.turn_calls.append(
+                (thread_id, input_items, dict(overrides or {}))
+            )
+            start_entered.set()
+            try:
+                await keep_start_pending.wait()
+            except asyncio.CancelledError as exc:
+                exc.pending_turn = turn
+                raise
+            return turn
+
+        manager.start_turn = AsyncMock(side_effect=pending_start)
+        stack, _events, _finished, _exec_fallback = self.runner_patches(manager)
+        release_slot = AsyncMock(return_value=True)
+        unpin = AsyncMock()
+        with stack, patch.object(
+            agent_server,
+            "release_turn_slot",
+            release_slot,
+        ), patch.object(
+            agent_server,
+            "unpin_codex_app_server_thread",
+            unpin,
+        ):
+            runner = asyncio.create_task(agent_server.run_codex_app_server(
+                "chat-native",
+                "run-original",
+                "Current text",
+                dict(self.session),
+                Path(self.cwd) / ".runner-test-manifest.json",
+                allow_exec_fallback=False,
+            ))
+            await asyncio.wait_for(start_entered.wait(), timeout=0.5)
+            runner.cancel()
+            with self.assertRaises(asyncio.CancelledError):
+                await runner
+
+        self.assertEqual(turn.interrupt_calls, 1)
+        self.assertEqual(turn.close_calls, 1)
+        release_slot.assert_awaited_once_with(
+            "chat-native",
+            expected_run_id="run-original",
+        )
+        unpin.assert_awaited_once_with(manager, "thread-native")
+
+    async def test_repeated_cancel_before_provisional_cleanup_cannot_skip_retirement(
+        self,
+    ) -> None:
+        turn = FakeTurn(turn_id="")
+        turn.transport_generation = 3
+        manager = FakeManager(turn)
+        start_entered = asyncio.Event()
+
+        async def pending_start(
+            thread_id: str,
+            input_items: list[dict[str, object]],
+            *,
+            overrides: dict[str, object] | None = None,
+            retain_thread_stream: bool = False,
+        ) -> FakeTurn:
+            manager.turn_calls.append(
+                (thread_id, input_items, dict(overrides or {}))
+            )
+            start_entered.set()
+            try:
+                await asyncio.Event().wait()
+            except asyncio.CancelledError as exc:
+                exc.pending_turn = turn
+                raise
+
+        class FinalizerGate:
+            def __init__(self) -> None:
+                self.entered = asyncio.Event()
+                self.release = asyncio.Event()
+
+            async def __aenter__(self) -> None:
+                self.entered.set()
+                await self.release.wait()
+
+            async def __aexit__(self, *_args: object) -> None:
+                return None
+
+        manager.start_turn = AsyncMock(side_effect=pending_start)
+        stack, _events, _finished, _exec_fallback = self.runner_patches(manager)
+        gate = FinalizerGate()
+        original_active_lock = agent_server.ACTIVE_LOCK
+        with stack, patch.object(
+            agent_server,
+            "CODEX_APP_SERVER_AMBIGUOUS_ACCEPT_SECONDS",
+            0.05,
+        ):
+            runner = asyncio.create_task(agent_server.run_codex_app_server(
+                "chat-native",
+                "run-original",
+                "Current text",
+                dict(self.session),
+                Path(self.cwd) / ".runner-test-manifest.json",
+                allow_exec_fallback=False,
+            ))
+            try:
+                await asyncio.wait_for(start_entered.wait(), timeout=0.5)
+                agent_server.ACTIVE_LOCK = gate  # type: ignore[assignment]
+                runner.cancel()
+                await asyncio.wait_for(gate.entered.wait(), timeout=0.5)
+                runner.cancel()
+                gate.release.set()
+                with self.assertRaises(asyncio.CancelledError):
+                    await asyncio.wait_for(runner, timeout=0.5)
+            finally:
+                gate.release.set()
+                agent_server.ACTIVE_LOCK = original_active_lock
+                if not runner.done():
+                    runner.cancel()
+                    await asyncio.gather(runner, return_exceptions=True)
+
+        self.assertEqual(turn.close_calls, 1)
+        self.assertEqual(manager.retire_generation_calls, [3])
+
+    async def test_cancellation_after_start_write_waits_for_late_turn_id(self) -> None:
+        turn = FakeTurn(turn_id="")
+        manager = FakeManager(turn)
+        start_entered = asyncio.Event()
+
+        async def pending_start(
+            thread_id: str,
+            input_items: list[dict[str, object]],
+            *,
+            overrides: dict[str, object] | None = None,
+            retain_thread_stream: bool = False,
+        ) -> FakeTurn:
+            manager.turn_calls.append(
+                (thread_id, input_items, dict(overrides or {}))
+            )
+            start_entered.set()
+            try:
+                await asyncio.Event().wait()
+            except asyncio.CancelledError as exc:
+                exc.pending_turn = turn
+                raise
+
+        manager.start_turn = AsyncMock(side_effect=pending_start)
+        stack, _events, _finished, _exec_fallback = self.runner_patches(manager)
+        release_slot = AsyncMock(return_value=True)
+        unpin = AsyncMock()
+        with stack, patch.multiple(
+            agent_server,
+            CODEX_APP_SERVER_AMBIGUOUS_ACCEPT_SECONDS=0.2,
+            release_turn_slot=release_slot,
+            unpin_codex_app_server_thread=unpin,
+        ):
+            runner = asyncio.create_task(agent_server.run_codex_app_server(
+                "chat-native",
+                "run-original",
+                "Current text",
+                dict(self.session),
+                Path(self.cwd) / ".runner-test-manifest.json",
+                allow_exec_fallback=False,
+            ))
+            await asyncio.wait_for(start_entered.wait(), timeout=0.5)
+            runner.cancel()
+            for _ in range(100):
+                if manager.list_turns_calls:
+                    break
+                await asyncio.sleep(0)
+            else:
+                self.fail("cancelled provisional reconciliation never started")
+            turn.adopt_turn_id("turn-late-after-cancel")
+            turn.feed({
+                "method": "turn/started",
+                "params": {
+                    "threadId": "thread-native",
+                    "turnId": "turn-late-after-cancel",
+                },
+            })
+            with self.assertRaises(asyncio.CancelledError):
+                await asyncio.wait_for(runner, timeout=0.5)
+
+        self.assertEqual(turn.interrupt_calls, 1)
+        self.assertEqual(turn.close_calls, 1)
+        self.assertEqual(manager.retire_generation_calls, [])
+        release_slot.assert_awaited_once_with(
+            "chat-native",
+            expected_run_id="run-original",
+        )
+        unpin.assert_awaited_once_with(manager, "thread-native")
+
+    async def test_unresolved_cancelled_start_retires_exact_generation(self) -> None:
+        turn = FakeTurn(turn_id="")
+        manager = FakeManager(turn)
+        start_entered = asyncio.Event()
+
+        async def pending_start(
+            thread_id: str,
+            input_items: list[dict[str, object]],
+            *,
+            overrides: dict[str, object] | None = None,
+            retain_thread_stream: bool = False,
+        ) -> FakeTurn:
+            manager.turn_calls.append(
+                (thread_id, input_items, dict(overrides or {}))
+            )
+            # Lazy app-server start/init advanced after the runner first
+            # acquired the manager. The provisional owns the generation that
+            # actually received the stdin write.
+            manager.generation = 2
+            turn.transport_generation = manager.generation
+            start_entered.set()
+            try:
+                await asyncio.Event().wait()
+            except asyncio.CancelledError as exc:
+                exc.pending_turn = turn
+                raise
+
+        manager.start_turn = AsyncMock(side_effect=pending_start)
+        stack, _events, _finished, _exec_fallback = self.runner_patches(manager)
+        release_slot = AsyncMock(return_value=True)
+        unpin = AsyncMock()
+        with stack, patch.multiple(
+            agent_server,
+            CODEX_APP_SERVER_AMBIGUOUS_ACCEPT_SECONDS=0.05,
+            release_turn_slot=release_slot,
+            unpin_codex_app_server_thread=unpin,
+        ):
+            runner = asyncio.create_task(agent_server.run_codex_app_server(
+                "chat-native",
+                "run-original",
+                "Current text",
+                dict(self.session),
+                Path(self.cwd) / ".runner-test-manifest.json",
+                allow_exec_fallback=False,
+            ))
+            await asyncio.wait_for(start_entered.wait(), timeout=0.5)
+            runner.cancel()
+            with self.assertRaises(asyncio.CancelledError):
+                await asyncio.wait_for(runner, timeout=0.5)
+
+        self.assertEqual(turn.interrupt_calls, 0)
+        self.assertEqual(turn.close_calls, 1)
+        self.assertEqual(manager.retire_generation_calls, [2])
+        release_slot.assert_awaited_once_with(
+            "chat-native",
+            expected_run_id="run-original",
+        )
+        unpin.assert_awaited_once_with(
+            manager,
+            "thread-native",
+            invalidate_loaded_thread=True,
+        )
+
     async def test_dispatcher_uses_app_server_and_only_auto_enables_fallback(
         self,
     ) -> None:
@@ -656,6 +1180,7 @@ class CodexAppServerRunnerTests(unittest.IsolatedAsyncioTestCase):
             manifest,
             allow_exec_fallback=True,
             interactive_app_server=False,
+            provider_runtime_env={},
         )
         exec_runner.assert_not_awaited()
 
@@ -719,6 +1244,7 @@ class CodexAppServerRunnerTests(unittest.IsolatedAsyncioTestCase):
             "Current text",
             self.session,
             manifest,
+            provider_runtime_env={},
         )
         invalidate_context.assert_awaited_once_with("chat-native")
         app_server.assert_not_awaited()
@@ -788,8 +1314,56 @@ class CodexAppServerRunnerTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual(
             manager.notification_barriers,
-            [(agent_server.project_codex_notification, "thread-native")],
+            # Drain before testing native goal ownership, then before final
+            # cleanup. Neither drain resends the user's prompt.
+            [(agent_server.project_codex_notification, "thread-native")] * 2,
         )
+
+    async def test_selected_skill_uses_native_text_and_structured_input(self) -> None:
+        turn = FakeTurn([
+            agent_message("msg-final", "Reviewed.", "final_answer"),
+            completed_notification(),
+        ])
+        manager = FakeManager(turn)
+        command = agent_server.ProviderCommandRecord(
+            public={"invocation": "/review"},
+            native={
+                "name": "review",
+                "path": "/private/provider/skills/review/SKILL.md",
+            },
+        )
+        stack, _events, _finished, exec_fallback = self.runner_patches(manager)
+        with stack:
+            await asyncio.wait_for(
+                agent_server.run_codex_app_server(
+                    "chat-native",
+                    "run-original",
+                    "/review focus on authentication",
+                    dict(self.session),
+                    Path(self.cwd) / ".runner-test-manifest.json",
+                    allow_exec_fallback=False,
+                    provider_command=command,
+                ),
+                timeout=2,
+            )
+
+        self.assertEqual(len(manager.turn_calls), 1)
+        self.assertEqual(
+            manager.turn_calls[0][1],
+            [
+                {
+                    "type": "text",
+                    "text": "$review focus on authentication",
+                    "text_elements": [],
+                },
+                {
+                    "type": "skill",
+                    "name": "review",
+                    "path": "/private/provider/skills/review/SKILL.md",
+                },
+            ],
+        )
+        exec_fallback.assert_not_awaited()
 
     async def test_scheduled_run_metadata_is_attached_to_live_reasoning_and_tools(
         self,
@@ -1040,6 +1614,9 @@ class CodexAppServerRunnerTests(unittest.IsolatedAsyncioTestCase):
         )
         manager = FakeManager(start_turn_error=rejection)
         stack, events, _finished, exec_fallback = self.runner_patches(manager)
+        runtime_env = {
+            "AGENTSDOCK_PROVIDER_AUTHORITY_ACTIONS": "publish",
+        }
         with stack:
             await agent_server.run_codex_app_server(
                 "chat-native",
@@ -1048,6 +1625,7 @@ class CodexAppServerRunnerTests(unittest.IsolatedAsyncioTestCase):
                 dict(self.session),
                 Path(self.cwd) / ".runner-test-manifest.json",
                 allow_exec_fallback=True,
+                provider_runtime_env=runtime_env,
             )
             unpin = agent_server.unpin_codex_app_server_thread
 
@@ -1059,6 +1637,10 @@ class CodexAppServerRunnerTests(unittest.IsolatedAsyncioTestCase):
         )
         self.context_invalidator.assert_awaited_once_with("chat-native")
         self.assertEqual(exec_fallback.await_args.args[2], "Safe to retry exactly once")
+        self.assertEqual(
+            exec_fallback.await_args.kwargs["provider_runtime_env"],
+            runtime_env,
+        )
         fallback_events = [
             call.args[2]
             for call in events.await_args_list
@@ -1068,6 +1650,75 @@ class CodexAppServerRunnerTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(
             fallback_events[0]["from"],
             agent_server.CODEX_TRANSPORT_APP_SERVER,
+        )
+
+    async def test_prewrite_turn_start_timeout_uses_exec_fallback_once(self) -> None:
+        timeout = CodexAppServerTimeout(
+            "turn/start",
+            0.01,
+            request_sent=False,
+        )
+        manager = FakeManager(start_turn_error=timeout)
+        stack, events, _finished, exec_fallback = self.runner_patches(manager)
+        with stack:
+            await agent_server.run_codex_app_server(
+                "chat-native",
+                "run-original",
+                "Replay only the request that never reached stdin",
+                dict(self.session),
+                Path(self.cwd) / ".runner-test-manifest.json",
+                allow_exec_fallback=True,
+            )
+            unpin = agent_server.unpin_codex_app_server_thread
+
+        self.assertFalse(timeout.request_sent)
+        self.assertTrue(timeout.safe_to_retry)
+        self.assertEqual(len(manager.turn_calls), 1)
+        exec_fallback.assert_awaited_once()
+        self.assertEqual(
+            exec_fallback.await_args.args[2],
+            "Replay only the request that never reached stdin",
+        )
+        unpin.assert_awaited_once_with(
+            manager,
+            "thread-native",
+            invalidate_loaded_thread=True,
+        )
+        self.assertEqual(
+            sum(
+                call.args[1] == "codex_transport_fallback"
+                for call in events.await_args_list
+            ),
+            1,
+        )
+
+    async def test_written_turn_start_failure_never_uses_exec_fallback(self) -> None:
+        ambiguous = CodexAppServerDisconnected(
+            "connection closed after write",
+            request_sent=True,
+            # Defend the delivery boundary even if a future transport path
+            # accidentally marks a post-write error as retryable.
+            safe_to_retry=True,
+        )
+        manager = FakeManager(start_turn_error=ambiguous)
+        stack, events, _finished, exec_fallback = self.runner_patches(manager)
+        with stack:
+            await agent_server.run_codex_app_server(
+                "chat-native",
+                "run-original",
+                "Never duplicate bytes already written",
+                dict(self.session),
+                Path(self.cwd) / ".runner-test-manifest.json",
+                allow_exec_fallback=True,
+                allow_resume_rollover=False,
+            )
+
+        exec_fallback.assert_not_awaited()
+        self.assertFalse(
+            any(
+                call.args[1] == "codex_transport_fallback"
+                for call in events.await_args_list
+            )
         )
 
     async def test_interactive_turn_start_rejection_invalidates_without_replay(
@@ -1176,6 +1827,298 @@ class CodexAppServerRunnerTests(unittest.IsolatedAsyncioTestCase):
             finished.await_args.args[1]["result_text"],
             "Observed the accepted turn.",
         )
+
+    async def exercise_goal_handoff(self, *, stop: bool) -> None:
+        turn = FakeTurn()
+        manager = FakeManager(turn)
+        handoff_ready = asyncio.Event()
+        continuation_output = asyncio.Event()
+        interrupted = asyncio.Event()
+        stack, events, finished, exec_fallback = self.runner_patches(manager)
+
+        async def read_retained_notification(
+            timeout: float | None = None,
+        ) -> tuple[int, dict[str, object]]:
+            active = agent_server.ACTIVE["chat-native"]
+            self.assertEqual(active["run_id"], "run-original")
+            self.assertEqual(active["codex_native_operation_kind"], "goal_resume")
+            self.assertIn("chat-native", agent_server.BUSY_SESSIONS)
+            self.assertEqual(
+                agent_server.CURRENT_TURNS["chat-native"]["run_id"],
+                "run-original",
+            )
+            self.assertEqual(active["codex_control_reservation_id"], "run-original")
+            self.assertEqual(
+                agent_server.CURRENT_TURNS["chat-native"]["codex_control_reservation_id"],
+                "run-original",
+            )
+            self.assertIs(
+                agent_server.CODEX_NATIVE_ACTION_TASKS[("chat-native", "run-original")],
+                runner,
+            )
+            finished.assert_not_awaited()
+            agent_server.release_turn_slot.assert_not_awaited()
+            agent_server.unpin_codex_app_server_thread.assert_not_awaited()
+            handoff_ready.set()
+            return await turn.next_notification_with_sequence(timeout)
+
+        turn._subscription = Mock(  # type: ignore[attr-defined]
+            next_notification_with_sequence=read_retained_notification,
+            next_notification=turn.next_notification,
+        )
+
+        async def record_event(
+            session_id: str, event_type: str, payload: dict[str, object],
+        ) -> dict[str, object]:
+            if event_type == "assistant_text" and payload.get("text") == "Goal result":
+                self.assertEqual(payload["run_id"], "run-original")
+                continuation_output.set()
+            return {}
+
+        events.side_effect = record_event
+
+        async def finalize(
+            session_id: str, run_id: str, *, stopped: bool,
+            payload: dict[str, object],
+        ) -> bool:
+            self.assertEqual(run_id, "run-original")
+            self.assertIsNotNone(agent_server.ACTIVE.pop(session_id, None))
+            agent_server.CURRENT_TURNS.pop(session_id)
+            agent_server.BUSY_SESSIONS.remove(session_id)
+            await finished(session_id, payload)
+            return True
+
+        async def pause_goal(*_args: object, **_kwargs: object) -> tuple[bool, bool, None]:
+            self.session["codex_goal"]["status"] = "paused"
+            return True, True, None
+
+        async def interrupt_native(
+            method: str, params: dict[str, object], **_kwargs: object,
+        ) -> dict[str, object]:
+            self.assertEqual(method, "turn/interrupt")
+            self.assertEqual(params["turnId"], "turn-goal")
+            self.assertEqual(self.session["codex_goal"]["status"], "paused")
+            interrupted.set()
+            return {}
+
+        manager.request = AsyncMock(side_effect=interrupt_native)
+        stop_task = None
+        with stack, patch.object(
+            agent_server, "CODEX_GOALS_ENABLED", True,
+        ), patch.object(
+            agent_server, "finalize_owned_turn_finished", AsyncMock(side_effect=finalize),
+        ) as finalize_mock, patch.object(
+            agent_server, "pause_active_codex_goal_for_stop", AsyncMock(side_effect=pause_goal),
+        ), patch.object(
+            agent_server, "CODEX_APP_SERVER_MANAGER", manager,
+        ), patch.object(
+            agent_server, "schedule_codex_subagent_finalization", Mock(),
+        ):
+            runner = asyncio.create_task(agent_server.run_codex_app_server(
+                "chat-native", "run-original", "Original request", dict(self.session),
+                Path(self.cwd) / ".runner-test-manifest.json",
+                allow_exec_fallback=False,
+            ))
+            try:
+                await self.wait_for_native_provider_ready(runner)
+                # Resume the goal while an ordinary user reply still owns the turn.
+                self.session["codex_goal"] = {
+                    "id": "goal-native", "objective": "Finish the task", "status": "active",
+                }
+                turn.feed(agent_message("ordinary-final", "Ordinary reply", "final_answer"))
+                turn.feed(completed_notification())
+                await asyncio.wait_for(handoff_ready.wait(), timeout=2)
+                self.assertEqual(manager.retained_stream_calls, [True])
+                self.assertEqual(turn.close_calls, 0)
+                active = agent_server.ACTIVE["chat-native"]
+                # The native projector binds turn/started before this consumer sees it.
+                active["provider_turn_id"] = "turn-goal"
+                active["provider_turn_ready"] = True
+                turn.feed({
+                    "method": "turn/started",
+                    "params": {"threadId": "thread-native", "turn": {"id": "turn-goal"}},
+                })
+                message = agent_message("goal-final", "Goal result", "final_answer")
+                message["params"]["turnId"] = "turn-goal"
+                turn.feed(message)
+                await asyncio.wait_for(continuation_output.wait(), timeout=2)
+                if stop:
+                    stop_task = asyncio.create_task(agent_server.stop_turn(
+                        "chat-native", expected_run_id="run-original",
+                        cascade_codex_subagents=False, cascade_claude_subagents=False,
+                        pause_queued_turns_on_stop=False,
+                    ))
+                    await asyncio.wait_for(interrupted.wait(), timeout=2)
+                else:
+                    self.session["codex_goal"]["status"] = "complete"
+                completed = completed_notification("interrupted" if stop else "completed")
+                completed["params"]["turnId"] = "turn-goal"
+                completed["params"]["turn"]["id"] = "turn-goal"
+                turn.feed(completed)
+                await asyncio.wait_for(runner, timeout=2)
+                if stop_task is not None:
+                    result = await asyncio.wait_for(stop_task, timeout=2)
+                    self.assertTrue(result["stopped"])
+                    manager.request.assert_awaited_once()
+                else:
+                    manager.request.assert_not_awaited()
+                finalize_mock.assert_awaited_once()
+                finished.assert_awaited_once()
+                self.assertEqual(finished.await_args.args[1]["stopped"], stop)
+                self.assertEqual(finished.await_args.args[1]["result_text"], "Goal result")
+                self.assertFalse(any(
+                    call.args[1] == "turn_finished" for call in events.await_args_list
+                ))
+                agent_server.unpin_codex_app_server_thread.assert_awaited_once()
+                self.assertEqual(turn.close_calls, 1)
+                self.assertEqual(len(manager.turn_calls), 1)
+                exec_fallback.assert_not_awaited()
+            finally:
+                pending = [task for task in (runner, stop_task) if task is not None and not task.done()]
+                for task in pending:
+                    task.cancel()
+                await asyncio.gather(*pending, return_exceptions=True)
+
+    async def test_goal_resumed_during_reply_retains_owner_until_goal_complete(self) -> None:
+        await self.exercise_goal_handoff(stop=False)
+
+    async def test_stop_during_retained_goal_interrupts_and_finalizes_once(self) -> None:
+        await self.exercise_goal_handoff(stop=True)
+
+    def prepare_goal_handoff(self, *, status: str = "active") -> tuple[FakeManager, FakeTurn]:
+        turn = FakeTurn()
+        manager = FakeManager(turn)
+        self.session["codex_goal"] = {
+            "id": "goal-native", "objective": "Finish the task", "status": status,
+        }
+        agent_server.ACTIVE["chat-native"] = {
+            "run_id": "run-original", "backend": agent_server.BACKEND_CODEX,
+            "transport": agent_server.CODEX_TRANSPORT_APP_SERVER,
+            "provider_thread_id": "thread-native", "provider_turn_id": "turn-native",
+            "provider_turn_ready": True, "codex_app_server_turn": turn,
+        }
+        return manager, turn
+
+    async def test_goal_handoff_waits_for_accepted_resume_lifecycle_update(self) -> None:
+        manager, turn = self.prepare_goal_handoff(status="paused")
+        projection_drained = asyncio.Event()
+
+        async def drain(*_args: object) -> None:
+            projection_drained.set()
+
+        manager.wait_for_notification_handler = AsyncMock(side_effect=drain)
+        with patch.object(agent_server, "CODEX_GOALS_ENABLED", True):
+            async with agent_server.session_lifecycle_lock("chat-native"):
+                handoff = asyncio.create_task(agent_server.retain_codex_goal_run_owner(
+                    "chat-native", "run-original", manager, "thread-native",
+                    subscription=turn._subscription,
+                ))
+                await asyncio.wait_for(projection_drained.wait(), timeout=1)
+                self.assertFalse(handoff.done())
+                self.assertNotIn("codex_goal_handoff_closed", agent_server.ACTIVE["chat-native"])
+                # An accepted goal/set persists its active response under this lock.
+                self.session["codex_goal"]["status"] = "active"
+            self.assertTrue(await asyncio.wait_for(handoff, timeout=1))
+        self.assertFalse(agent_server.ACTIVE["chat-native"]["codex_goal_handoff_closed"])
+        self.assertEqual(
+            agent_server.ACTIVE["chat-native"]["codex_control_reservation_id"],
+            agent_server.CURRENT_TURNS["chat-native"]["codex_control_reservation_id"],
+        )
+
+    async def test_completed_goal_with_unread_native_turn_retains_and_drains_stream(self) -> None:
+        manager, turn = self.prepare_goal_handoff(status="complete")
+        # The ordinary reply already consumed sequences 1 and 2. Projection
+        # reports complete before its retained continuation is rendered.
+        turn.notification_sequence = 2
+        turn.feed({
+            "method": "turn/started",
+            "params": {"threadId": "thread-native", "turn": {"id": "turn-goal"}},
+        })
+        message = agent_message("goal-final", "Fast goal result", "final_answer")
+        message["params"]["turnId"] = "turn-goal"
+        turn.feed(message)
+        completed = completed_notification()
+        completed["params"]["turnId"] = "turn-goal"
+        completed["params"]["turn"]["id"] = "turn-goal"
+        turn.feed(completed)
+        turn._subscription._last_enqueued_sequence = turn.notification_sequence
+        with patch.object(agent_server, "CODEX_GOALS_ENABLED", True), patch.object(
+            agent_server, "append_event", AsyncMock(return_value={}),
+        ) as events:
+            self.assertTrue(await agent_server.retain_codex_goal_run_owner(
+                "chat-native", "run-original", manager, "thread-native",
+                subscription=turn._subscription, handled_sequence=2,
+            ))
+            # Passive consumers must advance the same retained watermark even
+            # when no steering queue is attached.
+            agent_server.ACTIVE["chat-native"]["native_steer_queue"] = None
+            result = await asyncio.wait_for(agent_server.consume_codex_native_turn(
+                "chat-native", "run-original", "goal_resume", manager,
+                "thread-native", "run-original", turn._subscription,
+                finalize_operation=False, initial_sequence=2,
+            ), timeout=2)
+        self.assertEqual(result["status"], "completed")
+        self.assertEqual(result["result_text"], "Fast goal result")
+        self.assertEqual([call.args[1] for call in events.await_args_list], ["assistant_text"])
+        self.assertTrue(agent_server.ACTIVE["chat-native"]["codex_goal_handoff_closed"])
+        self.assertIn("chat-native", agent_server.BUSY_SESSIONS)
+        turn._subscription.close.assert_called_once()
+
+    async def test_goal_consumer_rechecks_resume_then_seals_before_stream_close(self) -> None:
+        manager, turn = self.prepare_goal_handoff()
+        timed_out = asyncio.Event()
+        resumed_read = asyncio.Event()
+        reads = 0
+
+        async def read(timeout: float | None = None) -> tuple[int, dict[str, object]]:
+            nonlocal reads
+            reads += 1
+            if reads == 1:
+                timed_out.set()
+                raise asyncio.TimeoutError
+            if reads == 2:
+                self.assertEqual(self.session["codex_goal"]["status"], "active")
+                self.assertFalse(agent_server.ACTIVE["chat-native"]["codex_goal_handoff_closed"])
+                resumed_read.set()
+            return await turn.next_notification_with_sequence(timeout)
+
+        def close() -> None:
+            self.assertTrue(agent_server.ACTIVE["chat-native"]["codex_goal_handoff_closed"])
+            self.assertIn("chat-native", agent_server.BUSY_SESSIONS)
+
+        turn._subscription.next_notification_with_sequence = read
+        turn._subscription.close.side_effect = close
+        with patch.object(agent_server, "CODEX_GOALS_ENABLED", True):
+            self.assertTrue(await agent_server.retain_codex_goal_run_owner(
+                "chat-native", "run-original", manager, "thread-native",
+                subscription=turn._subscription,
+            ))
+            self.session["codex_goal"]["status"] = "complete"
+            async with agent_server.session_lifecycle_lock("chat-native"):
+                consumer = asyncio.create_task(agent_server.consume_codex_native_turn(
+                    "chat-native", "run-original", "goal_resume", manager,
+                    "thread-native", "run-original", turn._subscription,
+                    finalize_operation=False,
+                ))
+                await asyncio.wait_for(timed_out.wait(), timeout=1)
+                self.assertFalse(consumer.done())
+                self.session["codex_goal"]["status"] = "active"
+            try:
+                await asyncio.wait_for(resumed_read.wait(), timeout=1)
+                self.session["codex_goal"]["status"] = "complete"
+                turn.feed({
+                    "method": "turn/started",
+                    "params": {"threadId": "thread-native", "turn": {"id": "turn-native"}},
+                })
+                turn.feed(completed_notification())
+                turn._subscription._last_enqueued_sequence = turn.notification_sequence
+                result = await asyncio.wait_for(consumer, timeout=2)
+            finally:
+                if not consumer.done():
+                    consumer.cancel()
+                    await asyncio.gather(consumer, return_exceptions=True)
+        self.assertEqual(result["status"], "completed")
+        turn._subscription.close.assert_called_once()
 
     async def test_stop_interrupts_native_turn_without_killing_shared_process(self) -> None:
         turn = FakeTurn()
@@ -1461,7 +2404,9 @@ class CodexAppServerRunnerTests(unittest.IsolatedAsyncioTestCase):
         agent_server.CURRENT_TURNS = {}
         runtime_started = asyncio.Event()
 
-        async def stalled_runtime(_backend: str) -> None:
+        async def stalled_runtime(
+            _backend: str, *, session: dict[str, object] | None = None,
+        ) -> None:
             runtime_started.set()
             await asyncio.Event().wait()
 
@@ -2166,7 +3111,7 @@ class CodexAppServerRunnerTests(unittest.IsolatedAsyncioTestCase):
                     "threadId": "thread-native",
                     "turnId": "turn-native",
                     "itemId": "raw-after-stop",
-                    "delta": "SECRET RAW REASONING",
+                    "delta": "Provider-supplied plaintext after Stop.",
                 },
             })
             turn.feed({
@@ -2177,7 +3122,7 @@ class CodexAppServerRunnerTests(unittest.IsolatedAsyncioTestCase):
                     "item": {
                         "id": "raw-after-stop",
                         "type": "reasoning",
-                        "text": "SECRET RAW REASONING",
+                        "text": ["Provider-supplied plaintext after Stop."],
                     },
                 },
             })
@@ -2277,21 +3222,21 @@ class CodexAppServerRunnerTests(unittest.IsolatedAsyncioTestCase):
         reasoning = [
             payload
             for event_type, payload in event_pairs
-            if event_type == "reasoning_summary"
+            if event_type in {"reasoning_summary", "reasoning_text"}
         ]
         self.assertEqual(
             [payload["text"] for payload in reasoning],
             [
                 "Completed reasoning after Stop.",
+                "Provider-supplied plaintext after Stop.",
                 "Completed plan after Stop.",
                 "Completed commentary after Stop.",
             ],
         )
         self.assertEqual(
             [payload.get("phase") for payload in reasoning],
-            [None, "plan", "commentary"],
+            ["summary", "reasoning", "plan", "commentary"],
         )
-        self.assertNotIn("SECRET RAW REASONING", str(event_pairs))
         self.assertFalse(
             any(event_type == "assistant_text" for event_type, _ in event_pairs)
         )
@@ -2545,19 +3490,14 @@ class CodexAppServerRunnerTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(steer_input[0]["type"], "text")
         self.assertEqual(steer_input[0]["text_elements"], [])
         steer_text = str(steer_input[0]["text"])
-        self.assertTrue(
-            steer_text.startswith(
-                user_prompt + "\n\n[AgentsDock provider authority]"
-            )
-        )
-        trusted_block = steer_text[len(user_prompt):]
+        self.assertEqual(steer_text, user_prompt)
         self.assertEqual(
             steer_text.count("[AgentsDock provider authority]"),
-            2,
+            1,
         )
-        self.assertIn(str(candidate_path), trusted_block)
-        self.assertNotIn(str(predecessor_path), trusted_block)
-        self.assertNotIn(fake_authority_path, trusted_block)
+        self.assertNotIn(str(candidate_path), steer_text)
+        self.assertNotIn(str(predecessor_path), steer_text)
+        self.assertIn(fake_authority_path, steer_text)
         self.assertNotIn(candidate_token, steer_text)
         self.assertNotIn(predecessor_token, steer_text)
         self.assertEqual(steer_message_id, run_now["run_id"])
@@ -2735,7 +3675,7 @@ class CodexAppServerRunnerTests(unittest.IsolatedAsyncioTestCase):
                     "threadId": "thread-native",
                     "turnId": "turn-native",
                     "itemId": "unfinished-reasoning",
-                    "delta": "This unfinished reasoning must stay transient.",
+                    "delta": "This unfinished summary remains visible as partial.",
                 },
             },
             {
@@ -2756,7 +3696,31 @@ class CodexAppServerRunnerTests(unittest.IsolatedAsyncioTestCase):
             "backend": agent_server.BACKEND_CODEX,
         }])
         stack, events, _finished, _exec_fallback = self.runner_patches(manager)
+        completed_trace_ready = asyncio.Event()
+        partial_trace_ready = asyncio.Event()
+        published_item_ids: set[str] = set()
+        expected_item_ids = {"reason-a", "reason-b", "commentary-before"}
+        update_stream = agent_server.update_reasoning_summary_stream
+
+        async def observe_append(_session_id, event_type, payload):
+            if event_type == "reasoning_summary" and payload.get("run_id") == "run-original":
+                published_item_ids.add(payload.get("item_id"))
+                if expected_item_ids <= published_item_ids:
+                    completed_trace_ready.set()
+            return {}
+
+        async def observe_stream(session_id, run_id, item_id, *args, **kwargs):
+            await update_stream(session_id, run_id, item_id, *args, **kwargs)
+            if (session_id, run_id, item_id) == ("chat-native", "run-original", "unfinished-reasoning"):
+                streamed = agent_server.reasoning_summary_stream_item(session_id, run_id, item_id)
+                if streamed.get("text") == "This unfinished summary remains visible as partial.":
+                    partial_trace_ready.set()
+
+        events.side_effect = observe_append
+        stack.enter_context(patch.object(agent_server, "update_reasoning_summary_stream", observe_stream))
         with stack:
+            released = agent_server.release_turn_slot
+            released.return_value = True
             runner = asyncio.create_task(
                 agent_server.run_codex_app_server(
                     "chat-native",
@@ -2767,41 +3731,42 @@ class CodexAppServerRunnerTests(unittest.IsolatedAsyncioTestCase):
                     allow_exec_fallback=True,
                 )
             )
-            for _ in range(100):
-                completed_trace = [
-                    call
-                    for call in events.await_args_list
-                    if call.args[1] == "reasoning_summary"
-                ]
-                if len(completed_trace) == 3:
-                    break
-                await asyncio.sleep(0)
-            else:
-                self.fail("pre-steer trace items were not published")
+            try:
+                # Steer only after both durable trace publication and the real
+                # live-summary update. Scheduler tick counts are not a deadline.
+                await asyncio.wait_for(asyncio.gather(
+                    completed_trace_ready.wait(), partial_trace_ready.wait()), timeout=10)
 
-            run_now = await asyncio.wait_for(
-                agent_server.run_queued_turn_now(
-                    "chat-native",
-                    "queued-steer",
-                ),
-                timeout=2,
-            )
-            # Re-delivery of one authoritative item must not duplicate it,
-            # while a distinct item with identical text remains visible.
-            turn.feed(reasoning_item("reason-a", "Same completed reasoning."))
-            turn.feed(reasoning_item("reason-after", "Same completed reasoning."))
-            turn.feed(agent_message(
-                "commentary-after",
-                "Completed commentary after steering.",
-                "commentary",
-            ))
-            turn.feed(agent_message(
-                "final-after",
-                "One final answer.",
-                "final_answer",
-            ))
-            turn.feed(completed_notification())
-            await asyncio.wait_for(runner, timeout=2)
+                run_now = await asyncio.wait_for(
+                    agent_server.run_queued_turn_now(
+                        "chat-native",
+                        "queued-steer",
+                    ),
+                    timeout=2,
+                )
+                # Re-delivery of one authoritative item must not duplicate it,
+                # while a distinct item with identical text remains visible.
+                turn.feed(reasoning_item("reason-a", "Same completed reasoning."))
+                turn.feed(reasoning_item("reason-after", "Same completed reasoning."))
+                turn.feed(agent_message(
+                    "commentary-after",
+                    "Completed commentary after steering.",
+                    "commentary",
+                ))
+                turn.feed(agent_message(
+                    "final-after",
+                    "One final answer.",
+                    "final_answer",
+                ))
+                turn.feed(completed_notification())
+                # This checks trace ownership, not a two-second cleanup SLA.
+                # Keep completion bounded without cancelling a valid finalizer
+                # when the full CI suite delays the event loop.
+                await asyncio.wait_for(runner, timeout=10)
+            finally:
+                if not runner.done():
+                    runner.cancel()
+                    await asyncio.gather(runner, return_exceptions=True)
 
         trace_payloads = [
             call.args[2]
@@ -2814,22 +3779,22 @@ class CodexAppServerRunnerTests(unittest.IsolatedAsyncioTestCase):
                 "reason-a",
                 "reason-b",
                 "commentary-before",
+                "unfinished-reasoning",
                 "reason-after",
                 "commentary-after",
             ],
         )
         self.assertEqual(
-            [payload["run_id"] for payload in trace_payloads[:3]],
-            ["run-original", "run-original", "run-original"],
+            [payload["run_id"] for payload in trace_payloads[:4]],
+            ["run-original"] * 4,
         )
         self.assertEqual(
-            [payload["run_id"] for payload in trace_payloads[3:]],
+            [payload["run_id"] for payload in trace_payloads[4:]],
             [run_now["run_id"], run_now["run_id"]],
         )
-        self.assertFalse(any(
-            "unfinished" in str(payload.get("text") or "").lower()
-            for payload in trace_payloads
-        ))
+        self.assertTrue(trace_payloads[3]["partial"])
+        self.assertEqual(trace_payloads[3]["text"], "This unfinished summary remains visible as partial.")
+        self.assertFalse(any(payload.get("partial") for payload in trace_payloads[:3] + trace_payloads[4:]))
         final_payloads = [
             call.args[2]
             for call in events.await_args_list
@@ -2838,8 +3803,118 @@ class CodexAppServerRunnerTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(final_payloads), 1)
         self.assertEqual(final_payloads[0]["item_id"], "final-after")
         self.assertEqual(final_payloads[0]["text"], "One final answer.")
+        released.assert_awaited_once_with(
+            "chat-native", expected_run_id=run_now["run_id"]
+        )
+        _finished.assert_awaited_once()
+        self.assertEqual(_finished.await_args.args[1]["run_id"], run_now["run_id"])
+        self.assertFalse(_finished.await_args.args[1]["stopped"])
 
-    async def test_app_server_never_persists_raw_reasoning_text(self) -> None:
+    async def test_summary_is_live_before_completion_and_replaced_once_authoritatively(self) -> None:
+        turn = FakeTurn()
+        stack, events, _finished, _fallback = self.runner_patches(FakeManager(turn))
+        broadcast = AsyncMock()
+
+        def delta(text, index=0, item_id="thinking"):
+            return {"method": "item/reasoning/summaryTextDelta", "params": {
+                "threadId": "thread-native", "turnId": "turn-native",
+                "itemId": item_id, "summaryIndex": index, "delta": text}}
+
+        async def wait_for_text(text):
+            async def ready():
+                while not any(text in str(call.args[1]) for call in broadcast.await_args_list):
+                    await asyncio.sleep(0)
+            await asyncio.wait_for(ready(), timeout=2)
+
+        with stack, patch.object(agent_server.HUB, "broadcast", broadcast), patch.dict(
+            agent_server.EVENT_SEQ_CACHE, {"chat-native": 10}, clear=True,
+        ):
+            runner = asyncio.create_task(agent_server.run_codex_app_server(
+                "chat-native", "run-original", "Explain", dict(self.session),
+                Path(self.cwd) / ".runner-test-manifest.json", allow_exec_fallback=True))
+            try:
+                turn.feed(delta("First section"))
+                await wait_for_text("First section")
+                turn.feed({"method": "item/reasoning/textDelta", "params": {
+                    "threadId": "thread-native", "turnId": "turn-native", "itemId": "thinking",
+                    "contentIndex": 0, "delta": "Live provider-supplied plaintext"}})
+                await wait_for_text("Live provider-supplied plaintext")
+                self.assertFalse(any(call.args[1] == "reasoning_summary" for call in events.await_args_list))
+                turn.feed({"method": "item/completed", "params": {
+                    "threadId": "thread-native", "turnId": "turn-native", "item": {
+                        "id": "tool-between", "type": "commandExecution", "command": "echo fixture",
+                        "status": "completed", "exitCode": 0, "aggregatedOutput": "fixture"}}})
+                turn.feed(delta("Second section", 1))
+                await wait_for_text("First section\\nSecond section")
+                completed = reasoning_item("thinking", "Authoritative revised summary")
+                completed["params"]["item"]["content"] = ["Authoritative plaintext section"]
+                turn.feed(completed)
+                turn.feed(completed)
+                turn.feed(delta("Late replay must not reopen the summary"))
+                turn.feed({"method": "item/reasoning/textDelta", "params": {
+                    "threadId": "thread-native", "turnId": "turn-native", "itemId": "thinking",
+                    "delta": "Late replay must not reopen plaintext"}})
+                turn.feed(agent_message("answer", "Done", "final_answer"))
+                turn.feed(completed_notification())
+                await asyncio.wait_for(runner, timeout=10)
+            finally:
+                if not runner.done():
+                    runner.cancel()
+                    await asyncio.gather(runner, return_exceptions=True)
+        summaries = [call.args[2] for call in events.await_args_list if call.args[1] in {"reasoning_summary", "reasoning_text"}]
+        self.assertEqual(len(summaries), 2)
+        self.assertEqual(summaries[0]["text"], "Authoritative revised summary")
+        self.assertEqual((summaries[1]["phase"], summaries[1]["text"]), ("reasoning", "Authoritative plaintext section"))
+        self.assertEqual(summaries[0]["reasoning_after_seq"], 10)
+        self.assertEqual(summaries[0]["item_id"], "thinking")
+        self.assertFalse(agent_server.REASONING_SUMMARY_STREAMS.get("chat-native"))
+        self.assertFalse(agent_server.REASONING_SUMMARY_STREAM_PENDING.get("chat-native"))
+        self.assertNotIn("Late replay", str(broadcast.await_args_list))
+
+    async def test_received_summary_survives_transport_error_and_task_cancellation(self) -> None:
+        for cancelled in (False, True):
+            with self.subTest(cancelled=cancelled):
+                turn = FakeTurn()
+                stack, events, _finished, _fallback = self.runner_patches(FakeManager(turn))
+                agent_server.BUSY_SESSIONS.add("chat-native")
+                agent_server.CURRENT_TURNS["chat-native"] = {"run_id": "run-original", "backend": "codex"}
+                with stack, patch.object(agent_server.HUB, "broadcast", AsyncMock()), patch.dict(
+                    agent_server.EVENT_SEQ_CACHE, {"chat-native": 10}, clear=True,
+                ):
+                    runner = asyncio.create_task(agent_server.run_codex_app_server(
+                        "chat-native", "run-original", "Explain", dict(self.session),
+                        Path(self.cwd) / ".runner-test-manifest.json", allow_exec_fallback=False,
+                        allow_resume_rollover=False))
+                    try:
+                        turn.feed({"method": "item/reasoning/summaryTextDelta", "params": {
+                            "threadId": "thread-native", "turnId": "turn-native",
+                            "itemId": "partial-thought", "summaryIndex": 0, "delta": "Already shown summary"}})
+                        turn.feed({"method": "item/reasoning/textDelta", "params": {
+                            "threadId": "thread-native", "turnId": "turn-native", "itemId": "partial-thought",
+                            "contentIndex": 0, "delta": "Already received provider plaintext"}})
+                        async def received():
+                            while not agent_server.reasoning_summary_stream_item("chat-native", "run-original", "partial-thought", "reasoning"):
+                                await asyncio.sleep(0)
+                        await asyncio.wait_for(received(), 2)
+                        if cancelled:
+                            runner.cancel()
+                        else:
+                            turn.feed(RuntimeError("Synthetic transport failure"))
+                        await asyncio.wait_for(asyncio.gather(runner, return_exceptions=True), 10)
+                    finally:
+                        if not runner.done():
+                            runner.cancel()
+                            await asyncio.gather(runner, return_exceptions=True)
+                summaries = [call.args[2] for call in events.await_args_list if call.args[1] in {"reasoning_summary", "reasoning_text"}]
+                self.assertEqual(len(summaries), 2)
+                self.assertEqual((summaries[0]["text"], summaries[0]["partial"], summaries[0]["reasoning_after_seq"]),
+                                 ("Already shown summary", True, 10))
+                self.assertEqual((summaries[1]["text"], summaries[1]["phase"], summaries[1]["partial"]),
+                                 ("Already received provider plaintext", "reasoning", True))
+                self.assertFalse(agent_server.REASONING_SUMMARY_STREAMS.get("chat-native"))
+                self.assertFalse(agent_server.REASONING_SUMMARY_STREAM_PENDING.get("chat-native"))
+
+    async def test_app_server_keeps_exposed_plaintext_separate_from_summary_and_ignores_encrypted_content(self) -> None:
         turn = FakeTurn([
             {
                 "method": "item/reasoning/textDelta",
@@ -2847,7 +3922,7 @@ class CodexAppServerRunnerTests(unittest.IsolatedAsyncioTestCase):
                     "threadId": "thread-native",
                     "turnId": "turn-native",
                     "itemId": "raw-only",
-                    "delta": "SECRET RAW CHAIN",
+                    "delta": "Earlier provider-supplied plaintext.",
                 },
             },
             {
@@ -2858,7 +3933,8 @@ class CodexAppServerRunnerTests(unittest.IsolatedAsyncioTestCase):
                     "item": {
                         "id": "raw-only",
                         "type": "reasoning",
-                        "text": "SECRET RAW CHAIN",
+                        "content": ["Authoritative provider-supplied plaintext."],
+                        "encrypted_content": "encrypted-data-must-never-be-decoded-or-persisted",
                     },
                 },
             },
@@ -2890,8 +3966,8 @@ class CodexAppServerRunnerTests(unittest.IsolatedAsyncioTestCase):
                     "item": {
                         "id": "safe-summary",
                         "type": "reasoning",
-                        "text": "RAW ITEM TEXT",
-                        "summary": [{"text": "Safe completed summary."}],
+                        "content": ["Provider reasoning section one.", "Provider reasoning section two."],
+                        "summary": ["Safe completed summary."],
                     },
                 },
             },
@@ -2909,7 +3985,7 @@ class CodexAppServerRunnerTests(unittest.IsolatedAsyncioTestCase):
             await agent_server.run_codex_app_server(
                 "chat-native",
                 "run-original",
-                "Do not leak raw reasoning",
+                "Preserve only explicitly exposed provider channels",
                 dict(self.session),
                 Path(self.cwd) / ".runner-test-manifest.json",
                 allow_exec_fallback=True,
@@ -2919,19 +3995,23 @@ class CodexAppServerRunnerTests(unittest.IsolatedAsyncioTestCase):
         traces = [
             call.args[2]
             for call in events.await_args_list
-            if call.args[1] == "reasoning_summary"
+            if call.args[1] in {"reasoning_summary", "reasoning_text"}
         ]
         self.assertEqual(
             [trace["text"] for trace in traces],
             [
+                "Authoritative provider-supplied plaintext.",
                 "Safe delta summary.",
                 "Safe completed summary.",
+                "Provider reasoning section one.\nProvider reasoning section two.",
                 "Completed commentary remains visible.",
             ],
         )
-        serialized = str(traces)
-        self.assertNotIn("SECRET RAW CHAIN", serialized)
-        self.assertNotIn("RAW ITEM TEXT", serialized)
+        self.assertEqual([trace["phase"] for trace in traces], ["reasoning", "summary", "summary", "reasoning", "commentary"])
+        self.assertEqual([(trace["item_id"], trace["phase"]) for trace in traces if trace["item_id"] == "safe-summary"], [
+            ("safe-summary", "summary"), ("safe-summary", "reasoning")])
+        self.assertNotIn("Earlier provider-supplied plaintext.", str(traces))
+        self.assertNotIn("encrypted-data", str(traces))
 
     async def test_native_steer_uses_ack_watermark_without_backlog_starvation(
         self,
@@ -2982,7 +4062,10 @@ class CodexAppServerRunnerTests(unittest.IsolatedAsyncioTestCase):
             run_now = await asyncio.wait_for(force_send, timeout=2)
             turn.feed(agent_message("final-after", "Done.", "final_answer"))
             turn.feed(completed_notification())
-            await asyncio.wait_for(runner, timeout=2)
+            # Forty authoritative events must all drain; the Linux debug-mode
+            # release runner can take longer than two seconds under load.
+            # This deadline is only a deadlock guard, not a throughput target.
+            await asyncio.wait_for(runner, timeout=10)
 
         traces = [
             call.args[2]
@@ -3142,6 +4225,149 @@ class CodexAppServerRunnerTests(unittest.IsolatedAsyncioTestCase):
         ]
         self.assertEqual(len(finals), 1)
         self.assertEqual(finals[0]["run_id"], run_now["run_id"])
+
+    async def test_pending_live_cross_chat_wait_pauses_codex_idle_watchdog(self) -> None:
+        turn = FakeTurn()
+        manager = FakeManager(turn)
+        real_wait = asyncio.wait
+
+        async def fast_poll(
+            futures: set[asyncio.Future[object] | asyncio.Task[object]],
+            *,
+            timeout: float | None = None,
+            return_when: str = asyncio.ALL_COMPLETED,
+        ) -> tuple[
+            set[asyncio.Future[object] | asyncio.Task[object]],
+            set[asyncio.Future[object] | asyncio.Task[object]],
+        ]:
+            return await real_wait(
+                futures,
+                timeout=min(0.01, timeout) if timeout is not None else 0.01,
+                return_when=return_when,
+            )
+
+        stack, events, finished, _exec_fallback = self.runner_patches(manager)
+        with stack, patch.object(
+            agent_server.asyncio,
+            "wait",
+            fast_poll,
+        ), patch.object(
+            agent_server,
+            "CODEX_APP_SERVER_FIRST_ACTIVITY_TIMEOUT_SECONDS",
+            0.02,
+        ), patch.object(
+            agent_server,
+            "IDLE_WARN_SECONDS",
+            0.02,
+        ), patch.object(
+            agent_server,
+            "IDLE_KILL_SECONDS",
+            0.03,
+        ), patch.object(
+            agent_server,
+            "provider_run_owns_pending_cross_chat_live_wait",
+            return_value=True,
+        ):
+            runner = asyncio.create_task(
+                agent_server.run_codex_app_server(
+                    "chat-native",
+                    "run-original",
+                    "Wait for a peer",
+                    dict(self.session),
+                    Path(self.cwd) / ".runner-test-manifest.json",
+                    allow_exec_fallback=True,
+                    allow_resume_rollover=False,
+                )
+            )
+            await asyncio.sleep(0.08)
+            self.assertFalse(runner.done())
+            turn.feed(agent_message(
+                "final-after-peer",
+                "Peer answered after the idle window.",
+                "final_answer",
+            ))
+            turn.feed(completed_notification())
+            await asyncio.wait_for(runner, timeout=2)
+
+        self.assertEqual(finished.await_args.args[1]["exit_code"], 0)
+        self.assertFalse(any(
+            call.args[1] in {"error", "idle_warning"}
+            for call in events.await_args_list
+        ))
+        self.assertEqual(turn.interrupt_calls, 0)
+
+    async def test_stale_live_wait_without_replay_resumes_codex_idle_watchdog(self) -> None:
+        turn = FakeTurn()
+        manager = FakeManager(turn)
+        real_wait = asyncio.wait
+        liveness_checks = 0
+
+        async def fast_poll(
+            futures: set[asyncio.Future[object] | asyncio.Task[object]],
+            *,
+            timeout: float | None = None,
+            return_when: str = asyncio.ALL_COMPLETED,
+        ) -> tuple[
+            set[asyncio.Future[object] | asyncio.Task[object]],
+            set[asyncio.Future[object] | asyncio.Task[object]],
+        ]:
+            return await real_wait(
+                futures,
+                timeout=min(0.01, timeout) if timeout is not None else 0.01,
+                return_when=return_when,
+            )
+
+        def live_helper_is_recent(*_args, **_kwargs) -> bool:
+            nonlocal liveness_checks
+            liveness_checks += 1
+            # Registration/a few authenticated heartbeat checks pause the
+            # watchdog. Once the helper stops replaying, freshness expires and
+            # the normal idle watchdog must become authoritative again.
+            return liveness_checks <= 4
+
+        stack, events, finished, _exec_fallback = self.runner_patches(manager)
+        with stack, patch.object(
+            agent_server.asyncio,
+            "wait",
+            fast_poll,
+        ), patch.object(
+            agent_server,
+            "CODEX_APP_SERVER_FIRST_ACTIVITY_TIMEOUT_SECONDS",
+            0.02,
+        ), patch.object(
+            agent_server,
+            "IDLE_WARN_SECONDS",
+            0.02,
+        ), patch.object(
+            agent_server,
+            "IDLE_KILL_SECONDS",
+            0.04,
+        ), patch.object(
+            agent_server,
+            "provider_run_owns_pending_cross_chat_live_wait",
+            side_effect=live_helper_is_recent,
+        ):
+            await asyncio.wait_for(
+                agent_server.run_codex_app_server(
+                    "chat-native",
+                    "run-original",
+                    "Wait for a peer whose helper disappears",
+                    dict(self.session),
+                    Path(self.cwd) / ".runner-test-manifest.json",
+                    allow_exec_fallback=True,
+                    allow_resume_rollover=False,
+                ),
+                timeout=2,
+            )
+
+        self.assertGreater(liveness_checks, 4)
+        self.assertEqual(finished.await_args.args[1]["exit_code"], 1)
+        self.assertTrue(any(
+            call.args[1] == "error"
+            and "idle timeout" in call.args[2]["message"]
+            for call in events.await_args_list
+        ))
+        self.assertGreaterEqual(turn.interrupt_calls, 1)
 
     async def test_first_activity_timeout_fails_fast_instead_of_hanging(self) -> None:
         # turn/start is accepted (FakeManager.start_turn returns a FakeTurn),
@@ -3326,6 +4552,7 @@ class CodexAppServerRunnerTests(unittest.IsolatedAsyncioTestCase):
                 input_items: list[dict[str, object]],
                 *,
                 overrides: dict[str, object] | None = None,
+                retain_thread_stream: bool = False,
             ) -> FakeTurn:
                 self.turn_calls.append(
                     (thread_id, input_items, dict(overrides or {}))
@@ -4138,13 +5365,19 @@ class CodexAppServerRunnerTests(unittest.IsolatedAsyncioTestCase):
                     allow_resume_rollover=False,
                 )
             )
-            for _ in range(100):
-                active = agent_server.ACTIVE.get("chat-native") or {}
-                if active.get("codex_app_server_turn") is pending_turn:
-                    break
-                await asyncio.sleep(0)
-            else:
-                self.fail("provisional native turn was never installed")
+            async def wait_for_active(predicate):
+                while not predicate(agent_server.ACTIVE.get("chat-native") or {}):
+                    if runner.done():
+                        await runner
+                        self.fail("runner finished before the expected provisional state")
+                    await asyncio.sleep(.001)
+            async def finish_runner():
+                if not runner.done():
+                    runner.cancel()
+                await asyncio.gather(runner, return_exceptions=True)
+            self.addAsyncCleanup(finish_runner)
+            await asyncio.wait_for(wait_for_active(
+                lambda active: active.get("codex_app_server_turn") is pending_turn), 10)
 
             agent_server.register_session_task(
                 agent_server.SESSION_TURN_TASKS,
@@ -4154,13 +5387,7 @@ class CodexAppServerRunnerTests(unittest.IsolatedAsyncioTestCase):
             stop_task = asyncio.create_task(
                 agent_server.stop_turn("chat-native")
             )
-            for _ in range(100):
-                active = agent_server.ACTIVE.get("chat-native") or {}
-                if active.get("stop_requested"):
-                    break
-                await asyncio.sleep(0)
-            else:
-                self.fail("Stop was not registered on the provisional turn")
+            await asyncio.wait_for(wait_for_active(lambda active: active.get("stop_requested")), 10)
             pending_turn.adopt_turn_id("turn-native")
             pending_turn.feed(
                 agent_message(
@@ -4479,6 +5706,12 @@ class CodexAppServerRunnerTests(unittest.IsolatedAsyncioTestCase):
             {"cross_chat_envelope_id": "handoff_delivery"},
             {"cross_chat_exchange_id": "exchange_delivery"},
             {"cross_chat_exchange_leg_id": "leg_delivery"},
+            {
+                "skill_selection": {
+                    "id": "pcmd_" + "a" * 32,
+                    "revision": "pcmdrev_" + "b" * 32,
+                }
+            },
             {"provider_cross_chat_route_snapshot": [route]},
         )
 
@@ -4732,8 +5965,19 @@ class CodexAppServerRunnerTests(unittest.IsolatedAsyncioTestCase):
                 self.events.append(event)
 
         class SlowWebSocket:
+            def __init__(self) -> None:
+                self.close_calls: list[tuple[int, str]] = []
+                self.accounted_during_close = False
+
             async def send_json(self, _event: dict[str, object]) -> None:
                 await asyncio.Event().wait()
+
+            async def close(self, code: int = 1000, reason: str = "") -> None:
+                self.accounted_during_close = self in hub._subscribers.get(
+                    "chat-native",
+                    set(),
+                )
+                self.close_calls.append((code, reason))
 
         hub = agent_server.SubscriberHub()
         fast = FastWebSocket()
@@ -4752,6 +5996,219 @@ class CodexAppServerRunnerTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(fast.events, [event])
         self.assertEqual(hub._subscribers["chat-native"], {fast})
+        self.assertTrue(slow.accounted_during_close)
+        self.assertEqual(
+            slow.close_calls,
+            [
+                (
+                    agent_server.EVENT_WEBSOCKET_DELIVERY_FAILURE_CLOSE_CODE,
+                    "event stream delivery failed; reconnect required",
+                )
+            ],
+        )
+
+    async def test_failed_delivery_close_terminates_event_endpoint(self) -> None:
+        class FailedWebSocket:
+            def __init__(self) -> None:
+                self.headers: dict[str, str] = {}
+                self.query_params: dict[str, str] = {}
+                self.receive_started = asyncio.Event()
+                self.closed = asyncio.Event()
+                self.close_calls: list[tuple[int, str]] = []
+
+            async def accept(self, *, subprotocol: str | None = None) -> None:
+                return None
+
+            async def send_json(self, _event: dict[str, object]) -> None:
+                await asyncio.Event().wait()
+
+            async def receive_text(self) -> str:
+                self.receive_started.set()
+                await self.closed.wait()
+                raise agent_server.WebSocketDisconnect()
+
+            async def close(self, code: int = 1000, reason: str = "") -> None:
+                self.close_calls.append((code, reason))
+                self.closed.set()
+
+        hub = agent_server.SubscriberHub()
+        failed = FailedWebSocket()
+        with (
+            tempfile.TemporaryDirectory() as temporary,
+            patch.object(agent_server, "HUB", hub),
+            patch.object(agent_server, "websocket_authorized", return_value=True),
+            patch.object(agent_server, "CODEX_SESSIONS_ROOT", Path(temporary) / "native-sessions"),
+            patch.object(
+                agent_server,
+                "events_path",
+                return_value=Path(temporary) / "events.jsonl",
+            ),
+            patch.object(agent_server, "WEBSOCKET_SEND_TIMEOUT_SECONDS", 0.01),
+        ):
+            endpoint = asyncio.create_task(
+                agent_server.session_events("chat-native", failed)  # type: ignore[arg-type]
+            )
+            await asyncio.wait_for(failed.receive_started.wait(), timeout=0.2)
+
+            await asyncio.wait_for(
+                hub.broadcast("chat-native", {"type": "session_updated"}),
+                timeout=0.2,
+            )
+            await asyncio.wait_for(endpoint, timeout=0.2)
+
+        self.assertEqual(
+            failed.close_calls,
+            [
+                (
+                    agent_server.EVENT_WEBSOCKET_DELIVERY_FAILURE_CLOSE_CODE,
+                    "event stream delivery failed; reconnect required",
+                )
+            ],
+        )
+        self.assertEqual(hub._subscribers, {})
+        self.assertEqual(hub._reservations, {})
+
+    async def test_failed_websocket_eviction_is_cancellation_safe(self) -> None:
+        close_started = asyncio.Event()
+        release_close = asyncio.Event()
+
+        class FailedWebSocket:
+            def __init__(self) -> None:
+                self.close_calls: list[tuple[int, str]] = []
+
+            async def send_json(self, _event: dict[str, object]) -> None:
+                raise RuntimeError("send failed")
+
+            async def close(self, code: int = 1000, reason: str = "") -> None:
+                self.close_calls.append((code, reason))
+                close_started.set()
+                await release_close.wait()
+
+        hub = agent_server.SubscriberHub()
+        failed = FailedWebSocket()
+        replacement = object()
+        hub._subscribers["chat-native"] = {failed}  # type: ignore[assignment]
+        event = {"type": "assistant_text", "text": "ready"}
+        with (
+            patch.object(agent_server, "EVENT_WEBSOCKET_MAX_ACTIVE_GLOBAL", 1),
+            patch.object(agent_server, "EVENT_WEBSOCKET_MAX_ACTIVE_PER_SESSION", 1),
+            patch.object(agent_server, "WEBSOCKET_SEND_TIMEOUT_SECONDS", 1.0),
+        ):
+            broadcast = asyncio.create_task(hub.broadcast("chat-native", event))
+            await asyncio.wait_for(close_started.wait(), timeout=0.2)
+
+            # The failed transport still consumes its lease while close is in
+            # flight, so reconnects cannot evade either capacity ceiling.
+            self.assertFalse(
+                await hub.reserve("replacement-chat", replacement)  # type: ignore[arg-type]
+            )
+            self.assertIn(failed, hub._subscribers["chat-native"])
+
+            broadcast.cancel()
+            await asyncio.sleep(0)
+            await asyncio.sleep(0)
+            self.assertFalse(broadcast.done())
+            self.assertIn(failed, hub._subscribers["chat-native"])
+
+            release_close.set()
+            with self.assertRaises(asyncio.CancelledError):
+                await broadcast
+
+            self.assertNotIn("chat-native", hub._subscribers)
+            self.assertEqual(
+                failed.close_calls,
+                [
+                    (
+                        agent_server.EVENT_WEBSOCKET_DELIVERY_FAILURE_CLOSE_CODE,
+                        "event stream delivery failed; reconnect required",
+                    )
+                ],
+            )
+            self.assertTrue(
+                await hub.reserve("replacement-chat", replacement)  # type: ignore[arg-type]
+            )
+
+        await hub.unsubscribe("replacement-chat", replacement)  # type: ignore[arg-type]
+
+    async def test_failed_websocket_close_keeps_capacity_lease(self) -> None:
+        class UnclosableWebSocket:
+            async def send_json(self, _event: dict[str, object]) -> None:
+                raise RuntimeError("send failed")
+
+            async def close(self, code: int = 1000, reason: str = "") -> None:
+                raise RuntimeError(f"close failed: {code} {reason}")
+
+        hub = agent_server.SubscriberHub()
+        failed = UnclosableWebSocket()
+        replacement = object()
+        hub._subscribers["chat-native"] = {failed}  # type: ignore[assignment]
+        with (
+            patch.object(agent_server, "EVENT_WEBSOCKET_MAX_ACTIVE_GLOBAL", 1),
+            patch.object(agent_server, "EVENT_WEBSOCKET_MAX_ACTIVE_PER_SESSION", 1),
+        ):
+            await hub.broadcast("chat-native", {"type": "session_updated"})
+
+            self.assertIn(failed, hub._subscribers["chat-native"])
+            self.assertFalse(
+                await hub.reserve("replacement-chat", replacement)  # type: ignore[arg-type]
+            )
+
+        await hub.unsubscribe("chat-native", failed)  # type: ignore[arg-type]
+
+    async def test_custom_unknown_model_clears_stale_effort_and_empty_completion_does_not_roll_over(self) -> None:
+        store = agent_server.codex_provider.ProviderStore(
+            Path(self.authority_temporary.name) / "provider",
+        )
+        store.save({
+            "base_url": "https://provider.example.invalid/v1",
+            "api_key": "runner-synthetic-only-key",
+        })
+        self.session.update({
+            "codex_provider": "custom",
+            "codex_provider_revision": store.revision(),
+            "model": "gateway/unknown-model",
+            "effort": "high",
+        })
+        store.record_thread("thread-native", store.selection(include_revision=True))
+        turn = FakeTurn([completed_notification()])
+        manager = FakeManager(turn)
+        rollover = AsyncMock()
+        stack, events, finished, exec_fallback = self.runner_patches(manager)
+        with stack, patch.object(
+            agent_server, "CODEX_PROVIDER_STORE", store,
+        ), patch.object(
+            agent_server, "rollover_codex_provider_session", rollover,
+        ):
+            await agent_server.run_codex_app_server(
+                "chat-native", "run-original", "Reply to this request",
+                dict(self.session),
+                Path(self.authority_temporary.name) / "manifest.json",
+                allow_exec_fallback=True,
+                allow_resume_rollover=True,
+                provider_runtime_env={"AGENTSDOCK_PROVIDER_AUTHORITY_ACTIONS": "publish"},
+            )
+
+        self.assertEqual(len(manager.turn_calls), 1)
+        overrides = manager.turn_calls[0][2]
+        self.assertEqual(overrides["model"], "gateway/unknown-model")
+        self.assertEqual(overrides["summary"], "none")
+        self.assertNotIn("effort", overrides)
+        self.assertEqual(overrides["collaborationMode"], {
+            "mode": "default", "settings": {
+                "model": "gateway/unknown-model",
+                "reasoning_effort": None,
+                "developer_instructions": None,
+            },
+        })
+        rollover.assert_not_awaited()
+        exec_fallback.assert_not_awaited()
+        self.runtime_failure.assert_not_called()
+        errors = [call.args[2]["message"] for call in events.await_args_list if call.args[1] == "error"]
+        self.assertEqual(len(errors), 1)
+        self.assertIn("basic compatibility", errors[0])
+        finished.assert_awaited_once()
+        self.assertEqual(finished.await_args.args[1]["exit_code"], 1)
+        self.assertEqual(turn.close_calls, 1)
 
     async def test_silent_resumed_thread_rolls_over_once_with_app_server(self) -> None:
         first_turn = FakeTurn([completed_notification()])
@@ -4766,6 +6223,16 @@ class CodexAppServerRunnerTests(unittest.IsolatedAsyncioTestCase):
             ]
         )
         manager = FakeManager(turns=[first_turn, second_turn])
+        native_steer_queues: list[object] = []
+        original_start_turn = manager.start_turn
+
+        async def capture_start_turn(*args: object, **kwargs: object) -> FakeTurn:
+            native_steer_queues.append(
+                (agent_server.ACTIVE.get("chat-native") or {}).get(
+                    "native_steer_queue"
+                )
+            )
+            return await original_start_turn(*args, **kwargs)
         fresh_session = {
             "id": "chat-native",
             "backend": agent_server.BACKEND_CODEX,
@@ -4789,6 +6256,10 @@ class CodexAppServerRunnerTests(unittest.IsolatedAsyncioTestCase):
             agent_server,
             "rollover_codex_provider_session",
             rollover,
+        ), patch.object(
+            manager,
+            "start_turn",
+            side_effect=capture_start_turn,
         ):
             await agent_server.run_codex_app_server(
                 "chat-native",
@@ -4797,6 +6268,9 @@ class CodexAppServerRunnerTests(unittest.IsolatedAsyncioTestCase):
                 dict(self.session),
                 Path(self.cwd) / ".runner-test-manifest.json",
                 allow_exec_fallback=True,
+                provider_runtime_env={
+                    "AGENTSDOCK_PROVIDER_AUTHORITY_ACTIONS": "publish",
+                },
             )
 
         self.assertEqual(len(manager.turn_calls), 2)
@@ -4804,6 +6278,7 @@ class CodexAppServerRunnerTests(unittest.IsolatedAsyncioTestCase):
             [call[0] for call in manager.turn_calls],
             ["thread-native", "thread-fresh"],
         )
+        self.assertEqual(native_steer_queues, [None, None])
         rollover.assert_awaited_once()
         self.assertFalse(
             rollover.await_args.kwargs["memory_seed_used"],
@@ -4883,11 +6358,9 @@ class CodexAppServerRunnerTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(retry_input), 1)
         self.assertEqual(retry_input[0]["type"], "text")
         self.assertEqual(retry_input[0]["text_elements"], [])
-        self.assertTrue(
-            str(retry_input[0]["text"]).startswith(
-                "Only retry this steering text."
-                "\n\n[AgentsDock provider authority]"
-            )
+        self.assertEqual(
+            retry_input[0]["text"],
+            "Only retry this steering text.",
         )
         self.assertNotIn(
             "Never replay this original text.",

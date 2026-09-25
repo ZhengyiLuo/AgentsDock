@@ -18,7 +18,7 @@ import { dismissAppKeyboard } from '../lib/app-keyboard'
 import { isWelcomeSession } from '../lib/welcome-session'
 import { useFileViewer } from './file-viewer/FileViewerContext'
 
-export function ChatScreen({ sessionId, compact, onBack, onOptions, onSearch, onToggleInspector, onReview, onSetupServer, onOpenMcp }: { sessionId: string; compact: boolean; onBack: () => void; onOptions: () => void; onSearch: () => void; onToggleInspector: () => void; onReview: (runId: string) => void; onSetupServer: () => void; onOpenMcp: () => void }) {
+export function ChatScreen({ sessionId, compact, inlineInspectorAvailable, onBack, onOptions, onSearch, onToggleInspector, onReview, onSetupServer, onOpenMcp }: { sessionId: string; compact: boolean; inlineInspectorAvailable: boolean; onBack: () => void; onOptions: () => void; onSearch: () => void; onToggleInspector: () => void; onReview: (runId: string) => void; onSetupServer: () => void; onOpenMcp: () => void }) {
   const colors = usePalette()
   const insets = useSafeAreaInsets()
   const { openWorkspace } = useFileViewer()
@@ -99,7 +99,7 @@ export function ChatScreen({ sessionId, compact, onBack, onOptions, onSearch, on
   }, [])
   const content = (
     <View style={[styles.root, { backgroundColor: colors.background }]}>
-      <ChatHeader sessionId={sessionId} compact={compact} onBack={onBack} onOptions={onOptions} onSearch={onSearch} onFiles={() => { trackEvent('open_file_clicked'); dismissAppKeyboard(); openWorkspace(sessionId) }} onToggleInspector={onToggleInspector} onSetupServer={onSetupServer} />
+      <ChatHeader sessionId={sessionId} compact={compact} inlineInspectorAvailable={inlineInspectorAvailable} onBack={onBack} onOptions={onOptions} onSearch={onSearch} onFiles={() => { trackEvent('open_file_clicked'); dismissAppKeyboard(); openWorkspace(sessionId) }} onToggleInspector={onToggleInspector} onSetupServer={onSetupServer} />
       {!welcome && backend ? <RuntimeHealthNotice backend={backend} sessionId={sessionId} /> : null}
       <KeyboardAvoidingView
             style={styles.body}

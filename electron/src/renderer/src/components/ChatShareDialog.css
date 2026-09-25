@@ -6,14 +6,20 @@
 .chat-share-warning { color: var(--muted); font-size: var(--text-size-meta); line-height: var(--line-height-body); }
 .chat-share-created { display: grid; gap: var(--space-4); }
 .chat-share-created p { margin: 0; }
+.chat-share-created-meta { color: var(--muted); font-size: var(--text-size-meta); }
+.chat-share-created-meta strong { color: var(--text); font-weight: var(--text-weight-label); }
 .chat-share-field { display: grid; gap: var(--space-2); min-width: 0; }
 .chat-share-field > span { color: var(--muted); font-size: var(--text-size-meta); }
 .chat-share-field > input { width: 100%; min-width: 0; }
-.chat-share-created-actions { display: flex; flex-wrap: wrap; gap: var(--space-4); }
+.chat-share-copy-field { min-width: 0; display: grid; grid-template-columns: minmax(0, 1fr) var(--control-height-sm); align-items: center; gap: var(--space-2); }
+.chat-share-copy-field > input { width: 100%; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.chat-share-copy-field > .chat-share-copy-button { flex: none; }
 .chat-share-existing { border-top: 1px solid var(--border); padding-top: var(--space-5); }
 .chat-share-existing summary { cursor: pointer; color: var(--muted); font-size: var(--text-size-meta); }
 .chat-share-revoked { margin-top: var(--space-5); }
 .chat-share-record { display: flex; align-items: center; justify-content: space-between; gap: var(--space-5); }
 .chat-share-record { margin-top: var(--space-4); }
-.chat-share-record span { min-width: 0; overflow-wrap: anywhere; }
-.chat-share-record small { display: block; color: var(--muted); font-size: var(--text-size-meta); }
+.chat-share-record-info { min-width: 0; display: flex; align-items: center; gap: var(--space-3); }
+.chat-share-mode-chip { flex: none; display: inline-flex; align-items: center; min-height: 22px; padding: 0 var(--space-3); color: var(--text); background: var(--surface-3); border: 1px solid var(--border); border-radius: var(--radius-pill); font-size: var(--text-size-caption); font-weight: var(--text-weight-label); white-space: nowrap; }
+.chat-share-mode-chip.interactive { color: var(--accent); border-color: color-mix(in srgb, var(--accent) 32%, var(--border)); background: color-mix(in srgb, var(--accent) 10%, var(--surface-3)); }
+.chat-share-record small { min-width: 0; color: var(--muted); font-size: var(--text-size-meta); overflow-wrap: anywhere; }
