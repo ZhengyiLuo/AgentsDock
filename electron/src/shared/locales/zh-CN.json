@@ -1056,7 +1056,6 @@
   "ui.ChatHeader.ChatHeader.close_this_chat_pane_4926598": "关闭此会话窗格",
   "ui.ChatHeader.ChatHeader.copied_8d525e5": "已复制",
   "ui.ChatHeader.ChatHeader.copy_session_8b985e2": "复制会话 ID",
-  "ui.ChatHeader.ChatHeader.create_digest_8b04e01": "创建摘要",
   "ui.ChatHeader.ChatHeader.delete_chat_93291d9": "删除会话",
   "ui.ChatHeader.ChatHeader.folder_4e7d7bc": "文件夹：{folder}",
   "ui.ChatHeader.ChatHeader.fork_chat_dfbcbb3": "创建会话分支",
