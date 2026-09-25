@@ -1,5 +1,20 @@
 # Public development log
 
+## 2026-09-25 — Restore running forks after hidden history repair
+
+- Keep the last completed native turn as the fork point when later history
+  repair adds an imported, metadata-only terminal event. That bookkeeping
+  event no longer causes a running Codex or Claude fork to lose its boundary.
+- Pass 69 fork tests, including a completed turn followed by mailbox work,
+  hidden replay metadata, stopped turns and a currently running turn.
+- Verify through the signed local desktop `1.0.7-beta.12`, build `1214`, against
+  the corrected isolated server: click Fork while Codex executes a command,
+  receive a native child before the parent completes, and let the parent finish
+  normally. The child excludes the active turn and recalls inherited file-tool
+  output without reading the file again. No renderer exceptions occur.
+- This is a server-source correction. It is not deployed or publicly released;
+  no desktop rebuild is required for this correction.
+
 ## 2026-09-25 — Integrate recovered features with current main
 
 - Preserve synchronized side conversations, goal controls, upgraded Codex CLI
