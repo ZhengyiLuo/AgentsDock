@@ -1,5 +1,22 @@
 # Public development log
 
+## 2026-09-24 — Accept local beta.12 goal shortcut correction
+
+- Accept local arm64 desktop `1.0.7-beta.12`, build `1214`, from committed source
+  `90beac268bda148cbf205a5cf38500feae41f1f7`. Pass all 4,849 active desktop tests,
+  TypeScript, production compilation, compiled-package audit, Developer ID
+  signature and entitlement checks.
+- In the signed package, click Codex's composer goal shortcut, submit a disposable
+  goal through native IPC/HTTP, observe native completion, and clear it. Open
+  the same dialog again from the Add menu. The unsent main draft survives all
+  actions and never becomes a submitted message.
+- Verify Claude's goal shortcut still opens its dialog, both composers omit
+  account usage, and the corrected controls fit a narrow window. The isolated
+  packaged app reports no renderer exceptions. Production credentials remain
+  unchanged and temporary credential copies are removed after acceptance.
+- This local app is signed, not notarized or publicly published, with automatic
+  updates disabled. The correction requires no additional server change.
+
 ## 2026-09-24 — Remove account usage preview and align goal shortcuts
 
 - Remove the account usage indicator from the composer while provider reporting
