@@ -150,7 +150,6 @@ export function ChatHeader({
           setActionsMenuOpen(open)
           if (!open) setSplitMenuRequested(false)
         }}><DropdownMenu.Trigger asChild><button className="icon-button" title={t("ui.ChatHeader.ChatHeader.chat_actions_8ba35bb")} aria-label={t("ui.ChatHeader.ChatHeader.chat_actions_8ba35bb")}><MoreHorizontal size={16} /></button></DropdownMenu.Trigger><DropdownMenu.Portal><DropdownMenu.Content className="menu-content" align="end">
-          <DropdownMenu.Item className="menu-item" onSelect={() => useAppStore.getState().setModal('digest', true)}><GitFork size={14} />{t("ui.ChatHeader.ChatHeader.create_digest_8b04e01")}</DropdownMenu.Item>
           {splitMenuRequested && onOpenSplit && <DropdownMenu.Sub>
             <DropdownMenu.SubTrigger className="menu-item split-chat-menu-trigger"><Columns2 size={14} />{t("ui.ChatHeader.ChatHeader.open_split_view_51e50f7")}<ChevronRight size={13} /></DropdownMenu.SubTrigger>
             <DropdownMenu.Portal><DropdownMenu.SubContent className="menu-content split-chat-menu" sideOffset={6} collisionPadding={12}>
