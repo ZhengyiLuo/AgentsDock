@@ -1707,6 +1707,7 @@ export interface SessionForkCompletedPrefixCapability {
 }
 
 export interface HealthCapabilities {
+  provider_usage?: { available: boolean; version: number; backends?: Backend[] }
   subagent_limit_v1?: { version: number; backends?: Backend[] }
   codex_provider_v1?: { available?: boolean; version?: number; per_chat?: boolean; per_chat_models?: boolean; model_discovery?: boolean; model_compatibility?: boolean }
   side_questions?: SideQuestionsCapability
@@ -2469,6 +2470,8 @@ export interface NativeFileRef {
 }
 
 export interface AppEventMap {
+  'provider-usage:changed': { profileId: string; profileGeneration: number; serverIdentity?: string | null; sessionId: string; backend: 'codex' | 'claude' }
+  'side-chat:changed': { profileId: string; profileGeneration: number; sessionId: string; revision: number }
   'app:storage': { full: boolean }
   'team:mail-hints': MailHintProjection
   'app:language': LanguageSettingsSnapshot

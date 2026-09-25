@@ -1,5 +1,219 @@
 # Public development log
 
+## 2026-09-25 — Integrate recovered features with current main
+
+- Preserve synchronized side conversations, goal controls, upgraded Codex CLI
+  detection and Python installation fixes alongside the restored provider,
+  installer, history-import and named-instance features.
+- Include both sets of runtime modules in installation, deployment and archive
+  manifests. Keep API details in the server reference and the README concise.
+- Move newly added main-branch tests into the recovered test package and align
+  isolated fixtures with bounded provider discovery, import filtering and
+  recipient-bound user delegation. Unattested legacy provenance stays private;
+  oversized attested migration remains recoverable.
+- Pass 96 focused installation tests, 40 previously failing CI-related checks,
+  500 affected desktop tests and desktop type checking. Complete source CI is
+  recorded on the recovery pull request. This integration does not deploy or
+  publish a server, desktop application or npm package.
+
+## 2026-09-24 — Accept local beta.12 goal shortcut correction
+
+- Accept local arm64 desktop `1.0.7-beta.12`, build `1214`, from committed source
+  `90beac268bda148cbf205a5cf38500feae41f1f7`. Pass all 4,849 active desktop tests,
+  TypeScript, production compilation, compiled-package audit, Developer ID
+  signature and entitlement checks.
+- In the signed package, click Codex's composer goal shortcut, submit a disposable
+  goal through native IPC/HTTP, observe native completion, and clear it. Open
+  the same dialog again from the Add menu. The unsent main draft survives all
+  actions and never becomes a submitted message.
+- Verify Claude's goal shortcut still opens its dialog, both composers omit
+  account usage, and the corrected controls fit a narrow window. The isolated
+  packaged app reports no renderer exceptions. Production credentials remain
+  unchanged and temporary credential copies are removed after acceptance.
+- This local app is signed, not notarized or publicly published, with automatic
+  updates disabled. The correction requires no additional server change.
+
+## 2026-09-24 — Remove account usage preview and align goal shortcuts
+
+- Remove the account usage indicator from the composer while provider reporting
+  receives further testing. The context usage meter remains available.
+- Give Codex the same goal shortcut beside the context meter and in the Add menu
+  as Claude. Both entry points open the existing provider goal dialog directly,
+  without sending a chat message or changing its draft.
+- Keep public desktop publication on hold. Record local package acceptance
+  separately after testing the corrected build through native controls.
+
+## 2026-09-24 — Publish the signed beta.11 server
+
+- Publish server `1.0.7-beta.11` from canonical source
+  `9b04f852c5c6e698edbf47f9e64d9eb9b65a81be` and standalone export
+  `278f88d1d4110b23b1cab3d30013116b7021214d` after all eight release test
+  shards pass: 5,163 cases, including six skipped.
+- Verify the Ed25519 signature and all 109 packaged runtime files against
+  committed source. Anonymous downloads match all three signed assets.
+  Archive SHA256:
+  `f4e84a2cb93ba4ebcf30f9db2ab77ada4eac496bd06ce85fb4001d2a0cb17a08`.
+- Both managed deployment targets accept the exact version and finish preparing
+  it. Activation is scheduled for idle; both still report beta.10 at handoff.
+  No running agents are interrupted. This publication changes neither desktop
+  releases nor npm tags.
+
+## 2026-09-24 — Accept local beta.11 desktop
+
+- Accept local arm64 desktop `1.0.7-beta.11`, build `1213`, from committed source
+  `9b04f852c5c6e698edbf47f9e64d9eb9b65a81be`, paired with the same server source.
+  Pass all 4,843 active desktop tests, TypeScript, production compilation,
+  compiled-package audit, Developer ID signature and entitlement checks.
+- Personally exercise the isolated native app and signed package through actual
+  IPC/HTTP with Codex and Claude: inherited tool-result context, follow-ups,
+  shared history in two clients, cross-client cancellation and Clear, app closure
+  while an answer continues, and native side-context retention after a server
+  restart. Verify both providers' goal completion, Codex Clear, Claude Clear &
+  stop, and the new Claude header panel. No provider mock is used in these checks.
+- Read real account observations from both providers through the packaged UI.
+  The test account reports Codex credit availability and Claude reset times;
+  neither supplies a percentage. Percentage rendering and rejected-window
+  precedence are covered by component/native-event regressions.
+- The local package is signed but not notarized or publicly published, and its
+  automatic updater is disabled. Public server-candidate validation and deployment
+  are recorded separately; a built candidate is not an installed server.
+
+## 2026-09-24 — Shared provider controls, side-chat sync and account usage
+
+- Use the same goal summary, progress and editing layout for Codex and Claude.
+  Add Claude's clickable header status panel, with its native context, pending
+  interactions and goal entry point. Preserve each provider's supported actions.
+- Persist side conversations on the connected server and reconcile them across
+  native clients using socket notifications. Accepted answers survive app closure;
+  Stop and Clear apply across clients. Codex resumes the saved native side thread;
+  Claude restores its native side history. Side content remains outside the main
+  transcript, and private Codex forks stay out of main-chat import discovery.
+- Show provider-reported account allowance, reset times and credits when supplied.
+  Missing percentages remain unknown; API and custom endpoints do not inherit
+  ChatGPT allowance. Account changes invalidate observations, and usage updates
+  do not become transcript events or trigger model requests.
+- Respect Claude's configured data directory when locating native session history
+  and goals. Preserve newly typed drafts during Clear and reject late results from
+  a previous connection. Refresh side history on reconnect transitions and changes,
+  without treating repeated timeline liveness notices as polling triggers.
+- Source verification includes the desktop suite, provider transport/authentication,
+  persistence and cancellation regressions, installation/package checks, TypeScript
+  and production compilation. Native acceptance uses two isolated desktop clients
+  and real providers through production IPC/HTTP; release-package acceptance is
+  recorded separately after packaging. Both app and server updates are required
+  for synchronized side conversations and the account usage indicator.
+
+## 2026-09-24 — Publish the signed beta.10 server correction
+
+- Publish server `1.0.7-beta.10` from canonical source
+  `240e29414a8cc843d593d699d7252e0b7df0c401` and standalone export
+  `2d84e17f8dc7d23f6ef2da8ecc8f0faeb8be6ba0` after all eight release test
+  shards and the paired local app acceptance pass.
+- Independently verify the Ed25519 signature and all 108 packaged runtime
+  files against committed source. Anonymous downloads match all three signed
+  candidate assets byte-for-byte. Archive SHA256:
+  `ef5f0418ab6e0890c87b346653fcb570256e1f9bb17d0da0afd292650dfec608`.
+- Managed updates prepare while agents keep working and activate when idle.
+  An accepted update request does not establish completed installation.
+  This publication changes neither desktop releases nor npm tags.
+
+## 2026-09-24 — Remove side-chat answer deadlines
+
+- Remove the 150-second answer cutoff from the shared side-chat runtime and
+  Claude's native control path, and the desktop's 210-second HTTP deadline.
+  Long answers retain their native conversation and follow-up context.
+  Codex side chats inherit ordinary Codex transport settings.
+- Preserve Stop, Clear, request-owner cancellation, disconnection and shutdown
+  cleanup. Remove timeout copy that promised a retry would work on an older
+  server after its native side conversation had already closed.
+- Regressions fail before the correction and pass after advancing beyond the
+  former deadlines. Exercise a real local HTTP connection, native conversation
+  retention, the full Claude manager/control path and cancellation without
+  stopping the parent. Pass 282 affected desktop and 238 server checks and
+  desktop TypeScript.
+- Personally reproduce the old cutoff through an isolated native offscreen
+  app and real Codex. With the correction, a 225-second tool completes and the
+  app receives its answer after 234 seconds. The main chat answers concurrently;
+  a side follow-up retains inherited tool-result context. Stop acknowledges in
+  100 ms and its owned tool exits.
+- Close a private Codex process promptly when Stop arrives during stalled
+  startup or fork creation. Retain ownership of delayed spawns and avoid
+  restarting a closed transport after a late fork reply. All 172 affected
+  adapter/transport checks pass, including unchanged durable-fork cleanup.
+- Accept local desktop `1.0.7-beta.10` build `1212`, arm64, from app source
+  `183083a5`, paired with server source `240e2941`. The actual signed package
+  completes native Codex and Claude first questions, contextual follow-ups,
+  Stop and Clear followed by another answer through production IPC/HTTP.
+  The isolated packaged window reports no renderer exceptions. Claude's
+  beyond-deadline control behavior is covered deterministically; the actual
+  225-second tool check uses Codex. No mocked provider is used for these app
+  acceptance checks.
+- Pass all 4,804 active desktop tests, TypeScript, production compilation and
+  compiled-package audit, plus all eight server release test shards. Verify
+  the local app's Developer ID signature. This local app is not notarized or
+  publicly published, and its automatic updater is disabled. Both app and
+  server corrections are required to remove both answer deadlines.
+
+## 2026-09-24 — Publish the signed beta.9 server correction
+
+- Publish server `1.0.7-beta.9` from canonical source
+  `40902a58873b6a9e298a4c9a24f55b80ebe21b4a` and exact standalone export
+  `ae9d4373eaeeaf6555eefeb6c3b0243329b4f44d`. All eight release test shards
+  and the canonical server, Electron and mobile-source CI checks pass.
+- Correct incomplete provider-manager test fixtures exposed by the first
+  release validation attempt, then rerun the full suite before signing and
+  publication. No failing candidate is published.
+- Verify the Ed25519 signature, all 108 packaged runtime files and executable
+  modes against committed source. Anonymous downloads match all three signed
+  candidate assets byte-for-byte. Archive SHA256:
+  `cb442218c9e524bad126190ee1ceb89c28356f41c3d1e91a200c857d75970548`.
+- Deployment uses the existing managed updater with fresh preparation and
+  when-idle activation. A queued request is not completed installation;
+  running agents retain their current worker until its work finishes.
+  This release changes neither desktop builds nor npm tags.
+
+## 2026-09-24 — Refresh an upgraded Codex CLI without stopping running chats
+
+- Recheck CLI and subsequent provider operations detect a replaced CLI.
+  New chats use a new process while existing turns, goals, approvals and
+  background work retain their original owner. Idle chats resume their native
+  thread history on the current process. Rechecking the same version does not
+  restart it, and read-only inspection cannot retain an old process forever.
+- Keep late notifications and approval requests tied to their emitting
+  process. Include manager identity in goal reconciliation and close every
+  retained process during provider shutdown.
+- Pass 376 affected checks, then 67 targeted checks after the final inspection
+  correction. The new regression cases cover concurrent routing, idle resume,
+  pending work, delayed callbacks, shutdown and inspection-task lifetime.
+- Exercise Settings > Server > Recheck CLIs in an isolated native offscreen
+  app through real IPC/HTTP. A fresh GPT-6 Sol chat using ChatGPT authentication
+  completes while the older process continues its existing turn. That turn
+  finishes normally; its old process exits and a contextual follow-up returns
+  the remembered phrase using the same native thread ID on the new process.
+  A repeated same-version recheck creates no additional process. No renderer
+  exceptions or changes to the production authentication file are observed.
+- The live test changes a wrapper's reported version while both processes use
+  the installed native CLI. It validates handoff and continuity, not historical
+  compatibility between two different CLI executables. The final read-only
+  inspection correction is covered by its focused lifetime regression.
+- Prepare server `1.0.7-beta.9`; public signing, publication and installed
+  activation are separate checks. No desktop or npm release is included.
+
+## 2026-09-24 — Preserve existing Python permissions during server updates
+
+- Accept same-user external Python interpreters and bounded uv runtime trees
+  with group-write permissions during preparation and activation. Record the
+  interpreter's bytes and mode without altering a shared installation.
+- Reproduce the preparation and durability failures before the correction.
+  Verify candidate and retained releases sharing a `0775` uv prefix with
+  `0664` library files and internal links. Changed interpreter bytes or modes
+  still invalidate the preparation receipt.
+- Pass 81 focused macOS checks (one Linux-only check skipped) and 61 Linux
+  checks, including real isolated worker/gateway startup and native systemd
+  unit parsing. The corrected scanner also accepts an existing uv runtime
+  and retained release without changing their permissions or service process.
+  Complete installed-service activation remains a separate deployment check.
+
 ## 2026-09-23 — Publish the signed beta.8 server update
 
 - Publish the legacy signed server beta `1.0.7-beta.8` from canonical source

@@ -42,3 +42,34 @@ export function GoalConditionField({ label, placeholder, value, onChange, disabl
     <small>{value.length.toLocaleString()} / 4,000</small>
   </label>
 }
+
+export function GoalSummaryBar({ label, condition, metadata, openLabel, onOpen, actions }: {
+  label: string
+  condition: string
+  metadata: ReactNode
+  openLabel: string
+  onOpen?: () => void
+  actions?: ReactNode
+}) {
+  const summary = <><Goal size={15} aria-hidden="true" /><span className="goal-summary-condition">{condition}</span>
+    <span className="goal-summary-meta">{metadata}</span></>
+  return <section className="goal-summary-bar" aria-label={label}>
+    {onOpen ? <button type="button" className="goal-summary" onClick={onOpen} aria-label={openLabel} title={condition}>{summary}</button>
+      : <div className="goal-summary">{summary}</div>}
+    {actions && <div className="goal-summary-actions">{actions}</div>}
+  </section>
+}
+
+export function GoalProgress({ label, status, condition, metrics, reason }: {
+  label: string
+  status: string
+  condition: string
+  metrics: Array<{ label: string; value: ReactNode }>
+  reason?: { label: string; text: string } | null
+}) {
+  return <section className="goal-progress" aria-label={label}>
+    <strong>{status}</strong><p>{condition}</p>
+    <dl>{metrics.map(metric => <div key={metric.label}><dt>{metric.label}</dt><dd>{metric.value}</dd></div>)}</dl>
+    {reason && <div className="goal-reason"><strong>{reason.label}</strong><p>{reason.text}</p></div>}
+  </section>
+}

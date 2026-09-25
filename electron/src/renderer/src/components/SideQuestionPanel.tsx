@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState, useSyncExternalStore } from 'react'
 import { ArrowDown, ArrowUp, Info, LoaderCircle, Square } from 'lucide-react'
 import { t } from '@shared/i18n'
-import { sideQuestionLimit, sideQuestionsAvailable, type SideQuestionScope } from '@shared/side-questions'
+import { sideChatSyncAvailable, sideQuestionLimit, sideQuestionsAvailable, type SideQuestionScope } from '@shared/side-questions'
 import type { Session } from '@shared/types'
 import { useLocale } from '../lib/i18n'
 import { SideChatController } from '../lib/side-chat'
@@ -26,7 +26,13 @@ export function SideQuestionPanel({ session, scope, controller, active = true, f
   const [showLatest, setShowLatest] = useState(false)
   const inputId = useId()
   const supported = !window.agentsDock.sharedChat && Boolean(window.agentsDock.sideQuestions) && sideQuestionsAvailable(health, session.backend)
-  const ready = supported && connected && !switchingProfileId && Boolean(scope.profileId)
+  const online = supported && connected && !switchingProfileId && Boolean(scope.profileId)
+  const sync = sideChatSyncAvailable(health)
+  const ready = online && (!sync || snapshot.revision !== undefined)
+  useEffect(() => {
+    if (!active || !online) return
+    return controller.connect(scope, session)
+  }, [active, online, sync, controller, scope.profileId, scope.profileGeneration, scope.serverIdentity, session.id])
   const limit = sideQuestionLimit(health)
   const length = Array.from(snapshot.draft.trim()).length
   useEffect(() => {
@@ -104,7 +110,10 @@ export function SideQuestionPanel({ session, scope, controller, active = true, f
       {showLatest && <button type="button" className="icon-button side-chat-jump" aria-label={t('timeline.ui.jumpToLatest')}
         title={t('timeline.ui.jumpToLatest')} onClick={jumpToLatest}><ArrowDown size={14} /></button>}
       {!supported && <p className="side-chat-note" role="status">{t('sideQuestion.unsupported')}</p>}
-      {supported && !ready && <p className="side-chat-note" role="status">{t('sideQuestion.connect')}</p>}
+      {supported && !online && <p className="side-chat-note" role="status">{t('sideQuestion.connect')}</p>}
+      {online && snapshot.loading && <p className="side-chat-note" role="status">{t('sideChat.syncing')}</p>}
+      {online && snapshot.error === 'side_chat_sync_failed' && <button type="button" className="quiet-button"
+        onClick={() => { void controller.refresh(scope, session.id) }}>{t('timeline.ui.retry')}</button>}
       {snapshot.historyOmitted && <p className="side-chat-note">{t('sideChat.historyOmitted')}</p>}
       {snapshot.error && <p className="side-chat-error" role="alert">{sideQuestionError(snapshot.error)}</p>}
       {length > limit && <p className="side-chat-error" role="status">{t('sideQuestion.limit', { count: length, limit })}</p>}
@@ -131,6 +140,8 @@ export function SideQuestionPanel({ session, scope, controller, active = true, f
 
 export function sideQuestionError(cause: unknown): string {
   const message = cause instanceof Error ? cause.message : String(cause)
+  if (/side_chat_sync_failed/.test(message)) return t('sideChat.syncFailed')
+  if (/side_question_interrupted/.test(message)) return t('sideQuestion.interrupted')
   if (/side_question_history_unsupported/.test(message)) return t('sideChat.historyUnsupported')
   if (/side_question_cancel_failed/.test(message)) return t('sideQuestion.cancelFailed')
   if (/side_question_unsupported|side_question_http_(?:404|405|501)/.test(message)) return t('sideQuestion.unsupported')

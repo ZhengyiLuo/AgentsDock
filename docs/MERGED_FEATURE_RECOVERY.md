@@ -1,9 +1,8 @@
 # Merged feature recovery
 
 This integration restores accepted changes to the maintained `server/` and desktop
-sources in one branch. It is a draft for review and acceptance testing, not a new
-release. Existing release versions, signed metadata, and distribution channels
-are unchanged.
+sources in one branch. This source integration does not publish a new release.
+Existing signed metadata and distribution channels are unchanged.
 
 ## Source map
 
@@ -38,8 +37,8 @@ reverting later accepted work.
 
 ## Validation and acceptance
 
-Automated validation is recorded in the pull request. Manual acceptance remains
-required before merge/release:
+Automated validation and the completed lightweight local acceptance are recorded
+in the pull request. The following checklist also guides deeper release acceptance:
 
 - Fresh interactive installation: URL/token output, opt-in clipboard, missing
   dependency prompts, and already installed Tailscale detection.
@@ -54,5 +53,14 @@ required before merge/release:
   boundaries through the actual desktop/provider tool.
 - App update/channel UI and current native side-question behavior.
 
-Full native App and live provider acceptance has not been established by unit
-checks. Test a local build from this branch; published npm releases are unchanged.
+Lightweight checks exercised real Claude, Codex, Cursor and OpenCode replies,
+Cursor import/resume, Cursor/OpenCode tools, provider side questions and isolated
+HTTP instances. This does not constitute full graphical or release-upgrade
+acceptance. OpenCode currently resets native context after Stop, and atomic
+workspace rename remains limited on filesystems without hard-link support.
+Published npm releases are unchanged.
+
+Integration with the latest main also retains synchronized side conversations,
+provider goal controls, upgraded Codex CLI detection and Python installation
+fixes. New server tests follow the recovered `server/tests/` package layout;
+installation, deployment and archive manifests include both sets of modules.

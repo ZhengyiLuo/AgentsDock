@@ -1,3 +1,4 @@
+import type { ProviderUsageScope, ProviderUsageSnapshot, UsageBackend } from '../shared/provider-usage'
 import { app, BrowserWindow, dialog, nativeImage, Notification, shell } from 'electron'
 import { applyOpenCodeSessionEvent } from '../shared/opencode'
 import { chmodSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
@@ -14,7 +15,7 @@ import { TeamMailHintController } from './team-mail-hint-controller'
 import { ActivityHealthProjection, type ActivityHealthRequest } from './activity-health'
 import type { CoordinatedConnection, CoordinatedProfile } from './coordinated-updates'
 import { SideQuestionRequests } from './side-question-requests'
-import { sideQuestionLimit, sideQuestionsAvailable, validateSideQuestionInput, type SideQuestionAnswer, type SideQuestionCancellation, type SideQuestionInput, type SideQuestionScope } from '../shared/side-questions'
+import { sideChatSyncAvailable, type SyncedSideChat, sideQuestionLimit, sideQuestionsAvailable, validateSideQuestionInput, type SideQuestionAnswer, type SideQuestionCancellation, type SideQuestionInput, type SideQuestionScope } from '../shared/side-questions'
 import { parseBulletinHintRefresh } from '../shared/team-bulletin-hints'
 import {
   cursorLocalSessionImportSupported,
@@ -2183,6 +2184,18 @@ export class AppService {
     })
   }
 
+  async providerUsage(expected: ProviderUsageScope, backend: UsageBackend, sessionId: string, refresh = false): Promise<ProviderUsageSnapshot> {
+    const scope = this.requireProfileScope(expected?.profileId, expected?.profileGeneration)
+    await this.ensureValidatedScope(scope)
+    this.assertCurrentScope(scope)
+    if (expected.serverIdentity && expected.serverIdentity !== this.settings.getProfile(scope.profileId)?.serverIdentity) throw staleProfileError()
+    const session = this.sessions.find(candidate => candidate.id === sessionId)
+    if (!session || session.backend !== backend || !['codex', 'claude'].includes(backend)) throw new Error('Provider usage is unavailable for this chat')
+    const result = await scope.client.providerUsage(backend, sessionId, refresh)
+    this.assertCurrentScope(scope)
+    return result
+  }
+
   async codexAuth(expected: CodexServerSettingsScope): Promise<CodexAuthStatus> {
     const scope = this.requireProfileScope(expected?.profileId, expected?.profileGeneration)
     await this.ensureValidatedScope(scope)
@@ -3286,6 +3299,13 @@ export class AppService {
         sessionId,
         snapshot
       })
+    }, revision => {
+      if (!this.isCurrentTimeline(scope, sessionId, lease)) return
+      this.emit('side-chat:changed', { profileId: scope.profileId, profileGeneration: scope.generation, sessionId, revision })
+    }, backend => {
+      if (!this.isCurrentTimeline(scope, sessionId, lease)) return
+      this.emit('provider-usage:changed', { profileId: scope.profileId, profileGeneration: scope.generation, sessionId, backend,
+        serverIdentity: this.settings.getProfile(scope.profileId)?.serverIdentity ?? null })
     })
     const current = this.timelineSubscriptions.get(sessionId)
     if (current?.lease === lease) current.stop = stop
@@ -3350,6 +3370,42 @@ export class AppService {
 
   viewState(expected: WorkspaceProfileScope, sessionId: string): ViewState | null { return this.cache.viewState(this.requireWorkspaceScope(expected).namespace, sessionId) }
   saveViewState(expected: WorkspaceProfileScope, state: ViewState): void { this.cache.putViewState(this.requireWorkspaceScope(expected).namespace, state) }
+
+  private async syncedSideChatOperation(expected: SideQuestionScope, sessionId: string,
+    operation: (client: AgentServerClient) => Promise<SyncedSideChat>): Promise<SyncedSideChat> {
+    const scope = this.requireProfileScope(expected?.profileId, expected?.profileGeneration)
+    await this.ensureValidatedScope(scope)
+    this.assertCurrentScope(scope)
+    if (expected.serverIdentity !== undefined
+      && expected.serverIdentity !== (this.settings.getProfile(scope.profileId)?.serverIdentity ?? null)) throw staleProfileError()
+    const session = this.sessions.find(candidate => candidate.id === sessionId)
+    if (!session || !sideQuestionsAvailable(this.health, session.backend) || !sideChatSyncAvailable(this.health)) throw new Error('side_question_unsupported')
+    try {
+      // This is an acknowledgement/read transport only. The server owns the
+      // native conversation and answer even if the desktop disconnects.
+      const result = await operation(scope.client)
+      this.assertCurrentScope(scope)
+      return result
+    } catch (error) {
+      if (error instanceof ServerError) throw new Error(`side_question_http_${error.status}: ${error.message}`)
+      throw error
+    }
+  }
+
+  readSyncedSideChat(scope: SideQuestionScope, sessionId: string): Promise<SyncedSideChat> {
+    return this.syncedSideChatOperation(scope, sessionId, client => client.readSyncedSideChat(sessionId))
+  }
+  submitSyncedSideChat(scope: SideQuestionScope, sessionId: string, input: SideQuestionInput): Promise<SyncedSideChat> {
+    const question = validateSideQuestionInput(input, sideQuestionLimit(this.health))
+    if (!question.side_chat_id || question.history !== undefined) return Promise.reject(new Error('side_question_invalid_request'))
+    return this.syncedSideChatOperation(scope, sessionId, client => client.submitSyncedSideChat(sessionId, question))
+  }
+  stopSyncedSideChat(scope: SideQuestionScope, sessionId: string, requestId: string): Promise<SyncedSideChat> {
+    return this.syncedSideChatOperation(scope, sessionId, client => client.stopSyncedSideChat(sessionId, requestId))
+  }
+  clearSyncedSideChat(scope: SideQuestionScope, sessionId: string, sideChatId: string): Promise<SyncedSideChat> {
+    return this.syncedSideChatOperation(scope, sessionId, client => client.clearSyncedSideChat(sessionId, sideChatId))
+  }
 
   async askSideQuestion(expected: SideQuestionScope, sessionId: string, input: SideQuestionInput): Promise<SideQuestionAnswer> {
     const scope = this.requireProfileScope(expected?.profileId, expected?.profileGeneration)

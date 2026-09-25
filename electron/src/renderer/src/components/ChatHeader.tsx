@@ -10,6 +10,8 @@ import { backendLabel, shortId } from '../lib/format'
 import { useTransientClose } from '../lib/transient-close'
 import { useAppStore } from '../store/app-store'
 import { ShortcutTooltip } from './ShortcutTooltip'
+import { ClaudeStatusButton } from './ClaudeControls'
+import { useClaudeRuntime } from './ClaudeRuntimeContext'
 import { CodexStatusButton } from './CodexControls'
 import { useCodexRuntime } from './CodexRuntimeContext'
 import { ScheduledJobsPopover } from './ScheduledJobsPopover'
@@ -47,6 +49,7 @@ export function ChatHeader({
   const running = useAppStore(state => (session ? state.activeSessionIds.has(session.id) : false))
   const admitting = useAppStore(state => (session ? Boolean(state.turnAdmissionTokens[session.id]) : false))
   const codexControlsSupported = useCodexRuntime().supported
+  const claudeControlsSupported = useClaudeRuntime().supported
   const liveForkSupported = useAppStore(state => completedPrefixForkAvailable(state.health, session?.backend))
   const forkBlocked = session?.backend === 'opencode' || (running || admitting) && !liveForkSupported
   const currentFolder = session?.folder?.trim() || 'General'
@@ -176,8 +179,9 @@ export function ChatHeader({
           onClick={onTerminalToggle}
         ><SquareTerminal size={16} /></button></ShortcutTooltip>}
         <CodexStatusButton />
+        <ClaudeStatusButton />
         {(running || admitting) && (
-          session.backend === 'claude'
+          (session.backend === 'claude' && !claudeControlsSupported)
           || (session.backend === 'codex' && !codexControlsSupported)
         ) && <AgentRunningStatus backend={session.backend} starting={!running && admitting} />}
         <ChatSyncStatus sessionId={session.id} />
