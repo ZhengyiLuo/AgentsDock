@@ -1,5 +1,26 @@
 # Public development log
 
+## 2026-09-25 — Preserve Claude input and repair imported wrappers
+
+- Send ordinary slash-prefixed Claude messages byte-for-byte as written, using
+  the provider's native per-message transport flag. Remove the injected literal
+  message instruction. Deliberately selected provider commands keep working.
+- Reconcile older injected copies and native command XML with their original
+  messages using provider message IDs and transcript ancestry. Preserve original
+  user text, quoted examples and raw transcripts. Imported-only records without
+  matching original-message evidence are left unchanged.
+- Carry existing same-ID history corrections in semantic pages even when the
+  duplicate's old timeline entry has disappeared. Refresh provider history can
+  replace a previously cached duplicate instead of simply omitting it.
+- Verify the signed local desktop `1.0.7-beta.12`, build `1214`, with the real
+  Claude provider: an absolute path with spaces reaches the provider unchanged,
+  a native Read retrieves a new file, ordinary slash text reaches the model,
+  and selecting `/context` executes the native command. Refresh provider history
+  removes a cached XML duplicate while retaining the original command, result
+  and file-read response. Pass 83 transport, 98 history/paging and 99 runner,
+  command and goal tests.
+- Server-source correction only; no production deployment or public release.
+
 ## 2026-09-25 — Restore running forks after hidden history repair
 
 - Keep the last completed native turn as the fork point when later history
