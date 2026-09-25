@@ -1,5 +1,15 @@
 # Public development log
 
+## 2026-09-24 — Remove account usage preview and align goal shortcuts
+
+- Remove the account usage indicator from the composer while provider reporting
+  receives further testing. The context usage meter remains available.
+- Give Codex the same goal shortcut beside the context meter and in the Add menu
+  as Claude. Both entry points open the existing provider goal dialog directly,
+  without sending a chat message or changing its draft.
+- Keep public desktop publication on hold. Record local package acceptance
+  separately after testing the corrected build through native controls.
+
 ## 2026-09-24 — Publish the signed beta.11 server
 
 - Publish server `1.0.7-beta.11` from canonical source

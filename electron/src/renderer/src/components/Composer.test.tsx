@@ -16,6 +16,7 @@ import { projectTeamMessageComposer } from '../lib/team-message-composer'
 import { Composer, TeamMentionPalette } from './Composer'
 import { ClaudeRuntimeProvider } from './ClaudeRuntimeContext'
 import { CodexRuntimeProvider } from './CodexRuntimeContext'
+import { CodexStatusButton } from './CodexControls'
 
 const secureConnectionId = '09d7bb2e-3b47-4be7-89fc-2cecd90f4434'
 const secureRouteId = '22e7bb2e-3b47-4be7-89fc-2cecd90f4434'
@@ -4925,6 +4926,109 @@ describe('Composer', () => {
     expect(screen.queryByRole('option', { name: /^Goal/ })).not.toBeInTheDocument()
   })
 
+  it.each(['shortcut', 'add menu'] as const)('opens the selected Codex chat goal from the %s and only starts work on submission', async path => {
+    const send = vi.fn()
+    const setGoal = vi.fn().mockResolvedValue({
+      goal: { threadId: 'thread-2', objective: 'Finish the selected chat task', status: 'active',
+        tokensUsed: 0, timeUsedSeconds: 0, tokenBudget: null, updatedAt: 0 },
+      time_budget_seconds: null
+    })
+    Object.defineProperty(window, 'agentsDock', { configurable: true, value: {
+      preferences: { get: vi.fn().mockResolvedValue(''), set: vi.fn().mockResolvedValue(undefined) },
+      turns: { send },
+      codex: { ...composerCodexBridge(), setGoal, clearGoal: vi.fn() },
+      events: { on: vi.fn().mockReturnValue(() => undefined) }
+    } as unknown as AgentsDockAPI })
+    useAppStore.setState({
+      selectedSessionId: 'chat-2',
+      chatPanes: { primary: 'chat-2', secondary: null },
+      sessions: [
+        { id: 'chat-1', title: 'Other chat', backend: 'codex' },
+        { id: 'chat-2', title: 'Selected chat', backend: 'codex' }
+      ],
+      health: { ok: true, capabilities: { codex_controls: {
+        available: true, required: false, message: '', action: null, features: { goals: true }
+      } } }
+    })
+    const user = userEvent.setup()
+    render(<CodexGoalComposerHarness />)
+
+    const shortcut = await screen.findByRole('button', { name: 'Codex goal' })
+    const editor = screen.getByPlaceholderText('Message')
+    await user.type(editor, 'Keep this unsent Codex draft')
+    expect(shortcut).toHaveClass('composer-icon')
+    if (path === 'shortcut') await user.click(shortcut)
+    else {
+      await user.click(screen.getByTitle('Add'))
+      await user.click(await screen.findByRole('menuitem', { name: 'Codex goal' }))
+    }
+
+    const dialog = await screen.findByRole('dialog', { name: 'Codex goal' })
+    expect(editor).toHaveValue('Keep this unsent Codex draft')
+    await user.type(within(dialog).getByRole('textbox', { name: 'Completion condition' }), 'Finish the selected chat task')
+    expect(send).not.toHaveBeenCalled()
+    expect(setGoal).not.toHaveBeenCalled()
+    await user.click(within(dialog).getByRole('button', { name: 'Start goal' }))
+    await waitFor(() => expect(setGoal).toHaveBeenCalledExactlyOnceWith('chat-2', {
+      objective: 'Finish the selected chat task', status: 'active', token_budget: null, time_budget_seconds: null
+    }))
+    expect(send).not.toHaveBeenCalled()
+  })
+
+  it.each(['shortcut', 'add menu'] as const)('keeps the Claude goal %s equivalent to Codex without sending a model turn', async path => {
+    const send = vi.fn()
+    const setGoal = vi.fn()
+    Object.defineProperty(window, 'agentsDock', { configurable: true, value: {
+      preferences: { get: vi.fn().mockResolvedValue(''), set: vi.fn().mockResolvedValue(undefined) },
+      turns: { send },
+      claude: { runtime: vi.fn().mockResolvedValue({ available: true, transport: 'sdk',
+        interactive_capability: 'claude_sdk_interactive_v1', session_loaded: true,
+        pending_interactions: [], features: { goals: true }, goal: null }), setGoal, clearGoal: vi.fn() },
+      events: { on: vi.fn().mockReturnValue(() => undefined) }
+    } as unknown as AgentsDockAPI })
+    useAppStore.setState({ sessions: [{ id: 'chat-1', title: 'Chat', backend: 'claude' }] })
+    const user = userEvent.setup()
+    render(<ClaudeComposerHarness />)
+
+    const shortcut = await screen.findByRole('button', { name: 'Claude goal' })
+    const editor = screen.getByPlaceholderText('Message')
+    await user.type(editor, 'Keep this unsent Claude draft')
+    expect(shortcut).toHaveClass('composer-icon')
+    if (path === 'shortcut') await user.click(shortcut)
+    else {
+      await user.click(screen.getByTitle('Add'))
+      await user.click(await screen.findByRole('menuitem', { name: 'Claude goal' }))
+    }
+    const dialog = await screen.findByRole('dialog', { name: 'Claude goal' })
+    expect(editor).toHaveValue('Keep this unsent Claude draft')
+    expect(within(dialog).getByRole('textbox', { name: 'Completion condition' })).toBeVisible()
+    expect(send).not.toHaveBeenCalled()
+    expect(setGoal).not.toHaveBeenCalled()
+  })
+
+  it.each(['codex', 'claude'] as const)('removes the unvalidated %s account usage popup without requesting quota', async backend => {
+    const usage = vi.fn().mockResolvedValue({
+      backend, status: 'available', source: backend === 'codex' ? 'codex-account' : 'claude-events',
+      account_kind: 'subscription', observed_at: '2026-09-24T12:00:00Z',
+      windows: [{ id: 'primary', label: '5 hours', used_percent: 25, resets_at: 1790254800,
+        window_minutes: 300, observed_at: '2026-09-24T12:00:00Z' }]
+    })
+    Object.defineProperty(window, 'agentsDock', { configurable: true, value: {
+      preferences: { get: vi.fn().mockResolvedValue(''), set: vi.fn().mockResolvedValue(undefined) },
+      runtime: { usage },
+      events: { on: vi.fn().mockReturnValue(() => undefined) }
+    } as unknown as AgentsDockAPI })
+    useAppStore.setState({ connected: true,
+      sessions: [{ id: 'chat-1', title: 'Chat', backend }],
+      health: { ok: true, server_identity: 'server-a', server_instance_id: 'instance-a',
+        capabilities: { provider_usage: { available: true, version: 1 } } }
+    })
+    render(<Composer />)
+    await userEvent.setup().type(screen.getByPlaceholderText('Message'), 'Keep writing')
+    expect(screen.queryByRole('button', { name: /^Account usage:/ })).not.toBeInTheDocument()
+    expect(usage).not.toHaveBeenCalled()
+  })
+
   it.each([
     ['keyboard selection', 'enter'],
     ['send-button fallback', 'send']
@@ -6445,6 +6549,14 @@ function deferred<T>() {
 function CodexComposerHarness() {
   const session = useAppStore(state => state.sessions.find(candidate => candidate.id === state.selectedSessionId) ?? null)
   return <CodexRuntimeProvider session={session} capability={{ available: true }}>
+    <Composer />
+  </CodexRuntimeProvider>
+}
+
+function CodexGoalComposerHarness() {
+  const session = useAppStore(state => state.sessions.find(candidate => candidate.id === state.selectedSessionId) ?? null)
+  return <CodexRuntimeProvider session={session} capability={{ available: true }}>
+    <CodexStatusButton />
     <Composer />
   </CodexRuntimeProvider>
 }
