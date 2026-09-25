@@ -113,6 +113,7 @@ import { BackendMark } from './BackendMark'
 import { CodexContextIndicator, CodexGoalBar } from './CodexControls'
 import { useCodexRuntime } from './CodexRuntimeContext'
 import { ClaudeContextIndicator } from './ClaudeContextIndicator'
+import { ProviderUsageIndicator } from './ProviderUsageIndicator'
 import { ClaudePermissionMenu } from './ClaudePermissionMenu'
 import { useClaudeRuntime } from './ClaudeRuntimeContext'
 import { ClaudeMcpDialog, claudeMcpCapabilityAdvertised, claudeMcpCapabilitySupported } from './ClaudeMcpDialog'
@@ -2187,6 +2188,7 @@ export const Composer = memo(function Composer({ dropActive = false, sessionId, 
           {session.backend === 'codex' && <CodexContextIndicator />}
           {session.backend === 'claude' && <ClaudePermissionMenu session={session} running={running} open={permissionMenuOpen} onOpenChange={setPermissionMenuOpen} />}
           {session.backend === 'claude' && <ClaudeContextIndicator />}
+          <ProviderUsageIndicator session={session} />
           {claudeGoalsAvailable && <button type="button" className="composer-icon" aria-label={t('claudeGoal.title')} title={t('claudeGoal.title')} onClick={() => setClaudeGoalOpen(true)}><Goal size={15} /></button>}
           {session.backend === 'cursor' && <CursorPermissionMenu session={session} running={running} open={permissionMenuOpen} onOpenChange={setPermissionMenuOpen} />}
         </div>

@@ -30,6 +30,48 @@ function fixture() {
 }
 
 describe('main side-question service scope', () => {
+  it('uses server-owned sync without registering a local answer transport or closing it on shutdown', async () => {
+    const { service, mainClient, clientFactory } = fixture()
+    const snapshot = { session_id: 'chat-a', side_chat_id: 'side-a', revision: 1, exchanges: [], last_request_id: null }
+    const methods = { readSyncedSideChat: vi.fn().mockResolvedValue(snapshot), submitSyncedSideChat: vi.fn().mockResolvedValue(snapshot),
+      stopSyncedSideChat: vi.fn().mockResolvedValue(snapshot), clearSyncedSideChat: vi.fn().mockResolvedValue(snapshot) }
+    Object.assign(mainClient, methods)
+    ;(service as any).health.capabilities.side_questions.sync = true
+    await expect(service.readSyncedSideChat(expected, 'chat-a')).resolves.toEqual(snapshot)
+    await expect(service.submitSyncedSideChat(expected, 'chat-a', input)).resolves.toEqual(snapshot)
+    await expect(service.stopSyncedSideChat(expected, 'chat-a', 'from-other-device')).resolves.toEqual(snapshot)
+    await expect(service.clearSyncedSideChat(expected, 'chat-a', 'side-a')).resolves.toEqual(snapshot)
+    expect(methods.stopSyncedSideChat).toHaveBeenCalledExactlyOnceWith('chat-a', 'from-other-device')
+    expect(methods.clearSyncedSideChat).toHaveBeenCalledExactlyOnceWith('chat-a', 'side-a')
+    ;(service as any).sideQuestions.cancelAll()
+    expect(clientFactory).not.toHaveBeenCalled()
+    expect(mainClient.dispose).not.toHaveBeenCalled()
+  })
+
+  it('requires sync support and current verified scope for cross-device operations', async () => {
+    const { service, mainClient } = fixture()
+    const read = vi.fn()
+    Object.assign(mainClient, { readSyncedSideChat: read })
+    await expect(service.readSyncedSideChat(expected, 'chat-a')).rejects.toThrow('side_question_unsupported')
+    ;(service as any).health.capabilities.side_questions.sync = true
+    await expect(service.readSyncedSideChat({ ...expected, serverIdentity: 'foreign' }, 'chat-a')).rejects.toThrow()
+    await expect(service.stopSyncedSideChat({ ...expected, profileGeneration: 6 }, 'chat-a', 'request')).rejects.toThrow()
+    expect(read).not.toHaveBeenCalled()
+  })
+
+  it('rejects a late sync read after its selected server changes', async () => {
+    const { service, mainClient } = fixture()
+    let resolve!: (value: unknown) => void
+    const read = vi.fn().mockReturnValue(new Promise(done => { resolve = done }))
+    Object.assign(mainClient, { readSyncedSideChat: read })
+    ;(service as any).health.capabilities.side_questions.sync = true
+    const pending = service.readSyncedSideChat(expected, 'chat-a')
+    await vi.waitFor(() => expect(read).toHaveBeenCalledOnce())
+    Object.assign(service, { activeProfileId: 'another', profileGeneration: 8 })
+    resolve({ session_id: 'chat-a', side_chat_id: 'side-a', revision: 1, exchanges: [], last_request_id: null })
+    await expect(pending).rejects.toThrow()
+  })
+
   it('finishes an owned request while another server is selected and resumes it after returning', async () => {
     const { service, sideClient, mainClient } = fixture()
     const owner = { ...expected, serverIdentity: 'identity-a' }

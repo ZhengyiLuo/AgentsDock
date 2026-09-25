@@ -1,5 +1,30 @@
 # Public development log
 
+## 2026-09-24 — Shared provider controls, side-chat sync and account usage
+
+- Use the same goal summary, progress and editing layout for Codex and Claude.
+  Add Claude's clickable header status panel, with its native context, pending
+  interactions and goal entry point. Preserve each provider's supported actions.
+- Persist side conversations on the connected server and reconcile them across
+  native clients using socket notifications. Accepted answers survive app closure;
+  Stop and Clear apply across clients. Codex resumes the saved native side thread;
+  Claude restores its native side history. Side content remains outside the main
+  transcript, and private Codex forks stay out of main-chat import discovery.
+- Show provider-reported account allowance, reset times and credits when supplied.
+  Missing percentages remain unknown; API and custom endpoints do not inherit
+  ChatGPT allowance. Account changes invalidate observations, and usage updates
+  do not become transcript events or trigger model requests.
+- Respect Claude's configured data directory when locating native session history
+  and goals. Preserve newly typed drafts during Clear and reject late results from
+  a previous connection. Refresh side history on reconnect transitions and changes,
+  without treating repeated timeline liveness notices as polling triggers.
+- Source verification includes the desktop suite, provider transport/authentication,
+  persistence and cancellation regressions, installation/package checks, TypeScript
+  and production compilation. Native acceptance uses two isolated desktop clients
+  and real providers through production IPC/HTTP; release-package acceptance is
+  recorded separately after packaging. Both app and server updates are required
+  for synchronized side conversations and the account usage indicator.
+
 ## 2026-09-24 — Publish the signed beta.10 server correction
 
 - Publish server `1.0.7-beta.10` from canonical source

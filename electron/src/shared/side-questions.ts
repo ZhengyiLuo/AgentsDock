@@ -12,6 +12,7 @@ export interface SideQuestionsCapability {
   history?: boolean
   max_history_items?: number
   max_history_chars?: number
+  sync?: boolean
   native_context?: boolean
 }
 
@@ -128,4 +129,52 @@ export function parseSideQuestionAnswer(value: unknown, sessionId: string, reque
     throw new Error('side_question_invalid_response')
   }
   return answer as SideQuestionAnswer
+}
+
+/** Server-owned side chat. Revisions survive clear and process restarts. */
+export interface SyncedSideChat {
+  session_id: string
+  side_chat_id: string
+  revision: number
+  last_request_id: string | null
+  exchanges: Array<{
+    request_id: string
+    question: string
+    status: 'running' | 'completed' | 'cancelled' | 'failed' | 'interrupted'
+    answer?: string
+    context_note?: string
+    backend?: 'codex' | 'claude'
+    error?: string
+    created_at: string
+    updated_at: string
+  }>
+}
+
+export function sideChatSyncAvailable(health: Health | null | undefined): boolean {
+  return health?.capabilities?.side_questions?.sync === true
+}
+
+export function parseSyncedSideChat(value: unknown, sessionId: string): SyncedSideChat {
+  const chat = value as Partial<SyncedSideChat> | null
+  const id = (value: unknown): value is string => typeof value === 'string' && /^[a-zA-Z0-9_-]{1,128}$/.test(value)
+  if (!chat || chat.session_id !== sessionId || !id(chat.side_chat_id)
+    || !Number.isSafeInteger(chat.revision) || chat.revision! < 0
+    || (chat.last_request_id !== null && !id(chat.last_request_id)) || !Array.isArray(chat.exchanges)) {
+    throw new Error('side_question_invalid_response')
+  }
+  const ids = new Set<string>()
+  for (const exchange of chat.exchanges) {
+    if (!exchange || !id(exchange.request_id) || ids.has(exchange.request_id)
+      || typeof exchange.question !== 'string' || !exchange.question.trim()
+      || !['running', 'completed', 'cancelled', 'failed', 'interrupted'].includes(exchange.status)
+      || (exchange.status === 'completed' && (typeof exchange.answer !== 'string' || !exchange.answer.trim()))
+      || (exchange.backend !== undefined && !['codex', 'claude'].includes(exchange.backend))
+      || [exchange.answer, exchange.context_note, exchange.error].some(value => value !== undefined && typeof value !== 'string')
+      || typeof exchange.created_at !== 'string' || typeof exchange.updated_at !== 'string') {
+      throw new Error('side_question_invalid_response')
+    }
+    ids.add(exchange.request_id)
+  }
+  if (chat.exchanges.filter(exchange => exchange.status === 'running').length > 1) throw new Error('side_question_invalid_response')
+  return chat as SyncedSideChat
 }

@@ -46,6 +46,35 @@ function browserHeaders(request: IncomingMessage): string[] {
 afterEach(() => { vi.useRealTimers(); vi.restoreAllMocks(); vi.unstubAllGlobals() })
 
 describe('side-question native HTTP contract', () => {
+  it('uses native authenticated transport for synced reads, submission, Stop and Clear', async () => {
+    const requests: Array<{ method?: string; url?: string; body: string }> = []
+    const snapshot = { session_id: 'chat-a', side_chat_id: 'side-a', revision: 0, last_request_id: null, exchanges: [] }
+    await localTransport(async (request, response) => {
+      expect(browserHeaders(request)).toEqual([])
+      expect(request.headers['x-agentsdock-token']).toBe(token)
+      requests.push({ method: request.method, url: request.url, body: await body(request) })
+      json(response, snapshot, request.method === 'POST' ? 202 : 200)
+    }, async client => {
+      await expect(client.readSyncedSideChat('chat-a')).resolves.toEqual(snapshot)
+      await expect(client.submitSyncedSideChat('chat-a', input)).resolves.toEqual(snapshot)
+      await expect(client.stopSyncedSideChat('chat-a', input.request_id)).resolves.toEqual(snapshot)
+      await expect(client.clearSyncedSideChat('chat-a', input.side_chat_id)).resolves.toEqual(snapshot)
+    })
+    expect(requests.map(request => [request.method, request.url])).toEqual([
+      ['GET', '/api/sessions/chat-a/side-chat'], ['POST', '/api/sessions/chat-a/side-chat'],
+      ['DELETE', '/api/sessions/chat-a/side-chat/requests/request-a'], ['DELETE', '/api/sessions/chat-a/side-chat/side-a']
+    ])
+    expect(JSON.parse(requests[1].body)).toEqual(input)
+  })
+
+  it('rejects foreign or malformed synced snapshots and invalid native paths', async () => {
+    await localTransport((_request, response) => json(response, { session_id: 'foreign', side_chat_id: 'side-a', revision: 0, last_request_id: null, exchanges: [] }), async client => {
+      await expect(client.readSyncedSideChat('chat-a')).rejects.toThrow('side_question_invalid_response')
+      await expect(client.readSyncedSideChat('chat/a')).rejects.toThrow('route is invalid')
+      await expect(client.stopSyncedSideChat('chat-a', 'request/a')).rejects.toThrow('route is invalid')
+    })
+  })
+
   it('passes the native owner guard and sends only the native follow-up cursor', async () => {
     vi.unstubAllGlobals() // Restore actual Node fetch instead of the global test safety stub.
     const requests: Array<{ request: IncomingMessage; body: string }> = []
