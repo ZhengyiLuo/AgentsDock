@@ -1,5 +1,25 @@
 # Public development log
 
+## 2026-09-24 — Accept local beta.11 desktop
+
+- Accept local arm64 desktop `1.0.7-beta.11`, build `1213`, from committed source
+  `9b04f852c5c6e698edbf47f9e64d9eb9b65a81be`, paired with the same server source.
+  Pass all 4,843 active desktop tests, TypeScript, production compilation,
+  compiled-package audit, Developer ID signature and entitlement checks.
+- Personally exercise the isolated native app and signed package through actual
+  IPC/HTTP with Codex and Claude: inherited tool-result context, follow-ups,
+  shared history in two clients, cross-client cancellation and Clear, app closure
+  while an answer continues, and native side-context retention after a server
+  restart. Verify both providers' goal completion, Codex Clear, Claude Clear &
+  stop, and the new Claude header panel. No provider mock is used in these checks.
+- Read real account observations from both providers through the packaged UI.
+  The test account reports Codex credit availability and Claude reset times;
+  neither supplies a percentage. Percentage rendering and rejected-window
+  precedence are covered by component/native-event regressions.
+- The local package is signed but not notarized or publicly published, and its
+  automatic updater is disabled. Public server-candidate validation and deployment
+  are recorded separately; a built candidate is not an installed server.
+
 ## 2026-09-24 — Shared provider controls, side-chat sync and account usage
 
 - Use the same goal summary, progress and editing layout for Codex and Claude.
