@@ -1,5 +1,20 @@
 # Public development log
 
+## 2026-09-24 — Publish the signed beta.11 server
+
+- Publish server `1.0.7-beta.11` from canonical source
+  `9b04f852c5c6e698edbf47f9e64d9eb9b65a81be` and standalone export
+  `278f88d1d4110b23b1cab3d30013116b7021214d` after all eight release test
+  shards pass: 5,163 cases, including six skipped.
+- Verify the Ed25519 signature and all 109 packaged runtime files against
+  committed source. Anonymous downloads match all three signed assets.
+  Archive SHA256:
+  `f4e84a2cb93ba4ebcf30f9db2ab77ada4eac496bd06ce85fb4001d2a0cb17a08`.
+- Both managed deployment targets accept the exact version and finish preparing
+  it. Activation is scheduled for idle; both still report beta.10 at handoff.
+  No running agents are interrupted. This publication changes neither desktop
+  releases nor npm tags.
+
 ## 2026-09-24 — Accept local beta.11 desktop
 
 - Accept local arm64 desktop `1.0.7-beta.11`, build `1213`, from committed source
