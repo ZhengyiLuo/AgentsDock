@@ -1,3 +1,4 @@
+import type { ProviderUsageScope, ProviderUsageSnapshot, UsageBackend } from './provider-usage'
 import type {
   AgentFile,
   AgentCrossChatRoute,
@@ -21,6 +22,12 @@ import type {
   CodexGoalInput,
   CodexGoalSnapshot,
   CodexGoalsConfiguration,
+  CodexAuthStatus,
+  CodexProviderConfiguration,
+  CodexProviderModels,
+  CodexProviderInput,
+  CodexProviderModelTestInput,
+  CodexProviderTestResult,
   CodexSubagentsConfiguration,
   CodexServerSettingsScope,
   CodexOperationAccepted,
@@ -156,6 +163,8 @@ import type {
   TeamNetworkProjectionPage,
   TeamNetworkProjectionQuery,
   TeamNetworkRegisterAgentInput,
+  TeamNetworkRenameServerInput,
+  TeamNetworkServerProfile,
   TeamNetworkReplyPassiveRequestInput,
   TeamNetworkSendMailboxInput,
   TeamAttachment,
@@ -197,6 +206,7 @@ import type {
   SecurePeerControlStatus,
   SecurePeerDeactivateInput,
   SecurePeerForgetConnectionInput,
+  SecurePeerUpdateEndpointInput,
   SecurePeerJoinInput,
   SecurePeerPairing,
   SecurePeerPublishRouteInput,
@@ -207,8 +217,24 @@ import type {
 } from './secure-peer'
 
 export interface AgentsDockAPI {
+  /** Native operator-only controls, deliberately absent from shared-chat clients. */
+  workspaceGit?: {
+    status(scope: WorkspaceProfileScope, sessionId: string): Promise<import('./workspace-git').WorkspaceGitStatus>
+    diff(scope: WorkspaceProfileScope, sessionId: string, path: string, view: import('./workspace-git').WorkspaceGitView): Promise<import('./workspace-git').WorkspaceGitDiff>
+    conflict(scope: WorkspaceProfileScope, sessionId: string, path: string): Promise<import('./workspace-git').WorkspaceGitConflict>
+    action(scope: WorkspaceProfileScope, sessionId: string, input: import('./workspace-git').WorkspaceGitAction): Promise<import('./workspace-git').WorkspaceGitStatus>
+  }
   /** Restricted browser renderer. It has no native, filesystem, or other-chat authority. */
   readonly sharedChat?: true
+  sideQuestions?: {
+    read?(scope: import('./side-questions').SideQuestionScope, sessionId: string): Promise<import('./side-questions').SyncedSideChat>
+    submit?(scope: import('./side-questions').SideQuestionScope, sessionId: string, input: import('./side-questions').SideQuestionInput): Promise<import('./side-questions').SyncedSideChat>
+    stop?(scope: import('./side-questions').SideQuestionScope, sessionId: string, requestId: string): Promise<import('./side-questions').SyncedSideChat>
+    clear?(scope: import('./side-questions').SideQuestionScope, sessionId: string, sideChatId: string): Promise<import('./side-questions').SyncedSideChat>
+    ask(scope: import('./side-questions').SideQuestionScope, sessionId: string, input: import('./side-questions').SideQuestionInput): Promise<import('./side-questions').SideQuestionAnswer>
+    cancel(scope: import('./side-questions').SideQuestionScope, sessionId: string, requestId: string): Promise<import('./side-questions').SideQuestionCancellation>
+    close?(scope: import('./side-questions').SideQuestionScope, sessionId: string, sideChatId: string): Promise<void>
+  }
   chatShares: {
     preview(scope: WorkspaceProfileScope, sessionId: string): Promise<import('./chat-shares').ChatSharePreview>
     list(scope: WorkspaceProfileScope, sessionId: string, mode: import('./chat-shares').ChatShareMode): Promise<import('./chat-shares').ChatShareRecord[]>
@@ -252,6 +278,7 @@ export interface AgentsDockAPI {
     postMessage(scope: TeamHubScope, input: TeamHubPostMessageInput): Promise<TeamHubMessage>
     networkCapabilities(scope: TeamHubScope): Promise<TeamNetworkCapabilities>
     network(scope: TeamHubScope, query: TeamNetworkProjectionQuery): Promise<TeamNetworkProjectionPage>
+    renameNetworkServer(scope: TeamHubScope, input: TeamNetworkRenameServerInput): Promise<TeamNetworkServerProfile>
     registerNetworkAgent(scope: TeamHubScope, input: TeamNetworkRegisterAgentInput): Promise<TeamNetworkAgent>
     bulletin(scope: TeamHubScope, query: TeamNetworkBulletinQuery): Promise<TeamNetworkBulletinPage>
     postBulletin(scope: TeamHubScope, input: TeamNetworkPostBulletinInput): Promise<TeamNetworkBulletinPost>
@@ -296,6 +323,7 @@ export interface AgentsDockAPI {
     activateSecurePeerPairing(scope: SecurePeerProfileScope, input: SecurePeerActivateInput): Promise<SecurePeerControlStatus>
     deactivateSecurePeerConnection(scope: SecurePeerProfileScope, input: SecurePeerDeactivateInput): Promise<SecurePeerControlStatus>
     forgetSecurePeerConnection(scope: SecurePeerProfileScope, input: SecurePeerForgetConnectionInput): Promise<SecurePeerControlStatus>
+    updateSecurePeerConnectionEndpoint(scope: SecurePeerProfileScope, input: SecurePeerUpdateEndpointInput): Promise<SecurePeerControlStatus>
     securePeers(scope: TeamHubScope, teamId: string): Promise<SecurePeerPairing[]>
     approveSecurePeerPairing(scope: SecurePeerProfileScope, input: SecurePeerApproveInput): Promise<SecurePeerControlStatus>
     rejectSecurePeerPairing(scope: SecurePeerProfileScope, input: SecurePeerRejectInput): Promise<SecurePeerControlStatus>
@@ -307,6 +335,8 @@ export interface AgentsDockAPI {
     status(): Promise<AppUpdateStatus>
     check(): Promise<AppUpdateStatus>
     install(): Promise<boolean>
+    cancel(): Promise<AppUpdateStatus>
+    retryServers(profileId: string): Promise<AppUpdateStatus>
     setTrack(track: AppUpdateTrack): Promise<AppUpdateStatus>
   }
   settings: {
@@ -348,7 +378,7 @@ export interface AgentsDockAPI {
     list(): Promise<Session[]>
     create(input: CreateSessionInput): Promise<Session>
     resume(input: ResumeSessionInput): Promise<Session>
-    update(sessionId: string, patch: UpdateSessionInput): Promise<Session>
+    update(sessionId: string, patch: UpdateSessionInput, expectedScope?: WorkspaceProfileScope): Promise<Session>
     reloadProvider(sessionId: string): Promise<ProviderReloadResult>
     remove(sessionId: string): Promise<boolean>
     fork(sessionId: string): Promise<Session>
@@ -387,6 +417,13 @@ export interface AgentsDockAPI {
     stop(sessionId: string): Promise<TurnStopResult>
   }
   codex: {
+    auth(scope: CodexServerSettingsScope): Promise<CodexAuthStatus>
+    provider(scope: CodexServerSettingsScope): Promise<CodexProviderConfiguration>
+    providerModels(scope: CodexServerSettingsScope, sessionId?: string): Promise<CodexProviderModels>
+    testProvider(scope: CodexServerSettingsScope, input: CodexProviderInput): Promise<CodexProviderTestResult>
+    testProviderModel(scope: CodexServerSettingsScope, input: CodexProviderModelTestInput): Promise<CodexProviderTestResult>
+    setProvider(scope: CodexServerSettingsScope, input: CodexProviderInput): Promise<CodexProviderConfiguration>
+    resetProvider(scope: CodexServerSettingsScope): Promise<CodexProviderConfiguration>
     serverGoals(): Promise<CodexGoalsConfiguration>
     setServerGoals(enabled: boolean): Promise<CodexGoalsConfiguration>
     serverSubagents(scope: CodexServerSettingsScope): Promise<CodexSubagentsConfiguration>
@@ -418,6 +455,8 @@ export interface AgentsDockAPI {
   }
   claude: {
     runtime(sessionId: string): Promise<ClaudeRuntimeSnapshot>
+    setGoal(sessionId: string, condition: string): Promise<ClaudeRuntimeSnapshot>
+    clearGoal(sessionId: string): Promise<ClaudeRuntimeSnapshot>
     refreshContextUsage(sessionId: string): Promise<ClaudeRuntimeSnapshot>
     mcp(sessionId: string): Promise<ClaudeMcpSnapshot>
     controlMcp(sessionId: string, input: ClaudeMcpControlInput): Promise<ClaudeMcpSnapshot>
@@ -522,6 +561,7 @@ export interface AgentsDockAPI {
     send(input: DigestInput): Promise<boolean>
   }
   runtime: {
+    usage?(scope: ProviderUsageScope, backend: UsageBackend, sessionId: string, refresh?: boolean): Promise<ProviderUsageSnapshot>
     catalog(refresh?: boolean): Promise<RuntimeCatalog>
   }
   processes: {

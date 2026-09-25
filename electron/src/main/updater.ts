@@ -22,7 +22,7 @@ const CHECK_BLOCKING_STATES = new Set<AppUpdateStatus['state']>([
   'downloading',
   'installing'
 ])
-const TRACK_BLOCKING_STATES = new Set<AppUpdateStatus['state']>([
+const CANCELABLE_STATES = new Set<AppUpdateStatus['state']>([
   ...CHECK_BLOCKING_STATES,
   'downloaded'
 ])
@@ -30,6 +30,7 @@ const TRACK_BLOCKING_STATES = new Set<AppUpdateStatus['state']>([
 export interface AppUpdateLifecycle {
   beforeInstall?: () => void
   installFailed?: () => void
+  retryServers?: (profileId: string) => Promise<void>
 }
 
 export interface AppUpdateTrackStore {
@@ -49,6 +50,24 @@ export class AppUpdateManager {
   private track: AppUpdateTrack = 'stable'
   private betaFeedOverridden = false
   private developmentChecksEnabled = false
+  private installInFlight: Promise<boolean> | null = null
+  private cancellationEpoch = 0
+  private ignoreUpdaterEvents = false
+  private suppressAutomaticChecks = false
+  private downloadCancellation: { cancel(): void } | null = null
+  private cancelInstallWait: (() => void) | null = null
+  private nativeInstallStarted = false
+
+  setServerUpdates(serverUpdates: NonNullable<AppUpdateStatus['serverUpdates']>): void {
+    this.set({ serverUpdates, serverUpdateMessage: undefined })
+  }
+
+  setServerUpdateError(message: string): void { this.set({ serverUpdateMessage: message }) }
+
+  async retryServers(profileId: string): Promise<AppUpdateStatus> {
+    await this.lifecycle.retryServers?.(profileId)
+    return this.status()
+  }
 
   constructor(
     private readonly publish: (status: AppUpdateStatus) => void,
@@ -59,7 +78,28 @@ export class AppUpdateManager {
   }
 
   status(): AppUpdateStatus {
-    return { ...this.value }
+    return { ...this.value, cancelable: !this.nativeInstallStarted && CANCELABLE_STATES.has(this.value.state) }
+  }
+
+  cancel(): AppUpdateStatus {
+    if (!this.status().cancelable) return this.status()
+    this.cancellationEpoch += 1
+    this.ignoreUpdaterEvents = true
+    this.suppressAutomaticChecks = true
+    this.readyUpdateBeforeRefresh = null
+    this.manualCheck = false
+    this.downloadCancellation?.cancel()
+    this.downloadCancellation = null
+    this.cancelInstallWait?.()
+    this.installInFlight = null
+    this.set({
+      state: 'idle',
+      availableVersion: undefined,
+      progress: undefined,
+      downloadedAt: undefined,
+      message: 'Update canceled. Check for updates when you are ready.'
+    })
+    return this.status()
   }
 
   start(): void {
@@ -121,15 +161,24 @@ export class AppUpdateManager {
   }
 
   private async performCheck(manual: boolean): Promise<AppUpdateStatus> {
+    if (!manual && this.suppressAutomaticChecks) return this.status()
+    if (CHECK_BLOCKING_STATES.has(this.value.state)) return this.status()
+    const epoch = this.cancellationEpoch
+    if (this.checkInFlight) {
+      const canceledCheck = this.ignoreUpdaterEvents
+      if (canceledCheck) this.set({ state: 'checking', message: 'Checking for updates…' })
+      // Metadata requests have no public abort API. Keep their callbacks
+      // ignored and serialize a new request behind their download cleanup.
+      await this.checkInFlight
+      if (!canceledCheck || epoch !== this.cancellationEpoch) return this.status()
+    }
+    if (manual) this.suppressAutomaticChecks = false
+    this.ignoreUpdaterEvents = false
     if (this.value.channel === 'development') {
-      return this.developmentChecksEnabled ? this.performDevelopmentCheck(manual) : this.status()
+      return this.developmentChecksEnabled ? this.performDevelopmentCheck(manual, epoch) : this.status()
     }
     if (this.value.channel !== 'direct') return this.status()
-    if (CHECK_BLOCKING_STATES.has(this.value.state)) return this.status()
-    if (this.checkInFlight) {
-      await this.checkInFlight
-      return this.status()
-    }
+    this.configureTrack()
     if (this.value.state === 'downloaded') this.readyUpdateBeforeRefresh = this.status()
     this.manualCheck = manual
     this.checkErrorHandled = false
@@ -139,22 +188,25 @@ export class AppUpdateManager {
       progress: undefined
     })
     const updateCheck = this.track === 'beta'
-      ? this.prepareBetaFeed().then(() => autoUpdater.checkForUpdates())
+      ? this.prepareBetaFeed(epoch).then(() => epoch === this.cancellationEpoch ? autoUpdater.checkForUpdates() : null)
       : autoUpdater.checkForUpdates()
     this.checkInFlight = updateCheck
       .then(async result => {
+        if (epoch !== this.cancellationEpoch) result?.cancellationToken?.cancel()
+        else this.downloadCancellation = result?.cancellationToken ?? null
         // electron-updater exposes auto-download completion as a nested
         // promise. Always consume it so download failures cannot become
         // unhandled rejections during startup, periodic, or manual checks.
         if (result?.downloadPromise) await result.downloadPromise
       })
       .catch(error => {
-        if (!this.checkErrorHandled) this.fail(error)
+        if (epoch === this.cancellationEpoch && !this.checkErrorHandled) this.fail(error)
       })
       .finally(() => {
         this.checkInFlight = null
+        this.downloadCancellation = null
         this.checkErrorHandled = false
-        if (this.readyUpdateBeforeRefresh && this.value.state === 'checking') {
+        if (epoch === this.cancellationEpoch && this.readyUpdateBeforeRefresh && this.value.state === 'checking') {
           this.restoreReadyUpdate('The downloaded update is still ready, but AgentsDock could not confirm whether a newer build exists.')
         }
       })
@@ -162,11 +214,7 @@ export class AppUpdateManager {
     return this.status()
   }
 
-  private async performDevelopmentCheck(manual: boolean): Promise<AppUpdateStatus> {
-    if (this.checkInFlight) {
-      await this.checkInFlight
-      return this.status()
-    }
+  private async performDevelopmentCheck(manual: boolean, epoch: number): Promise<AppUpdateStatus> {
     this.manualCheck = manual
     this.set({
       state: 'checking',
@@ -176,6 +224,7 @@ export class AppUpdateManager {
     })
     this.checkInFlight = this.latestPublishedVersion()
       .then(latestVersion => {
+        if (epoch !== this.cancellationEpoch) return
         this.set({
           // package.json intentionally keeps a development manifest version;
           // it does not describe how recent the checked-out source is. Report
@@ -188,7 +237,7 @@ export class AppUpdateManager {
         })
         this.manualCheck = false
       })
-      .catch(error => this.fail(error))
+      .catch(error => { if (epoch === this.cancellationEpoch) this.fail(error) })
       .finally(() => {
         this.checkInFlight = null
       })
@@ -199,7 +248,7 @@ export class AppUpdateManager {
   async setTrack(track: AppUpdateTrack): Promise<AppUpdateStatus> {
     if (track !== 'stable' && track !== 'beta') throw new Error('Unknown update channel.')
     if (this.value.channel !== 'direct' && this.value.channel !== 'development') return this.status()
-    if (this.value.state === 'checking' || (this.value.channel === 'direct' && TRACK_BLOCKING_STATES.has(this.value.state))) {
+    if (CHECK_BLOCKING_STATES.has(this.value.state)) {
       throw new Error('Wait for the current update operation to finish before changing channels.')
     }
     if (track === this.track) {
@@ -209,6 +258,7 @@ export class AppUpdateManager {
     }
 
     this.trackStore.write(track)
+    if (this.value.state === 'downloaded') this.cancel()
     this.track = track
     if (this.value.channel === 'development') {
       if (!this.developmentChecksEnabled) {
@@ -218,7 +268,6 @@ export class AppUpdateManager {
       this.set({ track, state: 'idle', availableVersion: undefined, checkedAt: undefined })
       return this.check(true)
     }
-    this.configureTrack()
     this.set({
       state: 'idle',
       track,
@@ -230,16 +279,27 @@ export class AppUpdateManager {
     return this.check(true)
   }
 
-  async install(): Promise<boolean> {
-    if (this.value.state !== 'downloaded') return false
+  install(): Promise<boolean> {
+    if (this.installInFlight) return this.installInFlight
+    const task = this.performInstall(this.cancellationEpoch).finally(() => {
+      if (this.installInFlight === task) this.installInFlight = null
+    })
+    this.installInFlight = task
+    return task
+  }
+
+  private async performInstall(epoch: number): Promise<boolean> {
+    if (epoch !== this.cancellationEpoch || this.value.state !== 'downloaded') return false
 
     // A beta can be superseded after it has already been downloaded. Refresh
     // immediately before installation and await any replacement download so a
     // single restart always targets the newest release visible on the channel.
     await this.performCheck(true)
-    if (this.value.state !== 'downloaded') return false
+    if (epoch !== this.cancellationEpoch || this.value.state !== 'downloaded') return false
 
-    appLog('updater', 'installing downloaded update', { version: this.value.availableVersion })
+    const pinnedVersion = this.value.availableVersion
+    if (!pinnedVersion) return false
+    appLog('updater', 'installing downloaded update', { version: pinnedVersion })
     this.set({
       state: 'installing',
       message: process.platform === 'darwin'
@@ -251,13 +311,29 @@ export class AppUpdateManager {
         const downloadedAt = Date.parse(this.value.downloadedAt ?? '')
         const elapsed = Number.isFinite(downloadedAt) ? Math.max(0, Date.now() - downloadedAt) : 0
         const remaining = Math.max(0, MAC_INSTALL_SETTLE_MS - elapsed)
-        if (remaining > 0) await delay(remaining)
+        if (remaining > 0) await new Promise<void>(resolve => {
+          const finish = (): void => {
+            clearTimeout(timer)
+            this.cancelInstallWait = null
+            resolve()
+          }
+          const timer = setTimeout(finish, remaining)
+          this.cancelInstallWait = finish
+        })
+        if (epoch !== this.cancellationEpoch) return false
         this.set({ message: `Restarting into AgentsDock ${this.value.availableVersion ?? 'update'}…` })
       }
+      if (epoch !== this.cancellationEpoch) return false
+      if (this.status().availableVersion !== pinnedVersion || this.status().state !== 'installing') {
+        throw new Error('The downloaded app changed before restart. Try Update AgentsDock again.')
+      }
+      this.nativeInstallStarted = true
+      this.set({})
       this.lifecycle.beforeInstall?.()
       autoUpdater.quitAndInstall(false, true)
       return true
     } catch (error) {
+      this.nativeInstallStarted = false
       this.lifecycle.installFailed?.()
       const message = error instanceof Error ? error.message : String(error)
       appLog('updater', 'could not install downloaded update', { message })
@@ -278,10 +354,12 @@ export class AppUpdateManager {
 
   private bindEvents(): void {
     autoUpdater.on('checking-for-update', () => {
+      if (this.ignoreUpdaterEvents) return
       appLog('updater', 'checking for update')
       this.set({ state: 'checking', message: 'Checking for updates…', checkedAt: now() })
     })
     autoUpdater.on('update-available', (info: UpdateInfo) => {
+      if (this.ignoreUpdaterEvents) return
       appLog('updater', 'update available', { version: info.version })
       // electron-updater may clear its pending cache while replacing a
       // download. Once replacement begins, the prior installer can no longer
@@ -295,6 +373,7 @@ export class AppUpdateManager {
       })
     })
     autoUpdater.on('download-progress', (progress: ProgressInfo) => {
+      if (this.ignoreUpdaterEvents) return
       this.set({
         state: 'downloading',
         progress: Math.max(0, Math.min(100, progress.percent)),
@@ -302,19 +381,25 @@ export class AppUpdateManager {
       })
     })
     autoUpdater.on('update-not-available', (info: UpdateInfo) => {
+      if (this.ignoreUpdaterEvents) return
       appLog('updater', 'app is current', { version: info.version })
-      if (this.restoreReadyUpdate()) return
+      const previouslyDownloaded = this.readyUpdateBeforeRefresh?.availableVersion
+      if (previouslyDownloaded === info.version && this.restoreReadyUpdate()) return
+      this.readyUpdateBeforeRefresh = null
       this.set({
         state: 'not-available',
         availableVersion: undefined,
         progress: undefined,
         downloadedAt: undefined,
-        message: this.track === 'beta' ? 'AgentsDock is up to date on the beta channel.' : 'AgentsDock is up to date.',
+        message: previouslyDownloaded
+          ? `AgentsDock ${previouslyDownloaded} is no longer offered. No update is currently available.`
+          : this.track === 'beta' ? 'AgentsDock is up to date on the beta channel.' : 'AgentsDock is up to date.',
         checkedAt: now()
       })
       this.manualCheck = false
     })
     autoUpdater.on('update-downloaded', (info: UpdateDownloadedEvent) => {
+      if (this.ignoreUpdaterEvents) return
       appLog('updater', 'update downloaded', { version: info.version })
       this.readyUpdateBeforeRefresh = null
       this.set({
@@ -328,6 +413,7 @@ export class AppUpdateManager {
       this.manualCheck = false
     })
     autoUpdater.on('error', error => {
+      if (this.ignoreUpdaterEvents) return
       this.checkErrorHandled = true
       this.fail(error)
     })
@@ -353,6 +439,8 @@ export class AppUpdateManager {
     this.manualCheck = false
     this.set({
       ...ready,
+      serverUpdates: this.value.serverUpdates,
+      serverUpdateMessage: this.value.serverUpdateMessage,
       state: 'downloaded',
       message: message ?? `AgentsDock ${ready.availableVersion ?? 'update'} is ready to install.`,
       checkedAt: now()
@@ -377,8 +465,9 @@ export class AppUpdateManager {
     autoUpdater.allowDowngrade = this.track === 'stable' && versionIsPrerelease(app.getVersion())
   }
 
-  private async prepareBetaFeed(): Promise<void> {
+  private async prepareBetaFeed(epoch: number): Promise<void> {
     const release = await this.resolveNewestBetaCompatibleRelease()
+    if (epoch !== this.cancellationEpoch) return
     const channel = release.track === 'beta' ? 'beta' : 'latest'
 
     autoUpdater.setFeedURL({
@@ -500,10 +589,6 @@ function isMacAppStoreBuild(): boolean {
 
 function now(): string {
   return new Date().toISOString()
-}
-
-function delay(milliseconds: number): Promise<void> {
-  return new Promise(resolve => setTimeout(resolve, milliseconds))
 }
 
 async function fetchBoundedReleaseText(url: string, accept: string, label: string, maxBytes: number): Promise<string> {

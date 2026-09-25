@@ -32,6 +32,34 @@ async function withLocalHTTPServer(
 afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals() })
 
 describe('secure Teamspace proxy authentication realms', () => {
+  it('sends endpoint migration only as a native PUT to the member control origin', async () => {
+    let received: IncomingMessage | undefined
+    let body = ''
+    const browserFetch = vi.fn()
+    vi.stubGlobal('fetch', browserFetch)
+    const input = { request_id: connectionId, expected_server_identity: 'member',
+      expected_server_instance_id: 'instance', expected_host_server_identity: 'host', expected_hub_id: 'hub',
+      expected_host_ip: '100.64.0.1', expected_port: 7851, host_ip: '100.64.0.2', port: 7852, confirmed: true }
+    await withLocalHTTPServer((request, response) => {
+      received = request
+      request.on('data', chunk => { body += chunk.toString() })
+      request.on('end', () => {
+        response.setHeader('Content-Type', 'application/json')
+        response.end('{"version":2}')
+      })
+    }, async baseURL => {
+      const client = new AgentServerClient(baseURL, 'member-control-secret')
+      await expect(client.updateSecurePeerConnectionEndpoint(connectionId, input)).resolves.toEqual({ version: 2 })
+      await expect(client.updateSecurePeerConnectionEndpoint('../escape', input)).rejects.toThrow()
+      client.dispose()
+    })
+    expect(received?.method).toBe('PUT')
+    expect(received?.url).toBe(`/api/admin/secure-peers/v1/connections/${connectionId}/endpoint`)
+    expect(received?.headers['x-agentsdock-token']).toBe('member-control-secret')
+    expect(received?.headers.authorization).toBeUndefined()
+    expect(JSON.parse(body)).toEqual(input)
+    expect(browserFetch).not.toHaveBeenCalled()
+  })
   it('admits a warm five-read burst across proxy closures only four at a time through full bodies', async () => {
     const responses: ServerResponse[] = []
     let notify: (() => void) | undefined

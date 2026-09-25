@@ -99,7 +99,12 @@ ACTUAL_SHA512="$(/usr/bin/openssl dgst -sha512 -binary "$ZIP_PATH" | /usr/bin/op
 /usr/sbin/spctl --assess --type open --context context:primary-signature --verbose=4 "$DMG_PATH"
 /usr/bin/xcrun stapler validate "$DMG_PATH"
 
-TEMP_DIR="$(/usr/bin/mktemp -d /tmp/agentsdock-release.XXXXXX)"
+TEMP_ROOT="${TMPDIR:-/tmp}"
+[[ -d "$TEMP_ROOT" && -w "$TEMP_ROOT" ]] || {
+  echo "Release verification temp directory is unavailable: $TEMP_ROOT" >&2
+  exit 2
+}
+TEMP_DIR="$(/usr/bin/mktemp -d "${TEMP_ROOT%/}/agentsdock-release.XXXXXX")"
 MOUNT_DIR="$TEMP_DIR/dmg"
 DMG_ATTACHED=false
 SMOKE_PID=""
@@ -172,6 +177,7 @@ DMG_APP_PATH="$(/usr/bin/find "$MOUNT_DIR" -maxdepth 2 -type d -name 'AgentsDock
 [[ -n "$DMG_APP_PATH" ]] || { echo "DMG does not contain AgentsDock.app" >&2; exit 2; }
 DMG_BUNDLE_VERSION="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$DMG_APP_PATH/Contents/Info.plist")"
 DMG_BUNDLE_ID="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$DMG_APP_PATH/Contents/Info.plist")"
+"$ROOT/scripts/audit_electron_bundle.sh" "$DMG_APP_PATH"
 DMG_CDHASH="$(/usr/bin/codesign -d --verbose=4 "$DMG_APP_PATH" 2>&1 | /usr/bin/awk -F= '/^CDHash=/{ value=$2 } END { print value }')"
 [[ "$DMG_BUNDLE_VERSION" == "$EXPECTED_VERSION" && "$DMG_BUNDLE_ID" == "$BUNDLE_ID" ]] || { echo "DMG app identity does not match the zip app" >&2; exit 2; }
 [[ "$DMG_CDHASH" == "$ZIP_CDHASH" ]] || { echo "DMG and zip contain different signed app payloads" >&2; exit 2; }

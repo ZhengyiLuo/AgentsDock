@@ -1,5 +1,6 @@
 import asyncio
 import json
+import os
 import sys
 import tempfile
 import types
@@ -7,7 +8,7 @@ import unittest
 from collections import OrderedDict, deque
 from contextlib import ExitStack
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 from unittest.mock import AsyncMock, Mock, patch
 
 from fastapi import HTTPException
@@ -53,6 +54,14 @@ class FakeClaudeRun:
     async def interrupt(self) -> bool:
         self.interrupt_calls += 1
         return True
+
+
+class NoisyClaudeRun(FakeClaudeRun):
+    """A provider iterator that is perpetually ready with nonterminal frames."""
+
+    async def __anext__(self) -> object:
+        await asyncio.sleep(0)
+        return {"type": "SystemMessage"}
 
 
 class FailingClaudeRun(FakeClaudeRun):
@@ -187,6 +196,7 @@ class FakeClaudeManager:
         configuration_key: str,
         query_session_id: str | None = None,
         on_supervisor_ready: object | None = None,
+        pending_mail_hint: Callable[[], str | None] | None = None,
     ) -> FakeClaudeRun:
         self.start_calls.append(
             (
@@ -262,6 +272,7 @@ class FakeClaudeManagerFailingAfterOwnership(FakeClaudeManager):
         configuration_key: str,
         query_session_id: str | None = None,
         on_supervisor_ready: object | None = None,
+        pending_mail_hint: Callable[[], str | None] | None = None,
     ) -> FakeClaudeRun:
         self.start_calls.append(
             (chat_id, prompt, run_id, options, configuration_key, query_session_id)
@@ -287,6 +298,7 @@ class SequencedClaudeManager(FakeClaudeManager):
         configuration_key: str,
         query_session_id: str | None = None,
         on_supervisor_ready: object | None = None,
+        pending_mail_hint: Callable[[], str | None] | None = None,
     ) -> FakeClaudeRun:
         self.start_calls.append(
             (
@@ -333,6 +345,7 @@ class PermissionDuringStartManager(SequencedClaudeManager):
         configuration_key: str,
         query_session_id: str | None = None,
         on_supervisor_ready: object | None = None,
+        pending_mail_hint: Callable[[], str | None] | None = None,
     ) -> FakeClaudeRun:
         call_number = len(self.start_calls) + 1
         self.start_calls.append(
@@ -415,6 +428,7 @@ class BlockingCandidateStartManager(SequencedClaudeManager):
         configuration_key: str,
         query_session_id: str | None = None,
         on_supervisor_ready: object | None = None,
+        pending_mail_hint: Callable[[], str | None] | None = None,
     ) -> FakeClaudeRun:
         call_number = len(self.start_calls) + 1
         self.start_calls.append(
@@ -453,6 +467,7 @@ class SafeFailingCandidateStartManager(SequencedClaudeManager):
         configuration_key: str,
         query_session_id: str | None = None,
         on_supervisor_ready: object | None = None,
+        pending_mail_hint: Callable[[], str | None] | None = None,
     ) -> FakeClaudeRun:
         call_number = len(self.start_calls) + 1
         self.start_calls.append((
@@ -533,6 +548,9 @@ class ClaudeSDKRunnerTests(unittest.IsolatedAsyncioTestCase):
         self.previous_deleted = agent_server.DELETED_SESSION_TOMBSTONES
         self.previous_maintenance = agent_server.SERVER_MAINTENANCE_SESSIONS
         self.previous_stop_fences = agent_server.CLAUDE_STOP_FENCE_SESSIONS
+        self.previous_stop_fence_retries = agent_server.CLAUDE_STOP_FENCE_RETRY_TASKS
+        self.previous_stop_fence_locks = agent_server.CLAUDE_STOP_FENCE_ATTEMPT_LOCKS
+        self.previous_stop_fence_attempts = agent_server.CLAUDE_STOP_FENCE_ATTEMPT_TASKS
         self.previous_capabilities = agent_server.CROSS_CHAT_CAPABILITIES
         self.previous_authority_root = agent_server.CROSS_CHAT_AUTHORITY_ROOT
         self.previous_agent_token = agent_server.AGENT_TOKEN
@@ -575,6 +593,9 @@ class ClaudeSDKRunnerTests(unittest.IsolatedAsyncioTestCase):
         agent_server.DELETED_SESSION_TOMBSTONES = set()
         agent_server.SERVER_MAINTENANCE_SESSIONS = set()
         agent_server.CLAUDE_STOP_FENCE_SESSIONS = set()
+        agent_server.CLAUDE_STOP_FENCE_RETRY_TASKS = {}
+        agent_server.CLAUDE_STOP_FENCE_ATTEMPT_LOCKS = {}
+        agent_server.CLAUDE_STOP_FENCE_ATTEMPT_TASKS = {}
         agent_server.CROSS_CHAT_CAPABILITIES = {}
         agent_server.CROSS_CHAT_AUTHORITY_ROOT = (
             Path(self.authority_temporary.name) / "authority"
@@ -608,6 +629,22 @@ class ClaudeSDKRunnerTests(unittest.IsolatedAsyncioTestCase):
         ]
         if pending:
             await asyncio.gather(*pending, return_exceptions=True)
+        stop_fence_retries = tuple(
+            agent_server.CLAUDE_STOP_FENCE_RETRY_TASKS.values()
+        )
+        stop_fence_attempts = tuple(
+            task
+            for tasks in agent_server.CLAUDE_STOP_FENCE_ATTEMPT_TASKS.values()
+            for task in tasks
+        )
+        for task in (*stop_fence_retries, *stop_fence_attempts):
+            task.cancel()
+        if stop_fence_retries or stop_fence_attempts:
+            await asyncio.gather(
+                *stop_fence_retries,
+                *stop_fence_attempts,
+                return_exceptions=True,
+            )
         agent_server.STORE.sessions = self.previous_sessions
         agent_server.ACTIVE = self.previous_active
         agent_server.BUSY_SESSIONS = self.previous_busy
@@ -629,6 +666,9 @@ class ClaudeSDKRunnerTests(unittest.IsolatedAsyncioTestCase):
         agent_server.DELETED_SESSION_TOMBSTONES = self.previous_deleted
         agent_server.SERVER_MAINTENANCE_SESSIONS = self.previous_maintenance
         agent_server.CLAUDE_STOP_FENCE_SESSIONS = self.previous_stop_fences
+        agent_server.CLAUDE_STOP_FENCE_RETRY_TASKS = self.previous_stop_fence_retries
+        agent_server.CLAUDE_STOP_FENCE_ATTEMPT_LOCKS = self.previous_stop_fence_locks
+        agent_server.CLAUDE_STOP_FENCE_ATTEMPT_TASKS = self.previous_stop_fence_attempts
         agent_server.CROSS_CHAT_CAPABILITIES = self.previous_capabilities
         agent_server.CROSS_CHAT_AUTHORITY_ROOT = self.previous_authority_root
         agent_server.AGENT_TOKEN = self.previous_agent_token
@@ -745,6 +785,118 @@ class ClaudeSDKRunnerTests(unittest.IsolatedAsyncioTestCase):
             )
         return append_event, append_finished, runtime_success, runtime_failure
 
+    async def _run_sdk_timeout_case(
+        self,
+        handle: FakeClaudeRun,
+        *,
+        pre_ack_timeout: float,
+        post_ack_timeout: float,
+        turn_timeout: float,
+        idle_warn: float,
+        idle_timeout: float,
+        project_result: dict[str, Any] | None = None,
+    ) -> tuple[FakeClaudeManager, AsyncMock, AsyncMock, Mock]:
+        manager = FakeClaudeManager(handle)
+        append_event = AsyncMock(return_value={})
+        append_finished = AsyncMock(return_value={})
+        runtime_failure = Mock()
+        with ExitStack() as stack:
+            for name, value in (
+                ("CLAUDE_SDK_PRE_ACK_TIMEOUT_SECONDS", pre_ack_timeout),
+                (
+                    "CLAUDE_SDK_POST_ACK_FIRST_ACTIVITY_TIMEOUT_SECONDS",
+                    post_ack_timeout,
+                ),
+                ("CLAUDE_SDK_TURN_TIMEOUT_SECONDS", turn_timeout),
+                ("CLAUDE_SDK_IDLE_WARN_SECONDS", idle_warn),
+                ("CLAUDE_SDK_IDLE_TIMEOUT_SECONDS", idle_timeout),
+            ):
+                stack.enter_context(patch.object(agent_server, name, value))
+            stack.enter_context(patch.object(
+                agent_server,
+                "resolve_claude_resume_provider",
+                return_value=(None, None),
+            ))
+            stack.enter_context(patch.object(
+                agent_server,
+                "capture_git_baseline",
+                AsyncMock(return_value={"head": "base"}),
+            ))
+            stack.enter_context(patch.object(
+                agent_server,
+                "build_claude_sdk_options",
+                return_value=(object(), "config", "/usr/bin/claude"),
+            ))
+            stack.enter_context(patch.object(
+                agent_server,
+                "claude_sdk_manager",
+                AsyncMock(return_value=manager),
+            ))
+            stack.enter_context(patch.object(
+                agent_server,
+                "watch_manifest_artifacts",
+                wait_forever,
+            ))
+            stack.enter_context(patch.object(
+                agent_server,
+                "append_event",
+                append_event,
+            ))
+            stack.enter_context(patch.object(
+                agent_server,
+                "project_claude_sdk_message",
+                AsyncMock(return_value=project_result),
+            ))
+            for name in (
+                "mark_provider_turn_ready",
+                "persist_run_provider_session",
+                "cancel_claude_interactions",
+                "collect_manifest",
+                "collect_recent_leftover_manifests",
+                "publish_turn_code_diff",
+            ):
+                stack.enter_context(patch.object(
+                    agent_server,
+                    name,
+                    AsyncMock(),
+                ))
+            stack.enter_context(patch.object(
+                agent_server,
+                "append_turn_finished_event",
+                append_finished,
+            ))
+            stack.enter_context(patch.object(
+                agent_server,
+                "release_turn_slot",
+                AsyncMock(return_value=True),
+            ))
+            stack.enter_context(patch.object(
+                agent_server,
+                "record_runtime_success",
+                Mock(),
+            ))
+            stack.enter_context(patch.object(
+                agent_server,
+                "record_runtime_failure",
+                runtime_failure,
+            ))
+            stack.enter_context(patch.object(
+                agent_server,
+                "should_schedule_queue_after_finish",
+                return_value=False,
+            ))
+            await asyncio.wait_for(
+                agent_server.run_claude_sdk(
+                    "chat-claude",
+                    "run-claude",
+                    "Prompt",
+                    dict(self.session),
+                    Path(self.cwd) / ".manifest.json",
+                ),
+                timeout=0.5,
+            )
+        return manager, append_event, append_finished, runtime_failure
+
     async def test_empty_sdk_result_without_tools_is_visible_failure(self) -> None:
         append_event, append_finished, runtime_success, runtime_failure = (
             await self._run_sdk_terminal_case([{
@@ -810,6 +962,90 @@ class ClaudeSDKRunnerTests(unittest.IsolatedAsyncioTestCase):
             for call in append_event.await_args_list
         ))
         runtime_success.assert_called_once_with(agent_server.BACKEND_CLAUDE)
+        runtime_failure.assert_not_called()
+
+    async def test_sdk_text_streams_as_commentary_and_result_is_only_final(
+        self,
+    ) -> None:
+        append_event, append_finished, runtime_success, runtime_failure = (
+            await self._run_sdk_terminal_case([
+                {
+                    "type": "AssistantMessage",
+                    "content": [{
+                        "type": "text",
+                        "text": "Checking the repository now.",
+                    }],
+                    "session_id": "provider",
+                },
+                {
+                    "type": "result",
+                    "result": "The repository is ready.",
+                    "session_id": "provider",
+                    "terminal_reason": "end_turn",
+                },
+            ])
+        )
+
+        projected = [
+            (call.args[1], call.args[2])
+            for call in append_event.await_args_list
+        ]
+        self.assertFalse(any(
+            event_type == "assistant_text"
+            for event_type, _payload in projected
+        ))
+        self.assertEqual(
+            [
+                payload
+                for event_type, payload in projected
+                if event_type == "reasoning_summary"
+            ],
+            [{
+                "run_id": "run-claude",
+                "text": "Checking the repository now.",
+                "phase": "commentary",
+                "backend": agent_server.BACKEND_CLAUDE,
+            }],
+        )
+        terminal = append_finished.await_args.args[1]
+        self.assertEqual(terminal["result_text"], "The repository is ready.")
+        self.assertFalse(terminal["stopped"])
+        runtime_success.assert_called_once_with(agent_server.BACKEND_CLAUDE)
+        runtime_failure.assert_not_called()
+
+    async def test_aborted_sdk_result_does_not_promote_commentary_to_final(
+        self,
+    ) -> None:
+        append_event, append_finished, runtime_success, runtime_failure = (
+            await self._run_sdk_terminal_case([
+                {
+                    "type": "AssistantMessage",
+                    "content": [{
+                        "type": "text",
+                        "text": "Partial work before cancellation.",
+                    }],
+                    "session_id": "provider",
+                },
+                {
+                    "type": "result",
+                    "result": "",
+                    "session_id": "provider",
+                    "terminal_reason": "aborted_streaming",
+                },
+            ])
+        )
+
+        self.assertTrue(any(
+            call.args[1] == "reasoning_summary"
+            and call.args[2].get("phase") == "commentary"
+            and call.args[2].get("text")
+            == "Partial work before cancellation."
+            for call in append_event.await_args_list
+        ))
+        terminal = append_finished.await_args.args[1]
+        self.assertTrue(terminal["stopped"])
+        self.assertEqual(terminal["result_text"], "")
+        runtime_success.assert_not_called()
         runtime_failure.assert_not_called()
 
     async def test_sdk_iterator_end_before_terminal_never_waits_forever(self) -> None:
@@ -1851,8 +2087,117 @@ class ClaudeSDKRunnerTests(unittest.IsolatedAsyncioTestCase):
             {
                 "replay-user-messages": None,
                 "allow-dangerously-skip-permissions": None,
+                "system-prompt-snapshot": "off",
             },
         )
+
+    async def test_sdk_options_explicitly_shadow_server_secrets(self) -> None:
+        captured_options: dict[str, object] = {}
+
+        def make_options(**kwargs: object) -> dict[str, object]:
+            captured_options.update(kwargs)
+            return kwargs
+
+        inherited = {
+            name: f"inherited-{index}"
+            for index, name in enumerate(agent_server.PROVIDER_SECRET_ENV_NAMES)
+        }
+        inherited["ANTHROPIC_API_KEY"] = "provider-credential"
+        with patch.dict(os.environ, inherited), patch.object(
+            agent_server,
+            "claude_sdk_cli_path",
+            return_value="/usr/bin/claude",
+        ), patch.object(
+            agent_server,
+            "resolve_claude_resume_provider",
+            return_value=(None, None),
+        ), patch.object(
+            agent_server,
+            "create_claude_agent_options",
+            side_effect=make_options,
+        ):
+            agent_server.build_claude_sdk_options(
+                "chat-claude",
+                self.session,
+                self.cwd,
+                Path(self.cwd) / ".manifest.json",
+            )
+
+        child_env = captured_options["env"]
+        self.assertIsInstance(child_env, dict)
+        for secret_name in agent_server.PROVIDER_SECRET_ENV_NAMES:
+            with self.subTest(secret_name=secret_name):
+                self.assertIn(secret_name, child_env)
+                self.assertEqual(child_env[secret_name], "")
+                self.assertEqual({**inherited, **child_env}[secret_name], "")
+        self.assertEqual(child_env["ANTHROPIC_API_KEY"], "provider-credential")
+
+    async def test_server_secrets_are_removed_from_process_environment(self) -> None:
+        inherited = {
+            name: f"server-secret-{index}"
+            for index, name in enumerate(agent_server.PROVIDER_SECRET_ENV_NAMES)
+        }
+        inherited["ANTHROPIC_API_KEY"] = "provider-credential"
+        with patch.dict(os.environ, inherited, clear=False):
+            removed = agent_server.scrub_server_secret_environment()
+            self.assertEqual(set(removed), set(agent_server.PROVIDER_SECRET_ENV_NAMES))
+            for secret_name in agent_server.PROVIDER_SECRET_ENV_NAMES:
+                self.assertNotIn(secret_name, os.environ)
+            self.assertEqual(
+                os.environ.get("ANTHROPIC_API_KEY"),
+                "provider-credential",
+            )
+
+    async def test_subagent_limit_is_chat_scoped_and_null_preserves_native_settings(self) -> None:
+        cap_name = "CLAUDE_CODE_MAX_CONCURRENT_SUBAGENTS"
+        manifest = Path(self.cwd) / ".manifest.json"
+        base = {**self.session}
+        base.pop("subagent_limit", None)
+        with patch.dict(os.environ, {cap_name: "9"}), patch.object(
+            agent_server, "claude_sdk_cli_path", return_value="/usr/bin/claude",
+        ), patch.object(
+            agent_server, "resolve_claude_resume_provider", return_value=(None, None),
+        ), patch.object(
+            agent_server, "create_claude_agent_options", side_effect=lambda **values: values,
+        ):
+            inherited, inherited_key, _ = agent_server.build_claude_sdk_options(
+                "chat-claude", base, self.cwd, manifest,
+            )
+            cleared, cleared_key, _ = agent_server.build_claude_sdk_options(
+                "chat-claude", {**base, "subagent_limit": None}, self.cwd, manifest,
+            )
+            limited, limited_key, _ = agent_server.build_claude_sdk_options(
+                "chat-claude", {**base, "subagent_limit": 3}, self.cwd, manifest,
+            )
+            sibling, _, _ = agent_server.build_claude_sdk_options(
+                "chat-sibling", {**base, "subagent_limit": 5}, self.cwd, manifest,
+            )
+            command = agent_server.build_claude_cmd(
+                "chat-claude", {**base, "subagent_limit": 3}, manifest,
+            )
+            inherited_command = agent_server.build_claude_cmd(
+                "chat-claude", {**base, "subagent_limit": None}, manifest,
+            )
+            self.assertEqual(os.environ[cap_name], "9")
+
+        self.assertEqual(inherited_key, cleared_key)
+        self.assertNotEqual(limited_key, inherited_key)
+        self.assertNotIn("settings", inherited)
+        self.assertNotIn("settings", cleared)
+        self.assertEqual(inherited["env"][cap_name], "9")
+        self.assertEqual(cleared["env"][cap_name], "9")
+        self.assertEqual(limited["env"][cap_name], "3")
+        self.assertEqual(sibling["env"][cap_name], "5")
+        self.assertEqual(json.loads(limited["settings"]), {"env": {cap_name: "3"}})
+        self.assertEqual(json.loads(sibling["settings"]), {"env": {cap_name: "5"}})
+        self.assertEqual(
+            json.loads(command[command.index("--settings") + 1]),
+            {"env": {cap_name: "3"}},
+        )
+        self.assertNotIn("--settings", inherited_command)
+        self.assertEqual(limited["setting_sources"], ["user", "project", "local"])
+        self.assertEqual(limited["thinking"], inherited["thinking"])
+        self.assertEqual(limited["permission_mode"], inherited["permission_mode"])
 
     async def test_permission_mode_options_hooks_and_plan_tools_are_wired(self) -> None:
         session = {**self.session, "claude_permission_mode": "plan"}
@@ -1893,11 +2238,25 @@ class ClaudeSDKRunnerTests(unittest.IsolatedAsyncioTestCase):
             )
 
         self.assertEqual(captured_options["permission_mode"], "plan")
-        self.assertEqual(agent_server.CLAUDE_SDK_CONFIGURATION_VERSION, 7)
+        self.assertEqual(agent_server.CLAUDE_SDK_CONFIGURATION_VERSION, 10)
         self.assertEqual(
             captured_options["disallowed_tools"],
             ["CronCreate", "Monitor", "ScheduleWakeup"],
         )
+        self.assertEqual(
+            captured_options["allowed_tools"],
+            [agent_server.CLAUDE_PROVIDER_MCP_TOOL_NAME],
+        )
+        system_prompt = captured_options["system_prompt"]["append"]
+        self.assertIn(
+            f"Use only `{agent_server.CLAUDE_PROVIDER_MCP_TOOL_NAME}`",
+            system_prompt,
+        )
+        self.assertIn(
+            "A user-configured MCP server named `agentsdock` is unrelated",
+            system_prompt,
+        )
+        self.assertNotIn("Use the `agentsdock` provider tool", system_prompt)
         self.assertEqual(
             captured_options["thinking"],
             {"type": "adaptive", "display": "summarized"},
@@ -1907,12 +2266,19 @@ class ClaudeSDKRunnerTests(unittest.IsolatedAsyncioTestCase):
             {
                 "replay-user-messages": None,
                 "allow-dangerously-skip-permissions": None,
+                "system-prompt-snapshot": "off",
             },
         )
         hooks = captured_options["hooks"]
         self.assertEqual(
             [matcher.matcher for matcher in hooks["PreToolUse"]],
-            ["Bash", "CronCreate", "Monitor", "ScheduleWakeup"],
+            [
+                agent_server.CLAUDE_PROVIDER_MCP_TOOL_NAME,
+                "Bash",
+                "CronCreate",
+                "Monitor",
+                "ScheduleWakeup",
+            ],
         )
         self.assertEqual(result, {"behavior": "allow"})
         permission.assert_awaited_once_with(
@@ -1922,6 +2288,7 @@ class ClaudeSDKRunnerTests(unittest.IsolatedAsyncioTestCase):
             {"tool_use_id": "exit-plan"},
             owner_token="",
         )
+
         default_key = agent_server.claude_sdk_configuration_key(
             {**session, "claude_permission_mode": "default"},
             self.cwd,
@@ -1938,7 +2305,7 @@ class ClaudeSDKRunnerTests(unittest.IsolatedAsyncioTestCase):
             session,
             Path(self.cwd) / ".manifest.json",
         )
-        with patch.object(agent_server, "CLAUDE_SDK_CONFIGURATION_VERSION", 6):
+        with patch.object(agent_server, "CLAUDE_SDK_CONFIGURATION_VERSION", 7):
             previous_version_key = agent_server.claude_sdk_configuration_key(
                 session,
                 self.cwd,
@@ -1958,6 +2325,126 @@ class ClaudeSDKRunnerTests(unittest.IsolatedAsyncioTestCase):
             )
         self.assertNotEqual(config_key, previous_version_key)
         self.assertNotEqual(config_key, previous_tools_key)
+
+    async def test_provider_tool_repeats_live_reads_but_replays_identical_mutations(self) -> None:
+        captured_mcp: dict[str, object] = {}
+
+        def make_options(**kwargs: object) -> dict[str, object]:
+            return kwargs
+
+        def make_mcp(**kwargs: object) -> dict[str, object]:
+            captured_mcp.update(kwargs)
+            return {"type": "sdk", "name": "agentsdock"}
+
+        with patch.object(
+            agent_server,
+            "claude_sdk_cli_path",
+            return_value="/usr/bin/claude",
+        ), patch.object(
+            agent_server,
+            "resolve_claude_resume_provider",
+            return_value=(None, None),
+        ), patch.object(
+            agent_server,
+            "create_claude_agent_options",
+            side_effect=make_options,
+        ), patch.object(
+            agent_server,
+            "create_claude_sdk_mcp_server",
+            side_effect=make_mcp,
+        ):
+            options, _config_key, _ = agent_server.build_claude_sdk_options(
+                "chat-claude",
+                self.session,
+                self.cwd,
+                Path(self.cwd) / ".manifest.json",
+            )
+
+        options["_agentsdock_bind_provider_tool_owner"]("owner", "run-claude")
+        handler = captured_mcp["handler"]
+        executor = AsyncMock(
+            side_effect=[
+                ("read-1", False),
+                ("read-2", False),
+                ("mutation", False),
+            ]
+        )
+        with patch.object(
+            agent_server,
+            "PROVIDER_TOOL_REPLAY",
+            agent_server.OrderedDict(),
+        ), patch.object(
+            agent_server,
+            "PROVIDER_TOOL_REPLAY_TOMBSTONES",
+            agent_server.OrderedDict(),
+        ), patch.object(
+            agent_server,
+            "PROVIDER_TOOL_REPLAY_LOCK",
+            asyncio.Lock(),
+        ), patch.object(
+            agent_server,
+            "provider_tool_capability_snapshot",
+            AsyncMock(return_value=(Path("/private/authority"), {})),
+        ), patch.object(
+            agent_server,
+            "execute_provider_tool",
+            executor,
+        ):
+            first_read = await handler({"helper": "jobs", "arguments": ["list"]})
+            second_read = await handler({"helper": "jobs", "arguments": ["list"]})
+            mutation = {
+                "helper": "team",
+                "arguments": ["send", "--route", "route-1"],
+                "stdin": "same body",
+            }
+            first_mutation = await handler(mutation)
+            second_mutation = await handler(mutation)
+
+        self.assertEqual(first_read["content"][0]["text"], "read-1")
+        self.assertEqual(second_read["content"][0]["text"], "read-2")
+        self.assertEqual(first_mutation, second_mutation)
+        self.assertEqual(first_mutation["content"][0]["text"], "mutation")
+        self.assertEqual(executor.await_count, 3)
+
+        entered = 0
+        both_entered = asyncio.Event()
+        release = asyncio.Event()
+
+        async def gated_executor(*_args: object, **_kwargs: object):
+            nonlocal entered
+            entered += 1
+            if entered == agent_server.PROVIDER_TOOL_MAX_CONCURRENT_PER_CLAUDE_CHAT:
+                both_entered.set()
+            await release.wait()
+            return "fresh", False
+
+        with patch.object(
+            agent_server,
+            "execute_provider_tool",
+            AsyncMock(side_effect=gated_executor),
+        ):
+            running = [
+                asyncio.create_task(handler({
+                    "helper": "jobs",
+                    "arguments": ["list"],
+                }))
+                for _ in range(
+                    agent_server.PROVIDER_TOOL_MAX_CONCURRENT_PER_CLAUDE_CHAT
+                )
+            ]
+            await asyncio.wait_for(both_entered.wait(), 1)
+            rejected = await handler({
+                "helper": "jobs",
+                "arguments": ["list"],
+            })
+            release.set()
+            await asyncio.gather(*running)
+
+        self.assertTrue(rejected["is_error"])
+        self.assertIn(
+            "too many AgentsDock provider actions",
+            rejected["content"][0]["text"],
+        )
 
     async def test_nondurable_scheduler_permission_never_creates_interaction(self) -> None:
         append_event = AsyncMock(return_value={})
@@ -1981,8 +2468,8 @@ class ClaudeSDKRunnerTests(unittest.IsolatedAsyncioTestCase):
                     )
                     self.assertIsInstance(result, FakePermissionResultDeny)
                     self.assertFalse(getattr(result, "interrupt", True))
-                    self.assertIn("AgentsDock Jobs CLI", result.message)
-                    self.assertIn("provider-authority block", result.message)
+                    self.assertIn("AgentsDock provider tool", result.message)
+                    self.assertNotIn("provider-authority block", result.message)
 
         self.assertFalse(agent_server.CLAUDE_PENDING_INTERACTIONS)
         append_event.assert_not_awaited()
@@ -2003,8 +2490,12 @@ class ClaudeSDKRunnerTests(unittest.IsolatedAsyncioTestCase):
                 "claude_sdk_owner_token": manager.owner_token,
                 "claude_permission_run_id": "run-claude",
                 "claude_permissions_open": True,
+                "claude_permission_mode": "bypassPermissions",
             }
         }
+        # The persisted setting can change while a turn is active. Permission
+        # callbacks must keep using the policy captured when this turn began.
+        self.session["claude_permission_mode"] = "default"
         append_event = AsyncMock(return_value={})
         update_metadata = AsyncMock()
         with patch.dict(sys.modules, fake_claude_sdk_modules()), patch.object(
@@ -2686,6 +3177,258 @@ class ClaudeSDKRunnerTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(marker.args[2]["run_ids"], ["run-parent"])
         self.assertTrue(marker.args[2]["all"])
 
+    async def test_unknown_claude_supervisor_state_keeps_stop_fence_closed(self) -> None:
+        manager = FakeClaudeManager()
+        manager.is_loaded = Mock(side_effect=RuntimeError("ownership unavailable"))
+        agent_server.CLAUDE_SDK_MANAGER = manager
+        agent_server.ACTIVE = {}
+        agent_server.BUSY_SESSIONS = set()
+
+        result = await agent_server.stop_idle_claude_background_subagents(
+            "chat-claude",
+            emit_event=False,
+        )
+
+        self.assertFalse(result["fence_committed"])
+        self.assertEqual(result["pending"], ["claude-background-work"])
+        self.assertIn("ownership unavailable", result["errors"])
+        self.append_durable_event.assert_not_awaited()
+
+    async def test_unknown_claude_supervisor_state_retries_to_durable_fence(self) -> None:
+        manager = FakeClaudeManager()
+        manager.is_loaded = Mock(
+            side_effect=[RuntimeError("ownership unavailable"), False]
+        )
+        agent_server.CLAUDE_SDK_MANAGER = manager
+        agent_server.ACTIVE = {}
+        agent_server.BUSY_SESSIONS = set()
+        agent_server.CURRENT_TURNS = {}
+        snapshot = {
+            "active_count": 1,
+            "subagents": [{
+                "run_id": "run-parent",
+                "subagent_id": "child-one",
+                "subagent_status": "running",
+            }],
+        }
+
+        with patch.object(
+            agent_server,
+            "CLAUDE_STOP_FENCE_RETRY_DELAYS_SECONDS",
+            (0.0,),
+        ), patch.object(
+            agent_server,
+            "build_claude_subagent_snapshot",
+            return_value=snapshot,
+        ), patch.object(
+            agent_server,
+            "cancel_codex_interactions",
+            AsyncMock(),
+        ), patch.object(
+            agent_server,
+            "cancel_claude_interactions",
+            AsyncMock(),
+        ), patch.object(
+            agent_server,
+            "schedule_next_queued_turn",
+        ) as schedule:
+            result = await agent_server.stop_turn(
+                "chat-claude",
+                emit_event=False,
+                schedule_queue=False,
+                pause_queued_turns_on_stop=False,
+            )
+            for _ in range(100):
+                if not agent_server.CLAUDE_STOP_FENCE_RETRY_TASKS:
+                    break
+                await asyncio.sleep(0)
+
+        self.assertFalse(result["subagents"]["fence_committed"])
+        self.assertEqual(manager.is_loaded.call_count, 2)
+        self.assertNotIn(
+            "chat-claude",
+            agent_server.CLAUDE_STOP_FENCE_SESSIONS,
+        )
+        self.assertEqual(self.append_durable_event.await_count, 1)
+        schedule.assert_called_once_with("chat-claude")
+
+    async def test_initial_claude_stop_attempt_error_still_arms_retry(self) -> None:
+        agent_server.ACTIVE = {}
+        agent_server.BUSY_SESSIONS = set()
+        agent_server.CURRENT_TURNS = {}
+
+        with patch.object(
+            agent_server,
+            "stop_idle_claude_background_subagents_bounded",
+            new=AsyncMock(side_effect=RuntimeError("attempt failed")),
+        ), patch.object(
+            agent_server,
+            "schedule_claude_stop_fence_retry",
+        ) as schedule, patch.object(
+            agent_server,
+            "cancel_codex_interactions",
+            AsyncMock(),
+        ), patch.object(
+            agent_server,
+            "cancel_claude_interactions",
+            AsyncMock(),
+        ):
+            with self.assertRaisesRegex(RuntimeError, "attempt failed"):
+                await agent_server.stop_turn(
+                    "chat-claude",
+                    emit_event=False,
+                    schedule_queue=False,
+                    pause_queued_turns_on_stop=False,
+                )
+
+        self.assertIn(
+            "chat-claude",
+            agent_server.CLAUDE_STOP_FENCE_SESSIONS,
+        )
+        self.assertIn(
+            "chat-claude",
+            agent_server.SERVER_MAINTENANCE_SESSIONS,
+        )
+        schedule.assert_called_once_with("chat-claude")
+
+    async def test_failed_claude_stop_fence_retries_and_releases_admission(self) -> None:
+        manager = FakeClaudeManager()
+        agent_server.CLAUDE_SDK_MANAGER = manager
+        agent_server.ACTIVE = {}
+        agent_server.BUSY_SESSIONS = set()
+        agent_server.CURRENT_TURNS = {}
+        snapshot = {
+            "active_count": 1,
+            "subagents": [{
+                "run_id": "run-parent",
+                "subagent_id": "child-one",
+                "subagent_status": "running",
+            }],
+        }
+        self.append_durable_event.side_effect = [
+            OSError("event log unavailable"),
+            {},
+        ]
+
+        with patch.object(
+            agent_server,
+            "CLAUDE_STOP_FENCE_RETRY_DELAYS_SECONDS",
+            (0.0,),
+        ), patch.object(
+            agent_server,
+            "build_claude_subagent_snapshot",
+            return_value=snapshot,
+        ), patch.object(
+            agent_server,
+            "cancel_codex_interactions",
+            AsyncMock(),
+        ), patch.object(
+            agent_server,
+            "cancel_claude_interactions",
+            AsyncMock(),
+        ), patch.object(
+            agent_server,
+            "schedule_next_queued_turn",
+        ) as schedule:
+            result = await agent_server.stop_turn(
+                "chat-claude",
+                emit_event=False,
+                schedule_queue=False,
+                pause_queued_turns_on_stop=False,
+            )
+            for _ in range(100):
+                if not agent_server.CLAUDE_STOP_FENCE_RETRY_TASKS:
+                    break
+                await asyncio.sleep(0)
+
+        self.assertFalse(result["subagents"]["fence_committed"])
+        self.assertNotIn(
+            "chat-claude",
+            agent_server.CLAUDE_STOP_FENCE_SESSIONS,
+        )
+        self.assertNotIn(
+            "chat-claude",
+            agent_server.SERVER_MAINTENANCE_SESSIONS,
+        )
+        self.assertNotIn(
+            "chat-claude",
+            agent_server.CLAUDE_STOP_FENCE_ATTEMPT_LOCKS,
+        )
+        self.assertEqual(self.append_durable_event.await_count, 2)
+        schedule.assert_called_once_with("chat-claude")
+
+    async def test_claude_stop_fence_retry_survives_unexpected_attempt_error(self) -> None:
+        agent_server.ACTIVE = {}
+        agent_server.BUSY_SESSIONS = set()
+        agent_server.CLAUDE_STOP_FENCE_SESSIONS.add("chat-claude")
+        agent_server.SERVER_MAINTENANCE_SESSIONS.add("chat-claude")
+        attempt = AsyncMock(side_effect=[
+            RuntimeError("unexpected persistence error"),
+            {"fence_committed": True},
+        ])
+
+        with patch.object(
+            agent_server,
+            "CLAUDE_STOP_FENCE_RETRY_DELAYS_SECONDS",
+            (0.0,),
+        ), patch.object(
+            agent_server,
+            "stop_idle_claude_background_subagents_bounded",
+            attempt,
+        ), patch.object(
+            agent_server,
+            "schedule_next_queued_turn",
+        ) as schedule:
+            await agent_server.retry_claude_stop_fence("chat-claude")
+
+        self.assertEqual(attempt.await_count, 2)
+        self.assertNotIn(
+            "chat-claude",
+            agent_server.CLAUDE_STOP_FENCE_SESSIONS,
+        )
+        self.assertNotIn(
+            "chat-claude",
+            agent_server.SERVER_MAINTENANCE_SESSIONS,
+        )
+        schedule.assert_called_once_with("chat-claude")
+
+    async def test_claude_stop_fence_attempt_has_hard_local_deadline(self) -> None:
+        release = asyncio.Event()
+
+        async def cancellation_hostile_attempt(
+            *_args: object,
+            **_kwargs: object,
+        ) -> dict[str, object]:
+            try:
+                await asyncio.Event().wait()
+            except asyncio.CancelledError:
+                await release.wait()
+            return {"fence_committed": True}
+
+        with patch.object(
+            agent_server,
+            "CLAUDE_STOP_FENCE_ATTEMPT_TIMEOUT_SECONDS",
+            0.01,
+        ), patch.object(
+            agent_server,
+            "stop_idle_claude_background_subagents",
+            side_effect=cancellation_hostile_attempt,
+        ):
+            result = await agent_server.stop_idle_claude_background_subagents_bounded(
+                "chat-claude",
+                emit_event=False,
+            )
+            self.assertFalse(result["fence_committed"])
+            self.assertEqual(result["pending"], ["claude-stop-fence"])
+            release.set()
+            pending = tuple(
+                agent_server.CLAUDE_STOP_FENCE_ATTEMPT_TASKS.get(
+                    "chat-claude"
+                ) or ()
+            )
+            if pending:
+                await asyncio.gather(*pending, return_exceptions=True)
+
     async def test_cancelled_sdk_start_drains_scheduled_job_successor_once(self) -> None:
         manager = FakeClaudeManager()
 
@@ -3292,11 +4035,7 @@ class ClaudeSDKRunnerTests(unittest.IsolatedAsyncioTestCase):
                 )
             self.assertEqual(stale.exception.status_code, 403)
             self.assertFalse(predecessor_path.exists())
-            self.assertTrue(
-                str(manager.start_calls[1][1]).startswith(
-                    "Steered prompt\n\n[AgentsDock provider authority]"
-                )
-            )
+            self.assertEqual(manager.start_calls[1][1], "Steered prompt")
             await second.messages.put(second_terminal)
             await asyncio.wait_for(runner, 0.5)
 
@@ -3988,41 +4727,299 @@ class ClaudeSDKRunnerTests(unittest.IsolatedAsyncioTestCase):
         runtime_failure.assert_called_once()
         schedule_next.assert_called_once_with("chat-claude")
 
-    async def test_pending_interaction_is_scoped_to_exact_claude_run(self) -> None:
+    async def test_pre_ack_timeout_retires_visible_failure(self) -> None:
+        handle = FakeClaudeRun(acknowledged=False)
+        manager, append_event, append_finished, runtime_failure = (
+            await self._run_sdk_timeout_case(
+                handle,
+                pre_ack_timeout=0.02,
+                post_ack_timeout=1.0,
+                turn_timeout=1.0,
+                idle_warn=0.5,
+                idle_timeout=1.0,
+            )
+        )
+
+        self.assertGreaterEqual(handle.interrupt_calls, 1)
+        self.assertEqual(manager.evict_calls, [("chat-claude", True)])
+        self.assertEqual(append_finished.await_args.args[1]["exit_code"], 1)
+        self.assertTrue(any(
+            call.args[1] == "error"
+            and "did not confirm prompt delivery" in call.args[2]["message"]
+            and call.args[2].get("delivery_unknown") is True
+            for call in append_event.await_args_list
+        ))
+        self.assertTrue(
+            append_finished.await_args.args[1].get("delivery_unknown")
+        )
+        runtime_failure.assert_called_once()
+
+    async def test_pre_ack_timeout_wins_when_idle_limit_is_shorter(self) -> None:
+        handle = FakeClaudeRun(acknowledged=False)
+        _manager, append_event, append_finished, runtime_failure = (
+            await self._run_sdk_timeout_case(
+                handle,
+                pre_ack_timeout=0.04,
+                post_ack_timeout=1.0,
+                turn_timeout=1.0,
+                idle_warn=0.005,
+                idle_timeout=0.01,
+            )
+        )
+
+        self.assertTrue(any(
+            call.args[1] == "error"
+            and "did not confirm prompt delivery" in call.args[2]["message"]
+            and call.args[2].get("delivery_unknown") is True
+            for call in append_event.await_args_list
+        ))
+        self.assertFalse(any(
+            call.args[1] == "idle_warning"
+            for call in append_event.await_args_list
+        ))
+        self.assertTrue(
+            append_finished.await_args.args[1].get("delivery_unknown")
+        )
+        runtime_failure.assert_called_once()
+
+    async def test_idle_timeout_after_activity_retires_visible_failure(self) -> None:
+        handle = FakeClaudeRun([{"type": "AssistantMessage"}])
+        manager, append_event, append_finished, runtime_failure = (
+            await self._run_sdk_timeout_case(
+                handle,
+                pre_ack_timeout=1.0,
+                post_ack_timeout=1.0,
+                turn_timeout=1.0,
+                idle_warn=0.01,
+                idle_timeout=0.03,
+            )
+        )
+
+        self.assertGreaterEqual(handle.interrupt_calls, 1)
+        self.assertEqual(manager.evict_calls, [("chat-claude", True)])
+        self.assertEqual(append_finished.await_args.args[1]["exit_code"], 1)
+        idle_warnings = [
+            call for call in append_event.await_args_list
+            if call.args[1] == "idle_warning"
+        ]
+        self.assertEqual(len(idle_warnings), 1)
+        self.assertTrue(any(
+            call.args[1] == "error"
+            and "no provider activity" in call.args[2]["message"]
+            for call in append_event.await_args_list
+        ))
+        runtime_failure.assert_called_once()
+
+    async def test_configured_absolute_timeout_bounds_an_active_sdk_turn(self) -> None:
+        handle = FakeClaudeRun()
+        manager, append_event, append_finished, runtime_failure = (
+            await self._run_sdk_timeout_case(
+                handle,
+                pre_ack_timeout=1.0,
+                post_ack_timeout=1.0,
+                turn_timeout=0.02,
+                idle_warn=0.5,
+                idle_timeout=1.0,
+            )
+        )
+
+        self.assertGreaterEqual(handle.interrupt_calls, 1)
+        self.assertEqual(manager.evict_calls, [("chat-claude", True)])
+        self.assertEqual(append_finished.await_args.args[1]["exit_code"], 1)
+        self.assertTrue(any(
+            call.args[1] == "error"
+            and "absolute turn timeout" in call.args[2]["message"]
+            for call in append_event.await_args_list
+        ))
+        runtime_failure.assert_called_once()
+
+    async def test_configured_absolute_timeout_cannot_be_starved_by_ready_frames(self) -> None:
+        handle = NoisyClaudeRun()
+        manager, append_event, append_finished, runtime_failure = (
+            await self._run_sdk_timeout_case(
+                handle,
+                pre_ack_timeout=1.0,
+                post_ack_timeout=1.0,
+                turn_timeout=0.02,
+                idle_warn=0.5,
+                idle_timeout=1.0,
+            )
+        )
+
+        self.assertGreaterEqual(handle.interrupt_calls, 1)
+        self.assertEqual(manager.evict_calls, [("chat-claude", True)])
+        self.assertEqual(append_finished.await_args.args[1]["exit_code"], 1)
+        self.assertTrue(any(
+            call.args[1] == "error"
+            and "absolute turn timeout" in call.args[2]["message"]
+            for call in append_event.await_args_list
+        ))
+        runtime_failure.assert_called_once()
+
+    async def test_disabled_absolute_timeout_allows_long_active_turn(self) -> None:
+        class DelayedTerminalClaudeRun(FakeClaudeRun):
+            async def __anext__(self) -> object:
+                await asyncio.sleep(0.06)
+                return {
+                    "type": "result",
+                    "result": "completed after the old hard deadline",
+                    "session_id": "provider",
+                    "terminal_reason": "end_turn",
+                }
+
+        handle = DelayedTerminalClaudeRun()
+        manager, append_event, append_finished, runtime_failure = (
+            await self._run_sdk_timeout_case(
+                handle,
+                pre_ack_timeout=1.0,
+                post_ack_timeout=1.0,
+                turn_timeout=0.0,
+                idle_warn=0.5,
+                idle_timeout=1.0,
+                project_result={
+                    "session_id": "provider",
+                    "result_text": "completed after the old hard deadline",
+                    "is_error": False,
+                    "error": "",
+                    "subtype": "success",
+                    "terminal_reason": "end_turn",
+                    "aborted": False,
+                },
+            )
+        )
+
+        self.assertEqual(handle.interrupt_calls, 0)
+        self.assertEqual(manager.evict_calls, [])
+        self.assertEqual(append_finished.await_args.args[1]["exit_code"], 0)
+        self.assertFalse(any(
+            call.args[1] == "error"
+            and "absolute turn timeout" in call.args[2]["message"]
+            for call in append_event.await_args_list
+        ))
+        runtime_failure.assert_not_called()
+
+    async def test_pending_approval_pauses_idle_and_absolute_watchdogs(self) -> None:
+        interaction_id = "claudereq_waiting"
+
+        class ApprovalDelayedTerminalClaudeRun(FakeClaudeRun):
+            async def __anext__(self) -> object:
+                await asyncio.sleep(0.06)
+                await agent_server.resolve_claude_interaction(
+                    "chat-claude",
+                    interaction_id,
+                    {"decision": "accept"},
+                )
+                return {
+                    "type": "result",
+                    "result": "continued after approval",
+                    "session_id": "provider",
+                    "terminal_reason": "end_turn",
+                }
+
         future = asyncio.get_running_loop().create_future()
         pending = {
-            "id": "claudereq_waiting",
+            "id": interaction_id,
             "session_id": "chat-claude",
+            "thread_id": "provider",
             "turn_id": "run-claude",
+            "item_id": "tool-approval",
+            "method": "item/commandExecution/requestApproval",
+            "params": {},
+            "created_at": "2026-09-08T00:00:00Z",
             "future": future,
             "responded": False,
+            "resolution": "dismissed",
         }
         async with agent_server.CLAUDE_PENDING_INTERACTIONS_LOCK:
-            agent_server.CLAUDE_PENDING_INTERACTIONS[pending["id"]] = pending
+            agent_server.CLAUDE_PENDING_INTERACTIONS[interaction_id] = pending
+        try:
+            handle = ApprovalDelayedTerminalClaudeRun()
+            manager, append_event, append_finished, runtime_failure = (
+                await self._run_sdk_timeout_case(
+                    handle,
+                    pre_ack_timeout=1.0,
+                    post_ack_timeout=0.01,
+                    turn_timeout=0.01,
+                    idle_warn=0.005,
+                    idle_timeout=0.01,
+                    project_result={
+                        "session_id": "provider",
+                        "result_text": "continued after approval",
+                        "is_error": False,
+                        "error": "",
+                        "subtype": "success",
+                        "terminal_reason": "end_turn",
+                        "aborted": False,
+                    },
+                )
+            )
+        finally:
+            async with agent_server.CLAUDE_PENDING_INTERACTIONS_LOCK:
+                agent_server.CLAUDE_PENDING_INTERACTIONS.pop(
+                    interaction_id,
+                    None,
+                )
 
-        self.assertTrue(await agent_server.claude_run_has_pending_interaction(
-            "chat-claude",
-            "run-claude",
+        self.assertTrue(future.done())
+        self.assertEqual(handle.interrupt_calls, 0)
+        self.assertEqual(manager.evict_calls, [])
+        self.assertEqual(append_finished.await_args.args[1]["exit_code"], 0)
+        self.assertFalse(any(
+            call.args[1] in {"idle_warning", "error"}
+            for call in append_event.await_args_list
         ))
-        self.assertFalse(await agent_server.claude_sdk_first_activity_timed_out(
-            "chat-claude",
-            "run-claude",
-            FakeClaudeRun(),
-        ))
-        self.assertFalse(await agent_server.claude_run_has_pending_interaction(
-            "another-chat",
-            "run-claude",
-        ))
-        self.assertFalse(await agent_server.claude_run_has_pending_interaction(
-            "chat-claude",
-            "replacement-run",
-        ))
+        runtime_failure.assert_not_called()
 
-        pending["responded"] = True
-        self.assertFalse(await agent_server.claude_run_has_pending_interaction(
-            "chat-claude",
-            "run-claude",
+    async def test_pending_live_cross_chat_wait_pauses_sdk_watchdogs(self) -> None:
+        class DelayedTerminalClaudeRun(FakeClaudeRun):
+            def __init__(self) -> None:
+                super().__init__()
+                self.delivered = False
+
+            async def __anext__(self) -> object:
+                if self.delivered:
+                    await asyncio.Event().wait()
+                self.delivered = True
+                await asyncio.sleep(0.06)
+                return {
+                    "type": "result",
+                    "result": "Peer answered after the old deadline",
+                    "session_id": "provider",
+                    "terminal_reason": "end_turn",
+                }
+
+        with patch.object(
+            agent_server,
+            "provider_run_owns_pending_cross_chat_live_wait",
+            return_value=True,
+        ):
+            _manager, append_event, append_finished, runtime_failure = (
+                await self._run_sdk_timeout_case(
+                    DelayedTerminalClaudeRun(),
+                    pre_ack_timeout=0.01,
+                    post_ack_timeout=0.01,
+                    turn_timeout=0.01,
+                    idle_warn=0.005,
+                    idle_timeout=0.01,
+                    project_result={
+                        "session_id": "provider",
+                        "result_text": "Peer answered after the old deadline",
+                        "is_error": False,
+                        "error": "",
+                        "subtype": "success",
+                        "terminal_reason": "end_turn",
+                        "aborted": False,
+                    },
+                )
+            )
+
+        terminal = append_finished.await_args.args[1]
+        self.assertEqual(terminal["exit_code"], 0)
+        self.assertFalse(any(
+            call.args[1] in {"error", "idle_warning"}
+            for call in append_event.await_args_list
         ))
+        runtime_failure.assert_not_called()
 
     async def test_delivery_uncertain_stream_retires_without_empty_success(self) -> None:
         handle = FailingClaudeRun(ClaudeSDKQueryError("replay ACK missing"))
@@ -5688,6 +6685,24 @@ class ClaudeSDKRunnerTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsInstance(result, FakePermissionResultDeny)
         self.assertTrue(getattr(result, "interrupt", False))
         self.assertFalse(agent_server.CLAUDE_PENDING_INTERACTIONS)
+
+    async def test_delete_rejects_while_explicit_stop_cleanup_is_active(self) -> None:
+        stop_operation = asyncio.create_task(wait_forever())
+        try:
+            with patch.object(
+                agent_server,
+                "EXPLICIT_STOP_OPERATIONS",
+                {"chat-claude": stop_operation},
+            ), patch.object(agent_server, "SESSION_LIFECYCLE_LOCKS", {}):
+                with self.assertRaises(HTTPException) as raised:
+                    await agent_server.delete_session("chat-claude")
+
+            self.assertEqual(raised.exception.status_code, 409)
+            self.assertIn("Stop cleanup", str(raised.exception.detail))
+            self.assertNotIn("chat-claude", agent_server.DELETING_SESSIONS)
+        finally:
+            stop_operation.cancel()
+            await asyncio.gather(stop_operation, return_exceptions=True)
 
     async def test_delete_force_retires_sdk_when_interrupt_has_no_terminal_result(self) -> None:
         handle = FakeClaudeRun()

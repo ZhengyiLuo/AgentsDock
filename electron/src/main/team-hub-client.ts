@@ -32,6 +32,7 @@ import type {
   TeamNetworkPassiveRequestDetails,
   TeamNetworkPassiveRequestReply,
   TeamNetworkProjectionPage,
+  TeamNetworkServerProfile,
   TeamNetworkReceiptState,
   TeamAttachment,
   TeamAttachmentDeclaration,
@@ -45,6 +46,7 @@ import type {
   TeamMessageThreadPage,
   TeamMessageReceiptResult,
   TeamMessagesCapability,
+  TeamMessageSearchCapability,
   TeamMailSubjectsCapability,
   TeamMailThreadsCapability,
   TeamMailboxStateCapability,
@@ -67,6 +69,7 @@ import {
   parseTeamNetworkPassiveRequestCreated,
   parseTeamNetworkPassiveRequestDetails,
   parseTeamNetworkProjection,
+  parseTeamNetworkServerProfileResponse,
   parseTeamAttachmentDeclaration,
   parseTeamAttachmentResponse,
   parseTeamMessagePage,
@@ -78,6 +81,8 @@ import {
   parseTeamMessageReceiptResponse,
   parseTeamMessageResponse,
   parseTeamMessagesCapability,
+  parseTeamMessageSearchCapability,
+  parseTeamMessageSearchQuery,
   parseTeamMailSubjectsCapability,
   parseTeamMailThreadsCapability,
   parseTeamMailboxStateCapability,
@@ -118,6 +123,7 @@ export interface TeamHubHealthResponse {
   capabilities?: {
     team_network_v1?: TeamNetworkCapabilities
     team_messages_v1?: TeamMessagesCapability
+    team_message_search_v1?: TeamMessageSearchCapability
     team_host_content_deletion_v1?: { available: true; version: 1 }
     team_mail_subjects_v1?: TeamMailSubjectsCapability
     team_mail_threads_v1?: TeamMailThreadsCapability
@@ -206,6 +212,7 @@ export class TeamHubClient {
   private teamMessageRevisionQueriesSupported: boolean | null = null
   private teamMailSubjectsAvailable = false
   private teamMailboxStateAvailable = false
+  private teamMessageSearchAvailable = false
 
   constructor(baseURL: string, options: TeamHubClientOptions = {}) {
     this.baseURL = normalizeMountedTeamHubURL(baseURL)
@@ -221,9 +228,11 @@ export class TeamHubClient {
   async health(): Promise<TeamHubHealthResponse> {
     this.teamMailSubjectsAvailable = false
     this.teamMailboxStateAvailable = false
+    this.teamMessageSearchAvailable = false
     const health = parseHealth(await this.request('/v1/health'))
     this.teamMailSubjectsAvailable = health.capabilities?.team_mail_subjects_v1?.available === true
     this.teamMailboxStateAvailable = health.capabilities?.team_mailbox_state_v1?.available === true
+    this.teamMessageSearchAvailable = health.capabilities?.team_message_search_v1?.available === true
     return health
   }
 
@@ -461,6 +470,12 @@ export class TeamHubClient {
     ).then(parseTeamNetworkProjection)
   }
 
+  renameNetworkServer(accessToken: string, teamId: string, displayName: string): Promise<{ server: TeamNetworkServerProfile }> {
+    return this.authenticated(`/v1/teams/${segment(teamId)}/network/server-profile`, accessToken, {
+      method: 'POST', body: { display_name: displayName }
+    }).then(parseTeamNetworkServerProfileResponse)
+  }
+
   registerNetworkAgent(
     accessToken: string,
     teamId: string,
@@ -642,7 +657,11 @@ export class TeamHubClient {
     teamId: string,
     queryInput: Omit<TeamMessageQuery, 'teamId'>
   ): Promise<TeamMessagePage> {
+    const search = parseTeamMessageSearchQuery(queryInput.q)
+    if (search && !this.teamMessageSearchAvailable) throw new Error('This Team Hub does not support message search. Update the Team Network host to search mail.')
+    if (search && queryInput.includeMailboxCoverage) throw new Error('Team Mail coverage requires an unfiltered server inbox.')
     const query = new URLSearchParams({ box: queryInput.box, limit: String(queryInput.limit ?? 50) })
+    if (search) query.set('q', search)
     if (this.teamMailboxStateAvailable && queryInput.box === 'inbox') query.set('include_mailbox_state', 'true')
     if (this.teamMailSubjectsAvailable) query.set('include_mail_subject', 'true')
     if (queryInput.addressKind) query.set('address_kind', queryInput.addressKind)
@@ -660,7 +679,13 @@ export class TeamHubClient {
       return this.authenticated(
         `/v1/teams/${segment(teamId)}/network/messages?${query}`,
         accessToken
-      ).then(value => parseTeamMessagePage(value, teamId))
+      ).then(value => parseTeamMessagePage(value, teamId)).catch(cause => {
+        if (search && cause instanceof TeamHubClientError && cause.status === 422
+          && cause.code === 'invalid_request' && cause.message === 'Proxy query is invalid') {
+          throw new Error('The connected server does not support message search through this Team Network connection. Update the connected server and try again.')
+        }
+        throw cause
+      })
     }
     if (this.teamMessageRevisionQueriesSupported === false) return request(false)
     try {
@@ -1342,13 +1367,18 @@ function parseHealth(value: unknown): TeamHubHealthResponse {
     try {
       if (advertised.team_mail_threads_v1 !== undefined) mailThreads = parseTeamMailThreadsCapability(advertised.team_mail_threads_v1)
     } catch { /* Unknown optional thread versions keep ordinary Mail usable. */ }
-    if (network || messages || allServers || mailSubjects || mailThreads || mailboxState || hostDeletionSupported) capabilities = {
+    let messageSearch: TeamMessageSearchCapability | undefined
+    try {
+      if (advertised.team_message_search_v1 !== undefined) messageSearch = parseTeamMessageSearchCapability(advertised.team_message_search_v1)
+    } catch { /* Unknown optional search contracts keep ordinary Mail usable, never authorize filtered reads. */ }
+    if (network || messages || allServers || mailSubjects || mailThreads || mailboxState || messageSearch || hostDeletionSupported) capabilities = {
       ...(network ? { team_network_v1: network } : {}),
       ...(messages ? { team_messages_v1: messages } : {}),
       ...(hostDeletionSupported ? { team_host_content_deletion_v1: { available: true as const, version: 1 as const } } : {}),
       ...(mailSubjects ? { team_mail_subjects_v1: mailSubjects } : {}),
       ...(mailThreads ? { team_mail_threads_v1: mailThreads } : {}),
       ...(mailboxState ? { team_mailbox_state_v1: mailboxState } : {}),
+      ...(messageSearch ? { team_message_search_v1: messageSearch } : {}),
       ...(allServers ? { team_all_servers_alias_v1: allServers } : {})
     }
   }

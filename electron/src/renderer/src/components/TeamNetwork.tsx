@@ -42,11 +42,13 @@ import type {
   TeamNetworkProjection,
   TeamNetworkProjectionPage,
   TeamNetworkServer,
+  TeamNetworkServerProfile,
   TeamMessageSummary,
   TeamMessagesCapability
 } from '@shared/team-network'
 import type { TeamReference } from '@shared/types'
 import { SecurePeerPanel } from './SecurePeerPanel'
+import { TeamNetworkHostAddressAction } from './SecurePeerHostAddress'
 import { startTeamFeedInitialLoad, TeamMessagesBoard, type TeamFeedInitialLoad, type TeamMailRouteTarget, type TeamMessageAddress } from './TeamMessagesBoard'
 import { buildTeamMailBundles, type TeamMailBundle } from '../lib/team-mail-board'
 import { validTeamReferences } from '../lib/team-references'
@@ -193,6 +195,7 @@ export function TeamNetwork({
   const serverRemovalRequest = useRef(0)
   const serverRemovalInFlight = useRef(false)
   const hostRenameInFlight = useRef(false)
+  const memberRenameInFlight = useRef(false)
   const connectAttempt = useRef<string | null>(null)
   const bindingManagerTriggerRef = useRef<HTMLButtonElement | null>(null)
   const inviteCloseButtonRef = useRef<HTMLButtonElement | null>(null)
@@ -1249,6 +1252,59 @@ export function TeamNetwork({
     }
   }
 
+  const renameMemberServer = async (server: TeamNetworkServer, rawName: string): Promise<boolean> => {
+    if (busy || memberRenameInFlight.current || !status || !details || !selectedTeamId
+      || !canRenameOwnMember(status, details, server)) return false
+    const name = rawName.trim()
+    if (!name || bodyBytes(name) > 160 || /[\u0000-\u001f\u007f]/.test(name)) return false
+    const teamId = selectedTeamId
+    const epoch = lifecycleEpoch.current
+    const dataRequest = dataEpoch.current
+    const active = () => {
+      const app = useAppStore.getState()
+      const profile = app.profiles.find(item => item.id === app.activeProfileId)
+      return lifecycleEpoch.current === epoch && dataEpoch.current === dataRequest
+        && selectedTeamIdRef.current === teamId && app.activeProfileId === status.profileId
+        && app.profileGeneration === status.profileGeneration && !app.switchingProfileId
+        && profile?.serverIdentity === status.serverIdentity
+    }
+    if (!active()) { setError(copy('teamNetwork.shell.renameServerChanged')); return false }
+    memberRenameInFlight.current = true
+    setBusy('rename-member')
+    setError(null)
+    setNotice(null)
+    try {
+      const fresh = await window.agentsDock.teamHub.status()
+      const owned = projectionRef.current?.servers.find(item => item.id === server.id)
+      if (!active() || teamNetworkSnapshotKey(fresh) !== teamNetworkSnapshotKey(status)
+        || !owned || !canRenameOwnMember(fresh, details, owned)) {
+        throw new NetworkError(copy('teamNetwork.shell.renameMemberChanged'))
+      }
+      const renamed = await window.agentsDock.teamHub.renameNetworkServer(scopeFrom(fresh), {
+        teamId, serverId: server.id, displayName: name
+      })
+      if (!active()) return false
+      if (!renamed || renamed.id !== server.id || renamed.server_identity !== status.serverIdentity
+        || renamed.display_name !== name) throw new NetworkError(copy('teamNetwork.shell.renameMemberUnconfirmed'))
+      // The server's exact receipt is authoritative. Keep the same directory
+      // row and fence older page reads; a rename never reloads the whole view
+      // or changes the local profile, connection name, role, or peer identity.
+      mutationEpoch.current += 1
+      dataEpoch.current += 1
+      invalidateTeamNetworkSnapshot(status, teamId)
+      updateProjection(current => applyNetworkServerRename(current, renamed))
+      setNotice(copy('teamNetwork.shell.memberRenamed', { name }))
+      setBusy(null)
+      return true
+    } catch (cause) {
+      if (active()) setError(errorMessage(cause))
+      return false
+    } finally {
+      memberRenameInFlight.current = false
+      if (active()) setBusy(null)
+    }
+  }
+
   const renameHostServer = async (server: TeamNetworkServer, rawName: string): Promise<boolean> => {
     if (busy || hostRenameInFlight.current || !status || !details || !workspace || !selectedTeamId
       || !canRenameOwnHost(status, details, server)) return false
@@ -1362,6 +1418,7 @@ export function TeamNetwork({
       ? <button type="button" className="quiet-button network-manage-binding-action" aria-label={t('teamNetwork.shell.connectNetwork')} disabled={Boolean(busy)} onClick={() => void reconnectNetwork()}><RefreshCw size={14} />{t('teamNetwork.shell.connectNetwork')}</button>
       : null
   const bindingLifecycleBusy = busy === 'connect' || busy === 'disconnect-network' || busy === 'forget-network'
+  const connectionActions = <>{localBindingAction}{status?.transport === 'secure_peer' && status.connectionId && !status.designatedHost && <TeamNetworkHostAddressAction status={status} onUpdated={loadStatus} />}</>
   const localBindingManager = status && bindingManagerOpen && status.transport !== 'secure_peer'
     ? <LocalBindingManager
         status={status}
@@ -1458,7 +1515,7 @@ export function TeamNetwork({
     /></div>}
   </NetworkShell>
 
-  if (status.authenticated && !workspace) return <NetworkShell status={status} onClose={onClose} actions={localBindingAction}>
+  if (status.authenticated && !workspace) return <NetworkShell status={status} onClose={onClose} actions={connectionActions}>
     <div className="teamspace-onboarding">
       <div className="teamspace-onboarding-card network-onboarding-card">
         <div className="network-onboarding-hero" role="alert">
@@ -1508,11 +1565,16 @@ export function TeamNetwork({
     {localBindingManager}
   </NetworkShell>
 
-  return <NetworkShell status={status} onClose={onClose} actions={<>
+  const ownNetworkName = status.authenticationMode === 'paired_node'
+    ? projection?.servers.find(server => (
+      server.owned_by_caller && server.server_identity === status.serverIdentity
+    ))?.display_name ?? status.serverName
+    : status.serverName
+  return <NetworkShell status={{ ...status, serverName: ownNetworkName }} onClose={onClose} actions={<>
     {projection && <div className="network-header-summary" aria-label={t(projectionHasMore ? 'teamNetwork.shell.serverCountMore' : projection.servers.length === 1 ? 'teamNetwork.shell.serverCountOne' : 'teamNetwork.shell.serverCountOther', { count: projection.servers.length })}>
       <span><Server size={13} /><strong>{projection.servers.length}{projectionHasMore && '+'}</strong>{projection.servers.length === 1 && !projectionHasMore ? t('teamNetwork.shell.serverSingular') : t('teamNetwork.shell.serverPlural')}</span>
     </div>}
-    {localBindingAction}
+    {connectionActions}
     {(canInvite || !status.serverManaged) && <Dialog.Root open={inviteOpen} onOpenChange={setInviteOpen}>
       <Dialog.Trigger asChild><button className="quiet-button network-invite-action" aria-label={status.designatedHost ? t('teamNetwork.shell.invite') : t('teamNetwork.shell.connectServer')}>{status.designatedHost ? <UserPlus size={14} /> : <KeyRound size={14} />}{status.designatedHost ? t('teamNetwork.shell.invite') : t('teamNetwork.shell.connectServer')}{status.designatedHost && pendingApprovals > 0 && <b className="network-nav-badge" aria-label={t('teamNetwork.shell.waitingCount', { count: pendingApprovals })}>{pendingApprovals}</b>}</button></Dialog.Trigger>
       <Dialog.Portal>
@@ -1562,7 +1624,7 @@ export function TeamNetwork({
         <div className="teamspace-nav-spacer" />
         <article className="team-network-nav-footer">
           <span className="team-network-nav-server-icon"><Server size={16} /></span>
-          <div><strong>{status.serverName || 'AgentsServer'}</strong><small>{status.designatedHost ? t('teamNetwork.shell.networkHost') : t('teamNetwork.shell.connectedServer')} · {roleLabel(details?.membership.role || 'member')}</small></div>
+          <div><strong>{ownNetworkName || 'AgentsServer'}</strong><small>{status.designatedHost ? t('teamNetwork.shell.networkHost') : t('teamNetwork.shell.connectedServer')} · {roleLabel(details?.membership.role || 'member')}</small></div>
           <i className={`teamspace-status-dot ${status.connectionState}`} />
         </article>
       </nav>
@@ -1620,8 +1682,8 @@ export function TeamNetwork({
           currentPrincipalId={status.principal?.id ?? null}
           busy={Boolean(busy)}
           canRemoveServers={canManageNetworkServers(status, details)}
-          renameHostId={projection.servers.find(server => canRenameOwnHost(status, details, server))?.id ?? null}
-          onRename={renameHostServer}
+          renameServerId={projection.servers.find(server => canRenameOwnHost(status, details, server) || canRenameOwnMember(status, details, server))?.id ?? null}
+          onRename={(server, name) => server.is_host ? renameHostServer(server, name) : renameMemberServer(server, name)}
           removingServerId={busy?.startsWith('remove-server:') ? busy.slice('remove-server:'.length) : null}
           loadingMore={busy === 'network-page'}
           hasMore={projectionHasMore}
@@ -1927,7 +1989,7 @@ interface DirectoryAdministration {
   ) => Promise<boolean>
 }
 
-function Directory({ projection, members, currentPrincipalId, busy, loadingMore, hasMore, canRemoveServers, removingServerId, renameHostId, onRename, onRemove, onOpenInbox, onLoadMore, administration }: { projection: TeamNetworkProjection; members: TeamHubTeamDetails['members']; currentPrincipalId: string | null; busy: boolean; loadingMore: boolean; hasMore: boolean; canRemoveServers: boolean; removingServerId: string | null; renameHostId: string | null; onRename: (server: TeamNetworkServer, name: string) => Promise<boolean>; onRemove: (server: TeamNetworkServer) => Promise<boolean>; onOpenInbox: (server: TeamNetworkServer) => void; onLoadMore: () => void; administration: DirectoryAdministration }) {
+function Directory({ projection, members, currentPrincipalId, busy, loadingMore, hasMore, canRemoveServers, removingServerId, renameServerId, onRename, onRemove, onOpenInbox, onLoadMore, administration }: { projection: TeamNetworkProjection; members: TeamHubTeamDetails['members']; currentPrincipalId: string | null; busy: boolean; loadingMore: boolean; hasMore: boolean; canRemoveServers: boolean; removingServerId: string | null; renameServerId: string | null; onRename: (server: TeamNetworkServer, name: string) => Promise<boolean>; onRemove: (server: TeamNetworkServer) => Promise<boolean>; onOpenInbox: (server: TeamNetworkServer) => void; onLoadMore: () => void; administration: DirectoryAdministration }) {
   useLocale()
   const showInvitations = administration.owner && (
     administration.pendingInvitations.length > 0 || administration.invitationsHasMore
@@ -1946,7 +2008,7 @@ function Directory({ projection, members, currentPrincipalId, busy, loadingMore,
         key={server.id}
         server={server}
         canRemove={canRemoveServers && !server.is_host && !server.owned_by_caller}
-        canRename={renameHostId === server.id}
+        canRename={renameServerId === server.id}
         onRename={onRename}
         canOpenInbox={server.owned_by_caller && server.status === 'active'}
         disabled={busy}
@@ -2043,7 +2105,7 @@ function ServerRow({ server, canOpenInbox, canRemove, canRename, disabled, remov
   }
   return <article className="network-roster-server">
     <header><Server size={18} /><div><strong title={server.server_identity}>{server.display_name}</strong><span className={server.status}>{logicalServerStatus(server)}</span></div><div className="network-roster-server-meta">{canOpenInbox && <button type="button" className="quiet-button network-roster-inbox" disabled={disabled} onClick={() => onOpenInbox(server)}><Inbox size={14} />{t('teamNetwork.shell.inbox')}</button>}{(canRemove || canRename) && <DropdownMenu.Root><DropdownMenu.Trigger asChild><button ref={menuTrigger} type="button" className="icon-button network-roster-server-menu" aria-label={t('teamNetwork.shell.manageNamed', { name: server.display_name })} disabled={disabled}>{removing ? <LoaderCircle className="spin" size={15} /> : <MoreHorizontal size={16} />}</button></DropdownMenu.Trigger><DropdownMenu.Portal><DropdownMenu.Content className="menu-content" align="end">{canRename && <DropdownMenu.Item className="menu-item" onSelect={() => { setName(server.display_name); setRenaming(true) }}><Pencil size={14} />{t('teamNetwork.shell.rename')}</DropdownMenu.Item>}{canRemove && <DropdownMenu.Item className="menu-item danger" onSelect={() => setConfirming(true)}><Trash2 size={14} />{t('teamNetwork.shell.removeNetwork')}</DropdownMenu.Item>}</DropdownMenu.Content></DropdownMenu.Portal></DropdownMenu.Root>}</div></header>
-    {renaming && canRename && <form className="teamspace-form" aria-label={t('teamNetwork.shell.renameHost')} onSubmit={event => { event.preventDefault(); void onRename(server, name).then(saved => { if (saved) setRenaming(false) }) }}>
+    {renaming && canRename && <form className="teamspace-form" aria-label={t(server.is_host ? 'teamNetwork.shell.renameHost' : 'teamNetwork.shell.renameServer')} onSubmit={event => { event.preventDefault(); void onRename(server, name).then(saved => { if (saved) setRenaming(false) }) }}>
       <label>{t('teamNetwork.shell.serverName')}<input aria-label={t('teamNetwork.shell.serverName')} autoFocus value={name} maxLength={160} disabled={disabled} onChange={event => setName(event.target.value)} /></label>
       <div><button type="submit" className="primary-button" disabled={disabled || !name.trim() || bodyBytes(name.trim()) > 160 || /[\u0000-\u001f\u007f]/.test(name)}>{disabled && <LoaderCircle className="spin" size={14} />}{t('teamNetwork.shell.save')}</button><button type="button" className="quiet-button" disabled={disabled} onClick={() => { setRenaming(false); queueMicrotask(() => menuTrigger.current?.focus()) }}>{t('teamNetwork.shell.cancel')}</button></div>
     </form>}
@@ -2112,6 +2174,14 @@ function addressKey(address: TeamNetworkMailboxAddress): string { return `${addr
 
 function projectionFromPage(page: TeamNetworkProjectionPage): TeamNetworkProjection {
   return mergeNetworkProjection({ network: page.network, servers: [], agents: [] }, page)
+}
+
+export function applyNetworkServerRename(current: TeamNetworkProjection, renamed: TeamNetworkServerProfile): TeamNetworkProjection {
+  return { ...current, servers: current.servers.map(item => (
+    item.id === renamed.id && item.server_identity === renamed.server_identity
+      ? { ...item, display_name: renamed.display_name,
+        ...(item.recipient_display_name !== undefined ? { recipient_display_name: renamed.display_name } : {}) } : item
+  )) }
 }
 
 function mergeNetworkProjection(current: TeamNetworkProjection, page: TeamNetworkProjectionPage): TeamNetworkProjection {
@@ -2292,6 +2362,15 @@ function canRenameOwnHost(status: TeamHubStatus | null, details: TeamHubTeamDeta
   return Boolean(status?.serverManaged && status.authenticationMode === 'server'
     && canManageNetworkServers(status, details) && server.is_host && server.owned_by_caller
     && server.status === 'active' && server.server_identity === status.serverIdentity)
+}
+
+function canRenameOwnMember(status: TeamHubStatus | null, details: TeamHubTeamDetails | null, server: TeamNetworkServer): boolean {
+  return Boolean(status?.authenticated && !status.designatedHost && status.authenticationMode === 'paired_node'
+    && status.transport === 'secure_peer' && status.connectionId && status.hostServerIdentity && status.hubIdentity
+    && status.principal?.kind === 'service' && details?.membership.principal_id === status.principal.id
+    && details.membership.status === 'active' && details.team.status === 'active'
+    && !server.is_host && server.owned_by_caller && server.status === 'active'
+    && server.server_identity === status.serverIdentity)
 }
 
 function logicalServerStatus(server: TeamNetworkServer): string {

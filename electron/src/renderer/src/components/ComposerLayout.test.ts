@@ -47,7 +47,7 @@ describe('composer queue layout', () => {
     expect(pane).toMatch(/<div className="chat-workspace-history">\s*<Timeline[^>]*\/>\s*<\/div>\s*<div className="chat-workspace-shelves">/)
     expect(styles).toMatch(/\.chat-workspace \{[^}]*grid-template-rows: minmax\(0, 1fr\) auto auto auto;[^}]*overflow: hidden;/s)
     expect(styles).toMatch(/\.chat-workspace-shelves \{[^}]*max-height: min\(44vh, 460px\);[^}]*overflow-y: auto;/s)
-    expect(readFileSync(resolve(process.cwd(), 'src/renderer/src/components/CodexControls.css'), 'utf8')).toMatch(/\.codex-goal-bar \{[^}]*margin: 0 auto 4px;/s)
+    expect(readFileSync(resolve(process.cwd(), 'src/renderer/src/components/GoalDialog.css'), 'utf8')).toMatch(/\.goal-summary-bar \{[^}]*margin: 0 auto var\(--space-3\);/s)
     expect(styles).toMatch(/\.chat-split-view\.stacked \.composer,\s*\.chat-split-view\.short \.composer \{[^}]*max-height: 75px;[^}]*grid-template-rows: minmax\(0, 1fr\) auto;[^}]*margin-bottom: 3px;/s)
     expect(styles).toMatch(/\.chat-split-view\.stacked \.emergency-timeline-dock,\s*\.chat-split-view\.short \.emergency-timeline-dock \{[^}]*height: 40px;[^}]*margin-bottom: 1px;[^}]*overflow: hidden;/s)
   })

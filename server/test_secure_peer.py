@@ -1,5 +1,6 @@
 import base64
 import copy
+from datetime import datetime, timedelta, timezone
 import hashlib
 import ipaddress
 import json
@@ -17,16 +18,22 @@ import uuid
 from cryptography import x509
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+from cryptography.x509.oid import ExtendedKeyUsageOID
 
 from agentsdock_team_hub.secure_peer import (
+    ACTIVATED_RENEWAL_HISTORY_LIMIT,
     MAX_RELAY_LEGS,
+    PAIRING_CLOCK_SKEW_SECONDS,
     PAIRING_ATTEMPT_RETENTION_SECONDS,
     PAIRING_STATUS_LIMIT,
     PAIRING_TTL_SECONDS,
     PEER_HEARTBEAT_COALESCE_SECONDS,
     PEER_HEARTBEAT_LEASE_SECONDS,
     PEER_BINDING_OID,
+    RENEWAL_REQUEST_TTL_SECONDS,
+    RETIRED_RENEWAL_MATERIAL_LIMIT,
     PeerAuthorization,
+    ProxyRequest,
     ProxyResponse,
     SecurePeerClient,
     SecurePeerError,
@@ -252,6 +259,59 @@ class SecurePeerStoreTests(unittest.TestCase):
             pending["pairing_id"], pending["poll_token"]
         )
         self.assertEqual(expired_poll["status"], "expired")
+
+    def test_listing_and_host_decisions_persist_due_pairing_expiry(self) -> None:
+        submitted: list[dict] = []
+        for index in range(3):
+            _key, request = self.request(
+                request_id=_uuid(),
+                server_identity=f"peer-server-{index + 10:03d}",
+            )
+            submitted.append(self.store.submit_pairing(request))
+
+        self.clock.value += PAIRING_TTL_SECONDS + 1
+        with self.assertRaises(SecurePeerError) as approve_expired:
+            self.store.approve_pairing(
+                submitted[0]["pairing_id"],
+                "team-alpha",
+                self.requested_scopes,
+                "owner-admin",
+                expected_peer_server_identity="peer-server-010",
+                expected_transcript_hash=submitted[0]["transcript_hash"],
+                idempotency_key=_uuid(),
+            )
+        self.assertEqual(approve_expired.exception.code, "pairing_not_pending")
+        with self.assertRaises(SecurePeerError) as reject_expired:
+            self.store.reject_pairing(
+                submitted[1]["pairing_id"],
+                "owner-admin",
+                "No longer needed",
+                expected_peer_server_identity="peer-server-011",
+                expected_transcript_hash=submitted[1]["transcript_hash"],
+                idempotency_key=_uuid(),
+            )
+        self.assertEqual(reject_expired.exception.code, "pairing_not_pending")
+
+        # Decision failures must commit their exact expiry before raising, and
+        # listing must expire any remaining due row before applying filters.
+        connection = sqlite3.connect(self.store.db_path)
+        try:
+            statuses = {
+                row[0]: row[1]
+                for row in connection.execute(
+                    "SELECT id,status FROM pairing_requests"
+                ).fetchall()
+            }
+        finally:
+            connection.close()
+        self.assertEqual(statuses[submitted[0]["pairing_id"]], "expired")
+        self.assertEqual(statuses[submitted[1]["pairing_id"]], "expired")
+        self.assertEqual(statuses[submitted[2]["pairing_id"]], "pending")
+        self.assertEqual(self.store.list_pairings(status="pending"), [])
+        self.assertEqual(
+            {row["pairing_id"] for row in self.store.list_pairings(status="expired")},
+            {row["pairing_id"] for row in submitted},
+        )
 
     def test_cross_chat_grant_requires_explicit_store_enablement(self) -> None:
         disabled = SecurePeerStore(
@@ -649,6 +709,18 @@ class SecurePeerStoreTests(unittest.TestCase):
         self.assertEqual(
             network.query, "after_server_id=node_12345678&limit=100"
         )
+        members = sanitize_proxy_request(
+            peer,
+            "GET",
+            "/v1/teams/team-alpha/members",
+            "limit=100&cursor=v1.AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+            (),
+            b"",
+        )
+        self.assertEqual(
+            members.query,
+            "limit=100&cursor=v1.AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+        )
         mailbox = sanitize_proxy_request(
             peer,
             "GET",
@@ -674,13 +746,13 @@ class SecurePeerStoreTests(unittest.TestCase):
             peer,
             "GET",
             "/v1/teams/team-alpha/network/skills",
-            "include_archived=false&slug=deploy-atlas",
+            "include_archived=false&slug=deploy-sonic",
             (),
             b"",
         )
         self.assertEqual(
             skills.query,
-            "include_archived=false&slug=deploy-atlas",
+            "include_archived=false&slug=deploy-sonic",
         )
         for path in (
             "/v1/sessions/refresh",
@@ -700,12 +772,32 @@ class SecurePeerStoreTests(unittest.TestCase):
             "address_kind=server&address_id=node_12345678&after_sequence=9223372036854775808",
             "address_kind=server&address_id=node_12345678&limit=1&limit=2",
             "address_kind=human&address_id=node_12345678",
+            "address_kind=agent&address_id=agent_12345678",
         ):
             with self.subTest(query=query), self.assertRaises(SecurePeerError):
                 sanitize_proxy_request(
                     peer,
                     "GET",
                     "/v1/teams/team-alpha/network/mailbox",
+                    query,
+                    (),
+                    b"",
+                )
+        for query in (
+            "limit=101",
+            "cursor=invalid",
+            "cursor=v1.short",
+            "cursor=v2.AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+            "limit=1&limit=2",
+            "unknown=value",
+        ):
+            with self.subTest(member_query=query), self.assertRaises(
+                SecurePeerError
+            ):
+                sanitize_proxy_request(
+                    peer,
+                    "GET",
+                    "/v1/teams/team-alpha/members",
                     query,
                     (),
                     b"",
@@ -748,6 +840,131 @@ class SecurePeerStoreTests(unittest.TestCase):
                 (("Content-Type", "application/json"),),
                 b'{"to":{"kind":"server","id":"node_12345678"},"body":"no","idempotency_key":"mail-denied-001"}',
             )
+
+    def test_proxy_delete_and_deletion_journal_are_narrowly_sanitized(self) -> None:
+        peer = PeerAuthorization(
+            _uuid(),
+            _uuid(),
+            "peer-server-delete",
+            "team-alpha",
+            frozenset({"teamspace.read", "teamspace.write"}),
+            "sha256:" + "b" * 64,
+            self.clock.value + 600,
+            "Deleting peer",
+        )
+        body = b'{"idempotency_key":"delete-message-001"}'
+        message = sanitize_proxy_request(
+            peer,
+            "DELETE",
+            "/v1/teams/team-alpha/network/messages/tmsg_12345678",
+            "",
+            (
+                ("Content-Type", "application/json"),
+                ("Authorization", "Bearer must-not-cross"),
+                ("Accept", "application/json"),
+            ),
+            body,
+        )
+        self.assertEqual(message.method, "DELETE")
+        self.assertEqual(
+            message.path,
+            "/v1/teams/team-alpha/network/messages/tmsg_12345678",
+        )
+        self.assertEqual(message.query, "")
+        self.assertEqual(message.body, body)
+        self.assertEqual(
+            message.headers,
+            (("content-type", "application/json"), ("accept", "application/json")),
+        )
+        bulletin = sanitize_proxy_request(
+            peer,
+            "DELETE",
+            "/v1/teams/team-alpha/network/bulletin/message_12345678",
+            "",
+            (("Content-Type", "application/json"),),
+            b'{"idempotency_key":"delete-bulletin-001"}',
+        )
+        self.assertEqual(bulletin.method, "DELETE")
+        journal = sanitize_proxy_request(
+            peer,
+            "GET",
+            "/v1/teams/team-alpha/network/deletions",
+            "after_sequence=0&limit=100",
+            (),
+            b"",
+        )
+        self.assertEqual(journal.query, "after_sequence=0&limit=100")
+
+        invalid_requests = (
+            (
+                "DELETE",
+                "/v1/teams/team-alpha/network/messages/tmsg_12345678",
+                "",
+                (("Content-Type", "application/json"),),
+                b"",
+            ),
+            (
+                "DELETE",
+                "/v1/teams/team-alpha/network/messages/tmsg_12345678",
+                "",
+                (("Content-Type", "application/json"),),
+                b"[]",
+            ),
+            (
+                "DELETE",
+                "/v1/teams/team-alpha/network/messages/tmsg_12345678",
+                "force=1",
+                (("Content-Type", "application/json"),),
+                body,
+            ),
+            (
+                "DELETE",
+                "/v1/teams/team-alpha/network/messages",
+                "",
+                (("Content-Type", "application/json"),),
+                body,
+            ),
+            (
+                "GET",
+                "/v1/teams/team-alpha/network/deletions",
+                "",
+                (("Content-Type", "application/json"),),
+                body,
+            ),
+        )
+        for method, path, query, headers, request_body in invalid_requests:
+            with self.subTest(method=method, path=path, query=query), self.assertRaises(
+                SecurePeerError
+            ):
+                sanitize_proxy_request(
+                    peer,
+                    method,
+                    path,
+                    query,
+                    headers,
+                    request_body,
+                )
+
+        read_only = PeerAuthorization(
+            peer.peer_id,
+            peer.pairing_id,
+            peer.peer_server_identity,
+            peer.team_id,
+            frozenset({"teamspace.read"}),
+            peer.certificate_fingerprint,
+            peer.certificate_expires_at,
+            peer.peer_display_name,
+        )
+        with self.assertRaises(SecurePeerError) as denied:
+            sanitize_proxy_request(
+                read_only,
+                "DELETE",
+                message.path,
+                "",
+                (("Content-Type", "application/json"),),
+                body,
+            )
+        self.assertEqual(denied.exception.status_code, 403)
 
     def test_proxy_response_is_bounded_and_strips_peer_control_headers(self) -> None:
         sanitized = sanitize_proxy_response(
@@ -811,6 +1028,7 @@ class SecurePeerStoreTests(unittest.TestCase):
             mock.patch.object(
                 client,
                 "_require_active_connection_locked",
+                return_value=None,
             ),
             mock.patch.object(
                 client,
@@ -846,6 +1064,7 @@ class SecurePeerStoreTests(unittest.TestCase):
                 mock.patch.object(
                     client,
                     "_require_active_connection_locked",
+                    return_value=None,
                 ),
                 mock.patch.object(
                     client,
@@ -857,6 +1076,102 @@ class SecurePeerStoreTests(unittest.TestCase):
                     client.proxy(connection_id, "GET", "/v1/teams"),
                     response,
                 )
+
+    def test_client_proxy_overlaps_read_io_but_keeps_mutations_fenced(self) -> None:
+        client = SecurePeerClient(
+            self.root / "concurrent-proxy-client",
+            "proxy-peer-001",
+            "Proxy peer",
+            clock=self.clock,
+        )
+        connection_id = _uuid()
+        row = {"host_ip": "192.0.2.20", "port": 7851}
+        two_reads_entered = threading.Event()
+        release_reads = threading.Event()
+        call_guard = threading.Lock()
+        entered_reads = 0
+        errors: list[BaseException] = []
+
+        def read_request(*_args, **_kwargs):
+            nonlocal entered_reads
+            with call_guard:
+                entered_reads += 1
+                if entered_reads == 2:
+                    two_reads_entered.set()
+            if not release_reads.wait(5):
+                raise TimeoutError("concurrent proxy reads were not released")
+            return 200, [("content-type", "application/json")], b"{}", b"leaf"
+
+        with (
+            mock.patch.object(
+                client, "_require_active_connection_locked", return_value=row
+            ),
+            mock.patch.object(client, "_pinned_context", return_value=object()),
+            mock.patch.object(client, "_request", side_effect=read_request),
+        ):
+            readers = [
+                threading.Thread(
+                    target=lambda: self._capture_thread_error(
+                        errors,
+                        lambda: client.proxy(
+                            connection_id,
+                            "GET",
+                            "/v1/teams",
+                        ),
+                    )
+                )
+                for _index in range(2)
+            ]
+            for reader in readers:
+                reader.start()
+            try:
+                self.assertTrue(
+                    two_reads_entered.wait(2),
+                    "read-only peer requests were serialized during remote I/O",
+                )
+            finally:
+                release_reads.set()
+            for reader in readers:
+                reader.join(5)
+                self.assertFalse(reader.is_alive())
+        self.assertEqual(errors, [])
+
+        mutation_entered = threading.Event()
+        release_mutation = threading.Event()
+
+        def mutation_request(*_args, **_kwargs):
+            mutation_entered.set()
+            if not release_mutation.wait(5):
+                raise TimeoutError("proxy mutation was not released")
+            return 200, [("content-type", "application/json")], b"{}", b"leaf"
+
+        with (
+            mock.patch.object(
+                client, "_require_active_connection_locked", return_value=row
+            ),
+            mock.patch.object(client, "_pinned_context", return_value=object()),
+            mock.patch.object(client, "_request", side_effect=mutation_request),
+        ):
+            writer = threading.Thread(
+                target=lambda: self._capture_thread_error(
+                    errors,
+                    lambda: client.proxy(
+                        connection_id,
+                        "POST",
+                        "/v1/teams/team-1/network/messages",
+                        body=b"{}",
+                    ),
+                )
+            )
+            writer.start()
+            self.assertTrue(mutation_entered.wait(2))
+            try:
+                self.assertFalse(client._route_guard.acquire(timeout=0.1))
+            finally:
+                release_mutation.set()
+            writer.join(5)
+            self.assertFalse(writer.is_alive())
+        self.assertEqual(errors, [])
 
     def test_pairing_capacity_is_transactional_and_prunes_old_terminal_rows(self) -> None:
         _key, request = self.request()
@@ -1027,6 +1342,140 @@ class SecurePeerStoreTests(unittest.TestCase):
             )
         self.assertEqual(full.exception.code, "pairing_capacity")
         self.assertEqual(client.actionable_pairing_count(), 0)
+
+    def test_client_signs_only_configured_pairing_capabilities(self) -> None:
+        client = SecurePeerClient(
+            self.root / "inbox-only-client",
+            "inbox-only-peer-001",
+            "Inbox-only peer",
+            clock=self.clock,
+            pairing_capabilities=("cert_renewal", "teamspace"),
+        )
+        health = {
+            "protocol_version": 1,
+            "host_server_identity": self.store.host_server_identity,
+            "hub_id": self.store.hub_id,
+            "host_ca_fingerprint": self.store.ca_fingerprint,
+        }
+        captured: dict = {}
+
+        def request(_host, _port, method, path, **kwargs):
+            if method == "GET" and path == "/v1/health":
+                return (
+                    200,
+                    [("Content-Type", "application/json")],
+                    canonical_json(health),
+                    b"stable discovery leaf",
+                )
+            captured.update(kwargs["body"])
+            raise RuntimeError("captured signed pairing request")
+
+        with (
+            mock.patch.object(client, "_request", side_effect=request),
+            self.assertRaisesRegex(RuntimeError, "captured signed pairing request"),
+        ):
+            client.begin_pairing(
+                "192.0.2.30",
+                requested_scopes=["teamspace.read"],
+            )
+
+        self.assertEqual(captured["capabilities"], ["cert_renewal", "teamspace"])
+        unsigned = {name: value for name, value in captured.items() if name != "signature"}
+        public_key = serialization.load_pem_public_key(
+            captured["peer_public_key_pem"].encode("ascii")
+        )
+        public_key.verify(
+            base64.b64decode(captured["signature"]),
+            canonical_json(unsigned),
+        )
+
+    def test_inbox_only_upgrade_retires_wider_persisted_pairing_attempt(self) -> None:
+        client_root = self.root / "pairing-policy-upgrade-client"
+        legacy = SecurePeerClient(
+            client_root,
+            "pairing-policy-peer-001",
+            "Pairing policy peer",
+            clock=self.clock,
+        )
+        request_id = _uuid()
+        connection_id = _uuid()
+        key = Ed25519PrivateKey.generate()
+        request = build_pairing_request(
+            key,
+            server_identity=legacy.server_identity,
+            display_name=legacy.display_name,
+            host_ca_fingerprint=self.store.ca_fingerprint,
+            request_id=request_id,
+            created_at=self.clock.value,
+            requested_scopes=["teamspace.read", "cross_chat.instruction"],
+        )
+        key_path = legacy.keys_dir / f"{connection_id}.key.pem"
+        key_path.write_bytes(
+            key.private_bytes(
+                serialization.Encoding.PEM,
+                serialization.PrivateFormat.PKCS8,
+                serialization.NoEncryption(),
+            )
+        )
+        key_path.chmod(0o600)
+        database = legacy._connect()
+        try:
+            database.execute(
+                """INSERT INTO client_pairing_attempts(
+                request_id,connection_id,host_ip,port,observed_ca_fingerprint,
+                health_leaf_fingerprint,host_server_identity,hub_id,request_json,
+                key_path,created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?)""",
+                (
+                    request_id,
+                    connection_id,
+                    "192.0.2.30",
+                    7851,
+                    self.store.ca_fingerprint,
+                    "sha256:" + "1" * 64,
+                    self.store.host_server_identity,
+                    self.store.hub_id,
+                    canonical_json(request).decode("utf-8"),
+                    str(key_path),
+                    self.clock.value,
+                ),
+            )
+        finally:
+            database.close()
+
+        inbox_only = SecurePeerClient(
+            client_root,
+            legacy.server_identity,
+            legacy.display_name,
+            clock=self.clock,
+            pairing_capabilities=("cert_renewal", "teamspace"),
+        )
+        self.assertEqual(inbox_only.retire_agent_routes_locally(), 1)
+        self.assertFalse(key_path.exists())
+        self.assertEqual(
+            inbox_only.recover_pairing_attempts(),
+            {
+                "attempted": 0,
+                "recovered": [],
+                "retired": 0,
+                "remaining": 0,
+                "error_code": None,
+                "error": None,
+            },
+        )
+        with mock.patch.object(inbox_only, "_request") as remote_request:
+            with self.assertRaises(SecurePeerError) as retired_scope:
+                inbox_only.begin_pairing(
+                    "192.0.2.30",
+                    requested_scopes=[
+                        "teamspace.read",
+                        "cross_chat.instruction",
+                    ],
+                )
+        self.assertEqual(
+            retired_scope.exception.code,
+            "pairing_capability_unavailable",
+        )
+        remote_request.assert_not_called()
 
     def test_route_bound_relay_uses_immutable_revisions_and_host_leg_ledger(self) -> None:
         _key, _submitted, _approved, peer = self.approve_peer()
@@ -1380,6 +1829,128 @@ class SecurePeerStoreTests(unittest.TestCase):
         self.assertEqual(envelope["status"], "expired")
         self.assertEqual(exchange["status"], "expired")
 
+    def test_inbox_only_retirement_rotates_routes_and_expires_relay_state(
+        self,
+    ) -> None:
+        _key, _submitted, _approved, peer = self.approve_peer()
+        remote = self.store.publish_peer_route(
+            peer,
+            {
+                "route_id": _uuid(),
+                "revision": "rev_" + uuid.uuid4().hex,
+                "alias": "retireremote",
+                "display_title": "Retire remote",
+                "actions": ["instruction", "request_reply"],
+            },
+        )
+        local = self.store.publish_local_route(
+            peer.team_id,
+            peer.peer_id,
+            "chat-retire-inbox-only",
+            "retirelocal",
+            "Retire local",
+            ["instruction", "request_reply"],
+            idempotency_key=_uuid(),
+            published_by="owner-admin",
+        )
+        envelopes = []
+        for index, kind in enumerate(("request_reply", "request_reply")):
+            envelopes.append(
+                self.store.submit_local_envelope(
+                    peer.team_id,
+                    local["route_id"],
+                    {
+                        "request_id": _uuid(),
+                        "source_route_id": local["route_id"],
+                        "target_route_id": remote["route_id"],
+                        "target_route_revision": remote["revision"],
+                        "kind": kind,
+                        "exchange_id": None,
+                        "parent_envelope_id": None,
+                        "expires_at": self.clock.value + 300 + index,
+                        "body": {"message": f"retire {index}"},
+                    },
+                )
+            )
+        claimed = self.store.claim_inbox(
+            peer,
+            "retirement-worker",
+            limit=1,
+        )
+        self.assertEqual(len(claimed["envelopes"]), 1)
+
+        connection = self.store._connect()
+        try:
+            revisions_before = {
+                str(row["id"]): str(row["revision"])
+                for row in connection.execute(
+                    "SELECT id,revision FROM peer_routes ORDER BY id"
+                ).fetchall()
+            }
+            states_before = {
+                str(row["status"])
+                for row in connection.execute(
+                    "SELECT status FROM relay_envelopes"
+                ).fetchall()
+            }
+            exchange_states_before = {
+                str(row["status"])
+                for row in connection.execute(
+                    "SELECT status FROM relay_exchanges"
+                ).fetchall()
+            }
+        finally:
+            connection.close()
+        self.assertEqual(states_before, {"queued", "claimed"})
+        self.assertEqual(exchange_states_before, {"open"})
+
+        self.assertEqual(self.store.retire_agent_routes_locally(), 2)
+        connection = self.store._connect()
+        try:
+            routes = connection.execute(
+                "SELECT id,revision,status,revoked_at FROM peer_routes ORDER BY id"
+            ).fetchall()
+            retired_envelopes = connection.execute(
+                """SELECT status,lease_owner,lease_token_hash,lease_expires_at
+                FROM relay_envelopes ORDER BY id"""
+            ).fetchall()
+            exchanges = connection.execute(
+                "SELECT status FROM relay_exchanges ORDER BY id"
+            ).fetchall()
+        finally:
+            connection.close()
+        revisions_after = {
+            str(row["id"]): str(row["revision"])
+            for row in routes
+        }
+        self.assertEqual(set(revisions_after), set(revisions_before))
+        self.assertTrue(all(row["status"] == "revoked" for row in routes))
+        self.assertTrue(all(row["revoked_at"] == self.clock.value for row in routes))
+        self.assertTrue(all(revisions_after[key] != value for key, value in revisions_before.items()))
+        self.assertTrue(
+            all(
+                row["status"] == "expired"
+                and row["lease_owner"] is None
+                and row["lease_token_hash"] is None
+                and row["lease_expires_at"] is None
+                for row in retired_envelopes
+            )
+        )
+        self.assertTrue(all(row["status"] == "expired" for row in exchanges))
+
+        self.assertEqual(self.store.retire_agent_routes_locally(), 0)
+        connection = self.store._connect()
+        try:
+            repeated_revisions = {
+                str(row["id"]): str(row["revision"])
+                for row in connection.execute(
+                    "SELECT id,revision FROM peer_routes ORDER BY id"
+                ).fetchall()
+            }
+        finally:
+            connection.close()
+        self.assertEqual(repeated_revisions, revisions_after)
+
     def test_relay_usage_budget_is_durable_and_isolated_per_peer(self) -> None:
         _key, _submitted, _approved, first_peer = self.approve_peer()
         _key, _submitted, _approved, second_peer = self.approve_peer(
@@ -1593,6 +2164,170 @@ class SecurePeerStoreTests(unittest.TestCase):
         with self.assertRaisesRegex(PermissionError, "quarantined"):
             SecurePeerClient(client_root, "other-peer-001", "Other peer")
 
+    def test_expired_host_leaf_repairs_without_identity_or_san_rollover(self) -> None:
+        host_dir = self.root / "expired-host-leaf"
+        original = SecurePeerStore(
+            host_dir,
+            "expired-host-001",
+            "expired-hub-001",
+        )
+        original.configure_listener_identity("192.0.2.44")
+        old_certificate = x509.load_pem_x509_certificate(
+            original.server_certificate_path.read_bytes()
+        )
+        old_ca = original.ca_certificate_path.read_bytes()
+        old_server_key = original.server_key_path.read_bytes()
+        old_sans = list(
+            old_certificate.extensions.get_extension_for_class(
+                x509.SubjectAlternativeName
+            ).value
+        )
+        after_expiry = old_certificate.not_valid_after_utc + timedelta(seconds=1)
+
+        class AfterLeafExpiry(datetime):
+            @classmethod
+            def now(cls, tz=None):
+                return (
+                    after_expiry
+                    if tz is not None
+                    else after_expiry.replace(tzinfo=None)
+                )
+
+        with mock.patch(
+            "agentsdock_team_hub.secure_peer.datetime", AfterLeafExpiry
+        ):
+            repaired = SecurePeerStore(
+                host_dir,
+                "expired-host-001",
+                "expired-hub-001",
+            )
+
+        new_certificate = x509.load_pem_x509_certificate(
+            repaired.server_certificate_path.read_bytes()
+        )
+        self.assertNotEqual(new_certificate.serial_number, old_certificate.serial_number)
+        self.assertEqual(repaired.ca_certificate_path.read_bytes(), old_ca)
+        self.assertEqual(repaired.server_key_path.read_bytes(), old_server_key)
+        self.assertEqual(
+            new_certificate.public_key().public_bytes(
+                serialization.Encoding.Raw,
+                serialization.PublicFormat.Raw,
+            ),
+            old_certificate.public_key().public_bytes(
+                serialization.Encoding.Raw,
+                serialization.PublicFormat.Raw,
+            ),
+        )
+        self.assertEqual(
+            list(
+                new_certificate.extensions.get_extension_for_class(
+                    x509.SubjectAlternativeName
+                ).value
+            ),
+            old_sans,
+        )
+        self.assertGreater(new_certificate.not_valid_after_utc, after_expiry)
+
+    def test_expired_host_leaf_with_non_expiry_defect_remains_quarantined(self) -> None:
+        host_dir = self.root / "defective-expired-host-leaf"
+        store = SecurePeerStore(
+            host_dir,
+            "defective-host-001",
+            "defective-hub-001",
+        )
+        now = datetime.now(timezone.utc)
+        server_key = serialization.load_pem_private_key(
+            store.server_key_path.read_bytes(), password=None
+        )
+        defective = (
+            x509.CertificateBuilder()
+            .subject_name(store._server_certificate.subject)
+            .issuer_name(store._ca_certificate.subject)
+            .public_key(server_key.public_key())
+            .serial_number(x509.random_serial_number())
+            .not_valid_before(now - timedelta(days=2))
+            .not_valid_after(now - timedelta(days=1))
+            .add_extension(x509.BasicConstraints(ca=False, path_length=None), True)
+            .add_extension(
+                x509.ExtendedKeyUsage([ExtendedKeyUsageOID.SERVER_AUTH]),
+                False,
+            )
+            .add_extension(
+                x509.SubjectAlternativeName(
+                    [
+                        x509.DNSName("unexpected.invalid"),
+                        x509.UniformResourceIdentifier(
+                            "urn:agentsdock:server:defective-host-001"
+                        ),
+                    ]
+                ),
+                False,
+            )
+            .add_extension(
+                x509.AuthorityKeyIdentifier.from_issuer_public_key(
+                    store._ca_key.public_key()
+                ),
+                False,
+            )
+            .sign(store._ca_key, algorithm=None)
+        )
+        store.server_certificate_path.write_bytes(
+            defective.public_bytes(serialization.Encoding.PEM)
+        )
+        with self.assertRaisesRegex(PermissionError, "host identity is invalid"):
+            SecurePeerStore(
+                host_dir,
+                "defective-host-001",
+                "defective-hub-001",
+            )
+
+    def test_listener_leaf_at_near_expiry_ca_ceiling_does_not_rotate_repeatedly(
+        self,
+    ) -> None:
+        store = SecurePeerStore(
+            self.root / "near-ca-expiry-host",
+            "near-expiry-host-001",
+            "near-expiry-hub-001",
+        )
+        now = datetime.now(timezone.utc)
+        builder = (
+            x509.CertificateBuilder()
+            .subject_name(store._ca_certificate.subject)
+            .issuer_name(store._ca_certificate.issuer)
+            .public_key(store._ca_key.public_key())
+            .serial_number(x509.random_serial_number())
+            .not_valid_before(now - timedelta(minutes=5))
+            .not_valid_after(now + timedelta(days=20))
+        )
+        for extension in store._ca_certificate.extensions:
+            builder = builder.add_extension(extension.value, extension.critical)
+        near_expiry_ca = builder.sign(store._ca_key, algorithm=None)
+        server_key = serialization.load_pem_private_key(
+            store.server_key_path.read_bytes(), password=None
+        )
+        ceiling_leaf = store._issue_server_certificate(
+            store._ca_key,
+            near_expiry_ca,
+            server_key,
+            now,
+            advertised_ip="192.0.2.45",
+        )
+        store.ca_certificate_path.write_bytes(
+            near_expiry_ca.public_bytes(serialization.Encoding.PEM)
+        )
+        store._ca_certificate = near_expiry_ca
+        with store._guard:
+            store._replace_server_certificate(ceiling_leaf)
+
+        serial = store._server_certificate.serial_number
+        self.assertEqual(
+            store._server_certificate.not_valid_after_utc,
+            near_expiry_ca.not_valid_after_utc,
+        )
+        self.assertFalse(store.configure_listener_identity("192.0.2.45"))
+        self.assertIsNone(store.refresh_tls_server_context("192.0.2.45"))
+        self.assertEqual(store._server_certificate.serial_number, serial)
+
     def test_remote_revocation_retires_exact_connection_and_routes_atomically(self) -> None:
         client = SecurePeerClient(
             self.root / "revoked-client",
@@ -1752,7 +2487,7 @@ class SecurePeerStoreTests(unittest.TestCase):
         self.assertEqual(repeated["status"], "revoked")
         self.assertFalse(repeated["active"])
 
-    def test_expired_unanswered_pairing_attempt_retires_its_private_key(self) -> None:
+    def test_expired_unanswered_pairing_attempt_retires_all_key_material(self) -> None:
         client = SecurePeerClient(
             self.root / "attempt-client",
             "attempt-peer-001",
@@ -1780,6 +2515,9 @@ class SecurePeerStoreTests(unittest.TestCase):
             )
         )
         key_path.chmod(0o600)
+        ca_path = client.keys_dir / f"{connection_id}.ca.pem"
+        ca_path.write_bytes(b"persisted pairing CA")
+        ca_path.chmod(0o600)
         database = client._connect()
         try:
             database.execute(
@@ -1808,6 +2546,54 @@ class SecurePeerStoreTests(unittest.TestCase):
         self.assertEqual(recovery["retired"], 1)
         self.assertEqual(recovery["remaining"], 0)
         self.assertFalse(key_path.exists())
+        self.assertFalse(ca_path.exists())
+        self.assertEqual(list(client.keys_dir.iterdir()), [])
+
+    def test_pairing_database_open_failure_retires_unpersisted_private_key(self) -> None:
+        client = SecurePeerClient(
+            self.root / "connect-failure-client",
+            "connect-failure-peer-001",
+            "Connect failure peer",
+            clock=self.clock,
+        )
+        health = {
+            "protocol_version": 1,
+            "host_server_identity": self.store.host_server_identity,
+            "hub_id": self.store.hub_id,
+            "host_ca_fingerprint": self.store.ca_fingerprint,
+        }
+        real_connect = client._connect
+        connect_calls = 0
+
+        def fail_after_key_creation():
+            nonlocal connect_calls
+            connect_calls += 1
+            if connect_calls == 2:
+                raise OSError("injected database-open failure")
+            return real_connect()
+
+        with (
+            mock.patch.object(
+                client,
+                "_request",
+                return_value=(
+                    200,
+                    [("Content-Type", "application/json")],
+                    canonical_json(health),
+                    b"stable discovery leaf",
+                ),
+            ),
+            mock.patch.object(client, "_connect", side_effect=fail_after_key_creation),
+            self.assertRaisesRegex(OSError, "injected database-open failure"),
+        ):
+            client.begin_pairing(
+                "192.0.2.30",
+                requested_scopes=["teamspace.read"],
+            )
+
+        self.assertEqual(connect_calls, 2)
+        self.assertEqual(client.actionable_pairing_count(), 0)
+        self.assertEqual(list(client.keys_dir.iterdir()), [])
 
     def test_untrusted_discovery_identity_cannot_create_actionable_client_state(self) -> None:
         client = SecurePeerClient(
@@ -1842,6 +2628,171 @@ class SecurePeerStoreTests(unittest.TestCase):
         self.assertEqual(rejected.exception.code, "host_identity_mismatch")
         self.assertEqual(client.actionable_pairing_count(), 0)
         self.assertEqual(list(client.keys_dir.iterdir()), [])
+
+    def test_host_compatibility_migration_rolls_back_schema_and_purge_together(self) -> None:
+        legacy_dir = self.root / "atomic-migration-host"
+        original = SecurePeerStore(
+            legacy_dir,
+            "atomic-host-001",
+            "atomic-hub-001",
+            clock=self.clock,
+        )
+        database = original._connect()
+        try:
+            database.execute(
+                "ALTER TABLE relay_envelopes DROP COLUMN source_route_revision"
+            )
+        finally:
+            database.close()
+
+        class FailingConnection:
+            def __init__(self, inner):
+                self.inner = inner
+
+            def execute(self, sql, parameters=()):
+                if sql.strip().startswith("DELETE FROM relay_receipts"):
+                    raise RuntimeError("simulated migration interruption")
+                return self.inner.execute(sql, parameters)
+
+            def __getattr__(self, name):
+                return getattr(self.inner, name)
+
+        class FailingStore(SecurePeerStore):
+            def _connect(self):
+                return FailingConnection(super()._connect())
+
+        with self.assertRaisesRegex(RuntimeError, "migration interruption"):
+            FailingStore(
+                legacy_dir,
+                "atomic-host-001",
+                "atomic-hub-001",
+                clock=self.clock,
+            )
+        database = sqlite3.connect(legacy_dir / "secure-peer.sqlite3")
+        try:
+            columns_after_failure = {
+                row[1]
+                for row in database.execute(
+                    "PRAGMA table_info(relay_envelopes)"
+                ).fetchall()
+            }
+        finally:
+            database.close()
+        self.assertNotIn("source_route_revision", columns_after_failure)
+
+        repaired = SecurePeerStore(
+            legacy_dir,
+            "atomic-host-001",
+            "atomic-hub-001",
+            clock=self.clock,
+        )
+        database = repaired._connect()
+        try:
+            columns_after_retry = {
+                row["name"]
+                for row in database.execute(
+                    "PRAGMA table_info(relay_envelopes)"
+                ).fetchall()
+            }
+        finally:
+            database.close()
+        self.assertIn("source_route_revision", columns_after_retry)
+
+    def test_attachment_download_releases_route_guard_while_body_streams(self) -> None:
+        client = SecurePeerClient(
+            self.root / "download-lock-client",
+            "download-peer-001",
+            "Download peer",
+            clock=self.clock,
+        )
+        entered = threading.Event()
+        release = threading.Event()
+
+        class Response:
+            status = 200
+
+            @staticmethod
+            def getheaders():
+                return [
+                    ("Content-Length", "4"),
+                    ("ETag", '"etag"'),
+                    ("Content-Type", "text/plain"),
+                    ("Accept-Ranges", "bytes"),
+                ]
+
+            def __init__(self):
+                self.sent = False
+
+            def read(self, _amount):
+                if self.sent:
+                    return b""
+                self.sent = True
+                entered.set()
+                if not release.wait(5):
+                    raise TimeoutError("test download was not released")
+                return b"data"
+
+        class Connection:
+            def __init__(self, *_args, **_kwargs):
+                self.response = Response()
+
+            @staticmethod
+            def request(*_args, **_kwargs):
+                return None
+
+            def getresponse(self):
+                return self.response
+
+            @staticmethod
+            def close():
+                return None
+
+        destination = self.root / "downloaded.txt"
+        errors: list[BaseException] = []
+        with (
+            mock.patch.object(
+                client, "_require_active_connection_locked", return_value=None
+            ),
+            mock.patch.object(
+                client,
+                "_connection_row",
+                return_value={"host_ip": "192.0.2.20", "port": 7851},
+            ),
+            mock.patch.object(client, "_pinned_context", return_value=object()),
+            mock.patch(
+                "agentsdock_team_hub.secure_peer.http.client.HTTPSConnection",
+                Connection,
+            ),
+        ):
+            worker = threading.Thread(
+                target=lambda: self._capture_thread_error(
+                    errors,
+                    lambda: client.download_attachment_to(
+                        str(uuid.uuid4()),
+                        "/v1/teams/team-1/network/attachments/attachment-1/content",
+                        destination,
+                        expected_size=4,
+                    ),
+                )
+            )
+            worker.start()
+            self.assertTrue(entered.wait(5))
+            self.assertTrue(client._route_guard.acquire(timeout=1))
+            client._route_guard.release()
+            release.set()
+            worker.join(5)
+        self.assertFalse(worker.is_alive())
+        self.assertEqual(errors, [])
+        self.assertEqual(destination.read_bytes(), b"data")
+
+    @staticmethod
+    def _capture_thread_error(
+        errors: list[BaseException], operation
+    ) -> None:
+        try:
+            operation()
+        except BaseException as exc:
+            errors.append(exc)
 
 
 def _nonloopback_ipv4() -> str | None:
@@ -2065,6 +3016,1006 @@ class SecurePeerLiveTLSTests(unittest.TestCase):
         )
         return self.client.poll_pairing(connection["connection_id"])
 
+    def test_host_role_pause_fences_mutation_and_revalidates_member_on_resume(self) -> None:
+        approved = self.pair_and_approve()
+        connection_id = approved["connection_id"]
+        active = self.client.set_active_connection(
+            connection_id,
+            expected_current=None,
+        )
+        runtime = SecurePeerRuntime(
+            Path(self.temporary.name) / "runtime",
+            server_identity=self.client.server_identity,
+            server_instance_id="instance-host-pause-12345678",
+            display_name="Live peer",
+        )
+        runtime.client = self.client
+
+        paused = runtime.pause_member_for_host()
+        self.assertEqual(paused["connection_id"], connection_id)
+        self.assertFalse(self.client.get_connection(connection_id)["active"])
+        for operation in (
+            lambda: runtime.deactivate_connection(
+                connection_id,
+                expected_host_server_identity=active["host_server_identity"],
+                expected_hub_id=active["hub_id"],
+            ),
+            lambda: runtime.forget_connection(
+                connection_id,
+                expected_host_server_identity=active["host_server_identity"],
+                expected_hub_id=active["hub_id"],
+                expected_certificate_fingerprint=active[
+                    "certificate_fingerprint"
+                ],
+            ),
+        ):
+            with self.assertRaises(SecurePeerError) as raised:
+                operation()
+            self.assertEqual(raised.exception.code, "host_role_active")
+
+        restored = runtime.resume_member_after_host()
+        self.assertEqual(restored["connection_id"], connection_id)
+        self.assertTrue(restored["active"])
+        self.assertEqual(restored["status"], "connected")
+        self.assertGreaterEqual(
+            restored["last_validated_at"],
+            int(paused["last_validated_at"] or 0),
+        )
+
+    def test_host_role_resume_keeps_member_paused_when_health_fails(self) -> None:
+        approved = self.pair_and_approve()
+        connection_id = approved["connection_id"]
+        self.client.set_active_connection(connection_id, expected_current=None)
+        runtime = SecurePeerRuntime(
+            Path(self.temporary.name) / "runtime-health-failure",
+            server_identity=self.client.server_identity,
+            server_instance_id="instance-host-pause-failure-12345678",
+            display_name="Live peer",
+        )
+        runtime.client = self.client
+        runtime.pause_member_for_host()
+
+        with mock.patch.object(
+            self.client,
+            "_request",
+            side_effect=SecurePeerError(
+                "peer_unavailable",
+                "peer is offline",
+                503,
+            ),
+        ), self.assertRaises(SecurePeerError):
+            runtime.resume_member_after_host()
+
+        paused = self.client.get_connection(connection_id)
+        self.assertFalse(paused["active"])
+        self.assertEqual(paused["status"], "deactivated")
+        with self.assertRaises(SecurePeerError) as blocked:
+            runtime.activate_pairing(
+                approved["pairing_id"],
+                expected_connection_id=connection_id,
+                expected_host_server_identity=approved["host_server_identity"],
+                expected_hub_id=approved["hub_id"],
+            )
+        self.assertEqual(blocked.exception.code, "host_role_active")
+
+    def test_outgoing_pending_pairing_expires_offline_and_retires_authority(
+        self,
+    ) -> None:
+        clock = _Clock()
+        client = SecurePeerClient(
+            self.client.data_dir.parent / "expiring-client",
+            "expiring-peer-live",
+            "Expiring peer",
+            clock=clock,
+            timeout_seconds=5,
+        )
+        # Explicitly model an old host: negotiated durable requests do not
+        # expire, while this legacy expiry/key-retirement contract still does.
+        legacy_health = dict(self.store.public_health())
+        legacy_health.pop("durable_pairing_approval_v1", None)
+        with mock.patch.object(self.store, "public_health", return_value=legacy_health):
+            pending = client.begin_pairing(
+                self.host_ip,
+                self.port,
+                expected_ca_fingerprint=self.store.ca_fingerprint,
+                requested_scopes=["teamspace.read"],
+            )
+        self.assertIsInstance(pending["pairing_expires_at"], int)
+        self.assertGreater(pending["pairing_expires_at"], clock.value)
+        clock.value = pending["pairing_expires_at"] + 1
+
+        with mock.patch.object(client, "_request") as remote_request:
+            expired = client.poll_pairing(pending["connection_id"])
+        remote_request.assert_not_called()
+        self.assertEqual(expired["status"], "expired")
+        self.assertEqual(expired["pairing_expires_at"], pending["pairing_expires_at"])
+        self.assertEqual(client.actionable_pairing_count(), 0)
+        self.assertEqual(list(client.keys_dir.iterdir()), [])
+        self.assertTrue(any((client.data_dir / "retired").iterdir()))
+
+    def test_pending_pairing_rejects_past_and_far_future_remote_deadlines(
+        self,
+    ) -> None:
+        deadlines = {
+            "past": lambda: int(time.time()) - 1,
+            "far-future": lambda: (
+                int(time.time())
+                + PAIRING_TTL_SECONDS
+                + PAIRING_CLOCK_SKEW_SECONDS
+                + 10
+            ),
+        }
+        for label, deadline in deadlines.items():
+            with self.subTest(deadline=label):
+                original_decode = self.client._decode_json_response
+                calls = 0
+
+                def replace_deadline(*args, **kwargs):
+                    nonlocal calls
+                    response = original_decode(*args, **kwargs)
+                    calls += 1
+                    if calls == 2:
+                        self.assertEqual(response.get("status"), "pending")
+                        response["expires_at"] = deadline()
+                    return response
+
+                with mock.patch.object(
+                    self.client,
+                    "_decode_json_response",
+                    side_effect=replace_deadline,
+                ):
+                    with self.assertRaises(SecurePeerError) as invalid:
+                        self.client.begin_pairing(
+                            self.host_ip,
+                            self.port,
+                            expected_ca_fingerprint=self.store.ca_fingerprint,
+                            requested_scopes=["teamspace.read"],
+                        )
+                self.assertEqual(invalid.exception.code, "remote_invalid")
+                self.assertEqual(list(self.client.keys_dir.iterdir()), [])
+
+    def test_outgoing_expiry_cas_wins_over_concurrent_approved_poll(self) -> None:
+        legacy_health = dict(self.store.public_health())
+        legacy_health.pop("durable_pairing_approval_v1", None)
+        with mock.patch.object(self.store, "public_health", return_value=legacy_health):
+            pending = self.client.begin_pairing(
+                self.host_ip,
+                self.port,
+                expected_ca_fingerprint=self.store.ca_fingerprint,
+                requested_scopes=["teamspace.read"],
+            )
+        incoming = self.store.list_pairings(status="pending")[0]
+        self.store.approve_pairing(
+            incoming["pairing_id"],
+            "team-alpha",
+            incoming["requested_scopes"],
+            "owner-admin",
+            expected_peer_server_identity=incoming["peer_server_identity"],
+            expected_transcript_hash=incoming["transcript_hash"],
+            idempotency_key=_uuid(),
+        )
+        competing = SecurePeerClient(
+            self.client.data_dir,
+            self.client.server_identity,
+            self.client.display_name,
+            clock=lambda: pending["pairing_expires_at"] + 1,
+            timeout_seconds=5,
+        )
+        validated = threading.Event()
+        release = threading.Event()
+        results: list[dict] = []
+        errors: list[BaseException] = []
+        original_validate = self.client._validate_issued_client_certificate
+
+        def pause_after_validation(*args, **kwargs):
+            result = original_validate(*args, **kwargs)
+            validated.set()
+            if not release.wait(5):
+                raise TimeoutError("test did not release pairing poll")
+            return result
+
+        def poll() -> None:
+            try:
+                results.append(self.client.poll_pairing(pending["connection_id"]))
+            except BaseException as exc:
+                errors.append(exc)
+
+        with mock.patch.object(
+            self.client,
+            "_validate_issued_client_certificate",
+            side_effect=pause_after_validation,
+        ):
+            worker = threading.Thread(target=poll)
+            worker.start()
+            self.assertTrue(validated.wait(5))
+            self.assertEqual(competing.expire_pending_pairings(), 1)
+            release.set()
+            worker.join(5)
+
+        self.assertFalse(worker.is_alive())
+        self.assertEqual(errors, [])
+        self.assertEqual([item["status"] for item in results], ["expired"])
+        self.assertEqual(
+            self.client.get_connection(pending["connection_id"])["status"],
+            "expired",
+        )
+        self.assertEqual(list(self.client.keys_dir.iterdir()), [])
+
+    def test_client_schema_migration_preserves_legacy_unknown_pairing_deadline(
+        self,
+    ) -> None:
+        legacy_health = dict(self.store.public_health())
+        legacy_health.pop("durable_pairing_approval_v1", None)
+        with mock.patch.object(self.store, "public_health", return_value=legacy_health):
+            pending = self.client.begin_pairing(
+                self.host_ip,
+                self.port,
+                expected_ca_fingerprint=self.store.ca_fingerprint,
+                requested_scopes=["teamspace.read"],
+            )
+        self.assertGreater(pending["pairing_expires_at"], 0)
+        database = self.client._connect()
+        try:
+            database.execute(
+                "ALTER TABLE client_connections DROP COLUMN pairing_expires_at"
+            )
+        finally:
+            database.close()
+
+        restarted = SecurePeerClient(
+            self.client.data_dir,
+            self.client.server_identity,
+            self.client.display_name,
+            clock=lambda: pending["pairing_expires_at"] + 10_000,
+            timeout_seconds=5,
+        )
+        database = restarted._connect()
+        try:
+            columns = {
+                row["name"]
+                for row in database.execute(
+                    "PRAGMA table_info(client_connections)"
+                ).fetchall()
+            }
+        finally:
+            database.close()
+        migrated = restarted.get_connection(pending["connection_id"])
+        self.assertIn("pairing_expires_at", columns)
+        self.assertIsNone(migrated["pairing_expires_at"])
+        self.assertEqual(migrated["status"], "pending")
+
+    def test_cancel_pairing_is_locally_terminal_and_response_loss_idempotent(self) -> None:
+        pending = self.client.begin_pairing(
+            self.host_ip,
+            self.port,
+            expected_ca_fingerprint=self.store.ca_fingerprint,
+            requested_scopes=["teamspace.read"],
+        )
+        original_abandon = self.client._abandon_uncredentialed_connection
+        abandon_calls = 0
+
+        def lose_first_local_response(row):
+            nonlocal abandon_calls
+            result = original_abandon(row)
+            abandon_calls += 1
+            if abandon_calls == 1:
+                raise RuntimeError("simulated lost local cancel response")
+            return result
+
+        operation_id = _uuid()
+        with mock.patch.object(
+            self.client,
+            "_abandon_uncredentialed_connection",
+            side_effect=lose_first_local_response,
+        ):
+            with self.assertRaisesRegex(RuntimeError, "lost local cancel response"):
+                self.client.cancel_pairing(
+                    pending["connection_id"], operation_id
+                )
+        repeated = self.client.cancel_pairing(
+            pending["connection_id"], operation_id
+        )
+        self.assertEqual(repeated["status"], "cancelled")
+        self.assertFalse(repeated["active"])
+        self.assertEqual(self.client.actionable_pairing_count(), 0)
+        self.assertEqual(list(self.client.keys_dir.iterdir()), [])
+        self.assertTrue(any((self.client.data_dir / "retired").iterdir()))
+
+    def test_cancel_pairing_is_locally_terminal_when_remote_is_unavailable(
+        self,
+    ) -> None:
+        remote_failures = {
+            "transport": SecurePeerError(
+                "transport_failed",
+                "Secure peer host is unavailable",
+                502,
+            ),
+            "not_found": (
+                404,
+                [("Content-Type", "application/json")],
+                canonical_json(
+                    {
+                        "error": {
+                            "code": "pairing_not_found",
+                            "message": "Pairing request was not found",
+                        }
+                    }
+                ),
+                b"pinned-host-leaf",
+            ),
+        }
+
+        for label, failure in remote_failures.items():
+            with self.subTest(failure=label):
+                pending = self.client.begin_pairing(
+                    self.host_ip,
+                    self.port,
+                    expected_ca_fingerprint=self.store.ca_fingerprint,
+                    requested_scopes=["teamspace.read"],
+                )
+                operation_id = _uuid()
+                request_patch = (
+                    mock.patch.object(self.client, "_request", side_effect=failure)
+                    if isinstance(failure, BaseException)
+                    else mock.patch.object(
+                        self.client,
+                        "_request",
+                        return_value=failure,
+                    )
+                )
+                with request_patch as remote_request:
+                    cancelled = self.client.cancel_pairing(
+                        pending["connection_id"], operation_id
+                    )
+
+                remote_request.assert_called_once()
+                self.assertEqual(cancelled["status"], "cancelled")
+                self.assertFalse(cancelled["active"])
+                self.assertEqual(self.client.actionable_pairing_count(), 0)
+                self.assertEqual(list(self.client.keys_dir.iterdir()), [])
+
+                # The local terminal tombstone makes retries independent of the
+                # remote host, including after a lost first response.
+                with mock.patch.object(self.client, "_request") as retry_request:
+                    repeated = self.client.cancel_pairing(
+                        pending["connection_id"], operation_id
+                    )
+                retry_request.assert_not_called()
+                self.assertEqual(repeated["status"], "cancelled")
+                self.assertFalse(repeated["active"])
+
+    def test_cancel_winning_during_approved_poll_cannot_resurrect_pairing(self) -> None:
+        pending = self.client.begin_pairing(
+            self.host_ip,
+            self.port,
+            expected_ca_fingerprint=self.store.ca_fingerprint,
+            requested_scopes=["teamspace.read"],
+        )
+        incoming = self.store.list_pairings(status="pending")[0]
+        self.store.approve_pairing(
+            incoming["pairing_id"],
+            "team-alpha",
+            incoming["requested_scopes"],
+            "owner-admin",
+            expected_peer_server_identity=incoming["peer_server_identity"],
+            expected_transcript_hash=incoming["transcript_hash"],
+            idempotency_key=_uuid(),
+        )
+        competing = SecurePeerClient(
+            self.client.data_dir,
+            self.client.server_identity,
+            self.client.display_name,
+            timeout_seconds=5,
+        )
+        validated = threading.Event()
+        release = threading.Event()
+        results: list[dict] = []
+        errors: list[BaseException] = []
+        original_validate = self.client._validate_issued_client_certificate
+
+        def pause_after_validation(*args, **kwargs):
+            result = original_validate(*args, **kwargs)
+            validated.set()
+            if not release.wait(5):
+                raise TimeoutError("test did not release pairing poll")
+            return result
+
+        def poll() -> None:
+            try:
+                results.append(self.client.poll_pairing(pending["connection_id"]))
+            except BaseException as exc:
+                errors.append(exc)
+
+        with mock.patch.object(
+            self.client,
+            "_validate_issued_client_certificate",
+            side_effect=pause_after_validation,
+        ):
+            worker = threading.Thread(target=poll)
+            worker.start()
+            self.assertTrue(validated.wait(5))
+            cancelled = competing.cancel_pairing(
+                pending["connection_id"], _uuid()
+            )
+            self.assertEqual(cancelled["status"], "cancelled")
+            release.set()
+            worker.join(5)
+        self.assertFalse(worker.is_alive())
+        self.assertEqual(errors, [])
+        self.assertEqual([item["status"] for item in results], ["cancelled"])
+        self.assertEqual(
+            self.client.get_connection(pending["connection_id"])["status"],
+            "cancelled",
+        )
+        self.assertEqual(list(self.client.keys_dir.iterdir()), [])
+
+    def test_stale_pending_poll_cannot_downgrade_approved_pairing(self) -> None:
+        pending = self.client.begin_pairing(
+            self.host_ip,
+            self.port,
+            expected_ca_fingerprint=self.store.ca_fingerprint,
+            requested_scopes=["teamspace.read"],
+        )
+        competing = SecurePeerClient(
+            self.client.data_dir,
+            self.client.server_identity,
+            self.client.display_name,
+            timeout_seconds=5,
+        )
+        decoded_pending = threading.Event()
+        release = threading.Event()
+        results: list[dict] = []
+        errors: list[BaseException] = []
+        original_decode = competing._decode_json_response
+
+        def pause_pending_decode(*args, **kwargs):
+            response = original_decode(*args, **kwargs)
+            if response.get("status") == "pending":
+                decoded_pending.set()
+                if not release.wait(5):
+                    raise TimeoutError("test did not release stale pairing poll")
+            return response
+
+        def stale_poll() -> None:
+            try:
+                results.append(competing.poll_pairing(pending["connection_id"]))
+            except BaseException as exc:
+                errors.append(exc)
+
+        with mock.patch.object(
+            competing,
+            "_decode_json_response",
+            side_effect=pause_pending_decode,
+        ):
+            worker = threading.Thread(target=stale_poll)
+            worker.start()
+            self.assertTrue(decoded_pending.wait(5))
+            incoming = self.store.list_pairings(status="pending")[0]
+            self.store.approve_pairing(
+                incoming["pairing_id"],
+                "team-alpha",
+                incoming["requested_scopes"],
+                "owner-admin",
+                expected_peer_server_identity=incoming["peer_server_identity"],
+                expected_transcript_hash=incoming["transcript_hash"],
+                idempotency_key=_uuid(),
+            )
+            approved = self.client.poll_pairing(pending["connection_id"])
+            self.assertEqual(approved["status"], "approved")
+            release.set()
+            worker.join(5)
+        self.assertFalse(worker.is_alive())
+        self.assertEqual(errors, [])
+        self.assertEqual([item["status"] for item in results], ["approved"])
+        self.assertEqual(
+            self.client.get_connection(pending["connection_id"])["status"],
+            "approved",
+        )
+
+    def test_winning_terminal_polls_retire_client_key_and_pinned_ca(self) -> None:
+        for terminal_status in ("rejected", "cancelled", "expired"):
+            with self.subTest(status=terminal_status):
+                pending = self.client.begin_pairing(
+                    self.host_ip,
+                    self.port,
+                    expected_ca_fingerprint=self.store.ca_fingerprint,
+                    requested_scopes=["teamspace.read"],
+                )
+                incoming = self.store.list_pairings(status="pending")[0]
+                material = [
+                    path
+                    for path in self.client.keys_dir.iterdir()
+                    if path.name.startswith(pending["connection_id"] + ".")
+                ]
+                self.assertEqual(
+                    {path.suffixes[-2] for path in material}, {".key", ".ca"}
+                )
+                if terminal_status == "rejected":
+                    self.store.reject_pairing(
+                        incoming["pairing_id"],
+                        "owner-admin",
+                        "Not this peer",
+                        expected_peer_server_identity=incoming[
+                            "peer_server_identity"
+                        ],
+                        expected_transcript_hash=incoming["transcript_hash"],
+                        idempotency_key=_uuid(),
+                    )
+                elif terminal_status == "cancelled":
+                    row = self.client._connection_row(pending["connection_id"])
+                    self.store.cancel_pairing(
+                        incoming["pairing_id"], row["poll_token"], _uuid()
+                    )
+                else:
+                    database = self.store._connect()
+                    try:
+                        database.execute(
+                            "UPDATE pairing_requests SET expires_at=? WHERE id=?",
+                            (int(time.time()) - 1, incoming["pairing_id"]),
+                        )
+                    finally:
+                        database.close()
+
+                result = self.client.poll_pairing(pending["connection_id"])
+                self.assertEqual(result["status"], terminal_status)
+                self.assertEqual(
+                    [
+                        path
+                        for path in self.client.keys_dir.iterdir()
+                        if path.name.startswith(pending["connection_id"])
+                    ],
+                    [],
+                )
+
+    def test_restart_poll_self_heals_terminal_commit_before_file_retirement(self) -> None:
+        pending = self.client.begin_pairing(
+            self.host_ip,
+            self.port,
+            expected_ca_fingerprint=self.store.ca_fingerprint,
+            requested_scopes=["teamspace.read"],
+        )
+        database = self.client._connect()
+        try:
+            database.execute(
+                "UPDATE client_connections SET status='expired' WHERE connection_id=?",
+                (pending["connection_id"],),
+            )
+        finally:
+            database.close()
+        self.assertTrue(
+            any(
+                path.name.startswith(pending["connection_id"])
+                for path in self.client.keys_dir.iterdir()
+            )
+        )
+
+        restarted = SecurePeerClient(
+            self.client.data_dir,
+            self.client.server_identity,
+            self.client.display_name,
+            timeout_seconds=5,
+        )
+        result = restarted.poll_pairing(pending["connection_id"])
+        self.assertEqual(result["status"], "expired")
+        self.assertEqual(
+            [
+                path
+                for path in restarted.keys_dir.iterdir()
+                if path.name.startswith(pending["connection_id"])
+            ],
+            [],
+        )
+
+    def test_expired_saved_renewal_is_retired_and_retried_once(self) -> None:
+        paired = self.pair_and_approve()
+        now = int(time.time())
+        host_db = self.store._connect()
+        try:
+            host_db.execute(
+                "UPDATE peer_certificates SET expires_at=? WHERE fingerprint=?",
+                (now + 60, paired["certificate_fingerprint"]),
+            )
+        finally:
+            host_db.close()
+        client_db = self.client._connect()
+        try:
+            client_db.execute(
+                "UPDATE client_connections SET certificate_expires_at=? WHERE connection_id=?",
+                (now + 60, paired["connection_id"]),
+            )
+        finally:
+            client_db.close()
+
+        original_request = self.client._request
+        activation_attempts = 0
+
+        def lose_first_activation(*args, **kwargs):
+            nonlocal activation_attempts
+            path = args[3]
+            if "/v1/renewals/" in path and path.endswith("/activate"):
+                activation_attempts += 1
+                if activation_attempts == 1:
+                    raise RuntimeError("simulated pre-activation interruption")
+            return original_request(*args, **kwargs)
+
+        with mock.patch.object(
+            self.client, "_request", side_effect=lose_first_activation
+        ):
+            with self.assertRaisesRegex(RuntimeError, "pre-activation interruption"):
+                self.client.renew_if_due(paired["connection_id"])
+        client_db = self.client._connect()
+        try:
+            stale = client_db.execute(
+                """SELECT * FROM client_renewals WHERE connection_id=?
+                AND status='certificate_saved'""",
+                (paired["connection_id"],),
+            ).fetchone()
+        finally:
+            client_db.close()
+        self.assertIsNotNone(stale)
+        stale_request_id = stale["request_id"]
+        host_db = self.store._connect()
+        try:
+            host_db.execute(
+                "UPDATE renewal_requests SET expires_at=? WHERE request_id=?",
+                (now - 1, stale_request_id),
+            )
+        finally:
+            host_db.close()
+        client_db = self.client._connect()
+        try:
+            client_db.execute(
+                "UPDATE client_renewals SET created_at=? WHERE request_id=?",
+                (
+                    now - RENEWAL_REQUEST_TTL_SECONDS - 1,
+                    stale_request_id,
+                ),
+            )
+        finally:
+            client_db.close()
+
+        renewed = self.client.renew_if_due(paired["connection_id"])
+        self.assertTrue(renewed["renewed"])
+        self.assertNotEqual(
+            renewed["connection"]["certificate_fingerprint"],
+            paired["certificate_fingerprint"],
+        )
+        client_db = self.client._connect()
+        try:
+            self.assertIsNone(
+                client_db.execute(
+                    "SELECT 1 FROM client_renewals WHERE request_id=?",
+                    (stale_request_id,),
+                ).fetchone()
+            )
+        finally:
+            client_db.close()
+        retired_names = {
+            path.name
+            for path in (self.client.data_dir / "retired").rglob("*")
+            if path.is_file()
+        }
+        self.assertTrue(any(stale_request_id in name for name in retired_names))
+
+    def test_missing_saved_renewal_is_retired_and_retried_once(self) -> None:
+        paired = self.pair_and_approve()
+        now = int(time.time())
+        host_db = self.store._connect()
+        try:
+            host_db.execute(
+                "UPDATE peer_certificates SET expires_at=? WHERE fingerprint=?",
+                (now + 60, paired["certificate_fingerprint"]),
+            )
+        finally:
+            host_db.close()
+        client_db = self.client._connect()
+        try:
+            client_db.execute(
+                "UPDATE client_connections SET certificate_expires_at=? WHERE connection_id=?",
+                (now + 60, paired["connection_id"]),
+            )
+        finally:
+            client_db.close()
+
+        original_request = self.client._request
+        activation_attempts = 0
+
+        def lose_first_activation(*args, **kwargs):
+            nonlocal activation_attempts
+            path = args[3]
+            if "/v1/renewals/" in path and path.endswith("/activate"):
+                activation_attempts += 1
+                if activation_attempts == 1:
+                    raise RuntimeError("simulated pre-activation interruption")
+            return original_request(*args, **kwargs)
+
+        with mock.patch.object(
+            self.client, "_request", side_effect=lose_first_activation
+        ):
+            with self.assertRaisesRegex(RuntimeError, "pre-activation interruption"):
+                self.client.renew_if_due(paired["connection_id"])
+        client_db = self.client._connect()
+        try:
+            stale = client_db.execute(
+                "SELECT * FROM client_renewals WHERE connection_id=? "
+                "AND status='certificate_saved'",
+                (paired["connection_id"],),
+            ).fetchone()
+        finally:
+            client_db.close()
+        self.assertIsNotNone(stale)
+        stale_request_id = stale["request_id"]
+        host_db = self.store._connect()
+        try:
+            host_db.execute(
+                "DELETE FROM renewal_requests WHERE request_id=?",
+                (stale_request_id,),
+            )
+        finally:
+            host_db.close()
+
+        renewed = self.client.renew_if_due(paired["connection_id"])
+        self.assertTrue(renewed["renewed"])
+        self.assertNotEqual(
+            renewed["connection"]["certificate_fingerprint"],
+            paired["certificate_fingerprint"],
+        )
+        client_db = self.client._connect()
+        try:
+            self.assertIsNone(
+                client_db.execute(
+                    "SELECT 1 FROM client_renewals WHERE request_id=?",
+                    (stale_request_id,),
+                ).fetchone()
+            )
+        finally:
+            client_db.close()
+        retired_names = {
+            path.name
+            for path in (self.client.data_dir / "retired").rglob("*")
+            if path.is_file()
+        }
+        self.assertTrue(any(stale_request_id in name for name in retired_names))
+
+    def test_fresh_host_expired_renewal_does_not_rotate_key_per_retry(self) -> None:
+        paired = self.pair_and_approve()
+        client_db = self.client._connect()
+        try:
+            client_db.execute(
+                "UPDATE client_connections SET certificate_expires_at=? "
+                "WHERE connection_id=?",
+                (int(time.time()) + 60, paired["connection_id"]),
+            )
+        finally:
+            client_db.close()
+
+        expired = SecurePeerError(
+            "renewal_expired", "host rejected fresh renewal", 410
+        )
+        with mock.patch.object(
+            self.client, "_mutual_json", side_effect=expired
+        ) as request:
+            for _attempt in range(2):
+                with self.assertRaises(SecurePeerError) as raised:
+                    self.client.renew_if_due(paired["connection_id"])
+                self.assertEqual(raised.exception.code, "renewal_expired")
+
+        client_db = self.client._connect()
+        try:
+            renewals = client_db.execute(
+                "SELECT request_id,key_path,created_at FROM client_renewals "
+                "WHERE connection_id=?",
+                (paired["connection_id"],),
+            ).fetchall()
+        finally:
+            client_db.close()
+        self.assertEqual(request.call_count, 2)
+        self.assertEqual(len(renewals), 1)
+        self.assertTrue(Path(renewals[0]["key_path"]).is_file())
+        retired_renewals = self.client.data_dir / "retired" / "renewals"
+        self.assertEqual(
+            [path for path in retired_renewals.rglob("*") if path.is_file()]
+            if retired_renewals.exists()
+            else [],
+            [],
+        )
+
+    def test_renewal_creation_db_failures_retire_unpersisted_keys(self) -> None:
+        paired = self.pair_and_approve()
+        connection_id = paired["connection_id"]
+        client_db = self.client._connect()
+        try:
+            client_db.execute(
+                """UPDATE client_connections SET certificate_expires_at=?
+                WHERE connection_id=?""",
+                (int(time.time()) + 60, connection_id),
+            )
+        finally:
+            client_db.close()
+        original_live_files = {
+            path.name: path.read_bytes() for path in self.client.keys_dir.iterdir()
+        }
+        real_connect = self.client._connect
+
+        for failure_point in ("insert", "commit"):
+            with self.subTest(failure_point=failure_point):
+                injected = False
+
+                class ConnectionProxy:
+                    def __init__(self, wrapped):
+                        self.wrapped = wrapped
+
+                    @property
+                    def in_transaction(self):
+                        return self.wrapped.in_transaction
+
+                    def execute(self, statement, *args):
+                        nonlocal injected
+                        normalized = " ".join(statement.split()).upper()
+                        should_fail = (
+                            failure_point == "insert"
+                            and normalized.startswith("INSERT INTO CLIENT_RENEWALS")
+                            or failure_point == "commit"
+                            and normalized == "COMMIT"
+                        )
+                        if should_fail and not injected:
+                            injected = True
+                            raise sqlite3.OperationalError(
+                                f"injected renewal {failure_point} failure"
+                            )
+                        return self.wrapped.execute(statement, *args)
+
+                    def __getattr__(self, name):
+                        return getattr(self.wrapped, name)
+
+                with (
+                    mock.patch.object(
+                        self.client,
+                        "_connect",
+                        side_effect=lambda: ConnectionProxy(real_connect()),
+                    ),
+                    self.assertRaisesRegex(
+                        sqlite3.OperationalError,
+                        f"renewal {failure_point} failure",
+                    ),
+                ):
+                    self.client.renew_if_due(connection_id)
+                self.assertTrue(injected)
+                client_db = real_connect()
+                try:
+                    count = client_db.execute(
+                        """SELECT COUNT(*) AS count FROM client_renewals
+                        WHERE connection_id=?""",
+                        (connection_id,),
+                    ).fetchone()["count"]
+                finally:
+                    client_db.close()
+                self.assertEqual(int(count), 0)
+                self.assertEqual(
+                    {
+                        path.name: path.read_bytes()
+                        for path in self.client.keys_dir.iterdir()
+                    },
+                    original_live_files,
+                )
+
+    def test_repeated_real_renewals_bound_live_material_and_history(self) -> None:
+        paired = self.pair_and_approve()
+        connection_id = paired["connection_id"]
+        current = paired
+        latest_request_id = ""
+        for _rotation in range(ACTIVATED_RENEWAL_HISTORY_LIMIT + 2):
+            timestamp = int(time.time())
+            with self.gateway._rate_guard:
+                self.gateway._pairing_rate.clear()
+            host_db = self.store._connect()
+            try:
+                host_db.execute(
+                    """UPDATE peer_certificates SET expires_at=?
+                    WHERE fingerprint=?""",
+                    (timestamp + 60, current["certificate_fingerprint"]),
+                )
+            finally:
+                host_db.close()
+            client_db = self.client._connect()
+            try:
+                client_db.execute(
+                    """UPDATE client_connections SET certificate_expires_at=?
+                    WHERE connection_id=?""",
+                    (timestamp + 60, connection_id),
+                )
+            finally:
+                client_db.close()
+            renewed = self.client.renew_if_due(connection_id)
+            self.assertTrue(renewed["renewed"])
+            current = renewed["connection"]
+
+            stored = self.client._connection_row(connection_id)
+            expected_live = {
+                Path(stored["key_path"]),
+                Path(stored["certificate_path"]),
+                self.client.keys_dir / f"{connection_id}.ca.pem",
+            }
+            self.assertEqual(set(self.client.keys_dir.iterdir()), expected_live)
+            latest_request_id = Path(stored["key_path"]).name[
+                len(connection_id) + 1 : -len(".key.pem")
+            ]
+
+        client_db = self.client._connect()
+        try:
+            client_history = client_db.execute(
+                """SELECT request_id FROM client_renewals
+                WHERE connection_id=? AND status='activated'
+                ORDER BY updated_at DESC,request_id DESC""",
+                (connection_id,),
+            ).fetchall()
+        finally:
+            client_db.close()
+        host_db = self.store._connect()
+        try:
+            host_history = host_db.execute(
+                """SELECT request_id FROM renewal_requests
+                WHERE peer_id=? AND status='activated'
+                ORDER BY activated_at DESC,request_id DESC""",
+                (paired["peer_id"],),
+            ).fetchall()
+        finally:
+            host_db.close()
+        self.assertEqual(
+            len(client_history), ACTIVATED_RENEWAL_HISTORY_LIMIT
+        )
+        self.assertEqual(len(host_history), ACTIVATED_RENEWAL_HISTORY_LIMIT)
+        self.assertIn(
+            latest_request_id,
+            {row["request_id"] for row in client_history},
+        )
+        self.assertIn(
+            latest_request_id,
+            {row["request_id"] for row in host_history},
+        )
+        stored = self.client._connection_row(connection_id)
+        status, headers, raw, _leaf = self.client._request(
+            stored["host_ip"],
+            int(stored["port"]),
+            "POST",
+            f"/v1/renewals/{latest_request_id}/activate",
+            body={"request_id": latest_request_id},
+            context=self.client._pinned_context(stored, mutual_tls=True),
+        )
+        replay = self.client._decode_json_response(status, headers, raw)
+        self.assertTrue(replay["activated"])
+        self.assertEqual(replay["request_id"], latest_request_id)
+        retired = (
+            self.client.data_dir / "retired" / "renewals" / connection_id
+        )
+        self.assertLessEqual(
+            len([path for path in retired.iterdir() if path.is_file()]),
+            RETIRED_RENEWAL_MATERIAL_LIMIT,
+        )
+
+    def test_retired_renewal_material_is_pruned_to_bound(self) -> None:
+        connection_id = _uuid()
+        for _attempt in range(RETIRED_RENEWAL_MATERIAL_LIMIT + 3):
+            request_id = _uuid()
+            for suffix in ("key.pem", "certificate.pem"):
+                material = (
+                    self.client.keys_dir
+                    / f"{connection_id}-{request_id}.{suffix}"
+                )
+                material.write_bytes(b"retired material")
+                material.chmod(0o600)
+            self.client._retire_client_key_material(
+                connection_id, renewal_request_id=request_id
+            )
+
+        retired = (
+            self.client.data_dir / "retired" / "renewals" / connection_id
+        )
+        self.assertLessEqual(
+            len([path for path in retired.iterdir() if path.is_file()]),
+            RETIRED_RENEWAL_MATERIAL_LIMIT,
+        )
+
     def test_live_pair_mtls_health_activation_and_pin(self) -> None:
         with self.assertRaises(SecurePeerError) as bad_pin:
             self.client.begin_pairing(
@@ -2099,6 +4050,74 @@ class SecurePeerLiveTLSTests(unittest.TestCase):
         )
         self.assertEqual(deactivated["status"], "deactivated")
         self.assertFalse(deactivated["active"])
+
+    def test_gateway_delete_forwards_authenticated_json_body_and_peer_binding(self) -> None:
+        requested_scopes = ["teamspace.read", "teamspace.write"]
+        connection = self.client.begin_pairing(
+            self.host_ip,
+            self.port,
+            expected_ca_fingerprint=self.store.ca_fingerprint,
+            requested_scopes=requested_scopes,
+        )
+        pending = self.store.list_pairings(status="pending")[0]
+        approved = self.store.approve_pairing(
+            pending["pairing_id"],
+            "team-alpha",
+            requested_scopes,
+            "owner-admin",
+            expected_peer_server_identity=pending["peer_server_identity"],
+            expected_transcript_hash=pending["transcript_hash"],
+            idempotency_key=_uuid(),
+        )
+        paired = self.client.poll_pairing(connection["connection_id"])
+        self.client.peer_health(connection["connection_id"])
+        self.client.set_active_connection(
+            connection["connection_id"],
+            expected_current=None,
+        )
+
+        forwarded: list[ProxyRequest] = []
+
+        def forward(request: ProxyRequest) -> ProxyResponse:
+            forwarded.append(request)
+            return ProxyResponse(
+                200,
+                (("content-type", "application/json"),),
+                canonical_json(
+                    {"deleted": True, "message_id": "tmsg_gateway_delete_001"}
+                ),
+            )
+
+        self.gateway.forwarder = forward
+        body = {"idempotency_key": "gateway-delete-key-001"}
+        response = self.client.proxy(
+            connection["connection_id"],
+            "DELETE",
+            "/v1/teams/team-alpha/network/messages/tmsg_gateway_delete_001",
+            headers={"content-type": "application/json"},
+            body=body,
+        )
+        self.assertEqual(response.status, 200)
+        self.assertEqual(
+            json.loads(response.body),
+            {"deleted": True, "message_id": "tmsg_gateway_delete_001"},
+        )
+        self.assertEqual(len(forwarded), 1)
+        request = forwarded[0]
+        self.assertEqual(request.method, "DELETE")
+        self.assertEqual(
+            request.path,
+            "/v1/teams/team-alpha/network/messages/tmsg_gateway_delete_001",
+        )
+        self.assertEqual(request.query, "")
+        self.assertEqual(json.loads(request.body), body)
+        self.assertEqual(request.peer.peer_id, approved["peer_id"])
+        self.assertEqual(request.peer.team_id, "team-alpha")
+        self.assertEqual(request.peer.scopes, frozenset(requested_scopes))
+        self.assertEqual(
+            request.peer.certificate_fingerprint,
+            paired["certificate_fingerprint"],
+        )
 
     def test_lowercase_forwarded_accept_header_is_not_duplicated(self) -> None:
         status, _headers, _raw, _leaf = self.client._request(
@@ -2422,6 +4441,85 @@ class SecurePeerLiveTLSTests(unittest.TestCase):
             outcome="delivered",
         )
         self.assertEqual(receipt["status"], "delivered")
+
+    def test_stale_local_route_does_not_poison_claimed_batch(self) -> None:
+        paired = self.pair_and_approve()
+        self.gateway.relay_enabled = True
+        self.client.peer_health(paired["connection_id"])
+        self.client.set_active_connection(
+            paired["connection_id"], expected_current=None
+        )
+        stale_target = self.client.publish_route(
+            paired["connection_id"],
+            "chat-client-stale",
+            "client-stale",
+            "Client stale",
+            ["instruction"],
+        )
+        valid_target = self.client.publish_route(
+            paired["connection_id"],
+            "chat-client-valid",
+            "client-valid",
+            "Client valid",
+            ["instruction"],
+        )
+        source = self.store.publish_local_route(
+            paired["team_id"],
+            paired["peer_id"],
+            "chat-host-batch",
+            "host-batch",
+            "Host batch",
+            ["instruction"],
+            idempotency_key=_uuid(),
+            published_by="owner-admin",
+        )
+        queued = []
+        for target in (stale_target, valid_target):
+            queued.append(
+                self.store.submit_local_envelope(
+                    paired["team_id"],
+                    source["route_id"],
+                    {
+                        "request_id": _uuid(),
+                        "source_route_id": source["route_id"],
+                        "target_route_id": target["route_id"],
+                        "target_route_revision": target["revision"],
+                        "kind": "instruction",
+                        "exchange_id": None,
+                        "parent_envelope_id": None,
+                        "expires_at": int(time.time()) + 300,
+                        "body": {"message": target["display_title"]},
+                    },
+                )
+            )
+        client_db = self.client._connect()
+        try:
+            client_db.execute(
+                "UPDATE client_routes SET status='publishing' WHERE route_id=?",
+                (stale_target["route_id"],),
+            )
+        finally:
+            client_db.close()
+
+        claimed = self.client.claim_inbox(
+            paired["connection_id"], lease_owner="batch-worker", limit=5
+        )
+        self.assertEqual(
+            [item["envelope_id"] for item in claimed["envelopes"]],
+            [queued[1]["envelope_id"]],
+        )
+        self.assertEqual(
+            claimed["envelopes"][0]["target_chat_id"], "chat-client-valid"
+        )
+        host_db = self.store._connect()
+        try:
+            stale_status = host_db.execute(
+                "SELECT status FROM relay_envelopes WHERE id=?",
+                (queued[0]["envelope_id"],),
+            ).fetchone()["status"]
+        finally:
+            host_db.close()
+        self.assertEqual(stale_status, "failed")
 
     def test_route_retirement_is_local_first_retryable_and_republish_rotates_id(self) -> None:
         paired = self.pair_and_approve()
@@ -2825,6 +4923,67 @@ class SecurePeerLiveTLSTests(unittest.TestCase):
         finally:
             stalled.close()
         self.assertEqual(closed, b"")
+
+    def test_running_gateway_rotates_leaf_context_without_listener_or_key_rollover(
+        self,
+    ) -> None:
+        server = self.gateway._server
+        listener_thread = self.gateway._thread
+        assert server is not None and listener_thread is not None
+        original_context = server.current_tls_context()
+        original_ca = self.store.ca_certificate_path.read_bytes()
+        original_server_key = self.store.server_key_path.read_bytes()
+        original_certificate = x509.load_pem_x509_certificate(
+            self.store.server_certificate_path.read_bytes()
+        )
+        original_sans = list(
+            original_certificate.extensions.get_extension_for_class(
+                x509.SubjectAlternativeName
+            ).value
+        )
+        server_key = serialization.load_pem_private_key(
+            original_server_key, password=None
+        )
+        now = datetime.now(timezone.utc)
+        short_lived = self.store._issue_server_certificate(
+            self.store._ca_key,
+            self.store._ca_certificate,
+            server_key,
+            now - timedelta(days=824),
+            advertised_ip=self.host_ip,
+        )
+        with self.store._guard:
+            self.store._replace_server_certificate(short_lived)
+
+        self.assertTrue(self.gateway.refresh_listener_identity())
+        rotated = x509.load_pem_x509_certificate(
+            self.store.server_certificate_path.read_bytes()
+        )
+        self.assertIsNot(server.current_tls_context(), original_context)
+        self.assertIs(self.gateway._thread, listener_thread)
+        self.assertTrue(listener_thread.is_alive())
+        self.assertEqual(self.store.ca_certificate_path.read_bytes(), original_ca)
+        self.assertEqual(self.store.server_key_path.read_bytes(), original_server_key)
+        self.assertEqual(
+            list(
+                rotated.extensions.get_extension_for_class(
+                    x509.SubjectAlternativeName
+                ).value
+            ),
+            original_sans,
+        )
+        self.assertGreater(rotated.not_valid_after_utc, now + timedelta(days=800))
+        self.assertFalse(self.gateway.refresh_listener_identity())
+
+        # A fresh TLS client must see the swapped context without rebinding or
+        # restarting the listener thread.
+        pending = self.client.begin_pairing(
+            self.host_ip,
+            self.port,
+            expected_ca_fingerprint=self.store.ca_fingerprint,
+            requested_scopes=["teamspace.read"],
+        )
+        self.assertEqual(pending["status"], "pending")
 
     def test_rate_limits_cover_health_poll_and_pairing(self) -> None:
         for action, allowed in (("health", 60), ("poll", 120), ("pair", 8)):

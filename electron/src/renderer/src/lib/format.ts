@@ -1,7 +1,9 @@
-import type { Backend, RuntimeCatalog, Session } from '@shared/types'
+import type { Backend, CodexProvider, RuntimeCatalog, Session } from '@shared/types'
 import { getLocale, t, type Locale } from '@shared/i18n'
+import { runtimeBackendCatalogFor, runtimeEffortOptions } from '@shared/runtime-catalog'
 
-export function backendLabel(backend: Backend): string {
+export function backendLabel(backend: Backend, codexProvider?: CodexProvider): string {
+  if (backend === 'codex' && codexProvider === 'custom') return t('codexProvider.label')
   if (backend === 'codex') return 'Codex'
   if (backend === 'cursor') return 'Cursor'
   return 'Claude'
@@ -35,17 +37,19 @@ export function formatDuration(seconds?: number | null): string {
 }
 
 export function runtimeLabel(session: Session, catalog?: RuntimeCatalog | null): string {
-  const backend = catalog?.backends[session.backend]
+  const backend = runtimeBackendCatalogFor(catalog, session.backend, session.codex_provider, session.codex_provider_catalog)
+  const custom = session.backend === 'codex' && session.codex_provider === 'custom'
   const model = session.model?.trim()
   const effort = session.backend === 'cursor' ? '' : session.effort?.trim()
   const modelLabel = model
     ? backend?.models.find(option => option.value === model)?.label ?? model
-    : backend?.models.find(option => option.value === (backend.default_model ?? ''))?.label ?? backend?.default_model ?? (session.backend === 'claude' ? 'Sonnet' : session.backend === 'codex' ? 'GPT' : 'Auto')
+    : backend?.models.find(option => option.value === (backend.default_model ?? ''))?.label ?? (backend?.default_model?.trim() || (custom ? t('codexProvider.chooseModel') : session.backend === 'claude' ? 'Sonnet' : session.backend === 'codex' ? 'GPT' : 'Auto'))
+  const supportedEfforts = custom ? runtimeEffortOptions(catalog, session.backend, session.model, null, session.codex_provider, session.codex_provider_catalog) : null
   const effortLabel = session.backend === 'cursor'
     ? null
     : effort
-      ? backend?.efforts.find(option => option.value === effort)?.label ?? effort
-      : backend?.default_effort
+      ? supportedEfforts ? supportedEfforts.find(option => option.value === effort)?.label : backend?.efforts.find(option => option.value === effort)?.label ?? effort
+      : custom ? null : backend?.default_effort
   return [modelLabel, effortLabel].filter(Boolean).join(' · ')
 }
 

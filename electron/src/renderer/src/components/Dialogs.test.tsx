@@ -60,14 +60,87 @@ describe('Dialog close controls', () => {
 
 describe('AppSettingsDialog', () => {
   afterEach(cleanup)
+  beforeEach(() => useAppStore.setState({ connected: false, health: null, profiles: [], activeProfileId: null }))
+
+  async function renderAppUpdate(status: AppUpdateStatus, overrides: Partial<AgentsDockAPI['updates']> = {}) {
+    const updates = {
+      status: vi.fn().mockResolvedValue(status),
+      check: vi.fn().mockResolvedValue(status),
+      install: vi.fn().mockResolvedValue(true),
+      cancel: vi.fn().mockResolvedValue(status),
+      setTrack: vi.fn().mockResolvedValue(status),
+      ...overrides
+    }
+    Object.defineProperty(window, 'agentsDock', {
+      configurable: true,
+      value: { updates, events: { on: vi.fn().mockReturnValue(() => undefined) } } as unknown as AgentsDockAPI
+    })
+    useAppStore.setState({ modals: { ...useAppStore.getState().modals, settings: false, appSettings: true }, error: null })
+    render(<AppSettingsDialog />)
+    fireEvent.click(screen.getByRole('button', { name: 'Updates' }))
+    await screen.findByText(status.message!)
+    return updates
+  }
+
+  it.each(['checking', 'downloading', 'installing', 'downloaded'] as const)('cancels a %s update through the updater and clears the pending UI', async state => {
+    const status: AppUpdateStatus = {
+      state, channel: 'direct', track: 'stable', currentVersion: '1.0.6-beta.1',
+      availableVersion: '1.0.6', message: 'Update in progress', progress: 42,
+      cancelable: state === 'downloaded' ? undefined : true
+    }
+    let resolveCancel!: (status: AppUpdateStatus) => void
+    const cancel = vi.fn(() => new Promise<AppUpdateStatus>(resolve => { resolveCancel = resolve }))
+    await renderAppUpdate(status, { cancel })
+
+    if (state === 'checking' || state === 'downloading') expect(screen.getByRole('button', { name: 'Check for updates' })).toBeDisabled()
+    if (state === 'installing') expect(screen.getByText('Restarting…')).toBeInTheDocument()
+    const button = screen.getByRole('button', { name: state === 'downloaded' ? 'Discard update' : 'Cancel update' })
+    expect(button).toBeEnabled()
+    fireEvent.click(button)
+    expect(cancel).toHaveBeenCalledOnce()
+    expect(screen.getByRole('button', { name: 'Cancelling…' })).toBeDisabled()
+    expect(screen.getByText('Update in progress')).toBeInTheDocument()
+
+    await act(async () => resolveCancel({ ...status, state: 'idle', cancelable: false, availableVersion: undefined, progress: undefined, message: 'Update cancelled.' }))
+    expect(screen.getByText('Update cancelled.')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Check for updates' })).toBeEnabled()
+    expect(screen.getByRole('button', { name: 'Beta' })).toBeEnabled()
+    expect(screen.queryByRole('button', { name: /Cancel update|Discard update|Cancelling/ })).not.toBeInTheDocument()
+    expect(screen.queryByText('Restarting…')).not.toBeInTheDocument()
+    expect(screen.queryByRole('progressbar')).not.toBeInTheDocument()
+  })
+
+  it('allows changing channels after download and renders the replacement updater state', async () => {
+    const status: AppUpdateStatus = {
+      state: 'downloaded', channel: 'direct', track: 'stable', currentVersion: '1.0.6-beta.1',
+      availableVersion: '1.0.3', cancelable: true, message: 'AgentsDock 1.0.3 is ready to install.'
+    }
+    const setTrack = vi.fn().mockResolvedValue({ ...status, track: 'beta', state: 'idle', availableVersion: undefined, cancelable: false, message: 'Beta channel selected.' })
+    const updates = await renderAppUpdate(status, { setTrack })
+
+    expect(screen.getByRole('button', { name: 'Beta' })).toBeEnabled()
+    fireEvent.click(screen.getByRole('button', { name: 'Beta' }))
+    await screen.findByText('Beta channel selected.')
+    expect(setTrack).toHaveBeenCalledWith('beta')
+    expect(screen.queryByText('AgentsDock 1.0.3 is ready to install.')).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Update AgentsDock' })).not.toBeInTheDocument()
+    expect(updates.install).not.toHaveBeenCalled()
+  })
+
+  it('does not offer cancellation after the native installer takes over', async () => {
+    await renderAppUpdate({ state: 'installing', channel: 'direct', track: 'stable', currentVersion: '1.0.6-beta.1', message: 'Restarting to install…', cancelable: false })
+    expect(screen.getByText('Restarting…')).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /Cancel update|Discard update/ })).not.toBeInTheDocument()
+  })
 
   it('keeps app preferences, server controls, and updates in one settings dialog', async () => {
-    const updateStatus = { state: 'not-available' as const, channel: 'direct' as const, track: 'stable' as const, currentVersion: '0.2.0', message: 'AgentsDock is up to date.' }
-    const check = vi.fn()
-      .mockResolvedValueOnce(updateStatus)
-      .mockResolvedValue({ ...updateStatus, state: 'downloaded', message: 'Ready to install' })
+    const updateStatus = { state: 'not-available' as const, channel: 'direct' as const, track: 'stable' as const, currentVersion: '0.2.0', message: 'AgentsDock is up to date.',
+      serverUpdates: [{ profileId: 'server-a', serverIdentity: 'identity-a', name: 'Research server', targetVersion: '1.2.0', phase: 'pending' as const, message: 'Queued until idle.' },
+        { profileId: 'server-b', serverIdentity: 'identity-b', name: 'Laptop server', targetVersion: '1.2.0', phase: 'offline' as const, message: 'The paired update will resume on reconnect.' }] }
+    const check = vi.fn().mockResolvedValue({ ...updateStatus, state: 'downloaded', message: 'Ready to install' })
     const install = vi.fn().mockResolvedValue(true)
-    const setTrack = vi.fn().mockResolvedValue({ ...updateStatus, track: 'beta', message: 'AgentsDock is up to date on the beta channel.' })
+    let resolveSetTrack!: (status: AppUpdateStatus) => void
+    const setTrack = vi.fn(() => new Promise<AppUpdateStatus>(resolve => { resolveSetTrack = resolve }))
     Object.defineProperty(window, 'agentsDock', {
       configurable: true,
       value: {
@@ -86,7 +159,8 @@ describe('AppSettingsDialog', () => {
       modals: { settings: false, appSettings: true, newChat: false, resume: false, folder: false, digest: false, job: false, search: false, review: false, importChats: false }
     })
 
-    render(<AppSettingsDialog serverSettings={<div>Existing server controls</div>} serverUpdates={<div>Existing server updates</div>} />)
+    const recoveryVisible = vi.fn()
+    render(<AppSettingsDialog serverSettings={<div>Existing server controls</div>} serverUpdates={<div>Existing server updates</div>} onServerUpdatesVisible={recoveryVisible} />)
     const dialog = screen.getByRole('dialog', { name: 'Settings' })
     expect(within(dialog).getByRole('button', { name: 'General' })).toHaveAttribute('aria-current', 'page')
     expect(await within(dialog).findByText('Version 0.2.0')).toBeInTheDocument()
@@ -100,6 +174,14 @@ describe('AppSettingsDialog', () => {
     expect(within(dialog).queryByRole('button', { name: 'Appearance' })).not.toBeInTheDocument()
     expect(within(dialog).getByRole('combobox', { name: 'App theme' })).toHaveValue('system')
     expect(within(dialog).queryByText('Set the color theme used throughout AgentsDock.')).not.toBeInTheDocument()
+    // The usage analytics opt-out was removed from Settings on purpose; keep it out.
+    expect(within(dialog).queryByRole('switch', { name: 'Share usage analytics' })).not.toBeInTheDocument()
+    expect(within(dialog).queryByText('Usage analytics')).not.toBeInTheDocument()
+    expect(within(dialog).queryByRole('button', { name: /Privacy Policy/ })).not.toBeInTheDocument()
+    expect(within(dialog).queryByRole('button', { name: 'Privacy' })).not.toBeInTheDocument()
+    expect(check).not.toHaveBeenCalled()
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Server' }))
+    expect(check).not.toHaveBeenCalled()
 
     fireEvent.click(within(dialog).getByRole('button', { name: 'Keyboard shortcuts' }))
     expect(within(dialog).getByRole('button', { name: 'Keyboard shortcuts' })).toHaveAttribute('aria-current', 'page')
@@ -113,21 +195,83 @@ describe('AppSettingsDialog', () => {
 
     fireEvent.click(within(dialog).getByRole('button', { name: 'Updates' }))
     expect(within(dialog).getByText('This is the latest one.')).toBeInTheDocument()
-    expect(check).toHaveBeenCalledOnce()
+    expect(within(dialog).getByText('Research server')).toBeInTheDocument()
+    expect(within(dialog).getByText('Waiting for idle')).toBeInTheDocument()
+    expect(within(dialog).getByText('Laptop server')).toBeInTheDocument()
+    expect(within(dialog).getByText('Reconnect to resume')).toBeInTheDocument()
+    expect(within(dialog).queryByText('Existing server updates')).not.toBeInTheDocument()
+    expect(recoveryVisible).toHaveBeenLastCalledWith(false)
+    expect(check).not.toHaveBeenCalled()
     const appUpdateChannel = within(dialog).getByRole('group', { name: 'App update channel' })
+    expect(within(appUpdateChannel).getByRole('button', { name: 'Stable' })).toHaveAttribute('aria-pressed', 'true')
+    expect(within(appUpdateChannel).getByRole('button', { name: 'Beta' })).toHaveAttribute('aria-pressed', 'false')
     fireEvent.click(within(appUpdateChannel).getByRole('button', { name: 'Beta' }))
-    await waitFor(() => expect(setTrack).toHaveBeenCalledWith('beta'))
+    expect(within(appUpdateChannel).getByRole('button', { name: 'Beta' })).toBeDisabled()
+    expect(within(dialog).getByRole('button', { name: 'Check for updates' })).toBeDisabled()
+    expect(setTrack).toHaveBeenCalledWith('beta')
+    await act(async () => resolveSetTrack({ ...updateStatus, track: 'beta' }))
+    expect(within(appUpdateChannel).getByRole('button', { name: 'Beta' })).toHaveAttribute('aria-pressed', 'true')
     fireEvent.click(within(dialog).getByRole('button', { name: 'Check for updates' }))
-    expect(check).toHaveBeenCalledTimes(2)
-    fireEvent.click(await within(dialog).findByRole('button', { name: 'Restart to update' }))
+    expect(check).toHaveBeenCalledOnce()
+    fireEvent.click(await within(dialog).findByRole('button', { name: 'Update AgentsDock' }))
     expect(install).toHaveBeenCalledOnce()
     expect(within(dialog).queryByRole('button', { name: 'Check for updates' })).not.toBeInTheDocument()
-    expect(within(dialog).getByText('Existing server updates')).toBeInTheDocument()
+    expect(within(dialog).queryByText('Advanced server recovery')).not.toBeInTheDocument()
+    expect(within(dialog).queryByText('Existing server updates')).not.toBeInTheDocument()
+    expect(recoveryVisible).toHaveBeenLastCalledWith(false)
 
     fireEvent.click(within(dialog).getByRole('button', { name: 'Server' }))
     expect(within(dialog).getByRole('button', { name: 'Server' })).toHaveAttribute('aria-current', 'page')
     expect(within(dialog).getByText('Existing server controls')).toBeInTheDocument()
+    expect(check).toHaveBeenCalledOnce()
     expect(useAppStore.getState().modals).toMatchObject({ appSettings: true, settings: false })
+  })
+
+  it('lists saved servers and only offers setup before any server is configured', async () => {
+    const updateStatus: AppUpdateStatus = { state: 'idle', channel: 'direct', track: 'stable', currentVersion: '0.2.0' }
+    const install = vi.fn()
+    Object.defineProperty(window, 'agentsDock', {
+      configurable: true,
+      value: {
+        updates: { status: vi.fn().mockResolvedValue(updateStatus), check: vi.fn().mockResolvedValue(updateStatus), install },
+        events: { on: vi.fn().mockReturnValue(() => undefined) }
+      } as unknown as AgentsDockAPI
+    })
+    const placeholder: PublicServerProfile = {
+      id: 'placeholder', name: 'My server', serverUrl: 'http://127.0.0.1:7850',
+      hasAccessToken: false, serverSetupComplete: false, connectionState: 'offline', cachedUnreadCount: 0
+    }
+    const saved: PublicServerProfile = {
+      id: 'saved', name: 'Saved server', serverUrl: 'https://saved.example.test',
+      hasAccessToken: true, serverSetupComplete: true, connectionState: 'offline', cachedUnreadCount: 0,
+      serverVersion: '0.1.26'
+    }
+    useAppStore.setState({
+      profiles: [placeholder, saved], activeProfileId: placeholder.id,
+      modals: { ...useAppStore.getState().modals, settings: false, appSettings: true }
+    })
+    render(<AppSettingsDialog serverUpdates={<div>Server update controls</div>} />)
+    await screen.findByText('Version 0.2.0')
+    fireEvent.click(screen.getByRole('button', { name: 'Updates' }))
+    expect(screen.getByText('Server update controls')).toBeInTheDocument()
+    expect(screen.getByText('Saved server')).toBeInTheDocument()
+    expect(screen.getByText('AgentsServer 0.1.26')).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /Set up your server|Install or update AgentsServer/ })).not.toBeInTheDocument()
+
+    act(() => useAppStore.setState({ activeProfileId: saved.id, health: { ok: true, server_version: '0.1.27' } }))
+    expect(screen.getByText('AgentsServer 0.1.27')).toBeInTheDocument()
+    act(() => useAppStore.setState({ profiles: [placeholder], activeProfileId: placeholder.id, health: null }))
+    const setup = vi.fn()
+    window.addEventListener('agentsdock:server-setup', setup)
+    try {
+      fireEvent.click(screen.getByRole('button', { name: 'Set up your server' }))
+      expect(setup).toHaveBeenCalledOnce()
+      expect((setup.mock.calls[0][0] as CustomEvent).detail).toMatchObject({ intent: 'setup' })
+      expect(useAppStore.getState().modals).toMatchObject({ appSettings: false, settings: false })
+      expect(install).not.toHaveBeenCalled()
+    } finally {
+      window.removeEventListener('agentsdock:server-setup', setup)
+    }
   })
 
   it('checks releases in development without offering an external installer download', async () => {
@@ -168,11 +312,11 @@ describe('AppSettingsDialog', () => {
 
     await waitFor(() => expect(setTrack).toHaveBeenCalledWith('beta'))
     expect(within(dialog).queryByRole('button', { name: /Download 0\.2\.13-beta\.13/ })).not.toBeInTheDocument()
-    expect(within(dialog).queryByRole('button', { name: 'Restart to update' })).not.toBeInTheDocument()
+    expect(within(dialog).queryByRole('button', { name: 'Update AgentsDock' })).not.toBeInTheDocument()
     const checkButton = within(dialog).getByRole('button', { name: 'Check for updates' })
     expect(checkButton).toBeEnabled()
     fireEvent.click(checkButton)
-    await waitFor(() => expect(check).toHaveBeenCalledTimes(2))
+    await waitFor(() => expect(check).toHaveBeenCalledOnce())
   })
 })
 
@@ -742,6 +886,49 @@ describe('SessionDialog runtime selection', () => {
     }
   }
 
+  it('creates a custom Codex chat without replacing normal Codex choices', async () => {
+    const create = vi.fn().mockResolvedValue({ id: 'custom-chat' })
+    Object.defineProperty(window, 'agentsDock', { configurable: true, value: {
+      sessions: { create }, preferences: { set: vi.fn().mockResolvedValue(undefined) }
+    } as unknown as AgentsDockAPI })
+    useAppStore.setState({ profiles: [], activeProfileId: null, profileGeneration: 0, sessions: [],
+      health: { ok: true, capabilities: { codex_provider_v1: { per_chat: true, per_chat_models: true } } },
+      runtimeCatalog: { backends: { ...runtimeCatalog.backends, codex: { ...runtimeCatalog.backends.codex,
+        custom_provider: { configured: true, available: true, model: null, base_url: 'https://inference.example/v1',
+          models: [{ value: 'provider/fast', label: 'Provider Fast' }], efforts: [], model_efforts: { 'provider/fast': [{ value: 'high', label: 'High' }] } }
+      } } }, refreshSessions: vi.fn().mockResolvedValue(undefined), selectSession: vi.fn().mockResolvedValue(undefined),
+      modals: { settings: false, newChat: true, resume: false, folder: false, digest: false, job: false, search: false, review: false, importChats: false }
+    })
+    const user = userEvent.setup()
+    render(<SessionDialog mode="newChat" />)
+    expect(screen.getByRole('button', { name: 'Codex' })).toHaveAttribute('aria-pressed', 'true')
+    await user.click(screen.getByRole('button', { name: 'Codex runtime · Custom endpoint' }))
+    expect(screen.getByRole('button', { name: 'Codex' })).toHaveAttribute('aria-pressed', 'false')
+    expect(screen.queryByLabelText('Reasoning')).not.toBeInTheDocument()
+    expect(screen.queryByRole('option', { name: 'GPT-5.6-Sol' })).not.toBeInTheDocument()
+    await user.selectOptions(screen.getByLabelText('Model'), 'provider/fast')
+    await user.selectOptions(screen.getByLabelText('Reasoning'), 'high')
+    await user.selectOptions(screen.getByLabelText('Model'), '__manual__')
+    await user.clear(screen.getByLabelText('Model ID'))
+    await user.type(screen.getByLabelText('Model ID'), 'provider/unlisted')
+    await user.click(screen.getByRole('button', { name: 'Create chat' }))
+    await waitFor(() => expect(create).toHaveBeenCalledWith(expect.objectContaining({ backend: 'codex', codex_provider: 'custom', model: 'provider/unlisted', effort: null })))
+  })
+
+  it('opens Settings for an unconfigured custom option without creating a normal Codex chat', async () => {
+    const create = vi.fn()
+    Object.defineProperty(window, 'agentsDock', { configurable: true, value: { sessions: { create } } as unknown as AgentsDockAPI })
+    useAppStore.setState({ sessions: [], runtimeCatalog, health: { ok: true },
+      modals: { settings: false, appSettings: false, newChat: true, resume: false, folder: false, digest: false, job: false, search: false, review: false, importChats: false }
+    })
+    const user = userEvent.setup()
+    render(<SessionDialog mode="newChat" />)
+    await user.click(screen.getByRole('button', { name: /Codex runtime · Custom endpoint · Configure in Settings/ }))
+    expect(useAppStore.getState().modals.appSettings).toBe(true)
+    expect(useAppStore.getState().modals.newChat).toBe(false)
+    expect(create).not.toHaveBeenCalled()
+  })
+
   it.each([{ mode: 'newChat' as const }, { mode: 'resume' as const }])(
     'offers an import-chat entry that opens the importer from the $mode dialog',
     async ({ mode }) => {
@@ -1088,6 +1275,37 @@ describe('SessionDialog runtime selection', () => {
 
 describe('JobDialog', () => {
   afterEach(cleanup)
+
+  it.each(['chat', 'standalone'] as const)('keeps custom Codex job admission and labels in %s mode independent of the normal model lock', async contextMode => {
+    const create = vi.fn().mockResolvedValue({})
+    Object.defineProperty(window, 'agentsDock', { configurable: true, value: { jobs: { create } } as unknown as AgentsDockAPI })
+    useAppStore.setState({ selectedSessionId: 'chat-1', sessions: [{ id: 'chat-1', title: 'Custom chat', backend: 'codex', codex_provider: 'custom', model: 'shared-model' }],
+      health: { ok: true, capabilities: { codex_provider_v1: { per_chat: true, per_chat_models: true },
+        scheduled_jobs: { available: true, required: false, message: '', action: null, version: 2, context_modes: ['chat', 'standalone'] }
+      } }, runtimeCatalog: { backends: { codex: {
+        models: [{ value: 'shared-model', label: 'Normal model', locked: true, locked_reason: 'Normal account model locked' }], efforts: [],
+        custom_provider: { configured: true, available: true, model: 'shared-model', base_url: 'https://inference.example/v1' }
+      } } }, drafts: {}, error: null,
+      modals: { settings: false, newChat: false, resume: false, folder: false, digest: false, job: true, search: false, review: false, importChats: false }
+    })
+    const user = userEvent.setup()
+    render(<JobDialog />)
+    if (contextMode === 'standalone') await user.click(screen.getByRole('button', { name: /Independent runs/ }))
+    expect(within(screen.getByRole('group', { name: 'Backend' })).getByRole('button', { name: 'Codex runtime · Custom endpoint' })).toBeVisible()
+    expect(screen.queryByText(/Normal account model locked/)).not.toBeInTheDocument()
+    await user.type(screen.getByLabelText('Title'), 'Custom check')
+    await user.type(screen.getByLabelText('Prompt'), 'Check the custom workspace')
+    act(() => useAppStore.setState(state => ({ runtimeCatalog: { backends: { codex: {
+      ...state.runtimeCatalog!.backends.codex, custom_provider: { configured: false, available: false, model: null, base_url: null }
+    } } } })))
+    expect(screen.getByRole('button', { name: 'Save job' })).toBeDisabled()
+    expect(screen.getByRole('alert')).toHaveTextContent('custom endpoint is not ready')
+    act(() => useAppStore.setState(state => ({ runtimeCatalog: { backends: { codex: {
+      ...state.runtimeCatalog!.backends.codex, custom_provider: { configured: true, available: true, model: 'shared-model', base_url: 'https://inference.example/v1' }
+    } } } })))
+    await user.click(screen.getByRole('button', { name: 'Save job' }))
+    await waitFor(() => expect(create).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ session_id: 'chat-1', backend: 'codex', context_mode: contextMode })))
+  })
 
   const renderJobMentionPalette = (create = vi.fn()) => {
     Object.defineProperty(window, 'agentsDock', {

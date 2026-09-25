@@ -15,6 +15,30 @@ import {
 import { PinRevisionConflictError } from './pin-sync'
 import { TEAM_MAIL_HINTS_PATH, TEAM_MAIL_HINTS_PROTOCOL, type MailboxCoverage } from '../shared/team-mail-hints'
 import { emptyBulletinCursor, TEAM_ACTIVITY_HINTS_PROTOCOL, type BulletinChangeCursor } from '../shared/team-bulletin-hints'
+import { appLog } from './logger'
+
+vi.mock('./logger', () => ({ appLog: vi.fn() }))
+
+describe('AgentServerClient network diagnostics', () => {
+  afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); vi.mocked(appLog).mockClear() })
+
+  it('records nested socket codes without secrets and preserves the original failure without retrying', async () => {
+    const socket = Object.assign(new Error('secret token and request body'), { code: 'ECONNRESET', syscall: 'read' })
+    const cause = Object.assign(new AggregateError([socket], 'private query'), { code: 'UND_ERR_SOCKET' })
+    const error = new TypeError('fetch failed with secret', { cause })
+    const fetchMock = vi.fn().mockRejectedValue(error)
+    vi.stubGlobal('fetch', fetchMock)
+    const client = new AgentServerClient('http://example.test:7850', 'secret-token')
+
+    await expect(client.health()).rejects.toBe(error)
+    expect(fetchMock).toHaveBeenCalledOnce()
+    expect(appLog).toHaveBeenCalledWith('transport', 'server request failed', {
+      origin: 'http://example.test:7850', path: '/api/health', method: 'GET', durationMs: expect.any(Number),
+      error: { name: 'TypeError', cause: { name: 'AggregateError', code: 'UND_ERR_SOCKET', errors: [{ name: 'Error', code: 'ECONNRESET', syscall: 'read' }] } }
+    })
+    expect(JSON.stringify(vi.mocked(appLog).mock.calls)).not.toMatch(/secret|private/)
+  })
+})
 
 async function withLocalHTTPServer(
   handler: (request: IncomingMessage, response: ServerResponse) => void | Promise<void>,
@@ -1613,6 +1637,30 @@ describe('AgentServerClient live stream', () => {
     stop()
   })
 
+  it('routes side-chat and provider usage invalidations without advancing durable history', () => {
+    vi.useFakeTimers()
+    vi.spyOn(Math, 'random').mockReturnValue(0)
+    vi.stubGlobal('WebSocket', FakeWebSocket)
+    const received: Event[] = []
+    const changed = vi.fn(), usage = vi.fn()
+    const client = new AgentServerClient('http://example.test:7850', 'token')
+    const stop = client.stream('chat', 5, event => received.push(event), () => {}, undefined, undefined, undefined, changed, usage)
+    const socket = FakeWebSocket.instances[0]
+    socket.emit('message', JSON.stringify({ type: 'side_chat_updated', session_id: 'chat', revision: 6, seq: 999 }))
+    socket.emit('message', JSON.stringify({ type: 'side_chat_updated', session_id: 'other', revision: 7 }))
+    socket.emit('message', JSON.stringify({ type: 'side_chat_updated', session_id: 'chat', revision: -1 }))
+    socket.emit('message', JSON.stringify({ type: 'provider_usage_changed', session_id: 'chat', backend: 'claude', seq: 998 }))
+    socket.emit('message', JSON.stringify({ type: 'provider_usage_changed', session_id: 'other', backend: 'codex' }))
+    socket.emit('message', JSON.stringify({ id: 'e6', session_id: 'chat', seq: 6, type: 'assistant_text', ts: 'now' }))
+    socket.emit('close')
+    vi.advanceTimersByTime(500)
+    expect(changed).toHaveBeenCalledExactlyOnceWith(6)
+    expect(usage).toHaveBeenCalledExactlyOnceWith('claude')
+    expect(received).toHaveLength(1)
+    expect(String(FakeWebSocket.instances[1].url)).toContain('after=6')
+    stop()
+  })
+
   it('routes ephemeral provider runtime packets without advancing the durable cursor', () => {
     vi.useFakeTimers()
     vi.spyOn(Math, 'random').mockReturnValue(0)
@@ -1686,6 +1734,82 @@ describe('AgentServerClient live stream', () => {
     expect(pinPackets).toEqual([{ type: 'timeline_pins_changed', session_id: 'chat', revision: 3, updated_at: '2026-08-25T00:00:03Z' }])
     expect(received).toHaveLength(1)
     expect(String(FakeWebSocket.instances[1].url)).toContain('after=6')
+    stop()
+  })
+
+  it('routes only current-session reasoning snapshots in increasing instance-bound revisions', () => {
+    vi.stubGlobal('WebSocket', FakeWebSocket)
+    const client = new AgentServerClient('http://example.test:7850', 'token')
+    const event = vi.fn(), summary = vi.fn()
+    const stop = client.stream('chat', 5, event, vi.fn(), undefined, undefined, summary)
+    const socket = FakeWebSocket.instances[0]
+    const snapshot = {
+      type: 'reasoning_summary_stream', session_id: 'chat', instance_id: 'boot-a', revision: 3,
+      items: [{ run_id: 'run-a', item_id: 'item-a', backend: 'codex', phase: 'summary',
+        text: 'Checking the first option.', ts: '2026-09-20T05:00:00Z', after_seq: 5 }]
+    }
+    expect(socket.url.searchParams.get('reasoning_stream')).toBe('true')
+    expect(socket.url.searchParams.get('reasoning_text')).toBe('true')
+    socket.emit('message', JSON.stringify(snapshot))
+    socket.emit('message', JSON.stringify({ ...snapshot, revision: 2 }))
+    socket.emit('message', JSON.stringify(snapshot))
+    socket.emit('message', JSON.stringify({ ...snapshot, session_id: 'other-chat', revision: 99 }))
+    socket.emit('message', JSON.stringify({ ...snapshot, instance_id: 'other-boot', revision: 99 }))
+    const cleared = { ...snapshot, revision: 4, items: [] }
+    socket.emit('message', JSON.stringify(cleared))
+    expect(summary.mock.calls.map(([value]) => value)).toEqual([snapshot, cleared])
+    expect(event).not.toHaveBeenCalled()
+    stop()
+    socket.emit('message', JSON.stringify({ ...snapshot, revision: 5 }))
+    expect(summary).toHaveBeenCalledTimes(2)
+  })
+
+  it('consumes malformed reasoning frames without poisoning the durable reconnect cursor or snapshot revision', () => {
+    vi.useFakeTimers()
+    vi.spyOn(Math, 'random').mockReturnValue(0)
+    vi.stubGlobal('WebSocket', FakeWebSocket)
+    const client = new AgentServerClient('http://example.test:7850', 'token')
+    const event = vi.fn(), summary = vi.fn()
+    const stop = client.stream('chat', 5, event, vi.fn(), undefined, undefined, summary)
+    const first = FakeWebSocket.instances[0]
+    const snapshot = { type: 'reasoning_summary_stream', session_id: 'chat', instance_id: 'boot-a', revision: 3, items: [] }
+    for (const malformed of [
+      { ...snapshot, revision: -1 }, { ...snapshot, items: null },
+      { ...snapshot, items: [{ run_id: 'run', item_id: 'item', backend: 'codex', phase: 'summary', text: 7, after_seq: 5, ts: 'now' }] },
+      { ...snapshot, instance_id: '', revision: 99 }
+    ]) first.emit('message', JSON.stringify({ ...malformed, seq: 10000 }))
+    first.emit('message', '{malformed')
+    first.emit('message', JSON.stringify(snapshot))
+    const durable: Event = { id: 'e6', session_id: 'chat', seq: 6, type: 'assistant_text', ts: 'now', text: 'Done.' }
+    first.emit('message', JSON.stringify(durable))
+    first.emit('close')
+    // Queued frames from the closed transport cannot change either cursor.
+    first.emit('message', JSON.stringify({ ...snapshot, revision: 100 }))
+    first.emit('message', JSON.stringify({ ...durable, seq: 9000 }))
+    vi.advanceTimersByTime(500)
+    const second = FakeWebSocket.instances[1]
+    expect(second.url.searchParams.get('after')).toBe('6')
+    expect(second.url.searchParams.get('reasoning_stream')).toBe('true')
+    const restarted = { ...snapshot, instance_id: 'boot-b', revision: 0 }
+    second.emit('message', JSON.stringify(restarted))
+    first.emit('message', JSON.stringify({ ...snapshot, revision: 101 }))
+    expect(event).toHaveBeenCalledExactlyOnceWith(durable)
+    expect(summary.mock.calls.map(([value]) => value)).toEqual([snapshot, restarted])
+    stop()
+  })
+
+  it('keeps reasoning packets out of the durable lane without opting older callers into streaming', () => {
+    vi.stubGlobal('WebSocket', FakeWebSocket)
+    const client = new AgentServerClient('http://example.test:7850', 'token')
+    const event = vi.fn()
+    const stop = client.stream('chat', 5, event, vi.fn())
+    const socket = FakeWebSocket.instances[0]
+    expect(socket.url.searchParams.has('reasoning_stream')).toBe(false)
+    expect(socket.url.searchParams.has('reasoning_text')).toBe(false)
+    socket.emit('message', JSON.stringify({ type: 'reasoning_summary_stream', seq: 500 }))
+    socket.emit('message', JSON.stringify({ id: 'e6', session_id: 'chat', seq: 6, type: 'assistant_text', ts: 'now' }))
+    expect(event).toHaveBeenCalledOnce()
+    expect(event.mock.calls[0][0].seq).toBe(6)
     stop()
   })
 
@@ -2238,6 +2362,36 @@ describe('AgentServerClient live stream', () => {
       expect(call.headers['content-length']).toBe(String(Buffer.byteLength(call.body)))
       expect(call.headers.origin).toBeUndefined()
       expect(call.headers.cookie).toBeUndefined()
+      expect(call.headers['sec-fetch-mode']).toBeUndefined()
+      expect(call.headers.authorization).toBeUndefined()
+    }
+  })
+
+  it('carries paired signed bytes and identity fences through the actual native HTTP transport', async () => {
+    // Actual Node HTTP client/socket; the endpoint here is a bounded fake server,
+    // not acceptance of the production server's signature/admission/installer.
+    const calls: Array<{ headers: IncomingMessage['headers']; body: string; url: string }> = []
+    const envelope = { manifest_base64: Buffer.from('{"schema":2}').toString('base64'), signature_base64: Buffer.alloc(64, 1).toString('base64') }
+    const target = { expected_server_identity: 'server-a', expected_server_instance_id: 'boot-a' }
+    await withLocalHTTPServer(async (request, response) => {
+      calls.push({ headers: request.headers, body: await incomingBody(request), url: request.url ?? '' })
+      response.setHeader('Content-Type', 'application/json')
+      response.statusCode = calls.length === 1 ? 200 : 409
+      response.end(JSON.stringify(calls.length === 1
+        ? { phase: 'pending', current_version: '1.1.0', server_identity: 'server-a', server_instance_id: 'boot-a', schedule_id: 'durable-schedule' }
+        : { detail: 'server_update_channel_conflict' }))
+    }, async baseURL => {
+      const client = new AgentServerClient(baseURL, 'fixture-token')
+      expect(await client.ensureServerUpdate(envelope, target)).toMatchObject({ phase: 'pending', schedule_id: 'durable-schedule' })
+      await expect(client.ensureServerUpdate(envelope, target)).rejects.toMatchObject({ status: 409 })
+      client.dispose()
+    })
+    expect(calls).toHaveLength(2)
+    for (const call of calls) {
+      expect(call.url).toBe('/api/admin/update/ensure')
+      expect(JSON.parse(call.body)).toEqual({ ...envelope, ...target })
+      expect(call.headers['x-agentsdock-token']).toBe('fixture-token')
+      expect(call.headers.origin).toBeUndefined()
       expect(call.headers['sec-fetch-mode']).toBeUndefined()
       expect(call.headers.authorization).toBeUndefined()
     }
@@ -2954,6 +3108,32 @@ describe('AgentServerClient live stream', () => {
       confirmed: true
     })
     expect(JSON.parse(String(calls[13][1].body))).toEqual({ confirmed: true })
+  })
+
+  it('sets and clears Claude goals through the actual native HTTP transport', async () => {
+    const calls: Array<{ method: string; url: string; headers: IncomingMessage['headers']; body: string }> = []
+    await withLocalHTTPServer(async (request, response) => {
+      calls.push({ method: request.method ?? '', url: request.url ?? '', headers: request.headers, body: await incomingBody(request) })
+      response.setHeader('Content-Type', 'application/json')
+      response.end(JSON.stringify({ available: true, features: { goals: true }, goal: null }))
+    }, async baseURL => {
+      const client = new AgentServerClient(baseURL, 'fixture-token')
+      await expect(client.setClaudeGoal('claude-chat', 'The application builds.')).resolves.toMatchObject({ features: { goals: true } })
+      await expect(client.clearClaudeGoal('claude-chat')).resolves.toMatchObject({ goal: null })
+      client.dispose()
+    })
+    expect(calls.map(call => [call.method, call.url])).toEqual([
+      ['PUT', '/api/sessions/claude-chat/claude/goal'],
+      ['DELETE', '/api/sessions/claude-chat/claude/goal']
+    ])
+    expect(JSON.parse(calls[0].body)).toEqual({ condition: 'The application builds.' })
+    expect(calls[1].body).toBe('')
+    for (const call of calls) {
+      expect(call.headers['x-agentsdock-token']).toBe('fixture-token')
+      expect(call.headers.origin).toBeUndefined()
+      expect(call.headers['sec-fetch-mode']).toBeUndefined()
+      expect(call.headers.cookie).toBeUndefined()
+    }
   })
 
   it('uses authenticated, encoded routes for Claude SDK runtime, MCP controls, refresh, and interactions', async () => {

@@ -1,15 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-cat >&2 <<'DISABLED'
-server/deploy.sh is permanently disabled.
-
-The embedded server/ tree is a frozen guardrail fixture, not deployable
-AgentsServer source. Install AgentsServer from its standalone repository, or
-update an existing installation through the signed managed-update channel.
-DISABLED
-exit 64
-
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 REMOTE_HOST="${AGENTSDOCK_REMOTE_HOST:-${ZENITHDOCK_REMOTE_HOST:-${1:-}}}"
 REMOTE_APP_DIR="${AGENTSDOCK_REMOTE_APP_DIR:-${ZENITHDOCK_REMOTE_APP_DIR:-.local/share/agents-server/current}}"
@@ -20,23 +11,74 @@ SERVICE_NAME="${AGENTSDOCK_SERVER_SERVICE:-${ZENITHDOCK_AGENT_SERVICE:-agents-se
 HEALTH_ATTEMPTS="${AGENTSDOCK_HEALTH_ATTEMPTS:-${ZENITHDOCK_HEALTH_ATTEMPTS:-45}}"
 HEALTH_TOKEN="${AGENTSDOCK_AGENT_TOKEN:-${ZENITHDOCK_AGENT_TOKEN:-}}"
 RUNTIME_FILES=(
+  "$SCRIPT_DIR/execution_activation.py"
+  "$SCRIPT_DIR/execution_legacy_runner.py"
+  "$SCRIPT_DIR/execution_preparation.py"
+  "$SCRIPT_DIR/update_preparation.py"
+  "$SCRIPT_DIR/update_handoff.py"
+  "$SCRIPT_DIR/update_recovery.py"
+  "$SCRIPT_DIR/execution_update_status.py"
+  "$SCRIPT_DIR/execution_uninstall.py"
+  "$SCRIPT_DIR/execution_recovery.py"
+  "$SCRIPT_DIR/execution_recovery_status.py"
+  "$SCRIPT_DIR/execution_http.py"
+  "$SCRIPT_DIR/execution_durability.py"
+  "$SCRIPT_DIR/execution_control.py"
+  "$SCRIPT_DIR/execution_install.py"
+  "$SCRIPT_DIR/execution_maintenance.py"
+  "$SCRIPT_DIR/execution_manage.py"
+  "$SCRIPT_DIR/execution_ownership.py"
+  "$SCRIPT_DIR/execution_service.py"
+  "$SCRIPT_DIR/execution_transport.py"
   "$SCRIPT_DIR/agent_server.py"
+  "$SCRIPT_DIR/workspace_git.py"
   "$SCRIPT_DIR/team_hub_host.py"
   "$SCRIPT_DIR/secure_peer_runtime.py"
+  "$SCRIPT_DIR/team_mail_runtime.py"
+  "$SCRIPT_DIR/team_mail_websocket.py"
+  "$SCRIPT_DIR/team_mail_grants.py"
   "$SCRIPT_DIR/secure_peer_delivery.py"
   "$SCRIPT_DIR/agentsdock_jobs.py"
   "$SCRIPT_DIR/agentsdock_chats.py"
+  "$SCRIPT_DIR/chat_mailbox.py"
   "$SCRIPT_DIR/agentsdock_emergency.py"
   "$SCRIPT_DIR/agentsdock_publish.py"
   "$SCRIPT_DIR/agentsdock_mail.py"
   "$SCRIPT_DIR/agentsdock_team.py"
+  "$SCRIPT_DIR/provider_commands.py"
+  "$SCRIPT_DIR/provider_usage.py"
   "$SCRIPT_DIR/claude_sdk_client.py"
+  "$SCRIPT_DIR/claude_goals.py"
+  "$SCRIPT_DIR/claude_background_reconciliation.py"
   "$SCRIPT_DIR/codex_app_server.py"
+  "$SCRIPT_DIR/codex_auth.py"
+  "$SCRIPT_DIR/codex_provider.py"
+  "$SCRIPT_DIR/side_questions.py"
+  "$SCRIPT_DIR/title_generation.py"
+  "$SCRIPT_DIR/codex_side_question.py"
+  "$SCRIPT_DIR/claude_side_question.py"
   "$SCRIPT_DIR/cursor_agent_client.py"
   "$SCRIPT_DIR/cursor_process_guard.py"
+  "$SCRIPT_DIR/claude_history_repair.py"
+  "$SCRIPT_DIR/claude_history_provenance.py"
+  "$SCRIPT_DIR/codex_history_repair.py"
+  "$SCRIPT_DIR/public_chat_shares.py"
+  "$SCRIPT_DIR/public_chat_transcript.py"
+  "$SCRIPT_DIR/public_chat_share_routes.py"
+  "$SCRIPT_DIR/interactive_chat_shares.py"
+  "$SCRIPT_DIR/interactive_chat_share_routes.py"
+  "$SCRIPT_DIR/interactive_chat_share_web.py"
+  "$SCRIPT_DIR/interactive_chat_projection.py"
+  "$SCRIPT_DIR/interactive_chat_runtime.py"
+  "$SCRIPT_DIR/interactive_chat_native.py"
+  "$SCRIPT_DIR/shared_chat_videos.py"
+  "$SCRIPT_DIR/shared_chat_video_stream.py"
+  "$SCRIPT_DIR/interactive_chat_controls.py"
   "$SCRIPT_DIR/update_runner.py"
-  "$SCRIPT_DIR/release-public-key.pem"
   "$SCRIPT_DIR/VERSION"
+  "$SCRIPT_DIR/release-public-key.pem"
+  "$SCRIPT_DIR/LICENSE"
+  "$SCRIPT_DIR/NOTICE"
 )
 
 if [[ -z "$REMOTE_HOST" ]]; then
@@ -67,6 +109,40 @@ if [[ -z "$HEALTH_TOKEN" ]]; then
   echo "  Use the signed managed update if authenticated in-place health is unavailable." >&2
   exit 2
 fi
+
+refuse_remote_execution_layout() {
+  local quoted_runtime=""
+  printf -v quoted_runtime '%q' "$REMOTE_SERVER_DIR"
+  ssh "$REMOTE_HOST" "bash -s -- $quoted_runtime" <<'EXECUTION_LAYOUT_CHECK'
+set -euo pipefail
+check_ancestors() {
+  local candidate="$1" marker=""
+  while :; do
+    for marker in "$candidate/execution-layout.json" "$candidate/.execution-transaction"; do
+      if [[ -e "$marker" || -L "$marker" ]]; then
+        echo "deploy.sh does not support the separate gateway/execution layout or its pending transaction." >&2
+        echo "Use the execution-aware managed lifecycle; the pinned worker has not been changed." >&2
+        return 1
+      fi
+    done
+    [[ "$candidate" != "/" ]] || break
+    candidate="$(dirname -- "$candidate")"
+  done
+}
+runtime="$1"
+[[ "$runtime" == /* ]] || runtime="$PWD/$runtime"
+check_ancestors "$runtime"
+# Check both the current-link namespace and its physical release ancestors.
+# A caller may name releases/V directly instead of the managed current link.
+while [[ ! -d "$runtime" && "$runtime" != "/" ]]; do
+  runtime="$(dirname -- "$runtime")"
+done
+runtime="$(cd -P -- "$runtime" && pwd -P)"
+check_ancestors "$runtime"
+EXECUTION_LAYOUT_CHECK
+}
+
+refuse_remote_execution_layout || exit 1
 
 REMOTE_HAS_HUB_RUNTIME="$(
   ssh "$REMOTE_HOST" \
@@ -331,6 +407,7 @@ if [[ "$TARGET_HUB_STATE" == "client" || "$TARGET_PEER_STATE" == "client" ]]; th
 fi
 
 echo "Deploying AgentsServer runtime to $REMOTE_HOST:$REMOTE_SERVER_DIR"
+refuse_remote_execution_layout || exit 1
 ssh "$REMOTE_HOST" "mkdir -p '$REMOTE_SERVER_DIR'"
 scp "${RUNTIME_FILES[@]}" "$REMOTE_HOST:$REMOTE_SERVER_DIR/"
 rsync -a --delete --delete-excluded \
@@ -353,11 +430,12 @@ ssh "$REMOTE_HOST" "
         'claude-agent-sdk==0.2.130' 'croniter>=6,<7' 'cryptography>=44,<47' 'python-dateutil>=2.9,<3' 'tzdata>=2025.2'
     fi
   fi
-  PYTHONPATH='$REMOTE_SERVER_DIR' '$REMOTE_PYTHON' -c 'from importlib.metadata import version; import agentsdock_team_hub, claude_agent_sdk, cursor_agent_client, cursor_process_guard, secure_peer_delivery, secure_peer_runtime, team_hub_host, agentsdock_mail, agentsdock_team; from agentsdock_team_hub import secure_peer, secure_peer_hub; sdk_version = version(\"claude-agent-sdk\"); raise SystemExit(0 if sdk_version == \"0.2.130\" else f\"expected claude-agent-sdk 0.2.130, got {sdk_version}\")'
+  PYTHONPATH='$REMOTE_SERVER_DIR' '$REMOTE_PYTHON' -c 'from importlib.metadata import version; import codex_auth, codex_provider, side_questions, codex_side_question, claude_side_question, agentsdock_team_hub, claude_agent_sdk, cursor_agent_client, cursor_process_guard, secure_peer_delivery, secure_peer_runtime, team_hub_host, agentsdock_mail, agentsdock_team, provider_commands; from agentsdock_team_hub import secure_peer, secure_peer_hub; sdk_version = version(\"claude-agent-sdk\"); raise SystemExit(0 if sdk_version == \"0.2.130\" else f\"expected claude-agent-sdk 0.2.130, got {sdk_version}\")'
 "
 
 echo "Compiling server on $REMOTE_HOST"
-ssh "$REMOTE_HOST" "chmod 755 '$REMOTE_SERVER_DIR/agentsdock_jobs.py' '$REMOTE_SERVER_DIR/agentsdock_chats.py' '$REMOTE_SERVER_DIR/agentsdock_emergency.py' '$REMOTE_SERVER_DIR/agentsdock_publish.py' '$REMOTE_SERVER_DIR/agentsdock_mail.py' '$REMOTE_SERVER_DIR/agentsdock_team.py' && '$REMOTE_PYTHON' -m compileall -q '$REMOTE_SERVER_DIR/agentsdock_team_hub' && '$REMOTE_PYTHON' -m py_compile '$REMOTE_SERVER_PATH' '$REMOTE_SERVER_DIR/team_hub_host.py' '$REMOTE_SERVER_DIR/secure_peer_runtime.py' '$REMOTE_SERVER_DIR/secure_peer_delivery.py' '$REMOTE_SERVER_DIR/agentsdock_jobs.py' '$REMOTE_SERVER_DIR/agentsdock_chats.py' '$REMOTE_SERVER_DIR/agentsdock_emergency.py' '$REMOTE_SERVER_DIR/agentsdock_publish.py' '$REMOTE_SERVER_DIR/agentsdock_mail.py' '$REMOTE_SERVER_DIR/agentsdock_team.py' '$REMOTE_SERVER_DIR/claude_sdk_client.py' '$REMOTE_SERVER_DIR/codex_app_server.py' '$REMOTE_SERVER_DIR/cursor_agent_client.py' '$REMOTE_SERVER_DIR/cursor_process_guard.py' '$REMOTE_SERVER_DIR/update_runner.py'"
+ssh "$REMOTE_HOST" "PYTHONPATH='$REMOTE_SERVER_DIR' '$REMOTE_PYTHON' -c 'import workspace_git'"
+ssh "$REMOTE_HOST" "chmod 755 '$REMOTE_SERVER_DIR/agentsdock_jobs.py' '$REMOTE_SERVER_DIR/agentsdock_chats.py' '$REMOTE_SERVER_DIR/agentsdock_emergency.py' '$REMOTE_SERVER_DIR/agentsdock_publish.py' '$REMOTE_SERVER_DIR/agentsdock_mail.py' '$REMOTE_SERVER_DIR/agentsdock_team.py' && '$REMOTE_PYTHON' -m compileall -q '$REMOTE_SERVER_DIR/agentsdock_team_hub' && '$REMOTE_PYTHON' -m py_compile '$REMOTE_SERVER_PATH' '$REMOTE_SERVER_DIR/execution_durability.py' '$REMOTE_SERVER_DIR/execution_http.py' '$REMOTE_SERVER_DIR/execution_recovery_status.py' '$REMOTE_SERVER_DIR/execution_recovery.py' '$REMOTE_SERVER_DIR/execution_uninstall.py' '$REMOTE_SERVER_DIR/update_recovery.py' '$REMOTE_SERVER_DIR/execution_activation.py' '$REMOTE_SERVER_DIR/execution_legacy_runner.py' '$REMOTE_SERVER_DIR/execution_preparation.py' '$REMOTE_SERVER_DIR/execution_update_status.py' '$REMOTE_SERVER_DIR/update_handoff.py' '$REMOTE_SERVER_DIR/update_preparation.py' '$REMOTE_SERVER_DIR/execution_control.py' '$REMOTE_SERVER_DIR/execution_install.py' '$REMOTE_SERVER_DIR/execution_maintenance.py' '$REMOTE_SERVER_DIR/execution_manage.py' '$REMOTE_SERVER_DIR/execution_ownership.py' '$REMOTE_SERVER_DIR/execution_service.py' '$REMOTE_SERVER_DIR/execution_transport.py' '$REMOTE_SERVER_DIR/workspace_git.py' '$REMOTE_SERVER_DIR/team_hub_host.py' '$REMOTE_SERVER_DIR/secure_peer_runtime.py' '$REMOTE_SERVER_DIR/team_mail_runtime.py' '$REMOTE_SERVER_DIR/team_mail_websocket.py' '$REMOTE_SERVER_DIR/team_mail_grants.py' '$REMOTE_SERVER_DIR/secure_peer_delivery.py' '$REMOTE_SERVER_DIR/agentsdock_jobs.py' '$REMOTE_SERVER_DIR/agentsdock_chats.py' '$REMOTE_SERVER_DIR/chat_mailbox.py' '$REMOTE_SERVER_DIR/provider_commands.py' '$REMOTE_SERVER_DIR/provider_usage.py' '$REMOTE_SERVER_DIR/agentsdock_emergency.py' '$REMOTE_SERVER_DIR/agentsdock_publish.py' '$REMOTE_SERVER_DIR/agentsdock_mail.py' '$REMOTE_SERVER_DIR/agentsdock_team.py' '$REMOTE_SERVER_DIR/claude_sdk_client.py' '$REMOTE_SERVER_DIR/claude_goals.py' '$REMOTE_SERVER_DIR/claude_background_reconciliation.py' '$REMOTE_SERVER_DIR/codex_app_server.py' '$REMOTE_SERVER_DIR/codex_auth.py' '$REMOTE_SERVER_DIR/codex_provider.py' '$REMOTE_SERVER_DIR/side_questions.py' '$REMOTE_SERVER_DIR/title_generation.py' '$REMOTE_SERVER_DIR/codex_side_question.py' '$REMOTE_SERVER_DIR/claude_side_question.py' '$REMOTE_SERVER_DIR/cursor_agent_client.py' '$REMOTE_SERVER_DIR/cursor_process_guard.py' '$REMOTE_SERVER_DIR/claude_history_repair.py' '$REMOTE_SERVER_DIR/claude_history_provenance.py' '$REMOTE_SERVER_DIR/codex_history_repair.py' '$REMOTE_SERVER_DIR/public_chat_shares.py' '$REMOTE_SERVER_DIR/public_chat_transcript.py' '$REMOTE_SERVER_DIR/public_chat_share_routes.py' '$REMOTE_SERVER_DIR/interactive_chat_shares.py' '$REMOTE_SERVER_DIR/interactive_chat_share_routes.py' '$REMOTE_SERVER_DIR/interactive_chat_share_web.py' '$REMOTE_SERVER_DIR/interactive_chat_projection.py' '$REMOTE_SERVER_DIR/interactive_chat_runtime.py' '$REMOTE_SERVER_DIR/interactive_chat_native.py' '$REMOTE_SERVER_DIR/shared_chat_videos.py' '$REMOTE_SERVER_DIR/shared_chat_video_stream.py' '$REMOTE_SERVER_DIR/interactive_chat_controls.py' '$REMOTE_SERVER_DIR/update_runner.py'"
 
 echo "Restarting $SERVICE_NAME"
 ssh "$REMOTE_HOST" "systemctl --user restart '$SERVICE_NAME'"

@@ -10,8 +10,10 @@ import { clearTimelineViewStates, Timeline } from './Timeline'
 const virtuosoHarness = vi.hoisted(() => ({
   scrollToIndex: vi.fn(),
   atBottomStateChange: null as ((value: boolean) => void) | null,
+  totalListHeightChanged: null as ((height: number) => void) | null,
   isScrolling: null as ((value: boolean) => void) | null,
   startReached: null as (() => void) | null,
+  initialLocation: undefined as unknown,
   renderCount: 0
 }))
 
@@ -23,17 +25,21 @@ vi.mock('react-virtuoso', async () => {
       computeItemKey: (index: number, item: unknown) => string
       itemContent: (index: number, item: unknown) => React.ReactNode
       atBottomStateChange?: (value: boolean) => void
+      totalListHeightChanged?: (height: number) => void
       isScrolling?: (value: boolean) => void
       scrollerRef?: (node: HTMLElement | Window | null) => void
       startReached?: () => void
+      initialTopMostItemIndex?: unknown
     }, ref: React.ForwardedRef<unknown>) {
       virtuosoHarness.renderCount += 1
       React.useImperativeHandle(ref, () => ({
         scrollToIndex: virtuosoHarness.scrollToIndex
       }))
       virtuosoHarness.atBottomStateChange = props.atBottomStateChange ?? null
+      virtuosoHarness.totalListHeightChanged = props.totalListHeightChanged ?? null
       virtuosoHarness.isScrolling = props.isScrolling ?? null
       virtuosoHarness.startReached = props.startReached ?? null
+      virtuosoHarness.initialLocation = props.initialTopMostItemIndex
       const setScroller = React.useCallback((node: HTMLDivElement | null) => {
         props.scrollerRef?.(node)
       }, [props.scrollerRef])
@@ -97,9 +103,11 @@ describe('Timeline search navigation', () => {
   beforeEach(() => {
     virtuosoHarness.scrollToIndex.mockReset()
     virtuosoHarness.atBottomStateChange = null
+    virtuosoHarness.totalListHeightChanged = null
     virtuosoHarness.isScrolling = null
     virtuosoHarness.startReached = null
     virtuosoHarness.renderCount = 0
+    virtuosoHarness.initialLocation = undefined
     search.mockReset()
     around.mockReset()
     historicalOlder.mockReset()
@@ -163,6 +171,38 @@ describe('Timeline search navigation', () => {
     if (!(button instanceof HTMLButtonElement)) throw new Error('Search result button was not rendered')
     return button
   }
+
+  it('restores an unloaded saved anchor without showing or saving the interim tail', async () => {
+    let finish!: (page: TimelinePage) => void
+    around.mockReturnValue(new Promise(resolve => { finish = resolve }))
+    useAppStore.setState({ snapshots: { [SESSION_ID]: {
+      ...snapshot([timelineEvent(100)]),
+      viewState: { sessionId: SESSION_ID, topItemId: 'turn:seq-2:assistant', topItemSeq: 2, topOffset: -37, atBottom: false, updatedAt: 1 }
+    } } })
+    render(<Timeline />)
+    expect(around).toHaveBeenCalledExactlyOnceWith(SESSION_ID, 2, expect.any(Number))
+    expect(screen.queryByTestId('timeline-virtuoso')).not.toBeInTheDocument()
+    act(() => { window.dispatchEvent(new CustomEvent('agentsdock:capture-timeline')) })
+    expect(window.agentsDock.timeline.saveViewState).not.toHaveBeenCalled()
+    await act(async () => { finish({ session, events: [timelineEvent(2)], has_more: false, next_before: null, latest_seq: 100 }) })
+    expect(screen.getByText('turn:seq-2:assistant')).toBeInTheDocument()
+    expect(virtuosoHarness.initialLocation).toEqual(expect.objectContaining({ align: 'start', offset: 37 }))
+  })
+
+  it('ignores a delayed saved-anchor response after the user scrolls', async () => {
+    let finish!: (page: TimelinePage) => void
+    around.mockReturnValue(new Promise(resolve => { finish = resolve }))
+    useAppStore.setState({ snapshots: { [SESSION_ID]: {
+      ...snapshot([timelineEvent(100)]),
+      viewState: { sessionId: SESSION_ID, topItemId: 'turn:seq-2:assistant', topItemSeq: 2, topOffset: -37, atBottom: false, updatedAt: 1 }
+    } } })
+    const { container } = render(<Timeline />)
+    fireEvent.wheel(container.querySelector('.timeline')!, { deltaY: -100 })
+    expect(screen.getByText('turn:seq-100:assistant')).toBeInTheDocument()
+    await act(async () => { finish({ session, events: [timelineEvent(2)], has_more: false, next_before: null, latest_seq: 100 }) })
+    expect(screen.queryByText('turn:seq-2:assistant')).not.toBeInTheDocument()
+    expect(screen.getByText('turn:seq-100:assistant')).toBeInTheDocument()
+  })
 
   it('scrolls to a loaded result and closes the search overlay when clicked', async () => {
     const searchResult = result('event-100', 100)
@@ -283,6 +323,20 @@ describe('Timeline search navigation', () => {
     ))
   })
 
+  it('keeps a floating latest button in an older history window, even at that window bottom', async () => {
+    const historicalEvent = timelineEvent(2)
+    around.mockResolvedValue({ session, events: [historicalEvent], has_more: false, next_before: null, latest_seq: 100 })
+    const resultButton = await showResult(result(historicalEvent.id, historicalEvent.seq, 'Older answer'))
+    fireEvent.click(resultButton)
+    await screen.findByText('turn:seq-2:assistant')
+    act(() => virtuosoHarness.atBottomStateChange?.(true))
+    fireEvent.click(screen.getByRole('button', { name: 'Jump to latest' }))
+    await screen.findByText('turn:seq-100:assistant')
+    await waitFor(() => expect(virtuosoHarness.scrollToIndex).toHaveBeenCalledWith({ index: 'LAST', align: 'end', behavior: 'auto' }))
+    act(() => virtuosoHarness.atBottomStateChange?.(true))
+    expect(screen.queryByRole('button', { name: 'Jump to latest' })).not.toBeInTheDocument()
+  })
+
   it('jumps directly to the semantic last row from the New button', () => {
     useAppStore.setState({
       snapshots: {
@@ -366,6 +420,28 @@ describe('Timeline search navigation', () => {
       align: 'end',
       behavior: 'auto'
     })
+  })
+
+  it.each([false, true])('follows initial row remeasurement only for a latest landing (saved reading position: %s)', async saved => {
+    vi.useFakeTimers()
+    try {
+      if (saved) useAppStore.setState({ snapshots: { [SESSION_ID]: {
+        ...snapshot([timelineEvent(100)]),
+        viewState: { sessionId: SESSION_ID, topItemId: 'turn:seq-100:assistant', topOffset: -30, atBottom: false, updatedAt: 1 }
+      } } })
+      const { container } = render(<Timeline />)
+      await act(async () => vi.advanceTimersByTimeAsync(50))
+      virtuosoHarness.scrollToIndex.mockClear()
+      act(() => virtuosoHarness.totalListHeightChanged?.(2000))
+      await act(async () => vi.advanceTimersByTimeAsync(50))
+      if (saved) expect(virtuosoHarness.scrollToIndex).not.toHaveBeenCalled()
+      else expect(virtuosoHarness.scrollToIndex).toHaveBeenCalledWith({ index: 'LAST', align: 'end', behavior: 'auto' })
+      virtuosoHarness.scrollToIndex.mockClear()
+      fireEvent.wheel(container.querySelector('.timeline')!, { deltaY: -100 })
+      act(() => virtuosoHarness.totalListHeightChanged?.(2500))
+      await act(async () => vi.advanceTimersByTimeAsync(50))
+      expect(virtuosoHarness.scrollToIndex).not.toHaveBeenCalled()
+    } finally { vi.useRealTimers() }
   })
 
   it('does not rerender the virtual timeline when an unchanged parent rerenders', () => {

@@ -1,5 +1,6 @@
 import asyncio
 import contextlib
+import hashlib
 import io
 import json
 import tempfile
@@ -22,6 +23,15 @@ def request_for(
     provider_token: str = "provider-secret",
     retry: bool = False,
 ) -> Request:
+    sent = False
+
+    async def receive():
+        nonlocal sent
+        if sent:
+            return {"type": "http.disconnect"}
+        sent = True
+        return {"type": "http.request", "body": b"", "more_body": False}
+
     headers = [
         (b"x-agentsdock-provider-capability", provider_token.encode()),
     ]
@@ -36,7 +46,7 @@ def request_for(
         "scheme": "http",
         "server": ("127.0.0.1", 7850),
         "client": (host, 43210),
-    })
+    }, receive=receive)
 
 
 class FakeResponse:
@@ -117,6 +127,30 @@ class ArtifactPublisherCLITests(unittest.TestCase):
             ):
                 agentsdock_publish.loopback_server_url()
 
+    def test_non_loopback_origin_requires_matching_authority_and_runtime(self) -> None:
+        environment = {
+            "AGENTSDOCK_SERVER_URL": "http://192.0.2.10:7850/",
+            "AGENTSDOCK_PROVIDER_SERVER_ORIGIN": "http://192.0.2.10:7850",
+        }
+        with patch.dict("os.environ", environment, clear=True):
+            self.assertEqual(
+                agentsdock_publish.validated_server_url(
+                    "http://192.0.2.10:7850"
+                ),
+                "http://192.0.2.10:7850",
+            )
+        environment["AGENTSDOCK_PROVIDER_SERVER_ORIGIN"] = (
+            "http://192.0.2.11:7850"
+        )
+        with patch.dict("os.environ", environment, clear=True):
+            with self.assertRaisesRegex(
+                agentsdock_publish.PublishCLIError,
+                "conflicts with the live provider origin",
+            ):
+                agentsdock_publish.validated_server_url(
+                    "http://192.0.2.10:7850"
+                )
+
     def test_missing_authority_is_rejected(self) -> None:
         with patch.dict(
             "os.environ",
@@ -128,6 +162,42 @@ class ArtifactPublisherCLITests(unittest.TestCase):
             with self.assertRaisesRegex(
                 agentsdock_publish.PublishCLIError,
                 "authority-file is required",
+            ):
+                agentsdock_publish.provider_authority(None)
+
+    def test_explicit_authority_cannot_override_live_provider_environment(self) -> None:
+        environment_authority = self.authority_file("sess/demo")
+        explicit_authority = self.authority_file("sess/demo")
+        with patch.dict("os.environ", {
+            "AGENTSDOCK_PROVIDER_AUTHORITY_FILE": environment_authority,
+            "AGENTSDOCK_CHAT_ID": "sess/demo",
+        }, clear=True):
+            with self.assertRaisesRegex(
+                agentsdock_publish.PublishCLIError,
+                "conflicts with the live provider authority",
+            ):
+                agentsdock_publish.provider_authority(explicit_authority)
+
+    def test_explicit_chat_cannot_mask_conflicting_provider_environment(self) -> None:
+        environment = self.environment("sess/demo")
+        environment["AGENTSDOCK_CHAT_ID"] = "sess/other"
+        with patch.dict("os.environ", environment, clear=True):
+            with self.assertRaisesRegex(
+                agentsdock_publish.PublishCLIError,
+                "conflicts with AGENTSDOCK_CHAT_ID",
+            ):
+                agentsdock_publish.publish(
+                    "sess/demo",
+                    ["/tmp/demo.mov"],
+                )
+
+    def test_oversized_provider_identity_environment_fails_closed(self) -> None:
+        with patch.dict("os.environ", {
+            "AGENTSDOCK_PROVIDER_AUTHORITY_FILE": "x" * 4097,
+        }, clear=True):
+            with self.assertRaisesRegex(
+                agentsdock_publish.PublishCLIError,
+                "exceeds the provider runtime limit",
             ):
                 agentsdock_publish.provider_authority(None)
 
@@ -294,6 +364,17 @@ class ArtifactPublisherServerTests(unittest.IsolatedAsyncioTestCase):
                 "source_run_id": run_id,
                 "actions": {"publish"},
             }),
+        ))
+        stack.enter_context(patch.object(
+            agent_server,
+            "CROSS_CHAT_CAPABILITIES",
+            {
+                hashlib.sha256(b"provider-secret").hexdigest(): {
+                    "source_session_id": session_id,
+                    "source_run_id": run_id,
+                    "actions": {"publish"},
+                }
+            },
         ))
         stack.enter_context(patch.object(agent_server, "EVENT_SEQ_CACHE", {}))
         stack.enter_context(patch.object(agent_server, "EVENT_DELIVERY_LOCKS", {}))

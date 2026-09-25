@@ -1,11 +1,17 @@
 import { createReadStream, openAsBlob } from 'node:fs'
+import { parseProviderUsage, type ProviderUsageSnapshot, type UsageBackend } from '../shared/provider-usage'
+import { parseCodexAuthStatus } from '../shared/codex-auth'
+import { parseCodexProviderConfiguration, parseCodexProviderModels, parseCodexProviderTestResult, validateCodexProviderInput, validateCodexProviderModelTestInput, validateCodexProviderSelection } from '../shared/codex-provider'
 import { randomUUID } from 'node:crypto'
 import { request as httpRequest, type IncomingMessage } from 'node:http'
 import { request as httpsRequest } from 'node:https'
 import { basename } from 'node:path'
 import { Readable } from 'node:stream'
 import { compactTimelineEvent, compactTimelineEvents } from '../shared/event-compaction'
+import { parseSyncedSideChat, type SyncedSideChat, parseSideQuestionAnswer, validateSideQuestionInput, type SideQuestionAnswer, type SideQuestionCancellation, type SideQuestionInput } from '../shared/side-questions'
 import { parseChatInboxDelete, parseChatInboxPage } from '../shared/chat-inbox'
+import { parseWorkspaceGitStatus, validateWorkspaceGitAction, workspaceGitPath, workspaceGitSessionId,
+  type WorkspaceGitAction, type WorkspaceGitDiff, type WorkspaceGitConflict, type WorkspaceGitView } from '../shared/workspace-git'
 import { chatShareCreateBody, chatShareId, chatShareMode, parseChatShareList, parseChatSharePreview, parseCreatedChatShare,
   type ChatShareMode, type CreateChatShareInput } from '../shared/chat-shares'
 import { inferredFileContentType } from '../shared/file-content-type'
@@ -41,6 +47,12 @@ import type {
   CodexGoalInput,
   CodexGoalSnapshot,
   CodexGoalsConfiguration,
+  CodexAuthStatus,
+  CodexProviderConfiguration,
+  CodexProviderModels,
+  CodexProviderInput,
+  CodexProviderModelTestInput,
+  CodexProviderTestResult,
   CodexSubagentsConfiguration,
   CodexOperationAccepted,
   CodexPendingInteraction,
@@ -67,6 +79,7 @@ import type {
   ProviderCommandsSnapshot,
   ProviderReloadResult,
   ProviderRuntimeChanged,
+  ReasoningSummaryStreamSnapshot,
   QueuedCrossChatDeliveryIdentity,
   QueuedRunNowResponse,
   QueuedTurn,
@@ -105,11 +118,14 @@ import type {
 import { normalizeCursorPermissionMode } from '../shared/cursor-permissions'
 import { normalizeServerURL } from '../shared/server-url'
 import { teamNetworkValidationMessage } from '../shared/server-errors'
+import { isReasoningSummaryStream } from '../shared/reasoning-stream'
 import { deriveTeamHubBootstrapControlURL } from '../shared/team-hub-url'
 import { parseAgentTeamMessagesCapability, parseTeamBulletinAliasCapability, parseTeamAllServersAliasCapability } from '../shared/team-network'
 import { PinRevisionConflictError } from './pin-sync'
 import { PORT_TUNNEL_SUBPROTOCOL } from './port-tunnel-manager'
 import { SecurePeerRequestAdmission } from './secure-peer-request-admission'
+import { appLog } from './logger'
+import { networkErrorDetails } from './network-error'
 import {
   parseMailHintPacket, TEAM_MAIL_HINTS_MAX_PACKET_CHARS, TEAM_MAIL_HINTS_PATH, TEAM_MAIL_HINTS_PROTOCOL,
   type MailboxCoverage, type MailHintMailbox, type MailHintPacket
@@ -328,6 +344,54 @@ export class AgentServerClient {
     return configurationURL(this.configuration, path)
   }
 
+  async readSyncedSideChat(sessionId: string): Promise<SyncedSideChat> {
+    return parseSyncedSideChat(await this.privilegedNativeRequest<unknown>(
+      `/api/sessions/${encodeURIComponent(sessionId)}/side-chat`, {}, undefined, 200, 8 * 1024 * 1024), sessionId)
+  }
+
+  async submitSyncedSideChat(sessionId: string, input: SideQuestionInput): Promise<SyncedSideChat> {
+    const body = validateSideQuestionInput(input)
+    return parseSyncedSideChat(await this.privilegedNativeRequest<unknown>(
+      `/api/sessions/${encodeURIComponent(sessionId)}/side-chat`, { method: 'POST', body: JSON.stringify(body) }, undefined, 202, 8 * 1024 * 1024), sessionId)
+  }
+
+  async stopSyncedSideChat(sessionId: string, requestId: string): Promise<SyncedSideChat> {
+    return parseSyncedSideChat(await this.privilegedNativeRequest<unknown>(
+      `/api/sessions/${encodeURIComponent(sessionId)}/side-chat/requests/${encodeURIComponent(requestId)}`, { method: 'DELETE' }, undefined, 200, 8 * 1024 * 1024), sessionId)
+  }
+
+  async clearSyncedSideChat(sessionId: string, sideChatId: string): Promise<SyncedSideChat> {
+    return parseSyncedSideChat(await this.privilegedNativeRequest<unknown>(
+      `/api/sessions/${encodeURIComponent(sessionId)}/side-chat/${encodeURIComponent(sideChatId)}`, { method: 'DELETE' }, undefined, 200, 8 * 1024 * 1024), sessionId)
+  }
+
+  async askSideQuestion(sessionId: string, input: SideQuestionInput, signal?: AbortSignal): Promise<SideQuestionAnswer> {
+    const body = validateSideQuestionInput(input)
+    // A native side turn can keep thinking, using tools, or awaiting approval.
+    // Its owner controls cancellation; elapsed time alone must not end it.
+    const response = await this.privilegedNativeRequest<unknown>(`/api/sessions/${encodeURIComponent(sessionId)}/side-questions`, {
+      method: 'POST', body: JSON.stringify(body), signal
+    }, null, 200, 2 * 1024 * 1024)
+    return parseSideQuestionAnswer(response, sessionId, body.request_id)
+  }
+
+  async cancelSideQuestion(sessionId: string, requestId: string): Promise<SideQuestionCancellation> {
+    const response = await this.privilegedNativeRequest<SideQuestionCancellation>(
+      `/api/sessions/${encodeURIComponent(sessionId)}/side-questions/${encodeURIComponent(requestId)}`,
+      { method: 'DELETE' }
+    )
+    if (response?.request_id !== requestId || !['cancelled', 'not_found'].includes(response.status)) {
+      throw new Error('side_question_invalid_response')
+    }
+    return response
+  }
+
+  async closeSideChat(sessionId: string, sideChatId: string): Promise<void> {
+    const response = await this.privilegedNativeRequest<{ side_chat_id: string; status: string }>(
+      `/api/sessions/${encodeURIComponent(sessionId)}/side-chats/${encodeURIComponent(sideChatId)}`, { method: 'DELETE' })
+    if (response?.side_chat_id !== sideChatId || response.status !== 'closed') throw new Error('side_question_invalid_response')
+  }
+
   async health(timeoutMs = DEFAULT_REQUEST_TIMEOUT_MS, redirect: 'follow' | 'error' = 'error'): Promise<Health> {
     const configuration = this.configuration
     const health = await this.request<Health>('/api/health', {
@@ -359,6 +423,12 @@ export class AgentServerClient {
       }
     }
   }
+  async providerUsage(backend: UsageBackend, sessionId: string, refresh = false): Promise<ProviderUsageSnapshot> {
+    const query = new URLSearchParams({ backend, session_id: sessionId })
+    if (refresh) query.set('refresh', 'true')
+    return parseProviderUsage(await this.privilegedNativeRequest<unknown>(`/api/runtime/usage?${query}`), backend)
+  }
+
   async runtimeCatalog(refresh = false): Promise<RuntimeCatalog> {
     return this.get(`/api/runtime/catalog${refresh ? '?refresh=true' : ''}`)
   }
@@ -397,6 +467,16 @@ export class AgentServerClient {
     return this.privilegedNativeRequest<ServerUpdateStatus>(
       '/api/admin/update/start',
       { method: 'POST', body: JSON.stringify(body) },
+      SERVER_UPDATE_REQUEST_TIMEOUT_MS
+    ).then(normalizeServerUpdateStatus)
+  }
+  async ensureServerUpdate(
+    envelope: { manifest_base64: string; signature_base64: string },
+    target: ServerUpdateTarget
+  ): Promise<ServerUpdateStatus> {
+    return this.privilegedNativeRequest<ServerUpdateStatus>(
+      '/api/admin/update/ensure',
+      { method: 'POST', body: JSON.stringify({ ...envelope, ...target }) },
       SERVER_UPDATE_REQUEST_TIMEOUT_MS
     ).then(normalizeServerUpdateStatus)
   }
@@ -503,6 +583,9 @@ export class AgentServerClient {
   }
   async forgetSecurePeerConnection(connectionId: string, input: unknown): Promise<unknown> {
     return this.securePeerRequest(`/api/admin/secure-peers/v1/connections/${securePeerSegment(connectionId)}/forget`, { method: 'POST', body: JSON.stringify(input) })
+  }
+  async updateSecurePeerConnectionEndpoint(connectionId: string, input: unknown): Promise<unknown> {
+    return this.securePeerRequest(`/api/admin/secure-peers/v1/connections/${securePeerSegment(connectionId)}/endpoint`, { method: 'PUT', body: JSON.stringify(input) })
   }
   async revokeSecurePeerHostPeer(peerId: string, input: unknown): Promise<unknown> {
     return this.securePeerRequest(`/api/admin/secure-peers/v1/peers/${securePeerSegment(peerId)}/revoke`, { method: 'POST', body: JSON.stringify(input) })
@@ -701,8 +784,72 @@ export class AgentServerClient {
   codexServerGoals(): Promise<CodexGoalsConfiguration> {
     return this.privilegedNativeRequest('/api/admin/codex/goals')
   }
+  codexAuth(): Promise<CodexAuthStatus> {
+    return this.codexAuthRequest('/api/admin/codex/auth')
+  }
+  private async codexAuthRequest(path: string, init: RequestInit = {}): Promise<CodexAuthStatus> {
+    try {
+      return parseCodexAuthStatus(await this.privilegedNativeRequest(path, init, 30_000, 200, 8192))
+    } catch (error) {
+      // Never pass a native provider/HTTP error body into IPC or log output:
+      // even misconfigured servers may echo the submitted secret in an error.
+      if (error instanceof ServerError) {
+        const code = [401, 403].includes(error.status) ? 'ADMIN'
+          : [404, 405, 501].includes(error.status) ? 'UPDATE'
+            : error.status === 409 ? 'BUSY'
+              : [400, 422].includes(error.status) ? 'INVALID_KEY' : 'FAILED'
+        throw new Error(`CODEX_AUTH_${code}`)
+      }
+      if (error instanceof Error && error.message === 'CODEX_AUTH_RESPONSE') throw error
+      throw new Error('CODEX_AUTH_CONNECTION')
+    }
+  }
   codexServerSubagents(): Promise<CodexSubagentsConfiguration> {
     return this.privilegedNativeRequest('/api/admin/codex/subagents')
+  }
+  codexProvider(): Promise<CodexProviderConfiguration> {
+    return this.codexProviderRequest('/api/admin/codex/provider', {}, parseCodexProviderConfiguration)
+  }
+  codexProviderModels(sessionId?: string): Promise<CodexProviderModels> {
+    if (sessionId !== undefined && (typeof sessionId !== 'string' || !sessionId || sessionId.length > 256)) throw new Error('CODEX_PROVIDER_INVALID')
+    const query = sessionId ? `?${new URLSearchParams({ session_id: sessionId })}` : ''
+    return this.codexProviderRequest(`/api/admin/codex/provider/models${query}`, {}, parseCodexProviderModels, 30_000, 2 * 1024 * 1024)
+  }
+  testCodexProvider(input: CodexProviderInput): Promise<CodexProviderTestResult> {
+    const checked = validateCodexProviderInput(input)
+    return this.codexProviderRequest('/api/admin/codex/provider/test', {
+      method: 'POST', body: JSON.stringify(checked)
+    }, parseCodexProviderTestResult, 55_000, 2 * 1024 * 1024)
+  }
+  testCodexProviderModel(input: CodexProviderModelTestInput): Promise<CodexProviderTestResult> {
+    const checked = validateCodexProviderModelTestInput(input)
+    return this.codexProviderRequest('/api/admin/codex/provider/test', {
+      method: 'POST', body: JSON.stringify(checked)
+    }, parseCodexProviderTestResult, 55_000, 512_000)
+  }
+  setCodexProvider(input: CodexProviderInput): Promise<CodexProviderConfiguration> {
+    const checked = validateCodexProviderInput(input)
+    return this.codexProviderRequest('/api/admin/codex/provider', {
+      method: 'PUT', body: JSON.stringify(checked)
+    }, parseCodexProviderConfiguration)
+  }
+  resetCodexProvider(): Promise<CodexProviderConfiguration> {
+    return this.codexProviderRequest('/api/admin/codex/provider', { method: 'DELETE' }, parseCodexProviderConfiguration)
+  }
+  private async codexProviderRequest<T>(path: string, init: RequestInit, parse: (value: unknown) => T, timeoutMs = 30_000, responseLimit = 8192): Promise<T> {
+    try {
+      return parse(await this.privilegedNativeRequest(path, init, timeoutMs, 200, responseLimit))
+    } catch (error) {
+      if (error instanceof ServerError) {
+        const code = [401, 403].includes(error.status) ? 'ADMIN'
+          : [404, 405, 501].includes(error.status) ? 'UPDATE'
+            : error.status === 409 ? 'BUSY'
+              : [400, 413, 422].includes(error.status) ? 'INVALID' : 'FAILED'
+        throw new Error(`CODEX_PROVIDER_${code}`)
+      }
+      if (error instanceof Error && error.message === 'CODEX_PROVIDER_RESPONSE') throw error
+      throw new Error('CODEX_PROVIDER_CONNECTION')
+    }
   }
   setCodexServerSubagents(limit: number | null): Promise<CodexSubagentsConfiguration> {
     if (limit !== null && (!Number.isSafeInteger(limit) || limit < 1)) {
@@ -774,15 +921,19 @@ export class AgentServerClient {
   }
 
   async createSession(input: CreateSessionInput | ResumeSessionInput): Promise<Session> {
+    const codexProvider = validateCodexProviderSelection(input.codex_provider)
+    if (codexProvider === 'custom' && input.backend !== 'codex') throw new Error('Custom endpoints require Codex.')
     const providerId = 'providerId' in input ? input.providerId : undefined
     const response = await this.post<{ session: Session }>('/api/sessions', {
       title: input.title,
       folder: input.folder,
       cwd: input.cwd,
       backend: input.backend,
+      ...(codexProvider !== undefined ? { codex_provider: codexProvider } : {}),
       model: input.model || null,
       effort: input.effort || null,
       system_prompt: input.system_prompt || null,
+      ...(input.subagent_limit !== undefined ? { subagent_limit: input.subagent_limit } : {}),
       codex_approval_policy: input.codex_approval_policy ?? null,
       codex_sandbox_mode: input.codex_sandbox_mode ?? null,
       codex_permission_profile: input.codex_permission_profile ?? null,
@@ -825,6 +976,8 @@ export class AgentServerClient {
   }
 
   async updateSession(sessionId: string, patch: UpdateSessionInput): Promise<Session> {
+    const codexProvider = validateCodexProviderSelection(patch.codex_provider)
+    if (codexProvider === 'custom' && patch.backend !== undefined && patch.backend !== 'codex') throw new Error('Custom endpoints require Codex.')
     const normalizedPatch = patch.cursor_permission_mode === undefined
       ? patch
       : {
@@ -1103,6 +1256,18 @@ export class AgentServerClient {
 
   claudeRuntime(sessionId: string): Promise<ClaudeRuntimeSnapshot> {
     return this.get(`/api/sessions/${encodeURIComponent(sessionId)}/claude/runtime`)
+  }
+
+  setClaudeGoal(sessionId: string, condition: string): Promise<ClaudeRuntimeSnapshot> {
+    return this.privilegedNativeRequest(`/api/sessions/${encodeURIComponent(sessionId)}/claude/goal`, {
+      method: 'PUT', body: JSON.stringify({ condition })
+    })
+  }
+
+  clearClaudeGoal(sessionId: string): Promise<ClaudeRuntimeSnapshot> {
+    return this.privilegedNativeRequest(`/api/sessions/${encodeURIComponent(sessionId)}/claude/goal`, {
+      method: 'DELETE'
+    })
   }
 
   refreshClaudeContextUsage(sessionId: string): Promise<ClaudeRuntimeSnapshot> {
@@ -1490,6 +1655,36 @@ export class AgentServerClient {
 
   workspaceInfo(sessionId: string): Promise<WorkspaceInfo> {
     return this.get(`/api/sessions/${encodeURIComponent(sessionId)}/workspace`)
+  }
+
+  async workspaceGitStatus(sessionId: string) {
+    return parseWorkspaceGitStatus(await this.privilegedNativeRequest(`/api/sessions/${workspaceGitSessionId(sessionId)}/workspace/git`, {}, 40_000, 200, 16 * 1024 * 1024))
+  }
+
+  async workspaceGitDiff(sessionId: string, path: string, view: WorkspaceGitView): Promise<WorkspaceGitDiff> {
+    if (view !== 'staged' && view !== 'unstaged') throw new Error('Invalid Git diff view.')
+    const query = new URLSearchParams({ path: workspaceGitPath(path), view })
+    const result = await this.privilegedNativeRequest<WorkspaceGitDiff>(`/api/sessions/${workspaceGitSessionId(sessionId)}/workspace/git/diff?${query}`, {}, 40_000, 200, 16 * 1024 * 1024)
+    if (result.path !== path || result.view !== view || typeof result.diff !== 'string' || typeof result.revision !== 'string'
+      || typeof result.binary !== 'boolean' || typeof result.truncated !== 'boolean') throw new Error('Invalid Git diff response.')
+    return result
+  }
+
+  async workspaceGitConflict(sessionId: string, path: string): Promise<WorkspaceGitConflict> {
+    const query = new URLSearchParams({ path: workspaceGitPath(path) })
+    const result = await this.privilegedNativeRequest<WorkspaceGitConflict>(`/api/sessions/${workspaceGitSessionId(sessionId)}/workspace/git/conflict?${query}`, {}, 40_000, 200, 16 * 1024 * 1024)
+    if (result.path !== path || typeof result.result !== 'string' || typeof result.revision !== 'string'
+      || typeof result.binary !== 'boolean' || !['base', 'ours', 'theirs'].every(key => result[key as 'base'] === null || typeof result[key as 'base'] === 'string')) {
+      throw new Error('Invalid Git conflict response.')
+    }
+    return result
+  }
+
+  async workspaceGitAction(sessionId: string, input: WorkspaceGitAction) {
+    const body = JSON.stringify(validateWorkspaceGitAction(input))
+    return parseWorkspaceGitStatus(await this.privilegedNativeRequest(`/api/sessions/${workspaceGitSessionId(sessionId)}/workspace/git/action`, {
+      method: 'POST', body
+    }, 120_000, 200, 16 * 1024 * 1024))
   }
 
   workspaceEntries(sessionId: string, path = '', offset = 0, limit = 500): Promise<WorkspaceEntriesPage> {
@@ -1906,7 +2101,10 @@ export class AgentServerClient {
     onEvent: (event: Event) => void,
     onState: (connected: boolean, error?: string) => void,
     onProviderRuntime?: (event: ProviderRuntimeChanged) => void,
-    onPinnedItemsChanged?: (event: TimelinePinsChanged) => void
+    onPinnedItemsChanged?: (event: TimelinePinsChanged) => void,
+    onReasoningStream?: (snapshot: ReasoningSummaryStreamSnapshot) => void,
+    onSideChatChanged?: (revision: number) => void,
+    onProviderUsageChanged?: (backend: 'codex' | 'claude') => void
   ): () => void {
     const configuration = this.configuration
     const endpoint = new URL(configurationURL(configuration, `/api/sessions/${encodeURIComponent(sessionId)}/events`))
@@ -1932,6 +2130,10 @@ export class AgentServerClient {
       const url = new URL(endpoint)
       url.searchParams.set('after', String(lastSeq))
       url.searchParams.set('visible', 'true')
+      if (onReasoningStream) {
+        url.searchParams.set('reasoning_stream', 'true')
+        url.searchParams.set('reasoning_text', 'true')
+      }
       const protocols = authenticatedWebSocketProtocols(
         configuration,
         url,
@@ -1940,6 +2142,8 @@ export class AgentServerClient {
       const current = new WebSocket(url, protocols)
       socket = current
       let disconnected = false
+      let reasoningInstance = ''
+      let reasoningRevision = -1
       const disconnect = (error?: string): void => {
         if (stopped || disconnected) return
         disconnected = true
@@ -1966,6 +2170,26 @@ export class AgentServerClient {
         if (stopped || disconnected) return
         try {
           const packet = JSON.parse(String(message.data)) as unknown
+          if (packet && typeof packet === 'object' && 'type' in packet && packet.type === 'reasoning_summary_stream') {
+            if (isReasoningSummaryStream(packet) && packet.session_id === sessionId
+              && (!reasoningInstance || packet.instance_id === reasoningInstance)
+              && packet.revision > reasoningRevision) {
+              reasoningInstance = packet.instance_id
+              reasoningRevision = packet.revision
+              onReasoningStream?.(packet)
+            }
+            return
+          }
+          if (packet && typeof packet === 'object' && 'type' in packet && packet.type === 'side_chat_updated') {
+            const notice = packet as { session_id?: string; revision?: number }
+            if (notice.session_id === sessionId && Number.isSafeInteger(notice.revision) && notice.revision! >= 0) onSideChatChanged?.(notice.revision!)
+            return
+          }
+          if (packet && typeof packet === 'object' && 'type' in packet && packet.type === 'provider_usage_changed') {
+            const notice = packet as { session_id?: string; backend?: string }
+            if (notice.session_id === sessionId && (notice.backend === 'codex' || notice.backend === 'claude')) onProviderUsageChanged?.(notice.backend)
+            return
+          }
           if (isProviderRuntimeChanged(packet)) {
             if (packet.session_id === sessionId) onProviderRuntime?.(packet)
             return
@@ -2291,7 +2515,7 @@ export class AgentServerClient {
   private async privilegedNativeRequest<T>(
     path: string,
     init: RequestInit = {},
-    timeoutMs = DEFAULT_REQUEST_TIMEOUT_MS,
+    timeoutMs: number | null = DEFAULT_REQUEST_TIMEOUT_MS,
     expectedStatus?: number,
     maxResponseBytes?: number
   ): Promise<T> {
@@ -2303,7 +2527,10 @@ export class AgentServerClient {
     if (!isPrivilegedNativeControlTarget(target, server, serverPrefix, method)) {
       throw new Error('Privileged native control route is invalid.')
     }
-    const body = boundedJSONRequestBody(init.body, method)
+    // Conflict results are file contents, not a tiny control message. Keep this
+    // larger bound exclusive to the validated Git action route.
+    const gitAction = /^\/api\/sessions\/[A-Za-z0-9_-]{1,128}\/workspace\/git\/action$/.test(target.pathname.slice(serverPrefix.length))
+    const body = boundedJSONRequestBody(init.body, method, gitAction ? 8 * 1024 * 1024 : SECURE_PEER_MAX_REQUEST_BYTES)
     const response = await securePeerNodeResponse(target, {
       method,
       headers: privilegedNativeTransportHeaders(configuration.token, body),
@@ -2312,7 +2539,7 @@ export class AgentServerClient {
       signal: combineAbortSignals(
         configuration.abortController.signal,
         init.signal,
-        AbortSignal.timeout(timeoutMs)
+        timeoutMs === null ? undefined : AbortSignal.timeout(timeoutMs)
       )
     })
     if (!response.ok || expectedStatus !== undefined && response.status !== expectedStatus) {
@@ -2389,15 +2616,33 @@ export class AgentServerClient {
     const headers = new Headers(init.headers)
     this.applyAuth(headers, configuration)
     if (init.body && !(init.body instanceof FormData) && !headers.has('Content-Type')) headers.set('Content-Type', 'application/json')
-    const response = await fetch(configurationURL(configuration, path), {
-      ...init,
-      headers,
-      // Never allow a profile credential to be replayed to a redirect target.
-      // Even same-origin redirects are rejected so an intermediary cannot
-      // silently rewrite the authenticated method or request body.
-      redirect: 'error',
-      signal: combineAbortSignals(configuration.abortController.signal, init.signal ?? AbortSignal.timeout(DEFAULT_REQUEST_TIMEOUT_MS))
-    })
+    const target = new URL(configurationURL(configuration, path))
+    const started = performance.now()
+    let response: Response
+    try {
+      response = await fetch(target.toString(), {
+        ...init,
+        headers,
+        // Never allow a profile credential to be replayed to a redirect target.
+        // Even same-origin redirects are rejected so an intermediary cannot
+        // silently rewrite the authenticated method or request body.
+        redirect: 'error',
+        signal: combineAbortSignals(configuration.abortController.signal, init.signal ?? AbortSignal.timeout(DEFAULT_REQUEST_TIMEOUT_MS))
+      })
+    } catch (error) {
+      // Profile retirement is expected cancellation. Preserve unexpected socket
+      // failures that otherwise become only "fetch failed" across Electron IPC.
+      if (!configuration.abortController.signal.aborted) {
+        appLog('transport', 'server request failed', {
+          origin: target.origin,
+          path: target.pathname,
+          method: init.method ?? 'GET',
+          durationMs: Math.round(performance.now() - started),
+          error: networkErrorDetails(error)
+        })
+      }
+      throw error
+    }
     if (!response.ok) {
       let detail = `${response.status} ${response.statusText}`
       let rawDetail: unknown
@@ -2442,7 +2687,7 @@ function securePeerSegment(value: string): string {
 
 function isSecurePeerControlPath(path: string): boolean {
   const identifier = '[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}'
-  return new RegExp(`^/api/admin/secure-peers/v1/(?:status|host|peers|pairings|routes|pairings/${identifier}(?:/(?:cancel|approve|reject|activate|completion))?|connections/${identifier}/(?:deactivate|forget)|peers/${identifier}/revoke|routes/${identifier}/revoke)$`).test(path)
+  return new RegExp(`^/api/admin/secure-peers/v1/(?:status|host|peers|pairings|routes|pairings/${identifier}(?:/(?:cancel|approve|reject|activate|completion))?|connections/${identifier}/(?:deactivate|forget|endpoint)|peers/${identifier}/revoke|routes/${identifier}/revoke)$`).test(path)
 }
 
 function isExactSecurePeerCompletionQuery(query: URLSearchParams): boolean {
@@ -2803,12 +3048,13 @@ function securePeerMethod(value: string, allowed: readonly SecurePeerMethod[]): 
   return method
 }
 
-function boundedJSONRequestBody(body: BodyInit | null | undefined, method: SecurePeerMethod): Buffer | null {
+function boundedJSONRequestBody(body: BodyInit | null | undefined, method: SecurePeerMethod, maxBytes = SECURE_PEER_MAX_REQUEST_BYTES): Buffer | null {
   if (body === null || body === undefined) return null
   if (method === 'GET' || method === 'HEAD') throw new TypeError(`Secure peer ${method} requests cannot carry a body.`)
   if (typeof body !== 'string') throw new TypeError('Secure peer requests require a buffered JSON body.')
   const bytes = Buffer.from(body, 'utf8')
-  if (bytes.byteLength > SECURE_PEER_MAX_REQUEST_BYTES) throw new Error('Secure peer request body is too large.')
+  if (bytes.byteLength > maxBytes) throw new Error(maxBytes === SECURE_PEER_MAX_REQUEST_BYTES
+    ? 'Secure peer request body is too large.' : 'Git resolution request body is too large.')
   try { JSON.parse(body) } catch { throw new TypeError('Secure peer requests require a JSON body.') }
   return bytes
 }
@@ -2867,15 +3113,46 @@ function isPrivilegedNativeControlTarget(
     || target.hash
     || target.username
     || target.password
-    || !target.pathname.startsWith(`${serverPrefix}/api/admin/`)
+    || !target.pathname.startsWith(`${serverPrefix}/api/`)
   ) return false
   const path = target.pathname.slice(serverPrefix.length)
+  if (/^\/api\/sessions\/[A-Za-z0-9_-]{1,128}\/claude\/goal$/.test(path)) {
+    return !target.search && (method === 'PUT' || method === 'DELETE')
+  }
+  const workspaceGit = /^\/api\/sessions\/[A-Za-z0-9_-]{1,128}\/workspace\/git(?:\/(diff|conflict|action))?$/.exec(path)
+  if (workspaceGit) {
+    const operation = workspaceGit[1]
+    if (!operation || operation === 'action') return !target.search && method === (operation ? 'POST' : 'GET')
+    const keys = [...target.searchParams.keys()]
+    return method === 'GET' && keys.length === (operation === 'diff' ? 2 : 1)
+      && keys.includes('path') && (operation !== 'diff' || keys.includes('view'))
+  }
+  const syncedSideChat = /^\/api\/sessions\/[A-Za-z0-9_-]{1,128}\/side-chat(?:\/(?:requests\/)?[A-Za-z0-9_-]{1,128})?$/.exec(path)
+  if (syncedSideChat) return !target.search && (path.endsWith('/side-chat') ? method === 'GET' || method === 'POST' : method === 'DELETE')
+  const sideQuestion = /^\/api\/sessions\/[A-Za-z0-9_-]{1,128}\/side-questions(?:\/([A-Za-z0-9_-]{1,128}))?$/.exec(path)
+  if (sideQuestion) return !target.search && method === (sideQuestion[1] ? 'DELETE' : 'POST')
+  if (/^\/api\/sessions\/[A-Za-z0-9_-]{1,128}\/side-chats\/[A-Za-z0-9_-]{1,128}$/.test(path)) {
+    return !target.search && method === 'DELETE'
+  }
   const share = /^\/api\/admin\/(chat-shares|interactive-chat-shares)\/[A-Za-z0-9_-]{1,128}(?:\/([A-Za-z0-9_-]{1,128}))?$/.exec(path)
   if (share) return !target.search && (!share[2] ? method === 'GET' || method === 'POST'
     : share[1] === 'chat-shares' && share[2] === 'preview' ? method === 'POST' : method === 'DELETE')
   if (path === '/api/admin/codex/goals' || path === '/api/admin/codex/subagents') {
     return !target.search && (method === 'GET' || method === 'PUT')
   }
+  if (path === '/api/runtime/usage') {
+    const keys = [...target.searchParams.keys()]
+    return method === 'GET' && keys.length === new Set(keys).size
+      && keys.every(key => ['backend', 'session_id', 'refresh'].includes(key))
+      && ['codex', 'claude'].includes(target.searchParams.get('backend') ?? '')
+      && /^[A-Za-z0-9_-]{1,128}$/.test(target.searchParams.get('session_id') ?? '')
+      && (!target.searchParams.has('refresh') || target.searchParams.get('refresh') === 'true')
+  }
+  if (path === '/api/admin/codex/auth') return !target.search && method === 'GET'
+  if (path === '/api/admin/codex/provider') return !target.search && ['GET', 'PUT', 'DELETE'].includes(method)
+  if (path === '/api/admin/codex/provider/test') return !target.search && method === 'POST'
+  if (path === '/api/admin/codex/provider/models') return method === 'GET' && (!target.search
+    || [...target.searchParams.keys()].length === 1 && Boolean(target.searchParams.get('session_id')))
   if (path === '/api/admin/update') {
     if (method !== 'GET') return false
     const keys = [...target.searchParams.keys()]
@@ -2888,6 +3165,7 @@ function isPrivilegedNativeControlTarget(
   return !target.search && method === 'POST' && (
     path === '/api/admin/update/check'
     || path === '/api/admin/update/start'
+    || path === '/api/admin/update/ensure'
     || path === '/api/admin/update/cancel'
     || path === '/api/admin/team-hub/host/enable'
     || path === '/api/admin/team-hub/host/disable'

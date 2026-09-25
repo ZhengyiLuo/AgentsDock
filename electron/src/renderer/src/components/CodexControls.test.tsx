@@ -132,8 +132,30 @@ describe('Codex controls', () => {
     expect(await screen.findByRole('heading', { name: 'Codex thread controls' })).toBeInTheDocument()
     expect(screen.getByText('Live state from Codex app-server')).toBeInTheDocument()
     expect(screen.getByRole('progressbar', { name: '80k of 88k usable context tokens used' })).toBeInTheDocument()
+    expect(screen.queryByRole('textbox', { name: 'Completion condition' })).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Goal…' })).toBeEnabled()
     expect(screen.queryByText('Permissions and approvals')).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: 'Save permissions' })).not.toBeInTheDocument()
+  })
+
+  it('keeps typing focus in the goal field after thread controls hand off, and restores focus on close', async () => {
+    runtimeResponse = { ...runtime, status: { type: 'idle' } }
+    renderControls()
+    const user = userEvent.setup()
+    const trigger = await screen.findByRole('button', { name: 'Codex controls: Idle' })
+    await user.click(trigger)
+    await user.click(screen.getByRole('button', { name: 'Goal…' }))
+    const field = screen.getByRole('textbox', { name: 'Completion condition' })
+    // Radix restores the departing content's focus in a deferred unmount task.
+    await act(async () => { await new Promise(resolve => setTimeout(resolve, 10)) })
+    expect(field).toHaveFocus()
+    await user.keyboard(' typing')
+    expect((field as HTMLTextAreaElement).value).toContain(' typing')
+    await user.click(screen.getByRole('button', { name: 'Close goal' }))
+    await waitFor(() => expect(trigger).toHaveFocus())
+    await user.click(trigger)
+    await user.click(screen.getByRole('button', { name: 'Close Codex controls' }))
+    await waitFor(() => expect(trigger).toHaveFocus())
   })
 
   it('disables shared goal controls when access is lost, while keeping Close available', async () => {
@@ -141,11 +163,11 @@ describe('Codex controls', () => {
     useAppStore.setState({ connected: true })
     renderControls()
     await userEvent.setup().click(await screen.findByRole('button', { name: 'Codex controls: Approval needed' }))
+    await userEvent.setup().click(screen.getByRole('button', { name: 'Goal…' }))
     expect(await screen.findByRole('button', { name: 'Save goal' })).toBeEnabled()
     act(() => { useAppStore.setState({ connected: false }) })
     expect(screen.getByRole('button', { name: 'Save goal' })).toBeDisabled()
-    expect(screen.getByRole('button', { name: 'Refresh Codex status' })).toBeDisabled()
-    expect(screen.getByRole('button', { name: 'Close Codex controls' })).toBeEnabled()
+    expect(screen.getByRole('button', { name: 'Close goal' })).toBeEnabled()
   })
 
   it('opens goal controls only for the addressed Codex chat', async () => {
@@ -160,7 +182,7 @@ describe('Codex controls', () => {
       }))
       await Promise.resolve()
     })
-    expect(screen.queryByRole('heading', { name: 'Codex thread controls' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('heading', { name: 'Codex goal' })).not.toBeInTheDocument()
     expect(runtimeCall).toHaveBeenCalledTimes(baselineCalls)
 
     act(() => {
@@ -169,10 +191,36 @@ describe('Codex controls', () => {
       }))
     })
 
-    expect(await screen.findByRole('heading', { name: 'Codex thread controls' })).toBeVisible()
+    expect(await screen.findByRole('heading', { name: 'Codex goal' })).toBeVisible()
     expect(screen.getByPlaceholderText('What should Codex keep working toward?')).toHaveFocus()
     await waitFor(() => expect(runtimeCall.mock.calls.length).toBeGreaterThan(baselineCalls))
     expect(runtimeCall).toHaveBeenLastCalledWith(session.id)
+  })
+
+  it('opens a standalone new goal with the shared layout and preserves native Codex limits', async () => {
+    runtimeResponse = { ...runtime, status: { type: 'idle' }, goal: null, time_budget_seconds: null }
+    renderControls()
+    await screen.findByRole('button', { name: 'Codex controls: Idle' })
+    act(() => window.dispatchEvent(new CustomEvent('agentsdock:open-codex-controls', {
+      detail: { sessionId: session.id, focus: 'goal' }
+    })))
+    expect(await screen.findByRole('heading', { name: 'Codex goal' })).toBeVisible()
+    expect(screen.getByRole('dialog')).toHaveClass('form-dialog', 'goal-dialog')
+    expect(screen.queryByText('Thread actions')).not.toBeInTheDocument()
+    const condition = screen.getByRole('textbox', { name: 'Completion condition' })
+    expect(condition).toHaveFocus()
+    expect(condition).toHaveAttribute('maxlength', '4000')
+    expect(screen.getByRole('button', { name: 'Start goal' })).toBeDisabled()
+    const user = userEvent.setup()
+    await user.type(condition, 'The build succeeds.')
+    await user.selectOptions(screen.getByRole('combobox', { name: 'Status' }), 'paused')
+    await user.type(screen.getByLabelText('Token budget'), '12345')
+    await user.type(screen.getByLabelText(/Time limit/), '90')
+    expect(screen.getByText('19 / 4,000')).toBeVisible()
+    await user.click(screen.getByRole('button', { name: 'Save goal' }))
+    await waitFor(() => expect(setGoal).toHaveBeenCalledWith(session.id, {
+      objective: 'The build succeeds.', status: 'paused', token_budget: 12345, time_budget_seconds: 90
+    }))
   })
 
   it('lets the authoritative active-run lifecycle override a stale idle thread snapshot', async () => {
@@ -194,6 +242,21 @@ describe('Codex controls', () => {
     })
     expect(screen.getByRole('button', { name: 'Codex controls: Idle' }).querySelector('.spin')).toBeNull()
   })
+
+  it('shows local admission as starting until the server marks the run active', async () => {
+    runtimeResponse = { ...runtime, status: { type: 'idle' } }
+    useAppStore.setState({ turnAdmissionTokens: { [session.id]: 'admission-1' } })
+    renderControls()
+    expect((await screen.findByRole('button', { name: 'Codex controls: Starting' })).querySelector('.spin')).not.toBeNull()
+
+    act(() => {
+      useAppStore.setState({
+        activeSessionIds: new Set([session.id]),
+        turnAdmissionTokens: {}
+      })
+    })
+    expect(screen.getByRole('button', { name: 'Codex controls: Running' })).toBeDefined()
+  }, 15_000)
 
   it('quietly polls active threads for fresh context occupancy', async () => {
     vi.useFakeTimers()
@@ -265,7 +328,7 @@ describe('Codex controls', () => {
     }
   })
 
-  it('shows a Codex-style persistent goal bar with direct pause, clear, and detail controls', async () => {
+  it('uses the shared goal summary with direct pause, clear and clickable goal details', async () => {
     renderControls(false, true)
 
     expect(await screen.findByLabelText('Persistent Codex goal')).toBeInTheDocument()
@@ -273,9 +336,10 @@ describe('Codex controls', () => {
     expect(screen.getByText('Finish the integration')).toBeVisible()
     expect(screen.getByLabelText('Goal elapsed time 45s')).toBeVisible()
 
-    await userEvent.setup().click(screen.getByRole('button', { name: 'Show goal details' }))
+    await userEvent.setup().click(screen.getByRole('button', { name: 'Edit goal' }))
     expect(screen.getByText('12,500 / 50,000')).toBeVisible()
     expect(screen.getByText('45s / 10m')).toBeVisible()
+    await userEvent.setup().click(screen.getByRole('button', { name: 'Close goal' }))
 
     await userEvent.setup().click(screen.getByRole('button', { name: 'Pause goal' }))
     await waitFor(() => expect(setGoal).toHaveBeenCalledWith('chat-1', { status: 'paused' }))
@@ -298,6 +362,7 @@ describe('Codex controls', () => {
     expect(screen.queryByRole('button', { name: 'Clear goal' })).not.toBeInTheDocument()
 
     await userEvent.setup().click(screen.getByRole('button', { name: 'Codex controls: Idle' }))
+    await userEvent.setup().click(screen.getByRole('button', { name: 'Goal…' }))
     expect(await screen.findByLabelText('Persistent goals disabled')).toBeInTheDocument()
     expect(screen.getByText('Persistent goals are disabled on this server.')).toBeVisible()
     expect(screen.getByText(/Normal chat turns and scheduled jobs still run/)).toBeVisible()
@@ -334,6 +399,7 @@ describe('Codex controls', () => {
     runtimeResponse = { ...runtime, status: { type: 'idle' } }
     renderControls()
     await userEvent.setup().click(await screen.findByRole('button', { name: 'Codex controls: Idle' }))
+    await userEvent.setup().click(screen.getByRole('button', { name: 'Goal…' }))
 
     const save = screen.getByRole('button', { name: 'Save goal' })
     fireEvent.click(save)
@@ -358,6 +424,7 @@ describe('Codex controls', () => {
     runtimeResponse = { ...runtime, status: { type: 'idle' } }
     renderControls()
     await userEvent.setup().click(await screen.findByRole('button', { name: 'Codex controls: Idle' }))
+    await userEvent.setup().click(screen.getByRole('button', { name: 'Goal…' }))
 
     await userEvent.setup().click(screen.getByRole('button', { name: 'Save goal' }))
 
@@ -376,6 +443,7 @@ describe('Codex controls', () => {
     runtimeResponse = { ...runtime, status: { type: 'idle' } }
     const view = renderControls()
     await userEvent.setup().click(await screen.findByRole('button', { name: 'Codex controls: Idle' }))
+    await userEvent.setup().click(screen.getByRole('button', { name: 'Goal…' }))
     const firstObjective = screen.getByPlaceholderText('What should Codex keep working toward?')
     await userEvent.setup().clear(firstObjective)
     await userEvent.setup().type(firstObjective, 'Unsaved work for chat one')
@@ -399,6 +467,7 @@ describe('Codex controls', () => {
       </CodexRuntimeProvider>
     )
     await userEvent.setup().click(await screen.findByRole('button', { name: 'Codex controls: Idle' }))
+    await userEvent.setup().click(screen.getByRole('button', { name: 'Goal…' }))
     expect(screen.getByPlaceholderText('What should Codex keep working toward?')).toHaveValue('Second chat goal')
 
     await act(async () => {
@@ -408,10 +477,28 @@ describe('Codex controls', () => {
     expect(screen.getByPlaceholderText('What should Codex keep working toward?')).toHaveValue('Second chat goal')
   })
 
+  it('discards a pending goal draft and late receipt when the server profile changes', async () => {
+    let resolveSave!: (value: { goal: CodexRuntimeSnapshot['goal']; time_budget_seconds: number | null }) => void
+    setGoal.mockImplementationOnce(() => new Promise(resolve => { resolveSave = resolve }))
+    runtimeResponse = { ...runtime, status: { type: 'idle' } }
+    renderControls()
+    await userEvent.setup().click(await screen.findByRole('button', { name: 'Codex controls: Idle' }))
+    await userEvent.setup().click(screen.getByRole('button', { name: 'Goal…' }))
+    fireEvent.change(screen.getByRole('textbox', { name: 'Completion condition' }), { target: { value: 'Old server draft' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Save goal' }))
+    runtimeResponse = { ...runtimeResponse, goal: { ...runtime.goal!, objective: 'New server goal' } }
+    act(() => useAppStore.setState({ activeProfileId: 'profile-2', profileGeneration: 5 }))
+    await waitFor(() => expect(screen.getByRole('textbox', { name: 'Completion condition' })).toHaveValue('New server goal'))
+    await act(async () => resolveSave({ goal: runtime.goal, time_budget_seconds: runtime.time_budget_seconds }))
+    expect(screen.getByRole('textbox', { name: 'Completion condition' })).toHaveValue('New server goal')
+    expect(screen.queryByText('Persistent goal updated.')).not.toBeInTheDocument()
+  })
+
   it('reports invalid goal budgets inline instead of silently blocking form submission', async () => {
     runtimeResponse = { ...runtime, status: { type: 'idle' } }
     renderControls()
     await userEvent.setup().click(await screen.findByRole('button', { name: 'Codex controls: Idle' }))
+    await userEvent.setup().click(screen.getByRole('button', { name: 'Goal…' }))
 
     const tokenBudget = screen.getByLabelText('Token budget')
     await userEvent.setup().clear(tokenBudget)
@@ -429,6 +516,7 @@ describe('Codex controls', () => {
     runtimeResponse = { ...runtime, status: { type: 'idle' } }
     renderControls()
     await userEvent.setup().click(await screen.findByRole('button', { name: 'Codex controls: Idle' }))
+    await userEvent.setup().click(screen.getByRole('button', { name: 'Goal…' }))
     await waitFor(() => expect(window.agentsDock.codex.runtime).toHaveBeenCalledTimes(2))
 
     let resolveLoad!: (value: CodexRuntimeSnapshot) => void
@@ -441,7 +529,9 @@ describe('Codex controls', () => {
       persisted_thread: true,
       status: { type: 'notLoaded' }
     }
-    await userEvent.setup().click(screen.getByRole('button', { name: 'Refresh Codex status' }))
+    act(() => window.dispatchEvent(new CustomEvent('agentsdock:open-codex-controls', {
+      detail: { sessionId: session.id, focus: 'goal' }
+    })))
     await waitFor(() => expect(loadThread).toHaveBeenCalledOnce())
 
     await userEvent.setup().click(screen.getByRole('button', { name: 'Save goal' }))
@@ -716,7 +806,7 @@ describe('Codex controls', () => {
     renderControls(false, true)
     await userEvent.setup().click(await screen.findByRole('button', { name: 'Edit goal' }))
 
-    expect(await screen.findByRole('heading', { name: 'Codex thread controls' })).toBeVisible()
+    expect(await screen.findByRole('heading', { name: 'Codex goal' })).toBeVisible()
     expect(screen.getByPlaceholderText('What should Codex keep working toward?')).toHaveFocus()
   })
 
@@ -755,6 +845,7 @@ describe('Codex controls', () => {
     expect(await screen.findByText('Time budget exhausted')).toBeInTheDocument()
     expect(screen.getByText('New goal turns are blocked. Increase the time limit or change the objective to continue.')).toBeInTheDocument()
     expect(screen.getByText('Time exhausted')).toBeInTheDocument()
+    await userEvent.setup().click(screen.getByRole('button', { name: 'Goal…' }))
     expect(screen.getByText('Exhausted. Raise this limit or change the objective before starting another goal turn.')).toBeInTheDocument()
   })
 
@@ -1044,6 +1135,7 @@ describe('Codex controls', () => {
     runtimeResponse = { ...runtime, status: { type: 'idle' } }
     renderControls()
     await userEvent.setup().click(await screen.findByRole('button', { name: 'Codex controls: Idle' }))
+    await userEvent.setup().click(screen.getByRole('button', { name: 'Goal…' }))
 
     const objective = screen.getByPlaceholderText('What should Codex keep working toward?')
     await userEvent.setup().clear(objective)
@@ -1052,7 +1144,9 @@ describe('Codex controls', () => {
       ...runtimeResponse,
       goal: runtimeResponse.goal ? { ...runtimeResponse.goal } : null
     }
-    await userEvent.setup().click(screen.getByRole('button', { name: 'Refresh Codex status' }))
+    act(() => window.dispatchEvent(new CustomEvent('agentsdock:open-codex-controls', {
+      detail: { sessionId: session.id, focus: 'goal' }
+    })))
 
     await waitFor(() => expect(objective).toHaveValue('Local unsaved objective'))
   })

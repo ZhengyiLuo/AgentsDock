@@ -1,9 +1,12 @@
 import { createElement } from 'react'
-import { cleanup, fireEvent, render, screen } from '@testing-library/react'
-import { afterEach, describe, expect, it } from 'vitest'
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { PublicServerProfile } from '@shared/types'
 import { useAppStore } from '../store/app-store'
 import { connectionStateLabel, profileHostSubtitle, ServerSelector, serverProfileHost } from './ServerSelector'
+
+const analytics = vi.hoisted(() => ({ trackEvent: vi.fn() }))
+vi.mock('../lib/analytics', () => analytics)
 
 const alpha: PublicServerProfile = {
   id: 'alpha',
@@ -25,9 +28,40 @@ const beta: PublicServerProfile = {
   connectionState: 'cached'
 }
 
-afterEach(cleanup)
+afterEach(() => {
+  cleanup()
+  analytics.trackEvent.mockClear()
+})
+beforeEach(() => useAppStore.setState({ health: null }))
 
 describe('server selector labels', () => {
+  it('shows the selected server host without exposing its version', () => {
+    useAppStore.setState({
+      profiles: [{ ...alpha, serverVersion: '0.1.26-beta.40' }, { ...beta, serverVersion: '0.1.25' }],
+      activeProfileId: alpha.id,
+      switchingProfileId: null,
+      health: { ok: true, server_identity: alpha.serverIdentity!, server_version: '0.1.26-beta.46' }
+    })
+    render(createElement(ServerSelector))
+    expect(screen.getByText('alpha.example:7850')).toBeInTheDocument()
+    expect(screen.queryByText(/0\.1\.26/)).not.toBeInTheDocument()
+    expect(screen.queryByTitle(/^AgentsServer v/)).not.toBeInTheDocument()
+
+    act(() => useAppStore.setState({ switchingProfileId: beta.id }))
+    expect(screen.queryByTitle(/^AgentsServer v/)).not.toBeInTheDocument()
+  })
+
+  it('does not add metadata when the profile name already contains the address', () => {
+    useAppStore.setState({
+      profiles: [{ ...alpha, name: 'alpha.example:7850', serverVersion: '0.1.26' }],
+      activeProfileId: alpha.id,
+      switchingProfileId: null
+    })
+    render(createElement(ServerSelector))
+    expect(screen.getAllByText('alpha.example:7850')).toHaveLength(1)
+    expect(screen.queryByText(/0\.1\.26/)).not.toBeInTheDocument()
+  })
+
   it('extracts the host and port from a server URL', () => {
     expect(serverProfileHost('https://alpha.example:9443/api')).toBe('alpha.example:9443')
     expect(serverProfileHost('not a URL')).toBeNull()
@@ -98,5 +132,25 @@ describe('server selector labels', () => {
 
     expect(selectedSection).toBe('server')
     expect(useAppStore.getState().modals).toMatchObject({ settings: false, appSettings: true })
+  })
+
+  it('records one successful explicit server switch from the sidebar', async () => {
+    const switchServer = vi.fn(async (profileId: string) => {
+      useAppStore.setState({ activeProfileId: profileId })
+      return true
+    })
+    useAppStore.setState({
+      profiles: [alpha, beta],
+      activeProfileId: alpha.id,
+      switchingProfileId: null,
+      switchServer
+    })
+
+    render(createElement(ServerSelector))
+    fireEvent.pointerDown(screen.getByRole('button', { name: /Choose AgentsServer/ }), { button: 0, ctrlKey: false })
+    fireEvent.click(await screen.findByRole('menuitem', { name: /Beta/ }))
+
+    await waitFor(() => expect(analytics.trackEvent).toHaveBeenCalledExactlyOnceWith('server_switched', { success: true }))
+    expect(switchServer).toHaveBeenCalledExactlyOnceWith('beta')
   })
 })

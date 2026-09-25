@@ -30,6 +30,8 @@ class SharedChatHTTPError extends Error {
   constructor(readonly status: number, message: string) { super(message) }
 }
 class SharedChatWriteDenied extends Error {}
+class SharedChatMalformedResponse extends Error {}
+export type SharedChatConnectionStatus = 'live' | 'reconnecting' | 'offline' | 'terminal'
 const unsupported: unknown = new Proxy(() => Promise.reject(new Error('This action is not available in a shared chat.')), {
   get: (_target, key) => key === 'then' ? undefined : unsupported
 })
@@ -37,7 +39,7 @@ const unsupported: unknown = new Proxy(() => Promise.reject(new Error('This acti
 export function createSharedChatBridge(
   prefix: string,
   receive: (state: SharedChatState) => void,
-  connection: (connected: boolean, error?: string) => void,
+  connection: (status: SharedChatConnectionStatus, error?: string) => void,
   request: typeof fetch = fetch
 ) {
   if (!/^\/interactive-chat\/interactive_[a-f0-9]{32}$/.test(prefix)) throw new Error('Invalid shared chat URL.')
@@ -48,7 +50,12 @@ export function createSharedChatBridge(
   let discoveredCatalog: RuntimeCatalog | null = null
   let csrf = ''
   let source: EventSource | null = null
-  let closed = false
+  let disposed = false
+  let terminalError: string | null = null
+  let streamLive = false
+  let recoveryListenersActive = false
+  let lastAutomaticRecovery = 0
+  let recoveryInFlight: Promise<void> | null = null
   let streamEpoch = 0
   let refreshRequest = 0
   let uncertainWrite: string | null = null
@@ -62,10 +69,26 @@ export function createSharedChatBridge(
   const emit = <K extends keyof AppEventMap>(name: K, value: AppEventMap[K]) => {
     for (const listener of listeners.get(name) ?? []) listener(value as never)
   }
-  const current = () => { if (!state || closed) return denied(); return state }
+  const current = () => {
+    if (!state || disposed) return denied()
+    if (terminalError) throw new Error(terminalError)
+    return state
+  }
   const exact = (id: string) => { if (id !== current().session.id) denied() }
+  function latchTerminal(message: string) {
+    if (disposed || terminalError) return
+    terminalError = message
+    streamLive = false
+    source?.close()
+    connection('terminal', message)
+  }
+  const reportInterrupted = () => {
+    if (disposed || terminalError) return
+    streamLive = false
+    connection(navigator.onLine === false ? 'offline' : 'reconnecting')
+  }
   async function json(path: '/state' | '/redeem' | '/controls' | '/prompts' | '/uploads', init: RequestInit = {}) {
-    if (closed) denied()
+    if (disposed || terminalError) current()
     const response = await request(prefix + path, {
       ...init, credentials: 'same-origin', redirect: 'error', cache: 'no-store',
       headers: { ...(init.body instanceof Blob ? {} : { 'Content-Type': 'application/json' }), ...(csrf ? { 'X-Chat-CSRF': csrf } : {}), ...init.headers }
@@ -73,14 +96,20 @@ export function createSharedChatBridge(
     if (!response.ok) {
       let message = `Shared chat request failed (${response.status}).`
       try { const value = await response.json(); if (typeof value.detail === 'string') message = value.detail } catch { /* Keep bounded status-only fallback. */ }
-      if ([401, 403, 410].includes(response.status)) { source?.close(); connection(false, message) }
+      // A missing cookie before redemption belongs to the token-entry flow.
+      // Once loaded, /state is the authoritative revocation check. Do not
+      // confuse expected 403 control denials with revoked access.
+      if (state && ([401, 410].includes(response.status)
+        || (path === '/state' && [403, 404].includes(response.status)))) latchTerminal(message)
       throw new SharedChatHTTPError(response.status, message)
     }
-    return response.json()
+    try { return await response.json() }
+    catch { throw new SharedChatMalformedResponse('The shared chat server returned malformed data.') }
   }
   async function write(path: '/controls' | '/prompts' | '/uploads', init: RequestInit, validate: (value: any) => boolean) {
     current()
     if (uncertainWrite) throw new Error(uncertainWrite)
+    if (source && !streamLive) throw new SharedChatWriteDenied('Reconnect before trying this action again.')
     try {
       const value = await json(path, init)
       if (!validate(value)) throw new Error('The server returned an invalid acceptance receipt.')
@@ -89,16 +118,16 @@ export function createSharedChatBridge(
       // These statuses are rejected before a native write. A transport error,
       // 5xx, pending/conflicting receipt, or malformed acknowledgment is not.
       if (!(error instanceof SharedChatWriteDenied)
-        && !(error instanceof SharedChatHTTPError && [400, 401, 403, 404, 408, 413, 415, 422].includes(error.status))) {
+        && !(error instanceof SharedChatHTTPError && [400, 401, 403, 404, 408, 410, 413, 415, 422].includes(error.status))) {
         uncertainWrite = 'Acceptance is unconfirmed. Reopen this page and inspect the chat before trying again; this action will not be retried automatically.'
-        connection(false, uncertainWrite)
+        latchTerminal(uncertainWrite)
         throw new Error(`${uncertainWrite} ${error instanceof Error ? error.message : ''}`.trim())
       }
       throw error
     }
   }
   const apply = (next: SharedChatState, catalogOnly = false) => {
-    if (closed || !next || !next.session || typeof next.session.id !== 'string'
+    if (disposed || terminalError || !next || !next.session || typeof next.session.id !== 'string'
       || !Array.isArray(next.events) || !Array.isArray(next.queue) || !Array.isArray(next.jobs)
       || typeof next.revision !== 'string' || !/^[a-f0-9]{16}:[0-9]+$/.test(next.revision)
       || next.events.some(event => event.session_id && event.session_id !== next.session.id)
@@ -126,13 +155,22 @@ export function createSharedChatBridge(
   async function refresh() {
     const epoch = streamEpoch
     const requestId = ++refreshRequest
-    const next = await json('/state')
-    if (epoch === streamEpoch && requestId === refreshRequest) apply(next)
-    return current()
+    try {
+      const next = await json('/state')
+      if (epoch === streamEpoch && requestId === refreshRequest) apply(next)
+      return current()
+    } catch (error) {
+      if (error instanceof SharedChatMalformedResponse || (error instanceof Error && error.message === 'Invalid shared chat state.')) {
+        latchTerminal('The shared chat stream returned invalid data. Reopen this page to reconnect safely.')
+      }
+      throw error
+    }
   }
   async function reconcileAccepted() {
     try { await refresh() }
-    catch { connection(false, 'The action was accepted, but its updated state could not be loaded. Reopen this page before trying it again.') }
+    catch {
+      if (!terminalError) reportInterrupted()
+    }
   }
   async function action(name: string, payload: Record<string, unknown> = {}, read = false) {
     current()
@@ -148,6 +186,16 @@ export function createSharedChatBridge(
     // An unknown/failed acknowledgment is never automatically retried.
     if (!read) await reconcileAccepted()
     return result.result
+  }
+  async function discoverRuntimeCatalog(): Promise<RuntimeCatalog> {
+    const value = await action('runtime.catalog', {}, true)
+    if (!value?.backends || typeof value.backends !== 'object' || Array.isArray(value.backends)) {
+      throw new Error('The shared chat server returned an invalid runtime catalog.')
+    }
+    const catalog = value as RuntimeCatalog
+    discoveredCatalog = catalog
+    apply(current(), true)
+    return catalog
   }
   async function timelinePage(name: 'timeline.older' | 'timeline.around', payload: Record<string, unknown>): Promise<TimelinePage> {
     const id = current().session.id
@@ -206,6 +254,7 @@ export function createSharedChatBridge(
     language: { get: async () => language, set: async (preference: LanguageSettingsSnapshot['preference']) => { language = { ...language, preference }; emit('app:language', language); return language } },
     native: group({ analyticsDisabled: true, log: async () => undefined, writeClipboard: copySharedChatText, readyForNotifications: async () => false, readyForSecurePeerInvite: async () => false }),
     preferences: { get: async <T>(key: string, fallback: T) => preferences.has(key) ? preferences.get(key) as T : fallback, set: async (key: string, value: unknown) => { preferences.set(key, value) }, getScoped: async <T>(_scope: unknown, key: string, fallback: T) => preferences.has(key) ? preferences.get(key) as T : fallback, setScoped: async (_scope: unknown, key: string, value: unknown) => { preferences.set(key, value) } },
+    runtime: group({ catalog: async (_refresh?: boolean) => discoverRuntimeCatalog() }),
     sessions: group({ list: async () => [current().session], update: async (id: string, patch: Record<string, unknown>) => { exact(id); const allowed = new Set(['title', 'model', 'effort', 'system_prompt', 'codex_approval_policy', 'codex_sandbox_mode', 'codex_permission_profile', 'codex_approvals_reviewer', 'claude_permission_mode', 'cursor_permission_mode', 'provider_jobs_access']); const payload = Object.fromEntries(Object.entries(patch).filter(([, value]) => value !== undefined)); if (Object.keys(payload).some(key => !allowed.has(key))) denied(); await action('settings.update', payload); return current().session }, markRead: async (id: string) => { exact(id); return current().session } }),
     timeline: group({ cached: async (id: string) => { exact(id); return snapshot() }, open: async (id: string) => { exact(id); await refresh(); return snapshot() }, older: async (id: string, before: number, limit = 100) => { exact(id); return timelinePage('timeline.older', { before, limit }) }, historicalOlder: async (id: string, before: number, limit = 100) => { exact(id); return timelinePage('timeline.older', { before, limit }) }, around: async (id: string, anchorSeq: number, limit = 100) => { exact(id); return timelinePage('timeline.around', { anchor_seq: anchorSeq, limit }) }, trace: tracePage, index: async (id: string) => { exact(id); return action('timeline.index', {}, true) }, subscribe: async (id: string) => { exact(id) }, unsubscribe: async (id: string) => { exact(id) }, saveViewState: async (_scope: unknown, value: ViewState) => { exact(value.sessionId); viewState = value }, getViewState: async (_scope: unknown, id: string) => { exact(id); return viewState }, search: async (id: string) => { exact(id); return [] } }),
     turns: { send: async (input: { sessionId: string; prompt: string; fileIds: string[]; chatReferences?: unknown[]; teamReferences?: unknown[]; skillSelection?: unknown }) => {
@@ -283,7 +332,7 @@ export function createSharedChatBridge(
         }
       },
       mediaURL: (profileId: string, generation: number, id: string, fileId: string) => {
-        if (closed || !state || profileId !== 'shared-chat' || generation !== 1 || id !== state.session.id
+        if (disposed || terminalError || !state || profileId !== 'shared-chat' || generation !== 1 || id !== state.session.id
           || !isSharedVideoId(fileId) || !videos.has(fileId)) return ''
         return `${prefix}/media/${encodeURIComponent(fileId)}`
       },
@@ -292,33 +341,110 @@ export function createSharedChatBridge(
     })
   }
   const api = group(methods) as unknown as AgentsDockAPI
+  const connectStream = () => {
+    if (disposed || terminalError) return
+    streamLive = false
+    source?.close()
+    connection(navigator.onLine === false ? 'offline' : 'reconnecting')
+    const nextSource = new EventSource(prefix + '/events', { withCredentials: true })
+    source = nextSource
+    nextSource.addEventListener('state', event => {
+      if (source !== nextSource || disposed || terminalError) return
+      try {
+        ++streamEpoch
+        apply(JSON.parse((event as MessageEvent).data))
+        // A complete authenticated SSE snapshot, including an unchanged
+        // revision, confirms live sync. Opening the socket alone does not.
+        if (uncertainWrite) latchTerminal(uncertainWrite)
+        else {
+          streamLive = true
+          connection('live')
+        }
+      } catch {
+        latchTerminal('The shared chat stream returned invalid data. Reopen this page to reconnect safely.')
+      }
+    })
+    nextSource.addEventListener('unavailable', () => {
+      if (source === nextSource) latchTerminal('This shared chat is no longer available.')
+    })
+    nextSource.onerror = () => {
+      if (source === nextSource) reportInterrupted()
+      // Do not close a transiently failed EventSource. The browser owns its
+      // retry policy and a later authenticated state event restores live sync.
+    }
+  }
+  const recover = () => {
+    if (disposed || terminalError || !state || streamLive) return
+    const now = Date.now()
+    if (now - lastAutomaticRecovery < 500) return
+    lastAutomaticRecovery = now
+    void retryStream().catch(() => { /* The connection callback owns recovery status. */ })
+  }
+  async function retryStream() {
+    if (disposed || terminalError) return
+    if (recoveryInFlight) return recoveryInFlight
+    const attempt = (async () => {
+      try { await refresh() }
+      catch (error) {
+        if (!terminalError && !streamLive) reportInterrupted()
+        throw error
+      }
+      if (!streamLive) connectStream()
+    })()
+    recoveryInFlight = attempt
+    try { await attempt }
+    finally { if (recoveryInFlight === attempt) recoveryInFlight = null }
+  }
+  const recoverVisible = () => {
+    if (document.visibilityState === 'visible') recover()
+  }
+  const addRecoveryListeners = () => {
+    if (recoveryListenersActive) return
+    recoveryListenersActive = true
+    window.addEventListener('online', recover)
+    window.addEventListener('offline', reportInterrupted)
+    window.addEventListener('focus', recover)
+    document.addEventListener('visibilitychange', recoverVisible)
+  }
+  const removeRecoveryListeners = () => {
+    if (!recoveryListenersActive) return
+    recoveryListenersActive = false
+    window.removeEventListener('online', recover)
+    window.removeEventListener('offline', reportInterrupted)
+    window.removeEventListener('focus', recover)
+    document.removeEventListener('visibilitychange', recoverVisible)
+  }
   return {
     api, snapshot, refresh,
     async redeem(token: string) { if (!/^[A-Za-z0-9_-]{43}$/.test(token)) throw new Error('Invalid invitation.'); const result = await json('/redeem', { method: 'POST', body: JSON.stringify({ invitation_token: token }) }); csrf = result.csrf },
     async start() {
-      await refresh()
-      source?.close()
-      source = new EventSource(prefix + '/events', { withCredentials: true })
-      source.addEventListener('state', event => {
-        try {
-          ++streamEpoch
-          apply(JSON.parse((event as MessageEvent).data))
-          // A complete authenticated SSE snapshot, including an unchanged
-          // revision, confirms live sync. A standalone HTTP GET does not.
-          if (uncertainWrite) connection(false, uncertainWrite)
-          else connection(true)
-        } catch { source?.close(); connection(false, 'The shared chat stream could not be read. Reopen this page to reconnect.') }
-      })
-      source.addEventListener('unavailable', () => { closed = true; source?.close(); connection(false, 'This shared chat is no longer available.') })
-      source.onerror = () => { source?.close(); connection(false, 'Connection interrupted. Reopen this page to reconnect.') }
-    },
-    async catalog() {
-      const value = await action('runtime.catalog', {}, true)
-      if (state && !closed && value?.backends && typeof value.backends === 'object' && !Array.isArray(value.backends)) {
-        discoveredCatalog = value
-        apply(state, true)
+      if (disposed || terminalError) current()
+      addRecoveryListeners()
+      try {
+        await refresh()
+        connectStream()
+      } catch (error) {
+        if (!terminalError) reportInterrupted()
+        throw error
       }
     },
-    close() { closed = true; source?.close(); listeners.clear(); staged.clear(); uploaded.clear(); videos.clear(); discoveredCatalog = null }
+    async retry() {
+      addRecoveryListeners()
+      await retryStream()
+    },
+    async catalog() {
+      await discoverRuntimeCatalog()
+    },
+    close() {
+      disposed = true
+      streamLive = false
+      source?.close()
+      removeRecoveryListeners()
+      listeners.clear()
+      staged.clear()
+      uploaded.clear()
+      videos.clear()
+      discoveredCatalog = null
+    }
   }
 }
