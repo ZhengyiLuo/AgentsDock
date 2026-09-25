@@ -48,6 +48,7 @@ export function subagentsFromEvents(events: Event[], ownerBackend?: 'claude' | '
   const taskKeys = new Map<string, string>()
   const toolKeys = new Map<string, string>()
   const runBackends = new Map<string, 'claude' | 'codex'>()
+  const unsupportedRuns = new Set<string>()
   const authoritativeKeys = new Set<string>()
   const agentStartSeqs = new Map<string, number>()
 
@@ -94,6 +95,11 @@ export function subagentsFromEvents(events: Event[], ownerBackend?: 'claude' | '
 
   for (const event of orderedEvents) {
     const runId = String(event.run_id || '')
+    if (event.backend && event.backend !== 'claude' && event.backend !== 'codex') {
+      if (runId) unsupportedRuns.add(runId)
+      continue
+    }
+    if (unsupportedRuns.has(runId)) continue
     const eventBackend = event.backend === 'claude' || event.backend === 'codex' ? event.backend : undefined
     if (runId && eventBackend) runBackends.set(runId, eventBackend)
     const backend = eventBackend || runBackends.get(runId) || ownerBackend || 'codex'

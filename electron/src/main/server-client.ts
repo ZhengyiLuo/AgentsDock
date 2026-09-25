@@ -116,6 +116,8 @@ import type {
   WorkingDirectoryCompletion
 } from '../shared/types'
 import { normalizeCursorPermissionMode } from '../shared/cursor-permissions'
+import { normalizeOpenCodePermissionMode } from '../shared/opencode-permissions'
+import { t } from '../shared/i18n'
 import { normalizeServerURL } from '../shared/server-url'
 import { teamNetworkValidationMessage } from '../shared/server-errors'
 import { isReasoningSummaryStream } from '../shared/reasoning-stream'
@@ -924,6 +926,7 @@ export class AgentServerClient {
     const codexProvider = validateCodexProviderSelection(input.codex_provider)
     if (codexProvider === 'custom' && input.backend !== 'codex') throw new Error('Custom endpoints require Codex.')
     const providerId = 'providerId' in input ? input.providerId : undefined
+    if (providerId && input.backend === 'opencode') throw new Error(t('opencode.resumeUnavailable'))
     const response = await this.post<{ session: Session }>('/api/sessions', {
       title: input.title,
       folder: input.folder,
@@ -942,20 +945,23 @@ export class AgentServerClient {
       cursor_permission_mode: input.backend === 'cursor'
         ? normalizeCursorPermissionMode(input.cursor_permission_mode)
         : null,
+      opencode_permission_mode: input.backend === 'opencode'
+        ? normalizeOpenCodePermissionMode(input.opencode_permission_mode)
+        : null,
       provider_session_id: providerId,
-      // Cursor can resume provider context by ID, but AgentsServer cannot
-      // import Cursor's prior transcript into the local timeline.
+      // Keep legacy manual-ID resume compatible. Cursor text-snapshot import
+      // uses the capability-gated local picker and bulk endpoint instead.
       import_history: Boolean(providerId) && input.backend !== 'cursor'
     })
     return response.session
   }
 
-  async listLocalSessions(limit = LOCAL_SESSION_IMPORT_HARD_LIST_LIMIT): Promise<LocalSessionCandidate[]> {
+  async listLocalSessions(limit = LOCAL_SESSION_IMPORT_HARD_LIST_LIMIT, includeCursor = false): Promise<LocalSessionCandidate[]> {
     if (!Number.isInteger(limit) || limit < 1 || limit > LOCAL_SESSION_IMPORT_HARD_LIST_LIMIT) {
       throw new Error('Import Chat local session limit is invalid.')
     }
     const response = await this.get<unknown>(
-      `/api/local-sessions?limit=${limit}`,
+      `/api/local-sessions?limit=${limit}${includeCursor ? '&include_cursor=true' : ''}`,
       this.configuration,
       DEFAULT_REQUEST_TIMEOUT_MS,
       LOCAL_SESSION_LIST_RESPONSE_MAX_BYTES
@@ -978,10 +984,13 @@ export class AgentServerClient {
   async updateSession(sessionId: string, patch: UpdateSessionInput): Promise<Session> {
     const codexProvider = validateCodexProviderSelection(patch.codex_provider)
     if (codexProvider === 'custom' && patch.backend !== undefined && patch.backend !== 'codex') throw new Error('Custom endpoints require Codex.')
-    const normalizedPatch = patch.cursor_permission_mode === undefined
-      ? patch
+    const openCodePatch = patch.opencode_permission_mode === undefined ? patch : {
+      ...patch, opencode_permission_mode: patch.opencode_permission_mode === null ? null : normalizeOpenCodePermissionMode(patch.opencode_permission_mode)
+    }
+    const normalizedPatch = openCodePatch.cursor_permission_mode === undefined
+      ? openCodePatch
       : {
-          ...patch,
+          ...openCodePatch,
           cursor_permission_mode: patch.cursor_permission_mode === null
             ? null
             : normalizeCursorPermissionMode(patch.cursor_permission_mode)
@@ -2716,7 +2725,7 @@ function isEmergencySessionPacket(value: unknown): value is Session {
     || typeof session.title !== 'string'
     || !session.title
     || session.title.length > 240
-    || (session.backend !== 'codex' && session.backend !== 'claude' && session.backend !== 'cursor')
+    || (session.backend !== 'codex' && session.backend !== 'claude' && session.backend !== 'cursor' && session.backend !== 'opencode')
     || typeof session.unacknowledged_emergency_count !== 'number'
     || !Number.isSafeInteger(session.unacknowledged_emergency_count)
     || session.unacknowledged_emergency_count < 0

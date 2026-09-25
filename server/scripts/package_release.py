@@ -35,6 +35,8 @@ FILES = (
     "execution_service.py",
     "execution_transport.py",
     "agent_server.py",
+    "local_session_ownership.py",
+    "cursor_history.py",
     "workspace_git.py",
     "team_hub_host.py",
     "secure_peer_runtime.py",
@@ -62,6 +64,7 @@ FILES = (
     "codex_side_question.py",
     "claude_side_question.py",
     "cursor_agent_client.py",
+    "opencode_agent_client.py",
     "cursor_process_guard.py",
     "claude_history_repair.py",
     "claude_history_provenance.py",
@@ -80,6 +83,8 @@ FILES = (
     "interactive_chat_controls.py",
     "install.sh",
     "uninstall.sh",
+    "instances.sh",
+    "server_instances.py",
     "update_runner.py",
     "pyproject.toml",
     "uv.lock",
@@ -230,6 +235,7 @@ def main() -> int:
             shutil.copytree(root / name, package_root / name, symlinks=False)
         (package_root / "install.sh").chmod(0o755)
         (package_root / "uninstall.sh").chmod(0o755)
+        (package_root / "instances.sh").chmod(0o755)
         (package_root / "agentsdock_jobs.py").chmod(0o755)
         (package_root / "agentsdock_chats.py").chmod(0o755)
         (package_root / "agentsdock_emergency.py").chmod(0o755)

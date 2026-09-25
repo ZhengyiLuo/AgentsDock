@@ -1,5 +1,21 @@
 # Public development log
 
+## 2026-09-25 — Integrate recovered features with current main
+
+- Preserve synchronized side conversations, goal controls, upgraded Codex CLI
+  detection and Python installation fixes alongside the restored provider,
+  installer, history-import and named-instance features.
+- Include both sets of runtime modules in installation, deployment and archive
+  manifests. Keep API details in the server reference and the README concise.
+- Move newly added main-branch tests into the recovered test package and align
+  isolated fixtures with bounded provider discovery, import filtering and
+  recipient-bound user delegation. Unattested legacy provenance stays private;
+  oversized attested migration remains recoverable.
+- Pass 96 focused installation tests, 40 previously failing CI-related checks,
+  500 affected desktop tests and desktop type checking. Complete source CI is
+  recorded on the recovery pull request. This integration does not deploy or
+  publish a server, desktop application or npm package.
+
 ## 2026-09-24 — Accept local beta.12 goal shortcut correction
 
 - Accept local arm64 desktop `1.0.7-beta.12`, build `1214`, from committed source

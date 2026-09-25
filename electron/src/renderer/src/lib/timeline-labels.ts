@@ -20,6 +20,7 @@ const eventKeys: Record<string, string> = {
   tool_started: 'toolStarted', tool_finished: 'toolFinished', error: 'error',
   reasoning_summary: 'reasoningSummary', system: 'system', system_message: 'systemMessage',
   working_directory_changed: 'workingDirectoryChanged',
+  provider_session_reset: 'providerSessionReset',
   handoff_digest_received: 'digestReceived', handoff_digest_sent: 'digestSent',
   handoff_digest_error: 'digestFailed', handoff_digest_started: 'digestStarted'
 }

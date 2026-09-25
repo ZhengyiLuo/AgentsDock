@@ -1,5 +1,6 @@
 import type { ProviderUsageScope, ProviderUsageSnapshot, UsageBackend } from '../shared/provider-usage'
 import { app, BrowserWindow, dialog, nativeImage, Notification, shell } from 'electron'
+import { applyOpenCodeSessionEvent } from '../shared/opencode'
 import { chmodSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
 import { open, rename, rm, stat, writeFile } from 'node:fs/promises'
 import { createHash, randomUUID } from 'node:crypto'
@@ -17,6 +18,7 @@ import { SideQuestionRequests } from './side-question-requests'
 import { sideChatSyncAvailable, type SyncedSideChat, sideQuestionLimit, sideQuestionsAvailable, validateSideQuestionInput, type SideQuestionAnswer, type SideQuestionCancellation, type SideQuestionInput, type SideQuestionScope } from '../shared/side-questions'
 import { parseBulletinHintRefresh } from '../shared/team-bulletin-hints'
 import {
+  cursorLocalSessionImportSupported,
   localSessionImportBatchLimit,
   localSessionImportListLimit,
   parseBulkImportSessionItems,
@@ -2372,7 +2374,9 @@ export class AppService {
     const scope = this.captureScope()
     await this.ensureValidatedScope(scope)
     const capability = requireLocalSessionImportCapability(this.health)
-    const candidates = await scope.client.listLocalSessions(localSessionImportListLimit(capability))
+    const candidates = cursorLocalSessionImportSupported(this.health)
+      ? await scope.client.listLocalSessions(localSessionImportListLimit(capability), true)
+      : await scope.client.listLocalSessions(localSessionImportListLimit(capability))
     this.assertCurrentScope(scope)
     return candidates
   }
@@ -2382,6 +2386,9 @@ export class AppService {
     await this.ensureValidatedScope(scope)
     const capability = requireLocalSessionImportCapability(this.health)
     const normalized = parseBulkImportSessionItems(items, localSessionImportListLimit(capability))
+    if (normalized.some(item => item.backend === 'cursor') && !cursorLocalSessionImportSupported(this.health)) {
+      throw new Error('Cursor Import Chat requires a server with Cursor local import support.')
+    }
     const batchLimit = localSessionImportBatchLimit(capability)
     const results: BulkImportSessionResult[] = []
     for (let offset = 0; offset < normalized.length; offset += batchLimit) {
@@ -5697,6 +5704,11 @@ export class AppService {
 
   private applyEventsToCaches(scope: ConnectionScope, sessionId: string, events: readonly Event[]): void {
     if (!events.length) return
+    const session = this.sessions.find(candidate => candidate.id === sessionId)
+    if (session && this.isCurrentScope(scope)) {
+      const updated = events.reduce(applyOpenCodeSessionEvent, session)
+      if (updated !== session) this.upsertSession(scope, updated)
+    }
     let queued: QueuedTurn[] | null = null
     let nextQueued: QueuedTurn[] | null = null
     let shouldRefreshQueue = false

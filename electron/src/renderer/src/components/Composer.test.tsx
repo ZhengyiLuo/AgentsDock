@@ -1451,6 +1451,50 @@ describe('Composer', () => {
     expect(useAppStore.getState().error).toBeNull()
   })
 
+  it('offers OpenCode explicitly and sends only its selected native skill capability', async () => {
+    const session: Session = { id: 'chat-1', title: 'OpenCode chat', backend: 'opencode', opencode_permission_mode: 'default' }
+    const list = vi.fn().mockResolvedValue({ backend: 'opencode', revision: 'skills-open-rev', support: { available: true, mode: 'native' }, commands: [{
+      id: 'skill-open-id', name: 'review', label: 'OpenCode review', description: 'Review a file', kind: 'skill', invocation: '/review'
+    }] })
+    const send = vi.fn().mockResolvedValue({ session, queued: false })
+    window.agentsDock.providerCommands = { list }
+    window.agentsDock.turns = { send } as unknown as AgentsDockAPI['turns']
+    useAppStore.setState({ connected: true, profileGeneration: 818, sessions: [session], health: { ok: true, capabilities: {
+      opencode_backend: { available: true, required: false, action: null, message: 'Supported', version: 1 },
+      local_provider_commands_v1: { available: true, required: false, action: null, message: 'Skills', version: 1, supported_backends: ['opencode'] }
+    } }, runtimeCatalog: { backends: { opencode: { available: true, models: [{ value: '', label: 'OpenCode default' }], efforts: [] } } } })
+    const user = userEvent.setup()
+    render(<Composer />)
+    expect(list).not.toHaveBeenCalled()
+    await user.click(screen.getByTitle('Change backend'))
+    expect(screen.getByRole('menuitemcheckbox', { name: 'OpenCode' })).toBeInTheDocument()
+    await user.keyboard('{Escape}')
+    const editor = screen.getByPlaceholderText('Message')
+    await user.type(editor, '/')
+    await user.click(await screen.findByRole('option', { name: /^OpenCode review/ }))
+    await user.type(editor, 'inspect this change')
+    fireEvent.keyDown(editor, { key: 'Enter' })
+    await waitFor(() => expect(send).toHaveBeenCalledWith(expect.objectContaining({
+      sessionId: session.id, prompt: '/review inspect this change',
+      clientCapabilities: ['opencode_provider_commands_v1'], skillSelection: { id: 'skill-open-id', revision: 'skills-open-rev' }
+    })))
+  })
+
+  it('keeps OpenCode visible but fails closed on an old server without fetching skills', async () => {
+    const list = vi.fn()
+    window.agentsDock.providerCommands = { list }
+    useAppStore.setState({ connected: true, profileGeneration: 819, sessions: [{ id: 'chat-1', title: 'OpenCode', backend: 'opencode' }], health: { ok: true } })
+    const user = userEvent.setup()
+    render(<Composer />)
+    await user.click(screen.getByTitle('Change backend'))
+    expect(screen.getByRole('menuitem', { name: /OpenCode.*Unavailable/ })).toHaveAttribute('aria-disabled', 'true')
+    await user.keyboard('{Escape}')
+    await user.type(screen.getByPlaceholderText('Message'), '/')
+    expect(list).not.toHaveBeenCalled()
+    expect(screen.getByRole('button', { name: 'Send message' })).toBeDisabled()
+    expect(screen.getAllByText(/Update the server, then reconnect/).length).toBeGreaterThan(0)
+  })
+
   it('offers ready Cursor backend switching when its runtime catalog is available', async () => {
     useAppStore.setState({
       health: {
@@ -1526,7 +1570,7 @@ describe('Composer', () => {
     render(<Composer />)
     await user.click(screen.getByTitle('Change backend'))
     const unavailableByKeyboard = screen.getByRole('menuitem', { name: /Cursor.*Unavailable/ })
-    await user.keyboard('{End}')
+    await user.keyboard('{End}{ArrowUp}')
     expect(unavailableByKeyboard).toHaveFocus()
     expect(await screen.findByRole('tooltip')).toHaveTextContent(/model choices are still loading/i)
   })

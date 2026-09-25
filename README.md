@@ -78,6 +78,10 @@
 
 ## What you can do
 
+- **Try OpenCode on desktop:** this beta branch adds optional OpenCode support
+  with the matching server beta. Install and authenticate OpenCode on the
+  server; see [setup and feature limits](electron/README.md#opencode-optional-beta-backend).
+  Mobile support and published release availability are separate.
 - **Work with your agents:** start and resume chats, follow live activity, and
   queue the next task.
 - **Review the results:** view images and videos inline, browse files, inspect
