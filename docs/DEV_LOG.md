@@ -34,6 +34,15 @@
   28 shared-chat and 23 desktop send tests plus type checking. The server-hosted
   browser bundle is rebuilt. No deployment or public release.
 
+## 2026-09-25 — Carry forward the provider Delete/release checklist
+
+- Port the documentation-only acceptance criterion from AgentsServer PR #117
+  into the canonical server checklist. Require confirmed runtime release,
+  preserved native history, native resume, failure handling and chat isolation.
+- Verification: documentation diff reviewed; no runtime behavior or deployment
+  changes. This is an acceptance checklist, not a claim that every provider has
+  already passed those checks.
+
 ## 2026-09-25 — Preserve Claude input and repair imported wrappers
 
 - Send ordinary slash-prefixed Claude messages byte-for-byte as written, using
@@ -283,6 +292,31 @@
   unit parsing. The corrected scanner also accepts an existing uv runtime
   and retained release without changing their permissions or service process.
   Complete installed-service activation remains a separate deployment check.
+
+## 2026-09-24 — Discover current and older Claude model choices
+
+- Resolve versioned Claude labels from native SDK initialization while retaining
+  alias values and existing chat selections. Restore selectable older versions
+  through a disposable native picker, not an unfiltered union of static IDs.
+- Preserve native restrictions, custom gateways and curated picker settings.
+  Metadata probes send no user prompt, disable tools/hooks/MCP, use bounded
+  process lifetimes and output, and never return account metadata.
+- Include the new runtime module in npm packages and legacy signed-package
+  inputs, installer validation and direct-deploy validation.
+- Verification: 189 focused server regressions pass. A real Claude Code
+  2.1.281 metadata probe through the isolated server catalog returns current and
+  older choices without duplicate IDs in 1.78 seconds; user settings are
+  unchanged. A full local npm package contains the exact module bytes and all
+  78 packaged Python sources compile.
+- Boundaries: metadata-only native verification, not billed inference or
+  Electron UI acceptance of this monorepo build. This is a source PR; no npm
+  publication, release or service restart is part of this change.
+- Integration recheck (2026-09-25): retain restored runtime modules and the
+  shared catalog deadline when merging current main; move the added tests into
+  `server/tests/`. All 214 focused tests pass, including three new deadline
+  regressions. A fresh metadata-only native probe returns 15 unique choices in
+  0.94 seconds. The local npm archive preserves the exact catalog module and
+  all 83 packaged Python sources compile. No archive was published.
 
 ## 2026-09-23 — Publish the signed beta.8 server update
 
