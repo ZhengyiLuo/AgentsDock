@@ -141,8 +141,14 @@ function RuntimeStatus({
   // Provider last_error is backend-wide, not session-scoped. Keep it in the
   // full Settings panel so a failure from one chat cannot leak into another
   // chat's compact composer notice.
+  // Claude checks authentication during a real send. Unknown readiness, or
+  // another chat's cached login failure, is not a reason to warn up front.
+  // Keep installation failures visible; only show passive auth diagnostics
+  // alongside an actual error from this chat's latest run.
+  const passiveClaudeAuth = backend === 'claude'
+    && (diagnostic?.status === 'unknown' || diagnostic?.status === 'unauthenticated')
   const providerNeedsAttention = compact
-    ? cursorUnavailable || Boolean(diagnostic && diagnostic.status !== 'ready')
+    ? cursorUnavailable || Boolean(diagnostic && diagnostic.status !== 'ready' && (!passiveClaudeAuth || chatError))
     : cursorUnavailable || runtimeDiagnosticNeedsAttention(diagnostic)
   if (compact && !chatError && !providerNeedsAttention) return null
   const tone = chatError ? 'warning' : cursorUnavailable ? 'error' : runtimeDiagnosticTone(diagnostic)

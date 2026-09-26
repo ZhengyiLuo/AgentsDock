@@ -955,7 +955,11 @@ OAuth renewal and exit before persisting the replacement credential (see
 [upstream report #95822](https://github.com/anthropics/claude-code/issues/95822)).
 Authentication readiness is recorded from real native Claude requests. Before
 the first request, an installed Claude reports `unknown` with `authenticated: null`;
-the existing desktop client can still start a chat. Installation checks retain
+the desktop client can still start a chat. Updated desktop clients keep this
+passive authentication state in Settings rather than warning in the composer
+before a send. A cached backend-wide login failure is not evidence that a
+different chat has failed; the composer shows its own latest run error.
+Installation checks retain
 the last native authentication result and its original timestamp rather than
 claiming to have checked the account again. A successful request clears the
 previous authentication error. After an external `claude auth login`, retry the

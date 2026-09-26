@@ -1,5 +1,25 @@
 # Public development log
 
+## 2026-09-25 — Keep passive Claude login status out of the composer
+
+- Do not show an upfront Claude authentication warning or Recheck button just
+  because login has not been checked, or another chat has a cached login failure.
+  Remove the composer's stale-auth send gate so retrying after external login
+  reaches the native Claude request instead of failing solely on cached status.
+- Keep actual errors from the selected chat's latest run visible, clear the
+  notice after a successful retry, and preserve missing/broken CLI guidance.
+  Full runtime diagnostics and manual rechecks remain available in Settings.
+- Regression coverage reproduces the original unknown-state banner, verifies
+  send admission without an auth probe, and covers failures, retry recovery,
+  stale readiness and Settings. Pass 4,912 desktop tests (five skipped), eight
+  packaging/license checks and 30 isolated server authentication/probe tests.
+  Type checking and production compilation pass. The new send regression first
+  exposed the stale-auth gate and passes after the correction.
+- Availability: desktop source and compiled output only; no installation or
+  server restart. Live desktop interaction remains unverified because computer
+  accessibility permissions are unavailable. This UI correction requires an
+  updated desktop app; restarting the server alone does not change it.
+
 ## 2026-09-25 — Hand off Codex work after a native re-login
 
 - Detect conservative native file-login revisions on demand and let Recheck
