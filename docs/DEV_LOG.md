@@ -15,11 +15,12 @@
   requiring POSIX permissions and for signing the local package.
 - Launch an isolated native desktop build `0.2.0` / `85` against an existing
   test server `1.0.7-beta.11`; application startup and authenticated health,
-  session and job refreshes succeed. Computer-use permissions block hands-on
-  drag/drop and paste acceptance, which remains pending. No provider request
-  or real upload has been accepted by this check.
-- Availability: local test package only. No server update is required for this
-  fix; no server restart, release publication or merge was performed.
+  session and job refreshes succeed. The local candidate was subsequently
+  manually tested and accepted. Computer-use permissions prevented independent
+  agent-operated drag/drop and paste verification; individual manual test-case
+  results were not recorded.
+- Availability: source and manually accepted local test package. No server
+  update is required for this fix; no server restart or release publication.
 
 ## 2026-09-26 — Restore ordinary steering during active Codex goals
 
