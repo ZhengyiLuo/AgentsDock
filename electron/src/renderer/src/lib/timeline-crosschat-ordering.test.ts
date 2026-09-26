@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it } from 'vitest'
 import type { AgentFile, Event } from '@shared/types'
 import { updateQueuedTurns } from '@shared/queue'
-import { activityEventSequence, projectTimeline, renderTimelineItems, type RenderTimelineItem } from './timeline'
+import { activityEventSequence, interleaveChronologicalSystemRows, projectTimeline, renderTimelineItems, type RenderTimelineItem } from './timeline'
 import { cachedTimelineProjection, clearTimelineProjectionCache } from './timeline-projection-cache'
 
 const event = (seq: number, type: string, patch: Partial<Event> = {}): Event => ({
@@ -94,6 +94,49 @@ describe('cross-chat messages stay at their place in ongoing work', () => {
           .toMatchObject([{ seq: sent.seq, anchorTs: sent.ts }])
       }
     }
+  })
+
+  it('keeps mail before the final when earlier route audit rows trail the expanded turn', () => {
+    const routes = [2, 3, 4, 5].map(seq => event(seq, 'agent_handoff_route_created'))
+    const sent = message(6, 'first-send', 'registered', { delivery_mode: 'mailbox', inbox_state: 'unread' })
+    const received = reply(8, 'received')
+    const live = [start(), ...routes, sent, progress(7),
+      { ...received, delivery_mode: 'mailbox', inbox_state: 'unread' } as Event,
+      progress(9), message(10, 'second-send'), progress(11)]
+    const finished = [...live, work(20, 'turn_finished', { result_text: 'All local work is complete.' })]
+    const acknowledged = [...finished, message(21, 'first-send', 'read', {
+      delivery_mode: 'mailbox', inbox_state: 'read'
+    })]
+    const snapshots = [live, finished, acknowledged]
+    const original = structuredClone(snapshots)
+    for (const snapshot of snapshots) {
+      const expected = ['user:1', 'delivery:6', 'activity:7', 'delivery:8', 'activity:9',
+        'delivery:10', 'activity:11', ...(snapshot === live ? [] : ['assistant:20'])]
+      // The ordinary replay includes route audit rows; compact semantic pages
+      // omit them. Both must place the same messages beside the same work.
+      const semantic = snapshot.filter(item => item.type !== 'agent_handoff_route_created')
+      for (const events of [snapshot, semantic]) {
+        for (const rows of projections(events)) {
+          expect(visibleOrder(rows)).toEqual(expected)
+          expect(rows.filter(row => row.kind === 'system' && row.seq === 6))
+            .toMatchObject([{ anchorTs: sent.ts }])
+        }
+      }
+    }
+    expect(snapshots).toEqual(original)
+  })
+
+  it('still places mail after older live progress deliberately shown behind newer status', () => {
+    const rows = renderTimelineItems(projectTimeline([start(), progress(9),
+      event(12, 'server_notice', { message: 'Newer durable status.' })], []))
+    const status = rows.find(row => row.kind === 'system' && row.event.type === 'server_notice')!
+    const user = rows.find(row => row.kind === 'message' && row.role === 'user')!
+    const activity = rows.filter(row => row.kind === 'progress')
+    const sent = renderTimelineItems(projectTimeline([message(10)], []))[0]
+    const presented = interleaveChronologicalSystemRows([user, status, ...activity, sent])
+    expect(presented.map(row => row.kind)).toEqual(['message', 'system', 'progress', 'system', 'progress'])
+    expect(visibleOrder(presented)).toEqual(['user:1', 'activity:9', 'delivery:10'])
+    expect(presented.at(-1)).toMatchObject({ kind: 'progress', active: true, events: [] })
   })
 
   it('keeps a second send and a started reply separate while work continues around each', () => {

@@ -127,6 +127,39 @@ describe('authoritative live status outside loaded timeline history', () => {
     expect(useAppStore.getState().snapshots[SESSION_ID].events).toEqual([...records, importedFinish, activity])
   })
 
+  it('keeps one keyed live activity after peer mail while a reasoning snapshot settles', () => {
+    const records = [
+      event(1, 'turn_started', { run_id: 'current-native-run', prompt: 'Check the live chronology' }),
+      event(2, 'reasoning_summary', { run_id: 'current-native-run', item_id: 'before', text: 'Before peer mail' }),
+      { ...completedHistory()[3], id: 'edge-3', seq: 3 },
+      event(4, 'tool_started', { run_id: 'current-native-run', tool_id: 'tool', tool: { name: 'read_file' } })
+    ]
+    const item = { run_id: 'current-native-run', item_id: 'live-summary', backend: 'codex' as const,
+      phase: 'summary' as const, text: 'Working after peer mail', ts: records[3].ts, after_seq: 4 }
+    useAppStore.setState({ snapshots: { [SESSION_ID]: {
+      ...snapshot(records), reasoningStream: {
+        type: 'reasoning_summary_stream', session_id: SESSION_ID, instance_id: 'synthetic-stream', revision: 1, items: [item]
+      }
+    } } })
+    const error = vi.spyOn(console, 'error').mockImplementation(() => {})
+    const { container } = render(<Timeline />)
+    const keys = harness.rows.map(row => row.key)
+    expect(new Set(keys).size).toBe(keys.length)
+    expect(harness.rows.map(row => row.kind)).toEqual(['message', 'progress', 'system', 'progress'])
+    expect(harness.rows.filter(row => row.kind === 'progress' && row.active)).toHaveLength(1)
+    expect(harness.rows.at(-1)).toMatchObject({ kind: 'progress', afterSeq: 3, events: [
+      { type: 'tool_started' }, { item_id: 'live-summary' }
+    ] })
+    expect(container.querySelectorAll('.chat-inbox-group')).toHaveLength(1)
+    expect(error.mock.calls.some(call => call.some(value => String(value).includes('same key')))).toBe(false)
+    act(() => useAppStore.setState({ snapshots: { [SESSION_ID]: snapshot([...records,
+      event(5, 'reasoning_summary', { run_id: item.run_id, item_id: item.item_id,
+        text: item.text, reasoning_after_seq: item.after_seq })]) } }))
+    expect(harness.rows.map(row => row.key)).toEqual(keys)
+    expect(harness.rows.filter(row => row.kind === 'progress' && row.active)).toHaveLength(1)
+    expect(container.querySelectorAll('.chat-inbox-group')).toHaveLength(1)
+  })
+
   it.each([false, true])('does not infer this chat is running from provider activity or another owner (other owner: %s)', otherOwner => {
     const providerActive: Session = { ...session, codex_thread_status: { type: 'active', activeFlags: [] } }
     useAppStore.setState({ sessions: [providerActive], snapshots: { [SESSION_ID]: { ...snapshot(completedHistory()), session: providerActive } },

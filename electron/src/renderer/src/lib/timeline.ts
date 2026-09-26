@@ -1672,7 +1672,7 @@ function systemRowBelongsToTurn(row: SystemItem, turn: TurnItem | undefined): bo
  * merge them by their immutable first-arrival anchor after flattening. Job
  * cards and ordinary status rows retain their existing presentation semantics.
  */
-function interleaveChronologicalSystemRows(rows: RenderTimelineItem[]): RenderTimelineItem[] {
+export function interleaveChronologicalSystemRows(rows: RenderTimelineItem[]): RenderTimelineItem[] {
   const chronological = rows.filter(isChronologicalSystemRow)
   if (!chronological.length) return rows
   return groupAdjacentMailboxRows(interleaveAnchoredRows(
@@ -1794,15 +1794,18 @@ function interleaveAnchoredRows(
   // linear and retain their render-item identities.
   if (!anchoredRows.length) return contentRows
 
-  // Most rows are sequence ordered, but live progress is deliberately moved
-  // to the presentation edge and can therefore have a lower sequence than a
-  // preceding row. For every anchored row, find the last presented content
-  // row at or before its sequence, then rebuild from insertion buckets. This
-  // preserves all non-compaction presentation order in O(n log n) rather than
-  // rescanning/splicing the full timeline for every marker.
-  const content = contentRows.map((row, contentIndex) => ({ row, contentIndex }))
+  // Expanding a turn can leave earlier audit/status rows after its final
+  // answer. Preserve those rows' presentation without letting their old
+  // sequences pull intervening mail below the answer. Live progress keeps
+  // its own anchor even when deliberately presented behind newer content.
+  // Insertion buckets preserve content order in O(n log n).
+  let latestContentSequence = Number.NEGATIVE_INFINITY
+  const content = contentRows.map((row, contentIndex) => {
+    latestContentSequence = Math.max(latestContentSequence, row.seq)
+    return { row, contentIndex, seq: row.kind === 'system' ? latestContentSequence : row.seq }
+  })
   const contentBySequence = [...content]
-    .sort((left, right) => left.row.seq - right.row.seq || left.contentIndex - right.contentIndex)
+    .sort((left, right) => left.seq - right.seq || left.contentIndex - right.contentIndex)
   const anchored = anchoredRows
     .map((row, index) => ({ row, index }))
     .sort((left, right) => left.row.seq - right.row.seq || left.index - right.index)
@@ -1815,8 +1818,8 @@ function interleaveAnchoredRows(
   for (const candidate of anchored) {
     while (
       contentCursor < contentBySequence.length
-      && (contentBySequence[contentCursor].row.seq < candidate.row.seq
-        || contentBySequence[contentCursor].row.seq === candidate.row.seq
+      && (contentBySequence[contentCursor].seq < candidate.row.seq
+        || contentBySequence[contentCursor].seq === candidate.row.seq
           && !(contentBySequence[contentCursor].row.kind === 'progress'
             && (contentBySequence[contentCursor].row as ProgressItem).afterSeq === candidate.row.seq))
     ) {
