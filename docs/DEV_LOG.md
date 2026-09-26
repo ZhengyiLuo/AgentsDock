@@ -1,5 +1,19 @@
 # Public development log
 
+## 2026-09-26 — Reserve an unmerged product-pipeline test candidate
+
+- Reserve desktop and server `1.0.7-beta.15`, desktop build `1217`, for an
+  explicitly authorized artifact-only signing and local packaging exercise.
+  Keep this candidate on a separate test release branch, without merging the
+  product-pipeline PR or changing the default branch.
+- Reuse the established server signing key inside the standalone repository's
+  controlled CI; upload only the signed npm/legacy packages and bundle receipt.
+  No npm publication, GitHub release drafts, service deployment, installation,
+  Apple upload or public release is authorized by this test.
+- Package acceptance and native update acceptance remain pending. The local
+  desktop test build will disable automatic updates and cannot establish the
+  phase-two one-click app/server update journey.
+
 ## 2026-09-26 — Prepare a unified desktop and server release pipeline
 
 - Add a manual product preparation/publication workflow deriving desktop,
