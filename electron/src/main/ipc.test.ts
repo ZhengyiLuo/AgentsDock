@@ -781,7 +781,7 @@ describe('native file IPC registration', () => {
   it('binds chooser, staging, and upload calls to the trusted renderer identity', async () => {
     const methods = {
       chooseFiles: vi.fn().mockResolvedValue([]),
-      stageNativeFile: vi.fn().mockResolvedValue({ path: '/tmp/native.txt', name: 'native.txt', size: 1 }),
+      stageNativeFiles: vi.fn().mockResolvedValue([{ path: '/tmp/native.txt', name: 'native.txt', size: 1 }]),
       stageClipboardImage: vi.fn().mockReturnValue({ path: '/tmp/image.png', name: 'image.png', size: 1 }),
       uploadFiles: vi.fn().mockResolvedValue([])
     }
@@ -792,12 +792,12 @@ describe('native file IPC registration', () => {
     const bytes = new ArrayBuffer(1)
 
     await harness.handlers.get('files:choose')?.(trustedEvent)
-    await harness.handlers.get('files:stage-native')?.(trustedEvent, '/tmp/native.txt')
+    await harness.handlers.get('files:stage-native-batch')?.(trustedEvent, ['/tmp/native.txt'])
     await harness.handlers.get('files:stage-clipboard')?.(trustedEvent, bytes, 'image.png', 'image/png')
     await harness.handlers.get('files:upload')?.(trustedEvent, 'chat-a', ['/tmp/image.png'])
 
     expect(methods.chooseFiles).toHaveBeenCalledWith(1)
-    expect(methods.stageNativeFile).toHaveBeenCalledWith(1, '/tmp/native.txt')
+    expect(methods.stageNativeFiles).toHaveBeenCalledWith(1, ['/tmp/native.txt'])
     expect(methods.stageClipboardImage).toHaveBeenCalledWith(1, bytes, 'image.png', 'image/png')
     expect(methods.uploadFiles).toHaveBeenCalledWith(1, 'chat-a', ['/tmp/image.png'])
   })
