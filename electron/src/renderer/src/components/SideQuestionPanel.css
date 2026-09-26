@@ -46,7 +46,8 @@
 .side-chat-error { margin: 0 0 var(--space-4); color: var(--danger); font-size: var(--text-size-meta); line-height: var(--line-height-relaxed); }
 .side-chat .visually-hidden { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 .chat-workspace-composer { position: relative; min-width: 0; }
-.side-chat-anchor { position: absolute; right: var(--space-7); top: calc(-1 * var(--space-4)); z-index: 13; }
+/* Follow the composer's 17px gutters and 1120px maximum width. */
+.side-chat-anchor { position: absolute; right: max(17px, calc((100% - 1120px) / 2)); top: calc(-1 * var(--space-4)); z-index: 13; }
 .side-chat-anchor + .composer-dock > .composer-context-row { padding-right: calc(var(--control-height-lg) + var(--space-4)); }
 .side-chat-trigger { width: var(--control-height-lg); height: var(--control-height-lg); background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-control); box-shadow: var(--shadow-tooltip); }
 .side-chat-trigger.active { color: var(--accent); border-color: var(--accent); }
