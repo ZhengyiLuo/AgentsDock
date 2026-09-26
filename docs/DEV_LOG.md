@@ -20,6 +20,44 @@
   their renewal/termination behavior needs separate validation. Removing
   auth-status probes does not establish that all catalog work is passive.
 
+## 2026-09-25 — Repair shared-chat files and live recovery
+
+- Restore the combined link-and-token copy action alongside individual copy
+  buttons. Shared-browser attachments support downloads, image previews, and
+  ordinary uploads through the existing session-owned file pipeline.
+- Remove browser-only attachment count, upload-size and lifetime quotas, and
+  transcript/snapshot size rejection. Keep complete messages in paginated
+  snapshots; migrate existing size constraints atomically without changing
+  stored links, tokens or the database version.
+- Drag-and-drop and paste use the same upload path as the chooser, without the
+  leftover four-file/eight-MiB restriction. Match browser submissions to their
+  existing request receipts so signed attachment IDs do not leave a duplicate
+  Submitted bubble after acceptance.
+- A temporary live-stream error now permits the browser's existing reconnect
+  behavior instead of falsely declaring the share unavailable. Actual
+  revocation still ends access.
+- Pass 216 affected server tests, including migration rollback, attachment
+  ownership, downloads and transient live-stream recovery. Verify real HTTP
+  sharing of a complete 3.64 MB message while excluding a 2.66 MB private tool
+  record. Preserve an existing share byte-for-byte through database migration.
+- In an isolated Chromium browser against the actual server and Codex provider,
+  drop six files including 9 MiB text, an empty file and an image; preview, send,
+  read them with the provider, and download unchanged bytes. Publish and download
+  a new output through its Markdown link. Repeat a single-file drop onto the
+  conversation, complete a tool-backed follow-up, and observe one accepted
+  message without a lingering Submitted bubble. Running, completion and server
+  reconnect states work. No provider or server mock is used for these checks.
+- Verify the combined copy action through signed local desktop
+  `1.0.7-beta.13`, build `1215`, from source `4caf335`, including native
+  IPC/HTTP and exact clipboard contents. Its 4,894 desktop tests, type checking, production compilation,
+  package audit and signature checks pass. Follow-up drop/submission fixes pass
+  28 shared-chat and 23 desktop send tests plus type checking. The server-hosted
+  browser bundle is rebuilt. No deployment or public release.
+- Integrate browser follow-up `4f95a99` with current main at `8430ba6`; pass 273
+  affected server, catalog and packaging tests. Stop isolated services, revoke
+  test shares, remove temporary credentials, and verify the original provider
+  credentials remain unchanged.
+
 ## 2026-09-25 — Carry forward the provider Delete/release checklist
 
 - Port the documentation-only acceptance criterion from AgentsServer PR #117

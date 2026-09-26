@@ -2410,6 +2410,8 @@ export interface SendTurnInput {
   sessionId: string
   prompt: string
   fileIds: string[]
+  /** Browser-local correlation with the shared chat's existing acceptance receipt. */
+  sharedChatRequestId?: string
   model?: string | null
   effort?: string | null
   clientCapabilities?: string[]

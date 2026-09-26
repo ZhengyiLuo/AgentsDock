@@ -18,6 +18,7 @@ import { agentFileBelongsToSession, isolateSessionEvent, isolateSessionSnapshot 
 import { isImportedClaudeControlCompanion, isImportedCodexRuntimeContext, isImportedHistoryRecord, isImportedProviderControlMetadata, isImportedProviderInterruption, mergeProviderInterruptionEvent } from '@shared/provider-origin'
 import { isReasoningSummaryStream } from '@shared/reasoning-stream'
 import { trackEvent } from '../lib/analytics'
+import { secureRandomUUID } from '../lib/browser-crypto'
 import { nudgeChatFontSize, setChatFontFamily, setChatFontSize } from '../lib/chat-font'
 import { activeEmergencyAlert } from '../lib/emergency-alert'
 import { isUntouchedNewChat, navigableSessions } from '../lib/sessions'
@@ -97,6 +98,7 @@ interface PendingTurnSubmissionInput {
 
 export interface PendingTurnSubmission {
   token: string
+  sharedChatRequestId?: string
   prompt: string
   files: AgentFile[]
   uploadPaths: NativeFileRef[]
@@ -1796,6 +1798,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       phase: 'submitting'
     } : {
       token: admissionToken,
+      ...(window.agentsDock.sharedChat ? { sharedChatRequestId: secureRandomUUID() } : {}),
       prompt,
       files: uploads.map(file => ({ ...file })),
       uploadPaths: uploadPaths.map(file => ({ ...file })),
@@ -1826,6 +1829,7 @@ export const useAppStore = create<AppState>((set, get) => ({
         sessionId,
         prompt,
         fileIds: uploads.map(file => file.id),
+        ...(pendingSubmission.sharedChatRequestId ? { sharedChatRequestId: pendingSubmission.sharedChatRequestId } : {}),
         model: session?.model,
         effort: session?.effort,
         clientCapabilities: interactiveClientCapabilities(session, get().health, Boolean(options?.skillSelection)),
@@ -3919,6 +3923,7 @@ function pendingTurnSubmissionFromState(
   const session = state.sessions.find(candidate => candidate.id === sessionId)
   return {
     token,
+    ...(window.agentsDock.sharedChat ? { sharedChatRequestId: secureRandomUUID() } : {}),
     prompt: rawPrompt.trim(),
     files: (consumeComposer ? state.uploadsBySession[sessionId] ?? [] : []).map(file => ({ ...file })),
     uploadPaths: (consumeComposer ? state.uploadPathsBySession[sessionId] ?? [] : []).map(file => ({ ...file })),
@@ -3950,6 +3955,9 @@ export function pendingTurnSubmissionAccepted(pending: PendingTurnSubmission, ev
   const pendingFileIds = pending.files.map(file => file.id).sort()
   return events.some(event => {
     if (event.seq <= pending.afterSeq || !PENDING_TURN_ACCEPTANCE_TYPES.has(event.type)) return false
+    // Shared attachment handles intentionally differ from temporary upload
+    // IDs. The server echoes this exact browser request identity on its event.
+    if (pending.sharedChatRequestId) return event.shared_chat_request_id === pending.sharedChatRequestId
     const prompt = (event.prompt ?? event.message ?? '').trim()
     const fileIds = [...(event.file_ids ?? [])].sort()
     return prompt === pending.prompt

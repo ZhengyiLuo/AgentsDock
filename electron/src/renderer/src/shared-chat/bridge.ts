@@ -1,7 +1,7 @@
 import type { AgentsDockAPI } from '@shared/ipc'
 import { secureRandomUUID } from '../lib/browser-crypto'
 import { copySharedChatText } from './clipboard'
-import { isSharedVideoId, projectSharedVideoEvents } from './videos'
+import { isSharedFileId, isSharedVideoId, projectSharedVideoEvents } from './videos'
 import type { AgentFile, AppEventMap, ClaudeRuntimeSnapshot, CodexGoalSnapshot, CodexRuntimeSnapshot, Event, Health, Job, LanguageSettingsSnapshot, NativeFileRef, QueuedTurn, RuntimeCatalog, Session, SessionSnapshot, TimelinePage, TimelineTracePage, ViewState } from '@shared/types'
 
 /** The server emits native DTOs, scoped and sanitized for the one redeemed chat. */
@@ -64,6 +64,7 @@ export function createSharedChatBridge(
   const preferences = new Map<string, unknown>()
   const staged = new Map<string, File>()
   const uploaded = new Map<string, AgentFile>()
+  const uploadPreviews = new Map<string, string>()
   const videos = new Map<string, AgentFile>()
   const listeners = new Map<string, Set<(value: never) => void>>()
   const emit = <K extends keyof AppEventMap>(name: K, value: AppEventMap[K]) => {
@@ -242,10 +243,24 @@ export function createSharedChatBridge(
       eventsTotal: value.eventsTotal, semanticPaging: true, historyVerified: true, cachedAt: Date.now(), viewState }
   }
   const stage = (file: File): NativeFileRef => {
-    if (staged.size >= 4 || file.size > 8 * 1024 * 1024) throw new Error('Choose at most 4 files, up to 8 MiB each.')
     const path = `guest-upload:${secureRandomUUID()}`
     staged.set(path, file)
     return { path, name: file.name, size: file.size, type: file.type }
+  }
+  async function saveFile(id: string, file: AgentFile): Promise<string> {
+    exact(id)
+    const known = videos.get(file.id)
+    if (!known || (file.session_id && file.session_id !== id)) return denied()
+    const url = `${prefix}/files/${encodeURIComponent(known.id)}`
+    // The same-origin browser request carries the share cookie; the server
+    // authorizes that GET and streams directly to the download manager.
+    const link = document.createElement('a')
+    link.href = url
+    link.download = known.filename
+    document.body.append(link)
+    link.click()
+    link.remove()
+    return url
   }
   const group = <T extends object>(methods: T): T => new Proxy(methods, { get: (target, key) => key in target ? Reflect.get(target, key) : unsupported })
   const methods = {
@@ -257,10 +272,10 @@ export function createSharedChatBridge(
     runtime: group({ catalog: async (_refresh?: boolean) => discoverRuntimeCatalog() }),
     sessions: group({ list: async () => [current().session], update: async (id: string, patch: Record<string, unknown>) => { exact(id); const allowed = new Set(['title', 'model', 'effort', 'system_prompt', 'codex_approval_policy', 'codex_sandbox_mode', 'codex_permission_profile', 'codex_approvals_reviewer', 'claude_permission_mode', 'cursor_permission_mode', 'provider_jobs_access']); const payload = Object.fromEntries(Object.entries(patch).filter(([, value]) => value !== undefined)); if (Object.keys(payload).some(key => !allowed.has(key))) denied(); await action('settings.update', payload); return current().session }, markRead: async (id: string) => { exact(id); return current().session } }),
     timeline: group({ cached: async (id: string) => { exact(id); return snapshot() }, open: async (id: string) => { exact(id); await refresh(); return snapshot() }, older: async (id: string, before: number, limit = 100) => { exact(id); return timelinePage('timeline.older', { before, limit }) }, historicalOlder: async (id: string, before: number, limit = 100) => { exact(id); return timelinePage('timeline.older', { before, limit }) }, around: async (id: string, anchorSeq: number, limit = 100) => { exact(id); return timelinePage('timeline.around', { anchor_seq: anchorSeq, limit }) }, trace: tracePage, index: async (id: string) => { exact(id); return action('timeline.index', {}, true) }, subscribe: async (id: string) => { exact(id) }, unsubscribe: async (id: string) => { exact(id) }, saveViewState: async (_scope: unknown, value: ViewState) => { exact(value.sessionId); viewState = value }, getViewState: async (_scope: unknown, id: string) => { exact(id); return viewState }, search: async (id: string) => { exact(id); return [] } }),
-    turns: { send: async (input: { sessionId: string; prompt: string; fileIds: string[]; chatReferences?: unknown[]; teamReferences?: unknown[]; skillSelection?: unknown }) => {
+    turns: { send: async (input: { sessionId: string; prompt: string; fileIds: string[]; sharedChatRequestId?: string; chatReferences?: unknown[]; teamReferences?: unknown[]; skillSelection?: unknown }) => {
       exact(input.sessionId)
-      if (input.chatReferences?.length || input.teamReferences?.length || input.skillSelection || input.fileIds.length > 4 || input.fileIds.some(id => !uploaded.has(id))) denied()
-      const requestId = secureRandomUUID()
+      if (input.chatReferences?.length || input.teamReferences?.length || input.skillSelection || input.fileIds.some(id => !uploaded.has(id))) denied()
+      const requestId = input.sharedChatRequestId ?? secureRandomUUID()
       const result = await write('/prompts', { method: 'POST', body: JSON.stringify({ prompt: input.prompt, upload_ids: input.fileIds, request_id: requestId }) }, value =>
         value?.accepted === true && value.request_id === requestId && typeof value.queued === 'boolean'
         && (value.queued ? typeof value.queued_id === 'string' && /^[A-Za-z0-9_.-]{1,128}$/.test(value.queued_id) : value.queued_id === undefined))
@@ -293,10 +308,6 @@ export function createSharedChatBridge(
         input.onchange = () => {
           try {
             const files = Array.from(input.files ?? [])
-            // Validate the entire selection before staging any file.
-            if (files.length + staged.size > 4 || files.some(file => file.size > 8 * 1024 * 1024)) {
-              throw new Error('Choose at most 4 files, up to 8 MiB each.')
-            }
             resolve(files.map(stage))
           } catch (error) { reject(error) }
           finally { input.remove() }
@@ -321,21 +332,27 @@ export function createSharedChatBridge(
             && typeof value.media_type === 'string' && value.byte_size === file.size)
           const item = { id: value.id, session_id: id, filename: value.name, content_type: value.media_type, size: value.byte_size } as AgentFile
           uploaded.set(item.id, item)
+          if (/^(image|video)\//.test(file.type)) uploadPreviews.set(item.id, URL.createObjectURL(file))
           staged.delete(path)
           result.push(item)
         }
         return result
         } finally {
           // The native composer removes failed batch chips. Release only the
-          // browser staging handles; server uploads/quota are never erased.
+          // browser staging handles; server uploads are never erased.
           for (const path of paths) staged.delete(path)
         }
       },
       mediaURL: (profileId: string, generation: number, id: string, fileId: string) => {
-        if (disposed || terminalError || !state || profileId !== 'shared-chat' || generation !== 1 || id !== state.session.id
-          || !isSharedVideoId(fileId) || !videos.has(fileId)) return ''
+        if (disposed || terminalError || !state || profileId !== 'shared-chat' || generation !== 1 || id !== state.session.id) return ''
+        if (uploadPreviews.has(fileId)) return uploadPreviews.get(fileId)!
+        const file = videos.get(fileId)
+        if (!file || (!isSharedVideoId(fileId) && (!isSharedFileId(fileId)
+          || !['image/png', 'image/jpeg', 'image/gif', 'image/webp', 'image/avif', 'image/bmp'].includes(file.content_type ?? '')))) return ''
         return `${prefix}/media/${encodeURIComponent(fileId)}`
       },
+      save: saveFile,
+      open: async (id: string, file: AgentFile) => { await saveFile(id, file) },
       list: async (id: string) => { exact(id); const files = [...videos.values()]; return { files, total: files.length, has_more: false } },
       findEvent: async (id: string) => { exact(id); return null }
     })
@@ -443,6 +460,8 @@ export function createSharedChatBridge(
       listeners.clear()
       staged.clear()
       uploaded.clear()
+      for (const url of uploadPreviews.values()) URL.revokeObjectURL(url)
+      uploadPreviews.clear()
       videos.clear()
       discoveredCatalog = null
     }

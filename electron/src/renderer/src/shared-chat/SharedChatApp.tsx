@@ -5,7 +5,7 @@ import { t } from '@shared/i18n'
 import type { SharedChatConnectionStatus, SharedChatState } from './bridge'
 import { useLocale } from '../lib/i18n'
 import { nativeFileRefsFromFiles } from '../lib/native-files'
-import { useAppStore } from '../store/app-store'
+import { pendingTurnSubmissionAccepted, useAppStore } from '../store/app-store'
 import { Timeline } from '../components/Timeline'
 import { Composer } from '../components/Composer'
 import { CodexRuntimeProvider } from '../components/CodexRuntimeContext'
@@ -49,6 +49,12 @@ export function receiveSharedChatState(value: SharedChatState, prefix: string) {
     const firstSeq = value.events[0]?.seq
     const prefixEvents = !reset && firstSeq != null ? (old?.events ?? []).filter(event => event.seq < firstSeq) : []
     const events = [...prefixEvents, ...value.events]
+    const pending = previous.pendingTurnSubmissions[session.id]
+    const accepted = pending && (pendingTurnSubmissionAccepted(pending, events)
+      || (pending.phase !== 'preflight' && pending.sharedChatRequestId
+        && value.queue.some(turn => turn.shared_chat_request_id === pending.sharedChatRequestId)))
+    const pendingTurnSubmissions = accepted ? { ...previous.pendingTurnSubmissions } : previous.pendingTurnSubmissions
+    if (accepted) delete pendingTurnSubmissions[session.id]
     return {
       initialized: true, activeProfileId: 'shared-chat', profileGeneration: 1,
       profiles: [{ id: 'shared-chat', name: 'Shared chat', serverUrl: location.origin, serverIdentity: prefix,
@@ -59,6 +65,7 @@ export function receiveSharedChatState(value: SharedChatState, prefix: string) {
       syncBySession: { [session.id]: previous.syncBySession[session.id] ?? { status: 'cached', error: null } },
       syncStatus: previous.syncBySession[session.id]?.status ?? 'cached',
       activeSessionIds: new Set(value.active ? [session.id] : []),
+      pendingTurnSubmissions,
       snapshots: { [session.id]: { session, events, queuedTurns: value.queue, files: value.files ?? [], filesTotal: value.files?.length ?? 0,
         hasMoreEvents: prefixEvents.length ? old?.hasMoreEvents === true : value.hasMoreEvents === true,
         nextTimelineBefore: prefixEvents.length ? old?.nextTimelineBefore : value.nextTimelineBefore,

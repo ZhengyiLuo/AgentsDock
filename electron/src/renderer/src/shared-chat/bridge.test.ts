@@ -142,6 +142,49 @@ describe('the restricted shared browser bridge', () => {
     for (let index = 0; index < 4; index++) await expect(bridge.api.files.stageNativeFile(new File(['synthetic'], `replacement-${index}.txt`))).resolves.toBeTruthy()
     expect(request).toHaveBeenCalledTimes(2)
   })
+  it('uploads more than four files including files above 8 MiB and sends their share-owned IDs', async () => {
+    let index = 0
+    const request = vi.fn(async (url: RequestInfo | URL, init?: RequestInit) => {
+      if (String(url).endsWith('/state')) return new Response(JSON.stringify(state))
+      if (String(url).endsWith('/uploads')) {
+        const file = init?.body as File
+        return new Response(JSON.stringify({ id: `upload_${++index}`, name: file.name, media_type: file.type || 'application/octet-stream', byte_size: file.size }))
+      }
+      const value = JSON.parse(String(init?.body))
+      return new Response(JSON.stringify({ accepted: true, request_id: value.request_id, queued: false }))
+    })
+    const bridge = createSharedChatBridge(prefix, vi.fn(), vi.fn(), request)
+    await bridge.refresh()
+    const files = Array.from({ length: 6 }, (_, index) => new File([index === 0 ? new Uint8Array(9 * 1024 * 1024) : 'synthetic'], `file-${index}.bin`))
+    const refs = await Promise.all(files.map(file => bridge.api.files.stageNativeFile(file)))
+    const uploaded = await bridge.api.files.upload(state.session.id, refs.map(ref => ref!.path))
+    expect(uploaded).toHaveLength(6)
+    const upload = request.mock.calls.find(([url]) => String(url).endsWith('/uploads'))!
+    expect(upload[1]).toMatchObject({ credentials: 'same-origin', headers: { 'X-Chat-CSRF': 'synthetic-csrf', 'Content-Type': 'application/octet-stream', 'X-Chat-Filename': 'file-0.bin' } })
+    expect(upload[1]?.body).toBe(files[0])
+    await bridge.api.turns.send({ sessionId: state.session.id, prompt: 'Read these files', fileIds: uploaded.map(file => file.id) })
+    const sent = request.mock.calls.find(([url]) => String(url).endsWith('/prompts'))!
+    expect(JSON.parse(String(sent[1]?.body)).upload_ids).toEqual(uploaded.map(file => file.id))
+    await expect(bridge.api.turns.send({ sessionId: state.session.id, prompt: 'Wrong file', fileIds: ['file_native'] })).rejects.toThrow('not available')
+    bridge.close()
+  })
+  it('previews uploaded images locally and releases the browser URLs when closed', async () => {
+    const createURL = vi.fn(() => 'blob:synthetic-upload')
+    const revokeURL = vi.fn()
+    vi.stubGlobal('URL', class extends URL { static createObjectURL = createURL; static revokeObjectURL = revokeURL })
+    const request = vi.fn(async (url: RequestInfo | URL) => new Response(JSON.stringify(String(url).endsWith('/state') ? state
+      : { id: 'upload_image', name: 'image.png', media_type: 'image/png', byte_size: 5 })))
+    const bridge = createSharedChatBridge(prefix, vi.fn(), vi.fn(), request)
+    await bridge.refresh()
+    const file = new File(['image'], 'image.png', { type: 'image/png' })
+    const staged = await bridge.api.files.stageNativeFile(file)
+    const [uploaded] = await bridge.api.files.upload(state.session.id, [staged!.path])
+    expect(bridge.api.files.mediaURL('shared-chat', 1, state.session.id, uploaded.id)).toBe('blob:synthetic-upload')
+    expect(createURL).toHaveBeenCalledWith(file)
+    expect(bridge.api.files.mediaURL('shared-chat', 1, 'another-chat', uploaded.id)).toBe('')
+    bridge.close()
+    expect(revokeURL).toHaveBeenCalledWith('blob:synthetic-upload')
+  })
   it('retains the discovered model choices across live baseline snapshots for this chat', async () => {
     class Stream extends EventTarget { static instance: Stream; close = vi.fn(); constructor() { super(); Stream.instance = this } }
     vi.stubGlobal('EventSource', Stream)
@@ -231,7 +274,7 @@ describe('the restricted shared browser bridge', () => {
     expect(runtimeSelectionError(received.health, received.runtime_catalog, 'cursor', received.session.model)).toBeNull()
     bridge.close()
   })
-  it('rejects an oversized chooser batch without leaving a pending promise or partially staging it', async () => {
+  it('stages the complete chooser selection without a shared-chat-only four-file limit', async () => {
     const request = vi.fn(async (_url: RequestInfo | URL, _init?: RequestInit) => new Response(JSON.stringify(state)))
     const bridge = createSharedChatBridge(prefix, vi.fn(), vi.fn(), request)
     await bridge.refresh()
@@ -239,7 +282,7 @@ describe('the restricted shared browser bridge', () => {
       Object.defineProperty(this, 'files', { value: Array.from({ length: 5 }, (_, index) => new File(['synthetic'], `file-${index}.txt`)) })
       this.dispatchEvent(new Event('change'))
     })
-    await expect(bridge.api.files.choose()).rejects.toThrow('at most 4 files')
+    await expect(bridge.api.files.choose()).resolves.toHaveLength(5)
     for (let index = 0; index < 4; index++) await expect(bridge.api.files.stageNativeFile(new File(['synthetic'], `valid-${index}.txt`))).resolves.toMatchObject({ name: `valid-${index}.txt` })
     expect(request).toHaveBeenCalledTimes(1)
   })

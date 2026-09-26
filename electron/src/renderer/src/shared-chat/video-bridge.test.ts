@@ -20,6 +20,41 @@ const url = (bridge: ReturnType<typeof createSharedChatBridge>, id = video.id, s
 afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals() })
 
 describe('shared video bridge admission', () => {
+  it('downloads advertised chat attachments with the browser and previews only supported media', async () => {
+    const documents = ['text/plain', 'image/png', 'text/html'].map((content_type, index) => ({
+      id: `shared_file_YXR0YWNobWVudA${index}.${'c'.repeat(64)}`, filename: `attachment-${index}.bin`, content_type, size: 12
+    }))
+    const initial = { ...state, events: [{ ...event(1, 'turn_started'), shared_files: documents }] }
+    const request = vi.fn(async () => new Response(JSON.stringify(initial)))
+    const downloads: Array<{ href: string; name: string }> = []
+    vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(function (this: HTMLAnchorElement) {
+      downloads.push({ href: this.getAttribute('href')!, name: this.download })
+    })
+    const bridge = createSharedChatBridge(prefix, vi.fn(), vi.fn(), request)
+    await bridge.refresh()
+    for (const file of bridge.snapshot().files) {
+      await bridge.api.files.save(state.session.id, { ...file, filename: 'untrusted-override' })
+      expect(downloads.at(-1)).toEqual({ href: `${prefix}/files/${file.id}`, name: file.filename })
+    }
+    expect(request).toHaveBeenCalledTimes(1) // Downloads use the browser, without a preflight request.
+    expect(url(bridge, documents[0].id)).toBe('')
+    expect(url(bridge, documents[1].id)).toBe(`${prefix}/media/${documents[1].id}`)
+    expect(url(bridge, documents[2].id)).toBe('')
+    expect(document.querySelector('a[download]')).toBeNull()
+    await expect(bridge.api.files.save(state.session.id, { id: 'file_native', filename: 'private' })).rejects.toThrow('not available')
+    await expect(bridge.api.files.save('another-chat', bridge.snapshot().files[0])).rejects.toThrow('not available')
+    bridge.close()
+  })
+  it('does not start downloads after this shared chat is closed', async () => {
+    const request = vi.fn(async () => new Response(JSON.stringify({ ...state, events: [event(1, 'artifact_created')] })))
+    const click = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {})
+    const bridge = createSharedChatBridge(prefix, vi.fn(), vi.fn(), request)
+    await bridge.refresh()
+    const file = bridge.snapshot().files[0]
+    bridge.close()
+    await expect(bridge.api.files.save(state.session.id, file)).rejects.toThrow('not available')
+    expect(click).not.toHaveBeenCalled()
+  })
   it('exposes only event-advertised videos through the same share path, without any extra request', async () => {
     const initial = { ...state, events: [event(3, 'artifact_created')], files: [{ id: 'raw-server-file', filename: 'private.mp4' }] }
     const request = vi.fn(async () => new Response(JSON.stringify(initial)))
@@ -36,7 +71,6 @@ describe('shared video bridge admission', () => {
     expect(receive.mock.calls[0][0].events[0].artifact).toEqual(bridge.snapshot().files[0])
     expect(await bridge.api.files.list(state.session.id)).toMatchObject({ files: bridge.snapshot().files, total: 1, has_more: false })
     await expect(bridge.api.files.list('another-chat')).rejects.toThrow('not available')
-    await expect(bridge.api.files.open(state.session.id, bridge.snapshot().files[0])).rejects.toThrow('not available')
     await expect(bridge.api.files.openLinked(state.session.id, '/private/movie.mp4')).rejects.toThrow('not available')
     expect(request).toHaveBeenCalledTimes(1)
     bridge.close(); expect(url(bridge)).toBe('')
