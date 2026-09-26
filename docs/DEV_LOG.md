@@ -1,5 +1,28 @@
 # Public development log
 
+## 2026-09-26 — Retain custom-endpoint reasoning summary support
+
+- Preserve explicitly advertised summary support across server restarts. Keep
+  evidence scoped to the saved endpoint, credentials and exact model, with
+  explicit rejections taking precedence over advertised support.
+- A successful native request with summaries enabled establishes parameter
+  support even when that answer contains no summary. Keep the existing app's
+  "summaries returned" result reserved for actual text, including completed
+  string and object summary formats. Unknown support remains unverified.
+- Pass 55 isolated provider/store/router/session regressions, including empty
+  successful answers, failed and interrupted requests, restart persistence,
+  pinned credential revisions and unaffected normal-account settings.
+- Exercise signed desktop `1.0.7-beta.14`, build `1216`, through native Settings
+  input, production IPC/HTTP, an isolated server and the actual custom provider
+  using Codex `0.153.4`. The model check passes and persists summary support;
+  two subsequent chat turns complete. A provider summary streams visibly with
+  Show reasoning traces enabled and collapses after completion. A separate
+  Codex `0.156.1` check encounters an endpoint stream disconnection before the
+  summary probe; that runtime/provider combination is not accepted here.
+- Availability: server source only; no production deployment, app rebuild or
+  public release. Existing apps can use the correction after the server update
+  and a successful model check where capability evidence is missing.
+
 ## 2026-09-26 — Restore ordinary steering during active Codex goals
 
 - Send goal follow-ups to the existing native turn even when the model/effort
