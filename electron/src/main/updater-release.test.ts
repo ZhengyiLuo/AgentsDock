@@ -6,6 +6,7 @@ import { beforeAll, describe, expect, it } from 'vitest'
 describe('direct release contract', () => {
   const packageJSON = JSON.parse(readFileSync(resolve(process.cwd(), 'package.json'), 'utf8')) as {
     main: string
+    version: string
     build: {
       mac: { target: string[]; artifactName: string }
       linux: { target: string[]; artifactName: string; executableArgs: string[] }
@@ -29,7 +30,12 @@ describe('direct release contract', () => {
   const releaseVersionGuard = readFileSync(resolve(process.cwd(), '../scripts/validate_electron_release_version.mjs'), 'utf8')
 
   it('keeps updater artifacts and a public read-only GitHub feed', () => {
-    const expectedChannel = process.env.AGENTSDOCK_RELEASE_TRACK === 'beta' ? 'beta' : 'latest'
+    expect(packageJSON.version).toMatch(/^\d+\.\d+\.\d+(?:-beta\.[1-9]\d*)?$/)
+    const expectedTrack = packageJSON.version.includes('-beta.') ? 'beta' : 'stable'
+    if (process.env.AGENTSDOCK_RELEASE_TRACK) {
+      expect(process.env.AGENTSDOCK_RELEASE_TRACK).toBe(expectedTrack)
+    }
+    const expectedChannel = expectedTrack === 'beta' ? 'beta' : 'latest'
 
     expect(packageJSON.build.mac.target).toEqual(expect.arrayContaining(['zip', 'dmg']))
     expect(packageJSON.build.mac.artifactName).toContain('${version}')
