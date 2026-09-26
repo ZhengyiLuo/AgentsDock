@@ -34,7 +34,7 @@ class PassiveClaudeAuthTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsNone(diagnostic["action"])
         self.command.assert_called_once()
 
-    async def test_http_catalog_refresh_never_authenticates_and_preserves_native_evidence(self):
+    async def test_http_catalog_readiness_never_runs_auth_status_and_preserves_native_evidence(self):
         self.enterContext(patch.object(server, "AGENT_TOKEN", "passive-auth-test-token"))
         self.enterContext(patch.object(server, "VALID_BACKENDS", {"claude"}))
         self.enterContext(patch.object(server, "parse_claude_help_catalog", return_value={

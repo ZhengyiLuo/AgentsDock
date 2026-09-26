@@ -953,14 +953,22 @@ Claude startup, automatic refresh, manual **Recheck CLIs**, and turn admission
 never execute `claude auth status`. Short-lived auth-status commands can start
 OAuth renewal and exit before persisting the replacement credential (see
 [upstream report #95822](https://github.com/anthropics/claude-code/issues/95822)).
-Authentication and renewal stay with real native Claude requests. Before the
-first request, an installed Claude reports `unknown` with `authenticated: null`;
+Authentication readiness is recorded from real native Claude requests. Before
+the first request, an installed Claude reports `unknown` with `authenticated: null`;
 the existing desktop client can still start a chat. Installation checks retain
 the last native authentication result and its original timestamp rather than
 claiming to have checked the account again. A successful request clears the
 previous authentication error. After an external `claude auth login`, retry the
 message; rechecking the installation alone does not prove a successful login.
 The former `AGENTSDOCK_CLAUDE_AUTH_PROBE_TIMEOUT_SECONDS` setting is no longer used.
+
+This removes standalone authentication monitoring, not every native Claude
+process started by the catalog. [Native model discovery](CLAUDE_MODEL_DISCOVERY.md)
+still initializes disposable SDK processes using the native authentication
+environment. Its behavior during token renewal and process termination has not
+been validated by the passive-readiness tests. Do not treat a successful model
+list as authentication evidence or this change as a guarantee against all
+native login failures.
 
 Cursor capability contract v2 advertises the hardened process guard, bounded
 idle warning/timeout lifecycle, and explicit permission-mode semantics.
