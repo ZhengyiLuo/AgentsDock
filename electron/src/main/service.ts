@@ -3969,22 +3969,29 @@ export class AppService {
     }))
     this.assertCurrentScope(scope)
     this.assertRendererGrantEpoch(rendererId, rendererEpoch)
-    this.fileUploadGrants.register(files.map(file => file.path), uploadGrantScope(scope, rendererId))
+    this.fileUploadGrants.registerFreshSelection(files.map(file => file.path), uploadGrantScope(scope, rendererId))
     return files
   }
 
   async stageNativeFile(rendererId: number, path: string): Promise<NativeFileRef> {
+    return (await this.stageNativeFiles(rendererId, [path]))[0]
+  }
+
+  async stageNativeFiles(rendererId: number, paths: string[]): Promise<NativeFileRef[]> {
     const scope = this.captureScope()
     const rendererEpoch = this.captureRendererGrantEpoch(rendererId)
-    const info = await stat(path)
-    if (!info.isFile()) throw new Error('Only regular files can be attached.')
+    const files = await Promise.all(paths.map(async path => {
+      const info = await stat(path)
+      if (!info.isFile()) throw new Error('Only regular files can be attached.')
+      return { path, name: basename(path), size: info.size }
+    }))
     this.assertCurrentScope(scope)
     this.assertRendererGrantEpoch(rendererId, rendererEpoch)
-    // A renderer can retain a native File object, so staging the same object
-    // again must not reset an already chat-bound grant. The explicit native
-    // chooser remains the user-confirmed way to grant it to another chat.
-    this.fileUploadGrants.register([path], uploadGrantScope(scope, rendererId), false)
-    return { path, name: basename(path), size: info.size }
+    // The isolated preload admits this batch only after a fresh trusted drop
+    // or paste gesture and consumes that gesture once. The registry validates
+    // and replaces the entire idle selection atomically.
+    this.fileUploadGrants.registerFreshSelection(paths, uploadGrantScope(scope, rendererId))
+    return files
   }
 
   stageClipboardImage(rendererId: number, data: ArrayBuffer, name: string, type: string): NativeFileRef {
@@ -4025,12 +4032,16 @@ export class AppService {
     const stagedReleases: Array<() => void> = []
     let admittedFiles: ReturnType<FileUploadGrantRegistry['admit']> = []
     try {
+      // Capture the exact main-owned selections before asynchronous profile
+      // validation. If another trusted gesture replaces one while validation
+      // is pending, this upload must fail instead of stealing the new grant.
+      const selectionIds = this.fileUploadGrants.captureAdmission(paths, grantScope, sessionId)
       // Do not consume a chooser grant merely because the profile is offline
       // or its pinned identity cannot be validated. Admission is the boundary
       // for a real upload attempt, after authority validation succeeds.
       await this.ensureValidatedScope(scope)
       this.assertRendererGrantEpoch(rendererId, rendererEpoch)
-      admittedFiles = this.fileUploadGrants.admit(paths, grantScope, sessionId)
+      admittedFiles = this.fileUploadGrants.admit(paths, grantScope, sessionId, undefined, selectionIds)
       stagedReleases.push(...paths.map(path => this.retainStagedClipboardFile(path)))
       const files: AgentFile[] = []
       for (const [index, admitted] of admittedFiles.entries()) {

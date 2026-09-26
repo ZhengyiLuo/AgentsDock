@@ -1,4 +1,5 @@
 import { closeSync, constants as fsConstants, fstatSync, openSync, realpathSync, statSync } from 'node:fs'
+import { randomUUID } from 'node:crypto'
 
 export interface FileUploadGrantScope {
   profileId: string
@@ -24,6 +25,7 @@ export interface FileUploadGrantRegistryOptions {
 }
 
 interface FileUploadGrant extends FileUploadGrantScope {
+  readonly selectionId: string
   readonly requestedPath: string
   readonly canonicalPath: string
   readonly device: number
@@ -92,6 +94,7 @@ export class FileUploadGrantRegistry {
       this.grants.set(item.requestedPath, {
         ...scope,
         ...item,
+        selectionId: randomUUID(),
         expiresAt,
         sessionId: null,
         declarationId: null,
@@ -102,6 +105,89 @@ export class FileUploadGrantRegistry {
         activeAdmissions: new Set()
       })
     }
+  }
+
+  registerFreshSelection(paths: readonly string[], scope: FileUploadGrantScope): void {
+    const now = this.now()
+    this.prune(now)
+    if (paths.length > this.maxEntries) throw new Error('Too many files were selected for upload.')
+    const uniquePaths = [...new Set(paths.map(exactPath))]
+    if (!uniquePaths.length) return
+
+    // Resolve the complete selection and prove every previous grant is idle
+    // before replacing any of them. A new trusted chooser/drop gesture may
+    // move a file capability to another chat, but it must never interrupt an
+    // upload or replace a private managed staging file in flight.
+    const resolved = uniquePaths.map(requestedPath => ({
+      requestedPath: exactPath(requestedPath),
+      ...this.canonicalRegularFile(requestedPath)
+    }))
+    for (const item of resolved) {
+      const previous = this.grants.get(item.requestedPath)
+      if (
+        previous
+        && (
+          previous.activeAdmissions.size > 0
+          || previous.declarationPending
+          || previous.declarationId !== null
+          || previous.cleanup !== null
+        )
+      ) throw new Error('Wait for this file to finish uploading before choosing it again.')
+    }
+
+    const newKeys = resolved.filter(item => !this.grants.has(item.requestedPath)).length
+    const evictionCount = Math.max(0, this.grants.size + newKeys - this.maxEntries)
+    const selectedPaths = new Set(resolved.map(item => item.requestedPath))
+    const evictionCandidates = [...this.grants.values()]
+      .filter(grant => !selectedPaths.has(grant.requestedPath) && freshSelectionMayReplace(grant))
+      .sort((left, right) => left.expiresAt - right.expiresAt)
+      .slice(0, evictionCount)
+    if (evictionCandidates.length < evictionCount) {
+      throw new Error('Wait for current file uploads to finish before choosing more files.')
+    }
+    for (const grant of evictionCandidates) this.releaseGrant(grant.requestedPath, grant)
+    const expiresAt = now + this.ttlMs
+    for (const item of resolved) {
+      const previous = this.grants.get(item.requestedPath)
+      if (previous) this.releaseGrant(item.requestedPath, previous)
+      this.grants.set(item.requestedPath, {
+        ...scope,
+        ...item,
+        selectionId: randomUUID(),
+        expiresAt,
+        sessionId: null,
+        declarationId: null,
+        declarationPending: false,
+        admissions: 0,
+        cleanup: null,
+        cleanupTimer: null,
+        activeAdmissions: new Set()
+      })
+    }
+  }
+
+  captureAdmission(
+    paths: readonly string[],
+    scope: FileUploadGrantScope,
+    sessionIdValue: string
+  ): string[] {
+    const now = this.now()
+    this.prune(now)
+    if (paths.length > this.maxEntries) throw new Error('Too many files were selected for upload.')
+    const sessionId = exactSessionId(sessionIdValue)
+    if (!paths.length) throw new Error('Choose at least one file to upload.')
+    const boundedPaths = paths.map(exactPath)
+    if (new Set(boundedPaths).size !== boundedPaths.length) throw new Error('The same file cannot be attached twice in one upload.')
+    return boundedPaths.map(requestedPath => {
+      const grant = this.grants.get(requestedPath)
+      if (
+        !grant
+        || !sameScope(grant, scope)
+        || (grant.sessionId !== null && grant.sessionId !== sessionId)
+        || grant.admissions >= this.maxAdmissions
+      ) throw unauthorizedPathError()
+      return grant.selectionId
+    })
   }
 
   registerManaged(path: string, scope: FileUploadGrantScope, cleanup: () => void): void {
@@ -119,7 +205,8 @@ export class FileUploadGrantRegistry {
     paths: readonly string[],
     scope: FileUploadGrantScope,
     sessionIdValue: string,
-    declarationIdValue?: string
+    declarationIdValue?: string,
+    expectedSelectionIds?: readonly string[]
   ): AdmittedUploadFile[] {
     const now = this.now()
     this.prune(now)
@@ -129,12 +216,13 @@ export class FileUploadGrantRegistry {
     if (!paths.length) throw new Error('Choose at least one file to upload.')
     const boundedPaths = paths.map(exactPath)
     if (new Set(boundedPaths).size !== boundedPaths.length) throw new Error('The same file cannot be attached twice in one upload.')
+    if (expectedSelectionIds && expectedSelectionIds.length !== boundedPaths.length) throw unauthorizedPathError()
 
     // Validate the whole batch first. Mutation happens only after every path
     // is proven, so two competing chat admissions cannot split a grant batch.
     const candidates: Array<{ grant: FileUploadGrant; admitted: AdmittedUploadFile }> = []
     try {
-      for (const requestedPath of boundedPaths) {
+      for (const [index, requestedPath] of boundedPaths.entries()) {
         const grant = this.grants.get(requestedPath)
         if (!grant) throw unauthorizedPathError()
         if (
@@ -143,6 +231,7 @@ export class FileUploadGrantRegistry {
           || grant.rendererId !== scope.rendererId
           || (grant.sessionId !== null && grant.sessionId !== sessionId)
           || (declarationId !== undefined && grant.declarationId !== declarationId)
+          || (expectedSelectionIds !== undefined && grant.selectionId !== expectedSelectionIds[index])
           || grant.admissions >= this.maxAdmissions
         ) throw unauthorizedPathError()
         const canonicalPath = this.realpath(requestedPath)
@@ -321,6 +410,13 @@ function sameScope(grant: FileUploadGrantScope, scope: FileUploadGrantScope): bo
   return grant.profileId === scope.profileId
     && grant.profileGeneration === scope.profileGeneration
     && grant.rendererId === scope.rendererId
+}
+
+function freshSelectionMayReplace(grant: FileUploadGrant): boolean {
+  return grant.activeAdmissions.size === 0
+    && !grant.declarationPending
+    && grant.declarationId === null
+    && grant.cleanup === null
 }
 
 function exactSessionId(value: string): string {

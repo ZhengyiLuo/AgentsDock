@@ -360,7 +360,7 @@ export function registerIpc(
   handle('jobs:run', jobId => service.runJob(jobId))
 
   handleWithEvent('files:choose', event => service.chooseFiles(event.sender.id))
-  handleWithEvent('files:stage-native', (event, path) => service.stageNativeFile(event.sender.id, path))
+  handleWithEvent('files:stage-native-batch', (event, paths) => service.stageNativeFiles(event.sender.id, paths))
   handleWithEvent('files:stage-clipboard', (event, data, name, type) => service.stageClipboardImage(event.sender.id, data, name, type))
   handleWithEvent('files:upload', (event, sessionId, paths) => service.uploadFiles(event.sender.id, sessionId, paths))
   handle('files:list', (sessionId, offset, limit, contentPrefix) => service.listFiles(sessionId, offset, limit, contentPrefix))

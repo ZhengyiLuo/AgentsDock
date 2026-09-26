@@ -1,5 +1,27 @@
 # Public development log
 
+## 2026-09-26 — Reauthorize fresh file selections across chats
+
+- Let a fresh native drop, paste, or file-picker selection grant an idle file
+  to another chat. Keep selection batches atomic, reject replay of old gestures,
+  and prevent delayed upload requests from consuming a newer selection. Active
+  uploads and managed attachment grants remain protected.
+- Preserve the shared browser's existing upload bridge when the desktop uses
+  native batch staging. Its real bridge regression caught an incompatible
+  optional-method probe during integration; the corrected tests pass.
+- Validate source `b3a3fad1` with TypeScript, 4,927 desktop tests (five skipped),
+  eight packaging/license tests, production compilation, bundle audit and local
+  ad-hoc signature verification. Use a native temporary filesystem for tests
+  requiring POSIX permissions and for signing the local package.
+- Launch an isolated native desktop build `0.2.0` / `85` against an existing
+  test server `1.0.7-beta.11`; application startup and authenticated health,
+  session and job refreshes succeed. The local candidate was subsequently
+  manually tested and accepted. Computer-use permissions prevented independent
+  agent-operated drag/drop and paste verification; individual manual test-case
+  results were not recorded.
+- Availability: source and manually accepted local test package. No server
+  update is required for this fix; no server restart or release publication.
+
 ## 2026-09-26 — Restore ordinary steering during active Codex goals
 
 - Send goal follow-ups to the existing native turn even when the model/effort
