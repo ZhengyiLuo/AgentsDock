@@ -9,13 +9,30 @@
   transcript/snapshot size rejection. Keep complete messages in paginated
   snapshots; migrate existing size constraints atomically without changing
   stored links, tokens or the database version.
+- Drag-and-drop and paste use the same upload path as the chooser, without the
+  leftover four-file/eight-MiB restriction. Match browser submissions to their
+  existing request receipts so signed attachment IDs do not leave a duplicate
+  Submitted bubble after acceptance.
 - A temporary live-stream error now permits the browser's existing reconnect
   behavior instead of falsely declaring the share unavailable. Actual
   revocation still ends access.
 - Pass 216 affected server tests, including migration rollback, attachment
-  ownership, downloads and transient live-stream recovery. Desktop component
-  tests and TypeScript pass; real-browser and packaged-app acceptance are in
-  progress. Source changes only; no deployment or public release.
+  ownership, downloads and transient live-stream recovery. Verify real HTTP
+  sharing of a complete 3.64 MB message while excluding a 2.66 MB private tool
+  record. Preserve an existing share byte-for-byte through database migration.
+- In an isolated Chromium browser against the actual server and Codex provider,
+  drop six files including 9 MiB text, an empty file and an image; preview, send,
+  read them with the provider, and download unchanged bytes. Publish and download
+  a new output through its Markdown link. Repeat a single-file drop onto the
+  conversation, complete a tool-backed follow-up, and observe one accepted
+  message without a lingering Submitted bubble. Running, completion and server
+  reconnect states work. No provider or server mock is used for these checks.
+- Verify the combined copy action through signed local desktop
+  `1.0.7-beta.13`, build `1215`, including native IPC/HTTP and exact clipboard
+  contents. Its 4,894 desktop tests, type checking, production compilation,
+  package audit and signature checks pass. Follow-up drop/submission fixes pass
+  28 shared-chat and 23 desktop send tests plus type checking. The server-hosted
+  browser bundle is rebuilt. No deployment or public release.
 
 ## 2026-09-25 — Preserve Claude input and repair imported wrappers
 
