@@ -1846,6 +1846,9 @@ function isChronologicalSystemRow(item: RenderTimelineItem): item is SystemItem 
     item.key.startsWith('codex:compaction:')
     || item.event.type === 'emergency_alert_raised'
     || item.event.type === 'team_message_sent'
+    || item.event.type === 'agent_handoff_route_created'
+    || item.event.type === 'agent_handoff_route_updated'
+    || item.event.type === 'agent_handoff_route_deleted'
     || crossChatSemanticKey(item.event) !== null
   )
 }

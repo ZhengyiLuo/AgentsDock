@@ -96,11 +96,11 @@ describe('cross-chat messages stay at their place in ongoing work', () => {
     }
   })
 
-  it('keeps mail before the final when earlier route audit rows trail the expanded turn', () => {
-    const routes = [2, 3, 4, 5].map(seq => event(seq, 'agent_handoff_route_created'))
+  it('keeps mail before the final when earlier ordinary status rows trail the expanded turn', () => {
+    const notices = [2, 3, 4, 5].map(seq => event(seq, 'server_notice'))
     const sent = message(6, 'first-send', 'registered', { delivery_mode: 'mailbox', inbox_state: 'unread' })
     const received = reply(8, 'received')
-    const live = [start(), ...routes, sent, progress(7),
+    const live = [start(), ...notices, sent, progress(7),
       { ...received, delivery_mode: 'mailbox', inbox_state: 'unread' } as Event,
       progress(9), message(10, 'second-send'), progress(11)]
     const finished = [...live, work(20, 'turn_finished', { result_text: 'All local work is complete.' })]
@@ -112,9 +112,9 @@ describe('cross-chat messages stay at their place in ongoing work', () => {
     for (const snapshot of snapshots) {
       const expected = ['user:1', 'delivery:6', 'activity:7', 'delivery:8', 'activity:9',
         'delivery:10', 'activity:11', ...(snapshot === live ? [] : ['assistant:20'])]
-      // The ordinary replay includes route audit rows; compact semantic pages
+      // The ordinary replay includes status rows; compact semantic pages
       // omit them. Both must place the same messages beside the same work.
-      const semantic = snapshot.filter(item => item.type !== 'agent_handoff_route_created')
+      const semantic = snapshot.filter(item => item.type !== 'server_notice')
       for (const events of [snapshot, semantic]) {
         for (const rows of projections(events)) {
           expect(visibleOrder(rows)).toEqual(expected)
@@ -124,6 +124,29 @@ describe('cross-chat messages stay at their place in ongoing work', () => {
       }
     }
     expect(snapshots).toEqual(original)
+  })
+
+  it('places route creation, updates and deletion before later work, mail and the final answer', () => {
+    const routes = [
+      event(2, 'agent_handoff_route_created'),
+      event(3, 'agent_handoff_route_updated'),
+      event(4, 'agent_handoff_route_deleted')
+    ]
+    const live = [start(), ...routes, progress(5), message(6), progress(7)]
+    const finished = [...live, work(20, 'turn_finished', { result_text: 'The local work is complete.' })]
+    for (const snapshot of [live, finished, [...finished, message(21, 'outgoing', 'read', {
+      delivery_mode: 'mailbox', inbox_state: 'read'
+    })]]) {
+      for (const rows of projections(snapshot)) {
+        expect(rows.map(row => [row.kind, row.seq])).toEqual([
+          ['message', 1], ['system', 2], ['system', 3], ['system', 4],
+          ['progress', 5], ['system', 6], ['progress', 6],
+          ...(snapshot === live ? [] : [['message', 20]])
+        ])
+        expect(rows.flatMap(row => row.kind === 'system' && row.event.type.startsWith('agent_handoff_route_')
+          ? [row.event] : [])).toEqual(routes)
+      }
+    }
   })
 
   it('still places mail after older live progress deliberately shown behind newer status', () => {
