@@ -1,5 +1,19 @@
 # Public development log
 
+## 2026-09-25 — Keep the Side chat button beside the composer
+
+- Align the Side chat launcher with the composer's right edge, including its
+  maximum width and narrow-window gutters. Preserve its existing vertical
+  position and popover behavior as the draft grows or panes resize.
+- Verify signed local desktop `1.0.7-beta.14`, build `1216`, from committed
+  source `acdad85`. Reproduce the previous 282.5-pixel gap in the prior build;
+  measure zero gap in the corrected native app at wide and narrow widths,
+  horizontal and stacked split views, and with a multiline draft. Open and
+  resize the popover against an isolated real server using native app input.
+- Pass 4,898 desktop tests, type checking, production compilation, package audit
+  and signature checks. No renderer exceptions during acceptance. This is an
+  app-only local build; no server deployment or public release.
+
 ## 2026-09-25 — Repair shared-chat files and live recovery
 
 - Restore the combined link-and-token copy action alongside individual copy
