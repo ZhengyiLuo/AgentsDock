@@ -1,6 +1,11 @@
 name: Verify server source
 
 on:
+  workflow_call:
+    inputs:
+      source_sha:
+        required: true
+        type: string
   pull_request:
   push:
     branches: [main, 'release/**']
@@ -10,8 +15,8 @@ permissions:
   contents: read
 
 concurrency:
-  group: verify-server-source-${{ github.ref }}
-  cancel-in-progress: true
+  group: verify-server-source-${{ inputs.source_sha && format('product-{0}', github.run_id) || github.ref }}
+  cancel-in-progress: ${{ !inputs.source_sha }}
 
 jobs:
   server:
@@ -31,6 +36,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
+          ref: ${{ inputs.source_sha || github.sha }}
           persist-credentials: false
       - uses: astral-sh/setup-uv@v6
         with:

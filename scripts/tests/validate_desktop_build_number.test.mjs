@@ -20,6 +20,15 @@ test('refuses omitted, ambiguous, unsafe or overflowing build reservations', () 
   for (const run of ['', '0', '-1', '1.5', '9007199254740991']) assert.throws(() => validateDesktopBuildNumber('1186', run))
 })
 
+test('product workflow has a disjoint bounded reservation range', () => {
+  assert.equal(validateDesktopBuildNumber('5001', '1', 'product'), '5001')
+  assert.equal(validateDesktopBuildNumber('9999', '4999', 'product'), '9999')
+  assert.throws(() => validateDesktopBuildNumber('1186', '1', 'product'), /exactly 5001/)
+  assert.throws(() => validateDesktopBuildNumber('5001', '3816'), /range exhausted/)
+  assert.throws(() => validateDesktopBuildNumber('10000', '5000', 'product'), /range exhausted/)
+  assert.throws(() => validateDesktopBuildNumber('5001', '1', 'other'), /Unknown/)
+})
+
 test('the workflow CLI emits only an exact reservation and rejects reuse on the next run', () => {
   const script = fileURLToPath(new URL('../validate_desktop_build_number.mjs', import.meta.url))
   const first = spawnSync(process.execPath, [script, '1186', '1'], { encoding: 'utf8' })

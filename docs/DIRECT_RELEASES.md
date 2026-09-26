@@ -7,6 +7,14 @@ dispatched preparation and publication workflows. Release jobs check out an
 explicit, reviewed source commit. Ordinary source CI has no signing credentials
 and does not publish releases.
 
+For normal paired app/server releases, use the
+[unified product pipeline](PRODUCT_RELEASES.md). It derives one version from
+committed `server/VERSION`, stages signed packages, and separately publishes an
+accepted immutable receipt. Its publication gate intentionally remains closed
+until the phase-two native acceptance workflow exists and passes. The desktop
+workflows described below are reusable components and retained manual
+compatibility/emergency paths, not the normal independent release entry points.
+
 The [legacy release feed](https://github.com/ZhengyiLuo/AgentsDock-Releases/releases)
 remains available for installed desktop clients and Android. Do not rename,
 delete, or redirect it as part of the desktop migration.
@@ -82,7 +90,8 @@ and its legacy mirror. Coordinated releases also require the exact npm archive
 and matching signed legacy server bridge to be available, with identical runtime
 contents and executable permissions.
 
-Both workflows are manual, restricted to the canonical repository and reviewed
+Both workflows support manual dispatch and calls from the manual product
+pipeline, restricted to the canonical repository and reviewed
 `main` or `release/*` branches. Jobs using signing credentials or the release
 token use the `direct-production` environment with matching branch restrictions.
 Fork pull requests do not run these release jobs. The workflow definitions must
@@ -90,10 +99,11 @@ exist on the default branch for manual dispatch, while a dispatch can select the
 reviewed release branch. Registering the workflows does not replace application
 source on a diverged default branch.
 
-The public workflow has a separate run counter from the former private workflow.
-Reserve its native build number explicitly; the first public run starts above
-the last accepted local build, 1185, and every later run increments the number.
-Never reuse the old private counter formula or a previously accepted build.
+The retained desktop workflow reserves `1185 + run_number`, capped at `4999`.
+The product workflow has its own counter and reserves `5000 + run_number`, capped
+at `9999`; its native build is derived automatically. Never interpret one
+workflow's counter as the other's, reuse a reservation, or assign local builds
+from the product range. See [product build identity](PRODUCT_RELEASES.md#source-and-native-build-identity).
 
 When macOS signing is performed locally, dispatch the same preparation workflow
 with `artifacts_only=true`. It retains the source ancestry, release version,
@@ -124,7 +134,7 @@ must be supplied again. Do not put them in source, chat, release assets or logs.
 | `APPLE_API_KEY_P8_BASE64` | Base64 App Store Connect API private key |
 | `APPLE_API_KEY_ID` | ID of that API key |
 | `APPLE_API_ISSUER` | App Store Connect issuer ID |
-| `AGENTSDOCK_RELEASE_TOKEN` | Fine-grained token with Contents write access to AgentsDock and AgentsDock-Releases |
+| `AGENTSDOCK_RELEASE_TOKEN` | Fine-grained token with Contents write access to AgentsDock and AgentsDock-Releases; the product pipeline also requires AgentsServer |
 
 For file-backed values, the CLI can send encoded bytes directly without printing
 them or placing the value in command history:
@@ -136,7 +146,8 @@ base64 < /path/to/AuthKey.p8 | gh secret set APPLE_API_KEY_P8_BASE64 --repo Zhen
 
 For the other values, use `gh secret set NAME --repo ZhengyiLuo/AgentsDock
 --env direct-production` and its interactive prompt, or the environment's secret
-editor. The native workflow needs no npm token or server signing key. Optional
+editor. The native leaf workflow needs no npm token or server signing key; the
+product preparation job has separate [server-signing requirements](PRODUCT_RELEASES.md#required-external-configuration). Optional
 Windows signing secrets remain separate; the existing explicitly unsigned
 preview policy still applies when they are absent.
 

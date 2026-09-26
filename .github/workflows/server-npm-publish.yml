@@ -3,6 +3,26 @@ name: Prepare or publish reviewed npm server release
 # Manual only. Descriptor signing and native/migration acceptance happen between
 # prepare and publish. This workflow never creates or publishes a GitHub release.
 on:
+  workflow_call:
+    inputs:
+      operation:
+        required: true
+        type: string
+      source_sha:
+        required: true
+        type: string
+      workflow_sha:
+        type: string
+        default: ''
+      source_ref:
+        required: true
+        type: string
+      candidate_tag:
+        required: true
+        type: string
+      accepted_manifest_sha256:
+        required: true
+        type: string
   workflow_dispatch:
     inputs:
       operation:
@@ -150,7 +170,7 @@ jobs:
           gh release download "$CANDIDATE_TAG" --repo "$GITHUB_REPOSITORY" --dir "$RUNNER_TEMP/npm-candidate" --pattern agents-server-npm-manifest.json --pattern agents-server-npm-manifest.sig --pattern "server-$version.tgz"
       - name: Verify acceptance pin, signature, exact payload and registry preconditions
         id: candidate
-        run: node scripts/verify_npm_publication.mjs preflight "$RUNNER_TEMP/npm-candidate" "$SOURCE_SHA" "$ACCEPTED_MANIFEST_SHA256" "$RUNNER_TEMP/npm-candidate-release.json"
+        run: node scripts/verify_npm_publication.mjs preflight "$RUNNER_TEMP/npm-candidate" "$SOURCE_SHA" "$ACCEPTED_MANIFEST_SHA256" "$RUNNER_TEMP/npm-candidate-release.json" "$RUNNER_TEMP/npm-registry-before.json"
       - name: Publish the verified tarball with npm trusted publishing
         if: steps.candidate.outputs.publish == 'true'
         env:
@@ -165,7 +185,7 @@ jobs:
         # Retry only the unchanged read-only verifier, never npm publish.
         run: |
           for ((attempt = 1; attempt <= 61; attempt++)); do
-            if node scripts/verify_npm_publication.mjs verify "$RUNNER_TEMP/npm-candidate" "$SOURCE_SHA" "$ACCEPTED_MANIFEST_SHA256" "$RUNNER_TEMP/npm-candidate-release.json"; then
+            if node scripts/verify_npm_publication.mjs verify "$RUNNER_TEMP/npm-candidate" "$SOURCE_SHA" "$ACCEPTED_MANIFEST_SHA256" "$RUNNER_TEMP/npm-candidate-release.json" "$RUNNER_TEMP/npm-registry-before.json"; then
               exit 0
             fi
             if ((attempt < 61)); then
