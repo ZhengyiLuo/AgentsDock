@@ -1,5 +1,32 @@
 # Public development log
 
+## 2026-09-26 — Keep inter-chat cards in chronological positions
+
+- Prevent older status rows presented after a completed turn from pulling
+  earlier inter-chat cards below its final answer. Place chat-route creation,
+  update and deletion notices at their actual event positions.
+- Reconcile streamed activity with the turn's existing inter-chat segments,
+  retaining stable row keys and a single active tail instead of inserting a
+  duplicate progress row. Late read receipts retain the original mail position.
+- Retain completed public commentary between mailbox arrivals in compact
+  server history, including incoming messages without a turn identifier.
+  Reopening the chat preserves those separators within the existing budget.
+- Pass 4,923 desktop tests (five skipped), type checking, production compilation,
+  package auditing and signature verification, plus 64 isolated server history
+  regressions. Focused coverage includes live, completed and reopened turns,
+  route lifecycle notices, receipt updates and stream-to-history transitions.
+- Reproduce the original placement failure in the previous packaged app, then
+  verify a 202-event recorded replay through the corrected packaged app's real
+  IPC, HTTP and WebSocket paths. Native scrolling and reload show route notices
+  before the work and earlier mail before the final answer. A fresh app profile
+  loads compact history and exposes the retained commentary between mail cards.
+  These checks replay recorded provider events; they do not send real peer mail
+  or execute new provider work. No renderer exceptions were recorded.
+- Accepted local desktop candidate: `1.0.7-beta.15`, build `1218`, arm64,
+  source `b180dc1`, Developer ID signed. No installation, public release or
+  production server deployment is included. The server companion is required
+  for the compact-history retention improvement.
+
 ## 2026-09-26 — Retain custom-endpoint reasoning summary support
 
 - Preserve explicitly advertised summary support across server restarts. Keep
