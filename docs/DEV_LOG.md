@@ -1,5 +1,29 @@
 # Public development log
 
+## 2026-09-26 — Prepare a unified desktop and server release pipeline
+
+- Add a manual product preparation/publication workflow deriving desktop,
+  npm server and legacy server versions from one committed `server/VERSION`.
+  Build both signed server formats from the exact source, require matching
+  runtime contents and permissions, and bundle that descriptor in native apps.
+- Bind staged artifacts to a reviewed receipt and verify source/export commits,
+  signatures, archive inventories and native checksum seals before publication.
+  Publish and read back npm first, then the legacy server bridge, then both
+  desktop feeds. Validate public Stable/Beta discovery and platform metadata.
+- Guard npm channel separation and immutable retries, serialize desktop writers,
+  isolate pinned server CI from ordinary push cancellation, and reserve a
+  separate native-build range. Repeated server preparation uses reproducible
+  archive metadata. Existing compatibility entry points remain available.
+- Pass 187 Node release/CLI tests and 38 Python packaging/export tests, including
+  real offline fixture packaging, signature checks, byte-identical repeated
+  preparation and negative acceptance cases. Actionlint and whitespace checks
+  pass. Source CI now runs the release-tooling regression suite without secrets.
+- No app runtime changes, native release builds, service deployments or public
+  publication were performed. Production CI and signing remain unexecuted.
+  Product publication intentionally requires the phase-two native acceptance
+  workflow, which is not yet implemented. Document the external signing/OIDC
+  configuration and operator-reviewed npm channel repair required before use.
+
 ## 2026-09-25 — Keep passive Claude login status out of the composer
 
 - Do not show an upfront Claude authentication warning or Recheck button just

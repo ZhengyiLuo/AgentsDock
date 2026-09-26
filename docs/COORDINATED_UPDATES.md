@@ -1,5 +1,13 @@
 # Coordinated app and server updates
 
+The normal release entry point is now the
+[unified product pipeline](PRODUCT_RELEASES.md): one committed version, signed
+server/native artifacts, an immutable receipt, then separately authorized
+publication. This pipeline-only change does not alter installed update behavior.
+Publication intentionally requires the not-yet-implemented phase-two native
+acceptance workflow; the historical acceptance below is not a substitute. The
+manual release operations documented here remain compatibility/emergency tools.
+
 **1.0.4 and 1.0.5 are withdrawn.** Public stable app and server feeds currently
 offer 1.0.3. Their earlier acceptance below covered particular fixtures and
 missed retained rollback records and channel transitions; it does not establish
@@ -175,6 +183,11 @@ without coordination support installs the new desktop first; its first launch
 then reconciles the saved server profiles from the bundled signed descriptor.
 
 ## Release artifacts and ordering
+
+Use [product preparation and acceptance](PRODUCT_RELEASES.md#prepare-accept-then-publish)
+for normal releases. The ordering below describes the same artifact invariants;
+the later separate workflow/signing instructions describe the retained manual
+compatibility path, not an alternate way to bypass product acceptance.
 
 1. Choose an unused version on the intended channel. Keep a beta line's base
    version fixed, and promote it to stable only after validation. Commit and

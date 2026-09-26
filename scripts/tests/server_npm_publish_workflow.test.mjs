@@ -180,6 +180,7 @@ exit 0
       const expectedArguments = [
         'scripts/verify_npm_publication.mjs', 'verify', `${env.RUNNER_TEMP}/npm-candidate`,
         env.SOURCE_SHA, env.ACCEPTED_MANIFEST_SHA256, `${env.RUNNER_TEMP}/npm-candidate-release.json`,
+        `${env.RUNNER_TEMP}/npm-registry-before.json`,
       ]
       assert.deepEqual(readFileSync(env.QA_ARGUMENTS, 'utf8').split('\0').slice(0, -1), Array.from({ length: attempts }, () => expectedArguments).flat())
       assert.equal(existsSync(env.QA_SLEEPS) ? readFileSync(env.QA_SLEEPS, 'utf8') : '', '10\n'.repeat(sleeps))

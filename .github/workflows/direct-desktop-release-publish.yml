@@ -1,6 +1,45 @@
 name: Publish direct desktop release
 
 on:
+  workflow_call:
+    inputs:
+      version:
+        required: true
+        type: string
+      track:
+        required: true
+        type: string
+      allow_unsigned_windows:
+        type: boolean
+        default: false
+      verify_only:
+        type: boolean
+        default: true
+      expected_source_sha:
+        required: true
+        type: string
+      expected_source_ref:
+        required: true
+        type: string
+      expected_manifest_sha256:
+        required: true
+        type: string
+      expected_npm_manifest_sha256:
+        required: true
+        type: string
+      migration_qa_sha:
+        type: string
+        default: ''
+      legacy_tag:
+        type: string
+        default: ''
+    outputs:
+      source_sha:
+        value: ${{ jobs.inspect-draft.outputs.source_sha }}
+      manifest_sha256:
+        value: ${{ jobs.inspect-draft.outputs.manifest_sha256 }}
+      windows_signing_policy:
+        value: ${{ jobs.inspect-draft.outputs.windows_signing_policy }}
   workflow_dispatch:
     inputs:
       version:
@@ -92,12 +131,24 @@ jobs:
           RELEASE_TRACK: ${{ inputs.track }}
           ALLOW_UNSIGNED_WINDOWS: ${{ inputs.allow_unsigned_windows }}
           LEGACY_RELEASE_TAG: ${{ inputs.legacy_tag }}
+          EXPECTED_SOURCE_SHA: ${{ inputs.expected_source_sha }}
+          EXPECTED_SOURCE_REF: ${{ inputs.expected_source_ref }}
+          EXPECTED_MANIFEST_SHA256: ${{ inputs.expected_manifest_sha256 }}
+          EXPECTED_NPM_MANIFEST_SHA256: ${{ inputs.expected_npm_manifest_sha256 }}
         run: |
           node scripts/direct-release-mirror.mjs inspect \
             --version "$RELEASE_VERSION" --track "$RELEASE_TRACK" \
             --allow-unsigned-windows "$ALLOW_UNSIGNED_WINDOWS" \
             --legacy-tag "$LEGACY_RELEASE_TAG" \
-            --assets "$RUNNER_TEMP/release" >> "$GITHUB_OUTPUT"
+            --assets "$RUNNER_TEMP/release" > "$RUNNER_TEMP/desktop-inspection.txt"
+          if [[ -n "$EXPECTED_SOURCE_SHA" ]]; then
+            grep -Fx "source_sha=$EXPECTED_SOURCE_SHA" "$RUNNER_TEMP/desktop-inspection.txt"
+            grep -Fx "source_ref=$EXPECTED_SOURCE_REF" "$RUNNER_TEMP/desktop-inspection.txt"
+            grep -Fx "manifest_sha256=$EXPECTED_MANIFEST_SHA256" "$RUNNER_TEMP/desktop-inspection.txt"
+            grep -Fx 'coordinated_updates=true' "$RUNNER_TEMP/desktop-inspection.txt"
+            test "$(sha256sum "$RUNNER_TEMP/release/agents-server-npm-manifest.json" | cut -d ' ' -f 1)" = "$EXPECTED_NPM_MANIFEST_SHA256"
+          fi
+          cat "$RUNNER_TEMP/desktop-inspection.txt" >> "$GITHUB_OUTPUT"
 
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
@@ -401,14 +452,31 @@ jobs:
           $Hash = (Get-FileHash -Algorithm SHA256 -LiteralPath "$env:RUNNER_TEMP/release/SHA256SUMS").Hash.ToLowerInvariant()
           "manifest_sha256=$Hash" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
 
-  publish:
+  verify-seals:
     if: github.event_name == 'workflow_dispatch' && github.repository == 'ZhengyiLuo/AgentsDock' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/release/'))
+    needs: [inspect-draft, verify-macos, verify-linux-x64, verify-linux-arm64, verify-windows-x64]
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Require every platform to have verified the identical prepared bytes
+        env:
+          EXPECTED: ${{ needs.inspect-draft.outputs.manifest_sha256 }}
+          MAC: ${{ needs.verify-macos.outputs.manifest_sha256 }}
+          LINUX: ${{ needs.verify-linux-x64.outputs.manifest_sha256 }}
+          ARM: ${{ needs.verify-linux-arm64.outputs.manifest_sha256 }}
+          WINDOWS: ${{ needs.verify-windows-x64.outputs.manifest_sha256 }}
+        run: |
+          [[ "$EXPECTED" =~ ^[0-9a-f]{64}$ ]]
+          test "$EXPECTED" = "$MAC" && test "$MAC" = "$LINUX" && test "$LINUX" = "$ARM" && test "$ARM" = "$WINDOWS"
+
+  publish:
+    if: github.event_name == 'workflow_dispatch' && github.repository == 'ZhengyiLuo/AgentsDock' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/release/')) && !inputs.verify_only
     needs:
       - inspect-draft
       - verify-macos
       - verify-linux-x64
       - verify-linux-arm64
       - verify-windows-x64
+      - verify-seals
     runs-on: ubuntu-24.04
     timeout-minutes: 25
     environment: direct-production
@@ -465,50 +533,7 @@ jobs:
           RELEASE_VERSION: ${{ inputs.version }}
           RELEASE_TRACK: ${{ inputs.track }}
           LEGACY_RELEASE_TAG: ${{ inputs.legacy_tag }}
-        run: |
-          for RELEASE_REPOSITORY in ZhengyiLuo/AgentsDock ZhengyiLuo/AgentsDock-Releases; do
-            RELEASE_TAG="v${RELEASE_VERSION}"
-            if [[ "$RELEASE_REPOSITORY" = ZhengyiLuo/AgentsDock-Releases && -n "$LEGACY_RELEASE_TAG" ]]; then
-              [[ "$LEGACY_RELEASE_TAG" = 1.0.0 && "$RELEASE_VERSION" = 1.0.0 && "$RELEASE_TRACK" = stable ]] || exit 1
-              RELEASE_TAG="$LEGACY_RELEASE_TAG"
-            fi
-            VERIFIED=false
-            for attempt in 1 2 3 4 5 6; do
-            IS_PRERELEASE="$(gh release view "$RELEASE_TAG" --repo $RELEASE_REPOSITORY --json isPrerelease --jq .isPrerelease)" || true
-            LATEST_TAG="$(gh api repos/$RELEASE_REPOSITORY/releases/latest --jq .tag_name)" || true
-            if [[ "$RELEASE_TRACK" = beta ]]; then
-              MAC_URL="https://github.com/$RELEASE_REPOSITORY/releases/download/v${RELEASE_VERSION}/beta-mac.yml"
-              LINUX_URL="https://github.com/$RELEASE_REPOSITORY/releases/download/v${RELEASE_VERSION}/beta-linux.yml"
-              LINUX_ARM64_URL="https://github.com/$RELEASE_REPOSITORY/releases/download/v${RELEASE_VERSION}/beta-linux-arm64.yml"
-              WINDOWS_URL="https://github.com/$RELEASE_REPOSITORY/releases/download/v${RELEASE_VERSION}/beta.yml"
-              EXPECTED_PRERELEASE=true
-              DISCOVERED_VERSION="$(curl -fsSL https://github.com/$RELEASE_REPOSITORY/releases.atom | node "$GITHUB_WORKSPACE/scripts/select_electron_beta_release.mjs")" || true
-              DISCOVERED_MAC_VERSION="$(curl -fsSL "https://github.com/$RELEASE_REPOSITORY/releases/download/v${DISCOVERED_VERSION}/beta-mac.yml" | awk '/^version:/ && !found { value=$2; found=1 } END { print value }' | tr -d '\"\047')" || true
-              DISCOVERED_LINUX_ARM64_VERSION="$(curl -fsSL "https://github.com/$RELEASE_REPOSITORY/releases/download/v${DISCOVERED_VERSION}/beta-linux-arm64.yml" | awk '/^version:/ && !found { value=$2; found=1 } END { print value }' | tr -d '\"\047')" || true
-              DISCOVERED_WINDOWS_VERSION="$(curl -fsSL "https://github.com/$RELEASE_REPOSITORY/releases/download/v${DISCOVERED_VERSION}/beta.yml" | awk '/^version:/ && !found { value=$2; found=1 } END { print value }' | tr -d '\"\047')" || true
-            else
-              MAC_URL="https://github.com/$RELEASE_REPOSITORY/releases/latest/download/latest-mac.yml"
-              LINUX_URL="https://github.com/$RELEASE_REPOSITORY/releases/latest/download/latest-linux.yml"
-              LINUX_ARM64_URL="https://github.com/$RELEASE_REPOSITORY/releases/latest/download/latest-linux-arm64.yml"
-              WINDOWS_URL="https://github.com/$RELEASE_REPOSITORY/releases/latest/download/latest.yml"
-              EXPECTED_PRERELEASE=false
-              DISCOVERED_VERSION="$RELEASE_VERSION"
-              DISCOVERED_MAC_VERSION="$RELEASE_VERSION"
-              DISCOVERED_LINUX_ARM64_VERSION="$RELEASE_VERSION"
-              DISCOVERED_WINDOWS_VERSION="$RELEASE_VERSION"
-            fi
-            MAC_VERSION="$(curl -fsSL "$MAC_URL" | awk '/^version:/ && !found { value=$2; found=1 } END { print value }' | tr -d '\"\047')" || true
-            LINUX_VERSION="$(curl -fsSL "$LINUX_URL" | awk '/^version:/ && !found { value=$2; found=1 } END { print value }' | tr -d '\"\047')" || true
-            LINUX_ARM64_VERSION="$(curl -fsSL "$LINUX_ARM64_URL" | awk '/^version:/ && !found { value=$2; found=1 } END { print value }' | tr -d '\"\047')" || true
-            WINDOWS_VERSION="$(curl -fsSL "$WINDOWS_URL" | awk '/^version:/ && !found { value=$2; found=1 } END { print value }' | tr -d '\"\047')" || true
-            if test "$MAC_VERSION" = "$RELEASE_VERSION" && test "$LINUX_VERSION" = "$RELEASE_VERSION" && test "$LINUX_ARM64_VERSION" = "$RELEASE_VERSION" && test "$WINDOWS_VERSION" = "$RELEASE_VERSION" && test "$DISCOVERED_VERSION" = "$RELEASE_VERSION" && test "$DISCOVERED_MAC_VERSION" = "$RELEASE_VERSION" && test "$DISCOVERED_LINUX_ARM64_VERSION" = "$RELEASE_VERSION" && test "$DISCOVERED_WINDOWS_VERSION" = "$RELEASE_VERSION" && test "$IS_PRERELEASE" = "$EXPECTED_PRERELEASE"; then
-              if [[ "$RELEASE_TRACK" = beta && "$LATEST_TAG" != "$RELEASE_TAG" ]]; then VERIFIED=true; break; fi
-              if [[ "$RELEASE_TRACK" = stable && "$LATEST_TAG" = "$RELEASE_TAG" ]]; then VERIFIED=true; break; fi
-            fi
-            sleep 10
-            done
-            test "$VERIFIED" = true || { echo "$RELEASE_REPOSITORY metadata or beta discovery did not resolve to $RELEASE_VERSION" >&2; exit 1; }
-          done
+        run: node scripts/verify_public_desktop_feed.mjs
 
   verify-native-migration:
     needs: [inspect-draft, publish]

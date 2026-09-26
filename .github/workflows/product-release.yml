@@ -1,0 +1,400 @@
+name: Release AgentsDock
+
+# One product release, two explicit phases. Never publishes on push/PR/tag.
+on:
+  workflow_dispatch:
+    inputs:
+      operation:
+        description: Prepare signed drafts, or publish an accepted prepared release
+        type: choice
+        options: [prepare, publish]
+        default: prepare
+        required: true
+      source_sha:
+        description: Exact reviewed monorepo commit (version comes from server/VERSION)
+        type: string
+        required: true
+      source_ref:
+        description: Reviewed branch containing source and workflow (main or release/*)
+        type: string
+        default: main
+        required: true
+      release_notes:
+        description: Prepare only; short public release notes
+        type: string
+        default: ''
+      allow_unsigned_windows:
+        description: Explicitly retain the approved unsigned Windows distribution policy
+        type: boolean
+        default: false
+      prepare_run_id:
+        description: Publish only; successful run of this workflow that sealed the release
+        type: string
+        default: ''
+      accepted_receipt_sha256:
+        description: Publish only; independently reviewed release.json SHA-256 from preparation
+        type: string
+        default: ''
+      acceptance_run_id:
+        description: Publish only; successful product-release-acceptance.yml run for these exact bytes
+        type: string
+        default: ''
+
+permissions:
+  contents: read
+  actions: read
+
+# Different from the reusable desktop/npm locks: holding a child's lock here
+# would deadlock. No cancellation of an in-progress publication.
+concurrency:
+  group: agentsdock-product-release
+  cancel-in-progress: false
+
+jobs:
+  validate:
+    if: github.event_name == 'workflow_dispatch' && github.repository == 'ZhengyiLuo/AgentsDock' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/release/'))
+    runs-on: ubuntu-24.04
+    outputs:
+      version: ${{ steps.identity.outputs.version }}
+      track: ${{ steps.identity.outputs.track }}
+      build_number: ${{ steps.identity.outputs.build_number }}
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        with:
+          node-version: 24
+          package-manager-cache: false
+      - name: Require reviewed source and workflow on the selected public release branch
+        env:
+          SOURCE_SHA: ${{ inputs.source_sha }}
+          SOURCE_REF: ${{ inputs.source_ref }}
+          WORKFLOW_SHA: ${{ github.sha }}
+        run: |
+          [[ "$SOURCE_SHA" =~ ^[a-f0-9]{40}$ ]]
+          [[ "$SOURCE_REF" == main || "$SOURCE_REF" =~ ^release/[A-Za-z0-9][A-Za-z0-9._/-]*$ ]]
+          git check-ref-format "refs/heads/$SOURCE_REF"
+          test "$GITHUB_REF" = "refs/heads/$SOURCE_REF"
+          git fetch --no-tags origin "refs/heads/$SOURCE_REF:refs/remotes/origin/product-reviewed"
+          git merge-base --is-ancestor "$SOURCE_SHA" "$WORKFLOW_SHA"
+          git merge-base --is-ancestor "$WORKFLOW_SHA" refs/remotes/origin/product-reviewed
+      - name: Verify release contract and orchestration tests
+        run: |
+          node --test scripts/tests/product-release.test.mjs scripts/tests/product_release_workflow.test.mjs scripts/tests/validate_desktop_build_number.test.mjs
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+        if: inputs.operation == 'prepare'
+        with:
+          ref: ${{ inputs.source_sha }}
+          fetch-depth: 0
+          persist-credentials: false
+          path: product-source
+      - id: identity
+        if: inputs.operation == 'prepare'
+        name: Derive both package versions and the channel once
+        working-directory: product-source
+        env:
+          SOURCE_SHA: ${{ inputs.source_sha }}
+          SOURCE_REF: ${{ inputs.source_ref }}
+          WORKFLOW_SHA: ${{ github.sha }}
+          PREPARE_RUN_NUMBER: ${{ github.run_number }}
+        run: node ../scripts/product-release.mjs identity >> "$GITHUB_OUTPUT"
+
+  server-tests:
+    if: inputs.operation == 'prepare'
+    needs: validate
+    uses: ./.github/workflows/server-source.yml
+    with:
+      source_sha: ${{ inputs.source_sha }}
+
+  prepare-server:
+    if: inputs.operation == 'prepare'
+    needs: [validate, server-tests]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    environment: direct-production
+    outputs:
+      manifest_base64: ${{ steps.descriptor.outputs.manifest_base64 }}
+      signature_base64: ${{ steps.descriptor.outputs.signature_base64 }}
+      export_sha: ${{ steps.export.outputs.export_sha }}
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+        with:
+          ref: ${{ inputs.source_sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        with:
+          node-version: 24
+          package-manager-cache: false
+      - name: Test server packaging and exact compatibility mirror guards
+        env:
+          PYTHONDONTWRITEBYTECODE: '1'
+        run: |
+          python3 -m unittest discover -s scripts/tests -p test_prepare_product_server.py
+          node --test scripts/tests/legacy-server-release.test.mjs scripts/tests/npm-candidate-release.test.mjs
+      - name: Build and sign both server distributions from the committed source
+        env:
+          SOURCE_SHA: ${{ inputs.source_sha }}
+          RELEASE_VERSION: ${{ needs.validate.outputs.version }}
+          AGENTS_SERVER_RELEASE_PRIVATE_KEY_B64: ${{ secrets.AGENTS_SERVER_RELEASE_PRIVATE_KEY_B64 }}
+          PYTHONDONTWRITEBYTECODE: '1'
+        run: python3 scripts/prepare_product_server.py --source-sha "$SOURCE_SHA" --version "$RELEASE_VERSION" --output "$RUNNER_TEMP/product-server"
+      - id: descriptor
+        name: Expose only public signed descriptor bytes to native packaging
+        run: |
+          node --input-type=module <<'NODE' >> "$GITHUB_OUTPUT"
+          import { readFileSync } from 'node:fs'
+          const root = `${process.env.RUNNER_TEMP}/product-server/npm`
+          console.log(`manifest_base64=${readFileSync(`${root}/agents-server-npm-manifest.json`).toString('base64')}`)
+          console.log(`signature_base64=${readFileSync(`${root}/agents-server-npm-manifest.sig`).toString('base64')}`)
+          NODE
+      - id: export
+        name: Export exact server source to a new immutable compatibility branch
+        env:
+          SOURCE_SHA: ${{ inputs.source_sha }}
+          RELEASE_VERSION: ${{ needs.validate.outputs.version }}
+          GH_TOKEN: ${{ secrets.AGENTSDOCK_RELEASE_TOKEN }}
+        run: |
+          EXPORT_SHA="$(git subtree split --prefix=server "$SOURCE_SHA")"
+          test "$(git rev-parse "$SOURCE_SHA:server")" = "$(git rev-parse "$EXPORT_SHA^{tree}")"
+          EXPORT_REF="refs/heads/exports/v$RELEASE_VERSION"
+          EXISTING="$(git ls-remote https://github.com/ZhengyiLuo/AgentsServer.git "$EXPORT_REF" | cut -f 1)"
+          if [[ -n "$EXISTING" ]]; then
+            test "$EXISTING" = "$EXPORT_SHA"
+          else
+            # Empty lease permits creation only, never replacing another export.
+            git -c credential.helper= -c 'credential.helper=!gh auth git-credential' push \
+              "--force-with-lease=$EXPORT_REF:" https://github.com/ZhengyiLuo/AgentsServer.git "$EXPORT_SHA:$EXPORT_REF"
+          fi
+          echo "export_sha=$EXPORT_SHA" >> "$GITHUB_OUTPUT"
+      - name: Stage exact npm and compatibility server drafts without publishing
+        env:
+          GH_TOKEN: ${{ secrets.AGENTSDOCK_RELEASE_TOKEN }}
+          SOURCE_SHA: ${{ inputs.source_sha }}
+          SOURCE_REF: ${{ inputs.source_ref }}
+          RELEASE_VERSION: ${{ needs.validate.outputs.version }}
+          RELEASE_TRACK: ${{ needs.validate.outputs.track }}
+          EXPORT_SHA: ${{ steps.export.outputs.export_sha }}
+        run: |
+          node scripts/npm-candidate-release.mjs stage --assets "$RUNNER_TEMP/product-server/npm" --version "$RELEASE_VERSION" --track "$RELEASE_TRACK" --source-sha "$SOURCE_SHA" --source-ref "$SOURCE_REF"
+          node scripts/legacy-server-release.mjs stage --assets "$RUNNER_TEMP/product-server/legacy" --npm-assets "$RUNNER_TEMP/product-server/npm" --version "$RELEASE_VERSION" --track "$RELEASE_TRACK" --source-sha "$SOURCE_SHA" --source-ref "$SOURCE_REF" --export-sha "$EXPORT_SHA"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: product-server-${{ github.run_id }}
+          path: ${{ runner.temp }}/product-server/
+          if-no-files-found: error
+          retention-days: 30
+
+  prepare-desktop:
+    if: inputs.operation == 'prepare'
+    needs: [validate, prepare-server]
+    uses: ./.github/workflows/direct-desktop-release-draft.yml
+    with:
+      version: ${{ needs.validate.outputs.version }}
+      track: ${{ needs.validate.outputs.track }}
+      build_number: ${{ needs.validate.outputs.build_number }}
+      source_sha: ${{ inputs.source_sha }}
+      source_ref: ${{ inputs.source_ref }}
+      release_notes: ${{ inputs.release_notes }}
+      coordinated_manifest_base64: ${{ needs.prepare-server.outputs.manifest_base64 }}
+      coordinated_signature_base64: ${{ needs.prepare-server.outputs.signature_base64 }}
+      product_release: true
+      allow_unsigned_windows: ${{ inputs.allow_unsigned_windows }}
+
+  seal-product:
+    if: inputs.operation == 'prepare'
+    needs: [validate, prepare-server, prepare-desktop]
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@018cc2cf5baa6db3ef3c5f8a56943fffe632ef53 # v6
+        with:
+          name: product-server-${{ github.run_id }}
+          path: product/server
+      - id: receipt
+        name: Seal the complete product identity for acceptance and retry
+        env:
+          RELEASE_VERSION: ${{ needs.validate.outputs.version }}
+          SOURCE_SHA: ${{ inputs.source_sha }}
+          SOURCE_REF: ${{ inputs.source_ref }}
+          WORKFLOW_SHA: ${{ github.sha }}
+          PREPARE_RUN_ID: ${{ github.run_id }}
+          PREPARE_RUN_NUMBER: ${{ github.run_number }}
+          BUILD_NUMBER: ${{ needs.validate.outputs.build_number }}
+          EXPORT_SHA: ${{ needs.prepare-server.outputs.export_sha }}
+          DESKTOP_MANIFEST_SHA256: ${{ needs.prepare-desktop.outputs.manifest_sha256 }}
+          WINDOWS_SIGNING_POLICY: ${{ needs.prepare-desktop.outputs.windows_signing_policy }}
+        run: |
+          case "$WINDOWS_SIGNING_POLICY" in
+            require-signed) export WINDOWS_SIGNING=signed ;;
+            allow-unsigned) export WINDOWS_SIGNING=unsigned ;;
+            *) echo 'Missing or unsupported native signing policy.' >&2; exit 1 ;;
+          esac
+          node scripts/product-release.mjs seal product/server product/release.json >> "$GITHUB_OUTPUT"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: product-release-${{ github.run_id }}
+          path: product/
+          if-no-files-found: error
+          retention-days: 30
+      - name: Report prepared, not published
+        env:
+          RECEIPT_SHA256: ${{ steps.receipt.outputs.receipt_sha256 }}
+        run: |
+          printf 'Prepared product release. Nothing has been published.\n\nReceipt SHA-256: `%s`\n\nPublication requires native one-click acceptance of these exact bytes.\n' "$RECEIPT_SHA256" >> "$GITHUB_STEP_SUMMARY"
+
+  inspect-product:
+    if: inputs.operation == 'publish'
+    needs: validate
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    environment: direct-production
+    outputs:
+      version: ${{ steps.receipt.outputs.version }}
+      track: ${{ steps.receipt.outputs.track }}
+      manifest_sha256: ${{ steps.receipt.outputs.manifest_sha256 }}
+      npm_manifest_sha256: ${{ steps.receipt.outputs.npm_manifest_sha256 }}
+      candidate_tag: ${{ steps.receipt.outputs.candidate_tag }}
+      export_sha: ${{ steps.receipt.outputs.export_sha }}
+      windows_signing: ${{ steps.receipt.outputs.windows_signing }}
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Require exact reviewed receipt and acceptance run identifiers
+        env:
+          PREPARE_RUN: ${{ inputs.prepare_run_id }}
+          ACCEPTANCE_RUN: ${{ inputs.acceptance_run_id }}
+          RECEIPT_SHA256: ${{ inputs.accepted_receipt_sha256 }}
+        run: |
+          [[ "$PREPARE_RUN" =~ ^[1-9][0-9]*$ ]]
+          [[ "$ACCEPTANCE_RUN" =~ ^[1-9][0-9]*$ ]]
+          [[ "$RECEIPT_SHA256" =~ ^[a-f0-9]{64}$ ]]
+      - uses: actions/download-artifact@018cc2cf5baa6db3ef3c5f8a56943fffe632ef53 # v6
+        with:
+          name: product-release-${{ inputs.prepare_run_id }}
+          run-id: ${{ inputs.prepare_run_id }}
+          github-token: ${{ github.token }}
+          path: product
+      - id: receipt
+        name: Verify prepared source, signatures and immutable release receipt
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PREPARE_RUN: ${{ inputs.prepare_run_id }}
+          RECEIPT_SHA256: ${{ inputs.accepted_receipt_sha256 }}
+          SOURCE_SHA: ${{ inputs.source_sha }}
+          SOURCE_REF: ${{ inputs.source_ref }}
+        run: |
+          gh api "repos/$GITHUB_REPOSITORY/actions/runs/$PREPARE_RUN" > "$RUNNER_TEMP/prepare-run.json"
+          node scripts/product-release.mjs inspect product/release.json "$RECEIPT_SHA256" "$RUNNER_TEMP/prepare-run.json" product/server > "$RUNNER_TEMP/product-identity.txt"
+          grep -Fx "source_sha=$SOURCE_SHA" "$RUNNER_TEMP/product-identity.txt"
+          grep -Fx "source_ref=$SOURCE_REF" "$RUNNER_TEMP/product-identity.txt"
+          PREPARED_WORKFLOW_SHA="$(sed -n 's/^workflow_sha=//p' "$RUNNER_TEMP/product-identity.txt")"
+          git merge-base --is-ancestor "$PREPARED_WORKFLOW_SHA" "$GITHUB_SHA"
+          cat "$RUNNER_TEMP/product-identity.txt" >> "$GITHUB_OUTPUT"
+      - uses: actions/download-artifact@018cc2cf5baa6db3ef3c5f8a56943fffe632ef53 # v6
+        with:
+          name: AgentsDock-${{ steps.receipt.outputs.version }}-acceptance
+          run-id: ${{ inputs.acceptance_run_id }}
+          github-token: ${{ github.token }}
+          path: acceptance
+      - name: Require real coordinated-update acceptance before either registry is published
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ACCEPTANCE_RUN: ${{ inputs.acceptance_run_id }}
+          RECEIPT_SHA256: ${{ inputs.accepted_receipt_sha256 }}
+        run: |
+          gh api "repos/$GITHUB_REPOSITORY/actions/runs/$ACCEPTANCE_RUN" > "$RUNNER_TEMP/acceptance-run.json"
+          node scripts/product-release.mjs acceptance acceptance/acceptance.json product/release.json "$RECEIPT_SHA256" "$RUNNER_TEMP/acceptance-run.json"
+      - name: Verify the sealed compatibility server draft before npm publication
+        env:
+          GH_TOKEN: ${{ secrets.AGENTSDOCK_RELEASE_TOKEN }}
+          SOURCE_SHA: ${{ inputs.source_sha }}
+          SOURCE_REF: ${{ inputs.source_ref }}
+          RELEASE_VERSION: ${{ steps.receipt.outputs.version }}
+          RELEASE_TRACK: ${{ steps.receipt.outputs.track }}
+          EXPORT_SHA: ${{ steps.receipt.outputs.export_sha }}
+          NPM_MANIFEST_SHA256: ${{ steps.receipt.outputs.npm_manifest_sha256 }}
+        run: node scripts/legacy-server-release.mjs inspect --assets product/server/legacy --npm-assets product/server/npm --version "$RELEASE_VERSION" --track "$RELEASE_TRACK" --source-sha "$SOURCE_SHA" --source-ref "$SOURCE_REF" --export-sha "$EXPORT_SHA" --accepted-manifest-sha256 "$NPM_MANIFEST_SHA256"
+
+  verify-desktop:
+    if: inputs.operation == 'publish'
+    needs: inspect-product
+    uses: ./.github/workflows/direct-desktop-release-publish.yml
+    with:
+      version: ${{ needs.inspect-product.outputs.version }}
+      track: ${{ needs.inspect-product.outputs.track }}
+      allow_unsigned_windows: ${{ inputs.allow_unsigned_windows }}
+      verify_only: true
+      expected_source_sha: ${{ inputs.source_sha }}
+      expected_source_ref: ${{ inputs.source_ref }}
+      expected_manifest_sha256: ${{ needs.inspect-product.outputs.manifest_sha256 }}
+      expected_npm_manifest_sha256: ${{ needs.inspect-product.outputs.npm_manifest_sha256 }}
+
+  publish-npm:
+    if: inputs.operation == 'publish'
+    needs: [inspect-product, verify-desktop]
+    permissions:
+      contents: write
+      id-token: write
+    uses: ./.github/workflows/server-npm-publish.yml
+    with:
+      operation: publish
+      source_sha: ${{ inputs.source_sha }}
+      source_ref: ${{ inputs.source_ref }}
+      workflow_sha: ${{ github.sha }}
+      candidate_tag: ${{ needs.inspect-product.outputs.candidate_tag }}
+      accepted_manifest_sha256: ${{ needs.inspect-product.outputs.npm_manifest_sha256 }}
+
+  publish-product:
+    if: inputs.operation == 'publish'
+    needs: [inspect-product, verify-desktop, publish-npm]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    environment: direct-production
+    concurrency:
+      group: agentsdock-direct-release
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/download-artifact@018cc2cf5baa6db3ef3c5f8a56943fffe632ef53 # v6
+        with:
+          name: product-release-${{ inputs.prepare_run_id }}
+          run-id: ${{ inputs.prepare_run_id }}
+          github-token: ${{ github.token }}
+          path: product
+      - name: Publish exact legacy server bridge, then desktop and compatibility feed
+        env:
+          GH_TOKEN: ${{ secrets.AGENTSDOCK_RELEASE_TOKEN }}
+          SOURCE_SHA: ${{ inputs.source_sha }}
+          SOURCE_REF: ${{ inputs.source_ref }}
+          RELEASE_VERSION: ${{ needs.inspect-product.outputs.version }}
+          RELEASE_TRACK: ${{ needs.inspect-product.outputs.track }}
+          EXPORT_SHA: ${{ needs.inspect-product.outputs.export_sha }}
+          NPM_MANIFEST_SHA256: ${{ needs.inspect-product.outputs.npm_manifest_sha256 }}
+          DESKTOP_MANIFEST_SHA256: ${{ needs.inspect-product.outputs.manifest_sha256 }}
+          WINDOWS_SIGNING: ${{ needs.inspect-product.outputs.windows_signing }}
+          ALLOW_UNSIGNED_WINDOWS: ${{ inputs.allow_unsigned_windows }}
+        run: |
+          node scripts/legacy-server-release.mjs publish --assets product/server/legacy --npm-assets product/server/npm --version "$RELEASE_VERSION" --track "$RELEASE_TRACK" --source-sha "$SOURCE_SHA" --source-ref "$SOURCE_REF" --export-sha "$EXPORT_SHA" --accepted-manifest-sha256 "$NPM_MANIFEST_SHA256"
+          node scripts/direct-release-mirror.mjs publish --version "$RELEASE_VERSION" --track "$RELEASE_TRACK" --source-sha "$SOURCE_SHA" --source-ref "$SOURCE_REF" --windows-signing "$WINDOWS_SIGNING" --manifest-sha256 "$DESKTOP_MANIFEST_SHA256" --coordinated-updates true --allow-unsigned-windows "$ALLOW_UNSIGNED_WINDOWS"
+      - name: Verify public updater metadata
+        env:
+          GH_TOKEN: ${{ secrets.AGENTSDOCK_RELEASE_TOKEN }}
+          RELEASE_VERSION: ${{ needs.inspect-product.outputs.version }}
+          RELEASE_TRACK: ${{ needs.inspect-product.outputs.track }}
+        run: node scripts/verify_public_desktop_feed.mjs
+      - name: Record publication completion
+        env:
+          RELEASE_VERSION: ${{ needs.inspect-product.outputs.version }}
+          RECEIPT_SHA256: ${{ inputs.accepted_receipt_sha256 }}
+        run: |
+          printf 'Published AgentsDock %s: npm server, signed legacy server bridge, desktop and desktop compatibility mirror.\n\nAccepted receipt: `%s`\n' "$RELEASE_VERSION" "$RECEIPT_SHA256" >> "$GITHUB_STEP_SUMMARY"

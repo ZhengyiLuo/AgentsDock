@@ -1,3 +1,4 @@
+import { execFileSync } from 'node:child_process'
 import { existsSync, readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { beforeAll, describe, expect, it } from 'vitest'
@@ -155,21 +156,34 @@ describe('direct release contract', () => {
   describe.skipIf(!existsSync(draftWorkflowPath) || !existsSync(publishWorkflowPath))('maintainer direct-release workflows (omitted from source-only snapshots)', () => {
     let draftWorkflow: string
     let publishWorkflow: string
+    let productWorkflow: string
+    let publicFeedVerifier: string
 
     beforeAll(() => {
       draftWorkflow = readFileSync(draftWorkflowPath, 'utf8')
       publishWorkflow = readFileSync(publishWorkflowPath, 'utf8')
+      productWorkflow = readFileSync(resolve(process.cwd(), '../.github/workflows/product-release.yml'), 'utf8')
+      publicFeedVerifier = readFileSync(resolve(process.cwd(), '../scripts/verify_public_desktop_feed.mjs'), 'utf8')
     })
 
     it('publishes and verifies the canonical release and its exact legacy mirror', () => {
       expect(draftWorkflow).toContain('for repository in ZhengyiLuo/AgentsDock ZhengyiLuo/AgentsDock-Releases; do')
-      expect(publishWorkflow).toContain('for RELEASE_REPOSITORY in ZhengyiLuo/AgentsDock ZhengyiLuo/AgentsDock-Releases; do')
       expect(draftWorkflow).toContain('node scripts/direct-release-mirror.mjs stage')
       expect(publishWorkflow).toContain('node scripts/direct-release-mirror.mjs inspect')
-      expect(publishWorkflow).toContain('node scripts/direct-release-mirror.mjs publish')
-      for (const metadata of ['latest-mac.yml', 'latest-linux.yml', 'latest-linux-arm64.yml', 'latest.yml']) {
-        expect(publishWorkflow).toContain(`https://github.com/$RELEASE_REPOSITORY/releases/latest/download/${metadata}`)
+      for (const [workflow, identity] of [[publishWorkflow, 'inputs'], [productWorkflow, 'needs.inspect-product.outputs']]) {
+        expect(workflow).toContain('node scripts/direct-release-mirror.mjs publish')
+        expect(workflow).toContain('run: node scripts/verify_public_desktop_feed.mjs')
+        expect(workflow.indexOf('node scripts/direct-release-mirror.mjs publish'))
+          .toBeLessThan(workflow.indexOf('run: node scripts/verify_public_desktop_feed.mjs'))
+        const verification = workflow.match(/- name: Verify public updater metadata\n([\s\S]*?)run: node scripts\/verify_public_desktop_feed\.mjs/)?.[1]
+        expect(verification).toContain(`RELEASE_VERSION: \${{ ${identity}.version }}`)
+        expect(verification).toContain(`RELEASE_TRACK: \${{ ${identity}.track }}`)
       }
+      expect(productWorkflow.indexOf('run: node scripts/verify_public_desktop_feed.mjs'))
+        .toBeLessThan(productWorkflow.indexOf('name: Record publication completion'))
+      expect(publicFeedVerifier).toContain("REPOSITORIES } from './direct-release-mirror.mjs'")
+      expect(publicFeedVerifier).toContain('for (const repository of REPOSITORIES)')
+      expect(publicFeedVerifier).toContain('https://github.com/${repository}/releases/latest/download/latest')
       expect(`${draftWorkflow}\n${publishWorkflow}`).not.toContain('/AgentsServer')
     })
 
@@ -214,23 +228,22 @@ describe('direct release contract', () => {
     it('keeps stable and beta feeds isolated', () => {
       expect(draftWorkflow).toContain('x.y.z-beta.N')
       expect(draftWorkflow).toContain("p.build.publish[0].channel=process.env.RELEASE_TRACK==='beta'?'beta':'latest'")
-      expect(publishWorkflow).toContain('beta-mac.yml')
-      expect(publishWorkflow).toContain('beta-linux.yml')
-      expect(publishWorkflow).toContain('beta-linux-arm64.yml')
-      expect(publishWorkflow).toContain('beta.yml')
-      expect(publishWorkflow).toContain('https://github.com/$RELEASE_REPOSITORY/releases.atom')
-      expect(publishWorkflow).toContain('DISCOVERED_VERSION')
-      expect(publishWorkflow).toContain('scripts/select_electron_beta_release.mjs')
-      expect(publishWorkflow).not.toContain('awk -v expected="$RELEASE_VERSION"')
-      expect(publishWorkflow).not.toContain("sed -n 's#.*releases/tag/v\\([^\"]*\\)\".*#\\1#p' | head -1")
-      expect(publishWorkflow).toContain('DISCOVERED_MAC_VERSION')
-      expect(publishWorkflow).toContain('DISCOVERED_LINUX_ARM64_VERSION')
-      expect(publishWorkflow).toContain('DISCOVERED_WINDOWS_VERSION')
-      expect(publishWorkflow).toContain('EXPECTED_PRERELEASE=true')
-      expect(publishWorkflow).toContain('EXPECTED_PRERELEASE=false')
-      expect(publishWorkflow).toContain('test "$IS_PRERELEASE" = "$EXPECTED_PRERELEASE"')
-      expect(publishWorkflow).toContain('"$LATEST_TAG" != "$RELEASE_TAG"')
-      expect(publishWorkflow).toContain('"$LATEST_TAG" = "$RELEASE_TAG"')
+      expect(publicFeedVerifier).toContain("['-mac.yml', '-linux.yml', '-linux-arm64.yml', '.yml']")
+      expect(publicFeedVerifier).toContain('https://github.com/${repository}/releases/download/v${version}/beta')
+      expect(publicFeedVerifier).toContain('https://github.com/${repository}/releases.atom')
+      expect(publicFeedVerifier).toContain("newestBetaVersionFromAtom } from '../electron/src/main/updater-feed.mjs'")
+      expect(publicFeedVerifier).toContain('newestBetaVersionFromAtom(feed) === version')
+      expect(publicFeedVerifier).toContain("release.prerelease === (track === 'beta')")
+      expect(publicFeedVerifier).toContain('latest?.tag_name === tag')
+      expect(publicFeedVerifier).toContain('latest.tag_name !== tag')
+      expect(publicFeedVerifier).toContain('latest.prerelease === false')
+      // Exercise the shared verifier's offline behavioral contract too: stale
+      // Atom/latest selections, every platform/mirror, prerelease state, and
+      // immutable legacy alias handling must fail closed in both entrypoints.
+      execFileSync(process.execPath, ['--test', resolve(process.cwd(), '../scripts/tests/verify_public_desktop_feed.test.mjs')], {
+        cwd: resolve(process.cwd(), '..'), encoding: 'utf8', timeout: 30000,
+        env: { ...process.env, NODE_OPTIONS: '' }, stdio: ['ignore', 'pipe', 'pipe']
+      })
     })
 
     it('rejects stale release versions before building or publishing', () => {
