@@ -28,11 +28,15 @@
   message without a lingering Submitted bubble. Running, completion and server
   reconnect states work. No provider or server mock is used for these checks.
 - Verify the combined copy action through signed local desktop
-  `1.0.7-beta.13`, build `1215`, including native IPC/HTTP and exact clipboard
-  contents. Its 4,894 desktop tests, type checking, production compilation,
+  `1.0.7-beta.13`, build `1215`, from source `4caf335`, including native
+  IPC/HTTP and exact clipboard contents. Its 4,894 desktop tests, type checking, production compilation,
   package audit and signature checks pass. Follow-up drop/submission fixes pass
   28 shared-chat and 23 desktop send tests plus type checking. The server-hosted
   browser bundle is rebuilt. No deployment or public release.
+- Integrate browser follow-up `4f95a99` with current main at `8430ba6`; pass 273
+  affected server, catalog and packaging tests. Stop isolated services, revoke
+  test shares, remove temporary credentials, and verify the original provider
+  credentials remain unchanged.
 
 ## 2026-09-25 — Carry forward the provider Delete/release checklist
 
