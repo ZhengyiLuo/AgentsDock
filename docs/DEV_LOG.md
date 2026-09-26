@@ -1,5 +1,61 @@
 # Public development log
 
+## 2026-09-25 — Keep passive Claude login status out of the composer
+
+- Do not show an upfront Claude authentication warning or Recheck button just
+  because login has not been checked, or another chat has a cached login failure.
+  Remove the composer's stale-auth send gate so retrying after external login
+  reaches the native Claude request instead of failing solely on cached status.
+- Keep actual errors from the selected chat's latest run visible, clear the
+  notice after a successful retry, and preserve missing/broken CLI guidance.
+  Full runtime diagnostics and manual rechecks remain available in Settings.
+- Regression coverage reproduces the original unknown-state banner, verifies
+  send admission without an auth probe, and covers failures, retry recovery,
+  stale readiness and Settings. Pass 4,912 desktop tests (five skipped), eight
+  packaging/license checks and 30 isolated server authentication/probe tests.
+  Type checking and production compilation pass. The new send regression first
+  exposed the stale-auth gate and passes after the correction.
+- Availability: desktop source and compiled output only; no installation or
+  server restart. Live desktop interaction remains unverified because computer
+  accessibility permissions are unavailable. This UI correction requires an
+  updated desktop app; restarting the server alone does not change it.
+
+## 2026-09-25 — Hand off Codex work after a native re-login
+
+- Detect conservative native file-login revisions on demand and let Recheck
+  CLIs explicitly request a normal-Codex process handoff. Token renewal and file
+  timestamp changes alone do not count as a new login.
+- Preserve active native work, custom endpoints and stored thread identities.
+  Release idle ownership before the next turn; keep goals, approvals, side
+  chats and background-terminal controls usable while migration waits.
+- Check pending requests and caller leases again after waiting for the process
+  start lock. Inconclusive release stays retryable; accepted turns are not replayed.
+- Pass 621 focused server tests and 43 desktop runtime/health tests. Verify
+  isolated lifecycle regressions and a real HTTP/native CLI metadata
+  fixture without real credentials or a server restart. Live OAuth renewal,
+  model/history continuity and graphical client acceptance remain unverified.
+  See [the handoff contract](../server/docs/CODEX_LOGIN_HANDOFF.md).
+
+## 2026-09-25 — Remove standalone Claude auth-status checks
+
+- Remove standalone Claude authentication-status subprocesses from startup,
+  catalog refreshes, manual CLI rechecks and turn admission. Installation and
+  capability checks do not claim that the user is authenticated.
+- Preserve the last actual Claude authentication result and its observation
+  time through installation refreshes. Allow a native retry after external
+  login, while still rejecting missing or broken executables.
+- Keep the existing desktop contract: unknown Claude authentication allows a
+  request, whose native result updates readiness. This change requires a server
+  update; it does not change the client runtime or publish a release.
+- Validate 218 focused server tests, 31 desktop contract tests and TypeScript.
+  An isolated HTTP server with a recording CLI fixture exercises startup and
+  repeated catalog refreshes with zero auth-status invocations. Successful
+  renewal using a real signed-in account is not established by these checks.
+- Preserve native model discovery merged in parallel. Its disposable SDK
+  initialization processes still use the native authentication environment;
+  their renewal/termination behavior needs separate validation. Removing
+  auth-status probes does not establish that all catalog work is passive.
+
 ## 2026-09-25 — Keep the Side chat button beside the composer
 
 - Align the Side chat launcher with the composer's right edge, including its

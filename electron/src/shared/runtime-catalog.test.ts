@@ -27,6 +27,27 @@ const validCatalog: RuntimeCatalog = {
   }
 }
 
+describe('passive Claude authentication status from the server', () => {
+  it.each(['unknown', 'unauthenticated'] as const)('allows a native retry while reporting %s honestly', status => {
+    const diagnostic: RuntimeDiagnostic = {
+      backend: 'claude', status, available: false, installed: true,
+      authenticated: status === 'unauthenticated' ? false : null,
+      message: status === 'unknown'
+        ? 'Claude will check authentication when you send a message.'
+        : 'The last Claude request failed authentication.'
+    }
+    const catalog: RuntimeCatalog = { backends: { ...validCatalog.backends,
+      claude: { ...validCatalog.backends.claude, available: false, diagnostic }
+    } }
+    const health: Health = { ok: true, runtimes: { claude: diagnostic } }
+    expect(runtimeCatalogHasSelectableModels(catalog)).toBe(true)
+    expect(selectableChatBackends(health, catalog)).toContain('claude')
+    expect(runtimeSelectionError(health, catalog, 'claude', 'sonnet')).toBeNull()
+    expect(runtimeDiagnosticLabel(runtimeDiagnosticFor(health, catalog, 'claude')))
+      .toBe(status === 'unknown' ? 'Not checked' : 'Sign-in required')
+  })
+})
+
 describe('per-chat Codex provider selection', () => {
   const health: Health = { ok: true, capabilities: { codex_provider_v1: { per_chat: true, per_chat_models: true } }, runtimes: {
     codex: { backend: 'codex', status: 'unauthenticated', available: false, message: 'OpenAI sign-in required' }

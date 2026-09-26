@@ -1378,7 +1378,10 @@ export const Composer = memo(function Composer({ dropActive = false, sessionId, 
     try {
       const runtimeSnapshot = useAppStore.getState()
       const diagnostic = runtimeDiagnosticFor(runtimeSnapshot.health, runtimeSnapshot.runtimeCatalog, session.backend, session.codex_provider, session.codex_provider_catalog)
-      if (diagnostic && !['ready', 'unknown'].includes(diagnostic.status)) {
+      // Claude owns login verification on the real request. Its cached failure
+      // can outlive an external login; do not prevent the retry that proves it.
+      const nativeClaudeAuthRetry = session.backend === 'claude' && diagnostic?.status === 'unauthenticated'
+      if (diagnostic && !['ready', 'unknown'].includes(diagnostic.status) && !nativeClaudeAuthRetry) {
         useAppStore.getState().setError([diagnostic.message, diagnostic.action].filter(Boolean).join(' '))
         return
       }

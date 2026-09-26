@@ -2809,6 +2809,38 @@ describe('Composer', () => {
     expect(useAppStore.getState().uploadsBySession['chat-1']).toEqual([attachment])
   })
 
+  it.each(['unknown', 'unauthenticated'] as const)('sends Claude messages without a pre-send auth warning or probe when status is %s', async status => {
+    const session = { id: 'chat-1', title: 'Chat', backend: 'claude' as const }
+    const send = vi.fn().mockResolvedValue({ session, queued: false })
+    const catalog = vi.fn()
+    Object.defineProperty(window, 'agentsDock', {
+      configurable: true,
+      value: {
+        ...window.agentsDock,
+        turns: { send },
+        runtime: { catalog },
+      } as unknown as AgentsDockAPI,
+    })
+    useAppStore.setState({
+      sessions: [session],
+      health: { ok: true, runtimes: { claude: {
+        backend: 'claude', status, available: false, installed: true,
+        authenticated: status === 'unknown' ? null : false,
+        message: 'Claude checks authentication during a real request.',
+      } } },
+    })
+    const user = userEvent.setup()
+    render(<Composer />)
+    expect(screen.queryByText('Claude checks authentication during a real request.')).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Recheck Claude Code CLI status' })).not.toBeInTheDocument()
+    await user.type(screen.getByPlaceholderText('Message'), 'Hello Claude')
+    await user.click(screen.getByRole('button', { name: 'Send message' }))
+    await waitFor(() => expect(send).toHaveBeenCalledWith(expect.objectContaining({
+      sessionId: 'chat-1', prompt: 'Hello Claude',
+    })))
+    expect(catalog).not.toHaveBeenCalled()
+  })
+
   it('shows an actionable provider warning and preserves the draft when the CLI is unavailable', async () => {
     useAppStore.setState({
       health: {
@@ -2829,6 +2861,29 @@ describe('Composer', () => {
     await user.click(screen.getByRole('button', { name: 'Send message' }))
     expect(editor).toHaveValue('Keep this draft')
     expect(useAppStore.getState().error).toContain('Install Codex')
+  })
+
+  it.each(['missing', 'error'] as const)('does not bypass a %s Claude executable when retrying', async status => {
+    const send = vi.fn()
+    Object.defineProperty(window, 'agentsDock', {
+      configurable: true,
+      value: { ...window.agentsDock, turns: { send } } as unknown as AgentsDockAPI,
+    })
+    useAppStore.setState({
+      sessions: [{ id: 'chat-1', title: 'Chat', backend: 'claude' }],
+      health: { ok: true, runtimes: { claude: {
+        backend: 'claude', status, available: false, installed: status !== 'missing',
+        authenticated: null, message: 'Claude executable is unavailable.',
+      } } },
+    })
+    const user = userEvent.setup()
+    render(<Composer />)
+    const editor = screen.getByPlaceholderText('Message')
+    await user.type(editor, 'Keep this Claude draft')
+    await user.click(screen.getByRole('button', { name: 'Send message' }))
+    expect(send).not.toHaveBeenCalled()
+    expect(editor).toHaveValue('Keep this Claude draft')
+    expect(useAppStore.getState().error).toBe('Claude executable is unavailable.')
   })
 
   it('prefers the current chat provider error over a generic runtime failure banner', () => {
