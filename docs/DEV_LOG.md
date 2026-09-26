@@ -1,5 +1,30 @@
 # Public development log
 
+## 2026-09-26 — Restore ordinary steering during active Codex goals
+
+- Send goal follow-ups to the existing native turn even when the model/effort
+  picker has changed for future turns. Preserve the running goal, provider
+  settings, original references, command and authority without Stop/restart.
+- Remove the obsolete client-capability requirement for plain queued input.
+  Keep the goal steering lane available for turns started from a skill.
+  Report unsupported new actions separately from a turn that is not ready.
+- Reproduce the reported rejection through signed desktop `1.0.7-beta.14`,
+  build `1216`: start a real Codex goal at Low effort, change the picker to
+  Medium, queue a plain message, and click Send now. The original server
+  responds with the reported 409; corrected server source `810d89f` accepts it.
+- Exercise two follow-ups on the original running goal, then explicitly Stop,
+  Resume goal, change effort again, and steer the completion marker. All three
+  requests receive 200, native acknowledgements appear once, the first two
+  retain the original run, and the third retains the resumed run. The goal
+  completes with no queued messages or renderer exceptions. This uses native
+  app input, production IPC/HTTP and the actual provider against isolated state.
+- Pass 211 targeted server regressions covering admission, delivery, original
+  command/reference ownership, legacy queue records, transport races, queue
+  recovery and goal resume; eight focused app goal tests also pass. Regression
+  provider fakes are supplemented by the separate live acceptance above.
+- Server-source fix only. Existing desktop builds can use it after server
+  deployment; no production server deployment or public release in this pass.
+
 ## 2026-09-25 — Keep passive Claude login status out of the composer
 
 - Do not show an upfront Claude authentication warning or Recheck button just
