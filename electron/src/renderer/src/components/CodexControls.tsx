@@ -16,7 +16,6 @@ import {
   LoaderCircle,
   MessageSquareCode,
   Pause,
-  Pencil,
   Play,
   RefreshCw,
   Sparkles,
@@ -47,7 +46,8 @@ import {
 } from './CodexRuntimeContext'
 import { useTransientClose } from '../lib/transient-close'
 import { CodexInteractionCard } from './CodexInteractionShelf'
-import { GoalConditionField, GoalDialogContent } from './GoalDialog'
+import { GoalConditionField, GoalDialogContent, GoalProgress, GoalSummaryBar } from './GoalDialog'
+import { ProviderStatusTrigger } from './ProviderStatusTrigger'
 import './CodexControls.css'
 
 export function CodexStatusButton() {
@@ -113,17 +113,9 @@ export function CodexStatusButton() {
     if (open) void refresh()
   }}>
     <Dialog.Trigger asChild>
-      <button
-        type="button"
-        className={`codex-status-button ${tone}`}
-        aria-label={t("ui.CodexControls.CodexStatusButton.codex_controls_36c63bd", { "label": String(label) })}
-        title={t("ui.CodexControls.CodexStatusButton.codex_thread_controls_51ea35d")}
-      >
-        {loading || tone === 'active' ? <LoaderCircle className="spin" size={11} aria-hidden="true" /> : <span aria-hidden="true" />}
-        <b>Codex</b>
-        <small>{label}</small>
-        <ChevronRight size={12} aria-hidden="true" />
-      </button>
+      <ProviderStatusTrigger provider="Codex" status={label} tone={tone} loading={loading}
+        aria-label={t('ui.CodexControls.CodexStatusButton.codex_controls_36c63bd', { label })}
+        title={t('ui.CodexControls.CodexStatusButton.codex_thread_controls_51ea35d')} />
     </Dialog.Trigger>
     <CodexControlsDialog focusGoal={focusGoal} onOpenGoal={() => setFocusGoal(true)} />
   </Dialog.Root>
@@ -213,7 +205,6 @@ export function CodexGoalBar() {
   const { supported, runtime, session, mutating, error, refresh, run, applyGoalSnapshot } = useCodexRuntime()
   const [dialogOpen, setDialogOpen] = useState(false)
   const [focusGoal, setFocusGoal] = useState(false)
-  const [detailsOpen, setDetailsOpen] = useState(false)
   const [observedAt, setObservedAt] = useState(() => Date.now())
   const [clock, setClock] = useState(() => Date.now())
   const [statusAction, setStatusAction] = useState<{
@@ -242,7 +233,6 @@ export function CodexGoalBar() {
     statusActionInFlight.current = false
     setStatusAction(null)
     setDialogOpen(false)
-    setDetailsOpen(false)
     return () => { statusActionEpoch.current += 1 }
   }, [session?.id])
   useEffect(() => {
@@ -313,38 +303,19 @@ export function CodexGoalBar() {
     : goalStatusLabel(goal.status)
 
   return <Dialog.Root open={dialogOpen} onOpenChange={setDialogOpen}>
-    <section className={`composer-context-control codex-goal-bar${detailsOpen ? ' expanded' : ''}${displayedError ? ' error' : ''}`} aria-label={t("ui.CodexControls.CodexGoalBar.persistent_codex_goal_bb0d41b")}>
-      <div className="codex-goal-bar-main">
-        <Goal size={13} aria-hidden="true" />
-        <strong title={goalsEnabled ? pendingLabel || displayedStatus : undefined}>{goalsEnabled ? pendingLabel || displayedStatus : t("ui.CodexControls.CodexGoalBar.goals_disabled_05cc75d")}</strong>
-        <span className="codex-goal-objective" title={goal.objective}>{goal.objective}</span>
-        <time aria-label={t("ui.CodexControls.CodexGoalBar.goal_elapsed_time_24a1c77", { "duration": String(formatGoalDuration(elapsed)) })}>{formatGoalDuration(elapsed)}</time>
-        {goalsEnabled && <button type="button" aria-label={t("ui.CodexControls.CodexGoalBar.edit_goal_8828def")} title={t("ui.CodexControls.CodexGoalBar.edit_goal_8828def")} disabled={mutating} onClick={() => openControls(true)}><Pencil size={12} /></button>}
-        {toggleStatus && <button
-          type="button"
-          aria-label={statusActionLabel}
-          title={statusActionLabel}
-          aria-busy={statusAction?.pending === true}
-          disabled={mutating}
-          onClick={toggleStatus}
-        >{statusAction?.pending ? <LoaderCircle className="spin" size={12} /> : goal.status === 'active' ? <Pause size={12} /> : <Play size={12} />}</button>}
-        {goalsEnabled && <button type="button" aria-label={t("ui.CodexControls.CodexGoalBar.clear_goal_0d7c342")} title={t("ui.CodexControls.CodexGoalBar.clear_goal_0d7c342")} disabled={mutating} onClick={clear}><Trash2 size={12} /></button>}
-        <button
-          type="button"
-          aria-label={detailsOpen ? t("ui.CodexControls.CodexGoalBar.hide_goal_details_35d10a4") : t("ui.CodexControls.CodexGoalBar.show_goal_details_4a79f2c")}
-          title={detailsOpen ? t("ui.CodexControls.CodexGoalBar.hide_goal_details_35d10a4") : t("ui.CodexControls.CodexGoalBar.show_goal_details_4a79f2c")}
-          aria-expanded={detailsOpen}
-          onClick={() => setDetailsOpen(value => !value)}
-        ><ChevronRight size={13} /></button>
-      </div>
-      {detailsOpen && <div className="codex-goal-bar-detail">
-        <span><small>{t("ui.CodexControls.CodexGoalBar.status_920e413")}</small><b>{displayedStatus}</b></span>
-        <span><small>{t("ui.CodexControls.CodexGoalBar.tokens_a039dfb")}</small><b>{formatGoalBudget(goal.tokensUsed, goal.tokenBudget)}</b></span>
-        <span><small>{t("ui.CodexControls.CodexGoalBar.time_33b9347")}</small><b>{formatGoalBudget(elapsed, runtime?.time_budget_seconds, true)}</b></span>
-        <button type="button" className="quiet-button" onClick={() => openControls(false)}>{t("ui.CodexControls.CodexGoalBar.all_thread_controls_2aab8d9")}{" "}<ChevronRight size={12} /></button>
-      </div>}
-      {displayedError && <div className="codex-goal-bar-error" role="alert">{displayedError}</div>}
-    </section>
+    <GoalSummaryBar label={t('ui.CodexControls.CodexGoalBar.persistent_codex_goal_bb0d41b')} condition={goal.objective}
+      openLabel={t('ui.CodexControls.CodexGoalBar.edit_goal_8828def')} onOpen={goalsEnabled ? () => openControls(true) : undefined}
+      metadata={<><span>{goalsEnabled ? displayedStatus : t('ui.CodexControls.CodexGoalBar.goals_disabled_05cc75d')}</span>{' · '}
+        <time aria-label={t('ui.CodexControls.CodexGoalBar.goal_elapsed_time_24a1c77', { duration: formatGoalDuration(elapsed) })}>{formatGoalDuration(elapsed)}</time></>}
+      actions={<>
+        {toggleStatus && <button type="button" className="quiet-button" aria-label={statusActionLabel} title={statusActionLabel}
+          aria-busy={statusAction?.pending === true} disabled={mutating} onClick={toggleStatus}>
+          {statusAction?.pending ? <LoaderCircle className="spin" size={14} /> : goal.status === 'active' ? <Pause size={14} /> : <Play size={14} />}
+          {statusActionLabel}
+        </button>}
+        {goalsEnabled && <button type="button" className="quiet-button" disabled={mutating} onClick={clear}>{t('ui.CodexControls.CodexGoalBar.clear_goal_0d7c342')}</button>}
+      </>} />
+    {displayedError && <p className="goal-feedback error" role="alert">{displayedError}</p>}
     <CodexControlsDialog focusGoal={focusGoal} onOpenGoal={() => setFocusGoal(true)} />
   </Dialog.Root>
 }
@@ -632,14 +603,9 @@ function GoalSettings({ onNotice, notice }: { onNotice(value: string): void; not
 
   return <form noValidate onSubmit={save}>
       {sharedDisconnected && <p className="goal-feedback" role="status">{t('chatShare.web.disconnected')}</p>}
-      {goal && <section className="goal-progress" aria-label={t('codexGoal.current')}>
-        <strong>{goalStatusLabel(goal.status)}</strong>
-        <p>{goal.objective}</p>
-        <dl>
-          <div><dt>{t('ui.CodexControls.CodexGoalBar.tokens_a039dfb')}</dt><dd>{formatGoalBudget(goal.tokensUsed, goal.tokenBudget)}</dd></div>
-          <div><dt>{t('ui.CodexControls.CodexGoalBar.time_33b9347')}</dt><dd>{formatGoalBudget(goal.timeUsedSeconds, runtime?.time_budget_seconds, true)}</dd></div>
-        </dl>
-      </section>}
+      {goal && <GoalProgress label={t('codexGoal.current')} status={goalStatusLabel(goal.status)} condition={goal.objective}
+        metrics={[{ label: t('ui.CodexControls.CodexGoalBar.tokens_a039dfb'), value: formatGoalBudget(goal.tokensUsed, goal.tokenBudget) },
+          { label: t('ui.CodexControls.CodexGoalBar.time_33b9347'), value: formatGoalBudget(goal.timeUsedSeconds, runtime?.time_budget_seconds, true) }]} />}
       <GoalConditionField label={t('codexGoal.condition')} placeholder={t('ui.CodexControls.GoalSettings.what_should_codex_keep_working_toward_da42c7b')}
         value={objective} disabled={blocked} onChange={value => { markDraftDirty(); setObjective(value) }} />
       <div className="codex-control-fields three-column">

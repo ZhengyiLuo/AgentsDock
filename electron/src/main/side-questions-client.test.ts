@@ -43,9 +43,38 @@ function browserHeaders(request: IncomingMessage): string[] {
   return Object.keys(request.headers).filter(name => name === 'origin' || name === 'cookie' || name.startsWith('sec-fetch-'))
 }
 
-afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals() })
+afterEach(() => { vi.useRealTimers(); vi.restoreAllMocks(); vi.unstubAllGlobals() })
 
 describe('side-question native HTTP contract', () => {
+  it('uses native authenticated transport for synced reads, submission, Stop and Clear', async () => {
+    const requests: Array<{ method?: string; url?: string; body: string }> = []
+    const snapshot = { session_id: 'chat-a', side_chat_id: 'side-a', revision: 0, last_request_id: null, exchanges: [] }
+    await localTransport(async (request, response) => {
+      expect(browserHeaders(request)).toEqual([])
+      expect(request.headers['x-agentsdock-token']).toBe(token)
+      requests.push({ method: request.method, url: request.url, body: await body(request) })
+      json(response, snapshot, request.method === 'POST' ? 202 : 200)
+    }, async client => {
+      await expect(client.readSyncedSideChat('chat-a')).resolves.toEqual(snapshot)
+      await expect(client.submitSyncedSideChat('chat-a', input)).resolves.toEqual(snapshot)
+      await expect(client.stopSyncedSideChat('chat-a', input.request_id)).resolves.toEqual(snapshot)
+      await expect(client.clearSyncedSideChat('chat-a', input.side_chat_id)).resolves.toEqual(snapshot)
+    })
+    expect(requests.map(request => [request.method, request.url])).toEqual([
+      ['GET', '/api/sessions/chat-a/side-chat'], ['POST', '/api/sessions/chat-a/side-chat'],
+      ['DELETE', '/api/sessions/chat-a/side-chat/requests/request-a'], ['DELETE', '/api/sessions/chat-a/side-chat/side-a']
+    ])
+    expect(JSON.parse(requests[1].body)).toEqual(input)
+  })
+
+  it('rejects foreign or malformed synced snapshots and invalid native paths', async () => {
+    await localTransport((_request, response) => json(response, { session_id: 'foreign', side_chat_id: 'side-a', revision: 0, last_request_id: null, exchanges: [] }), async client => {
+      await expect(client.readSyncedSideChat('chat-a')).rejects.toThrow('side_question_invalid_response')
+      await expect(client.readSyncedSideChat('chat/a')).rejects.toThrow('route is invalid')
+      await expect(client.stopSyncedSideChat('chat-a', 'request/a')).rejects.toThrow('route is invalid')
+    })
+  })
+
   it('passes the native owner guard and sends only the native follow-up cursor', async () => {
     vi.unstubAllGlobals() // Restore actual Node fetch instead of the global test safety stub.
     const requests: Array<{ request: IncomingMessage; body: string }> = []
@@ -77,7 +106,30 @@ describe('side-question native HTTP contract', () => {
     expect(sent.request.rawHeaders.filter(value => value.toLowerCase() === 'x-agentsdock-token')).toHaveLength(1)
     expect(JSON.parse(sent.body)).toEqual(followup)
     expect(JSON.parse(sent.body)).not.toHaveProperty('history')
-    expect(timeoutSignal).toHaveBeenCalledExactlyOnceWith(210_000)
+    expect(timeoutSignal).not.toHaveBeenCalled()
+  })
+
+  it('keeps a native answer pending beyond the old deadline and accepts its eventual response', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
+    const deadline = vi.spyOn(AbortSignal, 'timeout').mockImplementation(milliseconds => {
+      const controller = new AbortController()
+      setTimeout(() => controller.abort(new DOMException('Timed out', 'TimeoutError')), milliseconds)
+      return controller.signal
+    })
+    let received!: (response: ServerResponse) => void
+    const started = new Promise<ServerResponse>(resolve => { received = resolve })
+    await localTransport((_request, response) => { received(response) }, async client => {
+      let settled = false
+      const pending = client.askSideQuestion('chat-a', input)
+      void pending.then(() => { settled = true }, () => { settled = true })
+      const response = await started
+      await vi.advanceTimersByTimeAsync(210_001)
+      expect(settled).toBe(false)
+      expect(response.destroyed).toBe(false)
+      expect(deadline).not.toHaveBeenCalled()
+      json(response, answer)
+      await expect(pending).resolves.toEqual(answer)
+    })
   })
 
   it.each([{ session_id: 'wrong' }, { request_id: 'wrong' }])('rejects foreign response ownership %j', async foreign => {
@@ -98,6 +150,7 @@ describe('side-question native HTTP contract', () => {
   })
 
   it('cancels only the exact side-question URL using native owner headers', async () => {
+    const deadline = vi.spyOn(AbortSignal, 'timeout').mockImplementation(() => new AbortController().signal)
     const requests: IncomingMessage[] = []
     const cancelled = { request_id: 'request-a', status: 'cancelled' }
     await localTransport((request, response) => {
@@ -112,6 +165,7 @@ describe('side-question native HTTP contract', () => {
     expect(requests[0].url).toBe(`/gateway${path}/request-a`)
     expect(browserHeaders(requests[0])).toEqual([])
     expect(requests[0].headers['x-agentsdock-token']).toBe(token)
+    expect(deadline).toHaveBeenCalledExactlyOnceWith(30_000)
   })
 
   it('closes only the native conversation with owner headers and no request replay', async () => {
@@ -164,20 +218,21 @@ describe('side-question native HTTP contract', () => {
     expect(requests).toBe(0)
   })
 
-  it.each(['caller', 'timeout', 'configure', 'dispose'] as const)('aborts the in-flight native request on %s', async source => {
+  it.each(['caller', 'configure', 'dispose', 'disconnect'] as const)('still ends a long-running native request on %s', async source => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
     const caller = new AbortController()
-    const deadline = new AbortController()
-    let received!: () => void
-    const started = new Promise<void>(resolve => { received = resolve })
-    await localTransport((_request, _response) => { received() }, async client => {
+    let received!: (response: ServerResponse) => void
+    const started = new Promise<ServerResponse>(resolve => { received = resolve })
+    await localTransport((_request, response) => { received(response) }, async client => {
       const pending = client.askSideQuestion('chat-a', input, caller.signal)
       const rejected = expect(pending).rejects.toBeInstanceOf(Error)
-      await started
+      const response = await started
+      await vi.advanceTimersByTimeAsync(210_001)
       if (source === 'caller') caller.abort(new Error('caller cancelled'))
-      if (source === 'timeout') deadline.abort(new Error('deadline elapsed'))
       if (source === 'configure') client.configure(client.url(''), 'replacement-token')
       if (source === 'dispose') client.dispose()
+      if (source === 'disconnect') response.destroy()
       await rejected
-    }, { timeoutSignal: () => deadline.signal })
+    })
   })
 })

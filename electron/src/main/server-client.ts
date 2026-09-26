@@ -1,4 +1,5 @@
 import { createReadStream, openAsBlob } from 'node:fs'
+import { parseProviderUsage, type ProviderUsageSnapshot, type UsageBackend } from '../shared/provider-usage'
 import { parseCodexAuthStatus } from '../shared/codex-auth'
 import { parseCodexProviderConfiguration, parseCodexProviderModels, parseCodexProviderTestResult, validateCodexProviderInput, validateCodexProviderModelTestInput, validateCodexProviderSelection } from '../shared/codex-provider'
 import { randomUUID } from 'node:crypto'
@@ -7,7 +8,7 @@ import { request as httpsRequest } from 'node:https'
 import { basename } from 'node:path'
 import { Readable } from 'node:stream'
 import { compactTimelineEvent, compactTimelineEvents } from '../shared/event-compaction'
-import { parseSideQuestionAnswer, validateSideQuestionInput, type SideQuestionAnswer, type SideQuestionCancellation, type SideQuestionInput } from '../shared/side-questions'
+import { parseSyncedSideChat, type SyncedSideChat, parseSideQuestionAnswer, validateSideQuestionInput, type SideQuestionAnswer, type SideQuestionCancellation, type SideQuestionInput } from '../shared/side-questions'
 import { parseChatInboxDelete, parseChatInboxPage } from '../shared/chat-inbox'
 import { parseWorkspaceGitStatus, validateWorkspaceGitAction, workspaceGitPath, workspaceGitSessionId,
   type WorkspaceGitAction, type WorkspaceGitDiff, type WorkspaceGitConflict, type WorkspaceGitView } from '../shared/workspace-git'
@@ -115,6 +116,8 @@ import type {
   WorkingDirectoryCompletion
 } from '../shared/types'
 import { normalizeCursorPermissionMode } from '../shared/cursor-permissions'
+import { normalizeOpenCodePermissionMode } from '../shared/opencode-permissions'
+import { t } from '../shared/i18n'
 import { normalizeServerURL } from '../shared/server-url'
 import { teamNetworkValidationMessage } from '../shared/server-errors'
 import { isReasoningSummaryStream } from '../shared/reasoning-stream'
@@ -343,14 +346,34 @@ export class AgentServerClient {
     return configurationURL(this.configuration, path)
   }
 
+  async readSyncedSideChat(sessionId: string): Promise<SyncedSideChat> {
+    return parseSyncedSideChat(await this.privilegedNativeRequest<unknown>(
+      `/api/sessions/${encodeURIComponent(sessionId)}/side-chat`, {}, undefined, 200, 8 * 1024 * 1024), sessionId)
+  }
+
+  async submitSyncedSideChat(sessionId: string, input: SideQuestionInput): Promise<SyncedSideChat> {
+    const body = validateSideQuestionInput(input)
+    return parseSyncedSideChat(await this.privilegedNativeRequest<unknown>(
+      `/api/sessions/${encodeURIComponent(sessionId)}/side-chat`, { method: 'POST', body: JSON.stringify(body) }, undefined, 202, 8 * 1024 * 1024), sessionId)
+  }
+
+  async stopSyncedSideChat(sessionId: string, requestId: string): Promise<SyncedSideChat> {
+    return parseSyncedSideChat(await this.privilegedNativeRequest<unknown>(
+      `/api/sessions/${encodeURIComponent(sessionId)}/side-chat/requests/${encodeURIComponent(requestId)}`, { method: 'DELETE' }, undefined, 200, 8 * 1024 * 1024), sessionId)
+  }
+
+  async clearSyncedSideChat(sessionId: string, sideChatId: string): Promise<SyncedSideChat> {
+    return parseSyncedSideChat(await this.privilegedNativeRequest<unknown>(
+      `/api/sessions/${encodeURIComponent(sessionId)}/side-chat/${encodeURIComponent(sideChatId)}`, { method: 'DELETE' }, undefined, 200, 8 * 1024 * 1024), sessionId)
+  }
+
   async askSideQuestion(sessionId: string, input: SideQuestionInput, signal?: AbortSignal): Promise<SideQuestionAnswer> {
     const body = validateSideQuestionInput(input)
-    // Native side questions have a 150-second server deadline.
-    // Keep transport headroom and never retry or turn this into a chat turn.
+    // A native side turn can keep thinking, using tools, or awaiting approval.
+    // Its owner controls cancellation; elapsed time alone must not end it.
     const response = await this.privilegedNativeRequest<unknown>(`/api/sessions/${encodeURIComponent(sessionId)}/side-questions`, {
-      method: 'POST', body: JSON.stringify(body),
-      signal: combineAbortSignals(signal, this.timeoutSignal(210_000))
-    }, 210_000, 200, 2 * 1024 * 1024)
+      method: 'POST', body: JSON.stringify(body), signal
+    }, null, 200, 2 * 1024 * 1024)
     return parseSideQuestionAnswer(response, sessionId, body.request_id)
   }
 
@@ -402,6 +425,12 @@ export class AgentServerClient {
       }
     }
   }
+  async providerUsage(backend: UsageBackend, sessionId: string, refresh = false): Promise<ProviderUsageSnapshot> {
+    const query = new URLSearchParams({ backend, session_id: sessionId })
+    if (refresh) query.set('refresh', 'true')
+    return parseProviderUsage(await this.privilegedNativeRequest<unknown>(`/api/runtime/usage?${query}`), backend)
+  }
+
   async runtimeCatalog(refresh = false): Promise<RuntimeCatalog> {
     return this.get(`/api/runtime/catalog${refresh ? '?refresh=true' : ''}`)
   }
@@ -897,6 +926,7 @@ export class AgentServerClient {
     const codexProvider = validateCodexProviderSelection(input.codex_provider)
     if (codexProvider === 'custom' && input.backend !== 'codex') throw new Error('Custom endpoints require Codex.')
     const providerId = 'providerId' in input ? input.providerId : undefined
+    if (providerId && input.backend === 'opencode') throw new Error(t('opencode.resumeUnavailable'))
     const response = await this.post<{ session: Session }>('/api/sessions', {
       title: input.title,
       folder: input.folder,
@@ -915,20 +945,23 @@ export class AgentServerClient {
       cursor_permission_mode: input.backend === 'cursor'
         ? normalizeCursorPermissionMode(input.cursor_permission_mode)
         : null,
+      opencode_permission_mode: input.backend === 'opencode'
+        ? normalizeOpenCodePermissionMode(input.opencode_permission_mode)
+        : null,
       provider_session_id: providerId,
-      // Cursor can resume provider context by ID, but AgentsServer cannot
-      // import Cursor's prior transcript into the local timeline.
+      // Keep legacy manual-ID resume compatible. Cursor text-snapshot import
+      // uses the capability-gated local picker and bulk endpoint instead.
       import_history: Boolean(providerId) && input.backend !== 'cursor'
     })
     return response.session
   }
 
-  async listLocalSessions(limit = LOCAL_SESSION_IMPORT_HARD_LIST_LIMIT): Promise<LocalSessionCandidate[]> {
+  async listLocalSessions(limit = LOCAL_SESSION_IMPORT_HARD_LIST_LIMIT, includeCursor = false): Promise<LocalSessionCandidate[]> {
     if (!Number.isInteger(limit) || limit < 1 || limit > LOCAL_SESSION_IMPORT_HARD_LIST_LIMIT) {
       throw new Error('Import Chat local session limit is invalid.')
     }
     const response = await this.get<unknown>(
-      `/api/local-sessions?limit=${limit}`,
+      `/api/local-sessions?limit=${limit}${includeCursor ? '&include_cursor=true' : ''}`,
       this.configuration,
       DEFAULT_REQUEST_TIMEOUT_MS,
       LOCAL_SESSION_LIST_RESPONSE_MAX_BYTES
@@ -951,10 +984,13 @@ export class AgentServerClient {
   async updateSession(sessionId: string, patch: UpdateSessionInput): Promise<Session> {
     const codexProvider = validateCodexProviderSelection(patch.codex_provider)
     if (codexProvider === 'custom' && patch.backend !== undefined && patch.backend !== 'codex') throw new Error('Custom endpoints require Codex.')
-    const normalizedPatch = patch.cursor_permission_mode === undefined
-      ? patch
+    const openCodePatch = patch.opencode_permission_mode === undefined ? patch : {
+      ...patch, opencode_permission_mode: patch.opencode_permission_mode === null ? null : normalizeOpenCodePermissionMode(patch.opencode_permission_mode)
+    }
+    const normalizedPatch = openCodePatch.cursor_permission_mode === undefined
+      ? openCodePatch
       : {
-          ...patch,
+          ...openCodePatch,
           cursor_permission_mode: patch.cursor_permission_mode === null
             ? null
             : normalizeCursorPermissionMode(patch.cursor_permission_mode)
@@ -2075,7 +2111,9 @@ export class AgentServerClient {
     onState: (connected: boolean, error?: string) => void,
     onProviderRuntime?: (event: ProviderRuntimeChanged) => void,
     onPinnedItemsChanged?: (event: TimelinePinsChanged) => void,
-    onReasoningStream?: (snapshot: ReasoningSummaryStreamSnapshot) => void
+    onReasoningStream?: (snapshot: ReasoningSummaryStreamSnapshot) => void,
+    onSideChatChanged?: (revision: number) => void,
+    onProviderUsageChanged?: (backend: 'codex' | 'claude') => void
   ): () => void {
     const configuration = this.configuration
     const endpoint = new URL(configurationURL(configuration, `/api/sessions/${encodeURIComponent(sessionId)}/events`))
@@ -2149,6 +2187,16 @@ export class AgentServerClient {
               reasoningRevision = packet.revision
               onReasoningStream?.(packet)
             }
+            return
+          }
+          if (packet && typeof packet === 'object' && 'type' in packet && packet.type === 'side_chat_updated') {
+            const notice = packet as { session_id?: string; revision?: number }
+            if (notice.session_id === sessionId && Number.isSafeInteger(notice.revision) && notice.revision! >= 0) onSideChatChanged?.(notice.revision!)
+            return
+          }
+          if (packet && typeof packet === 'object' && 'type' in packet && packet.type === 'provider_usage_changed') {
+            const notice = packet as { session_id?: string; backend?: string }
+            if (notice.session_id === sessionId && (notice.backend === 'codex' || notice.backend === 'claude')) onProviderUsageChanged?.(notice.backend)
             return
           }
           if (isProviderRuntimeChanged(packet)) {
@@ -2476,7 +2524,7 @@ export class AgentServerClient {
   private async privilegedNativeRequest<T>(
     path: string,
     init: RequestInit = {},
-    timeoutMs = DEFAULT_REQUEST_TIMEOUT_MS,
+    timeoutMs: number | null = DEFAULT_REQUEST_TIMEOUT_MS,
     expectedStatus?: number,
     maxResponseBytes?: number
   ): Promise<T> {
@@ -2500,7 +2548,7 @@ export class AgentServerClient {
       signal: combineAbortSignals(
         configuration.abortController.signal,
         init.signal,
-        AbortSignal.timeout(timeoutMs)
+        timeoutMs === null ? undefined : AbortSignal.timeout(timeoutMs)
       )
     })
     if (!response.ok || expectedStatus !== undefined && response.status !== expectedStatus) {
@@ -2677,7 +2725,7 @@ function isEmergencySessionPacket(value: unknown): value is Session {
     || typeof session.title !== 'string'
     || !session.title
     || session.title.length > 240
-    || (session.backend !== 'codex' && session.backend !== 'claude' && session.backend !== 'cursor')
+    || (session.backend !== 'codex' && session.backend !== 'claude' && session.backend !== 'cursor' && session.backend !== 'opencode')
     || typeof session.unacknowledged_emergency_count !== 'number'
     || !Number.isSafeInteger(session.unacknowledged_emergency_count)
     || session.unacknowledged_emergency_count < 0
@@ -3088,6 +3136,8 @@ function isPrivilegedNativeControlTarget(
     return method === 'GET' && keys.length === (operation === 'diff' ? 2 : 1)
       && keys.includes('path') && (operation !== 'diff' || keys.includes('view'))
   }
+  const syncedSideChat = /^\/api\/sessions\/[A-Za-z0-9_-]{1,128}\/side-chat(?:\/(?:requests\/)?[A-Za-z0-9_-]{1,128})?$/.exec(path)
+  if (syncedSideChat) return !target.search && (path.endsWith('/side-chat') ? method === 'GET' || method === 'POST' : method === 'DELETE')
   const sideQuestion = /^\/api\/sessions\/[A-Za-z0-9_-]{1,128}\/side-questions(?:\/([A-Za-z0-9_-]{1,128}))?$/.exec(path)
   if (sideQuestion) return !target.search && method === (sideQuestion[1] ? 'DELETE' : 'POST')
   if (/^\/api\/sessions\/[A-Za-z0-9_-]{1,128}\/side-chats\/[A-Za-z0-9_-]{1,128}$/.test(path)) {
@@ -3098,6 +3148,14 @@ function isPrivilegedNativeControlTarget(
     : share[1] === 'chat-shares' && share[2] === 'preview' ? method === 'POST' : method === 'DELETE')
   if (path === '/api/admin/codex/goals' || path === '/api/admin/codex/subagents') {
     return !target.search && (method === 'GET' || method === 'PUT')
+  }
+  if (path === '/api/runtime/usage') {
+    const keys = [...target.searchParams.keys()]
+    return method === 'GET' && keys.length === new Set(keys).size
+      && keys.every(key => ['backend', 'session_id', 'refresh'].includes(key))
+      && ['codex', 'claude'].includes(target.searchParams.get('backend') ?? '')
+      && /^[A-Za-z0-9_-]{1,128}$/.test(target.searchParams.get('session_id') ?? '')
+      && (!target.searchParams.has('refresh') || target.searchParams.get('refresh') === 'true')
   }
   if (path === '/api/admin/codex/auth') return !target.search && method === 'GET'
   if (path === '/api/admin/codex/provider') return !target.search && ['GET', 'PUT', 'DELETE'].includes(method)

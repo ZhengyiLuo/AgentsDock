@@ -2636,6 +2636,24 @@ describe('selected live timeline', () => {
     }
   })
 
+  it('updates an OpenCode provider binding and reset in the live session without a refresh', async () => {
+    vi.useFakeTimers()
+    try {
+      const handlers = await initializeLiveEventHandlers()
+      const session: Session = { ...sessionFor('chat-a'), backend: 'opencode', latest_event_seq: 0 }
+      useAppStore.setState({ sessions: [session], snapshots: { 'chat-a': { ...snapshot('chat-a', []), session } } })
+      handlers.get('server:event')?.({ profileId: null, profileGeneration: 0,
+        event: eventFor('chat-a', 1, { type: 'provider_session', backend: 'opencode', provider_session_id: 'ses-native' }) })
+      await vi.advanceTimersByTimeAsync(1_000)
+      expect(useAppStore.getState().sessions[0]).toMatchObject({ opencode_session_id: 'ses-native', backend_locked: true })
+      expect(useAppStore.getState().snapshots['chat-a'].session.opencode_session_id).toBe('ses-native')
+      handlers.get('server:event')?.({ profileId: null, profileGeneration: 0,
+        event: eventFor('chat-a', 2, { type: 'provider_session_reset', backend: 'opencode', previous_provider_session_id: 'ses-native' }) })
+      await vi.advanceTimersByTimeAsync(1_000)
+      expect(useAppStore.getState().sessions[0]).toMatchObject({ opencode_session_id: null, session_id: null, backend_locked: true })
+    } finally { vi.useRealTimers() }
+  })
+
   it('lets emergency alerts interrupt input without pulling an unrelated input batch', async () => {
     vi.useFakeTimers()
     const editor = document.createElement('textarea')

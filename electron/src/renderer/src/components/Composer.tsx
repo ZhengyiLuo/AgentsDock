@@ -119,6 +119,10 @@ import { ClaudeMcpDialog, claudeMcpCapabilityAdvertised, claudeMcpCapabilitySupp
 import { ClaudeGoalControls, useClaudeGoalsAvailable } from './ClaudeGoalControls'
 import { CodexPermissionMenu } from './CodexPermissionMenu'
 import { CursorPermissionMenu } from './CursorPermissionMenu'
+import { OpenCodePermissionMenu } from './OpenCodePermissionMenu'
+import { openCodeProviderCommandsAvailable } from '@shared/opencode'
+import { opencodeBackendAvailable, opencodeBackendUnavailableReason } from '@shared/runtime-catalog'
+import { awaitAllOpenCodePermissionUpdates, awaitOpenCodePermissionUpdates } from '../lib/opencode-permission-updates'
 import { RuntimeHealthNotice } from './RuntimeHealth'
 import { ShortcutTooltip } from './ShortcutTooltip'
 import { WorkingDirectoryInput } from './WorkingDirectoryInput'
@@ -168,6 +172,9 @@ function composerHealthContractRevisions(health: Health | null): ComposerHealthC
       capabilities?.codex_provider_v1 ?? null,
       capabilities?.claude_controls ?? null,
       capabilities?.cursor_backend ?? null,
+      capabilities?.opencode_backend ?? null,
+      capabilities?.local_provider_commands_v1 ?? null,
+      health.runtimes?.opencode ?? null,
       capabilities?.scheduled_jobs ?? null,
       capabilities?.local_session_import_v1 ?? null,
       health.runtimes?.cursor ?? null
@@ -177,6 +184,8 @@ function composerHealthContractRevisions(health: Health | null): ComposerHealthC
       capabilities?.cross_chat_handoffs_v1 ?? null,
       capabilities?.team_all_servers_alias_v1 ?? null,
       capabilities?.cursor_backend ?? null,
+      capabilities?.opencode_backend ?? null,
+      health.runtimes?.opencode ?? null,
       health.runtimes?.cursor ?? null
     ])
   }
@@ -599,6 +608,7 @@ export const Composer = memo(function Composer({ dropActive = false, sessionId, 
     const key = providerCommandsKey
     const list = window.agentsDock.providerCommands?.list
     if (!key || !selectedId || !session || session.backend === 'cursor' || !connected || typeof list !== 'function') return
+    if (session.backend === 'opencode' && !openCodeProviderCommandsAvailable(useAppStore.getState().health)) return
     if (!refresh) {
       const cached = providerCommandCache.get(key)
       if (cached && cached.expiresAt > Date.now()) {
@@ -686,7 +696,7 @@ export const Composer = memo(function Composer({ dropActive = false, sessionId, 
   const hasReferenceFallback = hasStructuredReferences && (!hasInlineReferences || !editorMirrorAligned)
   const supportedChatActions = useMemo(() => supportedCrossChatActions(health), [healthRevision])
   const supportedTargetBackends = useMemo(() => supportedCrossChatTargetBackends(health), [healthRevision])
-  const routeHintsSupported = routeHintMentionsAvailable(health)
+  const routeHintsSupported = session?.backend !== 'opencode' && routeHintMentionsAvailable(health)
   const teamMentionsSupported = teamMessagesAvailable(health)
   const teamAllServersSupported = teamAllServersAliasAvailable(health)
   const teamMessagesAdvertised = health?.capabilities?.agent_team_messages_v1?.available === true
@@ -768,23 +778,33 @@ export const Composer = memo(function Composer({ dropActive = false, sessionId, 
     session?.backend === 'cursor'
     && cursorBackendAvailable(health, catalog)
   )
+  const codexGoalsAvailable = session?.backend === 'codex'
+    && codexControls?.available === true
+    && codexControls.features?.goals !== false
+    && codexRuntime.supported
+    && codexRuntime.runtime?.goals_enabled !== false
+  const goalControlsAvailable = !window.agentsDock.sharedChat && (codexGoalsAvailable || claudeGoalsAvailable)
+  const goalTitle = t(session?.backend === 'claude' ? 'claudeGoal.title' : 'codexGoal.title')
+  const openGoalControls = () => {
+    if (session?.backend === 'claude') setClaudeGoalOpen(true)
+    else if (session?.backend === 'codex') window.dispatchEvent(new CustomEvent('agentsdock:open-codex-controls', {
+      detail: { sessionId: session.id, focus: 'goal' }
+    }))
+  }
   const commandAvailable = useCallback((command: ComposerCommand): boolean => {
     if (!session) return false
     if (window.agentsDock.sharedChat && !['goal', 'permissions', 'reasoning', 'model', 'plan', 'schedule', 'attach'].includes(command.id)) return false
     if (command.provider) return command.provider.command.kind.length > 0
+      && (session.backend !== 'opencode' || openCodeProviderCommandsAvailable(health))
     if (command.id === 'chat') return crossChatSupported
     if (command.id === 'mail') return !teamMessagesAdvertised
     if (command.id === 'goal') {
       if (session.backend === 'claude') return claudeGoalsAvailable
-      return session.backend === 'codex'
-        && codexControls?.available === true
-        && codexControls.features?.goals !== false
-        && codexRuntime.supported
-        && codexRuntime.runtime?.goals_enabled !== false
+      return codexGoalsAvailable
     }
-    if (command.id === 'permissions') return codexPermissionsAvailable || claudePermissionsAvailable || cursorPermissionsAvailable
+    if (command.id === 'permissions') return codexPermissionsAvailable || claudePermissionsAvailable || cursorPermissionsAvailable || session.backend === 'opencode' && opencodeBackendAvailable(health, catalog)
     if (command.id === 'reasoning') {
-      return session.backend !== 'cursor'
+      return session.backend !== 'cursor' && session.backend !== 'opencode'
         && runtimeEffortOptions(catalog, session.backend, session.model, session.effort, session.codex_provider, session.codex_provider_catalog)
         .some(option => Boolean(option.value))
     }
@@ -799,7 +819,7 @@ export const Composer = memo(function Composer({ dropActive = false, sessionId, 
     if (command.id === 'import') return localSessionImportSupported(health)
     if (command.id === 'split') return !splitOpen
     return true
-  }, [catalog, claudeControls?.permission_modes, claudeGoalsAvailable, claudeMcpAvailable, claudePermissionModes, claudePermissionsAvailable, codexControls?.available, codexControls?.features?.goals, codexPermissionsAvailable, codexRuntime.runtime?.goals_enabled, codexRuntime.supported, crossChatSupported, cursorPermissionsAvailable, healthRevision, session, splitOpen, teamMessagesAdvertised])
+  }, [catalog, claudeControls?.permission_modes, claudeGoalsAvailable, claudeMcpAvailable, claudePermissionModes, claudePermissionsAvailable, codexGoalsAvailable, codexPermissionsAvailable, crossChatSupported, cursorPermissionsAvailable, healthRevision, session, splitOpen, teamMessagesAdvertised])
   const activeProviderCommandState: ProviderCommandLoadState = providerCommandState.key === providerCommandsKey
     ? providerCommandState
     : { key: providerCommandsKey, status: 'idle', snapshot: null }
@@ -1085,6 +1105,7 @@ export const Composer = memo(function Composer({ dropActive = false, sessionId, 
           : []),
         awaitAllClaudePermissionUpdates(),
         awaitAllCodexPermissionUpdates(),
+        awaitAllOpenCodePermissionUpdates(),
         awaitAllCursorPermissionUpdates()
       ]).then(() => {
         referencesDirtyRef.current = false
@@ -1189,6 +1210,7 @@ export const Composer = memo(function Composer({ dropActive = false, sessionId, 
 
   const send = async (steer = false, promptOverride?: string, consumeComposer = true) => {
     if (writeDisabled) return
+    if (steer && running && session?.backend === 'opencode') { useAppStore.getState().setError(t('opencode.steerUnavailable')); return }
     if (!profileIsActive(activeProfileId, profileGeneration)) return
     let steerConsent: InboundDeliveryConsent | undefined
     if (steer && selectedId) {
@@ -1387,6 +1409,10 @@ export const Composer = memo(function Composer({ dropActive = false, sessionId, 
         }
         if (!composerSessionIsCurrent(activeProfileId, profileGeneration, serverIdentity, session.id, draftContextRef, mountedRef)) return
       }
+      if (session.backend === 'opencode') {
+        try { await awaitOpenCodePermissionUpdates(session.id) } catch (error) { reportActionError(error); return }
+        if (!composerSessionIsCurrent(activeProfileId, profileGeneration, serverIdentity, session.id, draftContextRef, mountedRef)) return
+      }
       const currentRuntimeState = useAppStore.getState()
       const currentSession = currentRuntimeState.sessions.find(candidate => candidate.id === session.id)
       const currentRuntimeError = sessionRuntimeAdmissionError(currentSession, currentRuntimeState.health, currentRuntimeState.runtimeCatalog)
@@ -1493,6 +1519,7 @@ export const Composer = memo(function Composer({ dropActive = false, sessionId, 
   }
 
   const steerFirstQueued = async () => {
+    if (running && session?.backend === 'opencode') { reportActionError(t('opencode.steerUnavailable')); return }
     if (writeDisabled) return
     if (!selectedId || !steeringScope) return
     if (!profileIsActive(activeProfileId, profileGeneration)) return
@@ -1673,10 +1700,7 @@ export const Composer = memo(function Composer({ dropActive = false, sessionId, 
     } else if (command.id === 'feedback') {
       void window.agentsDock.native.openExternal('https://github.com/ZhengyiLuo/AgentsDock/issues/new').catch(reportActionError)
     } else if (command.id === 'goal') {
-      if (session.backend === 'claude') setClaudeGoalOpen(true)
-      else window.dispatchEvent(new CustomEvent('agentsdock:open-codex-controls', {
-          detail: { sessionId: session.id, focus: 'goal' }
-        }))
+      openGoalControls()
     } else if (command.id === 'import') {
       useAppStore.getState().setModal('importChats', true)
     } else if (command.id === 'model' || command.id === 'reasoning') {
@@ -2079,7 +2103,7 @@ export const Composer = memo(function Composer({ dropActive = false, sessionId, 
             }
             if (event.key === 'Enter' && !event.shiftKey && !event.altKey) {
               event.preventDefault()
-              const forceSend = (event.metaKey || event.ctrlKey) && !steeringPending
+              const forceSend = (event.metaKey || event.ctrlKey) && !steeringPending && session.backend !== 'opencode'
               if (canSend) void send(forceSend)
               else if (
                 (event.metaKey || event.ctrlKey)
@@ -2165,7 +2189,7 @@ export const Composer = memo(function Composer({ dropActive = false, sessionId, 
             <DropdownMenu.Trigger asChild><button className="composer-icon composer-add-button" title={t("ui.Composer.Composer.add_9fd728c")} disabled={writeDisabled}><Plus size={18} /></button></DropdownMenu.Trigger>
             <DropdownMenu.Portal><DropdownMenu.Content className="menu-content" side="top" align="start">
               <DropdownMenu.Item className="menu-item" onSelect={() => void chooseFiles()}><Paperclip size={14} />{" "}{t("ui.Composer.Composer.attach_files_e697cc1")}</DropdownMenu.Item>
-              {claudeGoalsAvailable && <DropdownMenu.Item className="menu-item" onSelect={() => setClaudeGoalOpen(true)}><Goal size={14} />{t('claudeGoal.title')}</DropdownMenu.Item>}
+              {goalControlsAvailable && <DropdownMenu.Item className="menu-item" onSelect={openGoalControls}><Goal size={14} />{goalTitle}</DropdownMenu.Item>}
               <DropdownMenu.Separator className="menu-separator" />
               <DropdownMenu.Label className="menu-label">{t("ui.Composer.Composer.frequent_phrases_e257acc")}</DropdownMenu.Label>
               {[t("ui.Composer.Composer.status_report_b784026"), t("ui.Composer.Composer.keep_going_8fc6411"), t("ui.Composer.Composer.verify_the_result_carefully_b07a805")].map(phrase => <DropdownMenu.Item key={phrase} className="menu-item" onSelect={() => void send(false, phrase, false)}>{phrase}</DropdownMenu.Item>)}
@@ -2187,8 +2211,9 @@ export const Composer = memo(function Composer({ dropActive = false, sessionId, 
           {session.backend === 'codex' && <CodexContextIndicator />}
           {session.backend === 'claude' && <ClaudePermissionMenu session={session} running={running} open={permissionMenuOpen} onOpenChange={setPermissionMenuOpen} />}
           {session.backend === 'claude' && <ClaudeContextIndicator />}
-          {claudeGoalsAvailable && <button type="button" className="composer-icon" aria-label={t('claudeGoal.title')} title={t('claudeGoal.title')} onClick={() => setClaudeGoalOpen(true)}><Goal size={15} /></button>}
+          {goalControlsAvailable && <button type="button" className="composer-icon" aria-label={goalTitle} title={goalTitle} onClick={openGoalControls}><Goal size={15} /></button>}
           {session.backend === 'cursor' && <CursorPermissionMenu session={session} running={running} open={permissionMenuOpen} onOpenChange={setPermissionMenuOpen} />}
+          {session.backend === 'opencode' && <OpenCodePermissionMenu session={session} running={running} open={permissionMenuOpen} onOpenChange={setPermissionMenuOpen} />}
         </div>
         <div className="composer-actions">
           {(steeringPending || admitting) && <span className="steering-pending" role="status"><span className="activity-ring" /><span className="steering-pending-label">{
@@ -2211,7 +2236,7 @@ export const Composer = memo(function Composer({ dropActive = false, sessionId, 
             }}
             title={stopping ? t("ui.Composer.Composer.stopping_agent_ec42789") : t("ui.Composer.Composer.stop_f9da57a", { "provider": String(session.title) })}
           ><span className="activity-ring" /><Square size={12} fill="currentColor" /><span className="stop-button-label">{stopping ? t("ui.Composer.Composer.stopping_bbe8574") : t("ui.Composer.Composer.stop_cae7d57")}</span></button>}
-          <ShortcutTooltip shortcut={running ? ['sendMessage', 'steerMessage'] : 'sendMessage'} label={running ? activeCodexGoal ? t('composer.queueMessageDuringGoal') : t("ui.Composer.Composer.queue_message_steer_now_eea53cb") : t("ui.Composer.Composer.send_message_93a26b1")}><button className="send-button" aria-label={sessionId === undefined ? (running ? t("ui.Composer.Composer.queue_message_891d4ef") : t("ui.Composer.Composer.send_message_93a26b1")) : t(running ? 'ui.composer.queueFor' : 'ui.composer.sendTo', { title: session.title })} disabled={!canSend} onClick={() => void send()}><Send size={17} /></button></ShortcutTooltip>
+          <ShortcutTooltip shortcut={running && session.backend !== 'opencode' ? ['sendMessage', 'steerMessage'] : 'sendMessage'} label={running ? session.backend === 'opencode' ? t("ui.Composer.Composer.queue_message_891d4ef") : activeCodexGoal ? t('composer.queueMessageDuringGoal') : t("ui.Composer.Composer.queue_message_steer_now_eea53cb") : t("ui.Composer.Composer.send_message_93a26b1")}><button className="send-button" aria-label={sessionId === undefined ? (running ? t("ui.Composer.Composer.queue_message_891d4ef") : t("ui.Composer.Composer.send_message_93a26b1")) : t(running ? 'ui.composer.queueFor' : 'ui.composer.sendTo', { title: session.title })} disabled={!canSend} onClick={() => void send()}><Send size={17} /></button></ShortcutTooltip>
         </div>
       </fieldset>
       <div className="drop-overlay" role="status" aria-label={dropActive ? t("ui.Composer.Composer.drop_to_attach_34a7a63") : undefined} aria-live="polite" aria-atomic="true" aria-hidden={!dropActive}>
@@ -2999,6 +3024,7 @@ function WorkingDirectoryCommandDialog({
               available={completionAvailable}
             />
             <small className="working-directory-hint">{t("ui.Composer.WorkingDirectoryCommandDialog.folder_suggestions_come_from_the_active_ag_fb6c963")}</small>
+            {session.backend === 'opencode' && <small className="working-directory-hint">{t('opencode.cwdReset')}</small>}
             <footer>
               <Dialog.Close asChild><button type="button" className="quiet-button">{t("ui.Composer.WorkingDirectoryCommandDialog.cancel_19766ed")}</button></Dialog.Close>
               <button type="submit" className="primary-button" disabled={!draft.trim() || saving}>{saving ? t("ui.Composer.WorkingDirectoryCommandDialog.saving_23e3929") : t("ui.Composer.WorkingDirectoryCommandDialog.use_folder_901c498")}</button>
@@ -3279,12 +3305,12 @@ function RuntimeMenu({
             <DropdownMenu.Item className="menu-item" onSelect={() => { setManualModel(session.model ?? ''); setManualModelOpen(true) }}>{t('codexProvider.manualModel')}</DropdownMenu.Item>
             <CodexModelDiscovery menu sessionId={session.id} />
           </>}
-          {session.backend !== 'cursor' && efforts.some(option => Boolean(option.value)) && <>
+          {session.backend !== 'cursor' && session.backend !== 'opencode' && efforts.some(option => Boolean(option.value)) && <>
             <DropdownMenu.Separator className="menu-separator" />
             <DropdownMenu.Label className="menu-label">Reasoning</DropdownMenu.Label>
             {efforts.map(option => <DropdownMenu.CheckboxItem data-runtime-section="reasoning" key={option.value || 'default'} className="menu-item" checked={(session.effort ?? '') === option.value} onCheckedChange={() => void useAppStore.getState().updateSession(session.id, { effort: option.value || null })}>{option.label}</DropdownMenu.CheckboxItem>)}
           </>}
-          {!window.agentsDock.sharedChat && session.backend !== 'cursor' && <>
+          {!window.agentsDock.sharedChat && session.backend !== 'cursor' && session.backend !== 'opencode' && <>
             <DropdownMenu.Separator className="menu-separator" />
             <DropdownMenu.Label className="menu-label">{t("ui.Composer.RuntimeMenu.agent_process_4dc27ee")}</DropdownMenu.Label>
             <DropdownMenu.Item
@@ -3321,6 +3347,8 @@ function BackendMenu({ session, running, admitting }: { session: Session; runnin
   const catalog = useAppStore(state => state.runtimeCatalog)
   const cursorAvailable = cursorBackendAvailable(health, catalog)
   const cursorUnavailableReason = cursorBackendUnavailableReason(health, catalog)
+  const openCodeAvailable = opencodeBackendAvailable(health, catalog)
+  const openCodeUnavailableReason = opencodeBackendUnavailableReason(health, catalog)
   const backends = selectableChatBackendChoices(health, catalog)
   const providerLocked = isBackendLocked(session)
   const disabled = providerLocked || running || admitting
@@ -3343,8 +3371,8 @@ function BackendMenu({ session, running, admitting }: { session: Session; runnin
       window.dispatchEvent(new CustomEvent('agentsdock:app-settings-section', { detail: 'server' }))
       useAppStore.getState().setModal('appSettings', true)
     }}><BackendMark backend="codex" size={15} />{t('codexProvider.label')}{' '}<span className="menu-item-locked-hint">{t('codexProvider.configure')}</span></DropdownMenu.Item>
-    const unavailable = backend === 'cursor' && !cursorAvailable
-    const unavailableReason = cursorUnavailableReason || t('ui.Composer.agentUnavailableFallback')
+    const unavailable = backend === 'cursor' && !cursorAvailable || backend === 'opencode' && !openCodeAvailable
+    const unavailableReason = (backend === 'opencode' ? openCodeUnavailableReason : cursorUnavailableReason) || t('ui.Composer.agentUnavailableFallback')
     if (unavailable) return <Tooltip.Root key={backend}>
       <Tooltip.Trigger asChild>
         <DropdownMenu.Item className="menu-item backend-unavailable-item" aria-disabled="true" onSelect={event => event.preventDefault()}>
@@ -3747,6 +3775,7 @@ const QueueShelf = memo(function QueueShelf({
   }
   const saveEdit = async (steer = false) => {
     if (!editing || savingEdit) return
+    if (steer && running && sourceSession?.backend === 'opencode') { reportActionError(t('opencode.steerUnavailable')); return }
     if (!profileIsActive(profileId, profileGeneration)) return
     let steerConsent: InboundDeliveryConsent | undefined
     if (steer) {
@@ -3802,6 +3831,7 @@ const QueueShelf = memo(function QueueShelf({
       )
       const chatReferences = validatedReferences.chatReferences
       const teamReferences = validatedReferences.teamReferences
+      if (sourceSession.backend === 'opencode' && chatReferences.length) throw new Error(t('opencode.crossChatUnavailable'))
       if (chatReferences.length !== editingReferences.length) {
         throw new Error('A queued chat reference was edited or is no longer valid. Remove it or select @Chat again.')
       }
@@ -4140,6 +4170,7 @@ function PendingQueuedRow({ submission }: { submission: PendingTurnSubmission })
 
 function QueuedRow({ profileId, profileGeneration, steeringScope, turn, sourceSessionTitle, sessionId, running, activeCodexGoal, drop, steeringPending, promotionPending, runtimeError, crossChatFence, blockingDelivery, canSkipExactDelivery, canSkipExactPeerDelivery, asyncControls, reorderable, moving, onMove, onEdit }: { profileId: string | null; profileGeneration: number; steeringScope: SteeringScope; turn: QueuedTurn; sourceSessionTitle?: string; sessionId: string; running: boolean; activeCodexGoal: boolean; drop: { id: string; placement: 'before' | 'after' } | null; steeringPending: boolean; promotionPending: boolean; runtimeError: string | null; crossChatFence: QueuedTurnCrossChatFence; blockingDelivery: QueuedTurn | null; canSkipExactDelivery: boolean; canSkipExactPeerDelivery: boolean; asyncControls: boolean; reorderable: boolean; moving: boolean; onMove: (direction: 'up' | 'down') => void; onEdit: (body?: string) => void }) {
   useLocale()
+  const openCodeSteeringBlocked = useAppStore(state => running && state.sessions.find(session => session.id === sessionId)?.backend === 'opencode')
   const agentMessage = isAsyncAgentQueuedTurn(turn)
   const senderTitle = agentMessage ? turn.source_title?.trim() || sourceSessionTitle?.trim() || t('timeline.ui.unknownAgent') : null
   const securePeerDelivery = isSecurePeerDeliveryQueuedTurn(turn)
@@ -4265,6 +4296,7 @@ function QueuedRow({ profileId, profileGeneration, steeringScope, turn, sourceSe
     catch (error) { if (profileIsActive(profileId, profileGeneration)) reportActionError(error) }
   }
   const steer = async () => {
+    if (openCodeSteeringBlocked) { reportActionError(t('opencode.steerUnavailable')); return }
     if (!profileIsActive(profileId, profileGeneration)) return
     const steerConsent = confirmInboundDeliveryInterruption(sessionId, 'send_now')
     if (!steerConsent) return
@@ -4409,8 +4441,8 @@ function QueuedRow({ profileId, profileGeneration, steeringScope, turn, sourceSe
     <button
       type="button"
       className="steer-action"
-      title={actionTitle}
-      disabled={steeringPending || promotionPending || Boolean(runtimeError) || remoteAgentRoute || crossChatFence.runNow}
+      title={openCodeSteeringBlocked ? t('opencode.steerUnavailable') : actionTitle}
+      disabled={openCodeSteeringBlocked || steeringPending || promotionPending || Boolean(runtimeError) || remoteAgentRoute || crossChatFence.runNow}
       onClick={() => void steer()}
     ><CornerDownRight size={13} /> <b>{actionLabel}</b></button>
     {blockingDelivery && canSkipBlockingDelivery && <button
@@ -4427,7 +4459,7 @@ function QueuedRow({ profileId, profileGeneration, steeringScope, turn, sourceSe
   </div>
 }
 
-function isBackendLocked(session: Session): boolean { return Boolean(session.backend_locked || session.session_id || session.claude_session_id || session.codex_thread_id || session.cursor_session_id) }
+function isBackendLocked(session: Session): boolean { return Boolean(session.backend_locked || session.session_id || session.claude_session_id || session.codex_thread_id || session.cursor_session_id || session.opencode_session_id) }
 
 function sessionRuntimeAdmissionError(
   session: Session | null | undefined,

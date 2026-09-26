@@ -12,7 +12,7 @@ export interface LanguageSettingsSnapshot {
 export type JsonPrimitive = string | number | boolean | null
 export type JsonValue = JsonPrimitive | JsonValue[] | { [key: string]: JsonValue }
 
-export type Backend = 'claude' | 'codex' | 'cursor'
+export type Backend = 'claude' | 'codex' | 'cursor' | 'opencode'
 export type CodexProvider = 'default' | 'custom'
 export type ChatSyncStatus = 'idle' | 'cached' | 'syncing' | 'live' | 'reconnecting' | 'offline' | 'error'
 export type ServerConnectionState = 'online' | 'degraded' | 'connecting' | 'retrying' | 'offline' | 'cached'
@@ -22,6 +22,7 @@ export type CodexSandboxMode = 'read-only' | 'workspace-write' | 'danger-full-ac
 export type CodexApprovalsReviewer = 'user' | 'auto_review' | 'guardian_subagent'
 export type ClaudePermissionMode = 'default' | 'acceptEdits' | 'plan' | 'bypassPermissions' | 'dontAsk' | 'auto'
 export type CursorPermissionMode = 'default' | 'full_access' | 'plan'
+export type OpenCodePermissionMode = 'default' | 'full_access' | 'plan'
 export type CodexGoalStatus = 'active' | 'paused' | 'blocked' | 'usageLimited' | 'budgetLimited' | 'complete'
 export type CodexThreadActiveFlag = 'waitingOnApproval' | 'waitingOnUserInput'
 export type CodexThreadStatus =
@@ -455,6 +456,8 @@ export interface Session {
   claude_permission_mode?: ClaudePermissionMode | null
   cursor_session_id?: string | null
   cursor_permission_mode?: CursorPermissionMode | null
+  opencode_session_id?: string | null
+  opencode_permission_mode?: OpenCodePermissionMode | null
   /** Server-enforced scheduled-job access granted to this chat's agent. */
   provider_jobs_access?: ProviderJobsAccess | null
   claude_pending_interaction_count?: number | null
@@ -550,6 +553,8 @@ export interface RuntimeBackendCatalog {
   default_model?: string | null
   default_effort?: string | null
   diagnostic?: RuntimeDiagnostic | null
+  permission_modes?: OpenCodePermissionMode[]
+  default_permission_mode?: OpenCodePermissionMode
 }
 export interface RuntimeCatalog {
   backends: Record<string, RuntimeBackendCatalog>
@@ -1118,6 +1123,7 @@ export interface Event extends SharedChatAttribution {
   stopped?: boolean | null
   is_error?: boolean | null
   provider_session_id?: string | null
+  previous_provider_session_id?: string | null
   /** Codex thread identity on native turn lifecycle events. */
   provider_thread_id?: string | null
   tool_id?: string | null
@@ -1418,6 +1424,11 @@ export interface CursorBackendCapability extends ServerCapability {
   permission_modes?: CursorPermissionMode[]
 }
 
+export interface OpenCodeBackendCapability extends ServerCapability {
+  version: 1
+  permission_modes?: OpenCodePermissionMode[]
+}
+
 export interface AgentTeamMailCapability extends ServerCapability {
   version: 1
   explicit_command?: '/mail'
@@ -1696,6 +1707,7 @@ export interface SessionForkCompletedPrefixCapability {
 }
 
 export interface HealthCapabilities {
+  provider_usage?: { available: boolean; version: number; backends?: Backend[] }
   subagent_limit_v1?: { version: number; backends?: Backend[] }
   codex_provider_v1?: { available?: boolean; version?: number; per_chat?: boolean; per_chat_models?: boolean; model_discovery?: boolean; model_compatibility?: boolean }
   side_questions?: SideQuestionsCapability
@@ -1706,6 +1718,8 @@ export interface HealthCapabilities {
   codex_controls?: InteractiveProviderCapability
   claude_controls?: InteractiveProviderCapability
   cursor_backend?: CursorBackendCapability
+  opencode_backend?: OpenCodeBackendCapability
+  local_provider_commands_v1?: ServerCapability & { version?: number; supported_backends?: Backend[] }
   agent_team_mail_v1?: AgentTeamMailCapability
   agent_team_messages_v1?: AgentTeamMessagesCapability
   agent_team_mail_routes_v1?: { available: boolean; version: 1; max_routes: number }
@@ -2346,6 +2360,7 @@ export interface CreateSessionInput {
   codex_approvals_reviewer?: CodexApprovalsReviewer | null
   claude_permission_mode?: ClaudePermissionMode | null
   cursor_permission_mode?: CursorPermissionMode | null
+  opencode_permission_mode?: OpenCodePermissionMode | null
 }
 export interface ResumeSessionInput extends CreateSessionInput { providerId: string }
 export interface LocalSessionCandidate {
@@ -2386,6 +2401,7 @@ export interface UpdateSessionInput {
   codex_approvals_reviewer?: CodexApprovalsReviewer | null
   claude_permission_mode?: ClaudePermissionMode | null
   cursor_permission_mode?: CursorPermissionMode | null
+  opencode_permission_mode?: OpenCodePermissionMode | null
   provider_jobs_access?: ProviderJobsAccess
   pinned?: boolean
   archived?: boolean
@@ -2454,6 +2470,8 @@ export interface NativeFileRef {
 }
 
 export interface AppEventMap {
+  'provider-usage:changed': { profileId: string; profileGeneration: number; serverIdentity?: string | null; sessionId: string; backend: 'codex' | 'claude' }
+  'side-chat:changed': { profileId: string; profileGeneration: number; sessionId: string; revision: number }
   'app:storage': { full: boolean }
   'team:mail-hints': MailHintProjection
   'app:language': LanguageSettingsSnapshot

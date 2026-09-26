@@ -71,7 +71,7 @@ jobs:
       - name: Verify CLI and actual offline npm packaging
         run: |
           node --test server/npm/cli.test.cjs scripts/tests/stage_coordinated_release.test.mjs scripts/tests/verify_npm_publication.test.mjs
-          python3 -m unittest discover -s server -p test_npm_release_package.py
+          python3 -m unittest discover -s server/tests -t server -p test_npm_release_package.py
       - name: Prepare exact unsigned payload for signing and acceptance
         run: python3 server/scripts/package_npm_release.py --output dist/npm-server --require-clean-source
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
@@ -136,7 +136,7 @@ jobs:
         run: |
           node -e 'const v=require("node:child_process").execFileSync("npm",["--version"],{encoding:"utf8"}).trim().split(".").map(Number);if(v[0]<11||(v[0]===11&&(v[1]<5||(v[1]===5&&v[2]<1))))throw Error("npm >=11.5.1 is required")'
           node --test server/npm/cli.test.cjs scripts/tests/stage_coordinated_release.test.mjs scripts/tests/verify_npm_publication.test.mjs
-          python3 -m unittest discover -s server -p test_npm_release_package.py
+          python3 -m unittest discover -s server/tests -t server -p test_npm_release_package.py
       - name: Download the accepted signed bundle from its separate draft
         env:
           GH_TOKEN: ${{ github.token }}

@@ -10,6 +10,8 @@ import { backendLabel, shortId } from '../lib/format'
 import { useTransientClose } from '../lib/transient-close'
 import { useAppStore } from '../store/app-store'
 import { ShortcutTooltip } from './ShortcutTooltip'
+import { ClaudeStatusButton } from './ClaudeControls'
+import { useClaudeRuntime } from './ClaudeRuntimeContext'
 import { CodexStatusButton } from './CodexControls'
 import { useCodexRuntime } from './CodexRuntimeContext'
 import { ScheduledJobsPopover } from './ScheduledJobsPopover'
@@ -47,8 +49,9 @@ export function ChatHeader({
   const running = useAppStore(state => (session ? state.activeSessionIds.has(session.id) : false))
   const admitting = useAppStore(state => (session ? Boolean(state.turnAdmissionTokens[session.id]) : false))
   const codexControlsSupported = useCodexRuntime().supported
+  const claudeControlsSupported = useClaudeRuntime().supported
   const liveForkSupported = useAppStore(state => completedPrefixForkAvailable(state.health, session?.backend))
-  const forkBlocked = (running || admitting) && !liveForkSupported
+  const forkBlocked = session?.backend === 'opencode' || (running || admitting) && !liveForkSupported
   const currentFolder = session?.folder?.trim() || 'General'
   const splitCandidates = useMemo(
     () => sessions.filter(candidate => (
@@ -96,7 +99,7 @@ export function ChatHeader({
     : null
   if (!session) return <header className="chat-header empty"><strong>AgentsDock</strong><div className="header-actions">{sidebarButton}</div></header>
   const save = () => { const clean = title.trim(); if (clean && clean !== session.title) void useAppStore.getState().updateSession(session.id, { title: clean }) }
-  const sessionIdValue = session.session_id || session.codex_thread_id || session.claude_session_id || session.cursor_session_id
+  const sessionIdValue = session.session_id || session.codex_thread_id || session.claude_session_id || session.cursor_session_id || session.opencode_session_id
   const copySessionId = () => {
     if (!sessionIdValue) return
     void window.agentsDock.native.writeClipboard(sessionIdValue).then(() => {
@@ -147,7 +150,6 @@ export function ChatHeader({
           setActionsMenuOpen(open)
           if (!open) setSplitMenuRequested(false)
         }}><DropdownMenu.Trigger asChild><button className="icon-button" title={t("ui.ChatHeader.ChatHeader.chat_actions_8ba35bb")} aria-label={t("ui.ChatHeader.ChatHeader.chat_actions_8ba35bb")}><MoreHorizontal size={16} /></button></DropdownMenu.Trigger><DropdownMenu.Portal><DropdownMenu.Content className="menu-content" align="end">
-          <DropdownMenu.Item className="menu-item" onSelect={() => useAppStore.getState().setModal('digest', true)}><GitFork size={14} />{t("ui.ChatHeader.ChatHeader.create_digest_8b04e01")}</DropdownMenu.Item>
           {splitMenuRequested && onOpenSplit && <DropdownMenu.Sub>
             <DropdownMenu.SubTrigger className="menu-item split-chat-menu-trigger"><Columns2 size={14} />{t("ui.ChatHeader.ChatHeader.open_split_view_51e50f7")}<ChevronRight size={13} /></DropdownMenu.SubTrigger>
             <DropdownMenu.Portal><DropdownMenu.SubContent className="menu-content split-chat-menu" sideOffset={6} collisionPadding={12}>
@@ -157,11 +159,11 @@ export function ChatHeader({
                 : <DropdownMenu.Label className="menu-label">{t("ui.ChatHeader.ChatHeader.no_other_active_chats_40889ab")}</DropdownMenu.Label>}
             </DropdownMenu.SubContent></DropdownMenu.Portal>
           </DropdownMenu.Sub>}
-          <DropdownMenu.Item className="menu-item" disabled={forkBlocked} title={forkBlocked ? t('sessionFork.runningUnavailable') : running || admitting ? t('sessionFork.runningDescription') : undefined} onSelect={() => void useAppStore.getState().forkSession(session.id)}><GitFork size={14} />{t("ui.ChatHeader.ChatHeader.fork_chat_dfbcbb3")}</DropdownMenu.Item>
+          <DropdownMenu.Item className="menu-item" disabled={forkBlocked} title={session?.backend === 'opencode' ? t('opencode.forkUnavailable') : forkBlocked ? t('sessionFork.runningUnavailable') : running || admitting ? t('sessionFork.runningDescription') : undefined} onSelect={() => void useAppStore.getState().forkSession(session.id)}><GitFork size={14} />{t("ui.ChatHeader.ChatHeader.fork_chat_dfbcbb3")}</DropdownMenu.Item>
           <DropdownMenu.Separator className="menu-separator" />
           <DropdownMenu.Item className="menu-item" onSelect={() => void useAppStore.getState().updateSession(session.id, { pinned: !session.pinned })}><Pin size={14} fill={session.pinned ? 'currentColor' : 'none'} />{session.pinned ? t("ui.ChatHeader.ChatHeader.unpin_chat_1944e0e") : t("ui.ChatHeader.ChatHeader.pin_chat_a754adf")}</DropdownMenu.Item>
           <DropdownMenu.Separator className="menu-separator" />
-          <DropdownMenu.Item className="menu-item" onSelect={() => void useAppStore.getState().importHistory(session.id)}><RefreshCw size={14} />{t("ui.ChatHeader.ChatHeader.refresh_provider_history_9d88960")}</DropdownMenu.Item>
+          <DropdownMenu.Item className="menu-item" disabled={session.backend === 'opencode'} onSelect={() => void useAppStore.getState().importHistory(session.id)}><RefreshCw size={14} />{t("ui.ChatHeader.ChatHeader.refresh_provider_history_9d88960")}</DropdownMenu.Item>
           <DropdownMenu.Separator className="menu-separator" />
           <DropdownMenu.Item className="menu-item" onSelect={() => void useAppStore.getState().updateSession(session.id, { archived: !session.archived })}>{session.archived ? <ArchiveRestore size={14} /> : <Archive size={14} />}{session.archived ? t("ui.ChatHeader.ChatHeader.unarchive_chat_54953a7") : t("ui.ChatHeader.ChatHeader.archive_chat_9bd687c")}</DropdownMenu.Item>
           <DropdownMenu.Item className="menu-item danger" onSelect={() => window.dispatchEvent(new CustomEvent('agentsdock:confirm-delete', { detail: session }))}><Trash2 size={14} />{t("ui.ChatHeader.ChatHeader.delete_chat_93291d9")}</DropdownMenu.Item>
@@ -176,8 +178,9 @@ export function ChatHeader({
           onClick={onTerminalToggle}
         ><SquareTerminal size={16} /></button></ShortcutTooltip>}
         <CodexStatusButton />
+        <ClaudeStatusButton />
         {(running || admitting) && (
-          session.backend === 'claude'
+          (session.backend === 'claude' && !claudeControlsSupported)
           || (session.backend === 'codex' && !codexControlsSupported)
         ) && <AgentRunningStatus backend={session.backend} starting={!running && admitting} />}
         <ChatSyncStatus sessionId={session.id} />

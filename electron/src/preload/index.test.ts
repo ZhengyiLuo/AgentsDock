@@ -32,6 +32,19 @@ describe('preload session IPC bridge', () => {
     expect(electronHarness.exposed?.codex).not.toHaveProperty('loginWithApiKey')
   })
 
+  it('exposes sync reads and explicit cross-device Stop and Clear', async () => {
+    const scope = { profileId: 'server-a', profileGeneration: 7, serverIdentity: 'verified-a' }
+    const input = { request_id: 'request-a', question: 'Why?', side_chat_id: 'side-a' }
+    await electronHarness.exposed?.sideQuestions?.read?.(scope, 'chat-a')
+    await electronHarness.exposed?.sideQuestions?.submit?.(scope, 'chat-a', input)
+    await electronHarness.exposed?.sideQuestions?.stop?.(scope, 'chat-a', input.request_id)
+    await electronHarness.exposed?.sideQuestions?.clear?.(scope, 'chat-a', input.side_chat_id)
+    expect(electronHarness.invoke.mock.calls).toEqual([
+      ['side-chat:read', scope, 'chat-a'], ['side-chat:submit', scope, 'chat-a', input],
+      ['side-chat:stop', scope, 'chat-a', 'request-a'], ['side-chat:clear', scope, 'chat-a', 'side-a']
+    ])
+  })
+
   it('keeps side-question IPC separate from turn submission and binds cancellation to its original scope', async () => {
     const scope = { profileId: 'server-a', profileGeneration: 7 }
     const input = { request_id: 'question-a', question: 'Why?' }

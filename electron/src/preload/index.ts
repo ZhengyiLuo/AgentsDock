@@ -11,6 +11,10 @@ const api: AgentsDockAPI = {
     action: (scope, sessionId, input) => ipcRenderer.invoke('workspace-git:action', scope, sessionId, input)
   },
   sideQuestions: {
+    read: (scope, sessionId) => ipcRenderer.invoke('side-chat:read', scope, sessionId),
+    submit: (scope, sessionId, input) => ipcRenderer.invoke('side-chat:submit', scope, sessionId, input),
+    stop: (scope, sessionId, requestId) => ipcRenderer.invoke('side-chat:stop', scope, sessionId, requestId),
+    clear: (scope, sessionId, sideChatId) => ipcRenderer.invoke('side-chat:clear', scope, sessionId, sideChatId),
     ask: (scope, sessionId, input) => ipcRenderer.invoke('side-questions:ask', scope, sessionId, input),
     cancel: (scope, sessionId, requestId) => ipcRenderer.invoke('side-questions:cancel', scope, sessionId, requestId),
     close: (scope, sessionId, sideChatId) => ipcRenderer.invoke('side-questions:close', scope, sessionId, sideChatId)
@@ -339,7 +343,10 @@ const api: AgentsDockAPI = {
     preview: input => ipcRenderer.invoke('digest:preview', input),
     send: input => ipcRenderer.invoke('digest:send', input)
   },
-  runtime: { catalog: refresh => ipcRenderer.invoke('runtime:catalog', refresh) },
+  runtime: {
+    catalog: refresh => ipcRenderer.invoke('runtime:catalog', refresh),
+    usage: (scope, backend, sessionId, refresh) => ipcRenderer.invoke('runtime:usage', scope, backend, sessionId, refresh)
+  },
   processes: {
     list: sessionId => ipcRenderer.invoke('processes:list', sessionId),
     tail: (sessionId, path, lines) => ipcRenderer.invoke('processes:tail', sessionId, path, lines)

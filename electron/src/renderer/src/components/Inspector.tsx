@@ -153,8 +153,8 @@ function SubagentsSection({ sessionId }: { sessionId: string }) {
     ?? state.sessions.find(session => session.id === sessionId)?.backend
     ?? 'codex'
   ))
-  const subagentOwnerBackend = ownerBackend === 'claude' ? 'claude' : 'codex'
-  const agents = useMemo(() => subagentsFromEvents(events, subagentOwnerBackend), [events, subagentOwnerBackend, getLocale()])
+  const agents = useMemo(() => ownerBackend === 'claude' || ownerBackend === 'codex'
+    ? subagentsFromEvents(events, ownerBackend) : [], [events, ownerBackend, getLocale()])
   const activeAgents = useMemo(() => agents.filter(isSubagentActive), [agents])
   const historicalAgents = useMemo(() => agents.filter(agent => !isSubagentActive(agent)), [agents])
   const activeCount = activeAgents.length

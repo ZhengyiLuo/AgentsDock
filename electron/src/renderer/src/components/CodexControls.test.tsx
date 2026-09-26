@@ -328,7 +328,7 @@ describe('Codex controls', () => {
     }
   })
 
-  it('shows a Codex-style persistent goal bar with direct pause, clear, and detail controls', async () => {
+  it('uses the shared goal summary with direct pause, clear and clickable goal details', async () => {
     renderControls(false, true)
 
     expect(await screen.findByLabelText('Persistent Codex goal')).toBeInTheDocument()
@@ -336,9 +336,10 @@ describe('Codex controls', () => {
     expect(screen.getByText('Finish the integration')).toBeVisible()
     expect(screen.getByLabelText('Goal elapsed time 45s')).toBeVisible()
 
-    await userEvent.setup().click(screen.getByRole('button', { name: 'Show goal details' }))
+    await userEvent.setup().click(screen.getByRole('button', { name: 'Edit goal' }))
     expect(screen.getByText('12,500 / 50,000')).toBeVisible()
     expect(screen.getByText('45s / 10m')).toBeVisible()
+    await userEvent.setup().click(screen.getByRole('button', { name: 'Close goal' }))
 
     await userEvent.setup().click(screen.getByRole('button', { name: 'Pause goal' }))
     await waitFor(() => expect(setGoal).toHaveBeenCalledWith('chat-1', { status: 'paused' }))

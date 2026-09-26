@@ -69,6 +69,33 @@ Server identity scopes sessions, preferences, timeline rows, read state, jobs,
 files, and pins so aliases for one server share data without contaminating a
 different server.
 
+## OpenCode (optional beta backend)
+
+OpenCode appears in the chat backend picker. A matching standalone
+AgentsServer must advertise the OpenCode v1 contract; an older server shows
+an upgrade requirement and cannot silently switch the chat to another backend.
+Install the server-supported OpenCode CLI and configure its provider on the
+server host, not in Electron. Settings → Runtimes → Recheck CLIs reports
+readiness and setup guidance. OpenCode is optional and does not block other
+providers when it is absent.
+
+Choose a server-advertised model, or leave the model empty to use OpenCode's
+native default. Existing AgentsDock chats resume their native OpenCode session
+on subsequent turns. Uploaded attachments use the normal native file flow.
+The Skills menu requires the separate server OpenCode provider-command
+capability; selected skills retain their opaque server-owned identifiers.
+
+Permissions apply to future turns: **OpenCode settings** preserves native
+policy, which may allow shell commands; **Full access** allows tools and
+commands automatically; **Plan only** applies a read-only tool policy, not an
+operating-system sandbox. Changing the permission mode or working directory
+resets native OpenCode context while retaining the visible AgentsDock timeline.
+
+This beta does not provide external history import, native session forks,
+side chats, live steering, native goals, or cross-chat routes for OpenCode.
+Ordinary queued follow-ups and Stop remain available. A copied-memory fork
+is not presented as a native clone.
+
 ## Architecture
 
 - `src/main`: server client, SQLite cache, downloads, native integration, IPC

@@ -6304,6 +6304,25 @@ describe('local session import', () => {
     expect(client.listLocalSessions).toHaveBeenCalledWith(500)
   })
 
+  it('opts into Cursor discovery only with the advertised snapshot capability', async () => {
+    const health: Health = { ...importHealth, capabilities: {
+      ...importHealth.capabilities,
+      local_session_import_cursor_v1: { available: true, version: 1, history_mode: 'initial_text_snapshot' }
+    } }
+    const client = fakeClient({ health: async () => health })
+    const { service } = createProfileService({ 'http://a.test:7850': [client] })
+    await service.listLocalSessions()
+    expect(client.listLocalSessions).toHaveBeenCalledWith(500, true)
+  })
+
+  it('rejects a Cursor import on an old server before sending any mutation', async () => {
+    const client = fakeClient({ health: async () => importHealth })
+    const { service } = createProfileService({ 'http://a.test:7850': [client] })
+    await expect(service.bulkImportSessions([{ provider_session_id: 'cursor-native', backend: 'cursor' }]))
+      .rejects.toThrow(/Cursor local import support/i)
+    expect(client.bulkImportSessions).not.toHaveBeenCalled()
+  })
+
   it('refreshes the session list after a bulk import with at least one success', async () => {
     const results: BulkImportSessionResult[] = [
       { provider_session_id: 'claude-abc', backend: 'claude', session_id: 'sess_new', ok: true, imported: 3 },

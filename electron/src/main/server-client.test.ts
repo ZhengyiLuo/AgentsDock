@@ -425,6 +425,19 @@ describe('AgentServerClient scheduled-job serialization', () => {
 describe('AgentServerClient local session import', () => {
   afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals() })
 
+  it('adds the Cursor discovery opt-in only when explicitly requested', async () => {
+    const fetcher = vi.fn(async (_input: string | URL | Request) => new Response(JSON.stringify({ sessions: [{
+      provider_session_id: 'cursor-native', backend: 'cursor', label: 'Cursor title',
+      updated_at: '2026-09-20T00:00:00Z', cwd: '/work'
+    }] }), { status: 200, headers: { 'Content-Type': 'application/json' } }))
+    vi.stubGlobal('fetch', fetcher)
+    const client = new AgentServerClient('http://example.test:7850', 'token')
+    expect((await client.listLocalSessions(200, true))[0].backend).toBe('cursor')
+    expect(String(fetcher.mock.calls[0][0])).toContain('?limit=200&include_cursor=true')
+    await client.listLocalSessions(200)
+    expect(String(fetcher.mock.calls[1][0])).not.toContain('include_cursor')
+  })
+
   it('lists local session candidates from GET /api/local-sessions', async () => {
     const calls: Array<{ url: string; init: RequestInit }> = []
     vi.stubGlobal('fetch', vi.fn(async (input: string | URL | Request, init: RequestInit = {}) => {
@@ -1634,6 +1647,30 @@ describe('AgentServerClient live stream', () => {
     expect(received[0].output).toBe(
       `${'x'.repeat(TOOL_OUTPUT_PREVIEW_CHARS)}\n\n[AgentsDock omitted 19 characters from this tool output]`
     )
+    stop()
+  })
+
+  it('routes side-chat and provider usage invalidations without advancing durable history', () => {
+    vi.useFakeTimers()
+    vi.spyOn(Math, 'random').mockReturnValue(0)
+    vi.stubGlobal('WebSocket', FakeWebSocket)
+    const received: Event[] = []
+    const changed = vi.fn(), usage = vi.fn()
+    const client = new AgentServerClient('http://example.test:7850', 'token')
+    const stop = client.stream('chat', 5, event => received.push(event), () => {}, undefined, undefined, undefined, changed, usage)
+    const socket = FakeWebSocket.instances[0]
+    socket.emit('message', JSON.stringify({ type: 'side_chat_updated', session_id: 'chat', revision: 6, seq: 999 }))
+    socket.emit('message', JSON.stringify({ type: 'side_chat_updated', session_id: 'other', revision: 7 }))
+    socket.emit('message', JSON.stringify({ type: 'side_chat_updated', session_id: 'chat', revision: -1 }))
+    socket.emit('message', JSON.stringify({ type: 'provider_usage_changed', session_id: 'chat', backend: 'claude', seq: 998 }))
+    socket.emit('message', JSON.stringify({ type: 'provider_usage_changed', session_id: 'other', backend: 'codex' }))
+    socket.emit('message', JSON.stringify({ id: 'e6', session_id: 'chat', seq: 6, type: 'assistant_text', ts: 'now' }))
+    socket.emit('close')
+    vi.advanceTimersByTime(500)
+    expect(changed).toHaveBeenCalledExactlyOnceWith(6)
+    expect(usage).toHaveBeenCalledExactlyOnceWith('claude')
+    expect(received).toHaveLength(1)
+    expect(String(FakeWebSocket.instances[1].url)).toContain('after=6')
     stop()
   })
 

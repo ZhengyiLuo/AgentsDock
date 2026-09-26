@@ -186,7 +186,7 @@ function jobLinkedRunIds(event: Event): string[] {
 }
 
 export function isHandoffDigestEvent(event: Event): boolean {
-  return Boolean(event.digest_job_id) &&
+  return event.type !== 'provider_session_reset' && Boolean(event.digest_job_id) &&
     (event.purpose === 'handoff_digest' || event.type.startsWith('handoff_digest_'))
 }
 
@@ -508,6 +508,13 @@ export class TimelineProjector {
       if (ownedFileIds) event = { ...event, file_ids: [...ownedFileIds] }
       this.queuedInputFileIds.delete(queuedId)
       this.removeItem(`turn-deferred:${queuedId}`)
+    }
+    // Context loss is user-visible even when a digest or scheduled turn owns
+    // the run. Keep provenance filtering above, but never absorb this notice
+    // into workflow plumbing or a folded activity card.
+    if (event.type === 'provider_session_reset') {
+      this.addItem({ kind: 'system', id: `event:${event.id}`, key: `event:${event.id}`, seq: event.seq, event })
+      return
     }
     const deliveredDigest = digestBody(event)
     if (deliveredDigest) {
