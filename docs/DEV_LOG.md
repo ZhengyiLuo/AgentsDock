@@ -1,5 +1,26 @@
 # Public development log
 
+## 2026-09-26 — Verify custom-endpoint reasoning summary delivery
+
+- Pass 67 isolated provider, reasoning-stream and native-turn projection tests.
+  Verify that public summaries, exposed reasoning text and assistant commentary
+  retain their separate event paths.
+- Compare isolated native Codex requests through a metadata-only HTTP proxy.
+  With summaries disabled, the endpoint returns no public summary. Requesting
+  `summary: auto` returns 476 summary characters across 107 deltas, all forwarded
+  by the native app-server. The custom model identifier needs no catalog alias
+  or additional native configuration override.
+- Confirm that missing saved capability evidence keeps summaries disabled.
+  The existing persistence correction and exact endpoint/model support evidence
+  enable subsequent requests; encrypted reasoning is never displayed as text.
+- Exercise the existing signed desktop `1.0.7-beta.15`, build `1218`, against a
+  disposable server through production IPC, HTTP and WebSocket paths. Native
+  Settings clicks expand a live summary; completion collapses it; Earlier
+  activity reveals the retained summary, including after reload. This UI check
+  uses synthetic stream replay; the real-provider wire check is separate.
+  Both disposable app processes closed and their credential entries were removed.
+  No new app build or public release is needed for this server correction.
+
 ## 2026-09-26 — Preserve internal wake identity across native continuations
 
 - Retain the initial Codex turn identifier when the same logical run continues
