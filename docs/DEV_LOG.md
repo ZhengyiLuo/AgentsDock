@@ -1,5 +1,36 @@
 # Public development log
 
+## 2026-09-26 — Preserve internal wake identity across native continuations
+
+- Retain the initial Codex turn identifier when the same logical run continues
+  after child-agent or goal activity. Record it separately from the current
+  turn identifier used by Stop and steering. Force Send starts a new logical
+  input identity while preserving the predecessor's terminal metadata.
+- Repair older imports whose final continuation identifier replaced their
+  original input identifier. Match public assistant item identity and content
+  against the completed native run and verified provider history, then hide
+  the exact internal wake and duplicate output. Preserve genuine user content,
+  original assistant output and ambiguous records.
+- Include malformed provider-record bytes in checkpoint verification while
+  skipping their semantic interpretation, matching the existing importer.
+  Native ledger evidence remains strict; neither source file is rewritten.
+- Pass 208 isolated runtime/transport tests, 68 history-repair tests and 96
+  desktop replay/cache tests, plus desktop type checking and diff checks.
+  New regressions cover continuation, delayed start acknowledgement, Force
+  Send, identical human quotations, ambiguous ownership and malformed source
+  records. Independent review found no correctness issues.
+- Reproduce the leak in signed desktop `1.0.7-beta.15`, build `1218`, against
+  the previous server source. With server source `d1cfe4c`, exercise the real
+  IPC/HTTP/WebSocket paths over an isolated copy of the affected history:
+  Refresh chats removes the internal user bubble and duplicate output; the
+  original answer remains. Cached reload and a fresh app profile stay clean,
+  with no renderer exceptions. Provider execution was not performed in this
+  GUI check; runtime tests use isolated in-memory provider transport.
+- Availability: committed server source only; no deployment, installation or
+  public release. Existing apps can consume the corrected history after a
+  server update. Same-version server replacements need one Refresh chats;
+  versioned server upgrades already trigger bounded cached-history refresh.
+
 ## 2026-09-26 — Keep inter-chat cards in chronological positions
 
 - Prevent older status rows presented after a completed turn from pulling
