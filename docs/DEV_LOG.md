@@ -1,5 +1,22 @@
 # Public development log
 
+## 2026-09-25 — Repair shared-chat files and live recovery
+
+- Restore the combined link-and-token copy action alongside individual copy
+  buttons. Shared-browser attachments support downloads, image previews, and
+  ordinary uploads through the existing session-owned file pipeline.
+- Remove browser-only attachment count, upload-size and lifetime quotas, and
+  transcript/snapshot size rejection. Keep complete messages in paginated
+  snapshots; migrate existing size constraints atomically without changing
+  stored links, tokens or the database version.
+- A temporary live-stream error now permits the browser's existing reconnect
+  behavior instead of falsely declaring the share unavailable. Actual
+  revocation still ends access.
+- Pass 216 affected server tests, including migration rollback, attachment
+  ownership, downloads and transient live-stream recovery. Desktop component
+  tests and TypeScript pass; real-browser and packaged-app acceptance are in
+  progress. Source changes only; no deployment or public release.
+
 ## 2026-09-25 — Preserve Claude input and repair imported wrappers
 
 - Send ordinary slash-prefixed Claude messages byte-for-byte as written, using

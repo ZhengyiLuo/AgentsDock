@@ -27,7 +27,7 @@ vi.mock('../lib/i18n', () => ({ useLocale: () => 'en', t: (key: string, values?:
   'chatShare.copiedSuccessfully': 'Copied successfully.',
   'chatShare.viewOnlyShare': 'View-only share', 'chatShare.interactiveShare': 'Interactive share',
   'chatShare.created': 'Created share link',
-  'chatShare.copyInvitation': 'Copy invitation', 'chatShare.copyTokenLink': 'Copy link with token',
+  'chatShare.copyInvitation': 'Copy link and token', 'chatShare.copyTokenLink': 'Copy link with token',
   'chatShare.close': 'Close chat sharing', 'chatShare.revoke': 'Revoke',
   'chatShare.active': 'Active', 'chatShare.revoked': 'Revoked',
   'chatShare.reusableTokenHint': 'Share the same token with multiple people.'
@@ -59,7 +59,7 @@ beforeEach(() => {
 afterEach(() => { cleanup(); vi.unstubAllGlobals() })
 
 describe('two-action chat sharing', () => {
-  it.each(['snapshot', 'interactive'] as const)('creates %s directly, opens the safe URL, and copies the URL and token separately', async mode => {
+  it.each(['snapshot', 'interactive'] as const)('creates %s without copying, then copies the URL and token separately or together', async mode => {
     const path = mode === 'snapshot' ? `/shared-chat/share_${'a'.repeat(32)}` : `/interactive-chat/interactive_${'b'.repeat(32)}`
     const url = `http://192.0.2.1:7850${path}`
     const token = 'c'.repeat(43)
@@ -93,9 +93,11 @@ describe('two-action chat sharing', () => {
     expect(screen.getByRole('status')).toHaveTextContent('Copied successfully.')
     fireEvent.click(copyToken)
     await waitFor(() => expect(fixture.copy).toHaveBeenLastCalledWith(token))
-    expect(fixture.copy).toHaveBeenCalledTimes(2)
+    fireEvent.click(screen.getByRole('button', { name: 'Copy link and token' }))
+    await waitFor(() => expect(fixture.copy).toHaveBeenLastCalledWith(`${url}\nToken: ${token}`))
+    expect(fixture.copy).toHaveBeenCalledTimes(3)
+    expect(screen.getByRole('status')).toHaveTextContent('Copied successfully.')
     expect(screen.queryByRole('button', { name: 'Copy link with token' })).toBeNull()
-    expect(screen.queryByRole('button', { name: 'Copy invitation' })).toBeNull()
     expect(fixture.create).toHaveBeenCalledExactlyOnceWith(fixture.scope, fixture.session.id, {
       mode, title: fixture.session.title, base_url: 'http://192.0.2.1:7850',
       ...(mode === 'snapshot' ? { confirmed_public: true } : { confirmed_interactive: true })
@@ -119,7 +121,24 @@ describe('two-action chat sharing', () => {
     expect(fixture.copy).not.toHaveBeenCalled()
     expect(screen.queryByRole('button', { name: 'Copy link with token' })).toBeNull()
     expect(document.body).not.toHaveTextContent(tokenURL)
+    fireEvent.click(screen.getByRole('button', { name: 'Copy link and token' }))
+    await waitFor(() => expect(fixture.copy).toHaveBeenCalledExactlyOnceWith(`${url}\nToken: ${token}`))
     expect(fixture.open).toHaveBeenCalledExactlyOnceWith(url)
+  })
+
+  it.each(['snapshot', 'interactive'] as const)('copies the relative path and token when a %s share has no absolute URL', async mode => {
+    const path = mode === 'snapshot' ? `/shared-chat/share_${'a'.repeat(32)}` : `/interactive-chat/interactive_${'b'.repeat(32)}`
+    const token = 'j'.repeat(43)
+    fixture.create.mockResolvedValue({ id: 'synthetic-share', title: fixture.session.title, created_at: 1,
+      expires_at: null, revoked_at: null, path, url: null, access_token: token })
+    openDialog()
+    fireEvent.click(screen.getByRole('button', { name: mode === 'snapshot' ? 'View only' : 'Interactive' }))
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Copy link and token' })).toBeEnabled())
+    expect(screen.getByRole('textbox', { name: 'Relative share path' })).toHaveValue(path)
+    expect(fixture.copy).not.toHaveBeenCalled()
+    expect(fixture.open).not.toHaveBeenCalled()
+    fireEvent.click(screen.getByRole('button', { name: 'Copy link and token' }))
+    await waitFor(() => expect(fixture.copy).toHaveBeenCalledExactlyOnceWith(`${path}\nToken: ${token}`))
   })
 
   it('clears the displayed token on revoke and does not recover it from the management list', async () => {
@@ -213,6 +232,34 @@ describe('two-action chat sharing', () => {
     expect(screen.getByRole('textbox', { name: 'Share URL' })).toHaveValue(url)
   })
 
+  it('clears previous copy success when combined copying fails and allows another attempt', async () => {
+    const path = `/interactive-chat/interactive_${'b'.repeat(32)}`
+    const url = `http://192.0.2.1:7850${path}`
+    const token = 'k'.repeat(43)
+    fixture.create.mockResolvedValue({ id: 'synthetic-share', title: fixture.session.title, created_at: 1,
+      expires_at: null, revoked_at: null, path, url, access_token: token })
+    openDialog()
+    fireEvent.click(screen.getByRole('button', { name: 'Interactive' }))
+    await waitFor(() => expect(fixture.open).toHaveBeenCalledExactlyOnceWith(url))
+    fireEvent.click(screen.getByRole('button', { name: 'Copy link' }))
+    await waitFor(() => expect(screen.getByRole('status')).toHaveTextContent('Copied successfully.'))
+
+    fixture.copy.mockRejectedValueOnce(new Error('Clipboard unavailable'))
+    const copyBoth = screen.getByRole('button', { name: 'Copy link and token' })
+    fireEvent.click(copyBoth)
+    await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent('Clipboard unavailable'))
+    expect(screen.queryByRole('status')).toBeNull()
+    expect(copyBoth).toBeEnabled()
+    expect(screen.getByRole('textbox', { name: 'Share URL' })).toHaveValue(url)
+    expect(screen.getByRole('textbox', { name: 'Access token' })).toHaveValue(token)
+    fireEvent.click(copyBoth)
+    await waitFor(() => expect(screen.getByRole('status')).toHaveTextContent('Copied successfully.'))
+    expect(fixture.copy).toHaveBeenLastCalledWith(`${url}\nToken: ${token}`)
+    expect(screen.queryByRole('alert')).toBeNull()
+    expect(fixture.create).toHaveBeenCalledTimes(1)
+    expect(fixture.open).toHaveBeenCalledTimes(1)
+  })
+
   it.each(['snapshot', 'interactive'] as const)('creates %s with a custom LAN origin and keeps its returned URLs bound after editing the address', async mode => {
     const path = mode === 'snapshot' ? `/shared-chat/share_${'a'.repeat(32)}` : `/interactive-chat/interactive_${'b'.repeat(32)}`
     const url = `http://192.168.50.20:7850${path}`
@@ -236,7 +283,9 @@ describe('two-action chat sharing', () => {
     await waitFor(() => expect(fixture.copy).toHaveBeenLastCalledWith(url))
     fireEvent.click(screen.getByRole('button', { name: 'Copy access token' }))
     await waitFor(() => expect(fixture.copy).toHaveBeenLastCalledWith(token))
-    expect(fixture.copy).toHaveBeenCalledTimes(2)
+    fireEvent.click(screen.getByRole('button', { name: 'Copy link and token' }))
+    await waitFor(() => expect(fixture.copy).toHaveBeenLastCalledWith(`${url}\nToken: ${token}`))
+    expect(fixture.copy).toHaveBeenCalledTimes(3)
     expect(fixture.open).toHaveBeenCalledExactlyOnceWith(url)
     expect(fixture.create).toHaveBeenCalledTimes(1)
   })

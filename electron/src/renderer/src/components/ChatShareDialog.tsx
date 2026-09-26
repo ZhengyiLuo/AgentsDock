@@ -185,6 +185,9 @@ function ChatSharePanel({ target: { session, scope, initialOrigin }, onClose }: 
               value={created.access_token} title={created.access_token} onFocus={event => event.currentTarget.select()} />
               <button type="button" className="icon-button chat-share-copy-button" aria-label={t('chatShare.copyAccessToken')}
                 title={t('chatShare.copyAccessToken')} onClick={() => void copyValue(created.access_token)} disabled={busy}><Copy size={14} /></button></div></div>
+          <button type="button" className="quiet-button" disabled={busy}
+            onClick={() => void copyValue(`${created.url ?? created.path}\nToken: ${created.access_token}`)}>
+            <Copy size={14} />{t('chatShare.copyInvitation')}</button>
           {created.mode === 'interactive' && <p className="chat-share-warning">{t('chatShare.reusableTokenHint')}</p>}
         </section>}
         {error && <p role="alert" className="error-text">{error}</p>}

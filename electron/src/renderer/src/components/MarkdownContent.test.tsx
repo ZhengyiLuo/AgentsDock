@@ -393,6 +393,22 @@ describe('MarkdownContent', () => {
     window.removeEventListener('agentsdock:open-agent-file', open)
   })
 
+  it('downloads a matched shared-chat attachment link instead of requesting a native editor', () => {
+    const save = vi.fn().mockResolvedValue('/scoped/download')
+    Object.defineProperty(window, 'agentsDock', { configurable: true, value: {
+      ...window.agentsDock, sharedChat: true, files: { ...window.agentsDock.files, save }
+    } })
+    const file = { id: 'shared-file', session_id: 'chat-7', filename: 'report.md', content_type: 'text/markdown' }
+    const open = vi.fn()
+    window.addEventListener('agentsdock:open-agent-file', open)
+    render(<MarkdownContent text="[Report](report.md)" files={[file]} sessionId="chat-7" />)
+    fireEvent.click(screen.getByRole('link', { name: 'Report' }))
+    expect(save).toHaveBeenCalledExactlyOnceWith('chat-7', file)
+    expect(open).not.toHaveBeenCalled()
+    expect(openLinked).not.toHaveBeenCalled()
+    window.removeEventListener('agentsdock:open-agent-file', open)
+  })
+
   it('keeps raw HTML inert unless a trusted preview explicitly enables it', () => {
     const resolveImageSource = vi.fn((source: string) => `agentsdock-media:${source}`)
     const { container } = render(<MarkdownContent
