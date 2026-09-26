@@ -1,6 +1,6 @@
 # Public development log
 
-## 2026-09-26 — Reserve an unmerged product-pipeline test candidate
+## 2026-09-26 — Verify an unmerged product-pipeline test candidate
 
 - Reserve desktop and server `1.0.7-beta.15`, desktop build `1217`, for an
   explicitly authorized artifact-only signing and local packaging exercise.
@@ -10,9 +10,19 @@
   controlled CI; upload only the signed npm/legacy packages and bundle receipt.
   No npm publication, GitHub release drafts, service deployment, installation,
   Apple upload or public release is authorized by this test.
-- Package acceptance and native update acceptance remain pending. The local
-  desktop test build will disable automatic updates and cannot establish the
-  phase-two one-click app/server update journey.
+- Verify the candidate from source `db71d58`: signing CI run `36230682181`
+  prepares both server formats twice with byte-identical results. Independently
+  verify signatures, source and inventory hashes, and all 115 matching runtime
+  files. An offline npm install into disposable local storage reports the
+  expected package/runtime version without lifecycle scripts or service actions.
+- Pass source CI run `36230681065`, including 4,912 desktop tests (five skipped),
+  type checking and production compilation. The local Apple-silicon desktop
+  passes bundle audit, strict Developer ID signature validation, exact signed
+  descriptor comparison, and version/build checks for beta.15/build 1217.
+- Availability: CI server artifacts and a local desktop package only. The app
+  was not launched, installed or notarized and disables automatic updates.
+  Native startup and update acceptance remain pending; this packaging test
+  does not establish the phase-two one-click app/server update journey.
 
 ## 2026-09-26 — Prepare a unified desktop and server release pipeline
 
