@@ -1,5 +1,14 @@
 # Public development log
 
+## 2026-09-25 — Carry forward the provider Delete/release checklist
+
+- Port the documentation-only acceptance criterion from AgentsServer PR #117
+  into the canonical server checklist. Require confirmed runtime release,
+  preserved native history, native resume, failure handling and chat isolation.
+- Verification: documentation diff reviewed; no runtime behavior or deployment
+  changes. This is an acceptance checklist, not a claim that every provider has
+  already passed those checks.
+
 ## 2026-09-25 — Preserve Claude input and repair imported wrappers
 
 - Send ordinary slash-prefixed Claude messages byte-for-byte as written, using
