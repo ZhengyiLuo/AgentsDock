@@ -1,5 +1,21 @@
 # Public development log
 
+## 2026-09-25 — Keep Claude login renewal in native requests
+
+- Remove standalone Claude authentication-status subprocesses from startup,
+  catalog refreshes, manual CLI rechecks and turn admission. Installation and
+  capability checks do not claim that the user is authenticated.
+- Preserve the last actual Claude authentication result and its observation
+  time through installation refreshes. Allow a native retry after external
+  login, while still rejecting missing or broken executables.
+- Keep the existing desktop contract: unknown Claude authentication allows a
+  request, whose native result updates readiness. This change requires a server
+  update; it does not change the client runtime or publish a release.
+- Validate 183 focused server tests, 31 desktop contract tests and TypeScript.
+  An isolated HTTP server with a recording CLI fixture exercises startup and
+  repeated catalog refreshes with zero auth-status invocations. Successful
+  renewal using a real signed-in account is not established by these checks.
+
 ## 2026-09-25 — Preserve Claude input and repair imported wrappers
 
 - Send ordinary slash-prefixed Claude messages byte-for-byte as written, using

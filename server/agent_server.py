@@ -928,7 +928,6 @@ CODEX_APP_SERVER_MAX_LOADED_THREADS = max(
 )
 CODEX_RESUME_ACTIVITY_TIMEOUT_SECONDS = int(agentsdock_setting("CODEX_RESUME_ACTIVITY_TIMEOUT_SECONDS", "120"))
 RUNTIME_CATALOG_TIMEOUT_SECONDS = float(agentsdock_setting("RUNTIME_CATALOG_TIMEOUT_SECONDS", "6"))
-CLAUDE_AUTH_PROBE_TIMEOUT_SECONDS = float(agentsdock_setting("CLAUDE_AUTH_PROBE_TIMEOUT_SECONDS", "15"))
 # Leave room for HTTP/JSON overhead before desktop and mobile's 30s deadline.
 RUNTIME_CATALOG_BUDGET_SECONDS = 25.0
 RUNTIME_CATALOG_DEADLINE: ContextVar[float | None] = ContextVar(
@@ -58069,7 +58068,10 @@ def runtime_action(
         return f"Install {runtime_display_name(backend)} for the server user, make `{public_executable}` available on PATH, then restart the agent server."
     if status == "unauthenticated":
         if backend == BACKEND_CLAUDE:
-            command = "claude auth login"
+            return (
+                "Run `claude auth login` as the server user, then retry your "
+                "message. Claude checks sign-in during the actual request."
+            )
         elif backend == BACKEND_OPENCODE:
             command = "opencode auth login"
         elif backend == BACKEND_CURSOR:
@@ -58083,7 +58085,10 @@ def runtime_action(
         return f"Run `{command}` as the server user, then click Recheck CLIs."
     if status == "error":
         if backend == BACKEND_CLAUDE:
-            command = "claude auth status"
+            return (
+                f"Run `{public_executable} --version` as the server user to "
+                "check the Claude installation, then retry your message."
+            )
         elif backend == BACKEND_OPENCODE:
             return (
                 "Run `opencode --version`, `opencode auth list`, and "
@@ -58437,15 +58442,24 @@ def probe_runtime(backend: str) -> dict[str, Any]:
         )
 
     if backend == BACKEND_CLAUDE:
-        auth_cmd = [resolved, "auth", "status", "--json"]
-    else:
-        auth_cmd = [resolved, "login", "status"]
-    try:
-        auth_result = (
-            runtime_command(auth_cmd, timeout_seconds=CLAUDE_AUTH_PROBE_TIMEOUT_SECONDS)
-            if backend == BACKEND_CLAUDE
-            else runtime_command(auth_cmd)
+        # Even `auth status` can start OAuth renewal during CLI initialization
+        # and exit before the replacement credential is saved. Never invoke it
+        # for startup, catalog refresh, manual recheck, or turn admission.
+        # Actual Claude runs own authentication and update the cached result.
+        return runtime_diagnostic_payload(
+            backend,
+            "unknown",
+            installed=True,
+            authenticated=None,
+            version=version,
+            message=(
+                "Claude Code is installed. Authentication will be checked by "
+                "Claude when you send a message."
+            ),
         )
+    auth_cmd = [resolved, "login", "status"]
+    try:
+        auth_result = runtime_command(auth_cmd)
     except subprocess.TimeoutExpired:
         logger.warning("%s authentication check timed out", backend)
         return runtime_diagnostic_payload(
@@ -58472,15 +58486,6 @@ def probe_runtime(backend: str) -> dict[str, Any]:
         )
 
     combined = f"{auth_result.stdout}\n{auth_result.stderr}"
-    if backend == BACKEND_CLAUDE and auth_result.stdout.strip():
-        try:
-            auth_payload = json.loads(auth_result.stdout)
-        except (TypeError, ValueError):
-            auth_payload = None
-        if isinstance(auth_payload, dict) and auth_payload.get("loggedIn") is False:
-            return runtime_diagnostic_payload(backend, "unauthenticated", installed=True, authenticated=False, version=version)
-        if isinstance(auth_payload, dict) and auth_payload.get("loggedIn") is True:
-            return runtime_diagnostic_payload(backend, "ready", installed=True, authenticated=True, version=version)
     if auth_result.returncode == 0:
         return runtime_diagnostic_payload(backend, "ready", installed=True, authenticated=True, version=version)
     if auth_failure_text(combined):
@@ -58507,7 +58512,7 @@ def runtime_diagnostic(backend: str, *, force: bool = False) -> dict[str, Any]:
     with RUNTIME_DIAGNOSTICS_LOCK:
         cached = dict(RUNTIME_DIAGNOSTICS.get(backend) or {})
         generation = RUNTIME_DIAGNOSTIC_GENERATIONS.get(backend, 0)
-    checked_at = cached.get("checked_at_epoch")
+    checked_at = cached.get("_installation_checked_at_epoch", cached.get("checked_at_epoch"))
     if not force and isinstance(checked_at, (int, float)) and time.time() - checked_at < RUNTIME_DIAGNOSTIC_TTL_SECONDS:
         return cached
     try:
@@ -58534,6 +58539,21 @@ def runtime_diagnostic(backend: str, *, force: bool = False) -> dict[str, Any]:
             current = dict(RUNTIME_DIAGNOSTICS.get(backend) or {})
             if current:
                 return current
+        if (
+            backend == BACKEND_CLAUDE
+            and probed.get("status") == "unknown"
+            and probed.get("installed") is True
+            and cached.get("status") in {"ready", "unauthenticated"}
+        ):
+            # Rechecking the executable is not new authentication evidence.
+            # Preserve the native run's timestamp and error as well as status;
+            # cache installation checks separately so each turn need not probe.
+            probed = {
+                **cached,
+                "installed": True,
+                "version": probed.get("version"),
+                "_installation_checked_at_epoch": probed.get("checked_at_epoch"),
+            }
         return store_runtime_diagnostic(probed)
 
 
@@ -58579,6 +58599,8 @@ def record_runtime_failure(
         if auth_failure is not None
         else auth_failure_text(text)
     )
+    if backend == BACKEND_CLAUDE and auth_failure is None:
+        is_auth_failure = is_auth_failure or "oauth session expired and could not be refreshed" in lower
     if is_auth_failure:
         current = runtime_diagnostic_payload(
             backend,
@@ -58628,6 +58650,7 @@ def record_runtime_success(backend: str) -> None:
         "ready",
         installed=True,
         authenticated=True,
+        message=("The last Claude request authenticated successfully." if backend == BACKEND_CLAUDE else None),
         version=previous.get("version"),
         executable=(
             str(previous.get("_executable") or "") or None
@@ -58640,6 +58663,14 @@ def record_runtime_success(backend: str) -> None:
 
 async def ensure_runtime_available(backend: str, *, session: dict[str, Any] | None = None) -> dict[str, Any]:
     diagnostic = await asyncio.to_thread(runtime_diagnostic, backend)
+    if (
+        backend == BACKEND_CLAUDE
+        and diagnostic.get("installed") is True
+        and diagnostic.get("status") in {"unknown", "ready", "unauthenticated"}
+    ):
+        # An unknown or previously rejected login must not prevent the native
+        # runtime from renewing it, or noticing an external login on retry.
+        return diagnostic
     if backend == BACKEND_CODEX and codex_provider.session_choice((session or {}).get("codex_provider")) == "custom":
         CODEX_PROVIDER_STORE.for_session(session)
         if CODEX_TRANSPORT != CODEX_TRANSPORT_EXEC and diagnostic.get("installed") is True:
