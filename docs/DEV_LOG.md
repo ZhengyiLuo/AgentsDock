@@ -1,5 +1,21 @@
 # Public development log
 
+## 2026-09-25 — Hand off Codex work after a native re-login
+
+- Detect conservative native file-login revisions on demand and let Recheck
+  CLIs explicitly request a normal-Codex process handoff. Token renewal and file
+  timestamp changes alone do not count as a new login.
+- Preserve active native work, custom endpoints and stored thread identities.
+  Release idle ownership before the next turn; keep goals, approvals, side
+  chats and background-terminal controls usable while migration waits.
+- Check pending requests and caller leases again after waiting for the process
+  start lock. Inconclusive release stays retryable; accepted turns are not replayed.
+- Pass 621 focused server tests and 43 desktop runtime/health tests. Verify
+  isolated lifecycle regressions and a real HTTP/native CLI metadata
+  fixture without real credentials or a server restart. Live OAuth renewal,
+  model/history continuity and graphical client acceptance remain unverified.
+  See [the handoff contract](../server/docs/CODEX_LOGIN_HANDOFF.md).
+
 ## 2026-09-25 — Remove standalone Claude auth-status checks
 
 - Remove standalone Claude authentication-status subprocesses from startup,

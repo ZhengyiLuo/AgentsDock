@@ -24,6 +24,27 @@ class RuntimeDiagnosticTests(unittest.TestCase):
             agent_server.RUNTIME_DIAGNOSTICS.clear()
             agent_server.RUNTIME_DIAGNOSTIC_GENERATIONS.clear()
 
+    def test_codex_login_hint_expires_cached_denial_without_claiming_authentication(self):
+        agent_server.record_runtime_failure("codex", "Not logged in")
+        agent_server.expire_codex_login_diagnostic()
+        expired = agent_server.RUNTIME_DIAGNOSTICS["codex"]
+        self.assertEqual(expired["status"], "unauthenticated")
+        self.assertEqual(expired["checked_at_epoch"], 0)
+        fresh = agent_server.runtime_diagnostic_payload("codex", "ready", installed=True, authenticated=True)
+        with patch.object(agent_server, "probe_runtime", return_value=fresh) as probe:
+            self.assertEqual(agent_server.runtime_diagnostic("codex")["status"], "ready")
+        probe.assert_called_once_with("codex")
+
+    def test_codex_login_hint_fences_an_older_probe_and_leaves_recheck_due(self):
+        agent_server.record_runtime_success("codex")
+        def older_probe(_backend):
+            agent_server.expire_codex_login_diagnostic()
+            return agent_server.runtime_diagnostic_payload("codex", "unauthenticated", installed=True, authenticated=False)
+        with patch.object(agent_server, "probe_runtime", side_effect=older_probe):
+            result = agent_server.runtime_diagnostic("codex", force=True)
+        self.assertEqual(result["status"], "ready")
+        self.assertEqual(result["checked_at_epoch"], 0)
+
     def test_missing_runtime_is_explicit(self) -> None:
         with patch.object(agent_server.shutil, "which", return_value=None):
             diagnostic = agent_server.probe_runtime(agent_server.BACKEND_CLAUDE)
