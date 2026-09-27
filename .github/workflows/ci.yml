@@ -238,11 +238,19 @@ jobs:
           REPLAY_LAUNCHER_PID=$!
           READINESS_CURL_STATUS=0
           for attempt in {1..60}; do
-            if curl --fail --silent --max-time 2 https://github.com/ZhengyiLuo/AgentsDock/releases.atom > /dev/null; then
+            # Bind this diagnostic probe explicitly to the exact ephemeral CA.
+            if curl --fail --silent --max-time 2 --cacert "$RUNNER_TEMP/agentsdock-acceptance-network/ca.pem" \
+              --dump-header "$RUNNER_TEMP/agentsdock-acceptance-network/readiness.headers" --output /dev/null \
+              --write-out '%{remote_ip}|%{ssl_verify_result}|%{http_code}\n' \
+              https://github.com/ZhengyiLuo/AgentsDock/releases.atom \
+              > "$RUNNER_TEMP/agentsdock-acceptance-network/readiness.metadata"; then
               if node --input-type=module - "$RUNNER_TEMP/agentsdock-acceptance-network/replay.log" \
-                "$RUNNER_TEMP/agentsdock-acceptance-network/replay.pid" <<'NODE'
+                "$RUNNER_TEMP/agentsdock-acceptance-network/replay.pid" \
+                "$RUNNER_TEMP/agentsdock-acceptance-network/readiness.metadata" \
+                "$RUNNER_TEMP/agentsdock-acceptance-network/readiness.headers" <<'NODE'
           import { assertReplayReadiness } from './scripts/product-release-replay.mjs'
-          try { await assertReplayReadiness({logPath: process.argv[2], pidPath: process.argv[3]}) }
+          try { await assertReplayReadiness({logPath: process.argv[2], pidPath: process.argv[3],
+            curlMetadataPath: process.argv[4], responseHeadersPath: process.argv[5]}) }
           catch { process.exitCode = 1 }
           NODE
               then exit 0; fi
@@ -255,22 +263,28 @@ jobs:
           REPLAY_LAUNCHER_PRESENT=false
           if /bin/ps -p "$REPLAY_LAUNCHER_PID" -o pid= > /dev/null; then REPLAY_LAUNCHER_PRESENT=true; fi
           node --input-type=module - "$RUNNER_TEMP/agentsdock-acceptance-network/replay.log" \
-            "$READINESS_CURL_STATUS" "$REPLAY_LAUNCHER_PRESENT" <<'NODE'
+            "$READINESS_CURL_STATUS" "$REPLAY_LAUNCHER_PRESENT" \
+            "$RUNNER_TEMP/agentsdock-acceptance-network/readiness.metadata" \
+            "$RUNNER_TEMP/agentsdock-acceptance-network/readiness.headers" <<'NODE'
           import { constants, openSync, fstatSync, readSync, closeSync } from 'node:fs'
-          import { parseReplayStartupDiagnostics } from './scripts/product-release-replay.mjs'
+          import { parseReplayStartupDiagnostics, parseReplayProbeDiagnostics } from './scripts/product-release-replay.mjs'
           const status = Number(process.argv[3])
           const summary = { kind: 'replay-readiness', curlExitCode: Number.isInteger(status) && status >= 0 && status <= 255 ? status : null,
             launcherPresent: process.argv[4] === 'true' }
-          let fd
-          try {
-            fd = openSync(process.argv[2], constants.O_RDONLY | constants.O_NOFOLLOW)
-            const stat = fstatSync(fd)
-            if (!stat.isFile() || stat.size > 32768) throw new Error('Unbounded diagnostic input')
-            const buffer = Buffer.alloc(32769)
-            const count = readSync(fd, buffer, 0, buffer.length, 0)
-            summary.startup = parseReplayStartupDiagnostics(buffer.subarray(0, count))
-          } catch { summary.diagnosticsUnavailable = true }
-          finally { if (fd !== undefined) closeSync(fd) }
+          function bounded(path) {
+            const fd = openSync(path, constants.O_RDONLY | constants.O_NOFOLLOW)
+            try {
+              const stat = fstatSync(fd)
+              if (!stat.isFile() || stat.size > 32768) throw new Error('Unbounded diagnostic input')
+              const buffer = Buffer.alloc(32769)
+              const count = readSync(fd, buffer, 0, buffer.length, 0)
+              return buffer.subarray(0, count)
+            } finally { closeSync(fd) }
+          }
+          try { summary.startup = parseReplayStartupDiagnostics(bounded(process.argv[2])) }
+          catch { summary.diagnosticsUnavailable = true }
+          try { summary.probe = parseReplayProbeDiagnostics(bounded(process.argv[5]), bounded(process.argv[6])) }
+          catch { summary.probeDiagnosticsUnavailable = true }
           console.log(JSON.stringify(summary))
           NODE
           echo 'Candidate replay did not become ready.' >&2

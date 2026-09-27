@@ -7,7 +7,7 @@ import { dirname, join, resolve } from 'node:path'
 import { test } from 'node:test'
 import { expectedAssets } from '../direct-release-mirror.mjs'
 import { assertReplayReadiness, assertReplayRunner, consumeReplayFault, createCandidateReplay, createProductReplay, createReplayStartupDiagnostics,
-  finalizeReplayListener, parseReplayArguments, parseReplayRange, parseReplayStartupDiagnostics, readReplayMetadata, serveProductReplay } from '../product-release-replay.mjs'
+  finalizeReplayListener, parseReplayArguments, parseReplayProbeDiagnostics, parseReplayRange, parseReplayStartupDiagnostics, readReplayMetadata, serveProductReplay } from '../product-release-replay.mjs'
 import { assertCandidateRunner, candidateAssets, inspectCandidate, validateCandidateReceipt } from '../product-candidate-receipt.mjs'
 import { newestCompatibleReleaseFromAtom } from '../../electron/src/main/updater-feed.mjs'
 
@@ -387,6 +387,8 @@ test('CI readiness diagnostics parse bounded safe records and never print the ra
   assert.match(workflow, /O_NOFOLLOW/)
   assert.match(workflow, /32769/)
   assert.match(workflow, /launcherPresent/)
+  assert.match(workflow, /parseReplayProbeDiagnostics/)
+  assert.match(workflow, /--cacert "\$RUNNER_TEMP\/agentsdock-acceptance-network\/ca\.pem"/)
   assert(!/\b(?:cat|tail|head)\b[^\n]*replay\.log/.test(workflow))
 })
 
@@ -409,28 +411,61 @@ test('readiness requires finite ready record, private owned PID and exact proces
   const root = mkdtempSync(join(tmpdir(), 'agentsdock-replay-readiness-unit-'))
   t.after(() => rmSync(root, { recursive: true, force: true }))
   const logPath = join(root, 'replay.log'), pidPath = join(root, 'replay.pid')
+  const curlMetadataPath = join(root, 'curl-metadata'), responseHeadersPath = join(root, 'curl-headers')
+  const paths = { logPath, pidPath, curlMetadataPath, responseHeadersPath }
   let ready = ''
   const diagnostics = createReplayStartupDiagnostics(line => { ready += line })
   diagnostics.stage('arguments'); diagnostics.stage('serving')
   writeFileSync(logPath, ready)
   writeFileSync(pidPath, '12345\n', { mode: 0o600 })
+  writeFileSync(curlMetadataPath, '127.0.0.1|0|200\n')
+  writeFileSync(responseHeadersPath, 'HTTP/1.1 200 OK\r\nx-agentsdock-replay: test-only\r\n\r\n')
   const command = `${process.execPath} scripts/product-release-replay.mjs serve --scope candidate --private-key ${join(root, 'leaf.key')} --pid-file ${pidPath}`
   const observed = `12345 ${process.getuid()} ${command}\n`
-  assert.deepEqual(await assertReplayReadiness({ logPath, pidPath }, { queryProcess: pid => {
+  assert.deepEqual(await assertReplayReadiness(paths, { queryProcess: pid => {
     assert.equal(pid, 12345); return observed
   } }), { ready: true, pid: 12345 })
+  for (const metadata of ['192.0.2.1|0|200\n', '127.0.0.1|20|200\n']) {
+    writeFileSync(curlMetadataPath, metadata)
+    await assert.rejects(assertReplayReadiness(paths, { queryProcess: () => { throw new Error('must not query') } }), /HTTPS probe/)
+  }
+  writeFileSync(curlMetadataPath, '127.0.0.1|0|200\n')
   for (const output of ['12345 0 arbitrary-command\n', observed.replace('12345', '12346'),
     observed.replace(' serve ', ' inspect '), observed.replace(pidPath, `${pidPath}-other`),
     observed.replace(process.execPath, '/untrusted/node'), `${observed}unexpected second process\n`, 'x'.repeat(8193)]) {
-    await assert.rejects(assertReplayReadiness({ logPath, pidPath }, { queryProcess: () => output }))
+    await assert.rejects(assertReplayReadiness(paths, { queryProcess: () => output }))
   }
   chmodSync(pidPath, 0o644)
-  await assert.rejects(assertReplayReadiness({ logPath, pidPath }), /private/)
+  await assert.rejects(assertReplayReadiness(paths), /private/)
   chmodSync(pidPath, 0o600)
   writeFileSync(logPath, ready.split('\n')[0] + '\n')
-  await assert.rejects(assertReplayReadiness({ logPath, pidPath }), /not completed/)
+  await assert.rejects(assertReplayReadiness(paths), /not completed/)
   writeFileSync(logPath, Buffer.alloc(32769))
-  await assert.rejects(assertReplayReadiness({ logPath, pidPath }), /bounded/)
+  await assert.rejects(assertReplayReadiness(paths), /bounded/)
   rmSync(logPath); symlinkSync(pidPath, logPath)
-  await assert.rejects(assertReplayReadiness({ logPath, pidPath }))
+  await assert.rejects(assertReplayReadiness(paths))
+})
+
+test('probe diagnostics expose only numeric TLS/HTTP status, validated IP and exact marker', () => {
+  const headers = 'HTTP/1.1 200 OK\r\nX-AgentsDock-Replay: test-only\r\nAuthorization: private-token\r\n\r\n'
+  assert.deepEqual(parseReplayProbeDiagnostics('127.0.0.1|0|200\n', headers), {
+    remoteIp: '127.0.0.1', sslVerifyResult: 0, httpCode: 200, replayMarker: true
+  })
+  assert.deepEqual(parseReplayProbeDiagnostics('|0|000\n', ''), {
+    remoteIp: null, sslVerifyResult: 0, httpCode: 0, replayMarker: false
+  })
+  assert.deepEqual(parseReplayProbeDiagnostics('::1|20|000\n', ''), {
+    remoteIp: '::1', sslVerifyResult: 20, httpCode: 0, replayMarker: false
+  })
+  assert.equal(parseReplayProbeDiagnostics('127.0.0.1|0|200\n', headers.replace('test-only', 'other')).replayMarker, false)
+  assert.equal(parseReplayProbeDiagnostics('127.0.0.1|0|200\n', headers.replace('Authorization: private-token',
+    'x-agentsdock-replay: test-only')).replayMarker, false)
+  for (const metadata of ['private-token|0|200\n', '999.0.0.1|0|200\n', 'a:b|0|200\n',
+    '127.0.0.1|-1|200\n', '127.0.0.1|256|200\n', '127.0.0.1|0|600\n', '127.0.0.1|0|200\nsecret', 'x'.repeat(129)]) {
+    assert.throws(() => parseReplayProbeDiagnostics(metadata, headers))
+  }
+  for (const badHeaders of ['private-token', 'HTTP/1.1 200 OK\r\nAuthorization: bad\0value\r\n', 'x'.repeat(32769)]) {
+    assert.throws(() => parseReplayProbeDiagnostics('127.0.0.1|0|200\n', badHeaders))
+  }
+  assert.throws(() => parseReplayProbeDiagnostics('127.0.0.1|0|200\n', headers.replace('200 OK', '404 Not Found')), /status differs/)
 })

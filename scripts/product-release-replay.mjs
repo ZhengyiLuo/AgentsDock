@@ -7,6 +7,7 @@ import { constants } from 'node:fs'
 import { lstat, open, realpath, rename, writeFile } from 'node:fs/promises'
 import { createServer } from 'node:https'
 import { createSecureContext } from 'node:tls'
+import { isIP } from 'node:net'
 import { dirname, isAbsolute, join, relative, resolve } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { pipeline } from 'node:stream/promises'
@@ -81,11 +82,41 @@ export function createReplayStartupDiagnostics(write) {
   })
 }
 
-export async function assertReplayReadiness({ logPath, pidPath }, { queryProcess = pid => execFileSync('/bin/ps',
+export function parseReplayProbeDiagnostics(bytes, headers) {
+  need((typeof bytes === 'string' || Buffer.isBuffer(bytes)) && Buffer.byteLength(bytes) <= 128
+    && (typeof headers === 'string' || Buffer.isBuffer(headers)) && Buffer.byteLength(headers) <= 32768,
+  'Invalid or unbounded replay probe diagnostics.')
+  const match = /^([0-9a-fA-F:.]{0,45})\|([0-9]{1,3})\|([0-9]{3})\n$/.exec(bytes.toString())
+  need(match && (match[1] === '' || isIP(match[1])) && Number(match[2]) <= 255 && (Number(match[3]) === 0
+    || Number(match[3]) >= 100 && Number(match[3]) <= 599), 'Invalid replay probe observations.')
+  const text = headers.toString()
+  need(!/[\0-\x08\x0b\x0c\x0e-\x1f\x7f]/.test(text), 'Invalid replay response headers.')
+  const lines = text.trimEnd() ? text.trimEnd().split(/\r?\n/) : []
+  need(lines.length <= 128 && (lines.length === 0 && Number(match[3]) === 0
+    || lines.length > 0 && /^HTTP\/[0-9.]+ [1-5][0-9]{2}(?: |$)/.test(lines[0])),
+    'Invalid replay response status.')
+  if (lines.length) need(Number(lines[0].split(' ')[1]) === Number(match[3]), 'Replay probe HTTP status differs.')
+  const marker = []
+  for (const line of lines.slice(1)) {
+    const header = /^([!#$%&'*+.^_`|~0-9A-Za-z-]+):[ \t]*([^\r\n]*)$/.exec(line)
+    need(header, 'Invalid replay response header.')
+    if (header[1].toLowerCase() === 'x-agentsdock-replay') marker.push(header[2].trim())
+  }
+  return { remoteIp: match[1] || null, sslVerifyResult: Number(match[2]), httpCode: Number(match[3]),
+    replayMarker: marker.length === 1 && marker[0] === 'test-only' }
+}
+
+export async function assertReplayReadiness({ logPath, pidPath, curlMetadataPath, responseHeadersPath }, { queryProcess = pid => execFileSync('/bin/ps',
   ['-p', String(pid), '-o', 'pid=', '-o', 'uid=', '-o', 'command='],
   { encoding: 'utf8', timeout: 5000, maxBuffer: 8192, stdio: ['ignore', 'pipe', 'pipe'] }) } = {}) {
-  need(isAbsolute(logPath) && isAbsolute(pidPath) && dirname(logPath) === dirname(pidPath)
-    && !/[\r\n\0]/.test(logPath + pidPath), 'Invalid replay readiness paths.')
+  need([logPath, pidPath, curlMetadataPath, responseHeadersPath].every(path => typeof path === 'string'
+    && isAbsolute(path) && dirname(path) === dirname(logPath) && !/[\r\n\0]/.test(path)), 'Invalid replay readiness paths.')
+  const work = await lstat(dirname(logPath))
+  need(work.isDirectory() && work.uid === process.getuid?.() && work.uid > 0 && (work.mode & 0o077) === 0,
+    'Replay readiness files must share a private runner-owned work directory.')
+  const probe = parseReplayProbeDiagnostics(await regular(curlMetadataPath, 128), await regular(responseHeadersPath, 32768))
+  need(probe.remoteIp === '127.0.0.1' && probe.sslVerifyResult === 0 && probe.httpCode === 200 && probe.replayMarker,
+    'Replay HTTPS probe did not reach the authenticated loopback replay origin.')
   const records = parseReplayStartupDiagnostics(await regular(logPath, 32768))
   need(records.at(-1)?.stage === 'serving' && records.at(-1)?.status === 'ready', 'Replay startup has not completed.')
   const file = await open(pidPath, constants.O_RDONLY | constants.O_NOFOLLOW)

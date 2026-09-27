@@ -1,5 +1,20 @@
 # Public development log
 
+## 2026-09-27 — Pin replay-probe trust and connection identity
+
+- Candidate run `36344660122` repeats the fresh npm and signed app/legacy
+  successes. Safe diagnostics show the listener fully initialized, while the
+  readiness probe exits with TLS verification code 60 before any update click.
+- Bind the probe explicitly to its ephemeral CA, retain certificate validation,
+  and require loopback, successful TLS verification, HTTP 200 and the exact
+  replay response marker as well as completed startup and owned listener PID.
+  Emit only bounded connection facts, never raw headers or private logs.
+- An unprivileged loopback TLS fixture accepts the same generated chain with
+  both environment CA hints and explicit CA input. This validates the probe
+  mechanism but does not prove why the CI trust check failed. No developer
+  trust-store/DNS or signed app/server artifact changes are made.
+- Pass 257 JavaScript release/CLI tests and workflow lint before the next retry.
+
 ## 2026-09-27 — Observe fresh native installation; diagnose replay startup
 
 - In candidate CI run `36343746182`, the frozen beta.18 npm package passes
