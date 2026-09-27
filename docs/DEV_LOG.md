@@ -79,6 +79,25 @@
   profile. Availability: local branch and ad-hoc package only; no server
   restart, release or publication.
 
+## 2026-09-27 — Skip native questions in no-prompt modes
+
+- Skip Codex user-input questions under `never` and Claude SDK questions under
+  `dontAsk` or `bypassPermissions` through the existing empty-answer/skip
+  responses. Do not create waiting interaction cards, invent answers or grant
+  additional tool permissions.
+- Keep ownership, Stop and deletion checks. Use the current turn's captured
+  policy, including independent Codex side conversations; preserve questions
+  and answer handling in normal prompting modes.
+- Pass 290 scoped server tests. A broader 299-test run has one existing
+  idle-thread runtime fixture failure, reproduced against unchanged main.
+  New skip regressions fail against unchanged main and pass with this fix.
+- Integrate with the AI Providers settings work on one development branch.
+  Pass 360 combined isolated server regressions covering question handling,
+  runner policy capture, side conversations, API settings and packaging.
+- Availability: source-only change; no deployment or release. Native provider
+  and real App acceptance remain pending. See
+  `server/docs/NO_PROMPT_USER_INPUT.md` for the local acceptance checklist.
+
 ## 2026-09-27 — Run-bound Cursor chat tools under native permissions
 
 - Replace Shell-based helper instructions for Cursor with a private per-run
