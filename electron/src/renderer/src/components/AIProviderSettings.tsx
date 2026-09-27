@@ -20,11 +20,10 @@ export function AIProviderSettings() {
       <p>{t('settings.providersScope')}</p>
     </div>
     <RuntimeHealthPanel />
-    <p className="app-settings-provider-help">{t('settings.providersCustomHelp')}</p>
-    <EndpointSetupHelp />
     <CodexAuthSettings connected={connected} profileId={profileId} profileGeneration={profileGeneration} serverTitle={profile?.name} />
     <ProviderConnectionSettings backend="claude" connected={connected} profileId={profileId} profileGeneration={profileGeneration} />
     <ProviderConnectionSettings backend="opencode" connected={connected} profileId={profileId} profileGeneration={profileGeneration} />
     <CursorEndpointNotice />
+    <EndpointSetupHelp />
   </div>
 }

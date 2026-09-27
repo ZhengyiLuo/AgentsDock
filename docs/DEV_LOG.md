@@ -1,5 +1,34 @@
 # Public development log
 
+## 2026-09-27 — Clear custom API identity and connection state
+
+- Separate the native Codex account from custom API credentials and billing.
+  Hide unconfigured custom choices in new-chat/composer menus without changing
+  existing custom chats. Never query native account quota for a custom chat.
+- Reduce forms to URL, key and Connect; fold protocol/model controls into
+  Advanced. Default checks use protected read-only APIs, not model inference.
+  Public catalogs cannot verify keys; known OpenRouter connections use its
+  private key-status API. Claude/OpenCode model probes remain explicit opt-ins.
+- Codex Connect saves only after server-side credential verification. Bind
+  the saved proof to the immutable credential revision; legacy saves remain
+  compatible but unverified. Preserve prior credentials on a failed replacement
+  and clear entered keys after completion. Keep native login unchanged.
+- Verify real Electron mouse/keyboard → production IPC/native HTTP → actual
+  native-admin guard, router and storage → loopback HTTP checks. All three
+  supported settings cards verify with synthetic keys; bad-key retry, reopen,
+  saved recheck, separate account identity and dark/light narrow layouts pass.
+  No third-party credentials, paid requests or native agent sends are exercised.
+- Pass 89 related server tests. The desktop suite passes 4,944 tests (five
+  skipped) with one missing CSS token; fix the token and pass its three-test
+  suite. TypeScript, production build, bundle audit and ad-hoc signature pass;
+  all 88 compiled files match the packaged application.
+- Replace and reopen the local development App as `1.0.7-providers.2.local`,
+  retaining its profile and previous bundle. Confirm the existing server's
+  saved Codex endpoint is unverified, not tied to the native account. That
+  server lacks the new verification/settings routes: deployment remains
+  pending operator approval. Claude/OpenCode are settings-only; Cursor has
+  no generic API form. Availability: local App/source only; no public release.
+
 ## 2026-09-27 — Settings-only Claude Code and OpenCode API connections
 
 - Extend desktop AI Providers with separate Claude Code and OpenCode endpoint

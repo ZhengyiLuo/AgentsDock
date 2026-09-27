@@ -44,13 +44,14 @@ describe('settings-only provider connection native transport', () => {
   })
 
   it('rejects malformed and cross-provider selections before transport', () => {
-    for (const invalid of [{ ...input, model: null }, { ...input, protocol: [] }, { ...input, expected_revision: -1 },
+    for (const invalid of [{ ...input, model: [] }, { ...input, protocol: [] }, { ...input, expected_revision: -1 },
       { ...input, base_url: 'http://remote.example' }, { ...input, base_url: 'https://example/api?key=secret' },
       { ...input, protocol: 'responses' }, { ...input, unexpected: true }]) {
       expect(() => connectionRequest('claude', 'save', invalid)).toThrow('PROVIDER_CONNECTION_INVALID')
     }
     expect(() => connectionRequest('cursor' as 'claude', 'save', input)).toThrow('PROVIDER_CONNECTION_INVALID')
     expect(() => connectionRequest('claude', 'check', input)).toThrow('PROVIDER_CONNECTION_INVALID')
+    expect(connectionRequest('claude', 'save', { ...input, model: null })).toEqual({ ...input, model: null })
   })
 
   it('does not treat inconsistent or stale-looking response evidence as a verified API', () => {

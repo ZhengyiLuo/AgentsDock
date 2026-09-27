@@ -287,6 +287,8 @@ export interface CodexAuthStatus {
 
 /** Custom Responses provider; never contains stored credentials. */
 export interface CodexProviderConfiguration {
+  connection_verified?: boolean
+  connection_check_available?: boolean
   available: boolean
   configured: boolean
   base_url: string | null
@@ -298,6 +300,7 @@ export interface CodexProviderConfiguration {
 
 /** Transient input sent only to the selected server's native admin route. */
 export interface CodexProviderInput {
+  verify_connection?: boolean
   base_url: string
   model?: string
   api_key: string

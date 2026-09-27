@@ -41,7 +41,8 @@ export function selectableChatBackendChoices(health: Health | null | undefined, 
   // Keep the new provider discoverable on old servers; runtimeSelectionError
   // still blocks admission and explains the required server upgrade.
   if (!supported.includes('opencode')) supported.push('opencode')
-  return supported.flatMap(backend => backend === 'codex' ? ['codex', 'codex-custom'] as ChatBackendChoice[] : [backend])
+  return supported.flatMap(backend => backend === 'codex' && codexCustomProviderAvailable(health, catalog)
+    ? ['codex', 'codex-custom'] as ChatBackendChoice[] : [backend])
 }
 
 // Claude and Codex are always expected on every server; Cursor is optional

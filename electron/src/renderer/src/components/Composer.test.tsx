@@ -1388,16 +1388,15 @@ describe('Composer', () => {
     await waitFor(() => expect(update).toHaveBeenLastCalledWith('chat-1', expect.objectContaining({ backend: 'codex', codex_provider: 'default' })))
   })
 
-  it('routes an unconfigured custom choice to Settings without changing the chat', async () => {
+  it('hides an unconfigured custom choice without changing the chat', async () => {
     const update = vi.fn()
     const navigate = vi.spyOn(window, 'dispatchEvent')
     window.agentsDock.sessions = { update } as unknown as AgentsDockAPI['sessions']
     const user = userEvent.setup()
     render(<Composer />)
     await user.click(screen.getByTitle('Change backend'))
-    await user.click(screen.getByRole('menuitem', { name: 'Codex runtime · Custom endpoint Configure in Settings' }))
-    expect(useAppStore.getState().modals.appSettings).toBe(true)
-    expect(navigate).toHaveBeenCalledWith(expect.objectContaining({ type: 'agentsdock:app-settings-section', detail: 'providers' }))
+    expect(screen.queryByText(/Codex runtime · Custom endpoint/)).not.toBeInTheDocument()
+    expect(navigate).not.toHaveBeenCalledWith(expect.objectContaining({ type: 'agentsdock:app-settings-section' }))
     expect(update).not.toHaveBeenCalled()
   })
 

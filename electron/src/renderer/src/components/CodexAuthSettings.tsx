@@ -1,10 +1,11 @@
 import { useCallback, useEffect, useId, useRef, useState } from 'react'
-import { KeyRound, LoaderCircle, RefreshCw } from 'lucide-react'
+import { CheckCircle2, KeyRound, LoaderCircle, RefreshCw } from 'lucide-react'
 import { t } from '@shared/i18n'
 import type { CodexAuthStatus, CodexProviderConfiguration, CodexProviderTestResult, CodexServerSettingsScope } from '@shared/types'
 import { useLocale } from '../lib/i18n'
 import { CodexModelCompatibilityCheck } from './CodexModelCompatibilityCheck'
 import './CodexAuthSettings.css'
+import './ProviderConnectionSettings.css'
 
 type AuthFailure = 'admin' | 'update' | 'connection' | 'readFailed'
 type ProviderFailure = 'providerAdmin' | 'providerUpdate' | 'providerBusy' | 'providerInvalid' | 'providerConnection' | 'providerFailed'
@@ -125,6 +126,7 @@ export function CodexAuthSettings({ connected, profileId, profileGeneration, ser
       }).finally(() => {
         if (ownsRequest(request, scope)) setLoading(false)
       })
+      void loadProviderConfiguration(true)
     }
     return () => {
       requestRef.current += 1
@@ -152,8 +154,8 @@ export function CodexAuthSettings({ connected, profileId, profileGeneration, ser
   const providerDraftComplete = Boolean(baseURL.trim() && hasKey)
   const tested = testResult?.ok === true && testResult.status === 'ready' && testResult.revision === draftRevisionRef.current
 
-  async function loadProviderConfiguration() {
-    if (!canOpenSettings || !profileId) return
+  async function loadProviderConfiguration(initial = false) {
+    if (!connected || !profileId || !initial && !canOpenSettings) return
     clearKey()
     invalidateTest()
     setProviderLoading(true)
@@ -206,7 +208,7 @@ export function CodexAuthSettings({ connected, profileId, profileGeneration, ser
   }
 
   async function saveProvider() {
-    if (!providerEditable || !providerDraftComplete || !profileId || !keyInputRef.current) return
+    if (!providerEditable || !currentProvider?.connection_check_available || !providerDraftComplete || !profileId || !keyInputRef.current) return
     const scope = { profileId, profileGeneration }
     const request = ++providerRequestRef.current
     let apiKey = keyInputRef.current.value.trim()
@@ -215,7 +217,7 @@ export function CodexAuthSettings({ connected, profileId, profileGeneration, ser
     try {
       const save = window.agentsDock.codex?.setProvider
       if (typeof save !== 'function') { setProviderError('providerUpdate'); return }
-      const pending = save(scope, { base_url: baseURL.trim(), api_key: apiKey })
+      const pending = save(scope, { base_url: baseURL.trim(), api_key: apiKey, verify_connection: true })
       apiKey = ''
       const next = await pending
       if (request !== providerRequestRef.current || !ownsScope(scope)) return
@@ -229,7 +231,7 @@ export function CodexAuthSettings({ connected, profileId, profileGeneration, ser
       if (request === providerRequestRef.current && ownsScope(scope)) setProviderError(providerFailure(reason))
     } finally {
       apiKey = ''
-      if (request === providerRequestRef.current && ownsScope(scope)) setSaving(false)
+      if (request === providerRequestRef.current && ownsScope(scope)) { clearKey(); setSaving(false) }
     }
   }
 
@@ -272,15 +274,12 @@ export function CodexAuthSettings({ connected, profileId, profileGeneration, ser
       : currentStatus?.auth_mode === 'other' ? t('codexAuth.other')
         : currentStatus?.requires_openai_auth === false ? t('codexAuth.notRequired') : t('codexAuth.signedOut')
 
-  return <section className="codex-auth-settings" aria-label={t('codexAuth.title')} aria-busy={loading || saving || providerLoading || testing}>
+  return <><section className="codex-auth-settings" aria-label={t('codexAuth.title')} aria-busy={loading}>
     <span className="codex-auth-settings-icon"><KeyRound size={17} /></span>
     <div className="codex-auth-settings-copy">
       <div className="codex-auth-settings-heading">
         <div><strong>{t('codexAuth.title')}</strong>{serverTitle && <small>{serverTitle}</small>}</div>
         <div className="codex-auth-settings-actions">
-          {!showForm && <button type="button" className="quiet-button" disabled={!canOpenSettings} onClick={() => {
-            setFormOpen(true); void loadProviderConfiguration()
-          }}>{t('codexAuth.customEndpoint')}</button>}
           <button type="button" className="quiet-button" disabled={!connected || !profileId || loading || saving}
             onClick={() => setReload(value => value + 1)}>
             {loading ? <LoaderCircle className="spin" size={14} /> : <RefreshCw size={14} />}{t('codexAuth.recheck')}
@@ -289,14 +288,30 @@ export function CodexAuthSettings({ connected, profileId, profileGeneration, ser
       </div>
       <small>{!connected || !profileId ? t('codexAuth.connect') : loading ? t('codexAuth.loading')
         : currentStatus?.available === false ? t('codexAuth.nativeRequired') : currentStatus ? account : t('codexAuth.unknown')}</small>
-      {currentProvider?.configured && <small>{t('codexAuth.customAccount', { endpoint: currentProvider.base_url ?? '' })}</small>}
       <small>{t('codexAuth.accountReadOnly')}</small>
+      {error && <small className="codex-auth-settings-error" role="alert">{t(`codexAuth.${error}`)}</small>}
+    </div>
+  </section>
+  <section className="codex-auth-settings provider-connection" aria-label={t('connections.title', { provider: 'Codex' })} aria-busy={saving || providerLoading || testing}>
+    <span className="codex-auth-settings-icon"><KeyRound size={17} /></span>
+    <div className="codex-auth-settings-copy">
+      <div className="codex-auth-settings-heading">
+        <div><strong>{t('connections.title', { provider: 'Codex' })}</strong><small>{t('codexAuth.independentAPI')}</small></div>
+        {!showForm && <button type="button" className="quiet-button" disabled={!canOpenSettings} onClick={() => {
+          clearKey(); invalidateTest(); setFormOpen(true)
+          if (!currentProvider && !providerReadFailed && !providerLoading) void loadProviderConfiguration()
+        }}>{t('codexAuth.customEndpoint')}</button>}
+      </div>
+      <small role="status" className={currentProvider?.connection_verified && !showForm && !providerError ? 'provider-connection-verified' : ''}>
+        {currentProvider?.connection_verified && !showForm && !providerError && <CheckCircle2 size={14} aria-hidden="true" />}
+        {providerLoading || saving ? t('connections.working') : showForm ? t('connections.draft')
+          : providerError ? t('connections.unavailable') : currentProvider?.connection_verified ? t('connections.verified')
+            : currentProvider?.configured ? t('connections.saved') : t('connections.empty')}
+      </small>
+      {currentProvider?.configured && !showForm && <small>{currentProvider.base_url}</small>}
       {showForm && <form className="codex-auth-settings-form" onSubmit={event => { event.preventDefault(); void saveProvider() }}>
-        <small>{t('codexAuth.providerSummary')}</small>
-        <small id={`${fieldId}-scope`}>{t('codexAuth.providerScope')}</small>
         {providerLoading && <small>{t('codexAuth.providerLoading')}</small>}
         <div className="codex-auth-endpoint-fields">
-          <strong>{t('codexAuth.customEndpoint')}</strong>
           {currentProvider?.available === false && <small>{t('codexAuth.nativeRequired')}</small>}
           <label htmlFor={`${fieldId}-endpoint`}>{t('codexAuth.baseURL')}</label>
           <input ref={endpointInputRef} id={`${fieldId}-endpoint`} type="url" value={baseURL} disabled={!providerEditable} autoComplete="off" spellCheck={false}
@@ -305,18 +320,18 @@ export function CodexAuthSettings({ connected, profileId, profileGeneration, ser
         <label htmlFor={fieldId}>{t('codexAuth.providerKey')}</label>
         <input ref={attachKeyInput} id={fieldId} type="password" autoComplete="off" autoCapitalize="none" autoCorrect="off"
           spellCheck={false} maxLength={4096} disabled={!providerEditable} data-1p-ignore data-lpignore="true"
-          aria-describedby={`${fieldId}-scope ${fieldId}-key-help ${fieldId}-test-help`}
           onChange={event => { setHasKey(Boolean(event.currentTarget.value.trim())); invalidateTest() }} />
-        <small id={`${fieldId}-key-help`}>{t('codexAuth.freshKey')}</small>
-        <small id={`${fieldId}-test-help`}>{t('codexAuth.testHelp')}</small>
         <div className="codex-auth-settings-actions">
-          <button type="button" className="quiet-button" disabled={!providerEditable || !providerDraftComplete || testing}
-            onClick={() => { void testConnection() }}>{testing && <LoaderCircle className="spin" size={14} />}{t(testing ? 'codexAuth.testing' : 'codexAuth.test')}</button>
-          <button type="submit" className="primary-button" disabled={!providerEditable || !providerDraftComplete}>
+          <button type="submit" className="primary-button" disabled={!providerEditable || !currentProvider?.connection_check_available || !providerDraftComplete}>
             {saving && <LoaderCircle className="spin" size={14} />}{t(saving ? 'codexAuth.providerSaving' : 'codexAuth.providerSave')}
           </button>
           <button type="button" className="quiet-button" disabled={saving} onClick={cancelForm}>{t('codexAuth.cancel')}</button>
         </div>
+        {currentProvider && !currentProvider.connection_check_available && <small role="alert">{t('codexAuth.providerUpdate')}</small>}
+        <details className="provider-connection-advanced"><summary>{t('connections.advanced')}</summary>
+          <small>{t('codexAuth.testHelp')}</small>
+          <button type="button" className="quiet-button" disabled={!providerEditable || !providerDraftComplete || testing}
+            onClick={() => { void testConnection() }}>{testing && <LoaderCircle className="spin" size={14} />}{t(testing ? 'codexAuth.testing' : 'codexAuth.test')}</button>
         {(currentProvider?.configured || providerReadFailed) && <div className="codex-auth-provider-reset">
           <button type="button" className="quiet-button" disabled={!canResetProvider} title={t('codexAuth.providerResetHelp')}
             onClick={() => { void resetProvider() }}>{t('codexAuth.providerResetAction')}</button>
@@ -324,13 +339,13 @@ export function CodexAuthSettings({ connected, profileId, profileGeneration, ser
         {testResult && <small role={tested ? 'status' : 'alert'} className={tested ? undefined : 'codex-auth-settings-error'}>
           {t(`codexAuth.testResult.${testResult.ok && testResult.status === 'ready' ? 'ready' : testResult.status === 'ready' ? 'failed' : testResult.status}`)}
         </small>}
+        </details>
       </form>}
-      {showForm && providerEditable && currentProvider?.configured && !hasKey && baseURL === currentProvider.base_url && profileId && <CodexModelCompatibilityCheck
+      {showForm && providerEditable && currentProvider?.configured && !hasKey && baseURL === currentProvider.base_url && profileId && <details className="provider-connection-advanced"><summary>{t('codexProvider.check')}</summary><CodexModelCompatibilityCheck
         key={`${profileId}:${profileGeneration}:${currentProvider.credential_id ?? currentProvider.base_url}`}
-        scope={{ profileId, profileGeneration }} credentialId={currentProvider.credential_id} />}
-      {error && <small className="codex-auth-settings-error" role="alert">{t(`codexAuth.${error}`)}</small>}
+        scope={{ profileId, profileGeneration }} credentialId={currentProvider.credential_id} /></details>}
       {providerError && <small className="codex-auth-settings-error" role="alert">{t(`codexAuth.${providerError}`)}</small>}
       {providerNotice && providerScopeMatches && <small role="status">{t(`codexAuth.${providerNotice}`)}</small>}
     </div>
-  </section>
+  </section></>
 }

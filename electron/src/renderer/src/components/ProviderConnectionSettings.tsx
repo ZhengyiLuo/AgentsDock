@@ -74,7 +74,7 @@ export function ProviderConnectionSettings({ backend, ...props }: Props & { back
     const n = ++serial.current
     const scope = { profileId: props.profileId, profileGeneration: props.profileGeneration }
     setBusy(true); setError(null); setConfirmForget(false)
-    const input = action === 'save' ? { base_url: baseURL, model, protocol, auth_header: authHeader,
+    const input = action === 'save' ? { base_url: baseURL, model: model.trim() || null, protocol, auth_header: authHeader,
       api_key: key.current?.value ?? '', expected_revision: saved.revision } : { expected_revision: saved.revision }
     try {
       const reply = await request(scope, backend, action, input)
@@ -107,7 +107,7 @@ export function ProviderConnectionSettings({ backend, ...props }: Props & { back
       {error && <small role="alert" className={error === 'update' ? '' : 'codex-auth-settings-error'}>{t(`connections.error.${error}`)}</small>}
       {!error && !open && saved?.last_result && saved.last_result !== 'verified' && <small role="alert" className="codex-auth-settings-error">{t(`connections.error.${saved.last_result}`)}</small>}
       {!open && saved?.configured && <>
-        <small>{saved.base_url} · {saved.model}</small>
+        <small>{saved.base_url}{saved.model ? ` · ${saved.model}` : ''}</small>
         <div className="codex-auth-settings-actions">
           <button type="button" className="quiet-button" disabled={!editable} onClick={() => void operate('check')}>{t('connections.check')}</button>
           <button type="button" className="quiet-button" disabled={!editable} onClick={() => confirmForget ? void operate('forget') : setConfirmForget(true)}>{t(confirmForget ? 'connections.confirmForget' : 'connections.forget')}</button>
@@ -118,7 +118,15 @@ export function ProviderConnectionSettings({ backend, ...props }: Props & { back
       {!open && error && <button type="button" className="quiet-button provider-connection-refresh" disabled={busy || !props.connected} onClick={() => setReload(n => n + 1)}>{t('connections.refresh')}</button>}
       {open && <form className="codex-auth-settings-form" onSubmit={event => { event.preventDefault(); void operate('save') }}>
         <label htmlFor={`${id}-url`}>{t('connections.baseURL')}</label>
-        <input id={`${id}-url`} value={baseURL} maxLength={2048} disabled={busy} onChange={e => setBaseURL(e.target.value)} autoComplete="off" spellCheck={false} />
+        <input id={`${id}-url`} value={baseURL} maxLength={2048} disabled={busy} onChange={e => {
+          setBaseURL(e.target.value)
+          if (backend === 'claude') {
+            try { setAuthHeader(new URL(e.target.value).hostname === 'api.anthropic.com' ? 'x-api-key' : 'bearer') } catch { /* incomplete URL */ }
+          }
+        }} autoComplete="off" spellCheck={false} />
+        <label htmlFor={`${id}-key`}>{t('connections.key')}</label>
+        <input id={`${id}-key`} type="password" ref={attachKey} maxLength={4096} disabled={busy} onChange={e => setHasKey(Boolean(e.target.value.trim()))} autoComplete="off" autoCapitalize="none" autoCorrect="off" spellCheck={false} data-1p-ignore data-lpignore="true" />
+        <details className="provider-connection-advanced"><summary>{t('connections.advanced')}</summary>
         {backend === 'opencode' && <><label htmlFor={`${id}-protocol`}>{t('connections.protocol')}</label>
           <select id={`${id}-protocol`} value={protocol} disabled={busy} onChange={e => { setProtocol(e.target.value as ConnectionProtocol); setAuthHeader('bearer') }}>
             <option value="chat_completions">OpenAI Chat Completions</option><option value="responses">OpenAI Responses</option><option value="anthropic">Anthropic Messages</option>
@@ -130,11 +138,10 @@ export function ProviderConnectionSettings({ backend, ...props }: Props & { back
         <label htmlFor={`${id}-model`}>{t('connections.model')}</label>
         <input id={`${id}-model`} value={model} maxLength={256} disabled={busy} onChange={e => setModel(e.target.value)} autoComplete="off" spellCheck={false} />
         <small>{t('connections.modelHelp')}</small>
-        <label htmlFor={`${id}-key`}>{t('connections.key')}</label>
-        <input id={`${id}-key`} type="password" ref={attachKey} maxLength={4096} disabled={busy} onChange={e => setHasKey(Boolean(e.target.value.trim()))} autoComplete="off" autoCapitalize="none" autoCorrect="off" spellCheck={false} data-1p-ignore data-lpignore="true" />
-        <small>{t('connections.cost')}</small>
+        {model.trim() && <small>{t('connections.cost')}</small>}
+        </details>
         <div className="codex-auth-settings-actions">
-          <button type="submit" className="primary-button" disabled={!editable || !hasKey || !baseURL.trim() || !model.trim()}>{t('connections.save')}</button>
+          <button type="submit" className="primary-button" disabled={!editable || !hasKey || !baseURL.trim()}>{t('connections.save')}</button>
           <button type="button" className="quiet-button" disabled={busy} onClick={() => { clearKey(); setOpen(false); setError(null) }}>{t('connections.cancel')}</button>
         </div>
       </form>}
@@ -144,10 +151,10 @@ export function ProviderConnectionSettings({ backend, ...props }: Props & { back
 
 export function EndpointSetupHelp() {
   useLocale()
-  return <div className="app-settings-provider-context">
-    <strong>{t('connections.startTitle')}</strong><p>{t('connections.startHelp')}</p>
+  return <details className="app-settings-provider-context">
+    <summary>{t('connections.startTitle')}</summary><p>{t('connections.startHelp')}</p>
     <button type="button" className="quiet-button" onClick={() => void window.agentsDock.native.openExternal('https://openrouter.ai/settings/keys')}>{t('connections.openRouter')}</button>
-  </div>
+  </details>
 }
 
 export function CursorEndpointNotice() {

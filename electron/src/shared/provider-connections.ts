@@ -4,9 +4,9 @@ import { validateCodexApiKey } from './codex-auth'
 export type ConnectionBackend = 'claude' | 'opencode'
 export type ConnectionAction = 'get' | 'save' | 'check' | 'forget'
 export type ConnectionProtocol = 'anthropic' | 'chat_completions' | 'responses'
-export type ConnectionResult = 'verified' | 'authentication_failed' | 'rate_limited' | 'unsupported' | 'connection_failed' | 'invalid_response'
+export type ConnectionResult = 'verified' | 'authentication_failed' | 'rate_limited' | 'unsupported' | 'connection_failed' | 'invalid_response' | 'model_required'
 export interface ProviderConnectionInput {
-  base_url: string; api_key: string; model: string; protocol: ConnectionProtocol
+  base_url: string; api_key: string; model: string | null; protocol: ConnectionProtocol
   auth_header: 'bearer' | 'x-api-key'; expected_revision: number
 }
 export interface ProviderConnectionConfiguration {
@@ -18,7 +18,7 @@ export interface ProviderConnectionReply {
   configuration?: ProviderConnectionConfiguration; ok?: boolean; status?: ConnectionResult
 }
 export type ProviderConnectionRequest = ProviderConnectionInput | { expected_revision: number }
-const results: ConnectionResult[] = ['verified', 'authentication_failed', 'rate_limited', 'unsupported', 'connection_failed', 'invalid_response']
+const results: ConnectionResult[] = ['verified', 'authentication_failed', 'rate_limited', 'unsupported', 'connection_failed', 'invalid_response', 'model_required']
 function invalid(): never { throw new Error('PROVIDER_CONNECTION_INVALID') }
 export function connectionBackend(value: unknown): ConnectionBackend {
   if (value !== 'claude' && value !== 'opencode') return invalid()
@@ -30,11 +30,11 @@ function revision(value: unknown): number {
 }
 function fields(backend: ConnectionBackend, input: Record<string, unknown>) {
   const base_url = validateCodexProviderURL(input.base_url)
-  if (/\/messages\/?$/i.test(base_url) || typeof input.model !== 'string' || !/^[\x21-\x7e]{1,256}$/.test(input.model.trim())) return invalid()
+  if (/\/messages\/?$/i.test(base_url) || input.model !== null && (typeof input.model !== 'string' || !/^[\x21-\x7e]{1,256}$/.test(input.model.trim()))) return invalid()
   const protocol = input.protocol as ConnectionProtocol, auth_header = input.auth_header as ProviderConnectionInput['auth_header']
   if (!['anthropic', 'chat_completions', 'responses'].includes(protocol) || backend === 'claude' && protocol !== 'anthropic'
     || !['bearer', 'x-api-key'].includes(auth_header) || protocol !== 'anthropic' && auth_header !== 'bearer') return invalid()
-  return { base_url, model: input.model.trim(), protocol, auth_header }
+  return { base_url, model: typeof input.model === 'string' ? input.model.trim() : null, protocol, auth_header }
 }
 export function connectionRequest(backend: ConnectionBackend, action: ConnectionAction, value?: unknown): ProviderConnectionRequest | undefined {
   connectionBackend(backend)
