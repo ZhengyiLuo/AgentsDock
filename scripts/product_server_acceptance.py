@@ -657,6 +657,10 @@ def diagnose(fixture: dict) -> dict:
                        "workerStderr": diagnostic_log_categories(state / "execution/logs/worker.stderr.log", state),
                        "gatewayStderr": diagnostic_log_categories(state / "execution/logs/gateway.stderr.log", state)}
     result["tmuxTrust"] = diagnostic_tmux_trust(fixture)
+    try:
+        result["preservation"] = snapshot_differences(fixture["snapshot"], state_snapshot(fixture))
+    except (OSError, RuntimeError, ValueError, KeyError, TypeError, http.client.HTTPException):
+        result["preservation"] = {"readable": False}
     return result
 
 
@@ -726,23 +730,97 @@ def state_snapshot(fixture: dict) -> dict:
         events = detail.get("events")
         need(isinstance(events, list), "Session timeline was omitted.")
         sessions[identifier] = {"identity": {key: session.get(key) for key in SESSION_KEYS},
+                                "presentFields": [key for key in SESSION_KEYS if key in session],
                                 "eventHashes": [sha(canonical(event)) for event in events],
                                 "queued": detail.get("queued_turns", [])}
     return {"serverIdentitySha256": sha(identity.encode()), "tokenSha256": sha(fixture["token"].encode()),
             "sessions": sessions}
 
 
-def compare_snapshot(before: dict, after: dict) -> None:
+def snapshot_differences(before: dict, after: dict) -> dict:
+    """Expose only fixed field names, booleans and bounded session counts."""
+    need(isinstance(before, dict) and isinstance(after, dict), "Invalid preservation snapshot.")
+    saved_sessions, actual_sessions = before.get("sessions"), after.get("sessions")
+    need(isinstance(saved_sessions, dict) and isinstance(actual_sessions, dict)
+         and 0 < len(saved_sessions) <= 30 and len(actual_sessions) <= 30,
+         "Preservation diagnostics require bounded session snapshots.")
+    result = {"readable": True,
+              "serverIdentityChanged": before.get("serverIdentitySha256") != after.get("serverIdentitySha256"),
+              "tokenChanged": before.get("tokenSha256") != after.get("tokenSha256"),
+              "missingSessionCount": 0, "changedSessionCount": 0,
+              "changedSessionFields": [], "unrecognizedSessionFieldChanged": False,
+              "historyChanged": False, "queuedMessagesChanged": False}
+    changed_fields: set[str] = set()
+    for identifier, saved in saved_sessions.items():
+        actual = actual_sessions.get(identifier)
+        if actual is None:
+            result["missingSessionCount"] += 1
+            continue
+        need(isinstance(saved, dict) and isinstance(actual, dict)
+             and isinstance(saved.get("identity"), dict) and isinstance(actual.get("identity"), dict)
+             and isinstance(saved.get("eventHashes"), list) and isinstance(actual.get("eventHashes"), list),
+             "Invalid session preservation snapshot.")
+        old, new = saved["identity"], actual["identity"]
+        if old != new:
+            result["changedSessionCount"] += 1
+            changed_fields.update(key for key in SESSION_KEYS if old.get(key) != new.get(key)
+                                  or (key in old) != (key in new))
+            result["unrecognizedSessionFieldChanged"] |= any(
+                key not in SESSION_KEYS and (old.get(key) != new.get(key) or (key in old) != (key in new))
+                for key in old.keys() | new.keys())
+        result["historyChanged"] |= actual["eventHashes"][:len(saved["eventHashes"])] != saved["eventHashes"]
+        result["queuedMessagesChanged"] |= bool(saved.get("queued")) and actual.get("queued") != saved["queued"]
+    result["changedSessionFields"] = sorted(changed_fields)
+    return result
+
+
+def schema_defaults_added(saved: dict, actual: dict, baseline_version: str | None,
+                          candidate_version: str | None) -> set[str]:
+    """Recognize only proven absent 1.0.3 fields gaining their exact defaults.
+
+    Signed 1.0.3 public_session omitted both fields. The candidate projects the
+    implicit Codex provider as 'default' and persists the new OpenCode default
+    on every loaded session. Existing fields, including explicit null, are not
+    migration defaults. Callers supply versions only after exact receipt-bound
+    candidate health; same-version and pre-update checks remain strict.
+    """
+    if (baseline_version != "1.0.3" or not isinstance(candidate_version, str)
+            or VERSION.fullmatch(candidate_version) is None
+            or version_order(candidate_version) <= version_order(baseline_version)):
+        return set()
+    old, new = saved.get("identity", {}), actual.get("identity", {})
+    if old.get("backend") not in {"codex", "claude", "cursor"} or old.get("backend") != new.get("backend"):
+        return set()
+    present_before, present_after = saved.get("presentFields"), actual.get("presentFields")
+    if not all(isinstance(value, list) and len(value) <= len(SESSION_KEYS)
+               and all(isinstance(key, str) and key in SESSION_KEYS for key in value)
+               and len(set(value)) == len(value) for value in (present_before, present_after)):
+        return set()
+    return {key for key in ("codex_provider", "opencode_permission_mode")
+            if key not in present_before and old.get(key) is None
+            and key in present_after and new.get(key) == "default"}
+
+
+def compare_snapshot(before: dict, after: dict, *, baseline_version: str | None = None,
+                     candidate_version: str | None = None) -> dict:
     need(before["serverIdentitySha256"] == after["serverIdentitySha256"] and before["tokenSha256"] == after["tokenSha256"],
          "Migration changed server identity or token.")
+    defaults_added: set[str] = set()
     for identifier, saved in before["sessions"].items():
         actual = after["sessions"].get(identifier)
-        need(actual is not None and actual["identity"] == saved["identity"],
-             "Migration changed chat identity, native session ID, configuration or custom working directory.")
+        need(actual is not None, "Migration removed a saved chat.")
+        defaults = schema_defaults_added(saved, actual, baseline_version, candidate_version)
+        expected = {**saved["identity"], **{key: "default" for key in defaults}}
+        changes = [key for key in SESSION_KEYS if actual["identity"].get(key) != expected.get(key)
+                   or (key in actual["identity"]) != (key in expected)]
+        need(actual["identity"] == expected,
+             "Migration changed preserved session fields: " + ", ".join(changes or ["unrecognized-field"]) + ".")
+        defaults_added.update(defaults)
         need(actual["eventHashes"][:len(saved["eventHashes"])] == saved["eventHashes"],
              "Migration removed or changed previously saved history.")
         if saved.get("queued"):
             need(actual.get("queued") == saved["queued"], "Migration changed the pending queued messages.")
+    return {"schemaDefaultsAdded": sorted(defaults_added)}
 
 
 def rejection_checks(fixture: dict, bundle: Path, version: str) -> dict:
@@ -998,13 +1076,14 @@ def rollback_retry(args: argparse.Namespace, fixture: dict, receipt: dict) -> di
         **body, "expected_server_instance_id": recovered["server_instance_id"]})
     health(fixture, receipt["version"], timeout=1500)
     wait_update_complete(fixture, receipt["version"])
-    compare_snapshot(fixture["snapshot"], state_snapshot(fixture))
+    preservation = compare_snapshot(fixture["snapshot"], state_snapshot(fixture),
+                                    baseline_version=fixture["baselineVersion"], candidate_version=receipt["version"])
     count = verify_installed_runtime(fixture, args.bundle, receipt["version"])
     return {"fault": "pidfd-exact-candidate-worker-health-failure", "candidateProcessesFaulted": len(observed["killed"]),
             "incumbentNeverSignaled": True, "realRollbackPhases": sorted(observed["rollbackPhases"]),
             "baselineAuthenticatedHealthRestored": True, "serverIdentityTokenAndSnapshotPreserved": True,
             "faultDisabledBeforeRetry": True, "candidateActivationCompletedAfterRetry": True,
-            "exactRuntimeFilesCompared": count,
+            "exactRuntimeFilesCompared": count, **preservation,
             "nonemptyProviderHistoryObserved": False}
 
 
@@ -1063,13 +1142,14 @@ def failure_retry(args: argparse.Namespace, fixture: dict, receipt: dict) -> dic
     need(accepted["server_instance_id"] != before["server_instance_id"],
          "Exact update did not replace the baseline runtime process.")
     wait_update_complete(fixture, receipt["version"])
-    compare_snapshot(fixture["snapshot"], state_snapshot(fixture))
+    preservation = compare_snapshot(fixture["snapshot"], state_snapshot(fixture),
+                                    baseline_version=fixture["baselineVersion"], candidate_version=receipt["version"])
     count = verify_installed_runtime(fixture, args.bundle, receipt["version"])
     registered_services(fixture)
     return {"fault": "truncated-exact-legacy-download", "failedDownloadObserved": True,
             "incumbentProcessIdentityAndDataPreserved": True, "sameAcceptedVersionRetried": True,
             "candidateAuthenticatedHealthObserved": True, "nativeActivationCompleted": True,
-            "exactRuntimeFilesCompared": count,
+            "exactRuntimeFilesCompared": count, **preservation,
             "activationInterruptionObserved": False, "rollbackObserved": False,
             "nonemptyProviderHistoryObserved": False}
 
@@ -1262,11 +1342,13 @@ def main() -> None:
             need(args.expect_version in {fixture["baselineVersion"], receipt["version"]}, "Expected version must be the exact baseline or candidate.")
             health(fixture, args.expect_version)
             need(isinstance(fixture.get("snapshot"), dict), "A populated pre-upgrade snapshot is required.")
-            compare_snapshot(fixture["snapshot"], state_snapshot(fixture))
+            preservation = compare_snapshot(fixture["snapshot"], state_snapshot(fixture),
+                baseline_version=fixture["baselineVersion"],
+                candidate_version=receipt["version"] if args.expect_version == receipt["version"] else None)
             registered_services(fixture)
             observations = {"authenticatedExactVersion": True, "serverIdentityAndTokenPreserved": True,
                             "sessionsNativeIdsSettingsAndHistoryPreserved": True,
-                            "snapshotSha256": fixture["baselineStateSha256"]}
+                            "snapshotSha256": fixture["baselineStateSha256"], **preservation}
             if args.expect_version == receipt["version"]:
                 observations["exactRuntimeFilesCompared"] = verify_installed_runtime(fixture, args.bundle, args.expect_version)
             observed_version = args.expect_version

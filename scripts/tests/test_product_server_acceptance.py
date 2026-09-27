@@ -354,6 +354,118 @@ class NativeServerAcceptanceUnitTests(unittest.TestCase):
             with self.subTest(field=field), self.assertRaises(RuntimeError):
                 MOD.compare_snapshot(before, after)
 
+    def legacy_schema_snapshots(self):
+        before = self.snapshot()
+        session = before["sessions"]["sess_fixture"]
+        session["identity"].update(backend="codex", codex_provider=None, opencode_permission_mode=None)
+        session["presentFields"] = [key for key in session["identity"]
+                                    if key not in {"codex_provider", "opencode_permission_mode"}]
+        after = copy.deepcopy(before)
+        current = after["sessions"]["sess_fixture"]
+        current["identity"].update(codex_provider="default", opencode_permission_mode="default")
+        current["presentFields"].extend(["codex_provider", "opencode_permission_mode"])
+        return before, after
+
+    def test_snapshot_records_actual_api_presence_including_explicit_null(self):
+        fixture = {"stateRoot": "/owned/state", "configRoot": "/owned/config",
+                   "serverIdentity": "private-identity", "token": "private-token"}
+        session = {"id": "sess_fixture", "backend": "codex", "codex_provider": None}
+        with patch.object(MOD, "read_regular", return_value=b"private-identity"), \
+                patch.object(MOD, "token_at", return_value="private-token"), \
+                patch.object(MOD, "request", side_effect=[{"sessions": [{"id": "sess_fixture"}]},
+                    {"session": session, "events": []}]):
+            snapshot = MOD.state_snapshot(fixture)["sessions"]["sess_fixture"]
+        self.assertIn("codex_provider", snapshot["presentFields"])
+        self.assertNotIn("opencode_permission_mode", snapshot["presentFields"])
+        self.assertIsNone(snapshot["identity"]["codex_provider"])
+        self.assertIsNone(snapshot["identity"]["opencode_permission_mode"])
+
+    def test_only_proven_absent_legacy_schema_defaults_are_recognized(self):
+        before, after = self.legacy_schema_snapshots()
+        observed = MOD.compare_snapshot(before, after, baseline_version="1.0.3", candidate_version="1.0.7-beta.18")
+        self.assertEqual(observed, {"schemaDefaultsAdded": ["codex_provider", "opencode_permission_mode"]})
+        self.assertIsNone(before["sessions"]["sess_fixture"]["identity"]["codex_provider"])
+        for baseline, target in ((None, None), ("1.0.3", None), ("1.0.4", "1.0.7-beta.18"),
+                                 ("1.0.3", "1.0.3"), ("1.0.3", "1.0.2"), ("1.0.3", "invalid")):
+            with self.subTest(baseline=baseline, target=target), self.assertRaises(RuntimeError):
+                MOD.compare_snapshot(before, after, baseline_version=baseline, candidate_version=target)
+
+    def test_explicit_null_or_configured_values_never_become_schema_defaults(self):
+        for key, values in (("codex_provider", (None, "custom", "default")),
+                            ("opencode_permission_mode", (None, "full_access", "plan", "default"))):
+            for value in values:
+                before, after = self.legacy_schema_snapshots()
+                saved = before["sessions"]["sess_fixture"]
+                saved["presentFields"].append(key)
+                saved["identity"][key] = value
+                if value == "default":
+                    after["sessions"]["sess_fixture"]["identity"][key] = "custom" if key == "codex_provider" else "full_access"
+                with self.subTest(key=key, value=value), self.assertRaises(RuntimeError):
+                    MOD.compare_snapshot(before, after, baseline_version="1.0.3", candidate_version="1.0.7-beta.18")
+        for value in ("full_access", "plan", None):
+            before, after = self.legacy_schema_snapshots()
+            after["sessions"]["sess_fixture"]["identity"]["opencode_permission_mode"] = value
+            with self.subTest(candidate=value):
+                # Null remains equal to the former absent projection; only a
+                # genuinely changed permission must fail, never be defaulted.
+                if value is None:
+                    result = MOD.compare_snapshot(before, after, baseline_version="1.0.3", candidate_version="1.0.7-beta.18")
+                    self.assertEqual(result["schemaDefaultsAdded"], ["codex_provider"])
+                else:
+                    with self.assertRaises(RuntimeError):
+                        MOD.compare_snapshot(before, after, baseline_version="1.0.3", candidate_version="1.0.7-beta.18")
+
+    def test_schema_default_exception_requires_presence_proof_and_non_opencode_backend(self):
+        for alteration in ("missing-presence", "invalid-presence", "explicit-null", "missing-target-presence", "opencode", "changed-backend"):
+            before, after = self.legacy_schema_snapshots()
+            saved, actual = before["sessions"]["sess_fixture"], after["sessions"]["sess_fixture"]
+            if alteration == "missing-presence": saved.pop("presentFields")
+            elif alteration == "invalid-presence": saved["presentFields"] = [{"secret": "private-token"}]
+            elif alteration == "explicit-null": saved["presentFields"].append("codex_provider")
+            elif alteration == "missing-target-presence": actual["presentFields"].remove("codex_provider")
+            elif alteration == "opencode": saved["identity"]["backend"] = actual["identity"]["backend"] = "opencode"
+            else: actual["identity"]["backend"] = "claude"
+            with self.subTest(alteration=alteration), self.assertRaises(RuntimeError):
+                MOD.compare_snapshot(before, after, baseline_version="1.0.3", candidate_version="1.0.7-beta.18")
+
+    def test_schema_default_exception_does_not_weaken_history_queue_or_native_identity(self):
+        for alteration in ("native-id", "cwd", "history", "queue", "token", "identity"):
+            before, after = self.legacy_schema_snapshots()
+            actual = after["sessions"]["sess_fixture"]
+            if alteration == "native-id": actual["identity"]["codex_thread_id"] = "private-replaced-thread"
+            elif alteration == "cwd": actual["identity"]["cwd"] = "/private/replaced/path"
+            elif alteration == "history": actual["eventHashes"] = ["changed"]
+            elif alteration == "queue": actual["queued"] = []
+            elif alteration == "token": after["tokenSha256"] = "different"
+            else: after["serverIdentitySha256"] = "different"
+            with self.subTest(alteration=alteration), self.assertRaises(RuntimeError):
+                MOD.compare_snapshot(before, after, baseline_version="1.0.3", candidate_version="1.0.7-beta.18")
+
+    def test_preservation_diagnostics_emit_only_fixed_field_names_and_bounded_counts(self):
+        before, after = self.legacy_schema_snapshots()
+        actual = after["sessions"]["sess_fixture"]
+        actual["identity"]["cwd"] = "/private/replaced/path"
+        actual["identity"]["private-field-name"] = "private-token"
+        actual["eventHashes"] = ["private-history-hash"]
+        actual["queued"] = [{"text": "private-message"}]
+        diff = MOD.snapshot_differences(before, after)
+        self.assertEqual(diff["changedSessionFields"], ["codex_provider", "cwd", "opencode_permission_mode"])
+        self.assertEqual(diff["changedSessionCount"], 1)
+        self.assertTrue(diff["unrecognizedSessionFieldChanged"])
+        self.assertTrue(diff["historyChanged"])
+        self.assertTrue(diff["queuedMessagesChanged"])
+        public = json.dumps(diff)
+        for secret in ("sess_fixture", "/private", "private-field-name", "private-token", "private-message", "native-fixture"):
+            self.assertNotIn(secret, public)
+        with self.assertRaises(RuntimeError) as raised:
+            MOD.compare_snapshot(before, after, baseline_version="1.0.3", candidate_version="1.0.7-beta.18")
+        self.assertEqual(str(raised.exception), "Migration changed preserved session fields: cwd.")
+        after["sessions"] = {}
+        self.assertEqual(MOD.snapshot_differences(before, after)["missingSessionCount"], 1)
+        oversized = {**before, "sessions": {str(index): {} for index in range(31)}}
+        with self.assertRaises(RuntimeError):
+            MOD.snapshot_differences(oversized, after)
+
     def test_partial_fresh_native_observations_cannot_claim_complete_acceptance(self):
         checks = MOD.checks_for("bootstrap", "fresh", {"nativeServiceInstalled": True})
         self.assertEqual(checks[0]["name"], "fresh-server-install")
@@ -753,6 +865,27 @@ class NativeServerAcceptanceUnitTests(unittest.TestCase):
             self.assertNotIn("private-identity", json.dumps(result))
             self.assertNotIn(str(home), json.dumps(result))
             self.assertEqual(MOD.checks_for("diagnose", "legacy", result)[0]["status"], "blocked")
+
+    def test_diagnose_includes_field_only_preservation_difference_without_changing_state(self):
+        before, after = self.legacy_schema_snapshots()
+        after["sessions"]["sess_fixture"]["identity"]["cwd"] = "/private/changed-path"
+        with tempfile.TemporaryDirectory() as temporary:
+            home = Path(temporary).resolve()
+            fixture = {"home": str(home), "installRoot": str(home / "install"), "stateRoot": str(home / "state"),
+                       "baselineVersion": "1.0.3", "targetVersion": "1.0.7-beta.18", "snapshot": before,
+                       "serverIdentity": "private-identity"}
+            with patch.object(MOD, "registered_services", return_value=[]), \
+                    patch.object(MOD, "request", return_value={"ok": True, "server_identity": "private-identity", "server_version": "1.0.7-beta.18"}), \
+                    patch.object(MOD, "state_snapshot", return_value=after), patch.object(MOD, "command") as command, \
+                    patch.object(MOD, "service") as service:
+                result = MOD.diagnose(fixture)
+            service.assert_not_called()
+            command.assert_not_called()
+            self.assertEqual(result["preservation"]["changedSessionFields"],
+                             ["codex_provider", "cwd", "opencode_permission_mode"])
+            self.assertNotIn("private", json.dumps(result))
+            self.assertNotIn("sess_fixture", json.dumps(result))
+            self.assertEqual(before["sessions"]["sess_fixture"]["identity"]["cwd"], "/owned/custom")
 
     def test_unverified_registration_diagnostics_do_not_query_or_mutate_service(self):
         with tempfile.TemporaryDirectory() as temporary:

@@ -1,5 +1,28 @@
 # Public development log
 
+## 2026-09-27 — Observe the matched native app/server upgrade
+
+- Run `36351034285` passes source CI and fresh native npm installation, then
+  exercises the real app update from `1.0.6` with its `1.0.3` server offline.
+  Squirrel replaces/relaunches the exact signed beta.18 app. Reconnection
+  triggers one automatic server update, shared by two real clients, to the
+  matching beta.18 gateway and execution runtime with the original identity.
+  The update journal completes and maintenance is released; no manual server
+  update or retry click is used. Owned routing/trust cleanup passes.
+- The job then fails its preservation comparison. Signed baseline `1.0.3`
+  omits `codex_provider` and `opencode_permission_mode` from session metadata;
+  the candidate explicitly reports their newly introduced `default` values.
+  The old snapshot conflated absent fields with explicit null. Preserve field
+  presence and narrowly distinguish these known schema additions from changed
+  user settings; retain strict identity, history, permission and path checks.
+  Full preservation and release acceptance remain unproven pending the retry.
+- Limit schema-default recognition to absent baseline `1.0.3` fields gaining
+  exactly `default` on unchanged non-OpenCode sessions, after authenticated
+  exact-candidate health. Explicit null/configured values receive no exception.
+  Emit measured default additions and finite changed-field names, never raw
+  session values. Pass 266 JavaScript tests, 106 Python tests and workflow lint;
+  keep the original signed candidate and supplemental preservation evidence.
+
 ## 2026-09-27 — Narrow the paired upgrade failure without changing packages
 
 - Run `36348933303` again passes source checks, fresh npm installation, signed
