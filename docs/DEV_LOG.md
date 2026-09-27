@@ -1,5 +1,20 @@
 # Public development log
 
+## 2026-09-27 — Keep existing chats usable during sign-in handoff
+
+- Remove message rejection when an existing Codex process must remain alive
+  for subagents, terminals, approvals or another request. Existing chats retain
+  that owner; fresh chats use the replacement process. Keep process cleanup
+  checks so a sign-in handoff does not interrupt running work.
+- Reproduce the previous rejection in regression tests for queued promotion
+  with a live child and for an unrelated pending request. Pass 214 related
+  authentication, process lifecycle, queue recovery and goal admission tests;
+  independent review also passes all 36 login-handoff tests.
+- Availability: server source correction. A disposable native-provider test
+  encountered a separate authentication setup failure before model execution;
+  it is not counted as native end-to-end acceptance. No production restart or
+  deployment is included in this source commit.
+
 ## 2026-09-27 — Avoid duplicate goal follow-ups after history sync
 
 - Match native Codex history against exact accepted-message identities even
