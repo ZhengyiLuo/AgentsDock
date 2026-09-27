@@ -11,8 +11,18 @@
 - Pass 272 focused server tests covering catalog behavior, readiness, SDK
   lifecycle and runner integration; compile changed runtime modules and check
   the diff. Regression tests use synthetic credentials and isolated state.
-- Availability: source only at this checkpoint. Native app/server acceptance
-  and a real token-renewal cycle remain pending; no public release.
+- Exercise the beta candidate's compiled app in an isolated native offscreen
+  Electron window through real IPC/HTTP and the native Claude SDK. Four real
+  requests pass, covering server restart/resume, selecting Haiku, repeated CLI
+  rechecks and app close/reopen with retained native session/context. The
+  picker displays twelve sanitized native options; credentials stay unchanged.
+- A before/after regression observes one disposable metadata-process attempt
+  in the old path and none in the corrected path. Actual app testing also
+  caught and fixed cache invalidation caused by Claude's startup counters.
+- Availability: locally committed source and an isolated patched beta server.
+  No public release or main push. Natural OAuth renewal and coexistence with
+  older servers sharing native login remain unverified; immediate successful
+  requests do not establish that repeated-login incidents are resolved.
 
 ## 2026-09-26 — Reauthorize fresh file selections across chats
 
