@@ -80,12 +80,12 @@ export async function discoverLocalServers(home = homedir(), probe = async (url:
   for (let offset = 0; offset < roots.length; offset += 4) await Promise.all(roots.slice(offset, offset + 4).map(async candidate => {
     try {
       const env = envValues(await readOwned(join(candidate.config, 'env'), home, true))
-      const rawPort = env.AGENTSDOCK_AGENT_PORT ?? env.ZENITHBOT_AGENT_PORT ?? '7850'
+      const rawPort = env.AGENTSDOCK_AGENT_PORT ?? '7850'
       if (!/^\d{1,5}$/.test(rawPort)) return
       const port = Number(rawPort)
       if (port < 1 || port > 65535) return
       if (!await listenerOwned(port)) return
-      const token = env.AGENTSDOCK_AGENT_TOKEN ?? env.ZENITHDOCK_AGENT_TOKEN ?? env.ZENITHBOT_AGENT_TOKEN ?? ''
+      const token = env.AGENTSDOCK_AGENT_TOKEN ?? ''
       if (!/^[\x21-\x7e]{16,4096}$/.test(token)) return
       await ownedPath(candidate.state, home)
       let identity: string
