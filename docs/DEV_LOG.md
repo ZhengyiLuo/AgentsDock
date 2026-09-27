@@ -9,8 +9,13 @@
   transport. Opening a card never renews credentials or runs model inference.
 - Model discovery/default selection is unchanged; catalog/compatibility UX
   improvements remain a separate research recommendation.
-- Focused account, authorization, native transport and card tests cover the
-  change. Local app/server acceptance is recorded after building; no release.
+- Verification: 55 focused desktop checks and 17 isolated server checks pass,
+  along with TypeScript, production compilation and local bundle validation.
+  The installed development app exercises expansion/reopening through IPC and
+  native HTTP into the real administration guard: Claude and Cursor return
+  email/plan only in their CLI cards. Dark/narrow layout is checked. Light-theme
+  and full localization visual acceptance remain pending. No inference, login
+  renewal, credential changes or public release is part of this check.
 
 ## 2026-09-27 — Folded provider settings and managed local discovery
 
