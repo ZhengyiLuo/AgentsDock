@@ -1,5 +1,5 @@
 {
-  "opencode.crossChatUnavailable": "OpenCode cross-chat routes are not supported in this beta. Remove the chat reference before sending.",
+  "opencode.crossChatUnavailable": "This server does not support OpenCode cross-chat tools yet. Update the server or remove the chat reference.",
   "opencode.permissions.waitUntilIdle": "Stop or wait for this turn to finish before changing OpenCode permissions.",
   "opencode.permissions.contextReset": "Changing permissions starts a fresh native OpenCode context. Visible chat history is kept.",
   "timeline.event.providerSessionReset": "Provider context reset",

@@ -3836,7 +3836,7 @@ const QueueShelf = memo(function QueueShelf({
       )
       const chatReferences = validatedReferences.chatReferences
       const teamReferences = validatedReferences.teamReferences
-      if (sourceSession.backend === 'opencode' && chatReferences.length) throw new Error(t('opencode.crossChatUnavailable'))
+      if (sourceSession.backend === 'opencode' && chatReferences.length && !supportedCrossChatTargetBackends(useAppStore.getState().health).includes('opencode')) throw new Error(t('opencode.crossChatUnavailable'))
       if (chatReferences.length !== editingReferences.length) {
         throw new Error('A queued chat reference was edited or is no longer valid. Remove it or select @Chat again.')
       }

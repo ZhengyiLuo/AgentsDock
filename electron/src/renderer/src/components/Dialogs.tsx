@@ -4349,7 +4349,7 @@ export function JobDialog() {
     const leadingWhitespace = prompt.length - prompt.trimStart().length
     const cleanPrompt = prompt.trim()
     const sameServerChatReferences = chatReferences.filter(reference => reference.target_kind !== 'secure_peer')
-    if (selectedBackend === 'opencode' && sameServerChatReferences.length) {
+    if (selectedBackend === 'opencode' && sameServerChatReferences.length && !supportedCrossChatTargetBackends(currentState.health).includes('opencode')) {
       currentState.setError(t('opencode.crossChatUnavailable'))
       setSaving(false)
       return

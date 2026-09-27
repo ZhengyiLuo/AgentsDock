@@ -6065,15 +6065,26 @@ describe('Composer', () => {
   })
 
   it('allows OpenCode source and target mentions only when the server advertises support', async () => {
+    const session: Session = { id: 'chat-1', title: 'Source', backend: 'opencode', model: 'opencode/big-pickle' }
+    const send = vi.fn().mockResolvedValue({ session, queued: false })
+    window.agentsDock.turns = { send } as unknown as AgentsDockAPI['turns']
     useAppStore.setState({
-      sessions: [{ id: 'chat-1', title: 'Source', backend: 'opencode' }, { id: 'chat-2', title: 'OpenCode target', backend: 'opencode' }],
-      health: { ok: true, capabilities: { cross_chat_handoffs_v1: durableComposerCapability({ supported_target_backends: ['codex', 'claude', 'cursor', 'opencode'] }) } }
+      sessions: [session, { id: 'chat-2', title: 'OpenCode target', backend: 'opencode' }],
+      runtimeCatalog: { backends: { opencode: { available: true, native_credentials_present: true, models: [{ value: 'opencode/big-pickle', label: 'Big Pickle' }], efforts: [] } } },
+      health: { ok: true, capabilities: {
+        opencode_backend: { available: true, required: false, message: '', action: null, version: 1 },
+        cross_chat_handoffs_v1: durableComposerCapability({ supported_target_backends: ['codex', 'claude', 'cursor', 'opencode'] }) } }
     })
     const user = userEvent.setup()
     render(<Composer />)
     await user.type(screen.getByPlaceholderText('Message'), 'Ask @Open')
     expect(await screen.findByRole('option', { name: /OpenCode target/ })).toBeInTheDocument()
     expect(screen.queryByText('Server update required')).not.toBeInTheDocument()
+    await user.click(screen.getByRole('option', { name: /OpenCode target/ }))
+    await user.click(screen.getByRole('button', { name: 'Send message' }))
+    await waitFor(() => expect(send).toHaveBeenCalledOnce())
+    expect(send.mock.calls[0][0].chatReferences[0].session_id).toBe('chat-2')
+    await user.type(screen.getByPlaceholderText('Message'), '@Open')
     act(() => useAppStore.setState({ health: { ok: true, capabilities: { cross_chat_handoffs_v1: durableComposerCapability({ supported_target_backends: ['codex', 'claude'] }) } } }))
     expect(screen.queryByRole('option', { name: /OpenCode target/ })).not.toBeInTheDocument()
   })

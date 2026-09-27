@@ -1707,7 +1707,8 @@ export const useAppStore = create<AppState>((set, get) => ({
     )
     const chatReferences = validatedReferences.chatReferences
     const teamReferences = validatedReferences.teamReferences
-    if (chatReferences.length && get().sessions.find(session => session.id === sessionId)?.backend === 'opencode') {
+    if (chatReferences.length && get().sessions.find(session => session.id === sessionId)?.backend === 'opencode'
+      && !supportedCrossChatTargetBackends(get().health).includes('opencode')) {
       set({ error: t('opencode.crossChatUnavailable') }); return false
     }
     if (requestedReferences.length !== chatReferences.length) {

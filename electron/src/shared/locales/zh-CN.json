@@ -1,5 +1,5 @@
 {
-  "opencode.crossChatUnavailable": "此测试版不支持 OpenCode 跨会话路由。请移除会话引用后再发送。",
+  "opencode.crossChatUnavailable": "此服务器尚不支持 OpenCode 跨会话工具。请更新服务器或移除会话引用。",
   "opencode.permissions.waitUntilIdle": "请停止或等待当前轮次完成后再更改 OpenCode 权限。",
   "opencode.permissions.contextReset": "更改权限会重置 OpenCode 原生上下文，界面中的会话记录会保留。",
   "timeline.event.providerSessionReset": "提供商上下文已重置",
