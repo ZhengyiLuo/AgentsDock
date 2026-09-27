@@ -1,5 +1,19 @@
 # Public development log
 
+## 2026-09-27 — Repair previously imported goal follow-up copies
+
+- Extend read-only history repair to identify imported copies of accepted
+  native goal follow-ups using the exact thread, turn, full text and occurrence
+  counts plus verified source checkpoints. Preserve original inputs and genuine
+  repeated messages; do not rewrite the event ledger or provider transcript.
+- Pass 45 native history repair tests, including eight new goal-steer cases;
+  the targeted baseline tests reproduce the missing repair. Validate a copied
+  affected transcript through history projection: all eight reported duplicate
+  bubbles disappear while all eight original inputs remain. File hashes stay
+  unchanged, and an independent review accepts the identity matching.
+- Availability: server source only. Existing clients receive the correction
+  through an authoritative history refresh; no production history is modified.
+
 ## 2026-09-27 — Keep existing chats usable during sign-in handoff
 
 - Remove message rejection when an existing Codex process must remain alive
