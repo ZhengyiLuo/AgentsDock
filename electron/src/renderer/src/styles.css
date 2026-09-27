@@ -1799,10 +1799,11 @@ button.tool-event-toggle:hover { background: #242424; }
 .subagent-state.starting, .subagent-state.running { background: var(--green); box-shadow: 0 0 0 3px color-mix(in srgb, var(--green) 15%, transparent); }
 .subagent-state.failed { background: var(--red); }
 .subagent-state.stopped { background: #d5a340; }
-.output-panel { position: absolute; z-index: 20; inset: 45px 8px 8px; display: grid; grid-template-rows: auto minmax(0, 1fr); overflow: hidden; background: #111; border: 1px solid #414141; border-radius: 7px; box-shadow: 0 12px 35px #000c; }
+.output-panel { position: absolute; z-index: 20; inset: 45px 8px 8px; display: grid; grid-template-columns: minmax(0, 1fr); grid-template-rows: auto minmax(0, 1fr); overflow: hidden; background: #111; border: 1px solid #414141; border-radius: 7px; box-shadow: 0 12px 35px #000c; }
 .collapsible-section:has(.output-panel) { position: relative; min-height: 350px; }
-.output-panel header { height: 32px; display: flex; align-items: center; gap: 3px; padding: 0 6px 0 10px; background: #222; }
+.output-panel header { min-width: 0; height: 32px; display: flex; align-items: center; gap: 3px; padding: 0 6px 0 10px; background: #222; }
 .output-panel header strong { min-width: 0; flex: 1; overflow: hidden; font-size: var(--text-size-ui); text-overflow: ellipsis; white-space: nowrap; }
+.output-panel header button { flex-shrink: 0; }
 .output-panel pre { margin: 0; padding: 10px; overflow: auto; color: #d0d0cc; font: 10px/1.5 "SFMono-Regular", monospace; white-space: pre-wrap; user-select: text; }
 .media-inspector { padding: 0 7px 8px; }
 .inspector-media-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 7px; }
