@@ -2,8 +2,8 @@
   "name": "agentsdock-electron",
   "productName": "AgentsDock",
   "desktopName": "agentsdock.desktop",
-  "version": "1.0.7-beta.15",
-  "releaseBuildNumber": "1217",
+  "version": "1.0.7-beta.17",
+  "releaseBuildNumber": "1222",
   "private": true,
   "license": "Apache-2.0",
   "packageManager": "pnpm@11.9.0",
@@ -26,7 +26,7 @@
   "build": {
     "appId": "com.zhengyiluo.AgentsDock",
     "productName": "AgentsDock",
-    "buildVersion": "1217",
+    "buildVersion": "1222",
     "asar": true,
     "directories": {
       "output": "dist"

@@ -101,16 +101,50 @@ jobs:
           PREPARE_RUN_NUMBER: ${{ github.run_number }}
         run: node ../scripts/product-release.mjs identity >> "$GITHUB_OUTPUT"
 
-  server-tests:
+  prepare-prerequisites:
     if: inputs.operation == 'prepare'
     needs: validate
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    environment: direct-production
+    permissions: {}
+    steps:
+      - name: Require configured preparation credentials without exposing their values
+        shell: bash
+        env:
+          MACOS_CERTIFICATE_P12_BASE64: ${{ secrets.MACOS_CERTIFICATE_P12_BASE64 != '' }}
+          MACOS_CERTIFICATE_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD != '' }}
+          APPLE_API_KEY_P8_BASE64: ${{ secrets.APPLE_API_KEY_P8_BASE64 != '' }}
+          APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID != '' }}
+          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER != '' }}
+          AGENTSDOCK_RELEASE_TOKEN: ${{ secrets.AGENTSDOCK_RELEASE_TOKEN != '' }}
+          AGENTS_SERVER_RELEASE_PRIVATE_KEY_B64: ${{ secrets.AGENTS_SERVER_RELEASE_PRIVATE_KEY_B64 != '' }}
+        run: |
+          missing=0
+          for secret_name in \
+            MACOS_CERTIFICATE_P12_BASE64 MACOS_CERTIFICATE_PASSWORD \
+            APPLE_API_KEY_P8_BASE64 APPLE_API_KEY_ID APPLE_API_ISSUER \
+            AGENTSDOCK_RELEASE_TOKEN AGENTS_SERVER_RELEASE_PRIVATE_KEY_B64; do
+            if [[ "${!secret_name}" != true ]]; then
+              printf '::error::Missing required direct-production secret: %s. Configure it through an authorized secret-management process before preparation.\n' "$secret_name"
+              missing=1
+            fi
+          done
+          if [[ "$missing" != 0 ]]; then
+            exit 1
+          fi
+          echo 'Required secrets are present. Presence does not validate credential contents, token scopes, certificate validity, or npm OIDC configuration.'
+
+  server-tests:
+    if: inputs.operation == 'prepare'
+    needs: [validate, prepare-prerequisites]
     uses: ./.github/workflows/server-source.yml
     with:
       source_sha: ${{ inputs.source_sha }}
 
   prepare-server:
     if: inputs.operation == 'prepare'
-    needs: [validate, server-tests]
+    needs: [validate, prepare-prerequisites, server-tests]
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     environment: direct-production
@@ -189,7 +223,7 @@ jobs:
 
   prepare-desktop:
     if: inputs.operation == 'prepare'
-    needs: [validate, prepare-server]
+    needs: [validate, prepare-prerequisites, prepare-server]
     uses: ./.github/workflows/direct-desktop-release-draft.yml
     with:
       version: ${{ needs.validate.outputs.version }}

@@ -117,6 +117,42 @@ class ProductServerTests(unittest.TestCase):
                 self.assertEqual(npm.extractfile(left).read(), legacy.extractfile(right).read(), name)
             self.assertEqual(npm.getmember("package/server/instances.sh").mode, 0o755)
 
+    def test_current_provider_fixes_ship_in_both_exact_runtime_inventories(self):
+        # Keep these requirements independent of the shared packager allowlist:
+        # parity alone would accept accidentally omitting a module from both
+        # distributions. Use real source bytes, but only disposable repo/key
+        # fixtures; this is packaging proof, not native provider acceptance.
+        provider_files = {
+            "agent_server.py", "agentsdock_chats.py", "cursor_provider_mcp.py",
+            "claude_sdk_client.py", "claude_model_catalog.py",
+        }
+        self.assertTrue(provider_files.issubset(self.runtime),
+                        f"provider release files missing: {provider_files.difference(self.runtime)}")
+        for name in provider_files:
+            shutil.copyfile(ROOT / "server" / name, self.server / name)
+        self.commit()
+        expected = {name: (self.server / name).read_bytes() for name in self.runtime}
+        receipt = self.prepare()
+        self.assertEqual(receipt["sourceSha"], self.sha)
+
+        for relative, prefix in (
+            (f"npm/server-{self.version}.tgz", "package/server/"),
+            (f"legacy/agents-server-{self.version}.tar.gz", f"agents-server-{self.version}/"),
+        ):
+            with self.subTest(archive=relative), tarfile.open(self.output / relative) as archive:
+                members = [member for member in archive
+                           if member.name.startswith(prefix) and not member.isdir()]
+                names = [member.name.removeprefix(prefix) for member in members]
+                self.assertEqual(len(names), len(set(names)), "duplicate runtime archive member")
+                self.assertEqual(set(names), set(expected), "runtime inventory must be exact")
+                self.assertTrue(provider_files.issubset(names))
+                for member, name in zip(members, names):
+                    self.assertTrue(member.isfile(), name)
+                    self.assertEqual(archive.extractfile(member).read(), expected[name], name)
+                    if name in provider_files:
+                        expected_mode = 0o755 if name == "agentsdock_chats.py" else 0o644
+                        self.assertEqual(member.mode, expected_mode, name)
+
     def test_stable_track_and_secret_environment_is_not_inherited(self):
         self.version = "1.2.3"
         (self.server / "VERSION").write_text(self.version + "\n")

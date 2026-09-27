@@ -29,6 +29,28 @@ server independently. A newer compatible server is not downgraded. Phase two
 must prove that journey with the exact prepared packages; this pipeline alone
 does not prove it. See [coordinated updates](COORDINATED_UPDATES.md).
 
+### Unpublished-package replay groundwork
+
+`scripts/product-release-replay.mjs` verifies a prepared product receipt,
+successful preparation-run identity, signed server bundle, complete desktop
+asset inventory and exact checksum manifest before constructing any routes.
+It can replay those same bytes under the clients' existing GitHub and npm URL
+paths. It does not rewrite descriptors, signatures, updater code or packages.
+Discovery responses are explicitly synthetic, not evidence of publication.
+
+The offline `inspect` operation checks the supplied files. The TLS `serve`
+operation is restricted to the exact-source canonical acceptance workflow on
+disposable hosted runners, binds only loopback, requires a private ephemeral
+TLS key, and rejects unknown routes, credentials and mutations. It does not
+install a CA, change DNS, forward requests, install software or emit acceptance
+results. No developer-host trust or routing changes are permitted by this tool.
+
+This is transport infrastructure, **not the missing acceptance workflow**.
+The disposable runner's trust/routing setup and real native installer, service,
+reboot, provider and multi-client scenarios still need implementation and
+execution against the sealed production packages. Unit tests use fixture keys
+and synthetic package contents; their success is not native acceptance.
+
 ## Prepare, accept, then publish
 
 Both operations require explicit release authorization. A source change or
@@ -49,6 +71,11 @@ Store targets.
    as separate three-asset drafts. It then builds/verifies the native targets
    with the identical npm descriptor and signature bundled inside them, and
    stages the canonical and legacy desktop drafts.
+   Before expensive preparation jobs, a protected `direct-production`
+   prerequisite checks that all seven required signing/publishing credentials
+   are present. Only presence booleans reach that check; missing secret names
+   are reported without exposing values. Presence does not establish valid
+   certificates, token permissions, matching signing keys or npm OIDC access.
 3. The successful run uploads `product-release-PREPARE_RUN_ID`. It contains
    `release.json` and the signed server bundle. The receipt binds version,
    channel, canonical source and workflow SHAs, source branch, export SHA,
@@ -168,6 +195,14 @@ operator-reviewed repair before publication. Review current registry state and
 whether an accepted stable package actually exists; do not relabel a beta as
 stable or select an unverified substitute automatically. No repair was performed
 as part of this implementation.
+
+The 2026-09-27 read-only recheck found the same two tags and only the beta.5
+npm version, so there is no published stable npm version to select automatically.
+It also found only the three Apple API secrets in canonical `direct-production`:
+the macOS certificate/password, release token and server signing key still need
+authorized provisioning there. Both release environments have branch policies,
+but no required-reviewer rule was visible. npm trusted-publisher authorization
+remains unverified. None of these settings were changed during candidate work.
 
 Beta publishing explicitly uses `beta`; stable publishing explicitly uses
 `latest`. The verifier snapshots both channel tags, verifies the non-target tag

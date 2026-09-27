@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict'
+import { spawnSync } from 'node:child_process'
 import { readFileSync } from 'node:fs'
 import { test } from 'node:test'
 
@@ -23,7 +24,7 @@ test('only an explicit canonical manual release can prepare or publish', () => {
 test('preparation derives version, runs server tests, signs both formats, and mandates pairing', () => {
   assert.match(job('validate'), /product-release\.mjs identity/)
   assert.match(job('server-tests'), /uses: \.\/\.github\/workflows\/server-source.yml/)
-  assert.match(job('prepare-server'), /needs: \[validate, server-tests\]/)
+  assert.match(job('prepare-server'), /needs: \[validate, prepare-prerequisites, server-tests\]/)
   assert.match(job('prepare-server'), /environment: direct-production/)
   assert.match(job('prepare-server'), /AGENTS_SERVER_RELEASE_PRIVATE_KEY_B64: \$\{\{ secrets\./)
   assert.match(job('prepare-server'), /prepare_product_server.py --source-sha "\$SOURCE_SHA"/)
@@ -34,6 +35,54 @@ test('preparation derives version, runs server tests, signs both formats, and ma
   assert.match(job('prepare-desktop'), /coordinated_signature_base64:/)
   assert.doesNotMatch(job('prepare-server'), /npm publish|legacy-server-release\.mjs publish/)
   assert.doesNotMatch(job('seal-product'), /direct-release-mirror\.mjs publish/)
+})
+
+const preparationSecrets = [
+  'MACOS_CERTIFICATE_P12_BASE64', 'MACOS_CERTIFICATE_PASSWORD',
+  'APPLE_API_KEY_P8_BASE64', 'APPLE_API_KEY_ID', 'APPLE_API_ISSUER',
+  'AGENTSDOCK_RELEASE_TOKEN', 'AGENTS_SERVER_RELEASE_PRIVATE_KEY_B64',
+]
+
+test('protected presence-only prerequisites gate expensive preparation after source validation', () => {
+  const prerequisites = job('prepare-prerequisites')
+  assert.match(prerequisites, /if: inputs\.operation == 'prepare'\n    needs: validate/)
+  assert.match(prerequisites, /environment: direct-production/)
+  assert.match(prerequisites, /permissions: \{\}/)
+  assert.match(prerequisites, /timeout-minutes: 5/)
+  assert.doesNotMatch(prerequisites, /uses:|checkout|\bgh |\bcurl |printenv|set -x|GITHUB_OUTPUT|upload-artifact/)
+  for (const name of preparationSecrets) {
+    assert(prerequisites.includes(`${name}: \${{ secrets.${name} != '' }}`), `${name} must enter the runner as a presence boolean only`)
+  }
+  assert.equal((prerequisites.match(/\$\{\{ secrets\./g) || []).length, preparationSecrets.length)
+  assert.match(job('server-tests'), /needs: \[validate, prepare-prerequisites\]/)
+  assert.match(job('prepare-server'), /needs: \[validate, prepare-prerequisites, server-tests\]/)
+  assert.match(job('prepare-desktop'), /needs: \[validate, prepare-prerequisites, prepare-server\]/)
+  for (const name of ['inspect-product', 'verify-desktop', 'publish-npm', 'publish-product']) {
+    assert.doesNotMatch(job(name), /prepare-prerequisites/)
+  }
+})
+
+test('preparation preflight reports every missing name without printing values or implying validity', () => {
+  const script = job('prepare-prerequisites').split('        run: |\n')[1]
+    .split('\n').map(line => line.replace(/^          /, '')).join('\n')
+  const run = overrides => spawnSync('bash', ['--noprofile', '--norc', '-e', '-o', 'pipefail', '-c', script], {
+    env: { ...Object.fromEntries(preparationSecrets.map(name => [name, 'true'])), ...overrides },
+    encoding: 'utf8',
+  })
+  const present = run({})
+  assert.equal(present.status, 0, present.stderr)
+  assert.match(present.stdout, /Presence does not validate credential contents, token scopes, certificate validity, or npm OIDC configuration/)
+  assert.doesNotMatch(present.stdout + present.stderr, /::error::/)
+  for (const name of preparationSecrets) {
+    const missing = run({ [name]: 'false' })
+    assert.equal(missing.status, 1)
+    assert.match(missing.stdout, new RegExp(`Missing required direct-production secret: ${name}\\.`))
+    assert.equal((missing.stdout.match(/::error::/g) || []).length, 1)
+  }
+  const absent = run(Object.fromEntries(preparationSecrets.map(name => [name, 'sensitive-sentinel'])))
+  assert.equal(absent.status, 1)
+  for (const name of preparationSecrets) assert(absent.stdout.includes(`secret: ${name}.`))
+  assert.doesNotMatch(absent.stdout + absent.stderr, /sensitive-sentinel|Required secrets are present/)
 })
 
 test('publication cannot bypass exact receipt and native acceptance or publish npm before desktop verification', () => {

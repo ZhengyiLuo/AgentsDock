@@ -1,5 +1,30 @@
 # Public development log
 
+## 2026-09-27 — Integrate the next product candidate without publication
+
+- Merge main through `f50595b4`, including passive Claude discovery, run-bound
+  Cursor chat tools, cross-chat file-selection reauthorization and Codex goal
+  steering, into the unmerged product-pipeline candidate branch. Reserve
+  `1.0.7-beta.17` after checking existing local and remote reservations; the
+  source's local-build reservation is `1222`, not a product CI allocation.
+- Add independent provider-inventory regression coverage for both server
+  formats. The 116-file inventories include the current Cursor MCP module and
+  Claude integration source with exact bytes and executable permissions.
+- Fail product preparation early when protected signing/publishing credentials
+  are missing. Check presence only, without passing secret bytes to that check;
+  leave publication ordering, trust roots and channel guards unchanged.
+- Add receipt-bound offline package replay infrastructure for future disposable
+  native tests. Restrict routes and require exact sealed bytes; label synthetic
+  discovery and never manufacture acceptance results. TLS routing, the real
+  acceptance workflow and native service/update scenarios remain unfinished.
+- Pass 4,927 desktop tests (five skipped), type checking, production compilation,
+  204 release/CLI tests and 16 offline packaging-helper tests. The longer targeted
+  server validation is still in progress and is not recorded as passed.
+- Availability: candidate source only. No completed production artifact set,
+  native acceptance, server deployment, npm publication, desktop publication or
+  App Store/TestFlight submission. Canonical signing configuration, release
+  approvals and npm stable-default policy still require operator action.
+
 ## 2026-09-26 — Verify an unmerged product-pipeline test candidate
 
 - Reserve desktop and server `1.0.7-beta.15`, desktop build `1217`, for an
