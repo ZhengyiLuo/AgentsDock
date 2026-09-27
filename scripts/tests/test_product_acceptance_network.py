@@ -48,7 +48,7 @@ class NetworkTests(unittest.TestCase):
             network.guard(link / "replay", self.env)
 
     def test_candidate_scope_has_separate_explicit_ci_guard(self):
-        env = {**self.env, "RUNNER_OS": "macOS", "GITHUB_WORKFLOW_REF":
+        env = {**self.env, "RUNNER_OS": "macOS", "GITHUB_SHA": "a" * 40, "GITHUB_WORKFLOW_REF":
                "ZhengyiLuo/AgentsDock/.github/workflows/ci.yml@refs/heads/release/test"}
         with mock.patch.object(network.sys, "platform", "darwin"):
             self.assertEqual(network.guard(self.work, env, candidate=True)[1]["publicationEligible"], False)

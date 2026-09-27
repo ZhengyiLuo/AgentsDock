@@ -72,16 +72,20 @@ class NativeServerAcceptanceUnitTests(unittest.TestCase):
             with self.assertRaises(RuntimeError):
                 MOD.guard(receipt, work, environment=env, uid=501, system="Darwin")
             for change in ({"kind": "production"}, {"publicationEligible": True}, {"scope": "all-platforms"},
-                           {"sourceRef": "main"}, {"sourceSha": "b" * 40}):
+                           {"sourceRef": "main"}):
                 with self.subTest(change=change), self.assertRaises(RuntimeError):
                     MOD.guard({**receipt, **change}, work, candidate=True, environment=env, uid=501, system="Darwin")
             for change in ({"GITHUB_EVENT_NAME": "workflow_call"}, {"GITHUB_EVENT_NAME": "pull_request"},
                            {"GITHUB_WORKFLOW_REF": "ZhengyiLuo/AgentsDock/.github/workflows/ci.yml@refs/heads/release/other"},
-                           {"RUNNER_ENVIRONMENT": "self-hosted"}, {"RUNNER_OS": "Linux"}):
+                           {"RUNNER_ENVIRONMENT": "self-hosted"}, {"RUNNER_OS": "Linux"}, {"GITHUB_SHA": "not-a-commit"}):
                 with self.subTest(change=change), self.assertRaises(RuntimeError):
                     MOD.guard(receipt, work, candidate=True, environment={**env, **change}, uid=501, system="Darwin")
             with self.assertRaises(RuntimeError):
                 MOD.guard(receipt, work, candidate=True, environment=env, uid=501, system="Linux")
+            # The separate validate-runner proof admits only reviewed harness
+            # descendants. The environment remains truthful about that HEAD.
+            self.assertEqual(MOD.guard(receipt, work, candidate=True,
+                             environment={**env, "GITHUB_SHA": "b" * 40}, uid=501, system="Darwin"), root / "account")
 
     def test_candidate_receipt_inspection_never_invents_production_preparation_metadata(self):
         args = argparse.Namespace(candidate=True, receipt=Path("/fixture/candidate.json"), receipt_sha256="a" * 64,
@@ -95,6 +99,36 @@ class NativeServerAcceptanceUnitTests(unittest.TestCase):
         with patch.object(MOD, "command") as command, self.assertRaises(RuntimeError):
             MOD.inspect_receipt(args)
         command.assert_not_called()
+
+    def test_candidate_checkout_proof_preserves_runtime_source_and_truthful_harness_pin(self):
+        args = argparse.Namespace(receipt=Path("/fixture/candidate.json"), receipt_sha256="c" * 64)
+        receipt = {"sourceSha": "a" * 40, "sourceRef": "release/native-test"}
+        proof = {**receipt, "harnessSourceSha": "b" * 40, "publicationEligible": False}
+        result = subprocess.CompletedProcess([], 0, json.dumps(proof).encode(), b"")
+        with patch.dict(os.environ, {"GITHUB_SHA": "b" * 40}), patch.object(MOD, "command", return_value=result) as command:
+            self.assertEqual(MOD.validate_candidate_checkout(args, receipt), "b" * 40)
+            self.assertEqual(command.call_args.args[0][2:], ["validate-runner", str(args.receipt), args.receipt_sha256])
+        for change in ({"sourceSha": "d" * 40}, {"harnessSourceSha": "a" * 40},
+                       {"sourceRef": "release/other"}, {"publicationEligible": True}):
+            result.stdout = json.dumps({**proof, **change}).encode()
+            with self.subTest(change=change), patch.dict(os.environ, {"GITHUB_SHA": "b" * 40}), \
+                    patch.object(MOD, "command", return_value=result), self.assertRaises(RuntimeError):
+                MOD.validate_candidate_checkout(args, receipt)
+
+    def test_candidate_checkout_rejection_precedes_every_native_operation(self):
+        raw = json.dumps({"sourceSha": "a" * 40, "sourceRef": "release/native-test"}).encode()
+        args = argparse.Namespace(receipt=Path("/fixture/candidate.json"), receipt_sha256=MOD.sha(raw),
+                                  work=Path("/runner/agentsdock-acceptance-test"), candidate=True)
+        with patch.object(MOD, "parser") as parser, patch.object(MOD, "read_regular", return_value=raw), \
+                patch.object(MOD, "guard", return_value=Path("/runner/account")), \
+                patch.object(MOD, "validate_candidate_checkout", side_effect=RuntimeError("unreviewed runtime delta")), \
+                patch.object(MOD, "inspect_receipt") as inspect, patch.object(MOD, "bootstrap") as bootstrap, \
+                patch.object(MOD, "contained") as contained, self.assertRaises(RuntimeError):
+            parser.return_value.parse_args.return_value = args
+            MOD.main()
+        inspect.assert_not_called()
+        bootstrap.assert_not_called()
+        contained.assert_not_called()
 
     def test_fixture_from_previous_run_attempt_is_refused_before_root_or_service_access(self):
         with tempfile.TemporaryDirectory() as temporary:
@@ -139,6 +173,114 @@ class NativeServerAcceptanceUnitTests(unittest.TestCase):
             MOD.command(["installer"])
         self.assertNotIn("token", str(caught.exception))
         self.assertNotIn("conversation", str(caught.exception))
+
+    def test_launchctl_error_labels_only_the_fixed_subcommand_not_arguments_or_output(self):
+        result = subprocess.CompletedProcess([], 5, b"token=private", b"private response")
+        with patch.object(MOD, "bounded_run", return_value=result), self.assertRaises(RuntimeError) as caught:
+            MOD.command(["/bin/launchctl", "bootstrap", "gui/private", "/private/registration.plist"])
+        self.assertIn("launchctl bootstrap, exit 5", str(caught.exception))
+        self.assertNotIn("registration", str(caught.exception))
+        self.assertNotIn("token", str(caught.exception))
+        self.assertNotIn("private response", str(caught.exception))
+
+    def test_launchctl_state_requires_concrete_absence_not_generic_exit_five(self):
+        item = Path("/owned/com.agentsdock.server.plist")
+        for code, text, expected in ((0, b"private service details", "loaded"),
+                                     (113, b"Could not find service", "absent"),
+                                     (5, b"Input/output error with private details", None)):
+            result = subprocess.CompletedProcess([], code, b"", text)
+            with patch.object(MOD, "launchd_registration"), patch.object(MOD, "command", return_value=result):
+                if expected is None:
+                    with self.assertRaises(RuntimeError) as caught:
+                        MOD.launchd_state(item, "a" * 64)
+                    self.assertNotIn("private details", str(caught.exception))
+                else:
+                    self.assertEqual(MOD.launchd_state(item, "a" * 64), expected)
+
+    def test_fresh_launchctl_absence_accepts_known_error_codes_only_with_explicit_absence(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            for code in (3, 5, 113):
+                absent = subprocess.CompletedProcess([], code, b"", b"Could not find service")
+                domain = subprocess.CompletedProcess([], 0, b"private domain data", b"")
+                with self.subTest(code=code), patch.object(MOD.platform, "system", return_value="Darwin"), \
+                        patch.object(MOD, "command", side_effect=[domain, absent, absent]) as command:
+                    MOD.ensure_empty(Path(temporary))
+                self.assertTrue(all(call.args[0][1] == "print" for call in command.call_args_list))
+            unknown = subprocess.CompletedProcess([], 5, b"", b"Input/output error")
+            with patch.object(MOD.platform, "system", return_value="Darwin"), \
+                    patch.object(MOD, "command", side_effect=[domain, unknown]), self.assertRaises(RuntimeError):
+                MOD.ensure_empty(Path(temporary))
+            with patch.object(MOD.platform, "system", return_value="Darwin"), \
+                    patch.object(MOD, "command", side_effect=[domain, domain]), self.assertRaises(RuntimeError):
+                MOD.ensure_empty(Path(temporary))
+
+    def test_launchctl_query_refuses_unrelated_service(self):
+        with patch.object(MOD, "command") as command, self.assertRaises(RuntimeError):
+            MOD.launchd_query_state(f"gui/{os.getuid()}/unrelated.service")
+        command.assert_not_called()
+
+    def test_launchctl_stop_waits_for_real_removal_and_is_idempotent_when_absent(self):
+        item = Path("/owned/com.agentsdock.server.plist")
+        with patch.object(MOD, "launchd_registration"), \
+                patch.object(MOD, "launchd_state", side_effect=["loaded", "loaded", "absent"]) as state, \
+                patch.object(MOD, "command", return_value=subprocess.CompletedProcess([], 0, b"", b"")) as command, \
+                patch.object(MOD.time, "sleep"):
+            MOD.stop_launchd(item, "a" * 64)
+        self.assertEqual(state.call_count, 3)
+        self.assertEqual(command.call_args.args[0][1], "bootout")
+        with patch.object(MOD, "launchd_state", return_value="absent"), patch.object(MOD, "command") as command:
+            MOD.stop_launchd(item, "a" * 64)
+        command.assert_not_called()
+
+    def test_launchctl_bootout_error_fails_if_owned_job_stays_loaded(self):
+        with patch.object(MOD, "launchd_registration"), patch.object(MOD, "launchd_state", return_value="loaded"), \
+                patch.object(MOD, "command", return_value=subprocess.CompletedProcess([], 5, b"", b"private")), \
+                self.assertRaises(RuntimeError) as caught:
+            MOD.stop_launchd(Path("/owned/com.agentsdock.server.plist"), "a" * 64)
+        self.assertIn("launchctl bootout, exit 5", str(caught.exception))
+
+    def test_launchctl_bootstrap_retries_only_known_transient_and_requires_registered_success(self):
+        transient = subprocess.CompletedProcess([], 5, b"", b"Bootstrap failed: 5: Input/output error")
+        success = subprocess.CompletedProcess([], 0, b"", b"")
+        item = Path("/owned/com.agentsdock.server.plist")
+        with patch.object(MOD, "launchd_registration"), patch.object(MOD, "wait_launchd_absent") as absent, \
+                patch.object(MOD, "command", side_effect=[transient, success]) as command, \
+                patch.object(MOD, "launchd_state", return_value="loaded"), patch.object(MOD.time, "sleep"):
+            MOD.start_launchd(item, "a" * 64)
+        self.assertEqual(command.call_count, 2)
+        self.assertEqual(absent.call_count, 2)
+        with patch.object(MOD, "launchd_registration"), patch.object(MOD, "wait_launchd_absent"), \
+                patch.object(MOD, "command", return_value=success), patch.object(MOD, "launchd_state", return_value="absent"), \
+                self.assertRaises(RuntimeError):
+            MOD.start_launchd(item, "a" * 64)
+
+    def test_launchctl_bootstrap_unknown_or_persistent_failure_never_passes(self):
+        for text, expected_attempts in ((b"Permission denied", 1), (b"Bootstrap failed: 5: Input/output error", 3)):
+            result = subprocess.CompletedProcess([], 5, b"", text)
+            with self.subTest(text=text), patch.object(MOD, "launchd_registration"), \
+                    patch.object(MOD, "wait_launchd_absent"), patch.object(MOD.time, "sleep"), \
+                    patch.object(MOD, "command", return_value=result) as command, self.assertRaises(RuntimeError):
+                MOD.start_launchd(Path("/owned/com.agentsdock.server.plist"), "a" * 64)
+            self.assertEqual(command.call_count, expected_attempts)
+
+    def test_launchctl_removal_wait_has_a_bounded_deadline(self):
+        clock = [0.0]
+        with patch.object(MOD.time, "monotonic", side_effect=lambda: clock[0]), \
+                patch.object(MOD.time, "sleep", side_effect=lambda seconds: clock.__setitem__(0, clock[0] + seconds)), \
+                patch.object(MOD, "launchd_state", return_value="loaded") as state, self.assertRaises(RuntimeError):
+            MOD.wait_launchd_absent(Path("/owned/com.agentsdock.server.plist"), "a" * 64, timeout=0.25)
+        self.assertEqual(state.call_count, 3)
+
+    def test_launchctl_registration_binding_rejects_changed_file_before_any_command(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            item = Path(temporary) / "com.agentsdock.server.plist"
+            item.write_bytes(b"owned-registration")
+            expected = MOD.sha(item.read_bytes())
+            MOD.launchd_registration(item, expected)
+            item.write_bytes(b"different-registration")
+            with patch.object(MOD, "command") as command, self.assertRaises(RuntimeError):
+                MOD.launchd_state(item, expected)
+            command.assert_not_called()
 
     def test_native_command_output_is_bounded_without_blocking_either_pipe(self):
         result = MOD.bounded_run([sys.executable, "-c", "import os; os.write(1,b'x'*2000000); os.write(2,b'y'*2000000)"], timeout=10, env=None)

@@ -144,6 +144,14 @@ test('import rejects wrong export tree before inspecting downloaded artifacts', 
   await assert.rejects(f.inspect(), /checkout differs/)
 })
 
+test('candidate import opt-in cannot bypass the disposable canonical runner guard', async t => {
+  const f = fixture(t)
+  await assert.rejects(f.inspect({ candidateRehearsal: 'false' }), /explicit true opt-in/)
+  await assert.rejects(f.inspect({ candidateRehearsal: 'true' }), /Candidate replay requires/)
+  f.setCheckout('e'.repeat(40))
+  await assert.rejects(f.inspect(), /checkout differs/)
+})
+
 test('import requires original ZIP identity and exact extracted member bytes', async t => {
   const f = fixture(t)
   await assert.rejects(f.inspect({ archive: '' }), /original Actions ZIP/)

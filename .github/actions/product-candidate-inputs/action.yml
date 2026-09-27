@@ -41,7 +41,6 @@ runs:
         import {readFileSync} from 'node:fs'
         const draft = JSON.parse(readFileSync(process.argv[2]))
         assert(draft.tagName === process.env.CANDIDATE_TAG && draft.isDraft === true && draft.isPrerelease === true)
-        assert(draft.targetCommitish === process.env.GITHUB_SHA, 'Draft must target the exact reviewed workflow/source commit')
         assert.deepEqual(draft.assets.map(asset => asset.name).sort(), ['candidate-bundle.zip', 'candidate.json'])
         NODE
         gh release download "$CANDIDATE_TAG" --repo "$GITHUB_REPOSITORY" \
@@ -50,18 +49,23 @@ runs:
           "$RUNNER_TEMP/candidate-inputs/candidate-bundle.zip" "$BUNDLE_SHA256" "$RUNNER_TEMP/candidate-inputs/payload"
         node scripts/product-candidate-receipt.mjs inspect "$RUNNER_TEMP/candidate-inputs/candidate.json" "$RECEIPT_SHA256" \
           "$RUNNER_TEMP/candidate-inputs/payload/server" "$RUNNER_TEMP/candidate-inputs/payload/desktop" > /dev/null
-        node --input-type=module - "$RUNNER_TEMP/candidate-inputs/candidate.json" <<'NODE' >> "$GITHUB_OUTPUT"
+        node scripts/product-candidate-receipt.mjs validate-runner "$RUNNER_TEMP/candidate-inputs/candidate.json" "$RECEIPT_SHA256" \
+          > "$RUNNER_TEMP/candidate-inputs/harness-identity.json"
+        node --input-type=module - "$RUNNER_TEMP/candidate-inputs/candidate.json" "$RUNNER_TEMP/candidate-inputs/draft.json" <<'NODE' >> "$GITHUB_OUTPUT"
         import assert from 'node:assert/strict'
         import {readFileSync} from 'node:fs'
         const receipt = JSON.parse(readFileSync(process.argv[2]))
-        assert(receipt.sourceSha === process.env.GITHUB_SHA && receipt.sourceRef === process.env.GITHUB_REF_NAME)
+        const draft = JSON.parse(readFileSync(process.argv[3]))
+        assert(draft.targetCommitish === receipt.sourceSha, 'Draft target must remain the immutable packaged source commit')
+        assert(receipt.sourceRef === process.env.GITHUB_REF_NAME)
         assert(process.env.CANDIDATE_TAG === `candidate-replay-v${receipt.version}`)
         console.log(`version=${receipt.version}`)
         NODE
         PRODUCT_VERSION="$(node -p 'JSON.parse(require("fs").readFileSync(process.argv[1])).version' "$RUNNER_TEMP/candidate-inputs/candidate.json")"
+        ARTIFACT_SOURCE_SHA="$(node -p 'JSON.parse(require("fs").readFileSync(process.argv[1])).sourceSha' "$RUNNER_TEMP/candidate-inputs/candidate.json")"
         SIGNER_RUN="$(node -p 'JSON.parse(require("fs").readFileSync(process.argv[1])).signerRunId' "$RUNNER_TEMP/candidate-inputs/candidate.json")"
         node scripts/import_product_server.mjs inspect --assets "$RUNNER_TEMP/candidate-inputs/payload/server" \
-          --archive "$RUNNER_TEMP/candidate-inputs/payload/signer-artifact.zip" --source-sha "$GITHUB_SHA" \
+          --archive "$RUNNER_TEMP/candidate-inputs/payload/signer-artifact.zip" --source-sha "$ARTIFACT_SOURCE_SHA" --candidate-rehearsal true \
           --source-ref "$GITHUB_REF_NAME" --version "$PRODUCT_VERSION" --signer-run-id "$SIGNER_RUN" \
           --report "$RUNNER_TEMP/candidate-inputs/server-import-live.json" > /dev/null
         cmp "$RUNNER_TEMP/candidate-inputs/server-import-live.json" "$RUNNER_TEMP/candidate-inputs/payload/server-import.json"

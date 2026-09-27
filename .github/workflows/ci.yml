@@ -152,6 +152,7 @@ jobs:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
         with:
           persist-credentials: false
+          fetch-depth: 0 # Prove any test-harness retry descends from the immutable packaged source.
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
         with:
           node-version: 24
@@ -183,6 +184,8 @@ jobs:
         run: |
           pnpm --dir electron install --frozen-lockfile --ignore-scripts
           export AGENTSDOCK_EXPECTED_BUILD_NUMBER="$(node -p 'JSON.parse(require("fs").readFileSync(process.argv[1])).buildNumber' "$RUNNER_TEMP/candidate-inputs/candidate.json")"
+          export AGENTSDOCK_COORDINATED_MANIFEST="$RUNNER_TEMP/candidate-inputs/payload/server/npm/agents-server-npm-manifest.json"
+          export AGENTSDOCK_COORDINATED_SIGNATURE="$RUNNER_TEMP/candidate-inputs/payload/server/npm/agents-server-npm-manifest.sig"
           scripts/verify_electron_release.sh "$RUNNER_TEMP/candidate-inputs/payload/desktop" "$PRODUCT_VERSION" beta
       - name: Install the exact npm candidate or signed legacy baseline
         env:

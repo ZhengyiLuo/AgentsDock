@@ -9,6 +9,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url'
 import { GitHubClient } from './direct-release-mirror.mjs'
 import { verifyExportSource } from './legacy-server-release.mjs'
 import { releaseIdentity, verifyServerBundleIdentity } from './product-release.mjs'
+import { assertCandidateCheckout } from './product-candidate-receipt.mjs'
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 const SIGNER = 'ZhengyiLuo/AgentsServer'
@@ -33,6 +34,8 @@ function identity(options) {
   // production receipt or treating a test-only candidate as publication-ready.
   const value = releaseIdentity(options.version, options.sourceSha, options.sourceRef, options.sourceSha)
   need(positive(options.signerRunId), 'An explicit positive signer run ID is required.')
+  need(options.candidateRehearsal === undefined || options.candidateRehearsal === 'true',
+    'Candidate rehearsal must be an explicit true opt-in.')
   return value
 }
 
@@ -138,7 +141,16 @@ async function verifyImportContext(options, { client, execute, repositoryDirecto
     checkout = execute('git', ['-C', repositoryDirectory, 'rev-parse', 'HEAD'],
       { encoding: 'utf8', timeout: 30000, maxBuffer: 16384, stdio: ['ignore', 'pipe', 'pipe'] }).trim()
   } catch { throw new Error('Signer import requires the exact pinned canonical checkout.') }
-  need(checkout === options.sourceSha, 'Signer import checkout differs from the exact canonical source.')
+  if (options.candidateRehearsal === 'true') {
+    // Only the separate non-publishing macOS rehearsal may evolve its test
+    // harness. The shared guard rejects any changed app/server/build payload,
+    // proves source ancestry and binds the actual clean CI checkout separately.
+    // The original signer artifact and every signed source/hash remain fixed.
+    assertCandidateCheckout({ sourceSha: options.sourceSha, sourceRef: options.sourceRef },
+      { execute, repositoryDirectory })
+  } else {
+    need(checkout === options.sourceSha, 'Signer import checkout differs from the exact canonical source.')
+  }
   // This proves the signer workflow's entire checkout is the exact reviewed
   // canonical server subtree, including the established committed public key.
   verifyExportSource({ ...options, track: release.track, exportSha }, { client, execute, repositoryDirectory })
@@ -199,8 +211,8 @@ function emit(value) {
 if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {
   try {
     const [operation, ...args] = process.argv.slice(2), options = {}
-    need(['inspect', 'extract'].includes(operation) && args.length % 2 === 0, 'Usage: import_product_server.mjs inspect|extract --assets DIR --archive ZIP --source-sha SHA --source-ref REF --version VERSION --signer-run-id ID [--report FILE]')
-    const allowed = new Set(['assets', 'archive', 'source-sha', 'source-ref', 'version', 'signer-run-id', 'report'])
+    need(['inspect', 'extract'].includes(operation) && args.length % 2 === 0, 'Usage: import_product_server.mjs inspect|extract --assets DIR --archive ZIP --source-sha SHA --source-ref REF --version VERSION --signer-run-id ID [--report FILE] [--candidate-rehearsal true]')
+    const allowed = new Set(['assets', 'archive', 'source-sha', 'source-ref', 'version', 'signer-run-id', 'report', 'candidate-rehearsal'])
     for (let i = 0; i < args.length; i += 2) {
       const name = args[i].slice(2), key = name.replace(/-([a-z])/g, (_, letter) => letter.toUpperCase())
       need(args[i].startsWith('--') && allowed.has(name) && !(key in options) && args[i + 1], 'Invalid signer import option.')

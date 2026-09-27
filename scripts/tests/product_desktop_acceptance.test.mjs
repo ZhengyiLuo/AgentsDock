@@ -44,6 +44,14 @@ test('candidate parser deliberately permits no preparation run, never a fake pro
   assert.throws(() => parseDesktopAcceptanceArguments([...args, '--scope', 'release']), /preparation-run|scope/)
 })
 
+test('candidate fixture binds separately reviewed harness commit without replacing artifact source', () => {
+  const harness = 'd'.repeat(40), env = { ...environment, GITHUB_SHA: harness }
+  const candidate = { ...identity, kind: 'candidate' }
+  assert.doesNotThrow(() => validateDesktopFixture({ ...fixture(), candidate: true, harnessSourceSha: harness }, candidate, env))
+  assert.throws(() => validateDesktopFixture({ ...fixture(), candidate: true, harnessSourceSha: identity.sourceSha }, candidate, env), /harness checkout/)
+  assert.throws(() => validateDesktopFixture({ ...fixture(), harnessSourceSha: harness }, candidate, env), /harness checkout/)
+})
+
 test('requires exact canonical disposable workflow context before native side effects', () => {
   assert.doesNotThrow(() => assertDesktopRunner(environment, 'darwin'))
   for (const patch of [{ GITHUB_ACTIONS: '' }, { RUNNER_ENVIRONMENT: 'self-hosted' }, { GITHUB_REPOSITORY: 'other/repo' },

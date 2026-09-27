@@ -84,7 +84,8 @@ def guard(work, env=None, candidate=False):
          and path != root, "Replay work directory must be a non-symlink child of RUNNER_TEMP")
     if candidate:
         need(sys.platform == "darwin" and env["RUNNER_OS"] == "macOS", "Candidate replay is scoped to disposable macOS")
-    return path, {**({"scope": "candidate", "publicationEligible": False} if candidate else {}),
+        need(re.fullmatch(r"[a-f0-9]{40}", env.get("GITHUB_SHA", "")), "Candidate harness commit is missing")
+    return path, {**({"scope": "candidate", "publicationEligible": False, "harnessSourceSha": env["GITHUB_SHA"]} if candidate else {}),
                   "runId": env["GITHUB_RUN_ID"], "runAttempt": env["GITHUB_RUN_ATTEMPT"],
                   "platform": env["RUNNER_OS"]}
 
@@ -137,8 +138,23 @@ def setup(receipt, receipt_hash, work, candidate=False):
              "Candidate network setup requires an explicitly non-publishing scoped receipt")
     source = parsed_receipt.get("sourceSha", "")
     need(re.fullmatch(r"[a-f0-9]{40}", source), "Receipt source pin is missing")
-    need(command("git", "rev-parse", "HEAD").decode().strip() == source,
-         "Checkout differs from the exact candidate source")
+    if candidate:
+        # Preserve real runner metadata for the shared git/provenance guard,
+        # but do not inherit publishing/provider credentials into this child.
+        env = {key: value for key, value in os.environ.items() if key in {
+            "PATH", "HOME", "LANG", "LC_ALL", "TMPDIR", "GITHUB_ACTIONS", "GITHUB_REPOSITORY",
+            "GITHUB_EVENT_NAME", "GITHUB_WORKFLOW_REF", "GITHUB_SHA", "GITHUB_RUN_ID", "GITHUB_RUN_ATTEMPT",
+            "RUNNER_ENVIRONMENT", "RUNNER_OS", "RUNNER_TEMP"}}
+        validated = subprocess.run(["node", str(Path(__file__).with_name("product-candidate-receipt.mjs")),
+            "validate-runner", str(receipt), receipt_hash], capture_output=True, env=env, timeout=60)
+        need(validated.returncode == 0 and len(validated.stdout) <= 32768,
+             "Candidate harness ancestry, checkout or allowed-path verification failed")
+        harness = json.loads(validated.stdout)
+        need(harness.get("sourceSha") == source and harness.get("harnessSourceSha") == identity["harnessSourceSha"]
+             and harness.get("publicationEligible") is False, "Candidate harness identity differs")
+    else:
+        need(command("git", "rev-parse", "HEAD").decode().strip() == source,
+             "Checkout differs from the exact candidate source")
     need(not work.exists(), "Replay work directory already exists")
     need(not Path("/usr/local/share/ca-certificates/agentsdock-product-replay.crt").exists(),
          "Replay trust anchor already exists")

@@ -1,5 +1,19 @@
 # Public development log
 
+## 2026-09-27 — Retry native rehearsal without rebuilding accepted packages
+
+- The first beta.18 native rehearsal verified the frozen inputs but stopped
+  before the update journey: its desktop verifier lacked the explicit expected
+  coordinated descriptor paths, and the fresh service harness reported a
+  launchctl failure. Do not record these observations as an updater pass.
+- Retain the exact signed beta.18 app/npm/legacy packages and original receipt.
+  Bind a separately recorded CI harness commit through clean-checkout, ancestry
+  and strict changed-path checks. Reject runtime/build/signing changes; leave
+  the production publication/acceptance contracts unchanged.
+- Pass 251 release/CLI JavaScript tests, 84 Python helper tests, workflow
+  linting and diff checks before retrying. These are harness checks, not native
+  acceptance or permission to publish.
+
 ## 2026-09-27 — Verify the unpublished beta.18 macOS/app-server candidate
 
 - Build `1.0.7-beta.18`, native build `1223`, from pinned source
@@ -13,7 +27,8 @@
   The app embeds the exact signed matching npm descriptor, not the server runtime.
 - Seal a non-publishing macOS candidate receipt with SHA-256
   `18b3f793b3d54a017f27b385dd4422e56f78d7cf07ea599d606a587ff17faffd`.
-  Keep its source branch pinned; later documentation does not rebuild packages.
+  Keep its artifact source commit pinned; later harness/documentation changes
+  do not rebuild packages.
 - Source CI passes Electron/release tooling/mobile checks and all eight server
   shards. Provide a separate-account macOS test handoff; real provider chats,
   logout/reboot and the native one-click replay are not established by this

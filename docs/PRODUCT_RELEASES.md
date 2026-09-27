@@ -90,6 +90,16 @@ reviewed release branch, before merging this PR. PR/push events do not invoke
 native installation or trust-routing tests. No developer-host trust/routing
 changes are supported.
 
+Rehearsal-only fixes may reuse those exact accepted bytes without rebuilding.
+Record the artifact source and CI harness source separately. A newer harness
+must be a clean, reviewed descendant on the same release branch and may change
+only the explicit candidate-helper/test/documentation/workflow allowlist. Any
+app, server, signing-key or package-build input change is rejected. The original
+draft target, receipt, signatures and artifact hashes stay fixed; GitHub's actual
+workflow SHA is never replaced with the artifact SHA. This exception is scoped
+to the non-publishing candidate path; production acceptance still requires its
+original exact-source preparation contract.
+
 This scoped receipt and its rehearsal reports cannot satisfy the full product
 publication gate. They establish only the cases actually observed on macOS;
 they do not imply complete cross-platform acceptance or authorize publication.

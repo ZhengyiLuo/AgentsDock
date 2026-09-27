@@ -14,7 +14,7 @@ import { basename, dirname, isAbsolute, join, relative, resolve } from 'node:pat
 import { homedir } from 'node:os'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { assertReplayRunner, createProductReplay, createCandidateReplay } from './product-release-replay.mjs'
-import { assertCandidateRunner } from './product-candidate-receipt.mjs'
+import { assertCandidateCheckout, assertCandidateRunner } from './product-candidate-receipt.mjs'
 import { appVersion, assertMigrationTrack, connect, freePort, hashFile, MIGRATION_INSTALL_BUTTON_NAMES,
   openMigrationUpdateSettings, processesFor, run, stopOwned, until, verifyApp } from './verify_electron_migration.mjs'
 
@@ -111,6 +111,10 @@ export function validateDesktopFixture(fixture, identity, env = process.env) {
     'Server fixture belongs to another prepared source or receipt')
   assert(String(fixture.runId) === env.GITHUB_RUN_ID, 'Server fixture belongs to another acceptance run')
   assert(String(fixture.runAttempt) === env.GITHUB_RUN_ATTEMPT, 'Server fixture belongs to another acceptance run attempt')
+  if (identity.kind === 'candidate') {
+    assert(fixture.candidate === true && fixture.harnessSourceSha === env.GITHUB_SHA,
+      'Server fixture belongs to another candidate harness checkout')
+  }
   assert(fixture.targetVersion === identity.version && VERSION.test(fixture.baselineVersion)
     && fixture.baselineVersion !== fixture.targetVersion, 'An actual older server fixture is required')
   assertOlderVersion(fixture.baselineVersion, fixture.targetVersion)
@@ -265,7 +269,8 @@ export async function main(argv = process.argv.slice(2)) {
   const replay = await (options.scope === 'candidate' ? createCandidateReplay : createProductReplay)({ receiptPath: options.receipt, acceptedReceiptSha256: options['receipt-sha256'],
     preparationRunPath: options['preparation-run'], serverDirectory: options['server-directory'], desktopDirectory: options['desktop-directory'],
     baselineDesktopDirectory: options['baseline-directory'], baselineVersion: options['baseline-version'] })
-  assert.equal(replay.identity.sourceSha, process.env.GITHUB_SHA, 'Native acceptance must run at the exact prepared source')
+  const harness = options.scope === 'candidate' ? assertCandidateCheckout(replay.identity) : null
+  if (!harness) assert.equal(replay.identity.sourceSha, process.env.GITHUB_SHA, 'Native acceptance must run at the exact prepared source')
   assertOlderVersion(options['baseline-version'], replay.identity.version)
   const fixtureStat = await lstat(options['server-fixture'])
   assert((fixtureStat.mode & 0o077) === 0, 'Server fixture token file must be private')
@@ -448,7 +453,8 @@ export async function main(argv = process.argv.slice(2)) {
     const coverage = migrationCoverage(fixture.snapshot)
     logs.assertHealthy()
     const evidence = { schema: 1,
-      ...(options.scope === 'candidate' ? { kind: 'scoped-macos-candidate-observations', publicationEligible: false, releaseAcceptance: false } : {}),
+      ...(harness ? { kind: 'scoped-macos-candidate-observations', publicationEligible: false, releaseAcceptance: false,
+        harnessSourceSha: harness.harnessSourceSha } : {}),
       releaseReceiptSha256: replay.identity.releaseReceiptSha256, sourceSha: replay.identity.sourceSha,
       version: replay.identity.version, track: replay.identity.track, runId: process.env.GITHUB_RUN_ID,
       runAttempt: process.env.GITHUB_RUN_ATTEMPT, platform: 'darwin', native: true,
@@ -482,6 +488,8 @@ export async function main(argv = process.argv.slice(2)) {
   } catch (error) {
     if (client) await client.screenshot(join(options.output, 'failure.png')).catch(() => {})
     await writeFile(join(options.output, 'failure-observations.json'), JSON.stringify({ schema: 1, status: 'failed',
+      ...(harness ? { kind: 'scoped-macos-candidate-observations', publicationEligible: false, releaseAcceptance: false,
+        harnessSourceSha: harness.harnessSourceSha } : {}),
       releaseReceiptSha256: replay.identity.releaseReceiptSha256, events }), { flag: 'wx', mode: 0o600 }).catch(() => {})
     throw error
   } finally {

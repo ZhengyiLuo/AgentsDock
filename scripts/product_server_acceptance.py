@@ -124,8 +124,11 @@ def command(args: list[str], *, timeout: int = 60, env: dict | None = None,
     # Installer output and launchctl output can include tokens. Never echo them,
     # including on failure. Public evidence contains only measured properties.
     result = bounded_run(args, timeout=timeout, env=env)
+    label = Path(args[0]).name
+    if label == "launchctl" and len(args) > 1 and args[1] in {"print", "bootout", "bootstrap"}:
+        label += " " + args[1]
     need(result.returncode in allowed,
-         f"Native command failed ({Path(args[0]).name}, exit {result.returncode}); private output was withheld.")
+         f"Native command failed ({label}, exit {result.returncode}); private output was withheld.")
     return result
 
 
@@ -178,7 +181,8 @@ def guard(receipt: dict, work: Path, *, environment: dict | None = None,
     need(env.get("GITHUB_ACTIONS") == "true" and env.get("RUNNER_ENVIRONMENT") == "github-hosted"
          and env.get("GITHUB_REPOSITORY") == "ZhengyiLuo/AgentsDock"
          and env.get("GITHUB_EVENT_NAME") in {"workflow_dispatch", "workflow_call"}
-         and env.get("GITHUB_SHA") == receipt.get("sourceSha")
+         and (re.fullmatch(r"[a-f0-9]{40}", str(env.get("GITHUB_SHA", ""))) is not None if candidate
+              else env.get("GITHUB_SHA") == receipt.get("sourceSha"))
          and re.fullmatch(r"[1-9]\d*", env.get("GITHUB_RUN_ID", "")) is not None
          and re.fullmatch(r"[1-9]\d*", env.get("GITHUB_RUN_ATTEMPT", "")) is not None,
          "Native acceptance is restricted to the exact-source canonical workflow on a disposable hosted runner.")
@@ -224,8 +228,7 @@ def ensure_empty(home: Path) -> None:
     if platform.system() == "Darwin":
         command(["/bin/launchctl", "print", f"gui/{os.getuid()}"])
         for label in ("com.agentsdock.server", "com.agentsdock.gateway"):
-            result = command(["/bin/launchctl", "print", f"gui/{os.getuid()}/{label}"], allowed=(0, 113))
-            need(result.returncode != 0 and b"Could not find service" in result.stderr,
+            need(launchd_query_state(f"gui/{os.getuid()}/{label}") == "absent",
                  "An existing or unverifiable native service prevents fresh acceptance.")
     else:
         command(["systemctl", "--user", "show-environment"])
@@ -290,11 +293,14 @@ def registered_services(fixture: dict) -> list[Path]:
     files = [item for item in service_files(home) if item.exists()]
     need(files and files[0] == service_files(home)[0], "Installed worker service is missing.")
     for item in files:
+        info = item.lstat()
+        need(info.st_uid == os.getuid() and not info.st_mode & 0o022,
+             "Native service registration is not safely owned by the disposable account.")
         raw = read_regular(item)
         if platform.system() == "Darwin":
             value = plistlib.loads(raw)
             args = value.get("ProgramArguments")
-            need(isinstance(args, list) and args and str(args[0]).startswith(str(root) + "/"),
+            need(value.get("Label") == item.stem and isinstance(args, list) and args and str(args[0]).startswith(str(root) + "/"),
                  "Installed service does not run from its permanent owned runtime.")
         else:
             entries = [line[10:] for line in raw.decode().splitlines() if line.startswith("ExecStart=")]
@@ -314,18 +320,87 @@ def registered_services(fixture: dict) -> list[Path]:
     return files
 
 
+def launchd_registration(item: Path, expected_sha: str) -> None:
+    info = item.lstat()
+    need(info.st_uid == os.getuid() and not info.st_mode & 0o022 and sha(read_regular(item)) == expected_sha,
+         "Owned launchd registration changed during the native service operation.")
+
+
+def launchd_query_state(target: str, *, timeout: float = 10) -> str:
+    need(target in {f"gui/{os.getuid()}/com.agentsdock.server", f"gui/{os.getuid()}/com.agentsdock.gateway"},
+         "Launchd observation must target an exact disposable AgentsDock service.")
+    result = command(["/bin/launchctl", "print", target],
+                     timeout=timeout, allowed=(0, 3, 5, 113))
+    if result.returncode == 0:
+        return "loaded"
+    output = result.stdout + result.stderr
+    need(any(label in output.lower() for label in (b"could not find service", b"service not found", b"no such process")),
+         f"Native command failed (launchctl print, exit {result.returncode}); service absence was not proven and private output was withheld.")
+    return "absent"
+
+
+def launchd_state(item: Path, expected_sha: str, *, timeout: float = 10) -> str:
+    launchd_registration(item, expected_sha)
+    return launchd_query_state(f"gui/{os.getuid()}/{item.stem}", timeout=timeout)
+
+
+def wait_launchd_absent(item: Path, expected_sha: str, *, timeout: float = 185) -> None:
+    deadline = time.monotonic() + timeout
+    while True:
+        remaining = deadline - time.monotonic()
+        need(remaining > 0, "Native launchctl removal timed out; no bootstrap was attempted.")
+        if launchd_state(item, expected_sha, timeout=min(10, remaining)) == "absent":
+            return
+        time.sleep(min(0.1, remaining))
+
+
+def stop_launchd(item: Path, expected_sha: str) -> None:
+    if launchd_state(item, expected_sha) == "absent":
+        return
+    launchd_registration(item, expected_sha)
+    result = command(["/bin/launchctl", "bootout", f"gui/{os.getuid()}/{item.stem}"],
+                     timeout=240, allowed=(0, 5, 113))
+    if result.returncode != 0:
+        need(launchd_state(item, expected_sha) == "absent",
+             f"Native command failed (launchctl bootout, exit {result.returncode}); owned service remained loaded and private output was withheld.")
+    # bootout only acknowledges teardown; it does not prove removal completed.
+    wait_launchd_absent(item, expected_sha)
+
+
+def start_launchd(item: Path, expected_sha: str) -> None:
+    wait_launchd_absent(item, expected_sha)
+    for attempt in range(3):
+        launchd_registration(item, expected_sha)
+        result = command(["/bin/launchctl", "bootstrap", f"gui/{os.getuid()}", str(item)],
+                         timeout=60, allowed=(0, 5, 37))
+        if result.returncode == 0:
+            need(launchd_state(item, expected_sha) == "loaded",
+                 "Native launchctl bootstrap succeeded but did not register the owned service.")
+            return
+        output = result.stdout + result.stderr
+        transient = (b"Operation already in progress" in output or
+                     (result.returncode == 5 and b"Bootstrap failed: 5: Input/output error" in output))
+        need(transient and attempt < 2,
+             f"Native command failed (launchctl bootstrap, exit {result.returncode}); retry unavailable or exhausted and private output was withheld.")
+        # Retry only the exact registered fixture after proving it absent again.
+        # Never turn a loaded job or an unknown status-5 error into success.
+        wait_launchd_absent(item, expected_sha)
+        time.sleep(0.1)
+
+
 def service(fixture: dict, action: str) -> None:
     files = registered_services(fixture)
+    bindings = {item: sha(read_regular(item)) for item in files}
     # Offline is a public-gateway outage for split services, preserving work.
     selected = files if action == "restart" else files[-1:]
     for item in reversed(selected) if action in {"stop", "restart"} else []:
         if platform.system() == "Darwin":
-            command(["/bin/launchctl", "bootout", f"gui/{os.getuid()}/{item.stem}"], timeout=240)
+            stop_launchd(item, bindings[item])
         else:
             command(["systemctl", "--user", "stop", item.name], timeout=240)
     for item in selected if action in {"start", "restart"} else []:
         if platform.system() == "Darwin":
-            command(["/bin/launchctl", "bootstrap", f"gui/{os.getuid()}", str(item)], timeout=60)
+            start_launchd(item, bindings[item])
         else:
             command(["systemctl", "--user", "start", item.name], timeout=60)
     if action == "stop":
@@ -779,6 +854,7 @@ def load_fixture(args: argparse.Namespace, receipt: dict, home: Path) -> dict:
     need(value.get("schema") == 1 and value.get("runId") == os.environ["GITHUB_RUN_ID"]
          and value.get("runAttempt") == os.environ["GITHUB_RUN_ATTEMPT"]
          and value.get("candidate", False) == getattr(args, "candidate", False)
+         and value.get("harnessSourceSha", value.get("sourceSha")) == os.environ.get("GITHUB_SHA")
          and value.get("sourceSha") == receipt["sourceSha"] and value.get("releaseReceiptSha256") == args.receipt_sha256
          and value.get("home") == str(home) and value.get("workDirectory") == str(args.work)
          and value.get("targetVersion") == receipt["version"], "Fixture belongs to another account, run or candidate.")
@@ -797,7 +873,8 @@ def bootstrap(args: argparse.Namespace, receipt: dict, home: Path) -> tuple[dict
         listener.bind(("127.0.0.1", 0))
         port = listener.getsockname()[1]
     fixture = {"schema": 1, "runId": os.environ["GITHUB_RUN_ID"], "runAttempt": os.environ["GITHUB_RUN_ATTEMPT"],
-               "sourceSha": receipt["sourceSha"], "candidate": getattr(args, "candidate", False),
+               "sourceSha": receipt["sourceSha"], "harnessSourceSha": os.environ["GITHUB_SHA"],
+               "candidate": getattr(args, "candidate", False),
                "releaseReceiptSha256": args.receipt_sha256, "home": str(home), "workDirectory": str(args.work),
                "serverUrl": f"http://127.0.0.1:{port}", "targetVersion": receipt["version"],
                **{key: str(value) for key, value in paths(home).items()}}
@@ -897,6 +974,16 @@ def inspect_receipt(args: argparse.Namespace) -> None:
                  args.receipt_sha256, str(args.prepare_run), str(args.bundle)], timeout=90)
 
 
+def validate_candidate_checkout(args: argparse.Namespace, receipt: dict) -> str:
+    result = command(["node", str(ROOT / "scripts/product-candidate-receipt.mjs"), "validate-runner",
+                      str(args.receipt), args.receipt_sha256], timeout=90)
+    value = json.loads(result.stdout)
+    need(value.get("sourceSha") == receipt["sourceSha"] and value.get("sourceRef") == receipt["sourceRef"]
+         and value.get("harnessSourceSha") == os.environ.get("GITHUB_SHA") and value.get("publicationEligible") is False,
+         "Candidate harness validation returned a different source, branch or eligibility.")
+    return value["harnessSourceSha"]
+
+
 def main() -> None:
     args = parser().parse_args()
     raw = read_regular(args.receipt, 32768)
@@ -904,13 +991,14 @@ def main() -> None:
          "Prepared receipt differs from the independently accepted digest.")
     receipt = json.loads(raw)
     home = guard(receipt, args.work, candidate=args.candidate)
+    harness_sha = validate_candidate_checkout(args, receipt) if args.candidate else receipt["sourceSha"]
     for path in (args.fixture, args.evidence):
         contained(path, args.work)
     # Reuse production signature, runtime parity and successful preparation-run
     # verification rather than trusting a caller-created success flag.
     inspect_receipt(args)
     head = command(["git", "-C", str(ROOT), "rev-parse", "HEAD"]).stdout.decode().strip()
-    need(head == receipt["sourceSha"], "Acceptance harness checkout differs from the packaged source.")
+    need(head == harness_sha, "Acceptance harness checkout differs from its reviewed validation.")
     if args.operation == "bootstrap":
         fixture, observations = bootstrap(args, receipt, home)
         observed_version = fixture["baselineVersion"]
@@ -950,6 +1038,7 @@ def main() -> None:
     evidence = {"schema": 1, "kind": "candidate-server-observations" if args.candidate else "native-server-observations",
                 "operation": args.operation,
                 "runId": os.environ["GITHUB_RUN_ID"], "sourceSha": receipt["sourceSha"],
+                "harnessSourceSha": harness_sha,
                 "runAttempt": os.environ["GITHUB_RUN_ATTEMPT"],
                 "version": receipt["version"], "observedVersion": observed_version,
                 "releaseReceiptSha256": args.receipt_sha256, "platform": sys.platform,

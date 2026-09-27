@@ -11,7 +11,7 @@ import { pathToFileURL } from 'node:url'
 import { pipeline } from 'node:stream/promises'
 import { expectedAssets, verifyAssets } from './direct-release-mirror.mjs'
 import { validatePreparationRun, verifyReceiptBundle } from './product-release.mjs'
-import { assertCandidateRunner, candidateAssets, inspectCandidate } from './product-candidate-receipt.mjs'
+import { assertCandidateCheckout, assertCandidateRunner, candidateAssets, inspectCandidate } from './product-candidate-receipt.mjs'
 
 const HOSTS = ['github.com', 'api.github.com', 'registry.npmjs.org']
 const DESKTOP_REPOSITORIES = ['ZhengyiLuo/AgentsDock', 'ZhengyiLuo/AgentsDock-Releases']
@@ -220,7 +220,7 @@ async function createReplay({ receiptPath, acceptedReceiptSha256, preparationRun
 
   return Object.freeze({
     identity: Object.freeze({ version: receipt.version, track: receipt.track, sourceSha: receipt.sourceSha,
-      ...(candidate ? { kind: 'candidate', publicationEligible: false } : { prepareRunId: receipt.prepareRunId }),
+      ...(candidate ? { kind: 'candidate', publicationEligible: false, sourceRef: receipt.sourceRef } : { prepareRunId: receipt.prepareRunId }),
       releaseReceiptSha256: acceptedReceiptSha256, discovery: 'synthetic-replay-not-publication' }),
     inventory: () => [...routes].map(([url, entry]) => ({ url, size: entry.size, sha256: entry.sha256, generated: entry.generated })),
     async respond({ method, host, path, headers = {} }) {
@@ -274,9 +274,11 @@ async function insideRunner(path) {
 // listener and trust its ephemeral certificate. Never run that setup locally.
 export async function serveProductReplay(replay, { certificatePath, privateKeyPath, port = 443,
   faultControlPath, faultObservedPath, pidPath }) {
-  if (replay.identity.kind === 'candidate') assertCandidateRunner()
-  else assertReplayRunner()
-  need(replay.identity.sourceSha === process.env.GITHUB_SHA, 'Replay must run at the exact accepted product source.')
+  if (replay.identity.kind === 'candidate') assertCandidateCheckout(replay.identity)
+  else {
+    assertReplayRunner()
+    need(replay.identity.sourceSha === process.env.GITHUB_SHA, 'Replay must run at the exact accepted product source.')
+  }
   need(Number.isInteger(port) && port >= 1 && port <= 65535, 'Invalid replay listener port.')
   await insideRunner(certificatePath); await insideRunner(privateKeyPath)
   const keyStat = await lstat(privateKeyPath)
