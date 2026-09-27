@@ -6084,6 +6084,8 @@ describe('Composer', () => {
     await user.click(screen.getByRole('button', { name: 'Send message' }))
     await waitFor(() => expect(send).toHaveBeenCalledOnce())
     expect(send.mock.calls[0][0].chatReferences[0].session_id).toBe('chat-2')
+    expect(send.mock.calls[0][0].clientCapabilities).toContain('agent_cross_chat_routes_v2')
+    expect(send.mock.calls[0][0].clientCapabilities).not.toContain('codex_interactive_v1')
     await user.type(screen.getByPlaceholderText('Message'), '@Open')
     act(() => useAppStore.setState({ health: { ok: true, capabilities: { cross_chat_handoffs_v1: durableComposerCapability({ supported_target_backends: ['codex', 'claude'] }) } } }))
     expect(screen.queryByRole('option', { name: /OpenCode target/ })).not.toBeInTheDocument()

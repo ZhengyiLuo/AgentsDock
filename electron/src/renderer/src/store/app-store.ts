@@ -1497,7 +1497,9 @@ export const useAppStore = create<AppState>((set, get) => ({
 
   async refreshAgentRoutes(sessionId) {
     const current = get()
-    if (!agentCrossChatRoutesAvailable(current.health) || current.sessions.find(session => session.id === sessionId)?.backend === 'opencode') {
+    if (!agentCrossChatRoutesAvailable(current.health)
+      || (current.sessions.find(session => session.id === sessionId)?.backend === 'opencode'
+        && !supportedCrossChatTargetBackends(current.health).includes('opencode'))) {
       set(state => {
         const agentRoutesBySession = { ...state.agentRoutesBySession }
         const agentRouteErrorsBySession = { ...state.agentRouteErrorsBySession }
@@ -4866,8 +4868,11 @@ export function interactiveClientCapabilities(
   health: Health | null,
   selectedSkill = false
 ): string[] {
-  if (session?.backend === 'opencode') return selectedSkill && openCodeProviderCommandsAvailable(health) ? ['opencode_provider_commands_v1'] : []
-  const capabilities = ['codex_interactive_v1', 'codex_goal_steer_v1']
+  const opencode = session?.backend === 'opencode'
+  const capabilities = opencode
+    ? selectedSkill && openCodeProviderCommandsAvailable(health) ? ['opencode_provider_commands_v1'] : []
+    : ['codex_interactive_v1', 'codex_goal_steer_v1']
+  if (opencode && !supportedCrossChatTargetBackends(health).includes('opencode')) return capabilities
   if (crossChatHandoffsAvailable(health)) capabilities.push('cross_chat_handoffs_v1')
   if (
     crossChatHandoffsAvailable(health)

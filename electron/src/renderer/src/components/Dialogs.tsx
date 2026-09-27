@@ -4497,7 +4497,7 @@ export function JobDialog() {
         health={health}
         sessions={sessions}
         folderOrder={folderOrder}
-        chatSupported={selectedBackend !== 'opencode' && scheduledJobMentionActionsAvailable(health)}
+        chatSupported={(selectedBackend !== 'opencode' || supportedCrossChatTargetBackends(health).includes('opencode')) && scheduledJobMentionActionsAvailable(health)}
         teamSupported={teamMessagesAvailable(health)}
         value={prompt}
         chatReferences={chatReferences}
