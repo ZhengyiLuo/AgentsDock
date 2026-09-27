@@ -333,7 +333,7 @@ jobs:
         if: always()
         run: |
           mkdir "$RUNNER_TEMP/candidate-public-evidence"
-          for pair in bootstrap.json:server.json desktop/desktop-evidence.json:desktop.json desktop/failure-observations.json:failure.json; do
+          for pair in bootstrap.json:server.json desktop/desktop-evidence.json:desktop.json desktop/failure-observations.json:failure.json desktop/server-diagnostics.json:server-diagnostics.json; do
             SOURCE="$RUNNER_TEMP/agentsdock-acceptance-candidate/${pair%%:*}"
             if [[ -f "$SOURCE" ]]; then cp "$SOURCE" "$RUNNER_TEMP/candidate-public-evidence/${pair#*:}"; fi
           done

@@ -121,6 +121,36 @@ export async function freePort() {
   return port
 }
 
+export function waitForCdpSocketOpen(socket, milliseconds = 15_000) {
+  assert(Number.isSafeInteger(milliseconds) && milliseconds > 0 && milliseconds <= 15_000, 'Invalid CDP handshake deadline')
+  return new Promise((resolve, reject) => {
+    let settled = false
+    const cleanup = () => {
+      clearTimeout(timer)
+      socket.removeEventListener('open', opened)
+      socket.removeEventListener('error', failed)
+      socket.removeEventListener('close', closed)
+    }
+    const fail = message => {
+      if (settled) return
+      settled = true
+      cleanup()
+      // Closing a CONNECTING socket can emit an asynchronous error. Consume
+      // that event while rejecting with only the fixed handshake diagnosis.
+      socket.addEventListener('error', () => {}, { once: true })
+      try { socket.close() } catch { /* The failed socket may already be closed. */ }
+      reject(new Error(message))
+    }
+    const opened = () => { if (!settled) { settled = true; cleanup(); resolve() } }
+    const failed = () => fail('CDP WebSocket handshake failed')
+    const closed = () => fail('CDP WebSocket closed before handshake')
+    const timer = setTimeout(() => fail('CDP WebSocket handshake timed out'), milliseconds)
+    socket.addEventListener('open', opened, { once: true })
+    socket.addEventListener('error', failed, { once: true })
+    socket.addEventListener('close', closed, { once: true })
+  })
+}
+
 export async function connect(port) {
   const targets = await fetch(`http://127.0.0.1:${port}/json/list`, { signal: AbortSignal.timeout(2000) }).then(response => response.json())
   const target = targets.find(item => item.type === 'page' && item.webSocketDebuggerUrl && item.url.startsWith('file:'))
@@ -136,10 +166,7 @@ export async function connect(port) {
     clearTimeout(request.timer)
     packet.error ? request.reject(new Error(packet.error.message)) : request.resolve(packet.result)
   })
-  await new Promise((resolve, reject) => {
-    socket.addEventListener('open', resolve, { once: true })
-    socket.addEventListener('error', reject, { once: true })
-  })
+  await waitForCdpSocketOpen(socket)
   const call = (method, params = {}) => new Promise((resolve, reject) => {
     const id = ++nextId
     const timer = setTimeout(() => { requests.delete(id); reject(new Error(`CDP timeout: ${method}`)) }, 15_000)

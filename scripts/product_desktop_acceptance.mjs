@@ -47,6 +47,22 @@ export function boundedNativeLog(stream, limit = 16 * 1024 * 1024) {
   }
 }
 
+const NATIVE_PROGRESS_PHASES = new Set(['baseline-artifact-verification-starting', 'baseline-artifact-verified',
+  'candidate-artifact-verification-starting', 'candidate-artifact-verified', 'baseline-renderer-connecting',
+  'updated-renderer-connecting', 'second-renderer-connecting', 'baseline-native-connected', 'stable-subscription-observed', 'beta-subscription-observed',
+  'server-offline-before-app-install', 'trusted-native-input-restart-to-update', 'native-replacement-and-relaunch',
+  'offline-pending-visible', 'second-native-client-waiting', 'owned-legacy-service-start-requested',
+  'two-native-clients-share-one-completed-update', 'paired-service-current'])
+
+export function emitNativeProgress(stage, at, write = line => process.stdout.write(line)) {
+  assert(NATIVE_PROGRESS_PHASES.has(stage), 'Unknown native progress stage')
+  assert(typeof at === 'string' && /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/.test(at)
+    && new Date(at).toISOString() === at, 'Invalid native progress timestamp')
+  // Detailed observations remain in bounded evidence. Live logs contain no
+  // profile values, updater messages, URLs, credentials or native process logs.
+  write(`${JSON.stringify({ kind: 'native-acceptance-progress', stage, at })}\n`)
+}
+
 export function assertOlderVersion(previous, candidate) {
   assert(VERSION.test(previous) && VERSION.test(candidate), 'Invalid comparison version')
   const parts = version => {
@@ -176,11 +192,100 @@ function serviceCommand(options, fixture, command, extra, evidenceName) {
     '--bundle', options['server-directory'], '--work', fixture.workDirectory,
     '--fixture', options['server-fixture'], '--evidence', join(options.output, evidenceName),
     ...(options.scope === 'candidate' ? ['--candidate'] : []), ...extra]
-  const text = execFileSync('python3', args, { encoding: 'utf8', timeout: 15 * 60_000, maxBuffer: 256 * 1024,
+  const text = execFileSync('python3', args, { encoding: 'utf8', timeout: command === 'diagnose' ? 60_000 : 15 * 60_000, maxBuffer: 256 * 1024,
     stdio: ['ignore', 'pipe', 'pipe'] })
   const observed = JSON.parse(text)
   assert(observed.observed === true && HASH.test(observed.evidenceSha256), 'Service helper did not return observed evidence')
   return observed
+}
+
+const RECONCILIATION_STATES = new Set(['disabled', 'idle', 'checking', 'available', 'downloading', 'downloaded', 'installing', 'not-available', 'error', 'unknown'])
+const RECONCILIATION_PHASES = new Set(['checking', 'pending', 'updating', 'current', 'offline', 'blocked', 'failed', 'missing', 'unknown'])
+const RECONCILIATION_CODES = new Set(['OBSERVED', 'APP_STATUS_UNAVAILABLE', 'APP_STATUS_INVALID', 'HEALTH_UNREACHABLE',
+  'HEALTH_HTTP_ERROR', 'HEALTH_RESPONSE_INVALID', 'COORDINATOR_BLOCKED', 'COORDINATOR_FAILED'])
+const RECONCILIATION_KEYS = ['schema', 'kind', 'code', 'appStatusAvailable', 'appState', 'appTrack', 'appVersionMatches',
+  'recordPresent', 'recordPhase', 'recordTargetMatches', 'recordIdentityMatches', 'recordPaused', 'operationPresent',
+  'healthReachable', 'healthHttpStatus', 'healthValid', 'healthOk', 'healthIdentityMatches', 'healthVersionMatches',
+  'healthInstanceChanged', 'gatewayVersionMatches', 'executionVersionMatches', 'executionMaintenanceHeld']
+
+export function parseReconciliationSnapshot(bytes) {
+  assert(typeof bytes === 'string' || Buffer.isBuffer(bytes), 'Invalid reconciliation diagnostic bytes')
+  assert(Buffer.byteLength(bytes) <= 4096, 'Reconciliation diagnostic exceeds bound')
+  const value = JSON.parse(String(bytes))
+  assert(value && typeof value === 'object' && !Array.isArray(value)
+    && Object.keys(value).sort().join('\0') === [...RECONCILIATION_KEYS].sort().join('\0'), 'Invalid reconciliation diagnostic fields')
+  assert(value.schema === 1 && value.kind === 'native-reconciliation-snapshot' && RECONCILIATION_CODES.has(value.code)
+    && RECONCILIATION_STATES.has(value.appState) && ['stable', 'beta', 'unknown'].includes(value.appTrack)
+    && RECONCILIATION_PHASES.has(value.recordPhase), 'Invalid reconciliation diagnostic enum')
+  assert(value.healthHttpStatus === null || (Number.isInteger(value.healthHttpStatus) && value.healthHttpStatus >= 100
+    && value.healthHttpStatus <= 599), 'Invalid reconciliation HTTP status')
+  for (const key of ['appStatusAvailable', 'recordPresent', 'operationPresent', 'healthReachable', 'healthValid']) {
+    assert(typeof value[key] === 'boolean', 'Invalid reconciliation observation flag')
+  }
+  for (const key of RECONCILIATION_KEYS.filter(key => key.endsWith('Matches') || key.endsWith('Changed')
+    || ['recordPaused', 'healthOk', 'executionMaintenanceHeld'].includes(key))) {
+    assert(value[key] === null || typeof value[key] === 'boolean', 'Invalid reconciliation comparison flag')
+  }
+  return value
+}
+
+export function reconciliationSnapshot(status, healthProbe, fixture, version) {
+  const validStatus = status && typeof status === 'object' && !Array.isArray(status)
+  const record = validStatus && Array.isArray(status.serverUpdates)
+    ? status.serverUpdates.find(item => item && item.profileId === PROFILE_ID) : null
+  const rawHealth = healthProbe?.health
+  const health = rawHealth && typeof rawHealth === 'object' && !Array.isArray(rawHealth) ? rawHealth : null
+  const compare = (value, expected) => typeof value === 'string' ? value === expected : null
+  const bool = value => typeof value === 'boolean' ? value : null
+  const httpStatus = Number.isInteger(healthProbe?.httpStatus) && healthProbe.httpStatus >= 100 && healthProbe.httpStatus <= 599
+    ? healthProbe.httpStatus : null
+  const reachable = healthProbe?.reachable === true
+  const code = !status ? 'APP_STATUS_UNAVAILABLE' : !validStatus ? 'APP_STATUS_INVALID'
+    : !reachable ? 'HEALTH_UNREACHABLE' : httpStatus === null || httpStatus < 200 || httpStatus >= 300 ? 'HEALTH_HTTP_ERROR'
+    : !health ? 'HEALTH_RESPONSE_INVALID' : record?.phase === 'blocked' ? 'COORDINATOR_BLOCKED'
+    : record?.phase === 'failed' ? 'COORDINATOR_FAILED' : 'OBSERVED'
+  return parseReconciliationSnapshot(JSON.stringify({ schema: 1, kind: 'native-reconciliation-snapshot', code,
+    appStatusAvailable: Boolean(validStatus), appState: RECONCILIATION_STATES.has(status?.state) ? status.state : 'unknown',
+    appTrack: ['stable', 'beta'].includes(status?.track) ? status.track : 'unknown', appVersionMatches: compare(status?.currentVersion, version),
+    recordPresent: Boolean(record), recordPhase: record ? (RECONCILIATION_PHASES.has(record.phase) ? record.phase : 'unknown') : 'missing',
+    recordTargetMatches: compare(record?.targetVersion, version), recordIdentityMatches: compare(record?.serverIdentity, fixture.serverIdentity),
+    recordPaused: bool(record?.paused), operationPresent: typeof (record?.operationId || record?.scheduleId) === 'string'
+      && (record.operationId || record.scheduleId).length > 0,
+    healthReachable: reachable, healthHttpStatus: httpStatus, healthValid: Boolean(health), healthOk: bool(health?.ok),
+    healthIdentityMatches: compare(health?.server_identity, fixture.serverIdentity), healthVersionMatches: compare(health?.server_version, version),
+    healthInstanceChanged: typeof health?.server_instance_id === 'string' ? health.server_instance_id !== fixture.serverInstanceId : null,
+    gatewayVersionMatches: compare(health?.gateway?.version, version), executionVersionMatches: compare(health?.execution_service?.version, version),
+    executionMaintenanceHeld: bool(health?.execution_service?.maintenance_held) }))
+}
+
+export async function collectReconciliationSnapshot(readStatus, readHealth, fixture, version) {
+  const [appResult, healthResult] = await Promise.allSettled([
+    Promise.resolve().then(readStatus), Promise.resolve().then(readHealth)])
+  const status = appResult.status === 'fulfilled' ? appResult.value : null
+  const probe = healthResult.status === 'fulfilled' ? healthResult.value : null
+  return { status, probe, snapshot: reconciliationSnapshot(status, probe, fixture, version) }
+}
+
+async function reconciliationHealth(fixture) {
+  let response
+  try {
+    response = await fetch(`${fixture.serverUrl.replace(/\/$/, '')}/api/health`, { headers: { 'X-AgentsDock-Token': fixture.token },
+      redirect: 'error', signal: AbortSignal.timeout(2000) })
+    const reader = response.body.getReader(), chunks = []
+    let size = 0
+    try {
+      for (;;) {
+        const { done, value } = await reader.read()
+        if (done) break
+        size += value.byteLength
+        if (size > 64 * 1024) { await reader.cancel(); throw new Error('Health response exceeds bound') }
+        chunks.push(value)
+      }
+    } finally { reader.releaseLock() }
+    return { reachable: true, httpStatus: response.status, health: JSON.parse(Buffer.concat(chunks).toString('utf8')) }
+  } catch {
+    return { reachable: Boolean(response), httpStatus: response?.status ?? null, health: null }
+  }
 }
 
 export function assertCurrentPairedServer(status, health, fixture, version) {
@@ -290,12 +395,20 @@ export async function main(argv = process.argv.slice(2)) {
   assert(!run('/bin/ps', ['-axo', 'command=']).includes('/AgentsDock.app/Contents/MacOS/AgentsDock'), 'An AgentsDock app is already running')
   await mkdir(options.output, { mode: 0o700 })
   const events = []
-  const observed = (kind, details = {}) => events.push({ kind, at: new Date().toISOString(), ...details })
+  const observed = (kind, details = {}) => {
+    const at = new Date().toISOString()
+    events.push({ kind, at, ...details })
+    emitNativeProgress(kind, at)
+  }
   const logs = boundedNativeLog(createWriteStream(join(options.output, 'native-private.log'), { flags: 'wx', mode: 0o600 }))
-  let ownedApp, secondApp, client, secondClient, keychainCreated = false
+  let ownedApp, secondApp, client, secondClient, lastReconciliation = null, keychainCreated = false
   try {
+    observed('baseline-artifact-verification-starting')
     const previous = await extractVerifiedApp(options['baseline-directory'], options['baseline-version'], join(options.output, 'installation'))
+    observed('baseline-artifact-verified')
+    observed('candidate-artifact-verification-starting')
     const expected = await extractVerifiedApp(options['desktop-directory'], replay.identity.version, join(options.output, 'expected'))
+    observed('candidate-artifact-verified')
     ownedApp = previous.app
     // Compare the signed descriptor embedded in the real target, not a helper-generated copy.
     for (const name of ['agents-server-npm-manifest.json', 'agents-server-npm-manifest.sig']) {
@@ -338,6 +451,7 @@ export async function main(argv = process.argv.slice(2)) {
       return child
     }
     const original = launch()
+    observed('baseline-renderer-connecting')
     client = await until('Baseline native renderer', () => connect(port))
     await client.call('Page.bringToFront')
     const before = await until('Baseline native transport connected', async () => {
@@ -392,6 +506,7 @@ export async function main(argv = process.argv.slice(2)) {
     // then reopen the same unmodified installation solely for CDP observation.
     await stopOwned(ownedApp)
     launch()
+    observed('updated-renderer-connecting')
     client = await until('Updated native renderer', () => connect(port))
     await client.call('Page.bringToFront')
     const offline = await until('Real coordinator reports offline server', async () => {
@@ -413,6 +528,7 @@ export async function main(argv = process.argv.slice(2)) {
     secondApp = expected.app
     const secondPort = await freePort()
     const secondProcess = launch(secondApp, secondProfile, secondPort)
+    observed('second-renderer-connecting')
     secondClient = await until('Second exact native candidate renderer', () => connect(secondPort))
     await until('Both real app instances observe the same offline server', async () => {
       const status = await secondClient.evaluate('window.agentsDock?.updates.status()')
@@ -425,10 +541,12 @@ export async function main(argv = process.argv.slice(2)) {
     // No server-update IPC is invoked by this harness: reconnect is the only
     // action, and the installed production coordinator owns admission/retry.
     serviceCommand(options, fixture, 'service', ['--action', 'start'], 'server-reconnected.json')
-    observed('owned-legacy-service-reconnected')
+    observed('owned-legacy-service-start-requested')
     const current = await until('Automatic paired server reconciliation', async () => {
-      const status = await client.evaluate('window.agentsDock.updates.status()')
-      const health = await serverHealth(fixture)
+      const { status, probe, snapshot } = await collectReconciliationSnapshot(
+        () => client.evaluate('window.agentsDock.updates.status()'), () => reconciliationHealth(fixture), fixture, replay.identity.version)
+      lastReconciliation = snapshot
+      const health = probe?.httpStatus === 200 ? probe.health : null
       try { return { status, health, verification: assertCurrentPairedServer(status, health, fixture, replay.identity.version) } }
       catch { return null }
     }, 15 * 60_000)
@@ -486,11 +604,16 @@ export async function main(argv = process.argv.slice(2)) {
     console.log(JSON.stringify({ observed: true, checks: evidence.checks, evidenceSha256: digest(await readFile(join(options.output, 'desktop-evidence.json'))) }))
     return evidence
   } catch (error) {
+    let serviceDiagnostics = { status: 'unavailable' }
+    try {
+      const diagnostic = serviceCommand(options, fixture, 'diagnose', [], 'server-diagnostics.json')
+      serviceDiagnostics = { status: 'written', evidenceSha256: diagnostic.evidenceSha256 }
+    } catch { /* Public evidence must never contain raw service errors. */ }
     if (client) await client.screenshot(join(options.output, 'failure.png')).catch(() => {})
     await writeFile(join(options.output, 'failure-observations.json'), JSON.stringify({ schema: 1, status: 'failed',
       ...(harness ? { kind: 'scoped-macos-candidate-observations', publicationEligible: false, releaseAcceptance: false,
         harnessSourceSha: harness.harnessSourceSha } : {}),
-      releaseReceiptSha256: replay.identity.releaseReceiptSha256, events }), { flag: 'wx', mode: 0o600 }).catch(() => {})
+      releaseReceiptSha256: replay.identity.releaseReceiptSha256, events, lastReconciliation, serviceDiagnostics }), { flag: 'wx', mode: 0o600 }).catch(() => {})
     throw error
   } finally {
     client?.close()

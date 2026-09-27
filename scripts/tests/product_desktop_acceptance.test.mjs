@@ -3,8 +3,8 @@ import { spawnSync } from 'node:child_process'
 import { resolve } from 'node:path'
 import { test } from 'node:test'
 import { assertCurrentPairedServer, assertDesktopRunner, assertOlderVersion, assertSharedOperation, boundedNativeLog,
-  assertStableDiscovery, assertVisibleCoordinatedRow, checksumForMacArchive,
-  migrationCoverage, parseDesktopAcceptanceArguments, validateDesktopFixture } from '../product_desktop_acceptance.mjs'
+  assertStableDiscovery, assertVisibleCoordinatedRow, checksumForMacArchive, collectReconciliationSnapshot, emitNativeProgress,
+  migrationCoverage, parseDesktopAcceptanceArguments, parseReconciliationSnapshot, reconciliationSnapshot, validateDesktopFixture } from '../product_desktop_acceptance.mjs'
 
 // These are harness contract tests only: no app/service installation, native
 // process, private signing identity, account, DNS, or trust-store mutation.
@@ -27,6 +27,73 @@ const status = () => ({ currentVersion: identity.version, serverUpdates: [record
 const health = () => ({ ok: true, server_identity: fixture().serverIdentity,
   server_instance_id: 'new-service-instance', server_version: identity.version,
   gateway: { version: identity.version }, execution_service: { version: identity.version, maintenance_held: false } })
+
+test('native progress prints only a fixed phase and canonical timestamp', () => {
+  const lines = [], write = line => lines.push(line)
+  const at = '2026-09-27T20:17:13.123Z'
+  emitNativeProgress('baseline-native-connected', at, write)
+  assert.deepEqual(lines, [`${JSON.stringify({ kind: 'native-acceptance-progress', stage: 'baseline-native-connected', at })}\n`])
+  assert.deepEqual(Object.keys(JSON.parse(lines[0])).sort(), ['at', 'kind', 'stage'])
+  for (const stage of ['', 'token=private', 'baseline-native-connected\nprivate', { stage: 'baseline-native-connected' }]) {
+    assert.throws(() => emitNativeProgress(stage, at, write))
+  }
+  for (const timestamp of ['', 'private-profile', '2026-09-27T20:17:13Z', '2026-99-27T20:17:13.123Z', `${at}\nprivate`]) {
+    assert.throws(() => emitNativeProgress('baseline-native-connected', timestamp, write))
+  }
+  assert.equal(lines.length, 1, 'invalid values must never reach the log writer')
+})
+
+test('reconciliation diagnostics project finite categories and equality flags without private fields', () => {
+  const privateValue = 'private-token-https://private.example/profile'
+  const snapshot = reconciliationSnapshot({ ...status(), state: 'idle', track: 'beta', message: privateValue,
+    serverUpdates: [{ ...record(), phase: 'blocked', message: privateValue, name: privateValue, operationId: privateValue }] },
+  { reachable: true, httpStatus: 200, health: { ...health(), private: privateValue } }, fixture(), identity.version)
+  assert.equal(snapshot.code, 'COORDINATOR_BLOCKED')
+  assert.equal(snapshot.recordPhase, 'blocked')
+  assert.equal(snapshot.recordTargetMatches, true)
+  assert.equal(snapshot.recordIdentityMatches, true)
+  assert.equal(snapshot.healthVersionMatches, true)
+  assert.equal(snapshot.healthInstanceChanged, true)
+  assert.equal(snapshot.executionMaintenanceHeld, false)
+  assert.doesNotMatch(JSON.stringify(snapshot), /private|token|https:|server-identity|operationId|targetVersion/)
+  const invalid = reconciliationSnapshot({ ...status(), state: privateValue, track: privateValue,
+    serverUpdates: [{ ...record(), phase: privateValue, paused: privateValue }] },
+  { reachable: true, httpStatus: privateValue, health: { ok: privateValue } }, fixture(), identity.version)
+  assert.equal(invalid.appState, 'unknown')
+  assert.equal(invalid.appTrack, 'unknown')
+  assert.equal(invalid.recordPhase, 'unknown')
+  assert.equal(invalid.recordPaused, null)
+  assert.equal(invalid.healthHttpStatus, null)
+  assert.doesNotMatch(JSON.stringify(invalid), /private-token/)
+})
+
+test('failed health and failed app probes preserve the independent successful observation', async () => {
+  const app = { ...status(), state: 'idle', track: 'beta' }
+  const first = await collectReconciliationSnapshot(() => app, () => { throw new Error('private URL/token') }, fixture(), identity.version)
+  assert.equal(first.snapshot.appVersionMatches, true)
+  assert.equal(first.snapshot.recordPhase, 'current')
+  assert.equal(first.snapshot.healthReachable, false)
+  assert.equal(first.snapshot.code, 'HEALTH_UNREACHABLE')
+  const second = await collectReconciliationSnapshot(() => Promise.reject(new Error('private native log')),
+    () => ({ reachable: true, httpStatus: 200, health: health() }), fixture(), identity.version)
+  assert.equal(second.snapshot.code, 'APP_STATUS_UNAVAILABLE')
+  assert.equal(second.snapshot.healthIdentityMatches, true)
+  assert.equal(second.snapshot.healthVersionMatches, true)
+  assert.doesNotMatch(JSON.stringify([first.snapshot, second.snapshot]), /private|Error|URL|token/)
+})
+
+test('public reconciliation parser rejects unbounded, extra and unexpected diagnostic values', () => {
+  const snapshot = reconciliationSnapshot({ ...status(), state: 'idle', track: 'beta' },
+    { reachable: false, httpStatus: null, health: null }, fixture(), identity.version)
+  assert.deepEqual(parseReconciliationSnapshot(JSON.stringify(snapshot)), snapshot)
+  for (const patch of [{ token: 'private' }, { code: 'private' }, { appState: 'secret' }, { appTrack: 'secret' },
+    { recordPhase: 'secret' }, { healthHttpStatus: '200' }, { healthHttpStatus: 600 }, { appVersionMatches: 'yes' },
+    { healthReachable: null }, { schema: 2 }, { kind: 'other' }]) {
+    assert.throws(() => parseReconciliationSnapshot(JSON.stringify({ ...snapshot, ...patch })))
+  }
+  assert.throws(() => parseReconciliationSnapshot(' '.repeat(4097)))
+  assert.throws(() => parseReconciliationSnapshot(JSON.stringify({ ...snapshot, healthValid: undefined })))
+})
 
 test('parses only exact required absolute artifact and fixture paths', () => {
   assert.equal(parseDesktopAcceptanceArguments(valid)['baseline-version'], '1.0.6')

@@ -416,6 +416,126 @@ def service(fixture: dict, action: str) -> None:
             time.sleep(0.2)
 
 
+DIAGNOSTIC_PHASES = frozenset({"idle", "available", "current", "pending", "starting", "checking", "downloading",
+    "verifying", "installing", "restarting", "complete", "failed", "prepared", "guarded", "quiescing", "quiesced",
+    "linking", "linked", "stopping", "stopped", "fencing", "fenced", "authorizing", "authority", "candidate-starting",
+    "candidate-healthy", "committing", "committed", "rolling-back", "rolled-back", "rollback-healthy"})
+
+
+def diagnostic_version(value: object, fixture: dict) -> str:
+    return "candidate" if value == fixture["targetVersion"] else "baseline" if value == fixture["baselineVersion"] else "other-or-unknown"
+
+
+def diagnostic_status(value: object, fixture: dict) -> dict:
+    if not isinstance(value, dict):
+        return {"readable": False}
+    phase = value.get("phase")
+    return {"readable": True, "phase": phase if isinstance(phase, str) and phase in DIAGNOSTIC_PHASES else "other-or-unknown",
+            "target": diagnostic_version(value.get("target_version", value.get("release_version")), fixture),
+            "retryable": value.get("retryable") is True,
+            "errorPresent": bool(value.get("error") or value.get("error_code"))}
+
+
+def diagnostic_service_output(result: subprocess.CompletedProcess, system: str) -> dict:
+    """Project only known native fields; never return environment or argv."""
+    text = result.stdout.decode("utf-8", errors="replace")
+    if result.returncode != 0:
+        absent = any(marker in (result.stdout + result.stderr).lower()
+                     for marker in (b"could not find service", b"service not found", b"no such process", b"not-found"))
+        return {"registered": False if absent else None, "querySucceeded": False}
+    if system == "Darwin":
+        state = re.search(r"^\s+state = ([a-z ]+)\s*$", text, re.MULTILINE)
+        pid = re.search(r"^\s+pid = ([0-9]{1,10})\s*$", text, re.MULTILINE)
+        status = re.search(r"^\s+last exit code = (-?[0-9]{1,5})\s*$", text, re.MULTILINE)
+        state_value = state[1] if state else None
+    else:
+        state = re.search(r"^ActiveState=([a-z-]+)$", text, re.MULTILINE)
+        pid = re.search(r"^MainPID=([0-9]{1,10})$", text, re.MULTILINE)
+        status = re.search(r"^ExecMainStatus=(-?[0-9]{1,5})$", text, re.MULTILINE)
+        state_value = state[1] if state else None
+    return {"registered": True, "querySucceeded": True,
+            "state": state_value if state_value in {"running", "waiting", "spawn scheduled", "active", "inactive", "failed", "activating", "deactivating"} else "other-or-unknown",
+            "pid": int(pid[1]) if pid and 0 < int(pid[1]) < 2 ** 31 else None,
+            "lastExitCode": int(status[1]) if status and -32768 <= int(status[1]) <= 32767 else None}
+
+
+def diagnostic_log_categories(path: Path, owner_root: Path) -> dict:
+    """Read at most the owned log's last 64 KiB, emitting finite labels only."""
+    try:
+        contained(path, owner_root)
+        fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+        with os.fdopen(fd, "rb") as stream:
+            info = os.fstat(stream.fileno())
+            need(stat.S_ISREG(info.st_mode) and info.st_uid == os.getuid() and info.st_nlink == 1,
+                 "Diagnostic log ownership is unproven.")
+            stream.seek(max(0, info.st_size - 65536))
+            data = stream.read(65536).lower()
+        patterns = {"tls-verification": (b"certificate_verify_failed", b"certificate verify failed", b"unable to get local issuer"),
+                    "port-in-use": (b"address already in use",), "missing-python-module": (b"modulenotfounderror",),
+                    "permission-denied": (b"permission denied",), "connection-refused": (b"connection refused",),
+                    "dependency-resolution": (b"no solution found", b"failed to download"),
+                    "native-health-failure": (b"health check failed", b"did not become healthy", b"rollback is incomplete"),
+                    "signature-rejected": (b"invalid signature", b"signature verification failed",)}
+        return {"readable": True, "categories": sorted(name for name, needles in patterns.items() if any(needle in data for needle in needles))}
+    except (OSError, RuntimeError):
+        return {"readable": False, "categories": []}
+
+
+def diagnose(fixture: dict) -> dict:
+    """Read-only failure observations; not an acceptance test or recovery tool."""
+    root, state, home = (Path(fixture[key]) for key in ("installRoot", "stateRoot", "home"))
+    current = root / "current"
+    target = current.resolve() if current.is_symlink() else None
+    version = next((value for value in (fixture["baselineVersion"], fixture["targetVersion"])
+                    if target == root / "releases" / value), None)
+    result = {"diagnosticOnly": True, "currentRuntime": diagnostic_version(version, fixture), "services": {}, "journals": {}}
+    try:
+        files = registered_services(fixture)
+        result["registrationsVerified"] = True
+    except (OSError, RuntimeError, ValueError):
+        files = []
+        result["registrationsVerified"] = False
+    for item in files:
+        role = "gateway" if "gateway" in item.name else "worker"
+        try:
+            system = platform.system()
+            if system == "Darwin":
+                config = plistlib.loads(read_regular(item))
+                environment = config.get("EnvironmentVariables", {})
+                if not isinstance(environment, dict):
+                    environment = {}
+                observed = command(["/bin/launchctl", "print", f"gui/{os.getuid()}/{item.stem}"], timeout=10, allowed=(0, 3, 5, 113))
+            else:
+                environment = {}
+                observed = command(["systemctl", "--user", "show", item.name, "--property=ActiveState,MainPID,ExecMainStatus"], timeout=10, allowed=(0, 1, 3, 4))
+            result["services"][role] = diagnostic_service_output(observed, system)
+            if system == "Darwin":
+                result["services"][role]["configuredPortMatches"] = str(environment.get("AGENTSDOCK_AGENT_PORT", "")) == str(urlsplit(fixture["serverUrl"]).port)
+        except (OSError, RuntimeError, ValueError):
+            result["services"][role] = {"querySucceeded": False}
+    try:
+        live = request(fixture, "/api/health")
+        result["health"] = {"reachable": True, "ok": live.get("ok") is True,
+                            "identityMatches": live.get("server_identity") == fixture["serverIdentity"],
+                            "version": diagnostic_version(live.get("server_version"), fixture)}
+    except (OSError, RuntimeError, ValueError, http.client.HTTPException):
+        result["health"] = {"reachable": False}
+    records = [("activation", root / ".activation-transaction/manifest.json", root),
+               ("execution", root / ".execution-transaction/manifest.json", root),
+               ("update", state / "admin/server-update.json", state)]
+    for label, path, owner in records:
+        try:
+            contained(path, owner)
+            result["journals"][label] = diagnostic_status(json.loads(read_regular(path, 256 * 1024, private=True)), fixture)
+        except (OSError, RuntimeError, ValueError):
+            result["journals"][label] = {"readable": False}
+    result["logs"] = {"updater": diagnostic_log_categories(state / "admin/server-update.log", state),
+                       "legacyStderr": diagnostic_log_categories(home / "Library/Logs/AgentsServer/server-error.log", home),
+                       "workerStderr": diagnostic_log_categories(state / "execution/logs/worker.stderr.log", state),
+                       "gatewayStderr": diagnostic_log_categories(state / "execution/logs/gateway.stderr.log", state)}
+    return result
+
+
 def safe_extract(archive: Path, destination: Path) -> Path:
     destination.mkdir(mode=0o700)
     with tarfile.open(archive, "r:gz") as package:
@@ -846,6 +966,8 @@ def checks_for(operation: str, kind: str, observations: dict, *, migrated: bool 
         return [{"name": "interrupted-update-recovery", "status": "passed", "observations": observations}]
     if operation == "rollback-retry":
         return [{"name": "rollback-data-preservation", "status": "passed", "observations": observations}]
+    if operation == "diagnose":
+        return [{"name": "server-failure-diagnostics", "status": "blocked", "observations": observations}]
     return [{"name": f"server-{operation}", "status": "passed", "observations": observations}]
 
 
@@ -947,7 +1069,7 @@ def bootstrap(args: argparse.Namespace, receipt: dict, home: Path) -> tuple[dict
 
 def parser() -> argparse.ArgumentParser:
     result = argparse.ArgumentParser(description=__doc__)
-    result.add_argument("operation", choices=("bootstrap", "snapshot", "verify", "service", "failure-retry", "rollback-retry"))
+    result.add_argument("operation", choices=("bootstrap", "snapshot", "verify", "service", "failure-retry", "rollback-retry", "diagnose"))
     for name in ("receipt", "bundle", "work", "fixture", "evidence"):
         result.add_argument(f"--{name}", type=Path, required=True)
     result.add_argument("--prepare-run", type=Path)
@@ -1030,6 +1152,9 @@ def main() -> None:
         elif args.operation == "rollback-retry":
             observations = rollback_retry(args, fixture, receipt)
             observed_version = receipt["version"]
+        elif args.operation == "diagnose":
+            observations = diagnose(fixture)
+            observed_version = None
         else:
             need(args.action is not None, "A scoped native service action is required.")
             service(fixture, args.action)

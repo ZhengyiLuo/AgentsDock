@@ -1,5 +1,27 @@
 # Public development log
 
+## 2026-09-27 — Observe native app replacement; investigate paired service activation
+
+- Run `36347084458` passes source checks, fresh npm installation, signed native
+  package verification and the corrected exact-origin HTTPS replay setup.
+- The real app shows no beta on Stable, downloads the exact beta.18 on Beta,
+  accepts a real update-button click with its server offline, and replaces and
+  relaunches itself through Squirrel. The installed ASAR matches the frozen
+  candidate. It visibly preserves the offline pending state, and two native
+  clients wait on that same saved server before service restart is requested.
+- The fixture's restart result proves native service registration, not HTTP
+  readiness; its original "reconnected" event must not be read as that proof.
+  After that request, automatic paired server reconciliation
+  times out with failed health fetches. This does not establish a completed
+  server upgrade or identify its cause. Trust/routing cleanup succeeds. Keep
+  publication blocked and retain the same candidate bytes for diagnosis.
+- Add finite native-stage progress, a bounded diagnostic WebSocket handshake,
+  and independent app/health snapshots that retain coordinator state when a
+  health fetch fails. Capture read-only owned service/activation diagnostics
+  using fixed fields and bounded log categories; never upload raw private logs
+  or run recovery automatically. Pass 265 JavaScript tests, 94 Python tests,
+  workflow lint and independent privacy review before the same-artifact retry.
+
 ## 2026-09-27 — Isolate replay certificate generation from runner defaults
 
 - Run `36346325878` repeats fresh npm and signed package verification, then

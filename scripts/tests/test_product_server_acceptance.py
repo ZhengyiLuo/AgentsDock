@@ -7,6 +7,7 @@ import io
 import json
 import os
 from pathlib import Path
+import plistlib
 import subprocess
 import sys
 import tarfile
@@ -617,6 +618,81 @@ class NativeServerAcceptanceUnitTests(unittest.TestCase):
         result = subprocess.run([sys.executable, str(Path(MOD.__file__)), "--help"], capture_output=True, text=True)
         self.assertEqual(result.returncode, 0)
         self.assertIn("disposable", result.stdout)
+
+    def test_service_diagnostics_emit_only_finite_fields_not_environment_or_argv(self):
+        raw = b"\tstate = running\n\tpid = 812\n\tlast exit code = 78\n\tenvironment = { TOKEN = private-token }\n\tprogram = /private/path\n"
+        value = MOD.diagnostic_service_output(subprocess.CompletedProcess([], 0, raw, b"private-stderr"), "Darwin")
+        self.assertEqual(value, {"registered": True, "querySucceeded": True, "state": "running", "pid": 812, "lastExitCode": 78})
+        for private in ("private-token", "private/path", "private-stderr", "environment"):
+            self.assertNotIn(private, json.dumps(value))
+        unknown = MOD.diagnostic_service_output(subprocess.CompletedProcess([], 5, b"private-token", b"I/O error"), "Darwin")
+        self.assertEqual(unknown, {"registered": None, "querySucceeded": False})
+        absent = MOD.diagnostic_service_output(subprocess.CompletedProcess([], 113, b"", b"Could not find service"), "Darwin")
+        self.assertEqual(absent["registered"], False)
+
+    def test_diagnostic_journal_projection_rejects_arbitrary_values(self):
+        fixture = {"baselineVersion": "1.0.3", "targetVersion": "1.0.7-beta.18"}
+        value = MOD.diagnostic_status({"phase": "rolling-back", "release_version": fixture["targetVersion"],
+                                       "error": "private-token private-path", "retryable": True}, fixture)
+        self.assertEqual(value, {"readable": True, "phase": "rolling-back", "target": "candidate", "errorPresent": True, "retryable": True})
+        for phase in ("private-token", {"token": "private-token"}, ["private-token"]):
+            result = MOD.diagnostic_status({"phase": phase, "error_code": "private-token"}, fixture)
+            self.assertEqual(result["phase"], "other-or-unknown")
+            self.assertNotIn("private-token", json.dumps(result))
+
+    def test_diagnostic_log_tail_is_bounded_and_never_exports_text_or_follows_links(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary).resolve()
+            path = root / "updater.log"
+            path.write_bytes(b"CERTIFICATE_VERIFY_FAILED private-token\n" + b"x" * 70000 + b"\nModuleNotFoundError: private-module\n")
+            self.assertEqual(MOD.diagnostic_log_categories(path, root), {"readable": True, "categories": ["missing-python-module"]})
+            link = root / "linked.log"
+            link.symlink_to(path)
+            self.assertEqual(MOD.diagnostic_log_categories(link, root), {"readable": False, "categories": []})
+
+    def test_diagnose_is_read_only_and_preserves_port_identity_and_activation_observations(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            home = Path(temporary).resolve()
+            install, state = home / "install", home / "state"
+            candidate = install / "releases/1.0.7-beta.18"
+            candidate.mkdir(parents=True)
+            state.mkdir()
+            (install / "current").symlink_to(candidate)
+            journal = install / ".activation-transaction"
+            journal.mkdir()
+            MOD.write_private(journal / "manifest.json", {"phase": "candidate-starting", "release_version": "1.0.7-beta.18", "private": "private-token"})
+            item = home / "com.agentsdock.server.plist"
+            item.write_bytes(plistlib.dumps({"EnvironmentVariables": {"AGENTSDOCK_AGENT_PORT": "17850", "TOKEN": "private-token"}}))
+            fixture = {"installRoot": str(install), "stateRoot": str(state), "home": str(home), "serverUrl": "http://127.0.0.1:17850",
+                       "baselineVersion": "1.0.3", "targetVersion": "1.0.7-beta.18", "serverIdentity": "private-identity"}
+            output = subprocess.CompletedProcess([], 0, b"\tstate = waiting\n\tlast exit code = 1\n", b"")
+            with patch.object(MOD, "registered_services", return_value=[item]), patch.object(MOD.platform, "system", return_value="Darwin"), \
+                    patch.object(MOD, "command", return_value=output) as command, patch.object(MOD, "request", side_effect=ConnectionRefusedError), \
+                    patch.object(MOD, "service") as service:
+                result = MOD.diagnose(fixture)
+            service.assert_not_called()
+            self.assertEqual(command.call_args.args[0][:2], ["/bin/launchctl", "print"])
+            self.assertEqual(command.call_count, 1)
+            self.assertEqual(result["currentRuntime"], "candidate")
+            self.assertEqual(result["services"]["worker"]["lastExitCode"], 1)
+            self.assertTrue(result["services"]["worker"]["configuredPortMatches"])
+            self.assertFalse(result["health"]["reachable"])
+            self.assertEqual(result["journals"]["activation"]["phase"], "candidate-starting")
+            self.assertNotIn("private-token", json.dumps(result))
+            self.assertNotIn("private-identity", json.dumps(result))
+            self.assertNotIn(str(home), json.dumps(result))
+            self.assertEqual(MOD.checks_for("diagnose", "legacy", result)[0]["status"], "blocked")
+
+    def test_unverified_registration_diagnostics_do_not_query_or_mutate_service(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            home = Path(temporary).resolve()
+            fixture = {"home": str(home), "installRoot": str(home / "install"), "stateRoot": str(home / "state"),
+                       "baselineVersion": "1.0.3", "targetVersion": "1.0.7-beta.18"}
+            with patch.object(MOD, "registered_services", side_effect=RuntimeError("unproven")), \
+                    patch.object(MOD, "request", side_effect=ConnectionRefusedError), patch.object(MOD, "command") as command:
+                result = MOD.diagnose(fixture)
+            command.assert_not_called()
+            self.assertFalse(result["registrationsVerified"])
 
 
 if __name__ == "__main__":

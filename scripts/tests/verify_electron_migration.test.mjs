@@ -3,9 +3,35 @@ import { test } from 'node:test'
 import { spawnSync } from 'node:child_process'
 import { resolve } from 'node:path'
 import { readFileSync } from 'node:fs'
-import { assertMigrationTrack, locateMigrationUpdateSettings, MIGRATION_INSTALL_BUTTON_NAMES, parseArguments } from '../verify_electron_migration.mjs'
+import { assertMigrationTrack, locateMigrationUpdateSettings, MIGRATION_INSTALL_BUTTON_NAMES, parseArguments, waitForCdpSocketOpen } from '../verify_electron_migration.mjs'
 
 const valid = ['--from-version', '0.2.13-beta.33', '--to-version', '1.0.0-beta.1', '--output', '/tmp/migration-argument-test']
+
+test('inert CDP handshake expires and closes without forwarding socket errors', async () => {
+  class InertSocket extends EventTarget {
+    closeCount = 0
+    close() { this.closeCount++; queueMicrotask(() => this.dispatchEvent(new Event('error'))) }
+  }
+  const socket = new InertSocket()
+  await assert.rejects(waitForCdpSocketOpen(socket, 20), { message: 'CDP WebSocket handshake timed out' })
+  assert.equal(socket.closeCount, 1)
+  for (const milliseconds of [0, -1, 15_001, Infinity]) assert.throws(() => waitForCdpSocketOpen(socket, milliseconds))
+})
+
+test('CDP handshake open succeeds and early close/error fail promptly', async () => {
+  for (const event of ['open', 'close', 'error']) {
+    const socket = new EventTarget()
+    let closes = 0
+    socket.close = () => { closes++ }
+    const waiting = waitForCdpSocketOpen(socket, 1000)
+    queueMicrotask(() => socket.dispatchEvent(new Event(event)))
+    if (event === 'open') { await waiting; assert.equal(closes, 0) }
+    else {
+      await assert.rejects(waiting, { message: event === 'close' ? 'CDP WebSocket closed before handshake' : 'CDP WebSocket handshake failed' })
+      assert.equal(closes, 1)
+    }
+  }
+})
 
 test('native install click recognizes the actual v1.0.6/current label and older restart label', () => {
   const strings = JSON.parse(readFileSync(new URL('../../electron/src/shared/locales/en.json', import.meta.url)))
