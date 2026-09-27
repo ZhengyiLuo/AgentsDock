@@ -59,6 +59,43 @@ contents; their success is not native acceptance.
 
 ## Prepare, accept, then publish
 
+### Artifact-only macOS rehearsal before merging the pipeline
+
+For a scoped, unpublished macOS/app-server candidate, the existing
+`AgentsServer` `server-npm-candidate.yml` workflow can sign both server formats
+with its current key **in place**. Export only the reviewed canonical `server/`
+tree to a controlled `release/*` branch, dispatch the signer with
+`product_bundle=true` and the exact canonical source/version, then retain the
+original attempt-specific Actions ZIP. `import_product_server.mjs` verifies
+the successful signing run, exact export tree, immutable artifact ZIP digest,
+both signatures, inventory and runtime parity. No private signing key is
+downloaded or copied to the canonical repository.
+
+Build the universal macOS ZIP/DMG locally from that same committed source with
+the existing Developer ID Keychain identity and existing Apple notarization
+credentials. Embed the imported signed npm descriptor and signature. This path
+does not require exporting the certificate, supplying its P12 password, copying
+the server key, or configuring a CI release PAT. The local credential owner's
+authenticated GitHub CLI performs the explicitly authorized candidate staging;
+no credential is placed in the package. Missing canonical CI secrets remain
+configuration requirements for the full production workflow, not blockers to
+this narrower rehearsal.
+
+The rehearsal uses a separate `agentsdock-macos-candidate` receipt, scoped to
+`darwin-app-server` and explicitly `publicationEligible: false`. Retain its
+exact bytes in a dedicated **unpublished test draft**, separate from production
+version tags. The registered source CI workflow's explicit candidate-replay
+dispatch can test those bytes on disposable hosted macOS runners from the
+reviewed release branch, before merging this PR. PR/push events do not invoke
+native installation or trust-routing tests. No developer-host trust/routing
+changes are supported.
+
+This scoped receipt and its rehearsal reports cannot satisfy the full product
+publication gate. They establish only the cases actually observed on macOS;
+they do not imply complete cross-platform acceptance or authorize publication.
+The original full-product receipt, successful production preparation provenance
+and complete acceptance requirements below remain unchanged.
+
 Both operations require explicit release authorization. A source change or
 local test does not authorize dispatching either operation. Preparation is not
 read-only: it signs packages, uploads artifacts, creates GitHub drafts, and
@@ -79,7 +116,12 @@ Store targets.
    stages the canonical and legacy desktop drafts.
    Before expensive preparation jobs, a protected `direct-production`
    prerequisite checks that all seven required signing/publishing credentials
-   are present. Only presence booleans reach that check; missing secret names
+   are present when signing server packages in that job. Alternatively, supply
+   `server_signing_run_id` to import the exact existing-key artifact-only run;
+   the canonical server private-key secret is then neither required nor used.
+   The import verifies the original Actions ZIP before safe extraction and
+   re-verifies source, signatures and runtime contents before native packaging.
+   Only presence booleans reach the prerequisite check; missing secret names
    are reported without exposing values. Presence does not establish valid
    certificates, token permissions, matching signing keys or npm OIDC access.
 3. The successful run uploads `product-release-PREPARE_RUN_ID`. It contains
@@ -184,13 +226,14 @@ implementation does not provision secrets, change npm settings, or repair tags.
   change `.github/workflows` also require Workflows write access on AgentsServer
   (or a separately reviewed source-export credential). No release token
   belongs inside the app or a release artifact.
-- Provision `AGENTS_SERVER_RELEASE_PRIVATE_KEY_B64` in that protected canonical
-  environment through an authorized secret-management path. It must be the
-  existing Ed25519 server release key matching committed
-  `server/release-public-key.pem`; do not rotate the trust root or retire the
-  legacy signed download path as part of this migration. A secret stored only
-  in the standalone repository is not automatically available here. Never copy
-  private key material into source, chat, workflow outputs, or logs.
+- Prefer `server_signing_run_id` to reuse the existing standalone signing
+  workflow and keep its private key in place. The release credential needs
+  Actions read access on AgentsServer to download that original artifact ZIP.
+  Direct signing in the canonical job is an optional alternative requiring
+  authorized provisioning of the existing `AGENTS_SERVER_RELEASE_PRIVATE_KEY_B64`.
+  Both paths must match committed `server/release-public-key.pem`; do not rotate
+  the trust root or retire the legacy signed download path. Never copy private
+  key material into source, chat, workflow outputs, or logs.
 - Configure the public `@agentsdock/server` package's npm trusted publisher for
   owner `ZhengyiLuo`, repository `AgentsDock`, **caller workflow
   `product-release.yml`**, environment `npm-release`, and permission for direct
@@ -211,8 +254,9 @@ as part of this implementation.
 The 2026-09-27 read-only recheck found the same two tags and only the beta.5
 npm version, so there is no published stable npm version to select automatically.
 It also found only the three Apple API secrets in canonical `direct-production`:
-the macOS certificate/password, release token and server signing key still need
-authorized provisioning there. Both release environments have branch policies,
+the macOS certificate/password and release token still need authorized
+provisioning for full native CI. The server key can now remain in its existing
+signer through the explicit import path. Both release environments have branch policies,
 but no required-reviewer rule was visible. npm trusted-publisher authorization
 remains unverified. None of these settings were changed during candidate work.
 

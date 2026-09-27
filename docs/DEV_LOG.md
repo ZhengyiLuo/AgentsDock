@@ -1,5 +1,24 @@
 # Public development log
 
+## 2026-09-27 — Reuse signing custody for an unpublished macOS rehearsal
+
+- Reuse the existing standalone artifact-only server signer without moving or
+  replacing its private key. Verify the exact canonical export, successful
+  signer run, original artifact ZIP digest, signed inventories and runtime parity.
+- Add a separate macOS/app-server candidate receipt and an explicit branch-only
+  source-CI replay route. Keep these non-publishing observations distinct from
+  full product acceptance; do not relax the production publication gate.
+- Reuse local Developer ID signing and existing Apple notarization credentials.
+  No new certificate, server trust key or copied signing secret is required for
+  the scoped candidate. Keep native trust/routing changes on disposable runners.
+- Document exact fresh npm installation commands for a separate Apple Silicon
+  macOS account, cache independence, identity/history checks and result reporting.
+- Stabilize a cancellation test by waiting for its observer-start precondition;
+  application behavior is unchanged. All 4,927 desktop tests pass locally, with
+  five existing skips. All 241 release/CLI JavaScript tests, 69 Python helper
+  tests and workflow linting pass. Native candidate build/replay results remain pending and
+  must be recorded separately; this source change establishes no public release.
+
 ## 2026-09-27 — Add receipt-bound native acceptance and a manual test handoff
 
 - Add an explicit, read-only-credential acceptance workflow on disposable

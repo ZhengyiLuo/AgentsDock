@@ -39,6 +39,10 @@ on:
         description: Publish only; successful product-release-acceptance.yml run for these exact bytes
         type: string
         default: ''
+      server_signing_run_id:
+        description: Prepare only; reuse an exact successful AgentsServer product-bundle signing run
+        type: string
+        default: ''
 
 permissions:
   contents: read
@@ -119,12 +123,20 @@ jobs:
           APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER != '' }}
           AGENTSDOCK_RELEASE_TOKEN: ${{ secrets.AGENTSDOCK_RELEASE_TOKEN != '' }}
           AGENTS_SERVER_RELEASE_PRIVATE_KEY_B64: ${{ secrets.AGENTS_SERVER_RELEASE_PRIVATE_KEY_B64 != '' }}
+          SERVER_SIGNING_RUN_ID: ${{ inputs.server_signing_run_id }}
         run: |
+          if [[ -n "$SERVER_SIGNING_RUN_ID" && ! "$SERVER_SIGNING_RUN_ID" =~ ^[1-9][0-9]*$ ]]; then
+            echo '::error::Server signing run must be an explicit positive run ID.'
+            exit 1
+          fi
           missing=0
           for secret_name in \
             MACOS_CERTIFICATE_P12_BASE64 MACOS_CERTIFICATE_PASSWORD \
             APPLE_API_KEY_P8_BASE64 APPLE_API_KEY_ID APPLE_API_ISSUER \
             AGENTSDOCK_RELEASE_TOKEN AGENTS_SERVER_RELEASE_PRIVATE_KEY_B64; do
+            if [[ "$secret_name" = AGENTS_SERVER_RELEASE_PRIVATE_KEY_B64 && -n "$SERVER_SIGNING_RUN_ID" ]]; then
+              continue
+            fi
             if [[ "${!secret_name}" != true ]]; then
               printf '::error::Missing required direct-production secret: %s. Configure it through an authorized secret-management process before preparation.\n' "$secret_name"
               missing=1
@@ -169,12 +181,35 @@ jobs:
           python3 -m unittest discover -s scripts/tests -p test_prepare_product_server.py
           node --test scripts/tests/legacy-server-release.test.mjs scripts/tests/npm-candidate-release.test.mjs
       - name: Build and sign both server distributions from the committed source
+        if: inputs.server_signing_run_id == ''
         env:
           SOURCE_SHA: ${{ inputs.source_sha }}
           RELEASE_VERSION: ${{ needs.validate.outputs.version }}
           AGENTS_SERVER_RELEASE_PRIVATE_KEY_B64: ${{ secrets.AGENTS_SERVER_RELEASE_PRIVATE_KEY_B64 }}
           PYTHONDONTWRITEBYTECODE: '1'
         run: python3 scripts/prepare_product_server.py --source-sha "$SOURCE_SHA" --version "$RELEASE_VERSION" --output "$RUNNER_TEMP/product-server"
+      - name: Import exact existing-key server signing artifacts without moving the key
+        if: inputs.server_signing_run_id != ''
+        env:
+          GH_TOKEN: ${{ secrets.AGENTSDOCK_RELEASE_TOKEN }}
+          SOURCE_SHA: ${{ inputs.source_sha }}
+          SOURCE_REF: ${{ inputs.source_ref }}
+          RELEASE_VERSION: ${{ needs.validate.outputs.version }}
+          SIGNER_RUN_ID: ${{ inputs.server_signing_run_id }}
+        run: |
+          [[ "$SIGNER_RUN_ID" =~ ^[1-9][0-9]*$ ]]
+          gh api "repos/ZhengyiLuo/AgentsServer/actions/runs/$SIGNER_RUN_ID" > "$RUNNER_TEMP/server-signing-run.json"
+          SIGNER_ATTEMPT="$(jq -er '.run_attempt' "$RUNNER_TEMP/server-signing-run.json")"
+          [[ "$SIGNER_ATTEMPT" =~ ^[1-9][0-9]*$ ]]
+          SIGNER_ARTIFACT_NAME="signed-product-server-$RELEASE_VERSION-$SOURCE_SHA-$SIGNER_RUN_ID-$SIGNER_ATTEMPT"
+          gh api "repos/ZhengyiLuo/AgentsServer/actions/runs/$SIGNER_RUN_ID/artifacts?per_page=100" > "$RUNNER_TEMP/server-signing-artifacts.json"
+          SIGNER_ARTIFACT_ID="$(jq -er --arg name "$SIGNER_ARTIFACT_NAME" '[.artifacts[] | select(.name == $name)] | if length == 1 then .[0].id else error("Expected one exact signing artifact") end' "$RUNNER_TEMP/server-signing-artifacts.json")"
+          [[ "$SIGNER_ARTIFACT_ID" =~ ^[1-9][0-9]*$ ]]
+          gh api "repos/ZhengyiLuo/AgentsServer/actions/artifacts/$SIGNER_ARTIFACT_ID/zip" > "$RUNNER_TEMP/server-signing-artifact.zip"
+          node scripts/import_product_server.mjs extract \
+            --assets "$RUNNER_TEMP/product-server" --archive "$RUNNER_TEMP/server-signing-artifact.zip" \
+            --source-sha "$SOURCE_SHA" --source-ref "$SOURCE_REF" --version "$RELEASE_VERSION" \
+            --signer-run-id "$SIGNER_RUN_ID" --report "$RUNNER_TEMP/server-import.json"
       - id: descriptor
         name: Expose only public signed descriptor bytes to native packaging
         run: |

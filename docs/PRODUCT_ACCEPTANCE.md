@@ -132,3 +132,64 @@ as files. An ordinary installed app cannot discover that unpublished candidate
 on its production feed. The one-click journey needs the authorized exact-origin
 CI replay or a separately authorized beta publication; manually replacing the
 app does not establish updater acceptance.
+
+### Exact fresh-install commands for the Apple Silicon test account
+
+Use a separate macOS account **logged into the desktop**, not merely `sudo -u`
+from the development account. Do not copy an existing server's configuration,
+provider credentials or history into it. Install Node.js 22.14 or newer, `uv`
+and `tmux` through your usual trusted package manager. Log into the provider
+you intend to test in that account through its native login flow.
+
+The candidate handoff must include the versioned npm tarball, macOS app ZIP,
+signed descriptors, a receipt and checksums. These commands assume the handoff
+has been extracted and Terminal is inside its `manual-test` directory. Do not
+substitute `@beta` or `@latest`: those tags do not identify this unpublished
+candidate.
+
+```sh
+uname -m
+node --version
+npm --version
+command -v uv tmux
+shasum -a 256 -c SHA256SUMS
+
+npm install --prefix ./cli --ignore-scripts --no-audit --no-fund --offline \
+  ./server-1.0.7-beta.17.tgz
+node ./cli/node_modules/@agentsdock/server/npm/cli.cjs --version
+node ./cli/node_modules/@agentsdock/server/npm/cli.cjs install \
+  --bind 127.0.0.1 --port 7850
+```
+
+Expected architecture is `arm64`; expected package version is
+`1.0.7-beta.17`. Stop if either differs. Do not run the installer with `sudo`
+or override its installation roots. If it reports existing state, use another
+account; do not delete history to bypass that guard. Keep the pairing token
+local and use it only in the app's server-connection dialog.
+
+Extract the notarized ZIP into a new folder owned by the test account, then
+open that app. Do not replace an app in `/Applications` shared by other users.
+
+```sh
+test ! -e ./app
+mkdir ./app
+ditto -x -k ./AgentsDock-1.0.7-beta.17-mac-universal.zip ./app
+codesign --verify --deep --strict ./app/AgentsDock.app
+spctl --assess --type execute --verbose=2 ./app/AgentsDock.app
+open ./app/AgentsDock.app
+```
+
+Pair `http://127.0.0.1:7850`, complete a new chat and follow-up, then close and
+reopen the app. Confirm the app and server both report the candidate version.
+To check independence from the npm staging directory, quit the app, retire
+only that directory, then reopen and continue the same chat:
+
+```sh
+test ! -e ./cli-retired && mv ./cli ./cli-retired
+open ./app/AgentsDock.app
+```
+
+Then log out/back in and reboot the test machine, checking the same chat each
+time. Renaming `cli-retired` back to `cli` restores the installation command;
+it does not affect the managed runtime. The installed service must not depend
+on either directory. Use the earlier result template, without including tokens.

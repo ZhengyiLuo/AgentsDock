@@ -37,6 +37,13 @@ test('parses only exact required absolute artifact and fixture paths', () => {
   }
 })
 
+test('candidate parser deliberately permits no preparation run, never a fake production run', () => {
+  const args = valid.filter((value, index) => index !== 4 && index !== 5)
+  assert.equal(parseDesktopAcceptanceArguments([...args, '--scope', 'candidate']).scope, 'candidate')
+  assert.throws(() => parseDesktopAcceptanceArguments(args), /preparation-run/)
+  assert.throws(() => parseDesktopAcceptanceArguments([...args, '--scope', 'release']), /preparation-run|scope/)
+})
+
 test('requires exact canonical disposable workflow context before native side effects', () => {
   assert.doesNotThrow(() => assertDesktopRunner(environment, 'darwin'))
   for (const patch of [{ GITHUB_ACTIONS: '' }, { RUNNER_ENVIRONMENT: 'self-hosted' }, { GITHUB_REPOSITORY: 'other/repo' },

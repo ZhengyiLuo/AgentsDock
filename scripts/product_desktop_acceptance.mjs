@@ -13,7 +13,8 @@ import { execFileSync, spawn } from 'node:child_process'
 import { basename, dirname, isAbsolute, join, relative, resolve } from 'node:path'
 import { homedir } from 'node:os'
 import { fileURLToPath, pathToFileURL } from 'node:url'
-import { assertReplayRunner, createProductReplay } from './product-release-replay.mjs'
+import { assertReplayRunner, createProductReplay, createCandidateReplay } from './product-release-replay.mjs'
+import { assertCandidateRunner } from './product-candidate-receipt.mjs'
 import { appVersion, assertMigrationTrack, connect, freePort, hashFile,
   openMigrationUpdateSettings, processesFor, run, stopOwned, until, verifyApp } from './verify_electron_migration.mjs'
 
@@ -63,14 +64,16 @@ export function parseDesktopAcceptanceArguments(argv) {
   const options = {}
   for (let i = 0; i < argv.length; i += 2) {
     const key = argv[i].replace(/^--/, '')
-    assert(argv[i] === `--${key}` && required.includes(key) && argv[i + 1] && !Object.hasOwn(options, key),
+    assert(argv[i] === `--${key}` && [...required, 'scope'].includes(key) && argv[i + 1] && !Object.hasOwn(options, key),
       `Unknown, incomplete or duplicate argument: ${argv[i]}`)
     options[key] = argv[i + 1]
   }
-  for (const key of required) assert(options[key], `Missing --${key}`)
+  for (const key of required) if (!(options.scope === 'candidate' && key === 'preparation-run')) assert(options[key], `Missing --${key}`)
+  assert(options.scope === undefined || options.scope === 'candidate', 'Unknown desktop acceptance scope')
   assert(HASH.test(options['receipt-sha256']), 'Invalid accepted receipt hash')
   assert(VERSION.test(options['baseline-version']), 'Invalid baseline version')
   for (const key of required.filter(key => !['receipt-sha256', 'baseline-version'].includes(key))) {
+    if (!options[key]) continue
     assert(isAbsolute(options[key]), `--${key} must be absolute`)
     options[key] = resolve(options[key])
   }
@@ -138,9 +141,7 @@ async function extractVerifiedApp(directory, version, destination) {
   const archive = join(directory, expected.name)
   assert((await lstat(archive)).isFile() && !(await lstat(archive)).isSymbolicLink(), 'ZIP must be a regular file')
   assert.equal(await hashFile(archive), expected.sha256, 'ZIP differs from its pinned checksum manifest')
-  const entries = run('/usr/bin/zipinfo', ['-1', archive]).split('\n')
-  assert(entries.length > 0 && entries.every(entry => entry.startsWith('AgentsDock.app/')
-    && !entry.includes('\\') && !entry.split('/').some(part => part === '..')), 'Unsafe or unexpected app archive path')
+  run('python3', [fileURLToPath(new URL('./verify_electron_app_zip.py', import.meta.url)), archive])
   await mkdir(destination)
   run('/usr/bin/ditto', ['-x', '-k', archive, destination])
   const app = join(destination, 'AgentsDock.app')
@@ -167,8 +168,10 @@ async function assertOffline(fixture) {
 
 function serviceCommand(options, fixture, command, extra, evidenceName) {
   const args = [SERVER_HELPER, command, '--receipt', options.receipt, '--receipt-sha256', options['receipt-sha256'],
-    '--prepare-run', options['preparation-run'], '--bundle', options['server-directory'], '--work', fixture.workDirectory,
-    '--fixture', options['server-fixture'], '--evidence', join(options.output, evidenceName), ...extra]
+    ...(options['preparation-run'] ? ['--prepare-run', options['preparation-run']] : []),
+    '--bundle', options['server-directory'], '--work', fixture.workDirectory,
+    '--fixture', options['server-fixture'], '--evidence', join(options.output, evidenceName),
+    ...(options.scope === 'candidate' ? ['--candidate'] : []), ...extra]
   const text = execFileSync('python3', args, { encoding: 'utf8', timeout: 15 * 60_000, maxBuffer: 256 * 1024,
     stdio: ['ignore', 'pipe', 'pipe'] })
   const observed = JSON.parse(text)
@@ -253,12 +256,13 @@ async function visibleServerRow(client, phase) {
 
 export async function main(argv = process.argv.slice(2)) {
   const options = parseDesktopAcceptanceArguments(argv)
-  assertDesktopRunner()
+  if (options.scope === 'candidate') assertCandidateRunner()
+  else assertDesktopRunner()
   for (const key of ['receipt', 'preparation-run', 'server-directory', 'desktop-directory', 'baseline-directory', 'server-fixture']) {
-    await assertInsideRunner(options[key])
+    if (options[key]) await assertInsideRunner(options[key])
   }
   await assertInsideRunner(options.output, true)
-  const replay = await createProductReplay({ receiptPath: options.receipt, acceptedReceiptSha256: options['receipt-sha256'],
+  const replay = await (options.scope === 'candidate' ? createCandidateReplay : createProductReplay)({ receiptPath: options.receipt, acceptedReceiptSha256: options['receipt-sha256'],
     preparationRunPath: options['preparation-run'], serverDirectory: options['server-directory'], desktopDirectory: options['desktop-directory'],
     baselineDesktopDirectory: options['baseline-directory'], baselineVersion: options['baseline-version'] })
   assert.equal(replay.identity.sourceSha, process.env.GITHUB_SHA, 'Native acceptance must run at the exact prepared source')
@@ -443,7 +447,9 @@ export async function main(argv = process.argv.slice(2)) {
       preservationEvidenceSha256: preservation.evidenceSha256 })
     const coverage = migrationCoverage(fixture.snapshot)
     logs.assertHealthy()
-    const evidence = { schema: 1, releaseReceiptSha256: replay.identity.releaseReceiptSha256, sourceSha: replay.identity.sourceSha,
+    const evidence = { schema: 1,
+      ...(options.scope === 'candidate' ? { kind: 'scoped-macos-candidate-observations', publicationEligible: false, releaseAcceptance: false } : {}),
+      releaseReceiptSha256: replay.identity.releaseReceiptSha256, sourceSha: replay.identity.sourceSha,
       version: replay.identity.version, track: replay.identity.track, runId: process.env.GITHUB_RUN_ID,
       runAttempt: process.env.GITHUB_RUN_ATTEMPT, platform: 'darwin', native: true,
       transport: 'exact-artifact-HTTPS-origin-replay-not-publication', baselineVersion: options['baseline-version'],

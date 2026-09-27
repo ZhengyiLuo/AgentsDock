@@ -62,14 +62,16 @@ def write_private(path, data):
         os.fsync(stream.fileno())
 
 
-def guard(work, env=None):
+def guard(work, env=None, candidate=False):
     env = os.environ if env is None else env
     need(env.get("CI") == "true" and env.get("GITHUB_ACTIONS") == "true"
          and env.get("RUNNER_ENVIRONMENT") == "github-hosted",
          "Network replay is restricted to disposable GitHub-hosted CI")
     need(env.get("GITHUB_REPOSITORY") == "ZhengyiLuo/AgentsDock",
          "Unexpected acceptance repository")
-    need(re.fullmatch(r"ZhengyiLuo/AgentsDock/\.github/workflows/product-release-acceptance\.yml@refs/heads/(?:main|release/[A-Za-z0-9][A-Za-z0-9._/-]*)",
+    expected_workflow = (r"ZhengyiLuo/AgentsDock/\.github/workflows/ci\.yml@refs/heads/release/[A-Za-z0-9][A-Za-z0-9._/-]*" if candidate else
+                         r"ZhengyiLuo/AgentsDock/\.github/workflows/product-release-acceptance\.yml@refs/heads/(?:main|release/[A-Za-z0-9][A-Za-z0-9._/-]*)")
+    need(re.fullmatch(expected_workflow,
                       env.get("GITHUB_WORKFLOW_REF", "")), "Unexpected acceptance workflow")
     need(env.get("GITHUB_EVENT_NAME") == "workflow_dispatch", "Acceptance must be explicitly dispatched")
     for field in ("GITHUB_RUN_ID", "GITHUB_RUN_ATTEMPT"):
@@ -80,7 +82,10 @@ def guard(work, env=None):
     path = Path(work).absolute()
     need(root.is_dir() and path == path.resolve() and path.is_relative_to(root)
          and path != root, "Replay work directory must be a non-symlink child of RUNNER_TEMP")
-    return path, {"runId": env["GITHUB_RUN_ID"], "runAttempt": env["GITHUB_RUN_ATTEMPT"],
+    if candidate:
+        need(sys.platform == "darwin" and env["RUNNER_OS"] == "macOS", "Candidate replay is scoped to disposable macOS")
+    return path, {**({"scope": "candidate", "publicationEligible": False} if candidate else {}),
+                  "runId": env["GITHUB_RUN_ID"], "runAttempt": env["GITHUB_RUN_ATTEMPT"],
                   "platform": env["RUNNER_OS"]}
 
 
@@ -120,12 +125,17 @@ def flush_dns(platform):
         command("sudo", "-n", "/usr/bin/killall", "-HUP", "mDNSResponder")
 
 
-def setup(receipt, receipt_hash, work):
-    work, identity = guard(work)
+def setup(receipt, receipt_hash, work, candidate=False):
+    work, identity = guard(work, candidate=candidate)
     need(re.fullmatch(r"[a-f0-9]{64}", receipt_hash), "Invalid receipt hash")
     content = regular(receipt)
     need(digest(content) == receipt_hash, "Receipt bytes differ from the accepted seal")
-    source = json.loads(content).get("sourceSha", "")
+    parsed_receipt = json.loads(content)
+    if candidate:
+        need(parsed_receipt.get("kind") == "agentsdock-macos-candidate" and parsed_receipt.get("schema") == 1
+             and parsed_receipt.get("scope") == "darwin-app-server" and parsed_receipt.get("publicationEligible") is False,
+             "Candidate network setup requires an explicitly non-publishing scoped receipt")
+    source = parsed_receipt.get("sourceSha", "")
     need(re.fullmatch(r"[a-f0-9]{40}", source), "Receipt source pin is missing")
     need(command("git", "rev-parse", "HEAD").decode().strip() == source,
          "Checkout differs from the exact candidate source")
@@ -193,8 +203,8 @@ def setup(receipt, receipt_hash, work):
     return public
 
 
-def teardown(work):
-    work, run = guard(work)
+def teardown(work, candidate=False):
+    work, run = guard(work, candidate=candidate)
     if not work.exists():
         need(not LOCK.exists(), "Replay lock exists without the requested work directory")
         return {"restored": True, "setupStarted": False}
@@ -250,10 +260,12 @@ def main():
     start.add_argument("--receipt", type=Path, required=True)
     start.add_argument("--receipt-sha256", required=True)
     start.add_argument("--work", type=Path, required=True)
+    start.add_argument("--candidate", action="store_true")
     stop = sub.add_parser("teardown")
     stop.add_argument("--work", type=Path, required=True)
+    stop.add_argument("--candidate", action="store_true")
     args = parser.parse_args()
-    result = setup(args.receipt, args.receipt_sha256, args.work) if args.operation == "setup" else teardown(args.work)
+    result = setup(args.receipt, args.receipt_sha256, args.work, args.candidate) if args.operation == "setup" else teardown(args.work, args.candidate)
     print(json.dumps(result, indent=2))
 
 

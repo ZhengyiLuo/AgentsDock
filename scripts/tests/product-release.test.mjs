@@ -38,6 +38,12 @@ test('receipt rejects missing pins, mismatched channel, old counter and invalid 
   }
 })
 
+test('test-only candidate markers cannot be augmented into a production receipt', () => {
+  for (const marker of [{ kind: 'agentsdock-macos-candidate' }, { publicationEligible: false }, { releaseAcceptance: false }]) {
+    assert.throws(() => validateReceipt({ ...receipt(), ...marker }), /candidate/)
+  }
+})
+
 function bundle(t, mutation = '') {
   const directory = mkdtempSync(join(tmpdir(), 'agentsdock-product-contract-'))
   t.after(() => rmSync(directory, { recursive: true, force: true }))

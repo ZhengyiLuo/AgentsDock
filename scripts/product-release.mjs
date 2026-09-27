@@ -39,6 +39,8 @@ export function releaseIdentity(version, sourceSha, sourceRef, workflowSha) {
 }
 
 export function validateReceipt(value) {
+  need(value?.kind !== 'agentsdock-macos-candidate' && value?.publicationEligible !== false
+    && value?.releaseAcceptance !== false, 'Test-only candidate receipts cannot authorize production publication.')
   need(value?.schema === 1, 'Unsupported product release receipt.')
   const identity = releaseIdentity(value.version, value.sourceSha, value.sourceRef, value.workflowSha)
   need(value.track === identity.track && commit(value.exportSha), 'Product channel or compatibility export identity differs.')
@@ -53,6 +55,14 @@ export function validateReceipt(value) {
 
 export function verifyReceiptBundle(receipt, directory, publicKey) {
   validateReceipt(receipt)
+  return verifyServerBundleIdentity(receipt, directory, publicKey)
+}
+
+/** Shared cryptographic server checks; does not authorize a product release. */
+export function verifyServerBundleIdentity(receipt, directory, publicKey) {
+  need(typeof receipt?.version === 'string' && /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(-beta\.[1-9]\d*)?$/.test(receipt.version)
+    && receipt.track === (receipt.version.includes('-') ? 'beta' : 'stable') && commit(receipt.sourceSha), 'Invalid signed server identity.')
+  for (const name of ['npmManifestSha256', 'legacyManifestSha256', 'serverBundleSha256']) need(digest(receipt[name]), `Invalid server ${name}.`)
   const npmDir = join(directory, 'npm'), legacyDir = join(directory, 'legacy')
   for (const path of [directory, npmDir, legacyDir]) need(lstatSync(path).isDirectory(), 'Server bundle directories must not be symlinks.')
   const npmBytes = regular(join(npmDir, 'agents-server-npm-manifest.json'), 8192)

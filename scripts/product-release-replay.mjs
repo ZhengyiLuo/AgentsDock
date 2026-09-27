@@ -11,6 +11,7 @@ import { pathToFileURL } from 'node:url'
 import { pipeline } from 'node:stream/promises'
 import { expectedAssets, verifyAssets } from './direct-release-mirror.mjs'
 import { validatePreparationRun, verifyReceiptBundle } from './product-release.mjs'
+import { assertCandidateRunner, candidateAssets, inspectCandidate } from './product-candidate-receipt.mjs'
 
 const HOSTS = ['github.com', 'api.github.com', 'registry.npmjs.org']
 const DESKTOP_REPOSITORIES = ['ZhengyiLuo/AgentsDock', 'ZhengyiLuo/AgentsDock-Releases']
@@ -102,15 +103,27 @@ export function parseReplayRange(value, size) {
  * is produced by successful replay construction or by serving a response. */
 export async function createProductReplay({ receiptPath, acceptedReceiptSha256, preparationRunPath,
   serverDirectory, desktopDirectory, baselineDesktopDirectory, baselineVersion, publicKey }) {
+  return createReplay({ receiptPath, acceptedReceiptSha256, preparationRunPath, serverDirectory, desktopDirectory,
+    baselineDesktopDirectory, baselineVersion, publicKey }, false)
+}
+
+export async function createCandidateReplay(options) { return createReplay(options, true) }
+
+async function createReplay({ receiptPath, acceptedReceiptSha256, preparationRunPath,
+  serverDirectory, desktopDirectory, baselineDesktopDirectory, baselineVersion, publicKey }, candidate) {
   const bytes = await regular(receiptPath)
   need(/^[a-f0-9]{64}$/.test(acceptedReceiptSha256) && digest(bytes) === acceptedReceiptSha256,
     'Replay receipt differs from the independently accepted SHA-256.')
   const receipt = JSON.parse(bytes)
   await directory(serverDirectory); await directory(desktopDirectory)
-  verifyReceiptBundle(receipt, serverDirectory, publicKey)
-  validatePreparationRun(JSON.parse(await regular(preparationRunPath)), receipt)
-  need(await verifyAssets(desktopDirectory, receipt.version, receipt.track, { ...receipt, coordinatedUpdates: true, publicKey })
-    === receipt.desktopManifestSha256, 'Replay desktop checksum manifest differs from the product receipt.')
+  if (candidate) {
+    await inspectCandidate({ receiptPath, receiptSha256: acceptedReceiptSha256, serverDirectory, desktopDirectory, publicKey })
+  } else {
+    verifyReceiptBundle(receipt, serverDirectory, publicKey)
+    validatePreparationRun(JSON.parse(await regular(preparationRunPath)), receipt)
+    need(await verifyAssets(desktopDirectory, receipt.version, receipt.track, { ...receipt, coordinatedUpdates: true, publicKey })
+      === receipt.desktopManifestSha256, 'Replay desktop checksum manifest differs from the product receipt.')
+  }
   for (const name of ['agents-server-npm-manifest.json', 'agents-server-npm-manifest.sig']) {
     need((await regular(join(desktopDirectory, name))).equals(await regular(join(serverDirectory, 'npm', name))),
       'Desktop and server signed descriptor bytes differ.')
@@ -183,7 +196,7 @@ export async function createProductReplay({ receiptPath, acceptedReceiptSha256, 
     if (baseline) generated(`https://api.github.com/repos/${repository}/releases/tags/v${baselineVersion}`, JSON.stringify(baseline), 'application/json')
   }
   for (const repository of DESKTOP_REPOSITORIES) {
-    for (const name of expectedAssets(receipt.version, receipt.track, true)) {
+    for (const name of candidate ? candidateAssets(receipt.version, receipt.track) : expectedAssets(receipt.version, receipt.track, true)) {
       const path = join(desktopDirectory, name), sha256 = name === 'SHA256SUMS' ? receipt.desktopManifestSha256 : sums.get(name)
       await asset(`https://github.com/${repository}/releases/download/v${receipt.version}/${name}`, path, sha256)
       if (receipt.track === 'stable') await asset(`https://github.com/${repository}/releases/latest/download/${name}`, path, sha256)
@@ -207,7 +220,8 @@ export async function createProductReplay({ receiptPath, acceptedReceiptSha256, 
 
   return Object.freeze({
     identity: Object.freeze({ version: receipt.version, track: receipt.track, sourceSha: receipt.sourceSha,
-      prepareRunId: receipt.prepareRunId, releaseReceiptSha256: acceptedReceiptSha256, discovery: 'synthetic-replay-not-publication' }),
+      ...(candidate ? { kind: 'candidate', publicationEligible: false } : { prepareRunId: receipt.prepareRunId }),
+      releaseReceiptSha256: acceptedReceiptSha256, discovery: 'synthetic-replay-not-publication' }),
     inventory: () => [...routes].map(([url, entry]) => ({ url, size: entry.size, sha256: entry.sha256, generated: entry.generated })),
     async respond({ method, host, path, headers = {} }) {
       if (!['GET', 'HEAD'].includes(method)) return errorResponse(405)
@@ -260,7 +274,8 @@ async function insideRunner(path) {
 // listener and trust its ephemeral certificate. Never run that setup locally.
 export async function serveProductReplay(replay, { certificatePath, privateKeyPath, port = 443,
   faultControlPath, faultObservedPath, pidPath }) {
-  assertReplayRunner()
+  if (replay.identity.kind === 'candidate') assertCandidateRunner()
+  else assertReplayRunner()
   need(replay.identity.sourceSha === process.env.GITHUB_SHA, 'Replay must run at the exact accepted product source.')
   need(Number.isInteger(port) && port >= 1 && port <= 65535, 'Invalid replay listener port.')
   await insideRunner(certificatePath); await insideRunner(privateKeyPath)
@@ -349,14 +364,15 @@ export function parseReplayArguments(argv) {
   const [operation, ...args] = argv
   need(['inspect', 'serve'].includes(operation), 'Usage: product-release-replay.mjs inspect|serve --receipt PATH --receipt-sha256 SHA256 --prepare-run PATH --server-assets DIR --desktop-assets DIR [--certificate PATH --private-key PATH --port NUMBER]')
   const required = ['--receipt', '--receipt-sha256', '--prepare-run', '--server-assets', '--desktop-assets']
-  const common = [...required, '--baseline-desktop', '--baseline-version']
+  const common = [...required, '--baseline-desktop', '--baseline-version', '--scope']
   const allowed = operation === 'serve' ? [...common, '--certificate', '--private-key', '--port', '--pid-file', '--fault-control', '--fault-observed'] : common
   const options = {}
   for (let i = 0; i < args.length; i += 2) {
     need(allowed.includes(args[i]) && args[i + 1] && options[args[i]] === undefined, 'Unknown, incomplete or duplicate replay argument.')
     options[args[i]] = args[i + 1]
   }
-  need(required.every(name => options[name]), 'Missing replay artifact inputs.')
+  need(required.filter(name => !(options['--scope'] === 'candidate' && name === '--prepare-run')).every(name => options[name]), 'Missing replay artifact inputs.')
+  need(options['--scope'] === undefined || options['--scope'] === 'candidate', 'Unknown replay scope.')
   need(Boolean(options['--baseline-desktop']) === Boolean(options['--baseline-version']), 'Baseline directory and version must be supplied together.')
   need(Boolean(options['--fault-control']) === Boolean(options['--fault-observed']), 'Both one-shot fault paths are required.')
   if (operation === 'serve') need(options['--certificate'] && options['--private-key'], 'Ephemeral replay certificate and private key are required.')
@@ -366,11 +382,12 @@ export function parseReplayArguments(argv) {
 async function main() {
   const { operation, options } = parseReplayArguments(process.argv.slice(2))
   if (operation === 'serve') {
-    assertReplayRunner()
-    for (const name of ['--receipt', '--prepare-run', '--server-assets', '--desktop-assets']) await insideRunner(options[name])
+    if (options['--scope'] === 'candidate') assertCandidateRunner()
+    else assertReplayRunner()
+    for (const name of ['--receipt', '--prepare-run', '--server-assets', '--desktop-assets']) if (options[name]) await insideRunner(options[name])
     if (options['--baseline-desktop']) await insideRunner(options['--baseline-desktop'])
   }
-  const replay = await createProductReplay({ receiptPath: options['--receipt'], acceptedReceiptSha256: options['--receipt-sha256'],
+  const replay = await (options['--scope'] === 'candidate' ? createCandidateReplay : createProductReplay)({ receiptPath: options['--receipt'], acceptedReceiptSha256: options['--receipt-sha256'],
     preparationRunPath: options['--prepare-run'], serverDirectory: options['--server-assets'], desktopDirectory: options['--desktop-assets'],
     baselineDesktopDirectory: options['--baseline-desktop'], baselineVersion: options['--baseline-version'] })
   if (operation === 'inspect') process.stdout.write(`${JSON.stringify({ ...replay.identity, routes: replay.inventory() }, null, 2)}\n`)

@@ -157,15 +157,27 @@ def contained(path: Path, parent: Path) -> None:
 
 
 def guard(receipt: dict, work: Path, *, environment: dict | None = None,
-          uid: int | None = None, system: str | None = None) -> Path:
+          uid: int | None = None, system: str | None = None, candidate: bool = False) -> Path:
     env = os.environ if environment is None else environment
     user = os.getuid() if uid is None else uid
     host = platform.system() if system is None else system
+    workflow_ref = str(env.get("GITHUB_WORKFLOW_REF", ""))
+    if candidate:
+        source_ref = receipt.get("sourceRef", "")
+        need(receipt.get("schema") == 1 and receipt.get("kind") == "agentsdock-macos-candidate"
+             and receipt.get("scope") == "darwin-app-server" and receipt.get("publicationEligible") is False
+             and host == "Darwin" and env.get("RUNNER_OS") == "macOS"
+             and isinstance(source_ref, str) and re.fullmatch(r"release/[A-Za-z0-9][A-Za-z0-9._/-]*", source_ref) is not None
+             and env.get("GITHUB_EVENT_NAME") == "workflow_dispatch"
+             and workflow_ref == f"ZhengyiLuo/AgentsDock/.github/workflows/ci.yml@refs/heads/{source_ref}",
+             "Test-only candidates require the deliberate exact-branch CI dispatch and cannot become production acceptance.")
+    else:
+        need(receipt.get("kind") != "agentsdock-macos-candidate"
+             and workflow_ref.startswith("ZhengyiLuo/AgentsDock/.github/workflows/product-release-acceptance.yml@refs/heads/"),
+             "Production acceptance requires its own workflow and a production receipt.")
     need(env.get("GITHUB_ACTIONS") == "true" and env.get("RUNNER_ENVIRONMENT") == "github-hosted"
          and env.get("GITHUB_REPOSITORY") == "ZhengyiLuo/AgentsDock"
          and env.get("GITHUB_EVENT_NAME") in {"workflow_dispatch", "workflow_call"}
-         and str(env.get("GITHUB_WORKFLOW_REF", "")).startswith(
-             "ZhengyiLuo/AgentsDock/.github/workflows/product-release-acceptance.yml@refs/heads/")
          and env.get("GITHUB_SHA") == receipt.get("sourceSha")
          and re.fullmatch(r"[1-9]\d*", env.get("GITHUB_RUN_ID", "")) is not None
          and re.fullmatch(r"[1-9]\d*", env.get("GITHUB_RUN_ATTEMPT", "")) is not None,
@@ -745,6 +757,7 @@ def load_fixture(args: argparse.Namespace, receipt: dict, home: Path) -> dict:
     value = json.loads(read_regular(args.fixture, private=True))
     need(value.get("schema") == 1 and value.get("runId") == os.environ["GITHUB_RUN_ID"]
          and value.get("runAttempt") == os.environ["GITHUB_RUN_ATTEMPT"]
+         and value.get("candidate", False) == getattr(args, "candidate", False)
          and value.get("sourceSha") == receipt["sourceSha"] and value.get("releaseReceiptSha256") == args.receipt_sha256
          and value.get("home") == str(home) and value.get("workDirectory") == str(args.work)
          and value.get("targetVersion") == receipt["version"], "Fixture belongs to another account, run or candidate.")
@@ -763,7 +776,7 @@ def bootstrap(args: argparse.Namespace, receipt: dict, home: Path) -> tuple[dict
         listener.bind(("127.0.0.1", 0))
         port = listener.getsockname()[1]
     fixture = {"schema": 1, "runId": os.environ["GITHUB_RUN_ID"], "runAttempt": os.environ["GITHUB_RUN_ATTEMPT"],
-               "sourceSha": receipt["sourceSha"],
+               "sourceSha": receipt["sourceSha"], "candidate": getattr(args, "candidate", False),
                "releaseReceiptSha256": args.receipt_sha256, "home": str(home), "workDirectory": str(args.work),
                "serverUrl": f"http://127.0.0.1:{port}", "targetVersion": receipt["version"],
                **{key: str(value) for key, value in paths(home).items()}}
@@ -837,8 +850,10 @@ def bootstrap(args: argparse.Namespace, receipt: dict, home: Path) -> tuple[dict
 def parser() -> argparse.ArgumentParser:
     result = argparse.ArgumentParser(description=__doc__)
     result.add_argument("operation", choices=("bootstrap", "snapshot", "verify", "service", "failure-retry", "rollback-retry"))
-    for name in ("receipt", "prepare-run", "bundle", "work", "fixture", "evidence"):
+    for name in ("receipt", "bundle", "work", "fixture", "evidence"):
         result.add_argument(f"--{name}", type=Path, required=True)
+    result.add_argument("--prepare-run", type=Path)
+    result.add_argument("--candidate", action="store_true", help="Deliberate test-only macOS candidate CI; never production acceptance.")
     result.add_argument("--receipt-sha256", required=True)
     result.add_argument("--kind", choices=("fresh", "legacy"), default="fresh")
     result.add_argument("--legacy-root-mode", choices=("0755", "0750"), default="0755")
@@ -851,19 +866,28 @@ def parser() -> argparse.ArgumentParser:
     return result
 
 
+def inspect_receipt(args: argparse.Namespace) -> None:
+    if args.candidate:
+        command(["node", str(ROOT / "scripts/product-candidate-receipt.mjs"), "inspect", str(args.receipt),
+                 args.receipt_sha256, str(args.bundle)], timeout=90)
+    else:
+        need(args.prepare_run is not None, "Production acceptance requires the successful preparation-run metadata.")
+        command(["node", str(ROOT / "scripts/product-release.mjs"), "inspect", str(args.receipt),
+                 args.receipt_sha256, str(args.prepare_run), str(args.bundle)], timeout=90)
+
+
 def main() -> None:
     args = parser().parse_args()
     raw = read_regular(args.receipt, 32768)
     need(re.fullmatch(r"[a-f0-9]{64}", args.receipt_sha256) is not None and sha(raw) == args.receipt_sha256,
          "Prepared receipt differs from the independently accepted digest.")
     receipt = json.loads(raw)
-    home = guard(receipt, args.work)
+    home = guard(receipt, args.work, candidate=args.candidate)
     for path in (args.fixture, args.evidence):
         contained(path, args.work)
     # Reuse production signature, runtime parity and successful preparation-run
     # verification rather than trusting a caller-created success flag.
-    command(["node", str(ROOT / "scripts/product-release.mjs"), "inspect", str(args.receipt),
-             args.receipt_sha256, str(args.prepare_run), str(args.bundle)], timeout=90)
+    inspect_receipt(args)
     head = command(["git", "-C", str(ROOT), "rev-parse", "HEAD"]).stdout.decode().strip()
     need(head == receipt["sourceSha"], "Acceptance harness checkout differs from the packaged source.")
     if args.operation == "bootstrap":
@@ -902,7 +926,8 @@ def main() -> None:
             service(fixture, args.action)
             observations = {"nativeServiceAction": args.action, "scope": "owned-disposable-installation"}
             observed_version = None
-    evidence = {"schema": 1, "kind": "native-server-observations", "operation": args.operation,
+    evidence = {"schema": 1, "kind": "candidate-server-observations" if args.candidate else "native-server-observations",
+                "operation": args.operation,
                 "runId": os.environ["GITHUB_RUN_ID"], "sourceSha": receipt["sourceSha"],
                 "runAttempt": os.environ["GITHUB_RUN_ATTEMPT"],
                 "version": receipt["version"], "observedVersion": observed_version,
@@ -910,7 +935,8 @@ def main() -> None:
                 "checks": checks_for(args.operation, args.kind, observations,
                                      migrated=args.operation == "verify" and args.expect_version == receipt["version"]
                                      and fixture["baselineVersion"] != receipt["version"]),
-                "releaseAcceptance": False}
+                "releaseAcceptance": False,
+                **({"publicationEligible": False} if args.candidate else {})}
     write_private(args.evidence, evidence)
     print(json.dumps({"operation": args.operation, "observed": True, "version": observed_version,
                       "evidenceSha256": sha(read_regular(args.evidence))}))

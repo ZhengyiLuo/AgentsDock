@@ -66,7 +66,7 @@ test('preparation preflight reports every missing name without printing values o
   const script = job('prepare-prerequisites').split('        run: |\n')[1]
     .split('\n').map(line => line.replace(/^          /, '')).join('\n')
   const run = overrides => spawnSync('bash', ['--noprofile', '--norc', '-e', '-o', 'pipefail', '-c', script], {
-    env: { ...Object.fromEntries(preparationSecrets.map(name => [name, 'true'])), ...overrides },
+    env: { ...Object.fromEntries(preparationSecrets.map(name => [name, 'true'])), SERVER_SIGNING_RUN_ID: '', ...overrides },
     encoding: 'utf8',
   })
   const present = run({})
@@ -83,6 +83,24 @@ test('preparation preflight reports every missing name without printing values o
   assert.equal(absent.status, 1)
   for (const name of preparationSecrets) assert(absent.stdout.includes(`secret: ${name}.`))
   assert.doesNotMatch(absent.stdout + absent.stderr, /sensitive-sentinel|Required secrets are present/)
+  const external = run({ AGENTS_SERVER_RELEASE_PRIVATE_KEY_B64: 'false', SERVER_SIGNING_RUN_ID: '42' })
+  assert.equal(external.status, 0, external.stdout + external.stderr)
+  for (const invalid of ['0', '-1', 'latest', '42\n43']) {
+    assert.notEqual(run({ SERVER_SIGNING_RUN_ID: invalid }).status, 0)
+  }
+})
+
+test('optional external server signer reuses custody without skipping signature/provenance checks', () => {
+  assert.match(workflow, /server_signing_run_id:\n        description: Prepare only;/)
+  const preparation = job('prepare-server')
+  assert.match(preparation, /Build and sign both server distributions[^\n]*\n        if: inputs.server_signing_run_id == ''/)
+  assert.match(preparation, /Import exact existing-key server signing artifacts[^\n]*\n        if: inputs.server_signing_run_id != ''/)
+  assert.match(preparation, /import_product_server\.mjs extract/)
+  assert.match(preparation, /--source-sha "\$SOURCE_SHA" --source-ref "\$SOURCE_REF" --version "\$RELEASE_VERSION"/)
+  assert.match(preparation, /--signer-run-id "\$SIGNER_RUN_ID"/)
+  const imported = preparation.split('      - name: Import exact existing-key')[1].split('      - id: descriptor')[0]
+  assert.doesNotMatch(imported, /PRIVATE_KEY|unzip|extractall|npm publish|gh release/)
+  assert(preparation.indexOf('import_product_server.mjs extract') < preparation.indexOf('Expose only public signed descriptor bytes'))
 })
 
 test('publication cannot bypass exact receipt and native acceptance or publish npm before desktop verification', () => {

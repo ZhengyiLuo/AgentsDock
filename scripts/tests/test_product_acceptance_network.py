@@ -47,6 +47,18 @@ class NetworkTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             network.guard(link / "replay", self.env)
 
+    def test_candidate_scope_has_separate_explicit_ci_guard(self):
+        env = {**self.env, "RUNNER_OS": "macOS", "GITHUB_WORKFLOW_REF":
+               "ZhengyiLuo/AgentsDock/.github/workflows/ci.yml@refs/heads/release/test"}
+        with mock.patch.object(network.sys, "platform", "darwin"):
+            self.assertEqual(network.guard(self.work, env, candidate=True)[1]["publicationEligible"], False)
+            with self.assertRaises(ValueError):
+                network.guard(self.work, env)
+            with self.assertRaises(ValueError):
+                network.guard(self.work, {**self.env, "RUNNER_OS": "macOS"}, candidate=True)
+        with mock.patch.object(network.sys, "platform", "linux"), self.assertRaises(ValueError):
+            network.guard(self.work, {**env, "RUNNER_OS": "Linux"}, candidate=True)
+
     def test_only_exact_three_hosts_are_overridden(self):
         baseline = b"127.0.0.1 localhost\n::1 localhost\n# github.com example comment\n192.0.2.1 other.test\n"
         active = network.hosts_overlay(baseline, network.MARKER + " 1/1")

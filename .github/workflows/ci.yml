@@ -5,13 +5,30 @@ on:
   push:
     branches: [main]
   workflow_dispatch:
+    inputs:
+      candidate_replay:
+        description: Install and replay an unpublished, pinned macOS beta on disposable hosted VMs only
+        type: boolean
+        default: false
+      candidate_tag:
+        description: Unpublished candidate-replay-vX.Y.Z-beta.N tag (not a product release)
+        type: string
+        default: ''
+      candidate_receipt_sha256:
+        description: Independently accepted candidate.json SHA-256
+        type: string
+        default: ''
+      candidate_bundle_sha256:
+        description: Independently accepted candidate-bundle.zip SHA-256
+        type: string
+        default: ''
 
 permissions:
   contents: read
 
 concurrency:
   group: verify-source-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ !(github.event_name == 'workflow_dispatch' && inputs.candidate_replay) }}
 
 jobs:
   release-tooling:
@@ -111,5 +128,162 @@ jobs:
       - run: node --test tests/ios-workspace-resolution.test.mjs
         working-directory: mobile-react
 
-# This workflow verifies source only. It has no signing credentials, deployment
-# authority, release publishing steps, or artifact uploads.
+  candidate-native:
+    # This existing registered workflow may be explicitly dispatched on a reviewed
+    # release branch before the separate production acceptance workflow is merged.
+    # Its observations are deliberately ineligible for production publication.
+    if: github.event_name == 'workflow_dispatch' && inputs.candidate_replay && github.repository == 'ZhengyiLuo/AgentsDock' && startsWith(github.ref, 'refs/heads/release/')
+    needs: [release-tooling, electron, mobile-source]
+    strategy:
+      fail-fast: false
+      matrix:
+        kind: [fresh, legacy]
+    runs-on: macos-15
+    timeout-minutes: 75
+    permissions:
+      contents: write # GitHub requires push access to read an unpublished draft.
+      actions: read
+    defaults:
+      run:
+        shell: bash
+    env:
+      RECEIPT_SHA256: ${{ inputs.candidate_receipt_sha256 }}
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        with:
+          node-version: 24
+          package-manager-cache: false
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: false
+      - name: Prepare disposable native prerequisites
+        run: |
+          uv python install 3.13
+          command -v tmux || brew install tmux
+          /bin/launchctl print "gui/$(id -u)" > /dev/null
+      - uses: ./.github/actions/product-candidate-inputs
+        id: candidate
+        with:
+          candidate_tag: ${{ inputs.candidate_tag }}
+          receipt_sha256: ${{ inputs.candidate_receipt_sha256 }}
+          bundle_sha256: ${{ inputs.candidate_bundle_sha256 }}
+          github_token: ${{ github.token }}
+      - uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v6
+        if: matrix.kind == 'legacy'
+        with:
+          version: 11.9.0
+          run_install: false
+      - name: Verify signed universal app, DMG, notarization, updater metadata and native launch
+        if: matrix.kind == 'legacy'
+        env:
+          PRODUCT_VERSION: ${{ steps.candidate.outputs.version }}
+        run: |
+          pnpm --dir electron install --frozen-lockfile --ignore-scripts
+          export AGENTSDOCK_EXPECTED_BUILD_NUMBER="$(node -p 'JSON.parse(require("fs").readFileSync(process.argv[1])).buildNumber' "$RUNNER_TEMP/candidate-inputs/candidate.json")"
+          scripts/verify_electron_release.sh "$RUNNER_TEMP/candidate-inputs/payload/desktop" "$PRODUCT_VERSION" beta
+      - name: Install the exact npm candidate or signed legacy baseline
+        env:
+          CANDIDATE_KIND: ${{ matrix.kind }}
+        run: |
+          umask 022
+          extra=()
+          if [[ "$CANDIDATE_KIND" == legacy ]]; then
+            extra=(--baseline-archive "$RUNNER_TEMP/candidate-inputs/baseline-server/agents-server-1.0.3.tar.gz"
+              --baseline-manifest "$RUNNER_TEMP/candidate-inputs/baseline-server/agents-server-manifest.json"
+              --baseline-signature "$RUNNER_TEMP/candidate-inputs/baseline-server/agents-server-manifest.sig" --legacy-root-mode 0755)
+          fi
+          python3 scripts/product_server_acceptance.py bootstrap --candidate --kind "$CANDIDATE_KIND" \
+            --receipt "$RUNNER_TEMP/candidate-inputs/candidate.json" --receipt-sha256 "$RECEIPT_SHA256" \
+            --bundle "$RUNNER_TEMP/candidate-inputs/payload/server" --work "$RUNNER_TEMP/agentsdock-acceptance-candidate" \
+            --fixture "$RUNNER_TEMP/agentsdock-acceptance-candidate/server.json" \
+            --evidence "$RUNNER_TEMP/agentsdock-acceptance-candidate/bootstrap.json" "${extra[@]}"
+      - name: Configure exact-origin replay only after all signatures and provenance pass
+        if: matrix.kind == 'legacy'
+        run: |
+          python3 scripts/product_acceptance_network.py setup --candidate \
+            --receipt "$RUNNER_TEMP/candidate-inputs/candidate.json" --receipt-sha256 "$RECEIPT_SHA256" \
+            --work "$RUNNER_TEMP/agentsdock-acceptance-network"
+          set -a
+          source "$RUNNER_TEMP/agentsdock-acceptance-network/trust.env"
+          set +a
+          /bin/launchctl setenv SSL_CERT_FILE "$SSL_CERT_FILE"
+          /bin/launchctl setenv NODE_EXTRA_CA_CERTS "$NODE_EXTRA_CA_CERTS"
+          if tmux show-environment -g > /dev/null 2>&1; then
+            tmux set-environment -g SSL_CERT_FILE "$SSL_CERT_FILE"
+            tmux set-environment -g NODE_EXTRA_CA_CERTS "$NODE_EXTRA_CA_CERTS"
+          fi
+          python3 scripts/product_server_acceptance.py service --candidate --action restart \
+            --receipt "$RUNNER_TEMP/candidate-inputs/candidate.json" --receipt-sha256 "$RECEIPT_SHA256" \
+            --bundle "$RUNNER_TEMP/candidate-inputs/payload/server" --work "$RUNNER_TEMP/agentsdock-acceptance-candidate" \
+            --fixture "$RUNNER_TEMP/agentsdock-acceptance-candidate/server.json" \
+            --evidence "$RUNNER_TEMP/agentsdock-acceptance-candidate/restarted.json"
+          sudo env GITHUB_ACTIONS="$GITHUB_ACTIONS" RUNNER_ENVIRONMENT="$RUNNER_ENVIRONMENT" RUNNER_OS="$RUNNER_OS" \
+            GITHUB_REPOSITORY="$GITHUB_REPOSITORY" GITHUB_WORKFLOW_REF="$GITHUB_WORKFLOW_REF" \
+            GITHUB_EVENT_NAME="$GITHUB_EVENT_NAME" GITHUB_RUN_ID="$GITHUB_RUN_ID" GITHUB_RUN_ATTEMPT="$GITHUB_RUN_ATTEMPT" \
+            GITHUB_SHA="$GITHUB_SHA" RUNNER_TEMP="$RUNNER_TEMP" \
+            "$(command -v node)" scripts/product-release-replay.mjs serve --scope candidate \
+            --receipt "$RUNNER_TEMP/candidate-inputs/candidate.json" --receipt-sha256 "$RECEIPT_SHA256" \
+            --server-assets "$RUNNER_TEMP/candidate-inputs/payload/server" --desktop-assets "$RUNNER_TEMP/candidate-inputs/payload/desktop" \
+            --baseline-desktop "$RUNNER_TEMP/candidate-inputs/baseline-desktop" --baseline-version 1.0.6 \
+            --certificate "$RUNNER_TEMP/agentsdock-acceptance-network/leaf.pem" \
+            --private-key "$RUNNER_TEMP/agentsdock-acceptance-network/leaf.key" \
+            --pid-file "$RUNNER_TEMP/agentsdock-acceptance-network/replay.pid" \
+            > "$RUNNER_TEMP/agentsdock-acceptance-network/replay.log" 2>&1 &
+          for attempt in {1..60}; do
+            if curl --fail --silent --max-time 2 https://github.com/ZhengyiLuo/AgentsDock/releases.atom > /dev/null; then exit 0; fi
+            sleep 1
+          done
+          echo 'Candidate replay did not become ready.' >&2
+          exit 1
+      - name: Real update click, native replacement, and saved-server reconciliation
+        if: matrix.kind == 'legacy'
+        run: |
+          set -a
+          source "$RUNNER_TEMP/agentsdock-acceptance-network/trust.env"
+          set +a
+          node scripts/product_desktop_acceptance.mjs --scope candidate \
+            --receipt "$RUNNER_TEMP/candidate-inputs/candidate.json" --receipt-sha256 "$RECEIPT_SHA256" \
+            --server-directory "$RUNNER_TEMP/candidate-inputs/payload/server" --desktop-directory "$RUNNER_TEMP/candidate-inputs/payload/desktop" \
+            --baseline-directory "$RUNNER_TEMP/candidate-inputs/baseline-desktop" --baseline-version 1.0.6 \
+            --server-fixture "$RUNNER_TEMP/agentsdock-acceptance-candidate/server.json" \
+            --output "$RUNNER_TEMP/agentsdock-acceptance-candidate/desktop"
+      - name: Restore disposable routing and trust before artifact upload
+        if: always() && matrix.kind == 'legacy'
+        run: |
+          /bin/launchctl unsetenv SSL_CERT_FILE
+          /bin/launchctl unsetenv NODE_EXTRA_CA_CERTS
+          if tmux show-environment -g > /dev/null 2>&1; then
+            tmux set-environment -gu SSL_CERT_FILE
+            tmux set-environment -gu NODE_EXTRA_CA_CERTS
+          fi
+          if [[ -f "$RUNNER_TEMP/agentsdock-acceptance-network/replay.pid" ]]; then
+            REPLAY_PID="$(cat "$RUNNER_TEMP/agentsdock-acceptance-network/replay.pid")"
+            [[ "$REPLAY_PID" =~ ^[1-9][0-9]*$ ]]
+            if ps -p "$REPLAY_PID" -o command= | grep -F 'scripts/product-release-replay.mjs serve' | grep -F "$RUNNER_TEMP/agentsdock-acceptance-network/leaf.key" > /dev/null; then
+              kill -TERM "$REPLAY_PID"
+            fi
+          fi
+          if [[ -f "$RUNNER_TEMP/agentsdock-acceptance-network/owner.json" ]]; then
+            python3 scripts/product_acceptance_network.py teardown --candidate --work "$RUNNER_TEMP/agentsdock-acceptance-network"
+          fi
+      - name: Collect bounded public observations, never credentials or private fixture logs
+        if: always()
+        run: |
+          mkdir "$RUNNER_TEMP/candidate-public-evidence"
+          for pair in bootstrap.json:server.json desktop/desktop-evidence.json:desktop.json desktop/failure-observations.json:failure.json; do
+            SOURCE="$RUNNER_TEMP/agentsdock-acceptance-candidate/${pair%%:*}"
+            if [[ -f "$SOURCE" ]]; then cp "$SOURCE" "$RUNNER_TEMP/candidate-public-evidence/${pair#*:}"; fi
+          done
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        if: always()
+        with:
+          name: candidate-replay-${{ github.run_id }}-${{ github.run_attempt }}-${{ matrix.kind }}
+          path: ${{ runner.temp }}/candidate-public-evidence/*.json
+          if-no-files-found: warn
+          retention-days: 14
+
+# The optional rehearsal contains no signing credentials or publishing commands.
+# Only product-release-acceptance.yml can supply production acceptance evidence.

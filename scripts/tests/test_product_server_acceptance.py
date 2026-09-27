@@ -58,6 +58,43 @@ class NativeServerAcceptanceUnitTests(unittest.TestCase):
                     MOD.contained(value, root)
             MOD.contained(root / "owned/file", root)
 
+    def test_test_only_candidate_guard_is_explicit_exact_branch_and_not_production(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary).resolve()
+            env = self.environment(root)
+            env["GITHUB_WORKFLOW_REF"] = "ZhengyiLuo/AgentsDock/.github/workflows/ci.yml@refs/heads/release/native-test"
+            env["RUNNER_OS"] = "macOS"
+            receipt = {"schema": 1, "kind": "agentsdock-macos-candidate", "scope": "darwin-app-server",
+                       "publicationEligible": False, "sourceSha": "a" * 40, "sourceRef": "release/native-test"}
+            work = root / "agentsdock-acceptance-test"
+            self.assertEqual(MOD.guard(receipt, work, candidate=True, environment=env, uid=501, system="Darwin"), root / "account")
+            with self.assertRaises(RuntimeError):
+                MOD.guard(receipt, work, environment=env, uid=501, system="Darwin")
+            for change in ({"kind": "production"}, {"publicationEligible": True}, {"scope": "all-platforms"},
+                           {"sourceRef": "main"}, {"sourceSha": "b" * 40}):
+                with self.subTest(change=change), self.assertRaises(RuntimeError):
+                    MOD.guard({**receipt, **change}, work, candidate=True, environment=env, uid=501, system="Darwin")
+            for change in ({"GITHUB_EVENT_NAME": "workflow_call"}, {"GITHUB_EVENT_NAME": "pull_request"},
+                           {"GITHUB_WORKFLOW_REF": "ZhengyiLuo/AgentsDock/.github/workflows/ci.yml@refs/heads/release/other"},
+                           {"RUNNER_ENVIRONMENT": "self-hosted"}, {"RUNNER_OS": "Linux"}):
+                with self.subTest(change=change), self.assertRaises(RuntimeError):
+                    MOD.guard(receipt, work, candidate=True, environment={**env, **change}, uid=501, system="Darwin")
+            with self.assertRaises(RuntimeError):
+                MOD.guard(receipt, work, candidate=True, environment=env, uid=501, system="Linux")
+
+    def test_candidate_receipt_inspection_never_invents_production_preparation_metadata(self):
+        args = argparse.Namespace(candidate=True, receipt=Path("/fixture/candidate.json"), receipt_sha256="a" * 64,
+                                  bundle=Path("/fixture/server"), prepare_run=None)
+        with patch.object(MOD, "command") as command:
+            MOD.inspect_receipt(args)
+        arguments = command.call_args.args[0]
+        self.assertTrue(arguments[1].endswith("product-candidate-receipt.mjs"))
+        self.assertEqual(arguments[2:], ["inspect", str(args.receipt), args.receipt_sha256, str(args.bundle)])
+        args.candidate = False
+        with patch.object(MOD, "command") as command, self.assertRaises(RuntimeError):
+            MOD.inspect_receipt(args)
+        command.assert_not_called()
+
     def test_fixture_from_previous_run_attempt_is_refused_before_root_or_service_access(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary).resolve()

@@ -119,6 +119,7 @@ cleanup() {
 }
 trap cleanup EXIT
 
+python3 "$ROOT/scripts/verify_electron_app_zip.py" "$ZIP_PATH"
 /usr/bin/ditto -x -k "$ZIP_PATH" "$TEMP_DIR/zip"
 APP_PATH="$(/usr/bin/find "$TEMP_DIR/zip" -maxdepth 2 -type d -name 'AgentsDock.app' -print -quit)"
 [[ -n "$APP_PATH" ]] || { echo "Zip does not contain AgentsDock.app" >&2; exit 2; }

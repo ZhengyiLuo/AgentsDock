@@ -6,7 +6,8 @@ import { tmpdir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 import { test } from 'node:test'
 import { expectedAssets } from '../direct-release-mirror.mjs'
-import { assertReplayRunner, consumeReplayFault, createProductReplay, parseReplayArguments, parseReplayRange, readReplayMetadata, serveProductReplay } from '../product-release-replay.mjs'
+import { assertReplayRunner, consumeReplayFault, createCandidateReplay, createProductReplay, parseReplayArguments, parseReplayRange, readReplayMetadata, serveProductReplay } from '../product-release-replay.mjs'
+import { assertCandidateRunner, candidateAssets, inspectCandidate, validateCandidateReceipt } from '../product-candidate-receipt.mjs'
 import { newestCompatibleReleaseFromAtom } from '../../electron/src/main/updater-feed.mjs'
 
 const hash = bytes => createHash('sha256').update(bytes).digest('hex')
@@ -83,6 +84,70 @@ async function consume(response) {
     return Buffer.concat(chunks)
   } finally { await response.dispose() }
 }
+
+function scopedFixture(t) {
+  const f = fixture(t), names = candidateAssets(f.value.version, 'beta'), desktopAssets = {}
+  for (const name of expectedAssets(f.value.version, 'beta', true)) {
+    if (!names.includes(name)) rmSync(join(f.options.desktopDirectory, name))
+  }
+  const sums = names.filter(name => name !== 'SHA256SUMS').map(name => `${hash(readFileSync(join(f.options.desktopDirectory, name)))}  ${name}`).join('\n') + '\n'
+  writeFileSync(join(f.options.desktopDirectory, 'SHA256SUMS'), sums)
+  for (const name of names) {
+    const bytes = readFileSync(join(f.options.desktopDirectory, name))
+    desktopAssets[name] = { size: bytes.length, sha256: hash(bytes) }
+  }
+  // Cryptographic contract fixture, not a real signing run or native artifact.
+  const signerArchive = Buffer.from('synthetic signer transport fixture')
+  writeFileSync(join(f.root, 'signer-artifact.zip'), signerArchive)
+  const imported = { schema: 1, kind: 'artifact-only-server-import', releaseAcceptance: false,
+    ...Object.fromEntries(['version', 'track', 'sourceSha', 'sourceRef', 'exportSha', 'npmManifestSha256', 'legacyManifestSha256', 'serverBundleSha256'].map(key => [key, f.value[key]])),
+    signerRunId: '123', signerRunAttempt: '2', signerArtifactDigest: `sha256:${hash(signerArchive)}` }
+  const report = Buffer.from(JSON.stringify(imported))
+  writeFileSync(join(f.root, 'server-import.json'), report)
+  f.value = { ...imported, kind: 'agentsdock-macos-candidate', scope: 'darwin-app-server', publicationEligible: false,
+    buildNumber: '1189', desktopManifestSha256: hash(sums), serverImportSha256: hash(report), desktopAssets }
+  writeFileSync(f.options.receiptPath, JSON.stringify(f.value))
+  f.options.acceptedReceiptSha256 = hash(readFileSync(f.options.receiptPath))
+  delete f.options.preparationRunPath
+  return f
+}
+
+test('test-only macOS scope verifies exact signed bytes but cannot enter production replay', async t => {
+  const f = scopedFixture(t), replay = await createCandidateReplay(f.options)
+  assert.equal(replay.identity.kind, 'candidate')
+  assert.equal(replay.identity.publicationEligible, false)
+  assert(!replay.inventory().some(entry => /AppImage|\.exe|linux|win\.yml/.test(entry.url)))
+  assert(replay.inventory().some(entry => entry.url.endsWith('.tgz')))
+  assert(replay.inventory().some(entry => entry.url.endsWith('-mac-universal.zip')))
+  await assert.rejects(() => createProductReplay(f.options), /candidate/)
+  assert.throws(() => validateCandidateReceipt({ ...f.value, publicationEligible: true }))
+  assert.throws(() => validateCandidateReceipt({ ...f.value, sourceRef: 'release/bad.lock' }))
+  writeFileSync(join(f.root, 'server-import.json'), 'changed')
+  await assert.rejects(() => createCandidateReplay(f.options), /import report/)
+})
+
+test('candidate verifies original signer transport and every macOS artifact hash', async t => {
+  const f = scopedFixture(t)
+  const inspect = () => inspectCandidate({ ...f.options, receiptSha256: f.options.acceptedReceiptSha256 })
+  await inspect()
+  writeFileSync(join(f.root, 'signer-artifact.zip'), 'different')
+  await assert.rejects(inspect, /signing artifact/)
+})
+
+test('candidate replay requires explicit real hosted ci dispatch and has no production preparation run', () => {
+  const environment = { GITHUB_ACTIONS: 'true', RUNNER_ENVIRONMENT: 'github-hosted', GITHUB_REPOSITORY: 'ZhengyiLuo/AgentsDock',
+    GITHUB_EVENT_NAME: 'workflow_dispatch', GITHUB_WORKFLOW_REF: 'ZhengyiLuo/AgentsDock/.github/workflows/ci.yml@refs/heads/release/test',
+    GITHUB_SHA: sourceSha, GITHUB_RUN_ID: '12', GITHUB_RUN_ATTEMPT: '1', RUNNER_OS: 'macOS' }
+  assert.doesNotThrow(() => assertCandidateRunner(environment, 'darwin'))
+  for (const change of [{ GITHUB_EVENT_NAME: 'pull_request' }, { RUNNER_ENVIRONMENT: 'self-hosted' },
+    { GITHUB_WORKFLOW_REF: environment.GITHUB_WORKFLOW_REF.replace('ci.yml', 'product-release-acceptance.yml') },
+    { GITHUB_RUN_ATTEMPT: '0' }, { GITHUB_WORKFLOW_REF: environment.GITHUB_WORKFLOW_REF.replace('release/test', 'main') }]) {
+    assert.throws(() => assertCandidateRunner({ ...environment, ...change }, 'darwin'))
+  }
+  const args = ['inspect', '--scope', 'candidate', '--receipt', '/receipt', '--receipt-sha256', 'a'.repeat(64), '--server-assets', '/server', '--desktop-assets', '/desktop']
+  assert.equal(parseReplayArguments(args).options['--scope'], 'candidate')
+  assert.throws(() => parseReplayArguments(args.filter((_, i) => i !== 1 && i !== 2)), /Missing/)
+})
 
 test('replays only receipt-bound exact server/native bytes and labels generated discovery', async t => {
   const f = fixture(t), replay = await createProductReplay(f.options)
