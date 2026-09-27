@@ -1,5 +1,26 @@
 # Public development log
 
+## 2026-09-27 — Run-bound Cursor chat tools under native permissions
+
+- Replace Shell-based helper instructions for Cursor with a private per-run
+  MCP plugin. Preserve native CLI session IDs, login, working directories,
+  stream output, and history. Keep explicit denies and other tool permissions.
+- Reuse server capability checks and idempotent tool execution. Stop and exit
+  revoke the endpoint; temporary permission/configuration files are removed.
+  Clarify that accepted delivery does not imply reading or replying and must
+  not trigger another send.
+- Verify real Cursor Default-mode MCP calls and same-ID continuation, native
+  Shell rejection, explicit MCP denial, and unchanged global configuration.
+  These native probes use a synthetic inbox. Server integration tests cover
+  the real IPC and live-run fence with a fixture provider process.
+- Pass 256 focused Cursor, authorization and mailbox tests, plus targeted
+  packaging/configuration checks and Python/shell compilation. Additional
+  lifecycle coverage rejects non-regular configuration files without hanging.
+- Availability: local source for test-server acceptance, with no main push,
+  public release, or additional running-server restart. Actual app round-trip
+  mail, app reopen, and the designated server's acceptance remain pending.
+  See `server/docs/CURSOR_PROVIDER_MCP.md` for the contract and limitations.
+
 ## 2026-09-27 — Keep Claude model discovery passive
 
 - Remove disposable authenticated model-discovery processes and their forced
