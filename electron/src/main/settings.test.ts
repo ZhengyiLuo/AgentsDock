@@ -84,6 +84,21 @@ afterEach(() => {
   while (temporaryDirectories.length) rmSync(temporaryDirectories.pop()!, { recursive: true, force: true })
 })
 
+it('keeps automatic local discovery in Keychain without entering startup OSCrypt', () => {
+  const path = settingsPath()
+  const keychain = new MemoryKeychain()
+  const encrypt = vi.fn(() => { throw new Error('Startup must not enter OSCrypt') })
+  const settings = new SettingsStore({ path, keychain, safeStorage: { ...memorySafeStorage, encryptString: encrypt } })
+  const profile = settings.addProfile({ name: 'Local fixture', serverUrl: 'http://127.0.0.1:7860', accessToken: 'synthetic-token' }, true)
+  expect(encrypt).not.toHaveBeenCalled()
+  expect(settings.accessToken(profile.id)).toBe('synthetic-token')
+  expect(readFileSync(path, 'utf8')).not.toContain('synthetic-token')
+  keychain.writeEnabled = false
+  expect(() => settings.addProfile({ name: 'Denied', serverUrl: 'http://127.0.0.1:7861', accessToken: 'synthetic-other-token' }, true)).toThrow('Secure token storage')
+  expect(readFileSync(path, 'utf8')).not.toContain('synthetic-other-token')
+  expect(settings.listProfiles().some(item => item.name === 'Denied')).toBe(false)
+})
+
 describe('SettingsStore schema v2 migration', () => {
   it('reads configured profile metadata without accessing Keychain or decrypting credentials', () => {
     const keychain = new MemoryKeychain()

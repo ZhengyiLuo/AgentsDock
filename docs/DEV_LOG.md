@@ -12,6 +12,9 @@
 - Discover owned managed local installations once at desktop startup; check
   listener ownership before authentication and verify durable identity. Preserve
   saved profiles and current selection; never scan LAN addresses or start services.
+- Keep macOS automatic credential writes in the existing bounded Keychain helper,
+  avoiding concurrent startup OSCrypt/Keychain blocking. Fail closed if secure
+  storage is unavailable; normal explicit credential editing remains unchanged.
 - Focused synthetic checks cover credential isolation, transport, UI and discovery.
   TypeScript and production build are checked. Real third-party model/tool
   compatibility remains user acceptance work; no broad regression or release.

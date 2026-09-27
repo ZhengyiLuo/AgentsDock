@@ -1522,12 +1522,14 @@ export class AppService {
           // Only fill an unconfigured bootstrap profile. Never overwrite saved
           // remote credentials, a trusted identity, or a user's selection.
           if (!existing.hasAccessToken && !existing.serverIdentity && existing.serverUrl.replace(/\/$/, '') === server.serverUrl) {
-            this.settings.updateProfile(existing.id, { accessToken: server.accessToken, serverIdentity: server.serverIdentity, serverSetupComplete: true })
+            this.settings.updateProfile(existing.id, { accessToken: server.accessToken, serverIdentity: server.serverIdentity, serverSetupComplete: true }, process.platform === 'darwin')
             if (existing.id === this.activeProfileId && intent === this.profileSelectionIntent) await this.switchServer(existing.id, true)
           }
           continue
         }
-        this.addServer({ ...server, serverSetupComplete: true })
+        const profile = this.settings.addProfile({ ...server, serverSetupComplete: true }, process.platform === 'darwin')
+        this.setProfileRuntime(profile.id, { connectionState: 'cached', lastConnectionCheckedAt: null })
+        this.emitProfiles()
       }
       if (this.running && this.shutdownEpoch === epoch) await this.refreshInactiveProfileHealth()
     } catch { appLog('startup', 'local server discovery unavailable; saved profiles unchanged') }
