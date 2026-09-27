@@ -1,6 +1,7 @@
 import { createReadStream, openAsBlob } from 'node:fs'
 import { parseProviderUsage, type ProviderUsageSnapshot, type UsageBackend } from '../shared/provider-usage'
 import { parseCodexAuthStatus } from '../shared/codex-auth'
+import { connectionBackend, connectionRequest, parseConnectionReply, type ConnectionBackend, type ConnectionAction, type ProviderConnectionRequest, type ProviderConnectionReply } from '../shared/provider-connections'
 import { parseCodexProviderConfiguration, parseCodexProviderModels, parseCodexProviderTestResult, validateCodexProviderInput, validateCodexProviderModelTestInput, validateCodexProviderSelection } from '../shared/codex-provider'
 import { randomUUID } from 'node:crypto'
 import { request as httpRequest, type IncomingMessage } from 'node:http'
@@ -808,6 +809,23 @@ export class AgentServerClient {
   }
   codexServerSubagents(): Promise<CodexSubagentsConfiguration> {
     return this.privilegedNativeRequest('/api/admin/codex/subagents')
+  }
+  async providerConnectionRequest(backend: ConnectionBackend, action: ConnectionAction, input?: ProviderConnectionRequest): Promise<ProviderConnectionReply> {
+    const checked = connectionRequest(backend, action, input)
+    const path = `/api/admin/provider-connections/${connectionBackend(backend)}${action === 'check' ? '/check' : ''}`
+    const method = { get: 'GET', save: 'PUT', check: 'POST', forget: 'DELETE' }[action]
+    try {
+      return parseConnectionReply(backend, action, await this.privilegedNativeRequest(path, {
+        method, ...(checked ? { body: JSON.stringify(checked) } : {})
+      }, 35_000, 200, 8192))
+    } catch (error) {
+      if (error instanceof ServerError) {
+        const code = [401, 403].includes(error.status) ? 'ADMIN' : [404, 405, 501].includes(error.status) ? 'UPDATE'
+          : error.status === 409 ? 'STALE' : [400, 413, 415, 422].includes(error.status) ? 'INVALID' : 'FAILED'
+        throw new Error(`PROVIDER_CONNECTION_${code}`)
+      }
+      throw new Error('PROVIDER_CONNECTION_FAILED')
+    }
   }
   codexProvider(): Promise<CodexProviderConfiguration> {
     return this.codexProviderRequest('/api/admin/codex/provider', {}, parseCodexProviderConfiguration)
@@ -3157,6 +3175,8 @@ function isPrivilegedNativeControlTarget(
       && /^[A-Za-z0-9_-]{1,128}$/.test(target.searchParams.get('session_id') ?? '')
       && (!target.searchParams.has('refresh') || target.searchParams.get('refresh') === 'true')
   }
+  if (/^\/api\/admin\/provider-connections\/(claude|opencode)$/.test(path)) return !target.search && ['GET', 'PUT', 'DELETE'].includes(method)
+  if (/^\/api\/admin\/provider-connections\/(claude|opencode)\/check$/.test(path)) return !target.search && method === 'POST'
   if (path === '/api/admin/codex/auth') return !target.search && method === 'GET'
   if (path === '/api/admin/codex/provider') return !target.search && ['GET', 'PUT', 'DELETE'].includes(method)
   if (path === '/api/admin/codex/provider/test') return !target.search && method === 'POST'

@@ -416,6 +416,10 @@ export interface AgentsDockAPI {
     send(input: SendTurnInput): Promise<{ session: Session; event?: Event; queued?: boolean; queued_id?: string; position?: number }>
     stop(sessionId: string): Promise<TurnStopResult>
   }
+  providerConnections?: {
+    request(scope: CodexServerSettingsScope, backend: import('./provider-connections').ConnectionBackend,
+      action: import('./provider-connections').ConnectionAction, input?: import('./provider-connections').ProviderConnectionRequest): Promise<import('./provider-connections').ProviderConnectionReply>
+  }
   codex: {
     auth(scope: CodexServerSettingsScope): Promise<CodexAuthStatus>
     provider(scope: CodexServerSettingsScope): Promise<CodexProviderConfiguration>

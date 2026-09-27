@@ -1,5 +1,32 @@
 # Public development log
 
+## 2026-09-27 — Settings-only Claude Code and OpenCode API connections
+
+- Extend desktop AI Providers with separate Claude Code and OpenCode endpoint
+  profiles. Explicitly verify a small model request before saving, show a
+  timestamped API-check result, recheck saved credentials, and confirm removal.
+  Keep native login and chat routing unchanged. Add OpenRouter setup guidance
+  and a Cursor notice explaining why a generic model gateway is not a Cursor
+  CLI service endpoint.
+- Add native-only, revision-fenced server routes with private atomic storage,
+  bounded request/response sizes, timeouts, no redirects or implicit proxy
+  credentials, and credential-free responses. Preserve old credentials on a
+  failed replacement; reject browser-origin and stale-server requests.
+- Exercise the production desktop build in an isolated native profile through
+  renderer mouse/keyboard input, IPC, native HTTP transport, the actual server
+  authorization functions, new router/storage and real outbound HTTP. Verify
+  both forms, a failed-key retry, saved recheck, removal, cancel, navigation
+  and reopen. Inspect light/dark presentation and narrow layout. The model API,
+  health/session data and initial server profile are synthetic fixtures; no
+  user credentials, native provider login or live chat was changed.
+- Pass 4,940 desktop tests (five skipped), then targeted profile-isolation
+  coverage; pass 73 related server tests and nine packaging-manifest checks.
+  TypeScript and production compilation pass. Chinese copy, stale responses
+  and disconnected/old-server behavior are covered by component/transport
+  tests. Actual third-party API and agent-tool compatibility remain unverified
+  until a user supplies a test endpoint/key. Availability: local source and
+  development build only; compatible client and server updates are required.
+
 ## 2026-09-27 — Dedicated desktop AI Providers settings
 
 - Add an AI Providers section with the selected server's existing runtime

@@ -282,6 +282,7 @@ export function registerIpc(
   handle('turns:stop', sessionId => service.stopTurn(sessionId))
 
   handle('codex:server-goals:get', () => service.codexServerGoals())
+  handle('provider-connections:request', (scope, backend, action, input) => service.providerConnectionRequest(scope, backend, action, input))
   handle('codex:auth:get', scope => service.codexAuth(scope))
   handle('codex:provider:get', scope => service.codexProvider(scope))
   handle('codex:provider:models', (scope, sessionId) => service.codexProviderModels(scope, sessionId))

@@ -1,4 +1,5 @@
 import type { ProviderUsageScope, ProviderUsageSnapshot, UsageBackend } from '../shared/provider-usage'
+import { connectionRequest, type ConnectionBackend, type ConnectionAction, type ProviderConnectionRequest, type ProviderConnectionReply } from '../shared/provider-connections'
 import { app, BrowserWindow, dialog, nativeImage, Notification, shell } from 'electron'
 import { applyOpenCodeSessionEvent } from '../shared/opencode'
 import { chmodSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
@@ -2192,6 +2193,16 @@ export class AppService {
     const session = this.sessions.find(candidate => candidate.id === sessionId)
     if (!session || session.backend !== backend || !['codex', 'claude'].includes(backend)) throw new Error('Provider usage is unavailable for this chat')
     const result = await scope.client.providerUsage(backend, sessionId, refresh)
+    this.assertCurrentScope(scope)
+    return result
+  }
+
+  async providerConnectionRequest(expected: CodexServerSettingsScope, backend: ConnectionBackend, action: ConnectionAction, input?: ProviderConnectionRequest): Promise<ProviderConnectionReply> {
+    const checked = connectionRequest(backend, action, input)
+    const scope = this.requireProfileScope(expected?.profileId, expected?.profileGeneration)
+    await this.ensureValidatedScope(scope)
+    this.assertCurrentScope(scope)
+    const result = await scope.client.providerConnectionRequest(backend, action, checked)
     this.assertCurrentScope(scope)
     return result
   }

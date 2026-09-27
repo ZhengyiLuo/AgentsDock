@@ -3,9 +3,10 @@ import { useLocale } from '../lib/i18n'
 import { useAppStore } from '../store/app-store'
 import { CodexAuthSettings } from './CodexAuthSettings'
 import { RuntimeHealthPanel } from './RuntimeHealth'
+import { CursorEndpointNotice, EndpointSetupHelp, ProviderConnectionSettings } from './ProviderConnectionSettings'
 
-// This page only organizes existing controls. Authentication, endpoint storage,
-// explicit checks and request ownership stay in their original components.
+// Native runtime status and API checks are separate. New connection profiles
+// are settings-only: they never change a session's provider or credentials.
 export function AIProviderSettings() {
   useLocale()
   const connected = useAppStore(state => state.connected)
@@ -20,6 +21,10 @@ export function AIProviderSettings() {
     </div>
     <RuntimeHealthPanel />
     <p className="app-settings-provider-help">{t('settings.providersCustomHelp')}</p>
+    <EndpointSetupHelp />
     <CodexAuthSettings connected={connected} profileId={profileId} profileGeneration={profileGeneration} serverTitle={profile?.name} />
+    <ProviderConnectionSettings backend="claude" connected={connected} profileId={profileId} profileGeneration={profileGeneration} />
+    <ProviderConnectionSettings backend="opencode" connected={connected} profileId={profileId} profileGeneration={profileGeneration} />
+    <CursorEndpointNotice />
   </div>
 }

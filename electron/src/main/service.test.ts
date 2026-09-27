@@ -1103,6 +1103,31 @@ describe('Codex account status profile isolation', () => {
   })
 })
 
+describe('settings-only provider connection profile isolation', () => {
+  const caller = { profileId: 'endpoint-a', profileGeneration: 1 }
+  function harness() {
+    const client = { providerConnectionRequest: vi.fn().mockResolvedValue({ ok: false, status: 'authentication_failed' }) }
+    const service = Object.create(AppService.prototype) as AppService
+    Object.assign(service, { scope: { profileId: caller.profileId, generation: 1, namespace: 'profile:endpoint-a', client },
+      activeProfileId: caller.profileId, profileGeneration: 1, validatedGeneration: 1,
+      profileResetIsPending: vi.fn().mockReturnValue(false) })
+    return { service, client }
+  }
+  it('rejects stale callers before dispatch and late results after switching servers', async () => {
+    const { service, client } = harness()
+    await expect(service.providerConnectionRequest({ ...caller, profileGeneration: 0 }, 'claude', 'get')).rejects.toThrow('superseded')
+    expect(client.providerConnectionRequest).not.toHaveBeenCalled()
+    const response = deferred<{ ok: boolean; status: string }>(), called = deferred<void>()
+    client.providerConnectionRequest.mockImplementation(() => { called.resolve(); return response.promise })
+    const pending = service.providerConnectionRequest(caller, 'opencode', 'check', { expected_revision: 1 })
+    await called.promise
+    Object.assign(service, { activeProfileId: 'endpoint-b', profileGeneration: 2 })
+    response.resolve({ ok: false, status: 'authentication_failed' })
+    await expect(pending).rejects.toThrow('superseded')
+    expect(client.providerConnectionRequest).toHaveBeenCalledExactlyOnceWith('opencode', 'check', { expected_revision: 1 })
+  })
+})
+
 describe('Codex endpoint request profile isolation', () => {
   const caller = { profileId: 'provider-a', profileGeneration: 1 }
   const configuration = { available: true, configured: true, base_url: 'https://gateway.example/v1',
