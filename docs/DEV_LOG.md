@@ -1,5 +1,22 @@
 # Public development log
 
+## 2026-09-27 — Verify and activate goal and history corrections
+
+- Apply the tested server corrections from `3b6a424` to the requested existing
+  installation after explicit approval to restart its worker. Preserve source
+  backups. Verify the replacement worker is healthy, contract version 28 and
+  Team Hub remain available, and the affected chat starts a native Codex turn
+  and produces output. Do not send a synthetic message into the user's chat.
+- Verify existing duplicate repair in the signed desktop `1.0.7-beta.16`, build
+  `1221`: use Refresh chats with the existing cached fixture that previously
+  displayed a duplicate. The imported copy disappears and all original user
+  messages remain once. No renderer exceptions occur.
+- Stop the disposable app/server/provider processes and tunnel, remove copied
+  credentials and the temporary Keychain item, and verify its listener closes.
+  A concurrently changed production configuration is left untouched.
+- Availability: a source hotfix on the requested server, still reporting
+  `1.0.7-beta.16`. This does not publish a new npm package or desktop release.
+
 ## 2026-09-27 — Repair previously imported goal follow-up copies
 
 - Extend read-only history repair to identify imported copies of accepted
