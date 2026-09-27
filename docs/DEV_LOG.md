@@ -16,10 +16,15 @@
 - Pass 256 focused Cursor, authorization and mailbox tests, plus targeted
   packaging/configuration checks and Python/shell compilation. Additional
   lifecycle coverage rejects non-regular configuration files without hanging.
-- Availability: local source for test-server acceptance, with no main push,
-  public release, or additional running-server restart. Actual app round-trip
-  mail, app reopen, and the designated server's acceptance remain pending.
-  See `server/docs/CURSOR_PROVIDER_MCP.md` for the contract and limitations.
+- Activate the patched local beta candidate through the normal authenticated
+  restart path. Preserve server identity and existing chat/native session
+  associations; leave other running server instances untouched. The user
+  subsequently accepted local App testing and requested source integration.
+  Individual manual checklist results were not separately recorded; this does
+  not replace independent full App round-trip or release acceptance evidence.
+- Availability: locally tested server fix submitted for main integration; no
+  public package or release publication. See
+  `server/docs/CURSOR_PROVIDER_MCP.md` for the contract and limitations.
 
 ## 2026-09-27 — Keep Claude model discovery passive
 
@@ -40,8 +45,8 @@
 - A before/after regression observes one disposable metadata-process attempt
   in the old path and none in the corrected path. Actual app testing also
   caught and fixed cache invalidation caused by Claude's startup counters.
-- Availability: locally committed source and an isolated patched beta server.
-  No public release or main push. Natural OAuth renewal and coexistence with
+- Availability: locally tested source submitted for main integration and an
+  isolated patched beta server; no public release. Natural OAuth renewal and coexistence with
   older servers sharing native login remain unverified; immediate successful
   requests do not establish that repeated-login incidents are resolved.
 

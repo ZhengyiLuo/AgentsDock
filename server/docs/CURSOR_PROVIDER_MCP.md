@@ -72,9 +72,14 @@ permission preservation, and the existing durable mailbox contracts. The
 runner subprocess in that integration test is a fixture; the separate native
 Cursor probes cover the real CLI permission and continuation behavior.
 
-**Pending acceptance:** after the designated test server is restarted with
-this source, exercise Codex → Cursor → Codex and the reverse direction in the
-actual app, with Cursor on Default permissions. Reopen the app and repeat;
-verify one stored message per send, denied unauthorized/stale access, and
-unchanged ordinary Shell permissions. Until then, this is an implementation
-prepared for native app acceptance, not an accepted product release.
+**Local manual acceptance:** the patched test server was restarted normally,
+preserving server identity and existing native chat associations. The user
+subsequently reported that local App testing looked good and authorized main
+integration. Individual checklist outcomes were not separately recorded; the
+agent's independent native probes above are not full App round-trip evidence.
+
+The repeatable App checklist remains: Codex → Cursor → Codex and the reverse
+direction with Cursor on Default permissions, then reopen the App and repeat.
+Verify one stored message per send, denied unauthorized/stale access, and
+unchanged ordinary Shell permissions. Source integration and local manual
+acceptance do not establish production-release acceptance or Windows support.
