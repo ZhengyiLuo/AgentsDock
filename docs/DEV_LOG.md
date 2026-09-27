@@ -15,7 +15,28 @@
   Reproduce the missing-label and stale-fallback failures before correction.
 - Exercise two real native Codex children through an isolated full server and
   confirm useful labels with no native title or path. Labels survive an isolated
-  server restart. Desktop build and hands-on acceptance are pending.
+  server restart and a follow-up submitted through the desktop composer.
+- Accept signed local desktop `1.0.7-beta.16`, build `1221`, from `aab4b43`,
+  with server source `5ba2edf`. Through production IPC, HTTP and WebSocket paths,
+  click both child cards and verify their distinct outputs, retained assignment
+  labels, and two history records after reload. Constrain the output panel's
+  grid column so long labels cannot hide Copy or Close; verify Close by clicking
+  it at both normal and narrow window widths. No renderer exceptions occur.
+- The final build passes 4,935 desktop tests with five existing skips, TypeScript
+  checks, production compilation, package auditing and signing verification.
+  Availability: local desktop package and prepared server candidate; no public
+  release. Disposable app/server/provider processes and credentials are removed.
+
+## 2026-09-26 — Verify interactive shared-chat downloads
+
+- Exercise the existing shared-chat web bundle in a separate browser session
+  against a disposable full server. Uploaded files, published artifacts,
+  Markdown file links and empty files download with matching bytes and attachment
+  response headers, including after reload.
+- Verify denial without the share session and after revocation. Revoke the test
+  share and remove its browser/server credentials and processes. These checks use
+  synthetic existing chat/file records and real browser authorization/download
+  routes; they do not make provider requests or require a desktop change.
 
 ## 2026-09-26 — Keep attachments working across native Codex continuations
 
