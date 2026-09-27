@@ -1,5 +1,25 @@
 # Public development log
 
+## 2026-09-27 — Verify the unpublished beta.18 macOS/app-server candidate
+
+- Build `1.0.7-beta.18`, native build `1223`, from pinned source
+  `78e113f806b023a1caa925bb9ff763adc79c2842`. Reuse server signing run
+  `36342006391` and the original trust key; verify artifact provenance, both
+  signatures and exact npm/legacy runtime parity. Offline npm staging reports
+  the matching version, including the pinned Claude and Cursor modules.
+- Verify the universal desktop ZIP and DMG with the existing Developer ID:
+  notarization/stapling, Gatekeeper, strict signatures, signed app parity,
+  updater metadata/blockmap and an isolated launch smoke test all pass.
+  The app embeds the exact signed matching npm descriptor, not the server runtime.
+- Seal a non-publishing macOS candidate receipt with SHA-256
+  `18b3f793b3d54a017f27b385dd4422e56f78d7cf07ea599d606a587ff17faffd`.
+  Keep its source branch pinned; later documentation does not rebuild packages.
+- Source CI passes Electron/release tooling/mobile checks and all eight server
+  shards. Provide a separate-account macOS test handoff; real provider chats,
+  logout/reboot and the native one-click replay are not established by this
+  package verification. No npm/public desktop release, key rotation, existing
+  service mutation or App Store/TestFlight upload has occurred.
+
 ## 2026-09-27 — Match native acceptance to the installer entry-point mode
 
 - Reserve `1.0.7-beta.18`, native build `1223`, for the corrected rehearsal.
