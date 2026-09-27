@@ -75,11 +75,11 @@ it('keeps legacy Server navigation and moves account/runtime controls only', asy
   useAppStore.setState(state => ({ modals: { ...state.modals, settings: true, appSettings: false } }))
   render(<SettingsDialog />)
   expect(screen.getByRole('button', { name: 'Server' })).toHaveAttribute('aria-current', 'page')
-  expect(screen.queryByText('Codex · Native account')).not.toBeInTheDocument()
+  expect(screen.queryByText('CLI Login')).not.toBeInTheDocument()
   expect(screen.queryByRole('button', { name: 'Recheck CLIs' })).not.toBeInTheDocument()
   expect(api.codex.auth).not.toHaveBeenCalled()
   fireEvent.click(screen.getByRole('button', { name: 'AI Providers' }))
-  await screen.findByText('Codex · Native account')
+  await screen.findAllByText('CLI Login')
   expect(screen.getAllByRole('button', { name: 'Reload settings' })[0]).toBeEnabled()
 })
 
@@ -117,4 +117,23 @@ it('localizes the provider navigation and selected-server context', () => {
   fireEvent.click(screen.getByRole('button', { name: 'AI 服务商' }))
   expect(screen.getByRole('heading', { name: 'AI 服务商' })).toBeVisible()
   expect(screen.getByText('当前服务端：Studio server')).toBeVisible()
+})
+
+it('uses matching CLI cards and loads only the expanded signed-in account without mixing API details', async () => {
+  bridge()
+  const read = vi.fn().mockResolvedValue({ backend: 'claude', email: 'cli@example.test', plan_type: 'max', source: 'local_profile' })
+  window.agentsDock.providerAccounts = { read }
+  useAppStore.setState({ runtimeCatalog: { backends: { claude: { native_credentials_present: true } } } as never })
+  render(<AppSettingsDialog />)
+  fireEvent.click(screen.getByRole('button', { name: 'AI Providers' }))
+  expect(document.querySelectorAll('.cli-account-card.codex-auth-settings')).toHaveLength(3)
+  expect(read).not.toHaveBeenCalled()
+  const group = screen.getByText('Claude Code', { selector: 'summary strong' }).closest('details')!
+  group.open = true
+  fireEvent(group, new Event('toggle'))
+  expect(await screen.findByText('Email: cli@example.test')).toBeVisible()
+  expect(screen.getByText('Plan: max')).toBeVisible()
+  expect(read).toHaveBeenCalledExactlyOnceWith({ profileId: 'studio', profileGeneration: 1 }, 'claude')
+  fireEvent.click(screen.getByRole('button', { name: 'General' }))
+  expect(screen.queryByText('Email: cli@example.test')).not.toBeInTheDocument()
 })

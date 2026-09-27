@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from 'vitest'
 import { createServer } from 'node:http'
 import type { AddressInfo } from 'node:net'
 import { AgentServerClient } from './server-client'
-import { connectionRequest, parseConnectionReply } from '../shared/provider-connections'
+import { connectionRequest, parseConnectionReply, parseCLIAccount } from '../shared/provider-connections'
 
 const input = { base_url: 'https://gateway.example/api', model: 'test/model', api_key: 'synthetic-only',
   protocol: 'anthropic' as const, auth_header: 'bearer' as const, expected_revision: 0 }
@@ -13,6 +13,26 @@ const empty = { ...config, configured: false, has_api_key: false, base_url: null
   auth_header: null, checked_at: null, last_result: null }
 
 describe('settings-only provider connection native transport', () => {
+  it('reads CLI account metadata over native HTTP and drops unexpected credentials', async () => {
+    const metadata = { backend: 'cursor', email: 'fixture@example.test', plan_type: 'Pro', source: 'cli' }
+    const fetch = vi.spyOn(globalThis, 'fetch').mockRejectedValue(new Error('generic fetch forbidden'))
+    const server = createServer((req, res) => {
+      expect(req.url).toBe('/api/admin/provider-accounts/cursor')
+      expect(req.method).toBe('GET')
+      expect(req.headers['x-agentsdock-token']).toBe('synthetic-admin')
+      expect(req.headers['origin']).toBeUndefined(); expect(req.headers['sec-fetch-mode']).toBeUndefined()
+      res.setHeader('Content-Type', 'application/json')
+      res.end(JSON.stringify({ ...metadata, accessToken: 'synthetic-secret' }))
+    })
+    await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve))
+    const client = new AgentServerClient(`http://127.0.0.1:${(server.address() as AddressInfo).port}`, 'synthetic-admin')
+    try {
+      expect(await client.providerAccount('cursor')).toEqual(metadata)
+      expect(fetch).not.toHaveBeenCalled()
+      expect(() => parseCLIAccount('claude', metadata)).toThrow('CLI_ACCOUNT_INVALID')
+      expect(() => parseCLIAccount('cursor', { ...metadata, email: 'bad\nemail' })).toThrow('CLI_ACCOUNT_INVALID')
+    } finally { client.dispose(); fetch.mockRestore(); server.closeAllConnections(); await new Promise<void>(resolve => server.close(() => resolve())) }
+  })
   it('uses exact native routes and strips extra secret fields from successful responses', async () => {
     const calls: { url?: string; method?: string; body: string }[] = []
     const fetch = vi.spyOn(globalThis, 'fetch').mockRejectedValue(new Error('generic fetch forbidden'))

@@ -1,5 +1,5 @@
 import type { ProviderUsageScope, ProviderUsageSnapshot, UsageBackend } from '../shared/provider-usage'
-import { connectionRequest, type ConnectionBackend, type ConnectionAction, type ProviderConnectionRequest, type ProviderConnectionReply } from '../shared/provider-connections'
+import { cliAccountBackend, type CLIAccountBackend, connectionRequest, type ConnectionBackend, type ConnectionAction, type ProviderConnectionRequest, type ProviderConnectionReply } from '../shared/provider-connections'
 import { app, BrowserWindow, dialog, nativeImage, Notification, shell } from 'electron'
 import { discoverLocalServers, type DiscoveredLocalServer } from './local-server-discovery'
 import { applyOpenCodeSessionEvent } from '../shared/opencode'
@@ -2248,6 +2248,16 @@ export class AppService {
     await this.ensureValidatedScope(scope)
     this.assertCurrentScope(scope)
     const result = await scope.client.codexAuth()
+    this.assertCurrentScope(scope)
+    return result
+  }
+
+  async providerAccount(expected: CodexServerSettingsScope, backend: CLIAccountBackend) {
+    const checked = cliAccountBackend(backend)
+    const scope = this.requireProfileScope(expected?.profileId, expected?.profileGeneration)
+    await this.ensureValidatedScope(scope)
+    this.assertCurrentScope(scope)
+    const result = await scope.client.providerAccount(checked)
     this.assertCurrentScope(scope)
     return result
   }

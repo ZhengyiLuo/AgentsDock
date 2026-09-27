@@ -1,5 +1,17 @@
 # Public development log
 
+## 2026-09-27 — CLI login account cards
+
+- Match CLI Login and Custom API card styling in all provider groups. Show
+  available CLI email/plan separately from custom API billing; omit unknown
+  fields. Claude metadata is explicitly a saved profile, not a login probe.
+- Add a read-only, native-administration account route and profile-fenced desktop
+  transport. Opening a card never renews credentials or runs model inference.
+- Model discovery/default selection is unchanged; catalog/compatibility UX
+  improvements remain a separate research recommendation.
+- Focused account, authorization, native transport and card tests cover the
+  change. Local app/server acceptance is recorded after building; no release.
+
 ## 2026-09-27 — Folded provider settings and managed local discovery
 
 - Present four expandable provider groups. Separate native credential presence

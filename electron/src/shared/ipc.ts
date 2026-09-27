@@ -420,6 +420,9 @@ export interface AgentsDockAPI {
     request(scope: CodexServerSettingsScope, backend: import('./provider-connections').ConnectionBackend,
       action: import('./provider-connections').ConnectionAction, input?: import('./provider-connections').ProviderConnectionRequest): Promise<import('./provider-connections').ProviderConnectionReply>
   }
+  providerAccounts?: {
+    read(scope: CodexServerSettingsScope, backend: import('./provider-connections').CLIAccountBackend): Promise<import('./provider-connections').CLIAccountMetadata>
+  }
   codex: {
     auth(scope: CodexServerSettingsScope): Promise<CodexAuthStatus>
     provider(scope: CodexServerSettingsScope): Promise<CodexProviderConfiguration>

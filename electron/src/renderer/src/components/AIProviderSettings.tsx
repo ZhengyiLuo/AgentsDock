@@ -1,7 +1,8 @@
-import { useState } from 'react'
-import { CheckCircle2, Circle, ChevronRight, RefreshCw } from 'lucide-react'
+import { useEffect, useState } from 'react'
+import { CheckCircle2, Circle, ChevronRight, RefreshCw, KeyRound } from 'lucide-react'
 import { t } from '@shared/i18n'
 import type { Backend } from '@shared/types'
+import type { CLIAccountBackend, CLIAccountMetadata } from '@shared/provider-connections'
 import { nativeProviderConnected } from '@shared/runtime-catalog'
 import { useLocale } from '../lib/i18n'
 import { useAppStore } from '../store/app-store'
@@ -10,6 +11,34 @@ import { useRuntimeRecheck } from './RuntimeHealth'
 import { NativeProviderSignIn } from './NativeProviderSignIn'
 import { CursorEndpointNotice, ProviderConnectionSettings } from './ProviderConnectionSettings'
 
+function CLIAccountCard({ backend, signedIn, open }: { backend: CLIAccountBackend; signedIn: boolean; open: boolean }) {
+  const connected = useAppStore(state => state.connected)
+  const profileId = useAppStore(state => state.activeProfileId)
+  const profileGeneration = useAppStore(state => state.profileGeneration)
+  const [account, setAccount] = useState<CLIAccountMetadata | null>(null)
+  useEffect(() => {
+    let cancelled = false
+    setAccount(null)
+    if (!open || !signedIn || !connected || !profileId) return
+    const read = window.agentsDock.providerAccounts?.read
+    if (read) void read({ profileId, profileGeneration }, backend).then(value => {
+      if (!cancelled) setAccount(value)
+    }).catch(() => { /* Optional display metadata must not invalidate working credentials. */ })
+    return () => { cancelled = true }
+  }, [open, signedIn, connected, profileId, profileGeneration, backend])
+  return <section className={`codex-auth-settings cli-account-card ${signedIn ? 'connection-connected' : 'connection-unconfirmed'}`} aria-label={`${backend} CLI Login`}>
+    <span className="codex-auth-settings-icon">{signedIn ? <CheckCircle2 size={18} /> : <KeyRound size={17} />}</span>
+    <div className="codex-auth-settings-copy">
+      <div className="codex-auth-settings-heading"><strong>{t('connections.nativeLogin')}</strong></div>
+      <small role="status">{t(signedIn ? 'connections.nativeDetected' : 'connections.notSignedIn')}</small>
+      {signedIn && account?.email && <small>{t('connections.email')}: {account.email}</small>}
+      {signedIn && account?.plan_type && <small>{t('connections.plan')}: {account.plan_type}</small>}
+      {signedIn && account?.source === 'local_profile' && <small>{t('connections.cachedProfile')}</small>}
+      {!signedIn && <NativeProviderSignIn backend={backend} disabled={!connected} />}
+    </div>
+  </section>
+}
+
 function ProviderGroup({ backend }: { backend: Backend }) {
   const connected = useAppStore(state => state.connected)
   const profileId = useAppStore(state => state.activeProfileId)
@@ -17,19 +46,17 @@ function ProviderGroup({ backend }: { backend: Backend }) {
   const native = useAppStore(state => state.connected && nativeProviderConnected(state.health, state.runtimeCatalog, backend))
   const [api, setAPI] = useState(false)
   const [codexNative, setCodexNative] = useState(false)
+  const [open, setOpen] = useState(false)
   const signedIn = backend === 'codex' ? codexNative || native : native
   const ready = connected && (signedIn || api)
   const name = { codex: 'Codex', claude: 'Claude Code', cursor: 'Cursor', opencode: 'OpenCode' }[backend]
-  return <details className={`provider-group ${ready ? 'is-connected' : ''}`}>
+  return <details className={`provider-group ${ready ? 'is-connected' : ''}`} onToggle={event => setOpen(event.currentTarget.open)}>
     <summary><ChevronRight size={16} className="provider-group-chevron" /><strong>{name}</strong>
       <span className="provider-group-status">{ready ? <CheckCircle2 size={17} /> : <Circle size={17} />}{t(ready ? 'connections.connected' : 'connections.empty')}</span>
     </summary>
     <div className="provider-group-body">
       {backend === 'codex' ? <CodexAuthSettings connected={connected} profileId={profileId} profileGeneration={profileGeneration} onAPIStatus={setAPI} onNativeStatus={setCodexNative} /> : <>
-        <div className={`provider-native-status ${signedIn ? 'is-connected' : ''}`}>
-          <strong>{t('connections.nativeLogin')}</strong><span>{signedIn ? <CheckCircle2 size={15} /> : <Circle size={15} />}{t(signedIn ? 'connections.nativeDetected' : 'connections.notSignedIn')}</span>
-          {!signedIn && <NativeProviderSignIn backend={backend} disabled={!connected} />}
-        </div>
+        <CLIAccountCard backend={backend} signedIn={signedIn} open={open} />
         {backend === 'cursor' ? <CursorEndpointNotice /> : <ProviderConnectionSettings backend={backend} connected={connected} profileId={profileId} profileGeneration={profileGeneration} onStatus={setAPI} />}
       </>}
     </div>

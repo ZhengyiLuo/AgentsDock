@@ -1,6 +1,26 @@
 import { validateCodexProviderURL } from './codex-provider'
 import { validateCodexApiKey } from './codex-auth'
 
+export type CLIAccountBackend = 'claude' | 'cursor' | 'opencode'
+export interface CLIAccountMetadata {
+  backend: CLIAccountBackend; email: string | null; plan_type: string | null
+  source: 'local_profile' | 'cli' | 'unavailable'
+}
+export function cliAccountBackend(value: unknown): CLIAccountBackend {
+  if (value !== 'claude' && value !== 'cursor' && value !== 'opencode') throw new Error('CLI_ACCOUNT_INVALID')
+  return value
+}
+export function parseCLIAccount(backend: CLIAccountBackend, value: unknown): CLIAccountMetadata {
+  if (!value || typeof value !== 'object') throw new Error('CLI_ACCOUNT_INVALID')
+  const item = value as Record<string, unknown>
+  const field = (value: unknown, max: number) => value === null ? null
+    : typeof value === 'string' && value.length > 0 && value.length <= max && !/[\x00-\x1f\x7f]/.test(value) ? value : undefined
+  const email = field(item.email, 254), plan = field(item.plan_type, 80)
+  if (item.backend !== backend || email === undefined || plan === undefined || (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email))
+    || !['local_profile', 'cli', 'unavailable'].includes(String(item.source))) throw new Error('CLI_ACCOUNT_INVALID')
+  return { backend, email, plan_type: plan, source: item.source as CLIAccountMetadata['source'] }
+}
+
 export type ConnectionBackend = 'claude' | 'opencode'
 export type ConnectionAction = 'get' | 'save' | 'check' | 'forget'
 export type ConnectionProtocol = 'anthropic' | 'chat_completions' | 'responses'

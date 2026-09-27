@@ -1,7 +1,7 @@
 import { createReadStream, openAsBlob } from 'node:fs'
 import { parseProviderUsage, type ProviderUsageSnapshot, type UsageBackend } from '../shared/provider-usage'
 import { parseCodexAuthStatus } from '../shared/codex-auth'
-import { connectionBackend, connectionRequest, parseConnectionReply, type ConnectionBackend, type ConnectionAction, type ProviderConnectionRequest, type ProviderConnectionReply } from '../shared/provider-connections'
+import { cliAccountBackend, parseCLIAccount, type CLIAccountBackend, connectionBackend, connectionRequest, parseConnectionReply, type ConnectionBackend, type ConnectionAction, type ProviderConnectionRequest, type ProviderConnectionReply } from '../shared/provider-connections'
 import { parseCodexProviderConfiguration, parseCodexProviderModels, parseCodexProviderTestResult, validateCodexProviderInput, validateCodexProviderModelTestInput, validateCodexProviderSelection } from '../shared/codex-provider'
 import { randomUUID } from 'node:crypto'
 import { request as httpRequest, type IncomingMessage } from 'node:http'
@@ -829,6 +829,10 @@ export class AgentServerClient {
   }
   codexProvider(): Promise<CodexProviderConfiguration> {
     return this.codexProviderRequest('/api/admin/codex/provider', {}, parseCodexProviderConfiguration)
+  }
+  async providerAccount(backend: CLIAccountBackend) {
+    const checked = cliAccountBackend(backend)
+    return parseCLIAccount(checked, await this.privilegedNativeRequest(`/api/admin/provider-accounts/${checked}`, {}, 15_000, 200, 8192))
   }
   codexProviderModels(sessionId?: string): Promise<CodexProviderModels> {
     if (sessionId !== undefined && (typeof sessionId !== 'string' || !sessionId || sessionId.length > 256)) throw new Error('CODEX_PROVIDER_INVALID')
@@ -3181,6 +3185,7 @@ function isPrivilegedNativeControlTarget(
   }
   if (/^\/api\/admin\/provider-connections\/(claude|opencode)$/.test(path)) return !target.search && ['GET', 'PUT', 'DELETE'].includes(method)
   if (/^\/api\/admin\/provider-connections\/(claude|opencode)\/check$/.test(path)) return !target.search && method === 'POST'
+  if (/^\/api\/admin\/provider-accounts\/(claude|cursor|opencode)$/.test(path)) return !target.search && method === 'GET'
   if (path === '/api/admin/codex/auth') return !target.search && method === 'GET'
   if (path === '/api/admin/codex/provider') return !target.search && ['GET', 'PUT', 'DELETE'].includes(method)
   if (path === '/api/admin/codex/provider/test') return !target.search && method === 'POST'
