@@ -3,6 +3,7 @@ import { createServer } from 'node:http'
 import type { AddressInfo } from 'node:net'
 import { AgentServerClient } from './server-client'
 import { connectionRequest, parseConnectionReply, parseCLIAccount } from '../shared/provider-connections'
+import { customModelInput, parseCustomModels } from '../shared/custom-models'
 
 const input = { base_url: 'https://gateway.example/api', model: 'test/model', api_key: 'synthetic-only',
   protocol: 'anthropic' as const, auth_header: 'bearer' as const, expected_revision: 0 }
@@ -13,6 +14,31 @@ const empty = { ...config, configured: false, has_api_key: false, base_url: null
   auth_header: null, checked_at: null, last_result: null }
 
 describe('settings-only provider connection native transport', () => {
+  it('reads and saves custom model defaults through native HTTP without resubmitting a key', async () => {
+    const calls: { method?: string; url?: string; body: string }[] = []
+    const metadata = { backend: 'claude' as const, revision: 1, default_model: 'fixture/one', models: [{ value: 'fixture/one', label: 'Friendly' }], discovery_status: 'ready' }
+    const server = createServer(async (req, res) => {
+      const chunks: Buffer[] = []; for await (const chunk of req) chunks.push(Buffer.from(chunk))
+      calls.push({ method: req.method, url: req.url, body: Buffer.concat(chunks).toString() })
+      expect(req.headers['x-agentsdock-token']).toBe('synthetic-admin')
+      expect(req.headers['origin']).toBeUndefined(); expect(req.headers['sec-fetch-mode']).toBeUndefined()
+      res.setHeader('Content-Type', 'application/json')
+      res.end(JSON.stringify({ ...metadata, api_key: 'should-not-return' }))
+    })
+    await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve))
+    const client = new AgentServerClient(`http://127.0.0.1:${(server.address() as AddressInfo).port}`, 'synthetic-admin')
+    try {
+      expect(await client.customModels('claude')).toEqual(metadata)
+      expect(await client.customModels('claude', { model: 'fixture/one', expected_revision: 1 })).toEqual({ backend: 'claude', revision: 1, default_model: 'fixture/one' })
+      await client.customModels('claude', undefined, 'session-one')
+      expect(calls.map(c => [c.method, c.url])).toEqual([
+        ['GET', '/api/admin/provider-models/claude'], ['PUT', '/api/admin/provider-models/claude'], ['GET', '/api/admin/provider-models/claude?session_id=session-one']])
+      expect(JSON.parse(calls[1].body)).toEqual({ model: 'fixture/one', expected_revision: 1 })
+      expect(() => customModelInput('claude', { model: 'bad model', expected_revision: 1 })).toThrow()
+      expect(() => customModelInput('codex', { model: 'valid', expected_revision: 1 })).toThrow()
+      expect(() => parseCustomModels('opencode', metadata, true)).toThrow()
+    } finally { client.dispose(); server.closeAllConnections(); await new Promise<void>(resolve => server.close(() => resolve())) }
+  })
   it('reads CLI account metadata over native HTTP and drops unexpected credentials', async () => {
     const metadata = { backend: 'cursor', email: 'fixture@example.test', plan_type: 'Pro', source: 'cli' }
     const fetch = vi.spyOn(globalThis, 'fetch').mockRejectedValue(new Error('generic fetch forbidden'))

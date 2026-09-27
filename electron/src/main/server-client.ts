@@ -1,6 +1,7 @@
 import { createReadStream, openAsBlob } from 'node:fs'
 import { parseProviderUsage, type ProviderUsageSnapshot, type UsageBackend } from '../shared/provider-usage'
 import { parseCodexAuthStatus } from '../shared/codex-auth'
+import { customModelBackend, customModelInput, parseCustomModels, type CustomModelBackend, type CustomModelInput } from '../shared/custom-models'
 import { cliAccountBackend, parseCLIAccount, type CLIAccountBackend, connectionBackend, connectionRequest, parseConnectionReply, type ConnectionBackend, type ConnectionAction, type ProviderConnectionRequest, type ProviderConnectionReply } from '../shared/provider-connections'
 import { parseCodexProviderConfiguration, parseCodexProviderModels, parseCodexProviderTestResult, validateCodexProviderInput, validateCodexProviderModelTestInput, validateCodexProviderSelection } from '../shared/codex-provider'
 import { randomUUID } from 'node:crypto'
@@ -833,6 +834,13 @@ export class AgentServerClient {
   async providerAccount(backend: CLIAccountBackend) {
     const checked = cliAccountBackend(backend)
     return parseCLIAccount(checked, await this.privilegedNativeRequest(`/api/admin/provider-accounts/${checked}`, {}, 15_000, 200, 8192))
+  }
+  async customModels(backend: CustomModelBackend, input?: CustomModelInput, sessionId?: string) {
+    const checked = customModelBackend(backend)
+    if (sessionId !== undefined && (input || typeof sessionId !== 'string' || !sessionId || sessionId.length > 256)) throw new Error('CUSTOM_MODELS_INVALID')
+    const body = input ? customModelInput(checked, input) : undefined
+    const path = `/api/admin/provider-models/${checked}${sessionId ? `?${new URLSearchParams({ session_id: sessionId })}` : ''}`
+    return parseCustomModels(checked, await this.privilegedNativeRequest(path, body ? { method: 'PUT', body: JSON.stringify(body) } : {}, 30_000, 200, 512 * 1024), !body)
   }
   codexProviderModels(sessionId?: string): Promise<CodexProviderModels> {
     if (sessionId !== undefined && (typeof sessionId !== 'string' || !sessionId || sessionId.length > 256)) throw new Error('CODEX_PROVIDER_INVALID')
@@ -3186,6 +3194,7 @@ function isPrivilegedNativeControlTarget(
   if (/^\/api\/admin\/provider-connections\/(claude|opencode)$/.test(path)) return !target.search && ['GET', 'PUT', 'DELETE'].includes(method)
   if (/^\/api\/admin\/provider-connections\/(claude|opencode)\/check$/.test(path)) return !target.search && method === 'POST'
   if (/^\/api\/admin\/provider-accounts\/(claude|cursor|opencode)$/.test(path)) return !target.search && method === 'GET'
+  if (/^\/api\/admin\/provider-models\/(codex|claude|opencode)$/.test(path)) return method === 'PUT' ? !target.search : method === 'GET' && [...target.searchParams.keys()].every(key => key === 'session_id') && target.searchParams.getAll('session_id').length <= 1
   if (path === '/api/admin/codex/auth') return !target.search && method === 'GET'
   if (path === '/api/admin/codex/provider') return !target.search && ['GET', 'PUT', 'DELETE'].includes(method)
   if (path === '/api/admin/codex/provider/test') return !target.search && method === 'POST'

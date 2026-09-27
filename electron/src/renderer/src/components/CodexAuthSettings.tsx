@@ -3,6 +3,7 @@ import { CheckCircle2, KeyRound, LoaderCircle, RefreshCw } from 'lucide-react'
 import { t } from '@shared/i18n'
 import type { CodexAuthStatus, CodexProviderConfiguration, CodexProviderTestResult, CodexServerSettingsScope } from '@shared/types'
 import { useLocale } from '../lib/i18n'
+import { CustomModelSettings } from './CustomModelSettings'
 import { CodexModelCompatibilityCheck } from './CodexModelCompatibilityCheck'
 import './CodexAuthSettings.css'
 import './ProviderConnectionSettings.css'
@@ -29,13 +30,14 @@ function authFailure(reason: unknown): AuthFailure {
   return 'readFailed'
 }
 
-export function CodexAuthSettings({ connected, profileId, profileGeneration, serverTitle, onAPIStatus, onNativeStatus }: {
+export function CodexAuthSettings({ connected, profileId, profileGeneration, serverTitle, onAPIStatus, onNativeStatus, expanded }: {
   connected: boolean
   profileId: string | null
   profileGeneration: number
   serverTitle?: string
   onAPIStatus?: (value: boolean) => void
   onNativeStatus?: (value: boolean) => void
+  expanded?: boolean
 }) {
   useLocale()
   const fieldId = useId()
@@ -317,6 +319,7 @@ export function CodexAuthSettings({ connected, profileId, profileGeneration, ser
             : currentProvider?.configured ? t('connections.saved') : t('connections.empty')}
       </small>
       {currentProvider?.configured && !showForm && <small>{currentProvider.base_url}</small>}
+      <CustomModelSettings backend="codex" active={expanded === true && apiVerified} onSaved={() => setReload(value => value + 1)} />
       {showForm && <form className="codex-auth-settings-form" onSubmit={event => { event.preventDefault(); void saveProvider() }}>
         {providerLoading && <small>{t('codexAuth.providerLoading')}</small>}
         <div className="codex-auth-endpoint-fields">

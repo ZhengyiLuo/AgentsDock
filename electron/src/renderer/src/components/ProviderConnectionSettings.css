@@ -20,3 +20,6 @@
 .provider-group a:focus-visible, .provider-group summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .native-provider-signin-help { display: flex; flex-direction: column; gap: var(--space-2); padding-top: var(--space-3); }
 .native-provider-signin-help > code { white-space: pre-wrap; overflow-wrap: anywhere; }
+.custom-model-settings { display: flex; flex-direction: column; gap: var(--space-3); padding-top: var(--space-3); border-top: 1px solid var(--border); }
+.custom-model-settings label { color: var(--text); font-size: var(--text-size-label); }
+.custom-model-settings select { width: 100%; min-width: 0; }

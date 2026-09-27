@@ -55,9 +55,9 @@ function ProviderGroup({ backend }: { backend: Backend }) {
       <span className="provider-group-status">{ready ? <CheckCircle2 size={17} /> : <Circle size={17} />}{t(ready ? 'connections.connected' : 'connections.empty')}</span>
     </summary>
     <div className="provider-group-body">
-      {backend === 'codex' ? <CodexAuthSettings connected={connected} profileId={profileId} profileGeneration={profileGeneration} onAPIStatus={setAPI} onNativeStatus={setCodexNative} /> : <>
+      {backend === 'codex' ? <CodexAuthSettings expanded={open} connected={connected} profileId={profileId} profileGeneration={profileGeneration} onAPIStatus={setAPI} onNativeStatus={setCodexNative} /> : <>
         <CLIAccountCard backend={backend} signedIn={signedIn} open={open} />
-        {backend === 'cursor' ? <CursorEndpointNotice /> : <ProviderConnectionSettings backend={backend} connected={connected} profileId={profileId} profileGeneration={profileGeneration} onStatus={setAPI} />}
+        {backend === 'cursor' ? <CursorEndpointNotice /> : <ProviderConnectionSettings expanded={open} backend={backend} connected={connected} profileId={profileId} profileGeneration={profileGeneration} onStatus={setAPI} />}
       </>}
     </div>
   </details>

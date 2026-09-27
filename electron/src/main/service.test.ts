@@ -1126,6 +1126,24 @@ describe('settings-only provider connection profile isolation', () => {
     await expect(pending).rejects.toThrow('superseded')
     expect(client.providerConnectionRequest).toHaveBeenCalledExactlyOnceWith('opencode', 'check', { expected_revision: 1 })
   })
+  it('fences custom model discovery and reconciles catalog without probing native authentication', async () => {
+    const { service, client } = harness()
+    const response = deferred<{ backend: string; revision: number; default_model: null }>(), called = deferred<void>()
+    const read = vi.fn().mockImplementation(() => { called.resolve(); return response.promise })
+    const refresh = vi.fn().mockResolvedValue(undefined)
+    Object.assign(client, { customModels: read }); Object.assign(service, { refreshRuntime: refresh })
+    await expect(service.customModels({ ...caller, profileGeneration: 0 }, 'claude')).rejects.toThrow('superseded')
+    expect(read).not.toHaveBeenCalled()
+    const pending = service.customModels(caller, 'claude')
+    await called.promise
+    Object.assign(service, { activeProfileId: 'endpoint-b', profileGeneration: 2 })
+    response.resolve({ backend: 'claude', revision: 1, default_model: null })
+    await expect(pending).rejects.toThrow('superseded')
+    expect(refresh).not.toHaveBeenCalled()
+    Object.assign(service, { activeProfileId: caller.profileId, profileGeneration: 1 })
+    await service.customModels(caller, 'claude')
+    expect(refresh).toHaveBeenCalledExactlyOnceWith(true, false, expect.anything(), true)
+  })
 })
 
 describe('Codex endpoint request profile isolation', () => {

@@ -162,13 +162,13 @@ export function runtimeCatalogOptions(
   const available = backendCatalog?.[type] ?? []
   const configuredDefault = type === 'models' ? backendCatalog?.default_model : backendCatalog?.default_effort
   const advertisedDefault = available.find(option => option.value === '')
-  const defaultLabel = (backend === 'opencode' && type === 'models'
+  const defaultLabel = (codexProvider === 'custom' && type === 'models' && !configuredDefault?.trim() ? t('customModels.choose') : '') || (backend === 'opencode' && type === 'models'
     ? configuredDefault?.trim() ? `${t('opencode.defaultModel')} (${configuredDefault.trim()})` : t('opencode.defaultModel') : '')
     || advertisedDefault?.label?.trim()
     || (configuredDefault?.trim() ? `Server default (${configuredDefault.trim()})` : '')
     || (catalog ? 'Server default' : type === 'models' ? 'Loading model choices…' : 'Loading reasoning choices…')
   const options: RuntimeOption[] = [
-    { value: '', label: defaultLabel },
+    { value: '', label: defaultLabel, ...(codexProvider === 'custom' && type === 'models' && !configuredDefault?.trim() ? { locked: true } : {}) },
     ...available.filter(option => option.value !== '')
   ]
   const selected = current?.trim()
@@ -229,7 +229,7 @@ export function runtimeSelectionError(
     const custom = runtimeBackendCatalogFor(catalog, backend, codexProvider, customCatalog)
     const selected = model?.trim() || custom?.default_model?.trim()
     if (selected && custom?.model_capabilities?.[selected]?.compatibility === 'unsupported') return t('codexProvider.modelUnsupported')
-    return null
+    return selected ? null : t('connections.chooseModel')
   }
   if (backend === 'cursor' && !cursorBackendAvailable(health, catalog)) {
     return cursorBackendUnavailableReason(health, catalog)

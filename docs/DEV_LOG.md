@@ -1,5 +1,20 @@
 # Public development log
 
+## 2026-09-27 — Independent custom API model catalogs
+
+- Keep native CLI model catalogs separate from custom API inventories. Discover
+  endpoint models with bounded pagination, readable labels and conservative
+  non-chat/tool filtering; use OpenRouter's user-filtered inventory.
+- Add a default-model dropdown and manual-ID fallback to connected API cards.
+  Save only the model/revision, without resubmitting keys or claiming a new
+  authentication check. Never automatically select the first model.
+- Preserve existing chat bindings and legacy inferred choices for started Codex
+  threads. Fence discovery and saves to the selected server/revision, and expose
+  explicit catalog refresh for each supported custom provider in chat selectors.
+- Focused server/desktop regression checks, type checking and compilation are
+  covered. Real-app native transport and presentation acceptance follow in the
+  local development build. No inference or public release is implied.
+
 ## 2026-09-27 — CLI login account cards
 
 - Match CLI Login and Custom API card styling in all provider groups. Show

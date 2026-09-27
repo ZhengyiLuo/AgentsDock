@@ -3012,7 +3012,7 @@ export function SessionDialog({ mode }: { mode: 'newChat' | 'resume' }) {
       {hasReasoning && <label><span>Reasoning</span><select value={effort} onChange={event => setEffort(event.target.value)}>{effortOptions.map(option => <option value={option.value} key={option.value || 'default'}>{option.label}</option>)}</select></label>}
       {connectionMode === 'custom' && <div className="span-two">
         {manualModel && <label><span>{t('codexAuth.model')}</span><input aria-label={t('codexAuth.model')} value={model} maxLength={256} autoComplete="off" spellCheck={false} onChange={event => selectModel(event.target.value)} /><small>{t('codexProvider.manualModelHelp')}</small></label>}
-        {backend === 'codex' && <CodexModelDiscovery />}
+        {backend !== 'cursor' && <CodexModelDiscovery backend={backend} />}
       </div>}
       {runtimeError && <small className="span-two schedule-validation error" role="alert">{runtimeError}</small>}
       <label className="span-two"><span>{t("ui.Dialogs.SessionDialog.system_prompt_561257c")}</span><textarea rows={4} value={systemPrompt} onChange={event => setSystemPrompt(event.target.value)} placeholder={t("ui.Dialogs.SessionDialog.optional_per_chat_instructions_454671b")} /></label>

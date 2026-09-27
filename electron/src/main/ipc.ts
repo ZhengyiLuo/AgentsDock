@@ -284,6 +284,8 @@ export function registerIpc(
   handle('codex:server-goals:get', () => service.codexServerGoals())
   handle('provider-connections:request', (scope, backend, action, input) => service.providerConnectionRequest(scope, backend, action, input))
   handle('provider-accounts:read', (scope, backend) => service.providerAccount(scope, backend))
+  handle('custom-models:read', (scope, backend, sessionId) => service.customModels(scope, backend, undefined, sessionId))
+  handle('custom-models:save', (scope, backend, input) => service.customModels(scope, backend, input))
   handle('codex:auth:get', scope => service.codexAuth(scope))
   handle('codex:provider:get', scope => service.codexProvider(scope))
   handle('codex:provider:models', (scope, sessionId) => service.codexProviderModels(scope, sessionId))

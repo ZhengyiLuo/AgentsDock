@@ -7,8 +7,9 @@ import { useLocale } from '../lib/i18n'
 import './CodexAuthSettings.css'
 import './ProviderConnectionSettings.css'
 import { useAppStore } from '../store/app-store'
+import { CustomModelSettings } from './CustomModelSettings'
 
-type Props = { connected: boolean; profileId: string | null; profileGeneration: number; onStatus?: (value: boolean) => void }
+type Props = { connected: boolean; profileId: string | null; profileGeneration: number; expanded?: boolean; onStatus?: (value: boolean) => void }
 type Failure = ConnectionResult | 'update' | 'admin' | 'stale' | 'invalid' | 'failed'
 function failure(reason: unknown): Failure {
   const code = reason instanceof Error ? reason.message : ''
@@ -112,6 +113,7 @@ export function ProviderConnectionSettings({ backend, ...props }: Props & { back
           : open ? t('connections.draft') : unavailable ? t('connections.unavailable') : saved?.configured ? t('connections.saved') : t('connections.empty')}
       </small>
       {saved?.checked_at && !open && <small>{t('connections.checkedAt', { time: new Date(saved.checked_at).toLocaleString() })}</small>}
+      <CustomModelSettings backend={backend} active={props.expanded === true && verified} onSaved={() => setReload(n => n + 1)} />
       {error && <small role="alert" className={error === 'update' ? '' : 'codex-auth-settings-error'}>{t(`connections.error.${error}`)}</small>}
       {!error && !open && saved?.last_result && saved.last_result !== 'verified' && <small role="alert" className="codex-auth-settings-error">{t(`connections.error.${saved.last_result}`)}</small>}
       {!open && saved?.configured && <>

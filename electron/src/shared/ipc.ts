@@ -423,6 +423,10 @@ export interface AgentsDockAPI {
   providerAccounts?: {
     read(scope: CodexServerSettingsScope, backend: import('./provider-connections').CLIAccountBackend): Promise<import('./provider-connections').CLIAccountMetadata>
   }
+  customModels?: {
+    read(scope: CodexServerSettingsScope, backend: import('./custom-models').CustomModelBackend, sessionId?: string): Promise<import('./custom-models').CustomModels>
+    save(scope: CodexServerSettingsScope, backend: import('./custom-models').CustomModelBackend, input: import('./custom-models').CustomModelInput): Promise<import('./custom-models').CustomModels>
+  }
   codex: {
     auth(scope: CodexServerSettingsScope): Promise<CodexAuthStatus>
     provider(scope: CodexServerSettingsScope): Promise<CodexProviderConfiguration>

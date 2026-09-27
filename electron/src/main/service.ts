@@ -1,4 +1,5 @@
 import type { ProviderUsageScope, ProviderUsageSnapshot, UsageBackend } from '../shared/provider-usage'
+import { customModelBackend, customModelInput, type CustomModelBackend, type CustomModelInput } from '../shared/custom-models'
 import { cliAccountBackend, type CLIAccountBackend, connectionRequest, type ConnectionBackend, type ConnectionAction, type ProviderConnectionRequest, type ProviderConnectionReply } from '../shared/provider-connections'
 import { app, BrowserWindow, dialog, nativeImage, Notification, shell } from 'electron'
 import { discoverLocalServers, type DiscoveredLocalServer } from './local-server-discovery'
@@ -2259,6 +2260,25 @@ export class AppService {
     this.assertCurrentScope(scope)
     const result = await scope.client.providerAccount(checked)
     this.assertCurrentScope(scope)
+    return result
+  }
+  async customModels(expected: CodexServerSettingsScope, backend: CustomModelBackend, input?: CustomModelInput, sessionId?: string) {
+    const checked = customModelBackend(backend)
+    const body = input ? customModelInput(checked, input) : undefined
+    const scope = this.requireProfileScope(expected?.profileId, expected?.profileGeneration)
+    await this.ensureValidatedScope(scope)
+    this.assertCurrentScope(scope)
+    const result = await scope.client.customModels(checked, body, sessionId)
+    this.assertCurrentScope(scope)
+    if (sessionId) {
+      const page = await scope.client.sessionPage(sessionId, { limit: 1 })
+      this.assertCurrentScope(scope)
+      this.upsertSession(scope, page.session)
+    } else {
+      // One reconciliation per explicit discovery/save, never per keystroke.
+      try { await this.refreshRuntime(true, false, scope, true) } catch { /* metadata operation still succeeded */ }
+      this.assertCurrentScope(scope)
+    }
     return result
   }
 
