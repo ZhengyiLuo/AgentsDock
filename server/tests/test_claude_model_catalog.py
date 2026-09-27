@@ -194,6 +194,17 @@ class PassiveNativeModelCacheTests(unittest.TestCase):
         self.remember(key=old_key)
         self.assertIsNone(self.read())
 
+    def test_native_startup_counters_do_not_invalidate_but_account_switch_does(self):
+        path = self.root / ".claude.json"
+        path.write_text(json.dumps({"oauthAccount": {"accountUuid": "one"}, "numStartups": 1}))
+        before = catalog.native_catalog_key(self.executable, self.env)
+        path.write_text(json.dumps({"oauthAccount": {"accountUuid": "one"}, "numStartups": 2,
+                                    "additionalModelOptionsCache": []}))
+        self.remember(key=before)
+        self.assertIsNotNone(self.read())
+        path.write_text(json.dumps({"oauthAccount": {"accountUuid": "two"}, "numStartups": 2}))
+        self.assertIsNone(self.read())
+
     def test_project_settings_are_not_promoted_to_global_catalog(self):
         folder = self.root / "project/.claude"
         folder.mkdir(parents=True)

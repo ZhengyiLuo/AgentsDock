@@ -109,6 +109,29 @@ def _file_revision(path: Path) -> tuple:
         return (str(path.absolute()), None)
 
 
+def _account_identity(config: Path, home: Path) -> list:
+    # Claude writes counters and picker caches to .claude.json on every
+    # startup. Its mtime is not a settings revision. Only fingerprint the
+    # account identity; never retain email, tokens or the whole document.
+    paths = {home / ".claude.json", config / ".claude.json"}
+    result = []
+    for path in sorted(paths):
+        try:
+            with path.open("rb") as stream:
+                raw = stream.read(2 * 1024 * 1024 + 1)
+            if len(raw) > 2 * 1024 * 1024:
+                raise ValueError("Native identity metadata exceeds its limit")
+            value = json.loads(raw)
+        except FileNotFoundError:
+            value = {}
+        account = value.get("oauthAccount", {}) if isinstance(value, dict) else {}
+        result.append([str(path), *(
+            str(account.get(field) or "")[:256] if isinstance(account, dict) else ""
+            for field in ("accountUuid", "organizationUuid")
+        )])
+    return result
+
+
 def native_catalog_key(executable: str, env: dict[str, str]) -> str:
     """Fingerprint runtime/config identity without reading native credentials.
 
@@ -123,12 +146,12 @@ def native_catalog_key(executable: str, env: dict[str, str]) -> str:
     resolved = shutil.which(executable, path=env.get("PATH")) or executable
     revisions = [_file_revision(Path(resolved)), *(
         _file_revision(path) for path in (
-            config / "settings.json", config / ".credentials.json", home / ".claude.json",
+            config / "settings.json", config / ".credentials.json",
             Path("/Library/Application Support/ClaudeCode/managed-settings.json"),
             Path("/etc/claude-code/managed-settings.json"),
         )
     )]
-    return hashlib.sha256(json.dumps([relevant, revisions], sort_keys=True).encode()).hexdigest()
+    return hashlib.sha256(json.dumps([relevant, revisions, _account_identity(config, home)], sort_keys=True).encode()).hexdigest()
 
 
 def _has_project_settings(cwd: str, env: dict[str, str]) -> bool:

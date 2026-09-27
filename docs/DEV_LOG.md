@@ -8,7 +8,7 @@
 - Preserve passive readiness, native alias labels, explicit empty pickers and
   fallback discovery. Do not promote project-specific model settings into the
   global catalog or retain private initialization/account fields.
-- Pass 271 focused server tests covering catalog behavior, readiness, SDK
+- Pass 272 focused server tests covering catalog behavior, readiness, SDK
   lifecycle and runner integration; compile changed runtime modules and check
   the diff. Regression tests use synthetic credentials and isolated state.
 - Availability: source only at this checkpoint. Native app/server acceptance
