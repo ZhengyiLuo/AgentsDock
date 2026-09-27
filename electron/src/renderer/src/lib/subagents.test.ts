@@ -432,6 +432,35 @@ describe('subagentsFromEvents', () => {
     expect(byId.get('child-b')?.status).toBe('running')
   })
 
+  it.each(['live', 'snapshot'] as const)('keeps separate native children sharing a wait tool ID (%s)', mode => {
+    const state = (seq: number, id: string, nickname: string, task: string, status: string, toolId: string): Event => event(seq, 'subagent_state', {
+      backend: 'codex', subagent_id: id, subagent_provider_ref: id,
+      subagent_tool_id: toolId, subagent_name: nickname, subagent_nickname: nickname,
+      subagent_title: null, subagent_path: null, subagent_task: task,
+      subagent_status: status, subagent_activity: `${nickname} output`,
+      subagent_started_at: seq % 2 ? '2026-09-26T12:00:01Z' : '2026-09-26T12:00:02Z'
+    })
+    const snapshot = [
+      state(27, 'child-halley', 'Halley', 'Inspect attachment download handling', 'completed', 'shared-wait-call'),
+      state(26, 'child-avicenna', 'Avicenna', 'Check subagent labels after reopening', 'completed', 'shared-wait-call')
+    ]
+    const events = mode === 'snapshot' ? snapshot : [
+      state(1, 'child-halley', 'Halley', 'Inspect attachment download handling', 'running', 'halley-spawn'),
+      state(2, 'child-avicenna', 'Avicenna', 'Check subagent labels after reopening', 'running', 'avicenna-spawn'),
+      ...snapshot
+    ]
+    const agents = subagentsFromEvents(events)
+    expect(agents).toHaveLength(2)
+    const halley = agents.find(agent => agent.id === 'child-halley')!
+    const avicenna = agents.find(agent => agent.id === 'child-avicenna')!
+    expect(subagentDisplayName(halley)).toBe('Inspect attachment download handling')
+    expect(subagentDisplayName(avicenna)).toBe('Check subagent labels after reopening')
+    expect(halley).toMatchObject({ status: 'completed', nickname: 'Halley', providerRef: 'child-halley' })
+    expect(avicenna).toMatchObject({ status: 'completed', nickname: 'Avicenna', providerRef: 'child-avicenna' })
+    expect(subagentLogText(halley)).not.toContain('Avicenna')
+    expect(subagentLogText(avicenna)).not.toContain('Halley')
+  })
+
   it('does not let a parent terminal event override authoritative Claude state', () => {
     const agents = subagentsFromEvents([
       event(1, 'subagent_state', {

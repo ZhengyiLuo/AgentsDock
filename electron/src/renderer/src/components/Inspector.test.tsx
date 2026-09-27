@@ -750,6 +750,38 @@ describe('Inspector', () => {
     expect(reopened.container.querySelector('.subagent-list > button code')?.textContent).toBe('Chandrasekhar')
   })
 
+  it('keeps both reopened child records when their terminal snapshots share a native wait call', () => {
+    const session: Session = { id: 'chat-1', title: 'Native child history', backend: 'codex' }
+    const events: Event[] = [
+      ['child-halley', 'Halley', 'Inspect attachment download handling'],
+      ['child-avicenna', 'Avicenna', 'Check subagent labels after reopening']
+    ].map(([id, nickname, task], index) => ({
+      id: `completed-${id}`, seq: 27 - index, session_id: session.id, run_id: 'parent-run',
+      type: 'subagent_state', ts: '2026-09-26T12:01:00Z', backend: 'codex',
+      subagent_id: id, subagent_provider_ref: id, subagent_tool_id: 'shared-wait-call',
+      subagent_name: nickname, subagent_nickname: nickname, subagent_task: task,
+      subagent_title: null, subagent_path: null, subagent_status: 'completed',
+      subagent_activity: `${nickname} completed output`
+    }))
+    useAppStore.setState({ sessions: [session], snapshots: { [session.id]: {
+      session, events, queuedTurns: [], files: [], hasMoreEvents: false, filesTotal: 0, cachedAt: 1
+    } } })
+    const { container } = render(<Inspector />)
+    fireEvent.click(screen.getByRole('button', { name: /Subagents 0 active/i }))
+    fireEvent.click(screen.getByRole('button', { name: /History 2 records/i }))
+    const rows = container.querySelectorAll('.subagent-history-list > button')
+    expect(rows).toHaveLength(2)
+    for (const event of events) {
+      const row = [...rows].find(value => value.querySelector('strong')?.textContent === event.subagent_task)!
+      expect(row.querySelector('code')?.textContent).toBe(event.subagent_nickname)
+      fireEvent.click(row)
+      const panel = container.querySelector('.output-panel')!
+      expect(panel.querySelector('header > strong')?.textContent).toBe(event.subagent_task)
+      expect(panel).toHaveTextContent(`Provider: ${event.subagent_id}`)
+      expect(panel).toHaveTextContent(`${event.subagent_nickname} completed output`)
+    }
+  })
+
   it('does not render a redundant status subtitle for a legacy nickname-only child', () => {
     const session: Session = { id: 'chat-1', title: 'Legacy native child', backend: 'codex' }
     useAppStore.setState({ sessions: [session], snapshots: { [session.id]: {

@@ -8,7 +8,10 @@
 - Persist assignment labels through status changes, follow-ups, completion and
   reopening. Hide the redundant generic status subtitle and retain its log entry.
   Preserve filenames and punctuation in human-readable assignment headings.
-- Pass 47 focused server tests and 67 desktop tests plus TypeScript checks.
+- Keep distinct native children separate when a shared wait call reports both.
+  Canonical child identities take precedence over provisional tool aliases.
+  Real desktop acceptance exposed the snapshot-only collapse before correction.
+- Pass 47 focused server tests and 70 desktop tests plus TypeScript checks.
   Reproduce the missing-label and stale-fallback failures before correction.
 - Exercise two real native Codex children through an isolated full server and
   confirm useful labels with no native title or path. Labels survive an isolated

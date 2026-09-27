@@ -131,6 +131,10 @@ export function subagentsFromEvents(events: Event[], ownerBackend?: 'claude' | '
         taskKeys.get(taskAlias(backend, childId, runId))
         || (projectedToolId ? toolKeys.get(toolAlias(backend, runId, projectedToolId)) : undefined)
       )
+      const aliased = existingKey ? agents.get(existingKey) : undefined
+      // One native wait can report several children. A tool alias may attach a
+      // provisional spawn row, but must never rename another identified child.
+      const provisional = aliased && !authoritativeKeys.has(aliased.key) ? aliased : undefined
       const fallback = [...agents.values()]
         .filter(candidate => (
           candidate.backend === backend
@@ -141,7 +145,7 @@ export function subagentsFromEvents(events: Event[], ownerBackend?: 'claude' | '
           && (agentStartSeqs.get(candidate.key) ?? Number.MAX_SAFE_INTEGER) <= event.seq
         ))
         .sort((a, b) => (agentStartSeqs.get(b.key) ?? 0) - (agentStartSeqs.get(a.key) ?? 0))[0]
-      const existing = agents.get(key) || (existingKey ? agents.get(existingKey) : undefined) || fallback
+      const existing = agents.get(key) || provisional || fallback
       // A retired Claude execution cannot become live again from a delayed
       // snapshot. A new owner has its own key, even if a task ID is reused.
       if (backend === 'claude' && existing && !ACTIVE_STATUSES.has(existing.status)
