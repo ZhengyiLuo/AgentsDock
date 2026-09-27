@@ -1,5 +1,27 @@
 # Public development log
 
+## 2026-09-27 — Pass the frozen macOS candidate rehearsal
+
+- Candidate replay `36352117281`, harness `59fcdc7`, passes source checks and
+  both native jobs against unchanged `1.0.7-beta.18` / build `1223` packages
+  from `78e113f806b023a1caa925bb9ff763adc79c2842`. No signing key, package,
+  publication state or existing user service is changed.
+- Observe one real app update from `1.0.6` while server `1.0.3` is offline,
+  native replacement/relaunch and automatic reconciliation after reconnect.
+  Two native clients share one completed server operation, with no manual
+  server-update or retry click. Stable excludes the beta in the isolated feed;
+  Beta installs the exact signed candidate. Owned routing/trust cleanup passes.
+- Verify all 116 installed server runtime files and the persisted fixture's
+  identity, token, settings, paths and history projection. The only recognized
+  schema additions are absent `codex_provider` and `opencode_permission_mode`
+  becoming `default`. The preservation report hash is independently matched to
+  both the desktop check and its completed paired-service event.
+- Keep real provider history/native session IDs, busy/queued work, interactive
+  installer cases, actual logout/reboot and native recovery acceptance blocked
+  until observed. These rehearsal reports explicitly remain ineligible for
+  publication. All 11 PR source checks pass on implementation commit `2016efd`;
+  PR #44 remains draft pending the remaining evidence and configuration.
+
 ## 2026-09-27 — Carry replay hardening into production acceptance
 
 - Bring the full macOS/Linux acceptance workflow in line with the isolated

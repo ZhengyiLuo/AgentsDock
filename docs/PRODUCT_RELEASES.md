@@ -11,8 +11,10 @@ not the desktop application.
 ## Current implementation boundary
 
 This is release-pipeline work, not a change to the installed app or server's
-runtime update behavior. It has not established production CI, signing,
-registry publication, or native end-to-end acceptance.
+runtime update behavior. It has not established full hosted production signing,
+registry publication, or complete native acceptance. The separately recorded
+unpublished macOS candidate is signed and notarized; its scoped rehearsal does
+not satisfy the full production gate.
 
 **Publication is intentionally blocked pending phase-two native acceptance.**
 The explicit `product-release-acceptance.yml` workflow and native harnesses now
@@ -226,7 +228,7 @@ Configuration and credential changes require their own authorization. This
 implementation does not provision secrets, change npm settings, or repair tags.
 
 - Restrict `direct-production` and `npm-release` to reviewed `main`/`release/*`
-  branches and retain the release-approval protections. The workflows must be
+  branches and configure/review release-approval protections. The workflows must be
   registered on the default branch before manual dispatch is available.
 - In AgentsDock's `direct-production` environment, provide the existing native
   signing/notarization credentials listed in [direct releases](DIRECT_RELEASES.md).

@@ -3,18 +3,26 @@
 ## Status
 
 The workflow and native harnesses are implemented on the product-pipeline PR.
-No complete production candidate or successful native acceptance run is recorded.
+No complete production candidate or full production acceptance run is recorded.
 Do not interpret passing helper unit tests as an accepted release. Publication
 remains blocked; the workflow does not generate passed records for unobserved
 scenarios.
 
 The unpublished macOS `1.0.7-beta.18` / build `1223` rehearsal has verified
-fresh npm installation and observed real app-first replacement, offline-server
+fresh npm installation and real app-first replacement, offline-server
 reconnection and one automatic matching server upgrade shared by two native
-clients. Run `36351034285` then failed the strict preservation comparison on
-newly introduced API defaults; the presence-aware comparison is being retried
-without rebuilding packages. These scoped observations do not satisfy the full
-production gate or prove provider history, busy-work, reboot or rollback cases.
+clients. [Run `36352117281`](https://github.com/ZhengyiLuo/AgentsDock/actions/runs/36352117281)
+passes both native jobs using the original signed packages and the
+presence-aware preservation comparison. These scoped observations do not satisfy
+the full production gate or prove provider history, busy-work, reboot or rollback
+cases. The rehearsal remains explicitly ineligible for production publication.
+
+The final replay independently compared all 116 installed runtime files and
+bound the supplemental preservation report by SHA-256 to the desktop's completed
+paired-service event. It preserved the API-created fixture and recognized only
+the two proven absent-to-default settings additions. That fixture contains no
+real provider-native conversation history or queued user message; their required
+checks remain blocked, despite the successful scoped CI jobs.
 
 Implemented native coverage (execution status is recorded separately above):
 
@@ -167,6 +175,7 @@ node --version
 npm --version
 command -v uv tmux
 shasum -a 256 -c SHA256SUMS
+node verify-candidate.mjs
 
 npm install --prefix ./cli --ignore-scripts --no-audit --no-fund --offline \
   ./server-1.0.7-beta.18.tgz
