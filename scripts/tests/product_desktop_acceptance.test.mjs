@@ -4,7 +4,8 @@ import { resolve } from 'node:path'
 import { test } from 'node:test'
 import { assertCurrentPairedServer, assertDesktopRunner, assertOlderVersion, assertSharedOperation, boundedNativeLog,
   assertStableDiscovery, assertVisibleCoordinatedRow, checksumForMacArchive, collectReconciliationSnapshot, emitNativeProgress,
-  migrationCoverage, parseDesktopAcceptanceArguments, parseReconciliationSnapshot, reconciliationSnapshot, validateDesktopFixture } from '../product_desktop_acceptance.mjs'
+  migrationCoverage, parseDesktopAcceptanceArguments, parseReconciliationSnapshot, reconciliationSnapshot,
+  terminalReconciliationFailure, validateDesktopFixture } from '../product_desktop_acceptance.mjs'
 
 // These are harness contract tests only: no app/service installation, native
 // process, private signing identity, account, DNS, or trust-store mutation.
@@ -93,6 +94,23 @@ test('public reconciliation parser rejects unbounded, extra and unexpected diagn
   }
   assert.throws(() => parseReconciliationSnapshot(' '.repeat(4097)))
   assert.throws(() => parseReconciliationSnapshot(JSON.stringify({ ...snapshot, healthValid: undefined })))
+})
+
+test('only repeated paused failure of the exact paired candidate ends reconciliation early', () => {
+  const failed = reconciliationSnapshot({ ...status(), state: 'not-available', track: 'beta',
+    serverUpdates: [{ ...record(), phase: 'failed', paused: true }] },
+  { reachable: false, httpStatus: null, health: null }, fixture(), identity.version)
+  assert.equal(terminalReconciliationFailure(null, failed), false)
+  assert.equal(terminalReconciliationFailure(failed, failed), true)
+  for (const patch of [{ recordPhase: 'offline' }, { recordPhase: 'blocked' }, { recordPhase: 'updating' },
+    { recordPhase: 'pending' }, { recordPhase: 'current' }, { recordPaused: false }, { recordPaused: null },
+    { recordTargetMatches: false }, { recordTargetMatches: null }, { recordIdentityMatches: false },
+    { appVersionMatches: false }, { appStatusAvailable: false }, { recordPresent: false }]) {
+    assert.equal(terminalReconciliationFailure({ ...failed, ...patch }, failed), false)
+    assert.equal(terminalReconciliationFailure(failed, { ...failed, ...patch }), false)
+  }
+  assert.throws(() => terminalReconciliationFailure({ ...failed, token: 'private' }, failed))
+  assert.throws(() => terminalReconciliationFailure(failed, { ...failed, recordPhase: 'raw private error' }))
 })
 
 test('parses only exact required absolute artifact and fixture paths', () => {

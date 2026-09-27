@@ -426,6 +426,106 @@ def diagnostic_version(value: object, fixture: dict) -> str:
     return "candidate" if value == fixture["targetVersion"] else "baseline" if value == fixture["baselineVersion"] else "other-or-unknown"
 
 
+def diagnostic_legacy_failure(message: object) -> dict:
+    """Classify legacy str(exc), never publish it or infer a previous phase.
+
+    The 1.0.3 runner stores exceptions only as `message`, not error/error_code.
+    In particular, an empty cryptography InvalidSignature string has no unique
+    identifier here and must remain unclassified rather than becoming proof.
+    """
+    if message is None:
+        return {"messageState": "missing", "categories": [], "knownError": None}
+    if not isinstance(message, str):
+        return {"messageState": "invalid-type", "categories": [], "knownError": None}
+    if len(message) > 8192:
+        return {"messageState": "oversized", "categories": [], "knownError": None}
+    if not message.strip():
+        return {"messageState": "empty", "categories": [], "knownError": None}
+    # These exact fixed errors are from the signed legacy updater's validation
+    # paths. Dynamic values are matched below but never copied into evidence.
+    exact = {
+        "release public key is not an Ed25519 key": ("manifest-verification", "release-key-type"),
+        "release manifest must be a JSON object": ("manifest-verification", "manifest-not-object"),
+        "release manifest contains an invalid version": ("manifest-verification", "manifest-version-invalid"),
+        "release manifest version does not match its immutable release tag": ("manifest-verification", "manifest-tag-mismatch"),
+        "release manifest prerelease metadata is inconsistent": ("manifest-verification", "manifest-prerelease-mismatch"),
+        "release manifest track metadata is inconsistent": ("manifest-verification", "manifest-track-mismatch"),
+        "release manifest is missing archive metadata": ("manifest-verification", "manifest-archive-missing"),
+        "release archive location is not trusted": ("manifest-verification", "archive-location-untrusted"),
+        "release archive checksum is invalid": ("manifest-verification", "archive-checksum-invalid"),
+        "release archive checksum does not match the signed manifest": ("archive-verification", "archive-checksum-mismatch"),
+        "release archive contains an unsafe path": ("archive-extraction", "archive-unsafe-path"),
+        "release archive must not contain links": ("archive-extraction", "archive-links-forbidden"),
+        "release archive has an invalid layout": ("archive-extraction", "archive-layout-invalid"),
+        "GitHub releases response must be a JSON array": ("release-discovery", "release-list-not-array"),
+        "GitHub releases response is invalid JSON": ("release-discovery", "release-list-invalid-json"),
+        "No signed AgentsServer release has been published yet.": ("release-discovery", "release-list-not-found"),
+        "expected release version is invalid": ("release-selection", "requested-version-invalid"),
+        "server update health credential is empty": ("health-authorization", "health-credential-empty"),
+        "managed update is missing the stable server identity": ("identity-admission", "stable-identity-missing"),
+        "managed update is missing a valid update ID": ("identity-admission", "update-identity-invalid"),
+        "AgentsServer stable identity changed before restart": ("identity-admission", "incumbent-identity-mismatch"),
+        "updated AgentsServer stable identity does not match": ("post-install-health", "candidate-identity-mismatch"),
+        "updated AgentsServer secure-peer state is unavailable": ("post-install-health", "candidate-peer-unavailable"),
+        "updated AgentsServer lost or changed its Team Hub identity": ("post-install-health", "candidate-hub-identity-mismatch"),
+        "updated AgentsServer changed its Team Hub transport": ("post-install-health", "candidate-hub-transport-mismatch"),
+        "updated AgentsServer changed its legacy Team Hub transport": ("post-install-health", "candidate-legacy-hub-transport-mismatch"),
+        "updated AgentsServer changed its Team Hub routes": ("post-install-health", "candidate-hub-routes-mismatch"),
+        "updated AgentsServer did not repair its Team Hub host": ("post-install-health", "candidate-hub-repair-failed"),
+    }
+    categories: set[str] = set()
+    known = None
+    if message in exact:
+        category, known = exact[message]
+        categories.add(category)
+    variable = (
+        (r"Signed (?:stable|beta) AgentsServer release [^\r\n ]+ is unavailable\.", "descriptor-fetch", "signed-descriptor-not-found"),
+        (r"No signed (?:stable|beta) AgentsServer release is available\.", "release-discovery", "release-track-empty"),
+        (r"release manifest is not on the requested (?:stable|beta) track", "manifest-verification", "manifest-wrong-track"),
+        (r"expected release [^\r\n ]+ is not on the requested (?:stable|beta) track", "release-selection", "requested-track-mismatch"),
+        (r"requested (?:stable|beta) release [^\r\n ]+ is no longer the latest signed (?:stable|beta) release [^\r\n ]+", "release-selection", "requested-not-latest"),
+        (r"resolved signed release is [^\r\n ]+, not [^\r\n ]+", "release-selection", "resolved-version-mismatch"),
+        (r"resolved release [^\r\n ]+ is not newer than installed version [^\r\n;]+; managed updates only permit forward updates or an explicit beta-to-stable channel switch", "release-selection", "forward-update-required"),
+        (r"download exceeds the [0-9]+-byte safety limit", "download", "download-size-limit"),
+        (r"AgentsServer startup readiness timed out after [0-9.]+ seconds", "health-readiness", "startup-readiness-timeout"),
+    )
+    for pattern, category, identifier in variable:
+        if re.fullmatch(pattern, message):
+            categories.add(category)
+            known = identifier
+            break
+    lowered = message.lower()
+    signatures = {
+        "tls-verification": ("certificate_verify_failed", "certificate verify failed", "unable to get local issuer"),
+        "network-refused": ("connection refused",), "network-timeout": ("timed out", "timeout"),
+        "dns-resolution": ("name or service not known", "nodename nor servname provided", "temporary failure in name resolution"),
+        "download-truncated": ("incompleteread", "unexpected end of data", "unexpected end of file", "compressed file ended before"),
+        "signature-verification": ("invalidsignature", "invalid signature", "signature verification failed"),
+        "archive-extraction": ("not a gzip file", "invalid header",),
+        "dependency-prerequisite": ("missing required prerequisites", "trusted uv executable", "no solution found", "failed to download"),
+        "missing-python-module": ("modulenotfounderror",), "permission-denied": ("permission denied",),
+        "missing-file-or-executable": ("no such file or directory", "no module named"),
+        "health-readiness": ("could not verify that agentsserver is idle before restart:", "server became busy before restart:", "server health response"),
+        "hub-continuity": ("managed team hub", "expected team hub", "repaired team hub",),
+    }
+    categories.update(category for category, needles in signatures.items() if any(needle in lowered for needle in needles))
+    result = {"messageState": "present", "categories": [], "knownError": known}
+    http = re.search(r"\bHTTP Error ([1-5][0-9]{2}):", message)
+    if http:
+        result["httpStatus"] = int(http[1])
+        categories.add("http-response")
+    installer = re.match(r"installer failed \((-?[0-9]{1,5})\):", message)
+    if installer and -32768 <= int(installer[1]) <= 32767:
+        result["installerExitCode"] = int(installer[1])
+        result["knownError"] = "installer-exit-failure"
+        categories.add("installer")
+    elif re.match(r"installer timed out after [0-9.]+ seconds", message):
+        result["knownError"] = "installer-timeout"
+        categories.add("installer")
+    result["categories"] = sorted(categories) if categories else ["unclassified"]
+    return result
+
+
 def diagnostic_status(value: object, fixture: dict) -> dict:
     if not isinstance(value, dict):
         return {"readable": False}
@@ -433,7 +533,8 @@ def diagnostic_status(value: object, fixture: dict) -> dict:
     return {"readable": True, "phase": phase if isinstance(phase, str) and phase in DIAGNOSTIC_PHASES else "other-or-unknown",
             "target": diagnostic_version(value.get("target_version", value.get("release_version")), fixture),
             "retryable": value.get("retryable") is True,
-            "errorPresent": bool(value.get("error") or value.get("error_code"))}
+            "errorPresent": bool(value.get("error") or value.get("error_code")),
+            **({"failure": diagnostic_legacy_failure(value.get("message"))} if phase == "failed" else {})}
 
 
 def diagnostic_service_output(result: subprocess.CompletedProcess, system: str) -> dict:
@@ -479,6 +580,28 @@ def diagnostic_log_categories(path: Path, owner_root: Path) -> dict:
         return {"readable": True, "categories": sorted(name for name, needles in patterns.items() if any(needle in data for needle in needles))}
     except (OSError, RuntimeError):
         return {"readable": False, "categories": []}
+
+
+def diagnostic_tmux_trust(fixture: dict) -> dict:
+    """Inspect one daemon variable only; never start/set a tmux server."""
+    result = {"daemonAvailable": None, "ownedTrustBundleAvailable": False, "trustBundleMatches": False}
+    try:
+        work = Path(fixture["workDirectory"])
+        bundle = work.parent / "agentsdock-acceptance-network/trust-bundle.pem"
+        contained(bundle, work.parent)
+        read_regular(bundle, private=True)
+        result["ownedTrustBundleAvailable"] = True
+        observed = command(["tmux", "show-environment", "-g", "SSL_CERT_FILE"], timeout=5, allowed=(0, 1))
+        if observed.returncode == 0:
+            result["daemonAvailable"] = True
+            result["trustBundleMatches"] = observed.stdout.rstrip(b"\r\n") == f"SSL_CERT_FILE={bundle}".encode()
+        elif b"unknown variable" in observed.stderr.lower():
+            result["daemonAvailable"] = True
+        elif any(marker in observed.stderr.lower() for marker in (b"no server running", b"no such file or directory")):
+            result["daemonAvailable"] = False
+    except (OSError, RuntimeError, KeyError):
+        pass
+    return result
 
 
 def diagnose(fixture: dict) -> dict:
@@ -533,6 +656,7 @@ def diagnose(fixture: dict) -> dict:
                        "legacyStderr": diagnostic_log_categories(home / "Library/Logs/AgentsServer/server-error.log", home),
                        "workerStderr": diagnostic_log_categories(state / "execution/logs/worker.stderr.log", state),
                        "gatewayStderr": diagnostic_log_categories(state / "execution/logs/gateway.stderr.log", state)}
+    result["tmuxTrust"] = diagnostic_tmux_trust(fixture)
     return result
 
 

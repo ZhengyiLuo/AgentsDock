@@ -640,6 +640,77 @@ class NativeServerAcceptanceUnitTests(unittest.TestCase):
             self.assertEqual(result["phase"], "other-or-unknown")
             self.assertNotIn("private-token", json.dumps(result))
 
+    def test_legacy_failure_classification_covers_fixed_descriptor_archive_and_installer_errors(self):
+        cases = [
+            ("Signed beta AgentsServer release 1.0.7-beta.18 is unavailable.", "descriptor-fetch", "signed-descriptor-not-found"),
+            ("release manifest version does not match its immutable release tag", "manifest-verification", "manifest-tag-mismatch"),
+            ("release archive location is not trusted", "manifest-verification", "archive-location-untrusted"),
+            ("release archive checksum does not match the signed manifest", "archive-verification", "archive-checksum-mismatch"),
+            ("release archive contains an unsafe path", "archive-extraction", "archive-unsafe-path"),
+            ("release archive has an invalid layout", "archive-extraction", "archive-layout-invalid"),
+            ("AgentsServer startup readiness timed out after 60 seconds", "health-readiness", "startup-readiness-timeout"),
+            ("updated AgentsServer stable identity does not match", "post-install-health", "candidate-identity-mismatch"),
+            ("installer failed (2): private-token /private/path", "installer", "installer-exit-failure"),
+            ("installer timed out after 1800 seconds: private-token", "installer", "installer-timeout"),
+        ]
+        for message, category, known in cases:
+            with self.subTest(known=known):
+                value = MOD.diagnostic_legacy_failure(message)
+                self.assertEqual(value["knownError"], known)
+                self.assertIn(category, value["categories"])
+                self.assertNotIn("stage", value)
+                self.assertNotIn("private-token", json.dumps(value))
+                self.assertNotIn("private/path", json.dumps(value))
+
+    def test_legacy_failure_classification_keeps_network_and_nested_output_private(self):
+        message = "<urlopen error [SSL: CERTIFICATE_VERIFY_FAILED] certificate verify failed: unable to get local issuer certificate https://private.invalid/?token=private-token>"
+        tls = MOD.diagnostic_legacy_failure(message)
+        self.assertEqual(tls["categories"], ["tls-verification"])
+        http = MOD.diagnostic_legacy_failure("HTTP Error 403: private-token https://private.invalid/private-path")
+        self.assertEqual(http["httpStatus"], 403)
+        self.assertEqual(http["categories"], ["http-response"])
+        install = MOD.diagnostic_legacy_failure("installer failed (78): ModuleNotFoundError: private-module; [Errno 13] Permission denied: /private/path")
+        self.assertEqual(install["installerExitCode"], 78)
+        self.assertEqual(install["categories"], ["installer", "missing-python-module", "permission-denied"])
+        output = json.dumps([tls, http, install])
+        for private in ("private-token", "private.invalid", "private-path", "private/path", "private-module"):
+            self.assertNotIn(private, output)
+
+    def test_legacy_failure_classification_is_bounded_and_does_not_invent_signature_or_stage(self):
+        for message, state in ((None, "missing"), ({"message": "private-token"}, "invalid-type"),
+                               ("x" * 8193, "oversized"), ("", "empty"), ("  ", "empty")):
+            with self.subTest(state=state):
+                self.assertEqual(MOD.diagnostic_legacy_failure(message), {"messageState": state, "categories": [], "knownError": None})
+        self.assertEqual(MOD.diagnostic_legacy_failure("private-token"),
+                         {"messageState": "present", "categories": ["unclassified"], "knownError": None})
+        fixture = {"baselineVersion": "1.0.3", "targetVersion": "1.0.7-beta.18"}
+        failed = MOD.diagnostic_status({"phase": "failed", "message": "HTTP Error 404: private-token"}, fixture)
+        self.assertEqual(failed["failure"]["httpStatus"], 404)
+        self.assertNotIn("failure", MOD.diagnostic_status({"phase": "installing", "message": "HTTP Error 404: private-token"}, fixture))
+
+    def test_tmux_diagnostic_inspects_only_owned_trust_variable_and_never_starts_a_daemon(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary).resolve()
+            work = root / "agentsdock-acceptance-candidate"
+            work.mkdir()
+            network = root / "agentsdock-acceptance-network"
+            network.mkdir()
+            bundle = network / "trust-bundle.pem"
+            MOD.write_private(bundle, {"publicFixture": True})
+            cases = [(0, f"SSL_CERT_FILE={bundle}\n".encode(), b"", True, True),
+                     (0, b"SSL_CERT_FILE=/private/unrelated\n", b"", True, False),
+                     (1, b"", b"unknown variable: SSL_CERT_FILE", True, False),
+                     (1, b"", b"no server running on /private/socket", False, False),
+                     (1, b"", b"private unknown error", None, False)]
+            for code, stdout, stderr, available, matches in cases:
+                with self.subTest(code=code, available=available, matches=matches), \
+                        patch.object(MOD, "command", return_value=subprocess.CompletedProcess([], code, stdout, stderr)) as command:
+                    value = MOD.diagnostic_tmux_trust({"workDirectory": str(work)})
+                self.assertEqual(command.call_args.args[0], ["tmux", "show-environment", "-g", "SSL_CERT_FILE"])
+                self.assertEqual(value, {"daemonAvailable": available, "ownedTrustBundleAvailable": True, "trustBundleMatches": matches})
+                self.assertNotIn("private", json.dumps(value))
+                self.assertNotIn(str(root), json.dumps(value))
+
     def test_diagnostic_log_tail_is_bounded_and_never_exports_text_or_follows_links(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary).resolve()

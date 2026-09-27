@@ -214,10 +214,18 @@ jobs:
           set +a
           /bin/launchctl setenv SSL_CERT_FILE "$SSL_CERT_FILE"
           /bin/launchctl setenv NODE_EXTRA_CA_CERTS "$NODE_EXTRA_CA_CERTS"
-          if tmux show-environment -g > /dev/null 2>&1; then
-            tmux set-environment -g SSL_CERT_FILE "$SSL_CERT_FILE"
-            tmux set-environment -g NODE_EXTRA_CA_CERTS "$NODE_EXTRA_CA_CERTS"
-          fi
+          # The signed legacy server strips CA hints when starting a new tmux
+          # daemon. Keep this disposable runner's default daemon alive BEFORE
+          # injecting replay trust. This owned sleeper is only TLS plumbing;
+          # it is never evidence of a running provider job or busy-update drain.
+          REPLAY_TMUX_SESSION="agentsdock-replay-trust-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
+          env -i HOME="$HOME" USER="$USER" LOGNAME="$LOGNAME" PATH="$PATH" TMPDIR="$TMPDIR" SHELL=/bin/bash \
+            tmux new-session -d -s "$REPLAY_TMUX_SESSION" -P -F '#{session_id}' 'exec /bin/sleep 5400' \
+            > "$RUNNER_TEMP/agentsdock-acceptance-network/tmux-session-id"
+          tmux set-environment -g SSL_CERT_FILE "$SSL_CERT_FILE"
+          tmux set-environment -g NODE_EXTRA_CA_CERTS "$NODE_EXTRA_CA_CERTS"
+          [[ "$(tmux show-environment -g SSL_CERT_FILE)" == "SSL_CERT_FILE=$SSL_CERT_FILE" ]]
+          [[ "$(tmux show-environment -g NODE_EXTRA_CA_CERTS)" == "NODE_EXTRA_CA_CERTS=$NODE_EXTRA_CA_CERTS" ]]
           python3 scripts/product_server_acceptance.py service --candidate --action restart \
             --receipt "$RUNNER_TEMP/candidate-inputs/candidate.json" --receipt-sha256 "$RECEIPT_SHA256" \
             --bundle "$RUNNER_TEMP/candidate-inputs/payload/server" --work "$RUNNER_TEMP/agentsdock-acceptance-candidate" \
@@ -319,6 +327,19 @@ jobs:
             tmux set-environment -gu SSL_CERT_FILE
             tmux set-environment -gu NODE_EXTRA_CA_CERTS
           fi
+          REPLAY_TMUX_CLEANUP_OK=true
+          if [[ -s "$RUNNER_TEMP/agentsdock-acceptance-network/tmux-session-id" ]]; then
+            # Check both native session ID and exact run-owned name. Never kill
+            # the default daemon, another session, or the chat's live terminal.
+            (
+              REPLAY_TMUX_ID="$(cat "$RUNNER_TEMP/agentsdock-acceptance-network/tmux-session-id")"
+              [[ "$REPLAY_TMUX_ID" =~ ^\$[0-9]+$ ]] || exit 1
+              if tmux has-session -t "$REPLAY_TMUX_ID" 2>/dev/null; then
+                [[ "$(tmux display-message -p -t "$REPLAY_TMUX_ID" '#{session_name}')" == "agentsdock-replay-trust-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT" ]] || exit 1
+                tmux kill-session -t "$REPLAY_TMUX_ID" || exit 1
+              fi
+            ) || REPLAY_TMUX_CLEANUP_OK=false
+          fi
           if [[ -f "$RUNNER_TEMP/agentsdock-acceptance-network/replay.pid" ]]; then
             REPLAY_PID="$(cat "$RUNNER_TEMP/agentsdock-acceptance-network/replay.pid")"
             [[ "$REPLAY_PID" =~ ^[1-9][0-9]*$ ]]
@@ -329,6 +350,7 @@ jobs:
           if [[ -f "$RUNNER_TEMP/agentsdock-acceptance-network/owner.json" ]]; then
             python3 scripts/product_acceptance_network.py teardown --candidate --work "$RUNNER_TEMP/agentsdock-acceptance-network"
           fi
+          [[ "$REPLAY_TMUX_CLEANUP_OK" == true ]]
       - name: Collect bounded public observations, never credentials or private fixture logs
         if: always()
         run: |

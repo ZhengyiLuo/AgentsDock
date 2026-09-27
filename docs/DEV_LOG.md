@@ -1,5 +1,29 @@
 # Public development log
 
+## 2026-09-27 — Narrow the paired upgrade failure without changing packages
+
+- Run `36348933303` again passes source checks, fresh npm installation, signed
+  package verification, exact-origin replay setup and real desktop replacement.
+- Independent diagnostics show the baseline server is healthy and reachable
+  with its original identity and configured port; its current runtime remains
+  `1.0.3`. The candidate update journal is failed, and the app coordinator is
+  failed and paused for the expected server and target. This rules out a
+  persistent server outage in this run, but does not identify the update error.
+- The old updater stores exception details in its journal message, not the
+  structured error fields previously observed. Keep raw messages private and
+  add only bounded, fixed diagnostic classifications. Preserve the frozen
+  beta.18 artifacts and keep publication blocked. Routing/trust cleanup passes.
+- Identify a replay-only trust-seeding gap in the signed legacy source: a new
+  detached tmux daemon intentionally drops CA environment hints, while the
+  harness configured hints only on an already-running daemon. Keep an owned
+  disposable sentinel session alive, inject and verify the exact test CA, and
+  clean up only its native ID plus run-owned name. This is TLS plumbing, not
+  a busy-provider acceptance test or proof of the previous failure's cause.
+- Stop the native journey promptly on two consecutive paused failures for the
+  exact paired identity and candidate, retaining diagnostic collection. Pass
+  266 JavaScript tests, 99 Python tests, workflow lint and independent review;
+  recheck that all frozen candidate/handoff hashes are unchanged.
+
 ## 2026-09-27 — Observe native app replacement; investigate paired service activation
 
 - Run `36347084458` passes source checks, fresh npm installation, signed native

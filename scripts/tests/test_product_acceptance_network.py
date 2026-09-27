@@ -1,4 +1,4 @@
-"""Pure/unit tests only: never change host routing or system trust."""
+"""Unit fixtures only: never change host routing, system trust or user tmux."""
 import hashlib
 import json
 import os
@@ -118,6 +118,40 @@ class NetworkTests(unittest.TestCase):
         self.assertEqual(child["PATH"], "/usr/bin")
         self.assertNotIn("AGENTSDOCK_RELEASE_TOKEN", child)
         self.assertEqual(run.call_args.kwargs["timeout"], 120)
+
+    @unittest.skipUnless(shutil.which("tmux"), "tmux is not installed")
+    def test_private_tmux_sentinel_keeps_trust_without_killing_other_sessions(self):
+        # A dedicated temporary socket and empty config can never reach the
+        # user's default daemon/terminal. This tests fixture plumbing only, not
+        # provider activity or the real app/server upgrade.
+        socket = self.root / "fixture.sock"
+        prefix = [shutil.which("tmux"), "-S", str(socket), "-f", os.devnull]
+        env = {key: value for key, value in os.environ.items()
+               if key in {"HOME", "USER", "LOGNAME", "PATH", "TMPDIR", "LANG"}}
+        env["SHELL"] = "/bin/bash"
+
+        def tmux(*arguments, check=True):
+            return subprocess.run([*prefix, *arguments], env=env, check=check,
+                                  capture_output=True, timeout=10).stdout.decode().strip()
+
+        try:
+            session = tmux("new-session", "-d", "-s", "agentsdock-replay-trust-fixture",
+                           "-P", "-F", "#{session_id}", "exec /bin/sleep 60")
+            self.assertRegex(session, r"^\$[0-9]+$")
+            trust = str(self.root / "synthetic-trust-bundle.pem")
+            tmux("set-environment", "-g", "SSL_CERT_FILE", trust)
+            self.assertEqual(tmux("show-environment", "-g", "SSL_CERT_FILE"), f"SSL_CERT_FILE={trust}")
+            other = tmux("new-session", "-d", "-s", "independent-fixture", "-P", "-F", "#{session_id}",
+                         "exec /bin/sleep 60")
+            self.assertNotEqual(session, other)
+            self.assertEqual(tmux("display-message", "-p", "-t", session, "#{session_name}"),
+                             "agentsdock-replay-trust-fixture")
+            tmux("set-environment", "-gu", "SSL_CERT_FILE")
+            tmux("kill-session", "-t", session)
+            tmux("has-session", "-t", other)
+        finally:
+            # Kill only this test's private socket, never the default daemon.
+            tmux("kill-server", check=False)
 
     def test_command_failures_and_timeouts_never_expose_arguments_or_output(self):
         args = ("openssl", "verify", "private-argument")

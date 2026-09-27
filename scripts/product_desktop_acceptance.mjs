@@ -266,6 +266,19 @@ export async function collectReconciliationSnapshot(readStatus, readHealth, fixt
   return { status, probe, snapshot: reconciliationSnapshot(status, probe, fixture, version) }
 }
 
+export function terminalReconciliationFailure(previous, current) {
+  if (!previous || !current) return false
+  const terminal = snapshot => snapshot.appStatusAvailable && snapshot.appVersionMatches === true
+    && snapshot.recordPresent && snapshot.recordPhase === 'failed' && snapshot.recordPaused === true
+    && snapshot.recordTargetMatches === true && snapshot.recordIdentityMatches === true
+  // A single transient observation is insufficient. Both observations must
+  // describe the exact saved server/candidate and a paused terminal failure;
+  // ordinary offline, blocked, pending and active-update states retain the
+  // existing wait budget. This never turns a failed journey into acceptance.
+  return terminal(parseReconciliationSnapshot(JSON.stringify(previous)))
+    && terminal(parseReconciliationSnapshot(JSON.stringify(current)))
+}
+
 async function reconciliationHealth(fixture) {
   let response
   try {
@@ -545,11 +558,14 @@ export async function main(argv = process.argv.slice(2)) {
     const current = await until('Automatic paired server reconciliation', async () => {
       const { status, probe, snapshot } = await collectReconciliationSnapshot(
         () => client.evaluate('window.agentsDock.updates.status()'), () => reconciliationHealth(fixture), fixture, replay.identity.version)
+      const failed = terminalReconciliationFailure(lastReconciliation, snapshot)
       lastReconciliation = snapshot
+      if (failed) return { terminalFailure: true }
       const health = probe?.httpStatus === 200 ? probe.health : null
       try { return { status, health, verification: assertCurrentPairedServer(status, health, fixture, replay.identity.version) } }
       catch { return null }
     }, 15 * 60_000)
+    assert(!current.terminalFailure, 'Production coordinator paused after a failed update of the exact paired server')
     const currentRow = await visibleServerRow(client, 'current')
     await client.screenshot(join(options.output, '03-matched-app-and-server.png'))
     const shared = await until('Both real clients joined one server update operation', async () => {
