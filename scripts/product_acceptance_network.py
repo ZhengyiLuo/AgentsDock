@@ -131,6 +131,35 @@ def flush_dns(platform):
         command("sudo", "-n", "/usr/bin/killall", "-HUP", "mDNSResponder")
 
 
+def generate_certificates(work, name, *, openssl="openssl"):
+    """Create only disposable fixture certificates, without host trust changes."""
+    # Never inherit a binary's default req.x509_extensions. Some LibreSSL
+    # versions append -addext to that section instead of replacing an existing
+    # extension, producing duplicate Basic Constraints and an invalid CA.
+    write_private(work / "ca.cnf", b"[req]\ndistinguished_name=dn\nx509_extensions=ca\nprompt=no\n"
+                  b"[dn]\nCN=AgentsDock disposable replay\n[ca]\n"
+                  b"basicConstraints=critical,CA:TRUE\nkeyUsage=critical,keyCertSign,cRLSign\n"
+                  b"subjectKeyIdentifier=hash\nauthorityKeyIdentifier=keyid:always\n")
+    write_private(work / "leaf.cnf", b"[req]\ndistinguished_name=dn\nprompt=no\n[dn]\nCN=github.com\n")
+    write_private(work / "leaf.ext", ("basicConstraints=critical,CA:FALSE\nkeyUsage=critical,digitalSignature,keyEncipherment\n"
+                  "extendedKeyUsage=serverAuth\nsubjectKeyIdentifier=hash\nauthorityKeyIdentifier=keyid,issuer\n"
+                  "subjectAltName=" + ",".join("DNS:" + host for host in HOSTS) + "\n").encode())
+    # Keys remain private even when OpenSSL itself creates their output files.
+    old_umask = os.umask(0o077)
+    try:
+        command(openssl, "req", "-config", str(work / "ca.cnf"), "-x509", "-newkey", "rsa:2048",
+                "-nodes", "-sha256", "-days", "1", "-subj", f"/CN={name}",
+                "-keyout", str(work / "ca.key"), "-out", str(work / "ca.pem"))
+        command(openssl, "req", "-config", str(work / "leaf.cnf"), "-new", "-newkey", "rsa:2048",
+                "-nodes", "-sha256", "-subj", "/CN=github.com",
+                "-keyout", str(work / "leaf.key"), "-out", str(work / "leaf.csr"))
+        command(openssl, "x509", "-req", "-sha256", "-days", "1", "-in", str(work / "leaf.csr"),
+                "-CA", str(work / "ca.pem"), "-CAkey", str(work / "ca.key"), "-CAcreateserial",
+                "-extfile", str(work / "leaf.ext"), "-out", str(work / "leaf.pem"))
+    finally:
+        os.umask(old_umask)
+
+
 def setup(receipt, receipt_hash, work, candidate=False):
     work, identity = guard(work, candidate=candidate)
     need(re.fullmatch(r"[a-f0-9]{64}", receipt_hash), "Invalid receipt hash")
@@ -175,24 +204,8 @@ def setup(receipt, receipt_hash, work, candidate=False):
     write_private(work / "hosts.baseline", baseline)
     write_private(work / "hosts.active", active)
     write_private(work / "owner.json", json.dumps(identity).encode())
-    # OpenSSL creates all key outputs under this restrictive umask. Private
-    # CA/key bytes are never uploaded; teardown deletes only these exact files.
-    old_umask = os.umask(0o077)
-    try:
-        name = f"AgentsDock disposable replay {identity['runId']}-{identity['runAttempt']}"
-        command("openssl", "req", "-x509", "-newkey", "rsa:2048", "-nodes", "-sha256", "-days", "1",
-                "-subj", f"/CN={name}", "-addext", "basicConstraints=critical,CA:TRUE",
-                "-addext", "keyUsage=critical,keyCertSign,cRLSign",
-                "-keyout", str(work / "ca.key"), "-out", str(work / "ca.pem"))
-        command("openssl", "req", "-new", "-newkey", "rsa:2048", "-nodes", "-sha256",
-                "-subj", "/CN=github.com", "-keyout", str(work / "leaf.key"), "-out", str(work / "leaf.csr"))
-        write_private(work / "leaf.ext", ("basicConstraints=critical,CA:FALSE\nkeyUsage=critical,digitalSignature,keyEncipherment\n"
-                      "extendedKeyUsage=serverAuth\nsubjectAltName=" + ",".join("DNS:" + host for host in HOSTS) + "\n").encode())
-        command("openssl", "x509", "-req", "-sha256", "-days", "1", "-in", str(work / "leaf.csr"),
-                "-CA", str(work / "ca.pem"), "-CAkey", str(work / "ca.key"), "-CAcreateserial",
-                "-extfile", str(work / "leaf.ext"), "-out", str(work / "leaf.pem"))
-    finally:
-        os.umask(old_umask)
+    # Private CA/key bytes are never uploaded; teardown deletes exact files.
+    generate_certificates(work, f"AgentsDock disposable replay {identity['runId']}-{identity['runAttempt']}")
     # Prove the generated leaf chains to this ephemeral CA and is valid for
     # every exact TLS origin before adding trust or changing host routing.
     # A malformed certificate remains owned by this setup and cleanable, but

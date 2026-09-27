@@ -1,5 +1,20 @@
 # Public development log
 
+## 2026-09-27 — Isolate replay certificate generation from runner defaults
+
+- Run `36346325878` repeats fresh npm and signed package verification, then
+  fails offline chain validation before any trust/routing activation. Cleanup
+  succeeds; no update click has yet been exercised.
+- Reproduce the same verification failure locally when LibreSSL combines
+  default CA extensions with additive command-line extensions. Generate the
+  disposable CA and leaf using explicit, owned configurations instead; retain
+  strict hostname/chain verification and the original app/server signing keys.
+  The CI runner's exact prior configuration has not been independently observed.
+- Verify unique extensions, all three replay hostnames, unrelated-hostname
+  rejection and private-key modes using temporary fixtures across OpenSSL and
+  LibreSSL. Pass 259 JavaScript tests, 89 Python tests and workflow lint.
+  Frozen candidate and manual-handoff hashes remain unchanged.
+
 ## 2026-09-27 — Verify replay chains before trust and use an exact TLS probe
 
 - Run `36345413985` again verifies fresh installation and the signed packages.

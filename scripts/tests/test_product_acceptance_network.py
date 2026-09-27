@@ -3,6 +3,7 @@ import hashlib
 import json
 import os
 from pathlib import Path
+import shutil
 import stat
 import subprocess
 import sys
@@ -202,6 +203,56 @@ class NetworkTests(unittest.TestCase):
                                 if call[:2] == ("openssl", "verify"))
         first_mutation = min(index for index, call in enumerate(self.calls) if call[0] == "sudo")
         self.assertLess(last_verification, first_mutation)
+
+    def test_certificate_generation_owns_its_config_and_never_appends_ca_extensions(self):
+        self.fixture()
+        network.setup(self.receipt, self.receipt_hash, self.work)
+        requests = [call for call in self.calls if call[:2] == ("openssl", "req")]
+        self.assertEqual(len(requests), 2)
+        self.assertEqual([call[call.index("-config") + 1] for call in requests],
+                         [str(self.work / "ca.cnf"), str(self.work / "leaf.cnf")])
+        self.assertTrue(all("-addext" not in call for call in requests))
+        ca_config = (self.work / "ca.cnf").read_text()
+        self.assertEqual(ca_config.count("basicConstraints="), 1)
+        self.assertEqual(ca_config.count("keyUsage="), 1)
+        self.assertIn("subjectKeyIdentifier=hash", ca_config)
+        self.assertIn("authorityKeyIdentifier=keyid:always", ca_config)
+        self.assertNotIn("x509_extensions", (self.work / "leaf.cnf").read_text())
+
+    def test_real_temporary_certificate_chains_have_unique_extensions_and_all_three_hostnames(self):
+        # Generate disposable fixture keys only. Never run setup, install trust,
+        # change hosts, or read a real signing identity in this regression.
+        binaries = []
+        for candidate in (shutil.which("openssl"), "/usr/bin/openssl", "/opt/homebrew/bin/openssl"):
+            if candidate and Path(candidate).is_file() and str(Path(candidate).resolve()) not in binaries:
+                binaries.append(str(Path(candidate).resolve()))
+        verifiers = []
+        for binary in binaries:
+            help_result = subprocess.run([binary, "verify", "-help"], capture_output=True, timeout=10)
+            if b"-verify_hostname" in help_result.stdout + help_result.stderr:
+                verifiers.append(binary)
+        if not verifiers:
+            self.skipTest("A hostname-capable OpenSSL verifier is not installed")
+        for index, binary in enumerate(binaries):
+            with self.subTest(binary=Path(binary).name, index=index):
+                work = self.root / f"certificates-{index}"
+                work.mkdir(mode=0o700)
+                network.generate_certificates(work, "AgentsDock disposable unit fixture", openssl=binary)
+                for certificate in ("ca.pem", "leaf.pem"):
+                    details = network.command(binary, "x509", "-in", str(work / certificate), "-noout", "-text")
+                    self.assertEqual(details.count(b"X509v3 Basic Constraints:"), 1)
+                    self.assertEqual(details.count(b"X509v3 Key Usage:"), 1)
+                for verifier in verifiers:
+                    for host in network.HOSTS:
+                        network.command(verifier, "verify", "-CAfile", str(work / "ca.pem"),
+                                        "-purpose", "sslserver", "-verify_hostname", host,
+                                        str(work / "leaf.pem"), timeout=30)
+                    with self.assertRaises(RuntimeError):
+                        network.command(verifier, "verify", "-CAfile", str(work / "ca.pem"),
+                                        "-purpose", "sslserver", "-verify_hostname", "unrelated.example",
+                                        str(work / "leaf.pem"), timeout=30)
+                for name in ("ca.key", "leaf.key"):
+                    self.assertEqual(stat.S_IMODE((work / name).stat().st_mode), 0o600)
 
     def test_certificate_preflight_failure_never_mutates_trust_or_hosts_and_is_cleanable(self):
         self.fixture()

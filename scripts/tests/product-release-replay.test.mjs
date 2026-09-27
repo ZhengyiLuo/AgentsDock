@@ -477,10 +477,13 @@ function originProbeFixture(t) {
   const caPath = join(root, 'ca.pem'), expectedLeafPath = join(root, 'leaf.pem')
   const execute = (...args) => execFileSync('openssl', args, { cwd: root,
     env: { PATH: process.env.PATH }, stdio: ['ignore', 'pipe', 'pipe'] })
-  writeFileSync(join(root, 'leaf.ext'), 'basicConstraints=critical,CA:FALSE\nkeyUsage=critical,digitalSignature,keyEncipherment\nextendedKeyUsage=serverAuth\nsubjectAltName=DNS:github.com\n')
+  writeFileSync(join(root, 'ca.cnf'), '[req]\nprompt=no\ndistinguished_name=dn\nx509_extensions=ca\n[dn]\nCN=Disposable unit CA\n[ca]\nbasicConstraints=critical,CA:TRUE\nkeyUsage=critical,keyCertSign,cRLSign\nsubjectKeyIdentifier=hash\nauthorityKeyIdentifier=keyid:always\n')
+  writeFileSync(join(root, 'leaf.cnf'), '[req]\nprompt=no\ndistinguished_name=dn\n[dn]\nCN=github.com\n')
+  writeFileSync(join(root, 'leaf.ext'), 'basicConstraints=critical,CA:FALSE\nkeyUsage=critical,digitalSignature,keyEncipherment\nextendedKeyUsage=serverAuth\nsubjectAltName=DNS:github.com\nsubjectKeyIdentifier=hash\nauthorityKeyIdentifier=keyid,issuer\n')
   execute('req', '-x509', '-newkey', 'rsa:2048', '-nodes', '-sha256', '-days', '1', '-subj', '/CN=Disposable unit CA',
-    '-addext', 'basicConstraints=critical,CA:TRUE', '-addext', 'keyUsage=critical,keyCertSign,cRLSign', '-keyout', 'ca.key', '-out', 'ca.pem')
-  execute('req', '-new', '-newkey', 'rsa:2048', '-nodes', '-sha256', '-subj', '/CN=github.com', '-keyout', 'leaf.key', '-out', 'leaf.csr')
+    '-config', 'ca.cnf', '-keyout', 'ca.key', '-out', 'ca.pem')
+  execute('req', '-new', '-newkey', 'rsa:2048', '-nodes', '-sha256', '-subj', '/CN=github.com',
+    '-config', 'leaf.cnf', '-keyout', 'leaf.key', '-out', 'leaf.csr')
   execute('x509', '-req', '-sha256', '-days', '1', '-in', 'leaf.csr', '-CA', 'ca.pem', '-CAkey', 'ca.key', '-CAcreateserial',
     '-extfile', 'leaf.ext', '-out', 'leaf.pem')
   chmodSync(caPath, 0o600); chmodSync(expectedLeafPath, 0o600)
