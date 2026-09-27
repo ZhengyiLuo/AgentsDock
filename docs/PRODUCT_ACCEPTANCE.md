@@ -8,7 +8,15 @@ Do not interpret passing helper unit tests as an accepted release. Publication
 remains blocked; the workflow does not generate passed records for unobserved
 scenarios.
 
-Implemented, awaiting execution against sealed packages:
+The unpublished macOS `1.0.7-beta.18` / build `1223` rehearsal has verified
+fresh npm installation and observed real app-first replacement, offline-server
+reconnection and one automatic matching server upgrade shared by two native
+clients. Run `36351034285` then failed the strict preservation comparison on
+newly introduced API defaults; the presence-aware comparison is being retried
+without rebuilding packages. These scoped observations do not satisfy the full
+production gate or prove provider history, busy-work, reboot or rollback cases.
+
+Implemented native coverage (execution status is recorded separately above):
 
 - Exact receipt/source/signature/runtime/permission verification before tests.
 - Real npm installation on Linux and macOS, native service restart, permanent

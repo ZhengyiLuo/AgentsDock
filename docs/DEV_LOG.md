@@ -1,5 +1,20 @@
 # Public development log
 
+## 2026-09-27 — Carry replay hardening into production acceptance
+
+- Bring the full macOS/Linux acceptance workflow in line with the isolated
+  rehearsal: exact TLS/startup/PID readiness, owned detached-updater trust
+  setup/cleanup and bounded failure diagnostics. Verify the signed macOS app
+  against the receipt's build number and exact coordinated descriptor before
+  changing disposable trust or routing.
+- Retain all production receipt/source/run/attempt checks, native matrices and
+  required observations. Supplemental diagnostic/preservation files cannot
+  satisfy required acceptance reports. Candidate rehearsals remain explicitly
+  ineligible for production publication.
+- Pass workflow lint, shell/embedded JavaScript syntax checks, 266 JavaScript
+  release-tooling tests and independent review. This is workflow preparation,
+  not a completed production acceptance run or publication approval.
+
 ## 2026-09-27 — Observe the matched native app/server upgrade
 
 - Run `36351034285` passes source CI and fresh native npm installation, then
