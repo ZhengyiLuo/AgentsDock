@@ -1,5 +1,27 @@
 # Public development log
 
+## 2026-09-27 — Keep Send now available during native goals
+
+- Allow text and attachment follow-ups to reach a paused goal's still-running
+  Codex turn without resuming the goal. Preserve pending input while the first
+  turn starts and when its owner transfers into automatic goal continuation.
+  Retain explicit Stop behavior and restore unsent input after startup failure.
+- Reproduce the reported rejection in the signed desktop `1.0.7-beta.16`, build
+  `1221`, with a real native goal: pause the goal while a command runs, queue a
+  message and click Send now. Repeat against the corrected disposable server:
+  two follow-ups reach the same running turn, both appear immediately, and the
+  provider acknowledges both. The goal remains paused through completion and
+  app reload. No renderer exceptions occur.
+- Pass 483 related server tests and 55 targeted desktop tests. The broader
+  suite caught premature steering admission during ordinary completion; retain
+  its existing regression and retire that completed turn's readiness before
+  awaiting notification projection. Native readiness and handoff timing cases
+  additionally use deterministic isolated lifecycle fixtures.
+- Availability: tested server source only. This correction needs no desktop
+  rebuild; it is not yet deployed or publicly released. The separate report of
+  old messages appearing after clearing a long-running goal remains under
+  investigation and is not covered by this acceptance.
+
 ## 2026-09-27 — Restore cross-chat tools after explicit goal Resume
 
 - Give explicitly resumed idle Codex goals fresh provider-tool authority before
