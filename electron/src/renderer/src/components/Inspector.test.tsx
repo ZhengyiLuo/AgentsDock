@@ -709,6 +709,65 @@ describe('Inspector', () => {
     expect(panel).toHaveTextContent('Progress after the explicit rename.')
   })
 
+  it('shows durable native assignment labels through follow-up, reopen and title changes', () => {
+    const session: Session = { id: 'chat-1', title: 'Native assignments', backend: 'codex' }
+    const state = (seq: number, patch: Partial<Event> = {}): Event => ({
+      id: `native-child-${seq}`, seq, session_id: session.id, run_id: 'parent-run',
+      type: 'subagent_state', ts: `2026-09-26T12:00:${String(seq).padStart(2, '0')}Z`, backend: 'codex',
+      subagent_id: 'native-child', subagent_name: 'Chandrasekhar', subagent_nickname: 'Chandrasekhar',
+      subagent_title: null, subagent_path: null, subagent_task: 'Review the release notes',
+      subagent_status: 'running', subagent_activity: 'Subagent status updated', ...patch
+    })
+    const setEvents = (events: Event[]) => useAppStore.setState({ sessions: [session], snapshots: { [session.id]: {
+      session, events, queuedTurns: [], files: [], hasMoreEvents: false, filesTotal: 0, cachedAt: 1
+    } } })
+    const start = state(1)
+    setEvents([start])
+    const rendered = render(<Inspector />)
+    const row = rendered.container.querySelector('.subagent-list > button')!
+    expect(row.querySelector('strong')?.textContent).toBe('Review the release notes')
+    expect(row.querySelector('code')?.textContent).toBe('Chandrasekhar')
+    expect(row).not.toHaveTextContent('Subagent status updated')
+    fireEvent.click(row)
+    const panel = rendered.container.querySelector('.output-panel')!
+    const followup = state(2, { subagent_activity: 'Subagent received follow-up' })
+    act(() => setEvents([start, followup]))
+    expect(rendered.container.querySelector('.subagent-list > button')).toBe(row)
+    expect(rendered.container.querySelector('.output-panel')).toBe(panel)
+    expect(row.querySelector('strong')?.textContent).toBe('Review the release notes')
+    const rename = state(3, { subagent_title: 'Release reviewer' })
+    act(() => setEvents([start, followup, rename]))
+    expect(row.querySelector('strong')?.textContent).toBe('Release reviewer')
+    expect(panel.querySelector('header > strong')?.textContent).toBe('Release reviewer')
+    const clear = state(4)
+    act(() => setEvents([start, followup, rename, clear]))
+    expect(row.querySelector('strong')?.textContent).toBe('Review the release notes')
+    expect(panel.querySelector('header > strong')?.textContent).toBe('Review the release notes')
+    rendered.unmount()
+    setEvents([clear])
+    const reopened = render(<Inspector />)
+    expect(reopened.container.querySelector('.subagent-list > button strong')?.textContent).toBe('Review the release notes')
+    expect(reopened.container.querySelector('.subagent-list > button code')?.textContent).toBe('Chandrasekhar')
+  })
+
+  it('does not render a redundant status subtitle for a legacy nickname-only child', () => {
+    const session: Session = { id: 'chat-1', title: 'Legacy native child', backend: 'codex' }
+    useAppStore.setState({ sessions: [session], snapshots: { [session.id]: {
+      session, events: [{
+        id: 'legacy-child', seq: 1, session_id: session.id, type: 'subagent_state', backend: 'codex',
+        ts: '2026-09-26T12:00:00Z', subagent_id: 'child', subagent_nickname: 'Aquinas',
+        subagent_status: 'running', subagent_activity: 'Subagent status updated'
+      }], queuedTurns: [], files: [], hasMoreEvents: false, filesTotal: 0, cachedAt: 1
+    } } })
+    const { container } = render(<Inspector />)
+    const row = container.querySelector('.subagent-list > button')!
+    expect(row.querySelector('strong')?.textContent).toBe('Aquinas')
+    expect(row.querySelector('code')).toBeNull()
+    expect(row).toHaveTextContent('Codex · running')
+    fireEvent.click(row)
+    expect(container.querySelector('.output-panel')).toHaveTextContent('Subagent status updated')
+  })
+
   it('renames a live Codex row and its open output panel in place without changing activity or count', () => {
     const session: Session = { id: 'chat-1', title: 'Named children', backend: 'codex' }
     const original: Event = {

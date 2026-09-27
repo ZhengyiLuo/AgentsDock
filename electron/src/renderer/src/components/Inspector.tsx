@@ -199,10 +199,13 @@ function SubagentsSection({ sessionId }: { sessionId: string }) {
 
 function SubagentList({ agents, onSelect, history = false }: { agents: SubagentActivity[]; onSelect: (agent: SubagentActivity) => void; history?: boolean }) {
   useLocale()
-  return <div className={`subagent-list${history ? ' subagent-history-list' : ''}`}>{agents.map(agent => <button key={agent.key} onClick={() => onSelect(agent)}>
-    <span className={`subagent-state ${agent.status}`} />
-    <div><strong>{subagentDisplayName(agent)}</strong><small>{agent.backend === 'claude' ? 'Claude' : 'Codex'} · {subagentStatusLabel(agent.status)} · {subagentElapsed(agent.startedAt, agent.updatedAt, isSubagentActive(agent))}</small><code>{subagentDetailText(agent)}</code></div>
-  </button>)}</div>
+  return <div className={`subagent-list${history ? ' subagent-history-list' : ''}`}>{agents.map(agent => {
+    const detail = subagentDetailText(agent)
+    return <button key={agent.key} onClick={() => onSelect(agent)}>
+      <span className={`subagent-state ${agent.status}`} />
+      <div><strong>{subagentDisplayName(agent)}</strong><small>{agent.backend === 'claude' ? 'Claude' : 'Codex'} · {subagentStatusLabel(agent.status)} · {subagentElapsed(agent.startedAt, agent.updatedAt, isSubagentActive(agent))}</small>{detail && <code>{detail}</code>}</div>
+    </button>
+  })}</div>
 }
 
 function subagentElapsed(startedAt: string, updatedAt: string, active: boolean): string {

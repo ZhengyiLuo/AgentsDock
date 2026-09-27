@@ -18,7 +18,7 @@ export interface SubagentActivity {
   title?: string | null
   nickname?: string
   path?: string
-  task?: string
+  task?: string | null
   kind?: string
   status: SubagentStatus
   startedAt: string
@@ -359,9 +359,10 @@ function subagentTaskLabel(agent: SubagentActivity): string {
 function readableSubagentTask(task: string): string {
   // Format task identifiers for display only; never rename the provider thread
   // or alter the stored path, nickname, identity, or selected output panel.
+  // Human assignments retain filenames and punctuation inside the sentence.
+  if (/\s/.test(task)) return task
   const label = task.replace(/[_-]+/g, ' ').trim() || task
-  if (!task.includes(' ') || task.includes('_')) return label.charAt(0).toUpperCase() + label.slice(1)
-  return task
+  return label.charAt(0).toUpperCase() + label.slice(1)
 }
 
 export function subagentDetailText(agent: SubagentActivity): string {
@@ -371,6 +372,7 @@ export function subagentDetailText(agent: SubagentActivity): string {
   const task = subagentTaskLabel(agent)
   if (task && task !== displayName) return task
   const activity = cleanIdentityText(agent.latestActivity)
+  if (activity === 'Subagent status updated') return ''
   return activity || agent.kind || 'subagent'
 }
 
@@ -413,7 +415,7 @@ interface SubagentIdentity {
   title?: string | null
   nickname?: string
   path?: string
-  task?: string
+  task?: string | null
   providerRef?: string
 }
 
@@ -437,11 +439,16 @@ function subagentEventIdentity(event: Event): SubagentIdentity {
     || typeof event.subagent_title === 'string' && !event.subagent_title.trim() ? null
     : typeof event.subagent_title === 'string' ? cleanIdentityText(event.subagent_title) || undefined
       : undefined
+  // A native task path can supersede an assignment-derived fallback. Omission
+  // from an older server keeps the task; an explicit clear removes it.
+  const task = identityEvent.subagent_task === null
+    || typeof identityEvent.subagent_task === 'string' && !identityEvent.subagent_task.trim() ? null
+    : explicitTask || (!projectedPath && projectedName !== nickname ? projectedName : '') || undefined
   return {
     title,
     nickname: nickname || undefined,
     path: explicitPath || projectedPath || undefined,
-    task: explicitTask || (!projectedPath && projectedName !== nickname ? projectedName : '') || undefined
+    task
   }
 }
 
@@ -449,7 +456,7 @@ function applySubagentIdentity(agent: SubagentActivity, identity: SubagentIdenti
   if (identity.title !== undefined) agent.title = identity.title
   if (identity.nickname) agent.nickname = identity.nickname
   if (identity.path) agent.path = identity.path
-  if (identity.task) agent.task = identity.task
+  if (identity.task !== undefined) agent.task = identity.task
   agent.name = agent.nickname || agent.task || agent.path || cleanIdentityText(agent.name)
     || (agent.backend === 'claude' ? 'Claude subagent' : 'Codex subagent')
 }

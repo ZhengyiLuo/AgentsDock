@@ -30,6 +30,15 @@ describe('subagentsFromEvents', () => {
     expect(subagentDisplayName(agent)).toBe(task)
   })
 
+  it('preserves filenames and punctuation in human task descriptions', () => {
+    const task = 'Review release_notes.md and server-side checks'
+    const [agent] = subagentsFromEvents([event(1, 'subagent_state', {
+      backend: 'codex', subagent_id: 'native-child', subagent_status: 'running',
+      subagent_task: task, subagent_nickname: 'Aquinas'
+    })])
+    expect(subagentDisplayName(agent)).toBe(task)
+  })
+
   it.each([null, undefined])('uses a readable task path for untitled live provider records (%s)', title => {
     const state = event(1, 'subagent_state', {
       backend: 'codex', subagent_id: 'child-live', subagent_status: 'running',
@@ -66,6 +75,57 @@ describe('subagentsFromEvents', () => {
       subagent_title: null, subagent_name: 'Kuhn', subagent_nickname: 'Kuhn', subagent_path: '/root'
     })])
     expect(subagentDisplayName(agent)).toBe('Kuhn')
+  })
+
+  it('retains a native assignment label through follow-up, reopen, rename and title clear', () => {
+    const assignment = event(1, 'subagent_state', {
+      backend: 'codex', subagent_id: 'native-child', subagent_tool_id: 'spawn-call',
+      subagent_title: null, subagent_name: 'Chandrasekhar', subagent_nickname: 'Chandrasekhar',
+      subagent_path: null, subagent_task: 'Review the release notes', subagent_status: 'running',
+      subagent_activity: 'Subagent attached'
+    })
+    const followup = { ...assignment, seq: 2, id: 'follow-up', subagent_activity: 'Subagent status updated' }
+    const [live] = subagentsFromEvents([assignment, followup])
+    const [reopened] = subagentsFromEvents([followup])
+    for (const agent of [live, reopened]) {
+      expect(subagentDisplayName(agent)).toBe('Review the release notes')
+      expect(subagentDetailText(agent)).toBe('Chandrasekhar')
+      expect(agent).toMatchObject({ key: 'codex:subagent:native-child', path: undefined, status: 'running' })
+    }
+    const renamed = { ...followup, seq: 3, id: 'renamed', subagent_title: 'Release reviewer' }
+    expect(subagentDisplayName(subagentsFromEvents([assignment, followup, renamed])[0])).toBe('Release reviewer')
+    const cleared = { ...renamed, seq: 4, id: 'cleared', subagent_title: null }
+    expect(subagentDisplayName(subagentsFromEvents([assignment, followup, renamed, cleared])[0])).toBe('Review the release notes')
+    expect(subagentDisplayName(subagentsFromEvents([cleared])[0])).toBe('Review the release notes')
+  })
+
+  it('clears a fallback task when native task-path metadata supersedes it', () => {
+    const original = event(1, 'subagent_state', {
+      backend: 'codex', subagent_id: 'native-child', subagent_status: 'running',
+      subagent_nickname: 'Aquinas', subagent_task: 'Review the initial assignment'
+    })
+    const omitted = event(2, 'subagent_state', { ...original, seq: 2, id: 'omitted', subagent_task: undefined })
+    expect(subagentDisplayName(subagentsFromEvents([original, omitted])[0])).toBe('Review the initial assignment')
+    const nativePath = event(3, 'subagent_state', {
+      ...original, seq: 3, id: 'native-path', subagent_task: null, subagent_path: '/root/release_review'
+    })
+    for (const events of [[original, omitted, nativePath], [nativePath]]) {
+      const [agent] = subagentsFromEvents(events)
+      expect(subagentDisplayName(agent)).toBe('Release review')
+      expect(subagentDetailText(agent)).toBe('Aquinas')
+    }
+  })
+
+  it('omits generic status-only detail without removing it from the output log', () => {
+    const [agent] = subagentsFromEvents([event(1, 'subagent_state', {
+      backend: 'codex', subagent_id: 'native-child', subagent_status: 'running',
+      subagent_name: 'Aquinas', subagent_nickname: 'Aquinas',
+      subagent_activity: 'Subagent status updated'
+    })])
+    expect(subagentDisplayName(agent)).toBe('Aquinas')
+    expect(subagentDetailText(agent)).toBe('')
+    expect(subagentLogText(agent)).toContain('Subagent status updated')
+    expect(subagentDetailText({ ...agent, latestActivity: 'Reading the release notes' })).toBe('Reading the release notes')
   })
 
   it('uses the exact Codex display title and retains its nickname and path separately', () => {

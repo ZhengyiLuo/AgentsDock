@@ -1,5 +1,19 @@
 # Public development log
 
+## 2026-09-26 — Keep useful labels for native Codex subagents
+
+- Show a short opening excerpt of the original assignment when a native child
+  has only a nickname. Preserve native titles, task paths and nicknames, without
+  renaming provider threads or issuing additional model requests.
+- Persist assignment labels through status changes, follow-ups, completion and
+  reopening. Hide the redundant generic status subtitle and retain its log entry.
+  Preserve filenames and punctuation in human-readable assignment headings.
+- Pass 47 focused server tests and 67 desktop tests plus TypeScript checks.
+  Reproduce the missing-label and stale-fallback failures before correction.
+- Exercise two real native Codex children through an isolated full server and
+  confirm useful labels with no native title or path. Labels survive an isolated
+  server restart. Desktop build and hands-on acceptance are pending.
+
 ## 2026-09-26 — Keep attachments working across native Codex continuations
 
 - Resolve helper calls through the exact live native thread and turn when
