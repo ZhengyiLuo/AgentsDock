@@ -11,9 +11,14 @@
 - Preserve existing chat bindings and legacy inferred choices for started Codex
   threads. Fence discovery and saves to the selected server/revision, and expose
   explicit catalog refresh for each supported custom provider in chat selectors.
-- Focused server/desktop regression checks, type checking and compilation are
-  covered. Real-app native transport and presentation acceptance follow in the
-  local development build. No inference or public release is implied.
+- Verification: 76 isolated server checks and 96 focused desktop checks pass,
+  with TypeScript, compilation and signed local-bundle validation. The real
+  desktop reads all three endpoint inventories through IPC/native administration;
+  manual default save, reopen and clear succeed without a key prompt. Browser
+  administration is rejected. Dark/narrow layout is checked. Native select-menu
+  keyboard selection, light/localized visual checks and paid model/tool requests
+  remain unverified. The temporary empty UI-test chat is removed; no real provider
+  history is touched. No public release is part of this validation.
 
 ## 2026-09-27 — CLI login account cards
 
