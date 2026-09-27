@@ -1,5 +1,20 @@
 # Public development log
 
+## 2026-09-27 — Visible endpoint menu inside Settings
+
+- Fix the custom endpoint menu painting behind the Settings dialog. Give this
+  nested menu and its confirmation overlay/dialog explicit, narrowly scoped
+  layers above Settings; CLI Login and endpoint removal semantics are unchanged.
+- Reproduce the hidden menu in the real desktop before fixing it. Verify visible
+  menu/confirmation, repeated opening, Cancel/Escape and keyboard selection in
+  an isolated native app connected to the development server. Check dark and
+  light/narrow presentation, then repeat menu/confirmation/cancel in the signed
+  installed local package. No real credentials are removed; confirmed deletion
+  transport is unchanged and covered by the preceding disposable-fixture check.
+- The layering regression fails before the CSS fix; all 59 focused checks,
+  TypeScript and production compilation pass. Local package only; no server
+  update or public release. Localized visual acceptance is not repeated.
+
 ## 2026-09-27 — OpenCode chat tools and concise provider settings
 
 - Add a run-bound native MCP bridge for OpenCode, preserving server authorization,
