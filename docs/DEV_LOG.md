@@ -1,5 +1,24 @@
 # Public development log
 
+## 2026-09-27 — Verify native goal inbox continuation and beta.16 activation
+
+- Exercise the actual cross-chat inbox helper in an ordinary authorized Codex
+  turn and its automatic goal continuation through a disposable full server.
+  Both return successful empty inboxes under the same logical run, with no
+  incomplete-metadata errors. An inert fixture peer supplies the normal route
+  grant; no messages are sent and no peer provider turn starts. Remove all
+  disposable processes and copied credentials after verification.
+- This establishes the retained-authority continuation path only. Explicitly
+  resuming an idle goal still lacks provider-tool authority and remains an
+  outstanding issue; the earlier attachment test did not cover that path.
+- Verify beta.16 server activation through authenticated worker and gateway
+  health, API contract 28, matching runtime source, available Team Hub, and
+  cleared execution maintenance and activation journals. Startup prematurely
+  consumed the update fence; after verifying the exact healthy candidate and
+  journal ownership, complete the existing installer commit recovery. The
+  runtime remains unchanged; the startup reconciliation issue needs a separate
+  source correction.
+
 ## 2026-09-26 — Keep useful labels for native Codex subagents
 
 - Show a short opening excerpt of the original assignment when a native child
