@@ -1,5 +1,28 @@
 # Public development log
 
+## 2026-09-27 — Restore cross-chat tools after explicit goal Resume
+
+- Give explicitly resumed idle Codex goals fresh provider-tool authority before
+  native execution starts. Use the chat's current saved permissions and retain
+  the same authority through automatic continuations. Already-running goal
+  edits keep their existing owner. Revoke credentials on completion, Stop,
+  cancellation and failed activation, including cancellation during cleanup.
+- Reproduce the missing-authority failure by clicking Resume in the signed
+  desktop `1.0.7-beta.16`, build `1221`, connected to a disposable full server
+  and real native Codex. With the corrected server, repeat Resume twice,
+  including after reloading the app: both actual inbox calls succeed and both
+  goals complete. No renderer exceptions occur.
+- Exercise a real resumed-goal send and recipient mailbox read between two
+  disposable chats. One message is persisted and rendered. Supplement this
+  with handler/database checks for reply/read and idempotent retries, and
+  141 passing lifecycle, goal-control, authority and MCP regression tests.
+- Resume messages remain ordinary peer mail; they do not invent user-delegation
+  provenance from a provider-authored goal or unrelated transcript. Automatic
+  continuation retains its originating turn's existing provenance.
+- Remove disposable app/server/provider processes and copied credentials;
+  protected provider files remain unchanged. Availability: tested server source
+  only, no new desktop build, production server deployment or public release.
+
 ## 2026-09-27 — Verify native goal inbox continuation and beta.16 activation
 
 - Exercise the actual cross-chat inbox helper in an ordinary authorized Codex
