@@ -941,6 +941,8 @@ export class AgentServerClient {
   }
 
   async createSession(input: CreateSessionInput | ResumeSessionInput): Promise<Session> {
+    const connection = validateCodexProviderSelection(input.provider_connection)
+    if (connection === 'custom' && !['claude', 'opencode'].includes(input.backend)) throw new Error('Unsupported custom API backend.')
     const codexProvider = validateCodexProviderSelection(input.codex_provider)
     if (codexProvider === 'custom' && input.backend !== 'codex') throw new Error('Custom endpoints require Codex.')
     const providerId = 'providerId' in input ? input.providerId : undefined
@@ -950,6 +952,7 @@ export class AgentServerClient {
       folder: input.folder,
       cwd: input.cwd,
       backend: input.backend,
+      ...(connection !== undefined ? { provider_connection: connection } : {}),
       ...(codexProvider !== undefined ? { codex_provider: codexProvider } : {}),
       model: input.model || null,
       effort: input.effort || null,
@@ -1000,6 +1003,7 @@ export class AgentServerClient {
   }
 
   async updateSession(sessionId: string, patch: UpdateSessionInput): Promise<Session> {
+    validateCodexProviderSelection(patch.provider_connection)
     const codexProvider = validateCodexProviderSelection(patch.codex_provider)
     if (codexProvider === 'custom' && patch.backend !== undefined && patch.backend !== 'codex') throw new Error('Custom endpoints require Codex.')
     const openCodePatch = patch.opencode_permission_mode === undefined ? patch : {

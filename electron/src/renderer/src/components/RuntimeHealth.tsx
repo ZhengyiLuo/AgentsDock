@@ -47,7 +47,7 @@ export function RuntimeHealthPanel() {
   </section>
 }
 
-function useRuntimeRecheck() {
+export function useRuntimeRecheck() {
   const [refreshing, setRefreshing] = useState(false)
   const recheck = async () => {
     setRefreshing(true)
@@ -139,9 +139,9 @@ function RuntimeStatus({
   const chatError = useAppStore(state => (
     compact && sessionId ? latestChatRunError(state.snapshots[sessionId]?.events, backend) : ''
   ))
-  const customCatalog = useAppStore(state => state.sessions.find(session => session.id === sessionId)?.codex_provider_catalog)
+  const customCatalog = useAppStore(state => { const session = state.sessions.find(item => item.id === sessionId); return session?.provider_connection_catalog ?? session?.codex_provider_catalog })
   const diagnostic = runtimeDiagnosticFor(health, catalog, backend, codexProvider, customCatalog)
-  const cursorUnavailable = backend === 'cursor' && !cursorBackendAvailable(health, catalog) || backend === 'opencode' && !opencodeBackendAvailable(health, catalog)
+  const cursorUnavailable = codexProvider !== 'custom' && (backend === 'cursor' && !cursorBackendAvailable(health, catalog) || backend === 'opencode' && !opencodeBackendAvailable(health, catalog))
   // Provider last_error is backend-wide, not session-scoped. Keep it in the
   // full Settings panel so a failure from one chat cannot leak into another
   // chat's compact composer notice.
@@ -182,7 +182,7 @@ function RuntimeStatus({
       <strong>{provider} <span>{label}</span></strong>
       <small>{detail}</small>
       {action ? <small className="runtime-action">{action}</small> : null}
-      {!compact && <NativeProviderSignIn key={`${backend}:${profileId}:${profileGeneration}`} backend={backend} disabled={!connected} />}
+      {!compact && tone !== 'ready' && <NativeProviderSignIn key={`${backend}:${profileId}:${profileGeneration}`} backend={backend} disabled={!connected} />}
     </div>
     {compact && providerNeedsAttention && onRecheck
       ? <button

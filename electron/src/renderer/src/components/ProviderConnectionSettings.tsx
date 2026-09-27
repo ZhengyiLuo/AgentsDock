@@ -6,8 +6,9 @@ import type { ConnectionAction, ConnectionBackend, ConnectionProtocol, Connectio
 import { useLocale } from '../lib/i18n'
 import './CodexAuthSettings.css'
 import './ProviderConnectionSettings.css'
+import { useAppStore } from '../store/app-store'
 
-type Props = { connected: boolean; profileId: string | null; profileGeneration: number }
+type Props = { connected: boolean; profileId: string | null; profileGeneration: number; onStatus?: (value: boolean) => void }
 type Failure = ConnectionResult | 'update' | 'admin' | 'stale' | 'invalid' | 'failed'
 function failure(reason: unknown): Failure {
   const code = reason instanceof Error ? reason.message : ''
@@ -82,6 +83,11 @@ export function ProviderConnectionSettings({ backend, ...props }: Props & { back
       if (reply.configuration) setSaved(reply.configuration)
       if (reply.ok === false) setError(reply.status ?? 'failed')
       else setOpen(false)
+      if (reply.configuration && window.agentsDock.runtime?.catalog) {
+        void window.agentsDock.runtime.catalog(false).then(runtimeCatalog => {
+          if (owns(n, scope)) useAppStore.setState({ runtimeCatalog })
+        }).catch(() => undefined)
+      }
     } catch (reason) { if (owns(n, scope)) setError(failure(reason)) }
     finally {
       if ('api_key' in input) input.api_key = ''
@@ -91,12 +97,13 @@ export function ProviderConnectionSettings({ backend, ...props }: Props & { back
   const name = backend === 'claude' ? 'Claude Code' : 'OpenCode'
   const editable = props.connected && Boolean(props.profileId) && Boolean(saved) && !busy
   const verified = props.connected && !busy && !open && !error && saved?.configured === true && saved?.last_result === 'verified'
+  useEffect(() => { props.onStatus?.(verified) }, [verified, props.onStatus])
   const unavailable = !props.connected || !saved || Boolean(error)
   return <section className={`codex-auth-settings provider-connection ${verified ? 'connection-connected' : 'connection-unconfirmed'}`} aria-label={`${name} custom endpoint`}>
     <div className="codex-auth-settings-icon">{verified ? <CheckCircle2 size={18} /> : <KeyRound size={16} />}</div>
     <div className="codex-auth-settings-copy">
       <div className="codex-auth-settings-heading">
-        <div><strong>{t('connections.title', { provider: name })}</strong><small>{t('connections.settingsOnly')}</small></div>
+        <div><strong>{t('connections.customAPI')}</strong>{saved?.scope === 'settings_only' && <small>{t('connections.settingsOnly')}</small>}</div>
         {!open && <button type="button" className={verified ? 'quiet-button' : 'primary-button'} disabled={!editable} onClick={configure}>{t('connections.configure')}</button>}
       </div>
       <small className={verified ? 'provider-connection-verified' : ''} role="status">
@@ -164,7 +171,7 @@ export function CursorEndpointNotice() {
     <div className="codex-auth-settings-icon"><KeyRound size={16} /></div>
     <div className="codex-auth-settings-copy"><strong>{t('connections.title', { provider: 'Cursor' })}</strong>
       <small role="status">{t('connections.unsupported')}</small><small>{t('connections.cursorHelp')}</small>
-      <button type="button" className="quiet-button provider-connection-refresh" onClick={() => void window.agentsDock.native.openExternal('https://cursor.com/docs/cli/reference/authentication')}>{t('connections.cursorDocs')}</button>
+      <a href="https://cursor.com/docs" onClick={event => { event.preventDefault(); void window.agentsDock.native.openExternal('https://cursor.com/docs') }}>{t('connections.readMore')}</a>
     </div>
   </section>
 }

@@ -6,6 +6,7 @@ import { useLocale } from '../lib/i18n'
 import { CodexModelCompatibilityCheck } from './CodexModelCompatibilityCheck'
 import './CodexAuthSettings.css'
 import './ProviderConnectionSettings.css'
+import { NativeProviderSignIn } from './NativeProviderSignIn'
 
 type AuthFailure = 'admin' | 'update' | 'connection' | 'readFailed'
 type ProviderFailure = 'providerAdmin' | 'providerUpdate' | 'providerBusy' | 'providerInvalid' | 'providerConnection' | 'providerFailed'
@@ -28,11 +29,13 @@ function authFailure(reason: unknown): AuthFailure {
   return 'readFailed'
 }
 
-export function CodexAuthSettings({ connected, profileId, profileGeneration, serverTitle }: {
+export function CodexAuthSettings({ connected, profileId, profileGeneration, serverTitle, onAPIStatus, onNativeStatus }: {
   connected: boolean
   profileId: string | null
   profileGeneration: number
   serverTitle?: string
+  onAPIStatus?: (value: boolean) => void
+  onNativeStatus?: (value: boolean) => void
 }) {
   useLocale()
   const fieldId = useId()
@@ -278,6 +281,7 @@ export function CodexAuthSettings({ connected, profileId, profileGeneration, ser
     && (currentStatus.auth_mode === 'chatgpt' || currentStatus.auth_mode === 'apiKey')
   const apiVerified = !providerLoading && !saving && !testing && !showForm && !providerError && !providerReadFailed
     && currentProvider?.configured === true && currentProvider.connection_verified === true
+  useEffect(() => { onAPIStatus?.(apiVerified); onNativeStatus?.(nativeSignedIn) }, [apiVerified, nativeSignedIn, onAPIStatus, onNativeStatus])
   return <><section className={`codex-auth-settings ${nativeSignedIn ? 'connection-connected' : 'connection-unconfirmed'}`} aria-label={t('codexAuth.title')} aria-busy={loading}>
     <span className="codex-auth-settings-icon">{nativeSignedIn ? <CheckCircle2 size={18} /> : <KeyRound size={17} />}</span>
     <div className="codex-auth-settings-copy">
@@ -292,7 +296,7 @@ export function CodexAuthSettings({ connected, profileId, profileGeneration, ser
       </div>
       <small>{!connected || !profileId ? t('codexAuth.connect') : loading ? t('codexAuth.loading')
         : currentStatus?.available === false ? t('codexAuth.nativeRequired') : currentStatus ? account : t('codexAuth.unknown')}</small>
-      <small>{t('codexAuth.accountReadOnly')}</small>
+      {!nativeSignedIn && !loading && <NativeProviderSignIn backend="codex" disabled={!connected} />}
       {error && <small className="codex-auth-settings-error" role="alert">{t(`codexAuth.${error}`)}</small>}
     </div>
   </section>

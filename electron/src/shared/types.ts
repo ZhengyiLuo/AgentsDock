@@ -434,8 +434,10 @@ export interface Session {
   backend: Backend
   /** Missing on older sessions means native Codex's default provider. */
   codex_provider?: CodexProvider
+  provider_connection?: CodexProvider
   /** Safe catalog for this chat's retained endpoint credentials. */
   codex_provider_catalog?: RuntimeBackendCatalog['custom_provider']
+  provider_connection_catalog?: RuntimeBackendCatalog['custom_provider']
   model?: string | null
   effort?: string | null
   system_prompt?: string | null
@@ -532,6 +534,7 @@ export interface RuntimeDiagnostic {
   last_error_at?: string | null
 }
 export interface RuntimeBackendCatalog {
+  native_credentials_present?: boolean
   /** Safe metadata only; credentials stay on the server. */
   custom_provider?: {
     configured: boolean
@@ -1713,6 +1716,7 @@ export interface HealthCapabilities {
   provider_usage?: { available: boolean; version: number; backends?: Backend[] }
   subagent_limit_v1?: { version: number; backends?: Backend[] }
   codex_provider_v1?: { available?: boolean; version?: number; per_chat?: boolean; per_chat_models?: boolean; model_discovery?: boolean; model_compatibility?: boolean }
+  provider_connections_v1?: { available?: boolean; per_chat?: boolean; backends?: Backend[] }
   side_questions?: SideQuestionsCapability
   tmux?: ServerCapability
   workspace_files?: WorkspaceFilesCapability
@@ -2353,6 +2357,7 @@ export interface CreateSessionInput {
   cwd: string
   backend: Backend
   codex_provider?: CodexProvider
+  provider_connection?: CodexProvider
   model?: string | null
   effort?: string | null
   system_prompt?: string | null
@@ -2394,6 +2399,7 @@ export interface UpdateSessionInput {
   cwd?: string
   backend?: Backend
   codex_provider?: CodexProvider
+  provider_connection?: CodexProvider
   model?: string | null
   effort?: string | null
   system_prompt?: string | null

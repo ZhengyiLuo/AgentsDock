@@ -10,7 +10,7 @@ export interface ProviderConnectionInput {
   auth_header: 'bearer' | 'x-api-key'; expected_revision: number
 }
 export interface ProviderConnectionConfiguration {
-  backend: ConnectionBackend; scope: 'settings_only'; revision: number; configured: boolean; has_api_key: boolean
+  backend: ConnectionBackend; scope: 'settings_only' | 'per_chat'; revision: number; configured: boolean; has_api_key: boolean
   base_url: string | null; model: string | null; protocol: ConnectionProtocol | null
   auth_header: 'bearer' | 'x-api-key' | null; checked_at: string | null; last_result: ConnectionResult | null
 }
@@ -56,9 +56,9 @@ export function parseConnection(backend: ConnectionBackend, value: unknown): Pro
   try {
     if (!value || typeof value !== 'object' || Array.isArray(value)) return invalid()
     const item = value as Record<string, unknown>
-    if (item.backend !== backend || item.scope !== 'settings_only' || typeof item.configured !== 'boolean'
+    if (item.backend !== backend || !(['settings_only', 'per_chat'].includes(String(item.scope))) || typeof item.configured !== 'boolean'
       || item.has_api_key !== item.configured) return invalid()
-    const common = { backend, scope: 'settings_only' as const, revision: revision(item.revision), configured: item.configured, has_api_key: item.configured }
+    const common = { backend, scope: item.scope as ProviderConnectionConfiguration['scope'], revision: revision(item.revision), configured: item.configured, has_api_key: item.configured }
     if (!item.configured) {
       if (['base_url', 'model', 'protocol', 'auth_header', 'checked_at', 'last_result'].some(key => item[key] !== null)) return invalid()
       return { ...common, base_url: null, model: null, protocol: null, auth_header: null, checked_at: null, last_result: null }

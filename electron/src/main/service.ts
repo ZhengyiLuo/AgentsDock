@@ -1,6 +1,7 @@
 import type { ProviderUsageScope, ProviderUsageSnapshot, UsageBackend } from '../shared/provider-usage'
 import { connectionRequest, type ConnectionBackend, type ConnectionAction, type ProviderConnectionRequest, type ProviderConnectionReply } from '../shared/provider-connections'
 import { app, BrowserWindow, dialog, nativeImage, Notification, shell } from 'electron'
+import { discoverLocalServers, type DiscoveredLocalServer } from './local-server-discovery'
 import { applyOpenCodeSessionEvent } from '../shared/opencode'
 import { chmodSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
 import { open, rename, rm, stat, writeFile } from 'node:fs/promises'
@@ -338,6 +339,7 @@ interface SemanticTimelineCapability {
 }
 
 export interface AppServiceOptions {
+  localServerDiscovery?: () => Promise<DiscoveredLocalServer[]>
   /** Reconcile authorized updates on existing health observations, without another polling loop. */
   onServerReachable?: (profileId: string, health: Health) => void
   onServerUnavailable?: (profileId: string) => void
@@ -363,6 +365,8 @@ export interface AppServiceOptions {
 }
 
 export class AppService {
+  private readonly localServerDiscovery: () => Promise<DiscoveredLocalServer[]>
+  private localDiscoveryStarted = false
   readonly settings: SettingsStore
   readonly cache: LocalCache
   client: AgentServerClient
@@ -469,6 +473,7 @@ export class AppService {
   } | null = null
 
   constructor(options: AppServiceOptions = {}) {
+    this.localServerDiscovery = options.localServerDiscovery ?? (options.settings || options.clientFactory ? async () => [] : discoverLocalServers)
     appLog('startup', 'loading settings')
     this.settings = options.settings ?? new SettingsStore()
     appLog('startup', 'settings loaded')
@@ -596,6 +601,10 @@ export class AppService {
     if (this.running) return
     if (!this.clientAvailable) this.activateProfile(this.activeProfileId, false, true)
     this.running = true
+    if (!this.localDiscoveryStarted) {
+      this.localDiscoveryStarted = true
+      void this.discoverManagedLocalServers()
+    }
     void this.runBackgroundRefresh(true, this.captureScope())
     void this.refreshInactiveProfileHealth()
     this.pollTimer = setInterval(
@@ -1499,6 +1508,31 @@ export class AppService {
     return this.settings.getProfile(profile.id, this.runtimeForProfile(profile.id)) ?? profile
   }
 
+  private async discoverManagedLocalServers(): Promise<void> {
+    const epoch = this.shutdownEpoch
+    const intent = this.profileSelectionIntent
+    try {
+      const found = await this.localServerDiscovery()
+      if (!this.running || this.shutdownEpoch !== epoch) return
+      for (const server of found) {
+        if (!this.running || this.shutdownEpoch !== epoch) return
+        const profiles = this.settings.listProfiles()
+        const existing = profiles.find(profile => profile.serverUrl.replace(/\/$/, '') === server.serverUrl || profile.serverIdentity === server.serverIdentity)
+        if (existing) {
+          // Only fill an unconfigured bootstrap profile. Never overwrite saved
+          // remote credentials, a trusted identity, or a user's selection.
+          if (!existing.hasAccessToken && !existing.serverIdentity && existing.serverUrl.replace(/\/$/, '') === server.serverUrl) {
+            this.settings.updateProfile(existing.id, { accessToken: server.accessToken, serverIdentity: server.serverIdentity, serverSetupComplete: true })
+            if (existing.id === this.activeProfileId && intent === this.profileSelectionIntent) await this.switchServer(existing.id, true)
+          }
+          continue
+        }
+        this.addServer({ ...server, serverSetupComplete: true })
+      }
+      if (this.running && this.shutdownEpoch === epoch) await this.refreshInactiveProfileHealth()
+    } catch { appLog('startup', 'local server discovery unavailable; saved profiles unchanged') }
+  }
+
   async updateServer(profileId: string, patch: UpdateServerProfilePatch): Promise<PublicServerProfile> {
     return patch.resetServerIdentity || this.profileAuthorityOperations.has(profileId)
       ? this.withProfileAuthorityOperation(profileId, () => this.updateServerOnce(profileId, patch))
@@ -2362,6 +2396,7 @@ export class AppService {
     await this.ensureValidatedScope(scope)
     this.assertCurrentScope(scope)
     this.requirePerChatCodexProvider(input.codex_provider)
+    this.requirePerChatProviderConnection(input.provider_connection)
     this.requirePerChatSubagentLimit(input.subagent_limit)
     const session = await scope.client.createSession(input)
     this.assertCurrentScope(scope)
@@ -2374,6 +2409,7 @@ export class AppService {
     await this.ensureValidatedScope(scope)
     this.assertCurrentScope(scope)
     this.requirePerChatCodexProvider(input.codex_provider)
+    if (input.provider_connection === 'custom') throw new Error('Import native conversations with their native login.')
     this.requirePerChatSubagentLimit(input.subagent_limit)
     const session = await scope.client.createSession(input)
     this.assertCurrentScope(scope)
@@ -2452,6 +2488,7 @@ export class AppService {
     await this.ensureValidatedScope(scope)
     this.assertCurrentScope(scope)
     this.requirePerChatCodexProvider(patch.codex_provider)
+    this.requirePerChatProviderConnection(patch.provider_connection)
     this.requirePerChatSubagentLimit(patch.subagent_limit)
     const session = await scope.client.updateSession(sessionId, patch)
     this.assertCurrentScope(scope)
@@ -2481,6 +2518,12 @@ export class AppService {
       || (capability as { per_chat?: unknown }).per_chat !== true) {
       throw new Error('Update AgentsServer to select a custom Codex endpoint for this chat.')
     }
+  }
+
+  private requirePerChatProviderConnection(selection: unknown): void {
+    if (selection === undefined || selection === 'default') return
+    if (selection !== 'custom') throw new Error('Invalid API connection selection.')
+    if (this.health?.capabilities?.provider_connections_v1?.per_chat !== true) throw new Error('Update AgentsServer to use this custom API in chats.')
   }
 
   private requireCodexProviderModels(): void {

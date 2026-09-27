@@ -293,17 +293,19 @@ export interface NewChatDefaults {
   cwd: string
   backend: Backend
   codex_provider?: CreateSessionInput['codex_provider']
+  provider_connection?: CreateSessionInput['provider_connection']
   model: string | null
   effort: string | null
 }
 
-function normalizedNewChatDefaults(input: Pick<CreateSessionInput, 'folder' | 'cwd' | 'backend' | 'codex_provider' | 'model' | 'effort'>): NewChatDefaults {
+function normalizedNewChatDefaults(input: Pick<CreateSessionInput, 'folder' | 'cwd' | 'backend' | 'codex_provider' | 'provider_connection' | 'model' | 'effort'>): NewChatDefaults {
   return {
     version: 1,
     folder: input.folder.trim() || 'General',
     cwd: input.cwd.trim(),
     backend: input.backend,
     ...(input.backend === 'codex' && input.codex_provider === 'custom' ? { codex_provider: 'custom' as const } : {}),
+    ...(input.provider_connection === 'custom' ? { provider_connection: 'custom' as const } : {}),
     model: input.model?.trim() || null,
     effort: input.effort?.trim() || null
   }
@@ -316,6 +318,7 @@ function parseNewChatDefaults(value: unknown): NewChatDefaults | null {
     candidate.version !== 1
     || !['claude', 'codex', 'cursor', 'opencode'].includes(String(candidate.backend))
     || candidate.codex_provider !== undefined && !['default', 'custom'].includes(candidate.codex_provider)
+    || candidate.provider_connection !== undefined && !['default', 'custom'].includes(candidate.provider_connection)
     || typeof candidate.folder !== 'string'
     || typeof candidate.cwd !== 'string'
     || candidate.model !== null && typeof candidate.model !== 'string'
@@ -341,12 +344,13 @@ function sessionNewChatDefaults(session: Session, defaultCwd: string): NewChatDe
     cwd: session.cwd || defaultCwd,
     backend: session.backend,
     codex_provider: session.codex_provider,
+    provider_connection: session.provider_connection,
     model: session.model,
     effort: session.effort
   })
 }
 
-export function saveNewChatDefaults(scope: WorkspaceProfileScope | null, input: Pick<CreateSessionInput, 'folder' | 'cwd' | 'backend' | 'codex_provider' | 'model' | 'effort'>): Promise<void> {
+export function saveNewChatDefaults(scope: WorkspaceProfileScope | null, input: Pick<CreateSessionInput, 'folder' | 'cwd' | 'backend' | 'codex_provider' | 'provider_connection' | 'model' | 'effort'>): Promise<void> {
   try {
     return setWorkspacePreference(scope, NEW_CHAT_DEFAULTS_PREFERENCE_KEY, normalizedNewChatDefaults(input))
   } catch (error) {
@@ -365,7 +369,7 @@ function directChatPlaceholderFingerprint(session: Session): string {
     folder: session.folder?.trim() || 'General',
     cwd: session.cwd?.trim() || '',
     backend: session.backend,
-    ...(session.backend === 'codex' && session.codex_provider === 'custom' ? { codexProvider: 'custom' } : {}),
+    ...(session.backend === 'codex' && (session.provider_connection === 'custom' ? 'custom' : session.codex_provider) === 'custom' ? { codexProvider: 'custom' } : {}),
     model: session.model?.trim() || null,
     effort: session.effort?.trim() || null,
     systemPrompt: session.system_prompt ?? null,
@@ -1777,7 +1781,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       set({ error: 'The selected chat is no longer available.' })
       return false
     }
-    const runtimeError = runtimeSelectionError(get().health, get().runtimeCatalog, currentTarget.backend, currentTarget.model, currentTarget.codex_provider, currentTarget.codex_provider_catalog)
+    const runtimeError = runtimeSelectionError(get().health, get().runtimeCatalog, currentTarget.backend, currentTarget.model, (currentTarget.provider_connection === 'custom' ? 'custom' : currentTarget.codex_provider), (currentTarget.provider_connection_catalog ?? currentTarget.codex_provider_catalog))
     if (runtimeError) {
       set({ error: runtimeError })
       return false
@@ -2083,7 +2087,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       }
       if (
         !selectableChatBackends(current.health, current.runtimeCatalog).includes(defaults.backend)
-        || runtimeSelectionError(current.health, current.runtimeCatalog, defaults.backend, defaults.model, defaults.codex_provider)
+        || runtimeSelectionError(current.health, current.runtimeCatalog, defaults.backend, defaults.model, defaults.provider_connection === 'custom' ? 'custom' : defaults.codex_provider)
       ) {
         set({ creatingChat: false })
         current.setModal('newChat', true)
@@ -2095,6 +2099,7 @@ export const useAppStore = create<AppState>((set, get) => ({
         cwd: defaults.cwd,
         backend: defaults.backend,
         ...(defaults.codex_provider === 'custom' ? { codex_provider: 'custom' as const } : {}),
+        ...(defaults.provider_connection === 'custom' ? { provider_connection: 'custom' as const } : {}),
         model: defaults.model,
         effort: defaults.effort,
         system_prompt: null,
@@ -4838,6 +4843,7 @@ function normalizeSessionPatch(patch: Partial<Session>) { return {
   cwd: patch.cwd ?? undefined,
   backend: patch.backend,
   codex_provider: patch.codex_provider,
+  provider_connection: patch.provider_connection,
   model: patch.model,
   effort: patch.effort,
   system_prompt: patch.system_prompt,

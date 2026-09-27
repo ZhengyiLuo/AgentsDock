@@ -805,7 +805,7 @@ export const Composer = memo(function Composer({ dropActive = false, sessionId, 
     if (command.id === 'permissions') return codexPermissionsAvailable || claudePermissionsAvailable || cursorPermissionsAvailable || session.backend === 'opencode' && opencodeBackendAvailable(health, catalog)
     if (command.id === 'reasoning') {
       return session.backend !== 'cursor' && session.backend !== 'opencode'
-        && runtimeEffortOptions(catalog, session.backend, session.model, session.effort, session.codex_provider, session.codex_provider_catalog)
+        && runtimeEffortOptions(catalog, session.backend, session.model, session.effort, (session.provider_connection === 'custom' ? 'custom' : session.codex_provider), (session.provider_connection_catalog ?? session.codex_provider_catalog))
         .some(option => Boolean(option.value))
     }
     if (command.id === 'mcp') return session.backend === 'claude' && claudeMcpAvailable
@@ -1377,7 +1377,7 @@ export const Composer = memo(function Composer({ dropActive = false, sessionId, 
     let submissionAccepted = false
     try {
       const runtimeSnapshot = useAppStore.getState()
-      const diagnostic = runtimeDiagnosticFor(runtimeSnapshot.health, runtimeSnapshot.runtimeCatalog, session.backend, session.codex_provider, session.codex_provider_catalog)
+      const diagnostic = runtimeDiagnosticFor(runtimeSnapshot.health, runtimeSnapshot.runtimeCatalog, session.backend, (session.provider_connection === 'custom' ? 'custom' : session.codex_provider), (session.provider_connection_catalog ?? session.codex_provider_catalog))
       // Claude owns login verification on the real request. Its cached failure
       // can outlive an external login; do not prevent the retry that proves it.
       const nativeClaudeAuthRetry = session.backend === 'claude' && diagnostic?.status === 'unauthenticated'
@@ -1859,7 +1859,7 @@ export const Composer = memo(function Composer({ dropActive = false, sessionId, 
       />
         </fieldset>
       {(uploads.length > 0 || uploadPaths.length > 0) && <AttachmentShelf sessionId={session.id} profileId={activeProfileId} profileGeneration={profileGeneration} files={uploads} pending={uploadPaths} />}
-      <RuntimeHealthNotice backend={session.backend} codexProvider={session.codex_provider} sessionId={session.id} />
+      <RuntimeHealthNotice backend={session.backend} codexProvider={(session.provider_connection === 'custom' ? 'custom' : session.codex_provider)} sessionId={session.id} />
       {selectedRuntimeError && !(session.backend === 'cursor' && !cursorPermissionsAvailable) && <span className="chat-reference-warning">{selectedRuntimeError}</span>}
       {activeInboundDeliveryKind && <span className={activeInboundDeliveryKind === 'unknown' ? 'composer-sync-status' : 'chat-reference-warning'} role="status">{activeInboundDeliveryKind === 'unknown'
         ? t("ui.Composer.Composer.an_active_turn_is_running_while_chat_sync__2265ac1")
@@ -2924,11 +2924,11 @@ function composerCommandValue(
 ): string {
   if (command.provider) return command.provider.command.invocation
   if (command.id === 'model') {
-    return runtimeCatalogOptions(catalog, session.backend, 'models', session.model, session.codex_provider, session.codex_provider_catalog)
+    return runtimeCatalogOptions(catalog, session.backend, 'models', session.model, (session.provider_connection === 'custom' ? 'custom' : session.codex_provider), (session.provider_connection_catalog ?? session.codex_provider_catalog))
       .find(option => option.value === (session.model ?? ''))?.label ?? 'Default'
   }
   if (command.id === 'reasoning') {
-    return runtimeEffortOptions(catalog, session.backend, session.model, session.effort, session.codex_provider, session.codex_provider_catalog)
+    return runtimeEffortOptions(catalog, session.backend, session.model, session.effort, (session.provider_connection === 'custom' ? 'custom' : session.codex_provider), (session.provider_connection_catalog ?? session.codex_provider_catalog))
       .find(option => option.value === (session.effort ?? ''))?.label ?? 'Default'
   }
   if (command.id === 'plan') return claudePermissionMode === 'plan' ? 'On' : 'Choose'
@@ -3228,13 +3228,14 @@ function RuntimeMenu({
   const catalog = useAppStore(state => state.runtimeCatalog)
   const codexRuntime = useCodexRuntime()
   const claudeRuntime = useClaudeRuntime()
-  const models = runtimeCatalogOptions(catalog, session.backend, 'models', session.model, session.codex_provider, session.codex_provider_catalog)
-  const efforts = runtimeEffortOptions(catalog, session.backend, session.model, session.effort, session.codex_provider, session.codex_provider_catalog)
+  const models = runtimeCatalogOptions(catalog, session.backend, 'models', session.model, (session.provider_connection === 'custom' ? 'custom' : session.codex_provider), (session.provider_connection_catalog ?? session.codex_provider_catalog))
+  const efforts = runtimeEffortOptions(catalog, session.backend, session.model, session.effort, (session.provider_connection === 'custom' ? 'custom' : session.codex_provider), (session.provider_connection_catalog ?? session.codex_provider_catalog))
   const profileId = useAppStore(state => state.activeProfileId)
   const profileGeneration = useAppStore(state => state.profileGeneration)
   const [manualModelOpen, setManualModelOpen] = useState(false)
   const [manualModel, setManualModel] = useState('')
-  const isCustomCodex = session.backend === 'codex' && session.codex_provider === 'custom'
+  const isCustomCodex = session.backend === 'codex' && (session.provider_connection === 'custom' ? 'custom' : session.codex_provider) === 'custom'
+  const isCustomAPI = isCustomCodex || session.provider_connection === 'custom'
   const [reloading, setReloading] = useState(false)
   const [reloadNotice, setReloadNotice] = useState<{ kind: 'success' | 'error'; message: string } | null>(null)
   const reloadNoticeTimer = useRef<number | null>(null)
@@ -3263,7 +3264,7 @@ function RuntimeMenu({
 
   const selectModel = (value: string) => {
     const model = value || null
-    const effort = runtimeEffortAfterModelChange(catalog, session.backend, model, session.effort, session.codex_provider, session.codex_provider_catalog)
+    const effort = runtimeEffortAfterModelChange(catalog, session.backend, model, session.effort, (session.provider_connection === 'custom' ? 'custom' : session.codex_provider), (session.provider_connection_catalog ?? session.codex_provider_catalog))
     void useAppStore.getState().updateSession(session.id, { model, effort })
   }
   const dismissReloadNotice = () => {
@@ -3304,9 +3305,9 @@ function RuntimeMenu({
         >
           <DropdownMenu.Label className="menu-label">{t("ui.Composer.RuntimeMenu.model_5e2c614")}</DropdownMenu.Label>
           {models.map(option => <DropdownMenu.CheckboxItem data-runtime-section="model" key={option.value || 'default'} className="menu-item" disabled={option.locked} title={option.locked ? option.locked_reason ?? undefined : undefined} checked={(session.model ?? '') === option.value} onCheckedChange={() => selectModel(option.value)}>{option.label}{option.locked && !isCustomCodex ? <span className="menu-item-locked-hint">{" "}{t("ui.Composer.upgrade_required_838a00a")}</span> : null}</DropdownMenu.CheckboxItem>)}
-          {isCustomCodex && <>
+          {isCustomAPI && <>
             <DropdownMenu.Item className="menu-item" onSelect={() => { setManualModel(session.model ?? ''); setManualModelOpen(true) }}>{t('codexProvider.manualModel')}</DropdownMenu.Item>
-            <CodexModelDiscovery menu sessionId={session.id} />
+            {isCustomCodex && <CodexModelDiscovery menu sessionId={session.id} />}
           </>}
           {session.backend !== 'cursor' && session.backend !== 'opencode' && efforts.some(option => Boolean(option.value)) && <>
             <DropdownMenu.Separator className="menu-separator" />
@@ -3325,7 +3326,7 @@ function RuntimeMenu({
           </>}
         </DropdownMenu.Content></DropdownMenu.Portal>
       </DropdownMenu.Root>
-      {isCustomCodex && <Dialog.Root open={manualModelOpen} onOpenChange={setManualModelOpen}>
+      {isCustomAPI && <Dialog.Root open={manualModelOpen} onOpenChange={setManualModelOpen}>
         <Dialog.Portal><Dialog.Overlay className="dialog-overlay" /><Dialog.Content className="form-dialog">
           <header><div><Dialog.Title>{t('codexProvider.manualModel')}</Dialog.Title><Dialog.Description>{t('codexProvider.manualModelHelp')}</Dialog.Description></div></header>
           <div className="form-dialog-body"><form className="dialog-form" onSubmit={event => { event.preventDefault(); if (manualModel.trim()) { selectModel(manualModel.trim()); setManualModelOpen(false) } }}>
@@ -3362,19 +3363,19 @@ function BackendMenu({ session, running, admitting }: { session: Session; runnin
       : admitting
         ? 'Wait for the message to be accepted before changing backend'
         : t('ui.composer.changeAgent')
-  const providerLabel = backendLabel(session.backend, session.codex_provider)
-  const compactLabel = session.backend === 'codex' && session.codex_provider === 'custom'
+  const providerLabel = backendLabel(session.backend, (session.provider_connection === 'custom' ? 'custom' : session.codex_provider))
+  const compactLabel = session.backend === 'codex' && (session.provider_connection === 'custom' ? 'custom' : session.codex_provider) === 'custom'
     ? t('codexProvider.compactLabel')
     : providerLabel
   const chip = <button className="backend-chip" title={title} aria-label={providerLabel} disabled={disabled}><BackendMark backend={session.backend} size={17} /><span>{compactLabel}</span>{!disabled && <ChevronDown size={12} />}</button>
   if (disabled) return chip
   return <Tooltip.Provider delayDuration={250}><DropdownMenu.Root><DropdownMenu.Trigger asChild>{chip}</DropdownMenu.Trigger><DropdownMenu.Portal><DropdownMenu.Content className="menu-content" side="top" align="start">{backends.map(choice => {
-    const { backend, codex_provider } = chatBackendSelection(choice)
+    const { backend, codex_provider, provider_connection } = chatBackendSelection(choice)
     if (choice === 'codex-custom' && !codexCustomProviderAvailable(health, catalog)) return <DropdownMenu.Item key={choice} className="menu-item" onSelect={() => {
       window.dispatchEvent(new CustomEvent('agentsdock:app-settings-section', { detail: 'providers' }))
       useAppStore.getState().setModal('appSettings', true)
     }}><BackendMark backend="codex" size={15} />{t('codexProvider.label')}{' '}<span className="menu-item-locked-hint">{t('codexProvider.configure')}</span></DropdownMenu.Item>
-    const unavailable = backend === 'cursor' && !cursorAvailable || backend === 'opencode' && !openCodeAvailable
+    const unavailable = backend === 'cursor' && !cursorAvailable || backend === 'opencode' && provider_connection !== 'custom' && !openCodeAvailable
     const unavailableReason = (backend === 'opencode' ? openCodeUnavailableReason : cursorUnavailableReason) || t('ui.Composer.agentUnavailableFallback')
     if (unavailable) return <Tooltip.Root key={backend}>
       <Tooltip.Trigger asChild>
@@ -3387,7 +3388,7 @@ function BackendMenu({ session, running, admitting }: { session: Session; runnin
       </Tooltip.Trigger>
       <Tooltip.Portal><Tooltip.Content className="shortcut-tooltip backend-unavailable-tooltip" side="right" sideOffset={7}><span>{unavailableReason}</span><Tooltip.Arrow className="shortcut-tooltip-arrow" /></Tooltip.Content></Tooltip.Portal>
     </Tooltip.Root>
-    return <DropdownMenu.CheckboxItem key={choice} className="menu-item" checked={chatBackendChoice(session) === choice} onCheckedChange={() => void useAppStore.getState().updateSession(session.id, { backend, codex_provider, model: null, effort: null })}><BackendMark backend={backend} size={15} />{backendLabel(backend, codex_provider)}</DropdownMenu.CheckboxItem>
+    return <DropdownMenu.CheckboxItem key={choice} className="menu-item" checked={chatBackendChoice(session) === choice} onCheckedChange={() => void useAppStore.getState().updateSession(session.id, { backend, codex_provider, provider_connection, model: null, effort: null })}><BackendMark backend={backend} size={15} />{backendLabel(backend, provider_connection === 'custom' ? 'custom' : codex_provider)}</DropdownMenu.CheckboxItem>
   })}</DropdownMenu.Content></DropdownMenu.Portal></DropdownMenu.Root></Tooltip.Provider>
 }
 
@@ -4469,7 +4470,7 @@ function sessionRuntimeAdmissionError(
   health: Parameters<typeof runtimeSelectionError>[0],
   catalog: Parameters<typeof runtimeSelectionError>[1]
 ): string | null {
-  return session ? runtimeSelectionError(health, catalog, session.backend, session.model, session.codex_provider, session.codex_provider_catalog) : null
+  return session ? runtimeSelectionError(health, catalog, session.backend, session.model, (session.provider_connection === 'custom' ? 'custom' : session.codex_provider), (session.provider_connection_catalog ?? session.codex_provider_catalog)) : null
 }
 
 function queuedTurnRuntimeAdmissionError(
@@ -4481,7 +4482,7 @@ function queuedTurnRuntimeAdmissionError(
   if (!sourceSession) return t("ui.Composer.queuedTurnRuntimeAdmissionError.the_source_chat_is_no_longer_available_0704bd1")
   const backend = turn.backend ?? sourceSession.backend
   const model = turn.model ?? (backend === sourceSession.backend ? sourceSession.model : null)
-  return runtimeSelectionError(health, catalog, backend, model, backend === sourceSession.backend ? sourceSession.codex_provider : undefined, sourceSession.codex_provider_catalog)
+  return runtimeSelectionError(health, catalog, backend, model, backend === sourceSession.backend ? (sourceSession.provider_connection === 'custom' ? 'custom' : sourceSession.codex_provider) : undefined, (sourceSession.provider_connection_catalog ?? sourceSession.codex_provider_catalog))
 }
 
 /** Product-owned `/mcp` must never be admitted as a Claude model turn. */

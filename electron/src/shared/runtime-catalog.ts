@@ -2,14 +2,24 @@ import type { Backend, CodexProvider, Health, RuntimeBackendCatalog, RuntimeCata
 import { t } from './i18n'
 
 /** UI identity only: the native runtime remains Codex for both choices. */
-export type ChatBackendChoice = Backend | 'codex-custom'
+export type ChatBackendChoice = Backend | 'codex-custom' | 'claude-custom' | 'opencode-custom'
 
-export function chatBackendChoice(session: { backend: Backend; codex_provider?: CodexProvider }): ChatBackendChoice {
-  return session.backend === 'codex' && session.codex_provider === 'custom' ? 'codex-custom' : session.backend
+export function chatBackendChoice(session: { backend: Backend; codex_provider?: CodexProvider; provider_connection?: CodexProvider }): ChatBackendChoice {
+  return (session.backend === 'codex' ? session.codex_provider : session.provider_connection) === 'custom' ? `${session.backend}-custom` as ChatBackendChoice : session.backend
 }
 
-export function chatBackendSelection(choice: ChatBackendChoice): { backend: Backend; codex_provider: CodexProvider } {
-  return { backend: choice === 'codex-custom' ? 'codex' : choice, codex_provider: choice === 'codex-custom' ? 'custom' : 'default' }
+export function chatBackendSelection(choice: ChatBackendChoice): { backend: Backend; codex_provider: CodexProvider; provider_connection: CodexProvider } {
+  return { backend: choice.replace(/-custom$/, '') as Backend, codex_provider: choice === 'codex-custom' ? 'custom' : 'default', provider_connection: choice === 'claude-custom' || choice === 'opencode-custom' ? 'custom' : 'default' }
+}
+
+export function customProviderAvailable(health: Health | null | undefined, catalog: RuntimeCatalog | null | undefined, backend: Backend, customCatalog?: RuntimeBackendCatalog['custom_provider']): boolean {
+  if (backend === 'codex') return codexCustomProviderAvailable(health, catalog, customCatalog)
+  const custom = customCatalog ?? catalog?.backends?.[backend]?.custom_provider
+  return health?.capabilities?.provider_connections_v1?.per_chat === true && ['claude', 'opencode'].includes(backend) && custom?.configured === true && custom.available === true
+}
+
+export function nativeProviderConnected(health: Health | null | undefined, catalog: RuntimeCatalog | null | undefined, backend: Backend): boolean {
+  return catalog?.backends?.[backend]?.native_credentials_present ?? runtimeDiagnosticFor(health, catalog, backend)?.authenticated === true
 }
 
 export function codexCustomProviderSupported(health: Health | null | undefined): boolean {
@@ -25,7 +35,7 @@ export function codexCustomProviderAvailable(health: Health | null | undefined, 
 /** Keep endpoint discovery separate from the normal Codex account's catalog. */
 export function runtimeBackendCatalogFor(catalog: RuntimeCatalog | null | undefined, backend: string, codexProvider?: CodexProvider, customCatalog?: RuntimeBackendCatalog['custom_provider']): RuntimeBackendCatalog | undefined {
   const standard = catalog?.backends[backend]
-  if (backend !== 'codex' || codexProvider !== 'custom') return standard
+  if (codexProvider !== 'custom') return standard
   const custom = customCatalog ?? standard?.custom_provider
   if (!custom) return undefined
   return {
@@ -38,11 +48,11 @@ export function runtimeBackendCatalogFor(catalog: RuntimeCatalog | null | undefi
 
 export function selectableChatBackendChoices(health: Health | null | undefined, catalog: RuntimeCatalog | null | undefined): ChatBackendChoice[] {
   const supported = selectableChatBackends(health, catalog)
-  // Keep the new provider discoverable on old servers; runtimeSelectionError
-  // still blocks admission and explains the required server upgrade.
-  if (!supported.includes('opencode')) supported.push('opencode')
-  return supported.flatMap(backend => backend === 'codex' && codexCustomProviderAvailable(health, catalog)
-    ? ['codex', 'codex-custom'] as ChatBackendChoice[] : [backend])
+  // Native first. Settings, not the composer, lists disconnected providers.
+  return supported.flatMap(backend => [
+    ...(nativeProviderConnected(health, catalog, backend) ? [backend] : []),
+    ...(customProviderAvailable(health, catalog, backend) ? [`${backend}-custom` as ChatBackendChoice] : [])
+  ])
 }
 
 // Claude and Codex are always expected on every server; Cursor is optional
@@ -208,6 +218,11 @@ export function runtimeSelectionError(
   codexProvider?: CodexProvider,
   customCatalog?: RuntimeBackendCatalog['custom_provider']
 ): string | null {
+  if (backend !== 'codex' && codexProvider === 'custom') {
+    if (!customProviderAvailable(health, catalog, backend, customCatalog)) return t('connections.unavailable')
+    const custom = runtimeBackendCatalogFor(catalog, backend, codexProvider, customCatalog)
+    return model?.trim() || custom?.default_model?.trim() ? null : t('connections.chooseModel')
+  }
   if (backend === 'codex' && codexProvider === 'custom') {
     if (!codexCustomProviderSupported(health)) return t('codexProvider.update')
     if (!codexCustomProviderAvailable(health, catalog, customCatalog)) return t('codexProvider.unavailable')
@@ -306,8 +321,8 @@ export function runtimeDiagnosticFor(
   codexProvider?: CodexProvider,
   customCatalog?: RuntimeBackendCatalog['custom_provider']
 ): RuntimeDiagnostic | null {
-  if (backend === 'codex' && codexProvider === 'custom') {
-    const available = codexCustomProviderAvailable(health, catalog, customCatalog)
+  if (codexProvider === 'custom') {
+    const available = customProviderAvailable(health, catalog, backend, customCatalog)
     return { backend, available, status: available ? 'ready' : 'error', message: available ? '' : t('codexProvider.unavailable') }
   }
   const fromHealth = health?.runtimes?.[backend] ?? null

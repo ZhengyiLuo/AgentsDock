@@ -1,5 +1,21 @@
 # Public development log
 
+## 2026-09-27 — Folded provider settings and managed local discovery
+
+- Present four expandable provider groups. Separate native credential presence
+  from explicit API connection checks, with brief CLI guidance only when absent.
+  Chat choices show connected native and custom methods separately, native first.
+- Wire Claude and OpenCode custom connections into explicit per-chat runtime
+  bindings. Pin private credentials, preserve native login/settings, reject
+  cross-login resume, inherit bindings on forks and fail closed without a model.
+  Cursor generic third-party endpoints remain unsupported, not falsely verified.
+- Discover owned managed local installations once at desktop startup; check
+  listener ownership before authentication and verify durable identity. Preserve
+  saved profiles and current selection; never scan LAN addresses or start services.
+- Focused synthetic checks cover credential isolation, transport, UI and discovery.
+  TypeScript and production build are checked. Real third-party model/tool
+  compatibility remains user acceptance work; no broad regression or release.
+
 ## 2026-09-27 — Visible provider connection state and login guidance
 
 - Put API configuration near the top of AI Providers and use the same

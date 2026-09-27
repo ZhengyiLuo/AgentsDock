@@ -4,6 +4,7 @@ import { runtimeBackendCatalogFor, runtimeEffortOptions } from '@shared/runtime-
 
 export function backendLabel(backend: Backend, codexProvider?: CodexProvider): string {
   if (backend === 'codex' && codexProvider === 'custom') return t('codexProvider.label')
+  if (codexProvider === 'custom') return t('connections.chatLabel', { provider: backend === 'opencode' ? 'OpenCode' : 'Claude' })
   if (backend === 'codex') return 'Codex'
   if (backend === 'cursor') return 'Cursor'
   if (backend === 'opencode') return 'OpenCode'
@@ -38,14 +39,14 @@ export function formatDuration(seconds?: number | null): string {
 }
 
 export function runtimeLabel(session: Session, catalog?: RuntimeCatalog | null): string {
-  const backend = runtimeBackendCatalogFor(catalog, session.backend, session.codex_provider, session.codex_provider_catalog)
-  const custom = session.backend === 'codex' && session.codex_provider === 'custom'
+  const backend = runtimeBackendCatalogFor(catalog, session.backend, (session.provider_connection === 'custom' ? 'custom' : session.codex_provider), (session.provider_connection_catalog ?? session.codex_provider_catalog))
+  const custom = session.backend === 'codex' && (session.provider_connection === 'custom' ? 'custom' : session.codex_provider) === 'custom'
   const model = session.model?.trim()
   const effort = session.backend === 'cursor' || session.backend === 'opencode' ? '' : session.effort?.trim()
   const modelLabel = model
     ? backend?.models.find(option => option.value === model)?.label ?? model
     : backend?.models.find(option => option.value === (backend.default_model ?? ''))?.label ?? (backend?.default_model?.trim() || (custom ? t('codexProvider.chooseModel') : session.backend === 'claude' ? 'Sonnet' : session.backend === 'codex' ? 'GPT' : session.backend === 'opencode' ? t('opencode.defaultModel') : 'Auto'))
-  const supportedEfforts = custom ? runtimeEffortOptions(catalog, session.backend, session.model, null, session.codex_provider, session.codex_provider_catalog) : null
+  const supportedEfforts = custom ? runtimeEffortOptions(catalog, session.backend, session.model, null, (session.provider_connection === 'custom' ? 'custom' : session.codex_provider), (session.provider_connection_catalog ?? session.codex_provider_catalog)) : null
   const effortLabel = session.backend === 'cursor' || session.backend === 'opencode'
     ? null
     : effort

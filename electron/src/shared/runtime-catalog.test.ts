@@ -57,11 +57,11 @@ describe('per-chat Codex provider selection', () => {
   } } }
 
   it('adds exactly one choice while preserving native Codex identity and legacy defaults', () => {
-    expect(selectableChatBackendChoices(health, catalog)).toEqual(['claude', 'codex', 'codex-custom', 'opencode'])
+    expect(selectableChatBackendChoices(health, catalog)).toEqual(['codex-custom'])
     expect(chatBackendChoice({ backend: 'codex' })).toBe('codex')
     expect(chatBackendChoice({ backend: 'codex', codex_provider: 'custom' })).toBe('codex-custom')
-    expect(chatBackendSelection('codex-custom')).toEqual({ backend: 'codex', codex_provider: 'custom' })
-    expect(chatBackendSelection('codex')).toEqual({ backend: 'codex', codex_provider: 'default' })
+    expect(chatBackendSelection('codex-custom')).toEqual({ backend: 'codex', codex_provider: 'custom', provider_connection: 'default' })
+    expect(chatBackendSelection('codex')).toEqual({ backend: 'codex', codex_provider: 'default', provider_connection: 'default' })
   })
 
   it('requires the per-chat capability and a configured ready endpoint', () => {
@@ -127,6 +127,25 @@ describe('per-chat Codex provider selection', () => {
     expect(runtimeSelectionError(health, catalog, 'codex', 'vendor/other', 'custom', custom)).toContain('compatibility check')
     expect(runtimeSelectionError(health, catalog, 'codex', 'vendor/unknown', 'custom', custom)).toBeNull()
     expect(runtimeEffortAfterModelChange({ backends: { codex: { models: [], efforts: custom.efforts, model_efforts: { plain: [] } } } }, 'codex', 'plain', 'high')).toBeNull()
+  })
+})
+
+describe('native and custom API choices', () => {
+  it('shows only connected choices, native before custom, and keeps API models separate', () => {
+    const health: Health = { ok: true, capabilities: { provider_connections_v1: { per_chat: true }, opencode_backend: { available: true, version: 1, required: false, message: '', action: null } } }
+    const custom = { configured: true, available: true, model: 'api/model', base_url: 'https://example.invalid', models: [{ value: 'api/model', label: 'API model' }] }
+    const catalog: RuntimeCatalog = { backends: {
+      claude: { models: [{ value: 'native-model', label: 'Native' }], efforts: [], native_credentials_present: true, custom_provider: custom },
+      codex: { models: [], efforts: [], native_credentials_present: false },
+      opencode: { models: [], efforts: [], native_credentials_present: false, custom_provider: custom }
+    } }
+    expect(selectableChatBackendChoices(health, catalog)).toEqual(['claude', 'claude-custom', 'opencode-custom'])
+    expect(chatBackendSelection('opencode-custom')).toEqual({ backend: 'opencode', codex_provider: 'default', provider_connection: 'custom' })
+    expect(chatBackendChoice({ backend: 'claude', provider_connection: 'custom' })).toBe('claude-custom')
+    expect(runtimeCatalogOptions(catalog, 'claude', 'models', null, 'custom').some(x => x.value === 'native-model')).toBe(false)
+    expect(runtimeSelectionError(health, catalog, 'opencode', 'api/model', 'custom')).toBeNull()
+    expect(runtimeSelectionError({ ok: true }, catalog, 'claude', 'api/model', 'custom')).not.toBeNull()
+    expect(runtimeSelectionError(health, catalog, 'claude', null, 'custom', { ...custom, model: null })).toContain('Choose a model')
   })
 })
 
