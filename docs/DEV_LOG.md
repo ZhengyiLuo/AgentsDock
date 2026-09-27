@@ -1,5 +1,22 @@
 # Public development log
 
+## 2026-09-27 — Verify replay chains before trust and use an exact TLS probe
+
+- Run `36345413985` again verifies fresh installation and the signed packages.
+  Its listener is ready and reached over loopback, but curl still reports
+  issuer-chain verification failure (`20`). No update click was exercised.
+- Verify the generated leaf against the ephemeral CA for all three exact
+  hostnames before any trust-store or hosts-file mutation; keep failures
+  sanitized and partial setup recoverable.
+- Use a bounded Node HTTPS readiness probe with explicit CA and normal
+  hostname/TLS verification, exact served-leaf match, loopback, expected response
+  marker and owned ready listener. Curl remains an independent diagnostic.
+  The production app's native TLS/update checks are unchanged and still must
+  pass the real upgrade journey. Do not treat infrastructure readiness as an
+  updater pass or publication approval.
+- Pass 259 JavaScript release/CLI tests, 87 Python helper tests and workflow
+  lint; independent review passes the TLS and diagnostic boundaries.
+
 ## 2026-09-27 — Pin replay-probe trust and connection identity
 
 - Candidate run `36344660122` repeats the fresh npm and signed app/legacy

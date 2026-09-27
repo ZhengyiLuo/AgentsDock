@@ -1,13 +1,17 @@
 import assert from 'node:assert/strict'
 import { execFileSync, spawnSync } from 'node:child_process'
-import { createHash, generateKeyPairSync, sign } from 'node:crypto'
+import { createHash, generateKeyPairSync, sign, X509Certificate } from 'node:crypto'
+import { EventEmitter } from 'node:events'
+import { Readable } from 'node:stream'
+import { checkServerIdentity } from 'node:tls'
 import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 import { test } from 'node:test'
 import { expectedAssets } from '../direct-release-mirror.mjs'
 import { assertReplayReadiness, assertReplayRunner, consumeReplayFault, createCandidateReplay, createProductReplay, createReplayStartupDiagnostics,
-  finalizeReplayListener, parseReplayArguments, parseReplayProbeDiagnostics, parseReplayRange, parseReplayStartupDiagnostics, readReplayMetadata, serveProductReplay } from '../product-release-replay.mjs'
+  finalizeReplayListener, parseReplayArguments, parseReplayOriginProbe, parseReplayProbeDiagnostics, parseReplayRange,
+  parseReplayStartupDiagnostics, probeReplayOrigin, readReplayMetadata, serveProductReplay } from '../product-release-replay.mjs'
 import { assertCandidateRunner, candidateAssets, inspectCandidate, validateCandidateReceipt } from '../product-candidate-receipt.mjs'
 import { newestCompatibleReleaseFromAtom } from '../../electron/src/main/updater-feed.mjs'
 
@@ -411,25 +415,22 @@ test('readiness requires finite ready record, private owned PID and exact proces
   const root = mkdtempSync(join(tmpdir(), 'agentsdock-replay-readiness-unit-'))
   t.after(() => rmSync(root, { recursive: true, force: true }))
   const logPath = join(root, 'replay.log'), pidPath = join(root, 'replay.pid')
-  const curlMetadataPath = join(root, 'curl-metadata'), responseHeadersPath = join(root, 'curl-headers')
-  const paths = { logPath, pidPath, curlMetadataPath, responseHeadersPath }
+  const nodeProbe = { kind: 'replay-origin-probe', verified: true, code: 'VERIFIED', remoteIp: '127.0.0.1',
+    tlsAuthorized: true, leafMatched: true, httpCode: 200, replayMarker: true, bodyBytes: 1,
+    bodySha256: 'a'.repeat(64), leafSha256: 'b'.repeat(64) }
+  const paths = { logPath, pidPath, nodeProbe }
   let ready = ''
   const diagnostics = createReplayStartupDiagnostics(line => { ready += line })
   diagnostics.stage('arguments'); diagnostics.stage('serving')
   writeFileSync(logPath, ready)
   writeFileSync(pidPath, '12345\n', { mode: 0o600 })
-  writeFileSync(curlMetadataPath, '127.0.0.1|0|200\n')
-  writeFileSync(responseHeadersPath, 'HTTP/1.1 200 OK\r\nx-agentsdock-replay: test-only\r\n\r\n')
   const command = `${process.execPath} scripts/product-release-replay.mjs serve --scope candidate --private-key ${join(root, 'leaf.key')} --pid-file ${pidPath}`
   const observed = `12345 ${process.getuid()} ${command}\n`
   assert.deepEqual(await assertReplayReadiness(paths, { queryProcess: pid => {
     assert.equal(pid, 12345); return observed
   } }), { ready: true, pid: 12345 })
-  for (const metadata of ['192.0.2.1|0|200\n', '127.0.0.1|20|200\n']) {
-    writeFileSync(curlMetadataPath, metadata)
-    await assert.rejects(assertReplayReadiness(paths, { queryProcess: () => { throw new Error('must not query') } }), /HTTPS probe/)
-  }
-  writeFileSync(curlMetadataPath, '127.0.0.1|0|200\n')
+  await assert.rejects(assertReplayReadiness({ ...paths, nodeProbe: { kind: 'replay-origin-probe', verified: false, code: 'TLS_UNAUTHORIZED' } },
+    { queryProcess: () => { throw new Error('must not query') } }), /HTTPS probe/)
   for (const output of ['12345 0 arbitrary-command\n', observed.replace('12345', '12346'),
     observed.replace(' serve ', ' inspect '), observed.replace(pidPath, `${pidPath}-other`),
     observed.replace(process.execPath, '/untrusted/node'), `${observed}unexpected second process\n`, 'x'.repeat(8193)]) {
@@ -468,4 +469,94 @@ test('probe diagnostics expose only numeric TLS/HTTP status, validated IP and ex
     assert.throws(() => parseReplayProbeDiagnostics('127.0.0.1|0|200\n', badHeaders))
   }
   assert.throws(() => parseReplayProbeDiagnostics('127.0.0.1|0|200\n', headers.replace('200 OK', '404 Not Found')), /status differs/)
+})
+
+function originProbeFixture(t) {
+  const root = mkdtempSync(join(tmpdir(), 'agentsdock-origin-probe-unit-'))
+  t.after(() => rmSync(root, { recursive: true, force: true }))
+  const caPath = join(root, 'ca.pem'), expectedLeafPath = join(root, 'leaf.pem')
+  const execute = (...args) => execFileSync('openssl', args, { cwd: root,
+    env: { PATH: process.env.PATH }, stdio: ['ignore', 'pipe', 'pipe'] })
+  writeFileSync(join(root, 'leaf.ext'), 'basicConstraints=critical,CA:FALSE\nkeyUsage=critical,digitalSignature,keyEncipherment\nextendedKeyUsage=serverAuth\nsubjectAltName=DNS:github.com\n')
+  execute('req', '-x509', '-newkey', 'rsa:2048', '-nodes', '-sha256', '-days', '1', '-subj', '/CN=Disposable unit CA',
+    '-addext', 'basicConstraints=critical,CA:TRUE', '-addext', 'keyUsage=critical,keyCertSign,cRLSign', '-keyout', 'ca.key', '-out', 'ca.pem')
+  execute('req', '-new', '-newkey', 'rsa:2048', '-nodes', '-sha256', '-subj', '/CN=github.com', '-keyout', 'leaf.key', '-out', 'leaf.csr')
+  execute('x509', '-req', '-sha256', '-days', '1', '-in', 'leaf.csr', '-CA', 'ca.pem', '-CAkey', 'ca.key', '-CAcreateserial',
+    '-extfile', 'leaf.ext', '-out', 'leaf.pem')
+  chmodSync(caPath, 0o600); chmodSync(expectedLeafPath, 0o600)
+  return { root, caPath, expectedLeafPath, raw: new X509Certificate(readFileSync(expectedLeafPath)).raw }
+}
+
+test('Node origin probe preserves native TLS verification and exact peer/leaf/body constraints (inert transport)', async t => {
+  const f = originProbeFixture(t)
+  let requestCount = 0
+  const run = async (change = {}) => probeReplayOrigin(f, {
+    lookup: async (name, options) => { assert.equal(name, 'github.com'); assert.equal(options.family, 4)
+      return change.dns ?? { address: '127.0.0.1', family: 4 } },
+    request: (url, options, callback) => {
+      requestCount++
+      assert.equal(url, 'https://github.com/ZhengyiLuo/AgentsDock/releases.atom')
+      assert.equal(options.rejectUnauthorized, true)
+      assert.equal(options.checkServerIdentity, checkServerIdentity)
+      assert.equal(options.servername, 'github.com')
+      assert.equal(options.agent, false)
+      assert.equal(options.autoSelectFamily, false)
+      assert.deepEqual(Object.keys(options).sort(), ['ca', 'rejectUnauthorized', 'checkServerIdentity', 'servername', 'family',
+        'autoSelectFamily', 'agent', 'headers', 'lookup'].sort())
+      assert.deepEqual(options.ca, readFileSync(f.caPath))
+      options.lookup('github.com', {}, (error, ip, family) => { assert.equal(error, null); assert.equal(ip, '127.0.0.1'); assert.equal(family, 4) })
+      options.lookup('untrusted.example', {}, error => assert.equal(error.code, 'DNS_NOT_LOOPBACK'))
+      const req = new EventEmitter()
+      req.destroy = () => {}
+      req.end = () => queueMicrotask(() => {
+        if (change.timeout) return
+        if (change.error) { req.emit('error', Object.assign(new Error('private raw detail'), { code: change.error })); return }
+        const response = Readable.from([change.body ?? Buffer.from('<feed/>')])
+        response.statusCode = change.httpCode ?? 200
+        response.rawHeaders = change.headers ?? ['X-AgentsDock-Replay', 'test-only']
+        response.socket = { authorized: change.authorized ?? true, remoteAddress: change.peer ?? '127.0.0.1',
+          getPeerCertificate: () => ({ raw: change.raw ?? f.raw }) }
+        callback(response)
+      })
+      return req
+    }
+  })
+  const success = parseReplayOriginProbe(JSON.stringify(await run()))
+  assert.equal(success.verified, true); assert.equal(success.bodySha256, hash('<feed/>'))
+  assert.equal(success.leafSha256, hash(f.raw))
+  for (const [change, code] of [
+    [{ authorized: false }, 'TLS_UNAUTHORIZED'], [{ peer: '192.0.2.1' }, 'PEER_NOT_LOOPBACK'],
+    [{ raw: Buffer.from('different certificate') }, 'LEAF_MISMATCH'], [{ httpCode: 302 }, 'RESPONSE_REJECTED'],
+    [{ headers: [] }, 'RESPONSE_REJECTED'], [{ headers: ['x-agentsdock-replay', 'test-only', 'X-AgentsDock-Replay', 'test-only'] }, 'RESPONSE_REJECTED'],
+    [{ headers: [null, 'private'] }, 'RESPONSE_REJECTED'],
+    [{ body: Buffer.alloc(32769) }, 'BODY_REJECTED'], [{ body: Buffer.alloc(0) }, 'BODY_REJECTED'],
+    [{ error: 'UNABLE_TO_GET_ISSUER_CERT_LOCALLY' }, 'UNABLE_TO_GET_ISSUER_CERT_LOCALLY'],
+    [{ error: 'secret-token' }, 'PROBE_FAILED']]) {
+    assert.deepEqual(parseReplayOriginProbe(JSON.stringify(await run(change))), { kind: 'replay-origin-probe', verified: false, code })
+  }
+  const before = requestCount
+  assert.equal((await run({ dns: { address: '192.0.2.1', family: 4 } })).code, 'DNS_NOT_LOOPBACK')
+  assert.equal(requestCount, before)
+  assert.equal((await run({ timeout: true })).code, 'TIMEOUT')
+  const afterTimeout = requestCount
+  const other = originProbeFixture(t)
+  const original = readFileSync(f.caPath)
+  writeFileSync(f.caPath, readFileSync(other.caPath))
+  assert.equal((await run()).code, 'CHAIN_REJECTED')
+  assert.equal(requestCount, afterTimeout)
+  writeFileSync(f.caPath, original)
+  chmodSync(f.caPath, 0o644)
+  assert.equal((await run()).code, 'INPUT_REJECTED')
+  assert.equal(requestCount, afterTimeout)
+})
+
+test('origin result parser refuses unbounded/raw/private fields and forged partial success', () => {
+  const failure = { kind: 'replay-origin-probe', verified: false, code: 'CERT_HAS_EXPIRED' }
+  assert.deepEqual(parseReplayOriginProbe(JSON.stringify(failure)), failure)
+  for (const value of [{ ...failure, message: 'private' }, { ...failure, code: 'secret-token' },
+    { ...failure, code: 'VERIFIED' }, { ...failure, verified: true }, { ...failure, verified: 'false' }]) {
+    assert.throws(() => parseReplayOriginProbe(JSON.stringify(value)))
+  }
+  assert.throws(() => parseReplayOriginProbe('private stderr'))
+  assert.throws(() => parseReplayOriginProbe(Buffer.alloc(2049)))
 })

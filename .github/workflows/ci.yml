@@ -236,38 +236,45 @@ jobs:
             --pid-file "$RUNNER_TEMP/agentsdock-acceptance-network/replay.pid" \
             > "$RUNNER_TEMP/agentsdock-acceptance-network/replay.log" 2>&1 &
           REPLAY_LAUNCHER_PID=$!
-          READINESS_CURL_STATUS=0
-          for attempt in {1..60}; do
-            # Bind this diagnostic probe explicitly to the exact ephemeral CA.
-            if curl --fail --silent --max-time 2 --cacert "$RUNNER_TEMP/agentsdock-acceptance-network/ca.pem" \
-              --dump-header "$RUNNER_TEMP/agentsdock-acceptance-network/readiness.headers" --output /dev/null \
-              --write-out '%{remote_ip}|%{ssl_verify_result}|%{http_code}\n' \
-              https://github.com/ZhengyiLuo/AgentsDock/releases.atom \
-              > "$RUNNER_TEMP/agentsdock-acceptance-network/readiness.metadata"; then
-              if node --input-type=module - "$RUNNER_TEMP/agentsdock-acceptance-network/replay.log" \
-                "$RUNNER_TEMP/agentsdock-acceptance-network/replay.pid" \
-                "$RUNNER_TEMP/agentsdock-acceptance-network/readiness.metadata" \
-                "$RUNNER_TEMP/agentsdock-acceptance-network/readiness.headers" <<'NODE'
-          import { assertReplayReadiness } from './scripts/product-release-replay.mjs'
-          try { await assertReplayReadiness({logPath: process.argv[2], pidPath: process.argv[3],
-            curlMetadataPath: process.argv[4], responseHeadersPath: process.argv[5]}) }
+          for attempt in {1..20}; do
+            if node --input-type=module - "$RUNNER_TEMP/agentsdock-acceptance-network/replay.log" \
+              "$RUNNER_TEMP/agentsdock-acceptance-network/replay.pid" \
+              "$RUNNER_TEMP/agentsdock-acceptance-network/ca.pem" \
+              "$RUNNER_TEMP/agentsdock-acceptance-network/leaf.pem" \
+              "$RUNNER_TEMP/agentsdock-acceptance-network/origin-probe.json" <<'NODE'
+          import { writeFile } from 'node:fs/promises'
+          import { assertReplayReadiness, probeReplayOrigin } from './scripts/product-release-replay.mjs'
+          try {
+            const nodeProbe = await probeReplayOrigin({caPath: process.argv[4], expectedLeafPath: process.argv[5]})
+            await writeFile(process.argv[6], JSON.stringify(nodeProbe), {mode: 0o600})
+            await assertReplayReadiness({logPath: process.argv[2], pidPath: process.argv[3], nodeProbe})
+          }
           catch { process.exitCode = 1 }
           NODE
-              then exit 0; fi
-              READINESS_CURL_STATUS=0
-            else
-              READINESS_CURL_STATUS=$?
-            fi
+            then exit 0; fi
             sleep 1
           done
+          # Curl is an independent diagnostic, not a substitute for the verified
+          # Node HTTPS probe or the real Electron updater's unchanged TLS checks.
+          READINESS_CURL_STATUS=0
+          if curl --fail --silent --max-time 5 --cacert "$RUNNER_TEMP/agentsdock-acceptance-network/ca.pem" \
+            --dump-header "$RUNNER_TEMP/agentsdock-acceptance-network/readiness.headers" --output /dev/null \
+            --write-out '%{remote_ip}|%{ssl_verify_result}|%{http_code}\n' \
+            https://github.com/ZhengyiLuo/AgentsDock/releases.atom \
+            > "$RUNNER_TEMP/agentsdock-acceptance-network/readiness.metadata"; then
+            READINESS_CURL_STATUS=0
+          else READINESS_CURL_STATUS=$?; fi
+          curl --version
+          openssl version
           REPLAY_LAUNCHER_PRESENT=false
           if /bin/ps -p "$REPLAY_LAUNCHER_PID" -o pid= > /dev/null; then REPLAY_LAUNCHER_PRESENT=true; fi
           node --input-type=module - "$RUNNER_TEMP/agentsdock-acceptance-network/replay.log" \
             "$READINESS_CURL_STATUS" "$REPLAY_LAUNCHER_PRESENT" \
             "$RUNNER_TEMP/agentsdock-acceptance-network/readiness.metadata" \
-            "$RUNNER_TEMP/agentsdock-acceptance-network/readiness.headers" <<'NODE'
+            "$RUNNER_TEMP/agentsdock-acceptance-network/readiness.headers" \
+            "$RUNNER_TEMP/agentsdock-acceptance-network/origin-probe.json" <<'NODE'
           import { constants, openSync, fstatSync, readSync, closeSync } from 'node:fs'
-          import { parseReplayStartupDiagnostics, parseReplayProbeDiagnostics } from './scripts/product-release-replay.mjs'
+          import { parseReplayStartupDiagnostics, parseReplayProbeDiagnostics, parseReplayOriginProbe } from './scripts/product-release-replay.mjs'
           const status = Number(process.argv[3])
           const summary = { kind: 'replay-readiness', curlExitCode: Number.isInteger(status) && status >= 0 && status <= 255 ? status : null,
             launcherPresent: process.argv[4] === 'true' }
@@ -285,6 +292,8 @@ jobs:
           catch { summary.diagnosticsUnavailable = true }
           try { summary.probe = parseReplayProbeDiagnostics(bounded(process.argv[5]), bounded(process.argv[6])) }
           catch { summary.probeDiagnosticsUnavailable = true }
+          try { summary.nodeProbe = parseReplayOriginProbe(bounded(process.argv[7])) }
+          catch { summary.nodeProbeDiagnosticsUnavailable = true }
           console.log(JSON.stringify(summary))
           NODE
           echo 'Candidate replay did not become ready.' >&2

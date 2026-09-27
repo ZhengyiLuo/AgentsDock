@@ -30,13 +30,18 @@ def need(condition, message):
         raise ValueError(message)
 
 
-def command(*args, data=None):
+def command(*args, data=None, timeout=120):
     # Never echo commands with private data, and never inherit release tokens
     # into OpenSSL/sudo children. Authenticated provider traffic is unrelated.
     env = {k: v for k, v in os.environ.items()
            if k in {"PATH", "LANG", "LC_ALL", "TMPDIR"}}
-    return subprocess.run(args, input=data, capture_output=True, check=True,
-                          env=env).stdout
+    try:
+        return subprocess.run(args, input=data, capture_output=True, check=True,
+                              timeout=timeout, env=env).stdout
+    except subprocess.CalledProcessError as error:
+        raise RuntimeError(f"Replay command failed ({Path(args[0]).name}, exit {error.returncode}); private output was withheld") from None
+    except subprocess.TimeoutExpired:
+        raise RuntimeError(f"Replay command timed out ({Path(args[0]).name}); private output was withheld") from None
 
 
 def digest(data):
@@ -188,6 +193,14 @@ def setup(receipt, receipt_hash, work, candidate=False):
                 "-extfile", str(work / "leaf.ext"), "-out", str(work / "leaf.pem"))
     finally:
         os.umask(old_umask)
+    # Prove the generated leaf chains to this ephemeral CA and is valid for
+    # every exact TLS origin before adding trust or changing host routing.
+    # A malformed certificate remains owned by this setup and cleanable, but
+    # never reaches a privileged mutation or a disabled-verification fallback.
+    for host in HOSTS:
+        command("openssl", "verify", "-CAfile", str(work / "ca.pem"),
+                "-purpose", "sslserver", "-verify_hostname", host,
+                str(work / "leaf.pem"), timeout=30)
     ca = regular(work / "ca.pem")
     fingerprint = command("openssl", "x509", "-in", str(work / "ca.pem"), "-noout", "-fingerprint", "-sha1").decode().strip().split("=")[-1].replace(":", "")
     need(re.fullmatch(r"[A-Fa-f0-9]{40}", fingerprint), "Invalid ephemeral CA fingerprint")

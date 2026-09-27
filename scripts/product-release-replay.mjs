@@ -5,9 +5,10 @@ import { createHash, createPublicKey, X509Certificate } from 'node:crypto'
 import { execFileSync } from 'node:child_process'
 import { constants } from 'node:fs'
 import { lstat, open, realpath, rename, writeFile } from 'node:fs/promises'
-import { createServer } from 'node:https'
-import { createSecureContext } from 'node:tls'
+import { createServer, request as httpsRequest } from 'node:https'
+import { createSecureContext, checkServerIdentity } from 'node:tls'
 import { isIP } from 'node:net'
+import { lookup as dnsLookup } from 'node:dns/promises'
 import { dirname, isAbsolute, join, relative, resolve } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { pipeline } from 'node:stream/promises'
@@ -106,16 +107,141 @@ export function parseReplayProbeDiagnostics(bytes, headers) {
     replayMarker: marker.length === 1 && marker[0] === 'test-only' }
 }
 
-export async function assertReplayReadiness({ logPath, pidPath, curlMetadataPath, responseHeadersPath }, { queryProcess = pid => execFileSync('/bin/ps',
+const ORIGIN_PROBE_CODES = new Set(['VERIFIED', 'INPUT_REJECTED', 'CHAIN_REJECTED', 'DNS_NOT_LOOPBACK', 'TIMEOUT',
+  'TLS_UNAUTHORIZED', 'PEER_NOT_LOOPBACK', 'LEAF_MISMATCH', 'RESPONSE_REJECTED', 'BODY_REJECTED', 'PROBE_FAILED',
+  'ECONNREFUSED', 'ECONNRESET', 'ETIMEDOUT', 'ENOTFOUND', 'EAI_AGAIN', 'EPIPE',
+  'UNABLE_TO_GET_ISSUER_CERT', 'UNABLE_TO_GET_ISSUER_CERT_LOCALLY', 'UNABLE_TO_VERIFY_LEAF_SIGNATURE',
+  'SELF_SIGNED_CERT_IN_CHAIN', 'DEPTH_ZERO_SELF_SIGNED_CERT', 'CERT_HAS_EXPIRED', 'CERT_NOT_YET_VALID',
+  'ERR_TLS_CERT_ALTNAME_INVALID', 'ERR_SSL_SSLV3_ALERT_HANDSHAKE_FAILURE', 'ERR_SSL_TLSV1_ALERT_UNKNOWN_CA'])
+
+export function parseReplayOriginProbe(bytes) {
+  need((typeof bytes === 'string' || Buffer.isBuffer(bytes)) && Buffer.byteLength(bytes) <= 2048,
+    'Invalid or unbounded origin probe result.')
+  const value = JSON.parse(bytes.toString())
+  need(value && typeof value === 'object' && !Array.isArray(value), 'Invalid origin probe result.')
+  const keys = ['kind', 'verified', 'code', ...(value.verified === true
+    ? ['remoteIp', 'tlsAuthorized', 'leafMatched', 'httpCode', 'replayMarker', 'bodyBytes', 'bodySha256', 'leafSha256'] : [])]
+  need(JSON.stringify(Object.keys(value).sort()) === JSON.stringify(keys.sort()) && value.kind === 'replay-origin-probe'
+    && typeof value.verified === 'boolean' && ORIGIN_PROBE_CODES.has(value.code), 'Invalid origin probe fields.')
+  if (value.verified) need(value.code === 'VERIFIED' && value.remoteIp === '127.0.0.1' && value.tlsAuthorized === true
+    && value.leafMatched === true && value.httpCode === 200 && value.replayMarker === true
+    && Number.isSafeInteger(value.bodyBytes) && value.bodyBytes > 0 && value.bodyBytes <= 32768
+    && /^[a-f0-9]{64}$/.test(value.bodySha256) && /^[a-f0-9]{64}$/.test(value.leafSha256), 'Invalid verified origin probe.')
+  else need(value.code !== 'VERIFIED', 'Failed origin probe cannot claim verification.')
+  return value
+}
+
+async function ownedProbeFile(path) {
+  const file = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW)
+  try {
+    const stat = await file.stat()
+    need(stat.isFile() && stat.size > 0 && stat.size <= 16384 && stat.uid === process.getuid?.()
+      && stat.uid > 0 && (stat.mode & 0o077) === 0, 'Probe certificate must be private and runner-owned.')
+    const bytes = await file.readFile()
+    need(bytes.length <= 16384, 'Probe certificate exceeded its size limit.')
+    return bytes
+  } finally { await file.close() }
+}
+
+// The workflow owns the hosted-runner guard. This library cannot reach another
+// origin: real DNS must yield loopback first, TLS must authorize the fixed public
+// hostname using the exact private test CA, and the served leaf is pinned too.
+// Tests inject inert DNS/transport observations, not native runtime/CI hooks.
+export async function probeReplayOrigin({ caPath, expectedLeafPath }, { lookup = dnsLookup, request = httpsRequest } = {}) {
+  const failure = code => ({ kind: 'replay-origin-probe', verified: false,
+    code: ORIGIN_PROBE_CODES.has(code) && code !== 'VERIFIED' ? code : 'PROBE_FAILED' })
+  let caBytes, leaf, address
+  try {
+    need([caPath, expectedLeafPath].every(path => typeof path === 'string' && isAbsolute(path)
+      && !/[\r\n\0]/.test(path)) && dirname(caPath) === dirname(expectedLeafPath), 'Invalid probe input paths.')
+    const work = await lstat(dirname(caPath))
+    need(work.isDirectory() && work.uid === process.getuid?.() && work.uid > 0 && (work.mode & 0o077) === 0,
+      'Probe certificates require a private runner-owned directory.')
+    caBytes = await ownedProbeFile(caPath)
+    const ca = new X509Certificate(caBytes)
+    leaf = new X509Certificate(await ownedProbeFile(expectedLeafPath))
+    if (!ca.ca || leaf.ca || !leaf.checkIssued(ca) || !leaf.verify(ca.publicKey)
+      || leaf.checkHost('github.com', { wildcards: false }) !== 'github.com'
+      || Date.parse(ca.validFrom) > Date.now() || Date.parse(ca.validTo) <= Date.now()
+      || Date.parse(leaf.validFrom) > Date.now() || Date.parse(leaf.validTo) <= Date.now()) return failure('CHAIN_REJECTED')
+  } catch { return failure('INPUT_REJECTED') }
+  const deadline = Date.now() + 10000
+  let dnsTimer
+  try {
+    address = await Promise.race([lookup('github.com', { family: 4 }), new Promise((_, reject) => {
+      dnsTimer = setTimeout(() => reject(Object.assign(new Error(), { code: 'TIMEOUT' })), 10000)
+    })])
+  } catch (error) { return failure(error?.code) }
+  finally { clearTimeout(dnsTimer) }
+  if (address?.address !== '127.0.0.1' || address.family !== 4) return failure('DNS_NOT_LOOPBACK')
+  const leafSha256 = digest(leaf.raw)
+  return new Promise(resolveProbe => {
+    let settled = false, req, response
+    const finish = value => {
+      if (settled) return
+      settled = true; clearTimeout(timer)
+      if (!value.verified) { response?.destroy(); req?.destroy() }
+      resolveProbe(value)
+    }
+    const timer = setTimeout(() => finish(failure('TIMEOUT')), Math.max(1, deadline - Date.now()))
+    try {
+      req = request('https://github.com/ZhengyiLuo/AgentsDock/releases.atom', {
+        ca: caBytes, rejectUnauthorized: true, checkServerIdentity, servername: 'github.com', family: 4,
+        autoSelectFamily: false, agent: false, headers: { Accept: 'application/atom+xml' },
+        lookup: (host, _options, done) => host === 'github.com'
+          ? done(null, address.address, address.family) : done(Object.assign(new Error(), { code: 'DNS_NOT_LOOPBACK' }))
+      }, incoming => {
+        try {
+          response = incoming
+          const socket = incoming.socket
+          if (socket?.authorized !== true) return finish(failure('TLS_UNAUTHORIZED'))
+          if (socket.remoteAddress !== '127.0.0.1') return finish(failure('PEER_NOT_LOOPBACK'))
+          const peer = socket.getPeerCertificate()?.raw
+          if (!Buffer.isBuffer(peer) || digest(peer) !== leafSha256) return finish(failure('LEAF_MISMATCH'))
+          const markers = []
+          for (let index = 0; index < incoming.rawHeaders.length; index += 2) {
+            if (incoming.rawHeaders[index].toLowerCase() === 'x-agentsdock-replay') markers.push(incoming.rawHeaders[index + 1])
+          }
+          if (incoming.statusCode !== 200 || markers.length !== 1 || markers[0].trim() !== 'test-only') {
+            return finish(failure('RESPONSE_REJECTED'))
+          }
+          let bodyBytes = 0
+          const hash = createHash('sha256')
+          incoming.on('data', chunk => {
+            if (settled) return
+            try {
+              bodyBytes += chunk.length
+              if (bodyBytes > 32768) return finish(failure('BODY_REJECTED'))
+              hash.update(chunk)
+            } catch { finish(failure('BODY_REJECTED')) }
+          })
+          incoming.once('error', error => finish(failure(error?.code)))
+          incoming.once('aborted', () => finish(failure('ECONNRESET')))
+          incoming.once('end', () => {
+            if (settled) return
+            if (!bodyBytes) return finish(failure('BODY_REJECTED'))
+            finish({ kind: 'replay-origin-probe', verified: true, code: 'VERIFIED', remoteIp: '127.0.0.1',
+              tlsAuthorized: true, leafMatched: true, httpCode: 200, replayMarker: true,
+              bodyBytes, bodySha256: hash.digest('hex'), leafSha256 })
+          })
+        } catch { finish(failure('RESPONSE_REJECTED')) }
+      })
+      req.once('error', error => finish(failure(error?.code)))
+      req.end()
+    } catch (error) { finish(failure(error?.code)) }
+  })
+}
+
+export async function assertReplayReadiness({ logPath, pidPath, nodeProbe }, { queryProcess = pid => execFileSync('/bin/ps',
   ['-p', String(pid), '-o', 'pid=', '-o', 'uid=', '-o', 'command='],
   { encoding: 'utf8', timeout: 5000, maxBuffer: 8192, stdio: ['ignore', 'pipe', 'pipe'] }) } = {}) {
-  need([logPath, pidPath, curlMetadataPath, responseHeadersPath].every(path => typeof path === 'string'
+  need([logPath, pidPath].every(path => typeof path === 'string'
     && isAbsolute(path) && dirname(path) === dirname(logPath) && !/[\r\n\0]/.test(path)), 'Invalid replay readiness paths.')
   const work = await lstat(dirname(logPath))
   need(work.isDirectory() && work.uid === process.getuid?.() && work.uid > 0 && (work.mode & 0o077) === 0,
     'Replay readiness files must share a private runner-owned work directory.')
-  const probe = parseReplayProbeDiagnostics(await regular(curlMetadataPath, 128), await regular(responseHeadersPath, 32768))
-  need(probe.remoteIp === '127.0.0.1' && probe.sslVerifyResult === 0 && probe.httpCode === 200 && probe.replayMarker,
+  const probe = parseReplayOriginProbe(JSON.stringify(nodeProbe))
+  need(probe.verified,
     'Replay HTTPS probe did not reach the authenticated loopback replay origin.')
   const records = parseReplayStartupDiagnostics(await regular(logPath, 32768))
   need(records.at(-1)?.stage === 'serving' && records.at(-1)?.status === 'ready', 'Replay startup has not completed.')

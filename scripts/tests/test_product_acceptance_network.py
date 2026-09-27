@@ -4,6 +4,7 @@ import json
 import os
 from pathlib import Path
 import stat
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -115,6 +116,23 @@ class NetworkTests(unittest.TestCase):
         child = run.call_args.kwargs["env"]
         self.assertEqual(child["PATH"], "/usr/bin")
         self.assertNotIn("AGENTSDOCK_RELEASE_TOKEN", child)
+        self.assertEqual(run.call_args.kwargs["timeout"], 120)
+
+    def test_command_failures_and_timeouts_never_expose_arguments_or_output(self):
+        args = ("openssl", "verify", "private-argument")
+        for error in (
+                subprocess.CalledProcessError(20, args, output=b"private-output", stderr=b"private-stderr"),
+                subprocess.TimeoutExpired(args, 30, output=b"private-output", stderr=b"private-stderr")):
+            with self.subTest(error=type(error).__name__), \
+                    mock.patch.object(network.subprocess, "run", side_effect=error) as run, \
+                    self.assertRaises(RuntimeError) as raised:
+                network.command(*args, timeout=30)
+            message = str(raised.exception)
+            self.assertIn("openssl", message)
+            self.assertIn("private output was withheld", message)
+            for private in ("private-argument", "private-output", "private-stderr"):
+                self.assertNotIn(private, message)
+            self.assertEqual(run.call_args.kwargs["timeout"], 30)
 
     def fixture(self):
         self.receipt = self.root / "release.json"
@@ -126,7 +144,7 @@ class NetworkTests(unittest.TestCase):
         self.lock = self.root / "lock"
         self.calls = []
 
-        def fake_command(*args, data=None):
+        def fake_command(*args, data=None, timeout=120):
             self.calls.append(args)
             if args[:2] == ("git", "rev-parse"):
                 return b"a" * 40 + b"\n"
@@ -165,6 +183,48 @@ class NetworkTests(unittest.TestCase):
         self.assertNotEqual(self.hosts.read_bytes(), self.baseline)
         self.assertEqual(network.teardown(self.work), {"restored": True})
         self.assertEqual(self.hosts.read_bytes(), self.baseline)
+        self.assertFalse(self.lock.exists())
+        self.assertFalse((self.work / "ca.key").exists())
+        self.assertFalse((self.work / "leaf.key").exists())
+        self.assertEqual(network.teardown(self.work), {"restored": True})
+
+    def test_all_replay_hostnames_are_verified_before_any_privileged_mutation(self):
+        self.fixture()
+        network.setup(self.receipt, self.receipt_hash, self.work)
+        verifications = [call for call in network.command.call_args_list
+                         if call.args[:2] == ("openssl", "verify")]
+        self.assertEqual([call.args for call in verifications], [
+            ("openssl", "verify", "-CAfile", str(self.work / "ca.pem"),
+             "-purpose", "sslserver", "-verify_hostname", host, str(self.work / "leaf.pem"))
+            for host in network.HOSTS])
+        self.assertTrue(all(call.kwargs.get("timeout") == 30 for call in verifications))
+        last_verification = max(index for index, call in enumerate(self.calls)
+                                if call[:2] == ("openssl", "verify"))
+        first_mutation = min(index for index, call in enumerate(self.calls) if call[0] == "sudo")
+        self.assertLess(last_verification, first_mutation)
+
+    def test_certificate_preflight_failure_never_mutates_trust_or_hosts_and_is_cleanable(self):
+        self.fixture()
+        original = network.command.side_effect
+
+        def reject_hostname(*args, data=None, timeout=120):
+            if args[:2] == ("openssl", "verify") and "api.github.com" in args:
+                self.calls.append(args)
+                raise RuntimeError("Replay command failed (openssl, exit 20); private output was withheld")
+            return original(*args, data=data, timeout=timeout)
+
+        with mock.patch.object(network, "command", side_effect=reject_hostname), \
+                self.assertRaisesRegex(RuntimeError, "openssl, exit 20"):
+            network.setup(self.receipt, self.receipt_hash, self.work)
+        verified_hosts = [call[call.index("-verify_hostname") + 1] for call in self.calls
+                          if call[:2] == ("openssl", "verify")]
+        self.assertEqual(verified_hosts, ["github.com", "api.github.com"])
+        self.assertFalse(any(call[0] == "sudo" for call in self.calls))
+        self.assertEqual(self.hosts.read_bytes(), self.baseline)
+        for marker in ("trust.attempted", "hosts.attempted", "trust.env", "network.json"):
+            self.assertFalse((self.work / marker).exists())
+        self.assertEqual(network.teardown(self.work), {"restored": True})
+        self.assertFalse(any(call[0] == "sudo" for call in self.calls))
         self.assertFalse(self.lock.exists())
         self.assertFalse((self.work / "ca.key").exists())
         self.assertFalse((self.work / "leaf.key").exists())
