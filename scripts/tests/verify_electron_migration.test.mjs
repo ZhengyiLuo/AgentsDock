@@ -2,9 +2,20 @@ import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import { spawnSync } from 'node:child_process'
 import { resolve } from 'node:path'
-import { assertMigrationTrack, locateMigrationUpdateSettings, parseArguments } from '../verify_electron_migration.mjs'
+import { readFileSync } from 'node:fs'
+import { assertMigrationTrack, locateMigrationUpdateSettings, MIGRATION_INSTALL_BUTTON_NAMES, parseArguments } from '../verify_electron_migration.mjs'
 
 const valid = ['--from-version', '0.2.13-beta.33', '--to-version', '1.0.0-beta.1', '--output', '/tmp/migration-argument-test']
+
+test('native install click recognizes the actual v1.0.6/current label and older restart label', () => {
+  const strings = JSON.parse(readFileSync(new URL('../../electron/src/shared/locales/en.json', import.meta.url)))
+  const currentLabel = strings['ui.Dialogs.AppSettingsDialog.restart_to_update_451d3a7']
+  assert.equal(currentLabel, 'Update AgentsDock')
+  assert.deepEqual(MIGRATION_INSTALL_BUTTON_NAMES, [currentLabel, 'Restart to update'])
+  for (const file of ['../verify_electron_migration.mjs', '../product_desktop_acceptance.mjs']) {
+    assert.match(readFileSync(new URL(file, import.meta.url), 'utf8'), /client\.clickButton\(MIGRATION_INSTALL_BUTTON_NAMES\)/)
+  }
+})
 
 test('accepts explicit source, target and absolute output without side effects', () => {
   assert.deepEqual(parseArguments(valid), { from: '0.2.13-beta.33', to: '1.0.0-beta.1', track: 'beta', output: '/tmp/migration-argument-test' })

@@ -24,6 +24,9 @@ import { pathToFileURL } from 'node:url'
 const LEGACY = 'https://github.com/ZhengyiLuo/AgentsDock-Releases/releases/download'
 const CANONICAL = 'https://github.com/ZhengyiLuo/AgentsDock/releases/download'
 const VERSION = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-beta\.[1-9]\d*)?$/
+// v1.0.6 uses "Update AgentsDock"; older release lines used the restart label.
+// Both are real rendered install controls, never an IPC/test-hook substitute.
+export const MIGRATION_INSTALL_BUTTON_NAMES = Object.freeze(['Update AgentsDock', 'Restart to update'])
 const delay = milliseconds => new Promise(resolve => setTimeout(resolve, milliseconds))
 
 export function parseArguments(argv) {
@@ -274,7 +277,7 @@ export async function main(argv = process.argv.slice(2)) {
     assert.equal(downloaded.availableVersion, options.to, 'Source feed did not offer the expected target')
     assertMigrationTrack(options.track, downloaded, await readFile(join(profileDirectory, 'update-track'), 'utf8'))
     await client.screenshot(join(options.output, '02-bridge-ready.png'))
-    await client.clickButton(['Restart to update'])
+    await client.clickButton(MIGRATION_INSTALL_BUTTON_NAMES)
     client.close()
     client = null
     await until('Native updater replaced the installed bundle', () => appVersion(ownedApp) === options.to, 4 * 60_000)

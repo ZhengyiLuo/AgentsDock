@@ -450,8 +450,24 @@ def rejection_checks(fixture: dict, bundle: Path, version: str) -> dict:
             "staleProcessIdentityRejected": True, "incumbentAndPersistedStateUnchanged": True}
 
 
+def installed_runtime_mode(member: tarfile.TarInfo, installer: bytes) -> int:
+    """Model the one deliberate package-to-install mode change, never relax bytes."""
+    mode = member.mode & 0o7777
+    need(mode in {0o644, 0o755}, "Signed runtime member has an unsupported mode.")
+    if member.name == "package/server/agent_server.py" and mode == 0o644:
+        # Both archives intentionally carry this Python module as 0644. The
+        # signed installer makes its installed entrypoint executable. Authorize
+        # precisely that known transformation only when the sealed installer
+        # contains the production rule; do not allow arbitrary mode changes.
+        rule = rb'^chmod 755 "\$STAGE_DIR/agent_server\.py"(?: "\$STAGE_DIR/[A-Za-z0-9_.-]+")*$'
+        need(sum(re.fullmatch(rule, line) is not None for line in installer.splitlines()) == 1,
+             "Signed installer does not establish the expected entrypoint mode.")
+        return 0o755
+    return mode
+
+
 def verify_installed_runtime(fixture: dict, bundle: Path, version: str) -> int:
-    """Compare installed runtime bytes/modes with the already sealed npm tarball."""
+    """Compare sealed bytes and exact installed modes, including installer policy."""
     descriptor = json.loads(read_regular(bundle / "npm/agents-server-npm-manifest.json", 8192))
     need(descriptor.get("version") == version, "Installed runtime pin differs from the prepared package.")
     install = Path(fixture["installRoot"])
@@ -463,6 +479,11 @@ def verify_installed_runtime(fixture: dict, bundle: Path, version: str) -> int:
     with tarfile.open(bundle / "npm" / descriptor["archive"]["name"], "r:gz") as package:
         members = package.getmembers()
         need(len(members) <= 500, "Unexpected runtime archive inventory size.")
+        installers = [member for member in members if member.name == "package/server/install.sh"]
+        need(len(installers) == 1 and installers[0].isfile() and installers[0].size <= 2 * 1024 * 1024,
+             "Signed runtime must contain one bounded installer.")
+        with package.extractfile(installers[0]) as source:
+            installer = source.read()
         for member in members:
             if not member.name.startswith("package/server/") or member.isdir():
                 continue
@@ -476,7 +497,7 @@ def verify_installed_runtime(fixture: dict, bundle: Path, version: str) -> int:
             with packaged:
                 expected = packaged.read()
             actual = read_regular(installed, 200 * 1024 * 1024)
-            need(actual == expected and bool(installed.stat().st_mode & 0o111) == bool(member.mode & 0o111),
+            need(actual == expected and stat.S_IMODE(installed.stat().st_mode) == installed_runtime_mode(member, installer),
                  "Activated runtime differs from the accepted package bytes or executable modes.")
             count += 1
     need(count > 0, "No signed server runtime files were compared.")

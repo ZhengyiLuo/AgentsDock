@@ -1,6 +1,7 @@
 """Unit-test native harness safety/claims, never start host services."""
 import copy
 import argparse
+import ast
 import importlib.util
 import io
 import json
@@ -278,6 +279,69 @@ class NativeServerAcceptanceUnitTests(unittest.TestCase):
             script.write_bytes(b"oops")
             with self.assertRaises(RuntimeError):
                 MOD.verify_installed_runtime(fixture, bundle, "1.0.7-beta.17")
+
+    def test_installer_mode_expectation_is_narrow_and_requires_the_signed_rule(self):
+        member = tarfile.TarInfo("package/server/agent_server.py")
+        member.mode = 0o644
+        installer = b'#!/bin/bash\nchmod 755 "$STAGE_DIR/agent_server.py" "$STAGE_DIR/install.sh"\n'
+        self.assertEqual(MOD.installed_runtime_mode(member, installer), 0o755)
+        for invalid in (b"", b'# chmod 755 "$STAGE_DIR/agent_server.py"\n', installer + installer,
+                        b'chmod 755 "$STAGE_DIR/another.py"\n'):
+            with self.subTest(invalid=invalid), self.assertRaises(RuntimeError):
+                MOD.installed_runtime_mode(member, invalid)
+        member.name = "package/server/unrelated.py"
+        self.assertEqual(MOD.installed_runtime_mode(member, installer), 0o644)
+        for unsafe in (0o777, 0o4755, 0o664):
+            member.mode = unsafe
+            with self.assertRaises(RuntimeError):
+                MOD.installed_runtime_mode(member, installer)
+
+    def test_installed_entrypoint_mode_matches_real_installer_without_changing_archive(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary).resolve()
+            bundle = root / "bundle"
+            (bundle / "npm").mkdir(parents=True)
+            runtime = root / "install/releases/1.0.7-beta.17"
+            runtime.mkdir(parents=True)
+            (root / "install/current").symlink_to(runtime)
+            installer = b'#!/bin/bash\nchmod 755 "$STAGE_DIR/agent_server.py" "$STAGE_DIR/install.sh"\n'
+            payload = {"install.sh": (installer, 0o755), "agent_server.py": (b"entrypoint", 0o644),
+                       "runtime.py": (b"module", 0o644)}
+            (bundle / "npm/agents-server-npm-manifest.json").write_text(json.dumps({
+                "version": "1.0.7-beta.17", "archive": {"name": "package.tgz"}}))
+            with tarfile.open(bundle / "npm/package.tgz", "w:gz") as package:
+                for name, (data, mode) in payload.items():
+                    member = tarfile.TarInfo(f"package/server/{name}")
+                    member.size, member.mode = len(data), mode
+                    package.addfile(member, io.BytesIO(data))
+                    installed = runtime / name
+                    installed.write_bytes(data)
+                    installed.chmod(0o755 if name == "agent_server.py" else mode)
+            fixture = {"installRoot": str(root / "install")}
+            self.assertEqual(MOD.verify_installed_runtime(fixture, bundle, "1.0.7-beta.17"), 3)
+            for name, mode in (("agent_server.py", 0o644), ("agent_server.py", 0o775), ("runtime.py", 0o755)):
+                target = runtime / name
+                original_mode = target.stat().st_mode & 0o7777
+                target.chmod(mode)
+                with self.subTest(name=name, mode=mode), self.assertRaises(RuntimeError):
+                    MOD.verify_installed_runtime(fixture, bundle, "1.0.7-beta.17")
+                target.chmod(original_mode)
+            (runtime / "agent_server.py").write_bytes(b"different")
+            with self.assertRaises(RuntimeError):
+                MOD.verify_installed_runtime(fixture, bundle, "1.0.7-beta.17")
+
+    def test_production_installer_and_packager_have_only_the_known_mode_difference(self):
+        server = Path(__file__).resolve().parents[2] / "server"
+        module = ast.parse((server / "scripts/package_npm_release.py").read_text())
+        package_executables = next(ast.literal_eval(node.value) for node in module.body
+                                   if isinstance(node, ast.Assign) and any(isinstance(target, ast.Name)
+                                   and target.id == "EXECUTABLE_FILES" for target in node.targets))
+        installed_executables = set()
+        for line in (server / "install.sh").read_text().splitlines():
+            if line.startswith("chmod 755 "):
+                installed_executables.update(MOD.re.findall(r'"\$STAGE_DIR/([A-Za-z0-9_.-]+)"', line))
+        installed_executables.discard("agentsdock_team_hub")  # directory, not runtime file
+        self.assertEqual(installed_executables, package_executables | {"agent_server.py"})
 
     def failure_case(self, root, *, bad_marker=False):
         bundle = root / "bundle"

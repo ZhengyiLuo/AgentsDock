@@ -1,5 +1,19 @@
 # Public development log
 
+## 2026-09-27 — Match native acceptance to the installer entry-point mode
+
+- Reserve `1.0.7-beta.18`, native build `1223`, for the corrected rehearsal.
+  The beta.17 server-only signing attempt succeeded, but no desktop package,
+  acceptance receipt or public release was produced from it.
+- Verify installed runtime permissions against the actual installer contract:
+  its entry point is made executable during installation. Preserve exact
+  package hashes and the existing signing key; do not mutate signed archives.
+- Match the native update test's click to the actual baseline's "Update
+  AgentsDock" button while retaining support for the older restart label.
+  These changes affect acceptance automation, not app update behavior.
+- Pass 242 release/CLI JavaScript tests, 72 Python helper tests and workflow
+  linting before the new source pin. Native build and replay remain pending.
+
 ## 2026-09-27 — Reuse signing custody for an unpublished macOS rehearsal
 
 - Reuse the existing standalone artifact-only server signer without moving or

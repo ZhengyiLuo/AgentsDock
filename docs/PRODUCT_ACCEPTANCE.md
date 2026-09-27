@@ -147,6 +147,12 @@ has been extracted and Terminal is inside its `manual-test` directory. Do not
 substitute `@beta` or `@latest`: those tags do not identify this unpublished
 candidate.
 
+The `--offline` flag covers npm staging only. The server installer still needs
+outbound access for Python/runtime dependencies. Connect this unpublished app
+only to the matching fresh test server. Do not import older real servers into
+its profile: automatic reconciliation would try to fetch the unpublished npm
+version, which is available only inside the isolated CI replay.
+
 ```sh
 uname -m
 node --version
@@ -155,17 +161,21 @@ command -v uv tmux
 shasum -a 256 -c SHA256SUMS
 
 npm install --prefix ./cli --ignore-scripts --no-audit --no-fund --offline \
-  ./server-1.0.7-beta.17.tgz
+  ./server-1.0.7-beta.18.tgz
 node ./cli/node_modules/@agentsdock/server/npm/cli.cjs --version
 node ./cli/node_modules/@agentsdock/server/npm/cli.cjs install \
   --bind 127.0.0.1 --port 7850
 ```
 
 Expected architecture is `arm64`; expected package version is
-`1.0.7-beta.17`. Stop if either differs. Do not run the installer with `sudo`
+`1.0.7-beta.18`. Stop if either differs. Do not run the installer with `sudo`
 or override its installation roots. If it reports existing state, use another
 account; do not delete history to bypass that guard. Keep the pairing token
 local and use it only in the app's server-connection dialog.
+
+macOS accounts still share TCP ports. If `7850` belongs to another account,
+choose an unused port in the install command and use that same port when
+pairing. Do not stop another account's server to free the port.
 
 Extract the notarized ZIP into a new folder owned by the test account, then
 open that app. Do not replace an app in `/Applications` shared by other users.
@@ -173,7 +183,7 @@ open that app. Do not replace an app in `/Applications` shared by other users.
 ```sh
 test ! -e ./app
 mkdir ./app
-ditto -x -k ./AgentsDock-1.0.7-beta.17-mac-universal.zip ./app
+ditto -x -k ./AgentsDock-1.0.7-beta.18-mac-universal.zip ./app
 codesign --verify --deep --strict ./app/AgentsDock.app
 spctl --assess --type execute --verbose=2 ./app/AgentsDock.app
 open ./app/AgentsDock.app

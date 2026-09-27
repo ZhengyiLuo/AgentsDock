@@ -15,7 +15,7 @@ import { homedir } from 'node:os'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { assertReplayRunner, createProductReplay, createCandidateReplay } from './product-release-replay.mjs'
 import { assertCandidateRunner } from './product-candidate-receipt.mjs'
-import { appVersion, assertMigrationTrack, connect, freePort, hashFile,
+import { appVersion, assertMigrationTrack, connect, freePort, hashFile, MIGRATION_INSTALL_BUTTON_NAMES,
   openMigrationUpdateSettings, processesFor, run, stopOwned, until, verifyApp } from './verify_electron_migration.mjs'
 
 const VERSION = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-beta\.[1-9]\d*)?$/
@@ -373,7 +373,7 @@ export async function main(argv = process.argv.slice(2)) {
     await until('Owned legacy service offline', () => assertOffline(fixture))
     observed('server-offline-before-app-install')
     await client.screenshot(join(options.output, '01-ready-with-server-offline.png'))
-    await client.clickButton(['Restart to update'])
+    await client.clickButton(MIGRATION_INSTALL_BUTTON_NAMES)
     observed('trusted-native-input-restart-to-update')
     client.close(); client = null
     await until('Squirrel replaced installed app', () => appVersion(ownedApp) === replay.identity.version, 4 * 60_000)
