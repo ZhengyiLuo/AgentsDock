@@ -114,6 +114,24 @@ describe('renderer CSS custom properties', () => {
       [...missing].map(([property, locations]) => `${property}: ${locations.join(', ')}`)
     ).toEqual([])
   })
+
+  it('keeps endpoint menus and confirmations above their parent Settings dialog', () => {
+    const shell = sources.find(({ file }) => file === join(rendererRoot, 'styles.css'))?.source ?? ''
+    const component = readFileSync(join(rendererRoot, 'components/EndpointMenu.tsx'), 'utf8')
+    const layer = (name: string) => {
+      const body = shell.split(`.${name} {`)[1]?.split('}')[0] ?? ''
+      const value = Number(body.match(/z-index:\s*(\d+)/)?.[1])
+      expect(Number.isFinite(value), `Missing ${name} layer`).toBe(true)
+      return value
+    }
+    const settings = layer('app-settings-dialog')
+    expect(component).toContain('menu-content endpoint-menu-content')
+    expect(component).toContain('dialog-overlay endpoint-confirm-overlay')
+    expect(component).toContain('form-dialog endpoint-confirm-dialog')
+    expect(layer('endpoint-menu-content')).toBeGreaterThan(settings)
+    expect(layer('endpoint-confirm-overlay')).toBeGreaterThan(settings)
+    expect(layer('endpoint-confirm-dialog')).toBeGreaterThan(layer('endpoint-confirm-overlay'))
+  })
 })
 
 function cssFiles(directory: string): string[] {

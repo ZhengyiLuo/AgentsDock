@@ -10,12 +10,12 @@ export function EndpointMenu({ disabled, scopeKey, onForget }: { disabled: boole
   useEffect(() => { setConfirm(false) }, [scopeKey])
   return <>
     <DropdownMenu.Root><DropdownMenu.Trigger className="icon-button" disabled={disabled} aria-label={t('connections.options')}><MoreHorizontal size={18} /></DropdownMenu.Trigger>
-      <DropdownMenu.Portal><DropdownMenu.Content className="menu-content" align="end" sideOffset={5}>
+      <DropdownMenu.Portal><DropdownMenu.Content className="menu-content endpoint-menu-content" align="end" sideOffset={5}>
         <DropdownMenu.Item className="menu-item" onSelect={() => setConfirm(true)}>{t('connections.forget')}</DropdownMenu.Item>
       </DropdownMenu.Content></DropdownMenu.Portal>
     </DropdownMenu.Root>
-    <Dialog.Root open={confirm} onOpenChange={setConfirm}><Dialog.Portal><Dialog.Overlay className="dialog-overlay" />
-      <Dialog.Content className="form-dialog">
+    <Dialog.Root open={confirm} onOpenChange={setConfirm}><Dialog.Portal><Dialog.Overlay className="dialog-overlay endpoint-confirm-overlay" />
+      <Dialog.Content className="form-dialog endpoint-confirm-dialog">
         <header><Dialog.Title>{t('connections.confirmForget')}</Dialog.Title></header>
         <div className="form-dialog-body"><Dialog.Description>{t('connections.forgetHelp')}</Dialog.Description>
           <div className="codex-auth-settings-actions">

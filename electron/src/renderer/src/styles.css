@@ -1841,6 +1841,10 @@ button.tool-event-toggle:hover { background: #242424; }
 .app-settings-sidebar nav button:hover { color: var(--text); background: color-mix(in srgb, var(--text) 6%, transparent); }
 .app-settings-sidebar nav button.active { color: var(--text); background: color-mix(in srgb, var(--text) 10%, transparent); }
 .app-settings-content { min-width: 0; min-height: 0; position: relative; overflow-y: auto; padding: 48px 44px 42px; }
+/* These body portals belong to Settings, so they must paint above its dialog. */
+.endpoint-menu-content { z-index: 1002; }
+.endpoint-confirm-overlay { z-index: 1002; }
+.endpoint-confirm-dialog { z-index: 1003; }
 .app-settings-close { position: absolute; z-index: 2; top: 14px; right: 15px; }
 .app-settings-section { width: 100%; max-width: 650px; margin: 0 auto; }
 .app-settings-section > header { margin-bottom: 18px; }
