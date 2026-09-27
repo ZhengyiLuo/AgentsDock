@@ -2,6 +2,30 @@ import { contextBridge, ipcRenderer, webUtils } from 'electron'
 import type { AgentsDockAPI } from '../shared/ipc'
 import type { AppEventMap } from '../shared/types'
 import { buildMediaURL, buildWorkspaceMediaURL } from '../shared/media-url'
+import {
+  NativeFileSelectionGate,
+  nativeFileDropTarget,
+  nativeFilePasteTarget
+} from './native-file-selection'
+
+const nativeFileSelections = new NativeFileSelectionGate(file => webUtils.getPathForFile(file))
+
+window.addEventListener('drop', event => {
+  if (nativeFileDropTarget(event)) nativeFileSelections.authorize(event.dataTransfer?.files, event.isTrusted)
+}, true)
+window.addEventListener('paste', event => {
+  if (nativeFilePasteTarget(event)) nativeFileSelections.authorize(event.clipboardData?.files, event.isTrusted)
+}, true)
+
+async function stageNativeFiles(files: File[]): Promise<Array<import('../shared/types').NativeFileRef | null>> {
+  const paths = nativeFileSelections.consumeBatch(files)
+  const nativePaths = paths.filter((path): path is string => Boolean(path))
+  if (!nativePaths.length) return paths.map(() => null)
+  const refs = await ipcRenderer.invoke('files:stage-native-batch', nativePaths) as import('../shared/types').NativeFileRef[]
+  if (refs.length !== nativePaths.length) throw new Error('The selected files could not be staged safely.')
+  let nativeIndex = 0
+  return paths.map(path => path ? refs[nativeIndex++] : null)
+}
 
 const api: AgentsDockAPI = {
   workspaceGit: {
@@ -302,10 +326,8 @@ const api: AgentsDockAPI = {
   files: {
     choose: () => ipcRenderer.invoke('files:choose'),
     pathForFile: file => webUtils.getPathForFile(file),
-    stageNativeFile: file => {
-      const path = webUtils.getPathForFile(file)
-      return path ? ipcRenderer.invoke('files:stage-native', path) : Promise.resolve(null)
-    },
+    stageNativeFile: async file => (await stageNativeFiles([file]))[0],
+    stageNativeFiles,
     stageClipboardImage: (data, name, type) => ipcRenderer.invoke('files:stage-clipboard', data, name, type),
     upload: (sessionId, paths) => ipcRenderer.invoke('files:upload', sessionId, paths),
     list: (sessionId, offset, limit, contentPrefix) => ipcRenderer.invoke('files:list', sessionId, offset, limit, contentPrefix),

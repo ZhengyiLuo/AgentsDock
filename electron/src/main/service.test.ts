@@ -7906,6 +7906,84 @@ describe('credential-free profile metadata and asynchronous authentication', () 
 })
 
 describe('server profile lifecycle', () => {
+  it('rebinds freshly dropped image and video paths to another chat while rejecting stale replay', async () => {
+    const uploadOpened = vi.fn(async (sessionId: string, source: import('./server-client').OpenedUploadSource) => ({
+      id: `${sessionId}-${source.filename}`,
+      session_id: sessionId,
+      filename: source.filename,
+      content_type: source.filename.endsWith('.png') ? 'image/png' : 'video/mp4'
+    }))
+    const client = fakeClient({ uploadOpened })
+    const { service } = createProfileService({ 'http://a.test:7850': [client] })
+    Object.assign(service, { validatedGeneration: 1 })
+    const directory = mkdtempSync(join(tmpdir(), 'agentsdock-native-restage-'))
+    cleanup.push(() => rmSync(directory, { recursive: true, force: true }))
+    const image = join(directory, 'photo.png')
+    const video = join(directory, 'movie.mp4')
+    writeFileSync(image, 'image')
+    writeFileSync(video, 'video')
+    const paths = [image, video]
+    service.addWindow({
+      isDestroyed: () => false,
+      on: vi.fn(),
+      webContents: { id: 41, send: vi.fn(), on: vi.fn() }
+    } as never)
+
+    await service.stageNativeFiles(41, paths)
+    await expect(service.uploadFiles(41, 'chat-a', paths)).resolves.toEqual([
+      expect.objectContaining({ session_id: 'chat-a', filename: 'photo.png' }),
+      expect.objectContaining({ session_id: 'chat-a', filename: 'movie.mp4' })
+    ])
+
+    await expect(service.uploadFiles(41, 'chat-b', paths)).rejects.toThrow('Choose this file again')
+    expect(uploadOpened).toHaveBeenCalledTimes(2)
+
+    await service.stageNativeFiles(41, paths)
+    await expect(service.uploadFiles(41, 'chat-b', paths)).resolves.toEqual([
+      expect.objectContaining({ session_id: 'chat-b', filename: 'photo.png' }),
+      expect.objectContaining({ session_id: 'chat-b', filename: 'movie.mp4' })
+    ])
+    expect(uploadOpened.mock.calls.map(call => [call[0], call[1].filename])).toEqual([
+      ['chat-a', 'photo.png'],
+      ['chat-a', 'movie.mp4'],
+      ['chat-b', 'photo.png'],
+      ['chat-b', 'movie.mp4']
+    ])
+  })
+
+  it('does not let an upload awaiting profile validation steal a newer native selection', async () => {
+    const validating = deferred<Health>()
+    const uploadOpened = vi.fn(async (sessionId: string, source: import('./server-client').OpenedUploadSource) => ({
+      id: `${sessionId}-${source.filename}`,
+      session_id: sessionId,
+      filename: source.filename,
+      content_type: 'image/png'
+    }))
+    const client = fakeClient({ health: () => validating.promise, uploadOpened })
+    const { service } = createProfileService({ 'http://a.test:7850': [client] })
+    const directory = mkdtempSync(join(tmpdir(), 'agentsdock-native-validation-race-'))
+    cleanup.push(() => rmSync(directory, { recursive: true, force: true }))
+    const image = join(directory, 'photo.png')
+    writeFileSync(image, 'image')
+    service.addWindow({
+      isDestroyed: () => false,
+      on: vi.fn(),
+      webContents: { id: 41, send: vi.fn(), on: vi.fn() }
+    } as never)
+
+    await service.stageNativeFile(41, image)
+    const staleUpload = service.uploadFiles(41, 'chat-a', [image])
+    await vi.waitFor(() => expect(client.health).toHaveBeenCalledOnce())
+    await service.stageNativeFile(41, image)
+    validating.resolve({ ok: true })
+
+    await expect(staleUpload).rejects.toThrow('Choose this file again')
+    expect(uploadOpened).not.toHaveBeenCalled()
+    await expect(service.uploadFiles(41, 'chat-b', [image])).resolves.toEqual([
+      expect.objectContaining({ session_id: 'chat-b', filename: 'photo.png' })
+    ])
+  })
+
   it('aborts an admitted upload when its renderer reloads and never starts the next file', async () => {
     const firstStarted = deferred<void>()
     const upload = vi.fn((_sessionId: string, _path: string, signal?: AbortSignal) => {

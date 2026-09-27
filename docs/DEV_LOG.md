@@ -48,6 +48,103 @@
   workflow, which is not yet implemented. Document the external signing/OIDC
   configuration and operator-reviewed npm channel repair required before use.
 
+## 2026-09-27 — Run-bound Cursor chat tools under native permissions
+
+- Replace Shell-based helper instructions for Cursor with a private per-run
+  MCP plugin. Preserve native CLI session IDs, login, working directories,
+  stream output, and history. Keep explicit denies and other tool permissions.
+- Reuse server capability checks and idempotent tool execution. Stop and exit
+  revoke the endpoint; temporary permission/configuration files are removed.
+  Clarify that accepted delivery does not imply reading or replying and must
+  not trigger another send.
+- Verify real Cursor Default-mode MCP calls and same-ID continuation, native
+  Shell rejection, explicit MCP denial, and unchanged global configuration.
+  These native probes use a synthetic inbox. Server integration tests cover
+  the real IPC and live-run fence with a fixture provider process.
+- Pass 256 focused Cursor, authorization and mailbox tests, plus targeted
+  packaging/configuration checks and Python/shell compilation. Additional
+  lifecycle coverage rejects non-regular configuration files without hanging.
+- Activate the patched local beta candidate through the normal authenticated
+  restart path. Preserve server identity and existing chat/native session
+  associations; leave other running server instances untouched. The user
+  subsequently accepted local App testing and requested source integration.
+  Individual manual checklist results were not separately recorded; this does
+  not replace independent full App round-trip or release acceptance evidence.
+- Availability: locally tested server fix submitted for main integration; no
+  public package or release publication. See
+  `server/docs/CURSOR_PROVIDER_MCP.md` for the contract and limitations.
+
+## 2026-09-27 — Keep Claude model discovery passive
+
+- Remove disposable authenticated model-discovery processes and their forced
+  teardown. Reuse bounded model metadata from real SDK initialization, with
+  configuration-scoped expiry and invalidation after native auth failures.
+- Preserve passive readiness, native alias labels, explicit empty pickers and
+  fallback discovery. Do not promote project-specific model settings into the
+  global catalog or retain private initialization/account fields.
+- Pass 272 focused server tests covering catalog behavior, readiness, SDK
+  lifecycle and runner integration; compile changed runtime modules and check
+  the diff. Regression tests use synthetic credentials and isolated state.
+- Exercise the beta candidate's compiled app in an isolated native offscreen
+  Electron window through real IPC/HTTP and the native Claude SDK. Four real
+  requests pass, covering server restart/resume, selecting Haiku, repeated CLI
+  rechecks and app close/reopen with retained native session/context. The
+  picker displays twelve sanitized native options; credentials stay unchanged.
+- A before/after regression observes one disposable metadata-process attempt
+  in the old path and none in the corrected path. Actual app testing also
+  caught and fixed cache invalidation caused by Claude's startup counters.
+- Availability: locally tested source submitted for main integration and an
+  isolated patched beta server; no public release. Natural OAuth renewal and coexistence with
+  older servers sharing native login remain unverified; immediate successful
+  requests do not establish that repeated-login incidents are resolved.
+
+## 2026-09-26 — Reauthorize fresh file selections across chats
+
+- Let a fresh native drop, paste, or file-picker selection grant an idle file
+  to another chat. Keep selection batches atomic, reject replay of old gestures,
+  and prevent delayed upload requests from consuming a newer selection. Active
+  uploads and managed attachment grants remain protected.
+- Preserve the shared browser's existing upload bridge when the desktop uses
+  native batch staging. Its real bridge regression caught an incompatible
+  optional-method probe during integration; the corrected tests pass.
+- Validate source `b3a3fad1` with TypeScript, 4,927 desktop tests (five skipped),
+  eight packaging/license tests, production compilation, bundle audit and local
+  ad-hoc signature verification. Use a native temporary filesystem for tests
+  requiring POSIX permissions and for signing the local package.
+- Launch an isolated native desktop build `0.2.0` / `85` against an existing
+  test server `1.0.7-beta.11`; application startup and authenticated health,
+  session and job refreshes succeed. The local candidate was subsequently
+  manually tested and accepted. Computer-use permissions prevented independent
+  agent-operated drag/drop and paste verification; individual manual test-case
+  results were not recorded.
+- Availability: source and manually accepted local test package. No server
+  update is required for this fix; no server restart or release publication.
+
+## 2026-09-26 — Restore ordinary steering during active Codex goals
+
+- Send goal follow-ups to the existing native turn even when the model/effort
+  picker has changed for future turns. Preserve the running goal, provider
+  settings, original references, command and authority without Stop/restart.
+- Remove the obsolete client-capability requirement for plain queued input.
+  Keep the goal steering lane available for turns started from a skill.
+  Report unsupported new actions separately from a turn that is not ready.
+- Reproduce the reported rejection through signed desktop `1.0.7-beta.14`,
+  build `1216`: start a real Codex goal at Low effort, change the picker to
+  Medium, queue a plain message, and click Send now. The original server
+  responds with the reported 409; corrected server source `810d89f` accepts it.
+- Exercise two follow-ups on the original running goal, then explicitly Stop,
+  Resume goal, change effort again, and steer the completion marker. All three
+  requests receive 200, native acknowledgements appear once, the first two
+  retain the original run, and the third retains the resumed run. The goal
+  completes with no queued messages or renderer exceptions. This uses native
+  app input, production IPC/HTTP and the actual provider against isolated state.
+- Pass 211 targeted server regressions covering admission, delivery, original
+  command/reference ownership, legacy queue records, transport races, queue
+  recovery and goal resume; eight focused app goal tests also pass. Regression
+  provider fakes are supplemented by the separate live acceptance above.
+- Server-source fix only. Existing desktop builds can use it after server
+  deployment; no production server deployment or public release in this pass.
+
 ## 2026-09-25 — Keep passive Claude login status out of the composer
 
 - Do not show an upfront Claude authentication warning or Recheck button just

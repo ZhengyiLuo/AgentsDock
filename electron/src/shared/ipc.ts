@@ -523,6 +523,7 @@ export interface AgentsDockAPI {
     choose(): Promise<NativeFileRef[]>
     pathForFile(file: File): string
     stageNativeFile(file: File): Promise<NativeFileRef | null>
+    stageNativeFiles?(files: File[]): Promise<Array<NativeFileRef | null>>
     stageClipboardImage(data: ArrayBuffer, name: string, type: string): Promise<NativeFileRef>
     upload(sessionId: string, paths: string[]): Promise<AgentFile[]>
     list(sessionId: string, offset?: number, limit?: number, contentPrefix?: string): Promise<FilesPage>

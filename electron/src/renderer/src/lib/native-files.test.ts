@@ -34,4 +34,25 @@ describe('native file selection', () => {
     expect(await nativeFileRefsFromFiles(files)).toHaveLength(5)
     expect(stage).toHaveBeenCalledTimes(5)
   })
+  it('uses one atomic native batch when the desktop preload provides it', async () => {
+    const stageNativeFiles = vi.fn(async (files: File[]) => files.map(file => ({
+      path: `/tmp/${file.name}`, name: file.name, size: file.size, type: file.type
+    })))
+    const stageClipboardImage = vi.fn()
+    Object.defineProperty(window, 'agentsDock', { configurable: true, value: {
+      sharedChat: false,
+      files: { stageNativeFiles, stageNativeFile: vi.fn(), stageClipboardImage }
+    } as unknown as AgentsDockAPI })
+    const files = [
+      new File(['image'], 'photo.png', { type: 'image/png' }),
+      new File(['video'], 'movie.mp4', { type: 'video/mp4' })
+    ]
+
+    await expect(nativeFileRefsFromFiles(files)).resolves.toEqual([
+      expect.objectContaining({ path: '/tmp/photo.png', type: 'image/png' }),
+      expect.objectContaining({ path: '/tmp/movie.mp4', type: 'video/mp4' })
+    ])
+    expect(stageNativeFiles).toHaveBeenCalledExactlyOnceWith(files)
+    expect(stageClipboardImage).not.toHaveBeenCalled()
+  })
 })
