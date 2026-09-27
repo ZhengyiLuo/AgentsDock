@@ -90,18 +90,19 @@ export function ProviderConnectionSettings({ backend, ...props }: Props & { back
   }
   const name = backend === 'claude' ? 'Claude Code' : 'OpenCode'
   const editable = props.connected && Boolean(props.profileId) && Boolean(saved) && !busy
-  const verified = !open && !error && saved?.last_result === 'verified'
-  return <section className="codex-auth-settings provider-connection" aria-label={`${name} custom endpoint`}>
-    <div className="codex-auth-settings-icon"><KeyRound size={16} /></div>
+  const verified = props.connected && !busy && !open && !error && saved?.configured === true && saved?.last_result === 'verified'
+  const unavailable = !props.connected || !saved || Boolean(error)
+  return <section className={`codex-auth-settings provider-connection ${verified ? 'connection-connected' : 'connection-unconfirmed'}`} aria-label={`${name} custom endpoint`}>
+    <div className="codex-auth-settings-icon">{verified ? <CheckCircle2 size={18} /> : <KeyRound size={16} />}</div>
     <div className="codex-auth-settings-copy">
       <div className="codex-auth-settings-heading">
         <div><strong>{t('connections.title', { provider: name })}</strong><small>{t('connections.settingsOnly')}</small></div>
-        <button type="button" className="quiet-button" disabled={!editable} onClick={configure}>{t('connections.configure')}</button>
+        {!open && <button type="button" className={verified ? 'quiet-button' : 'primary-button'} disabled={!editable} onClick={configure}>{t('connections.configure')}</button>}
       </div>
       <small className={verified ? 'provider-connection-verified' : ''} role="status">
         {verified && <CheckCircle2 size={14} aria-hidden="true" />}
         {busy ? t('connections.working') : verified ? t('connections.verified')
-          : open ? t('connections.draft') : saved?.configured ? t('connections.saved') : t('connections.empty')}
+          : open ? t('connections.draft') : unavailable ? t('connections.unavailable') : saved?.configured ? t('connections.saved') : t('connections.empty')}
       </small>
       {saved?.checked_at && !open && <small>{t('connections.checkedAt', { time: new Date(saved.checked_at).toLocaleString() })}</small>}
       {error && <small role="alert" className={error === 'update' ? '' : 'codex-auth-settings-error'}>{t(`connections.error.${error}`)}</small>}
@@ -159,10 +160,10 @@ export function EndpointSetupHelp() {
 
 export function CursorEndpointNotice() {
   useLocale()
-  return <section className="codex-auth-settings" aria-label="Cursor custom endpoint">
+  return <section className="codex-auth-settings connection-unconfirmed" aria-label="Cursor custom endpoint">
     <div className="codex-auth-settings-icon"><KeyRound size={16} /></div>
     <div className="codex-auth-settings-copy"><strong>{t('connections.title', { provider: 'Cursor' })}</strong>
-      <small>{t('connections.cursorHelp')}</small>
+      <small role="status">{t('connections.unsupported')}</small><small>{t('connections.cursorHelp')}</small>
       <button type="button" className="quiet-button provider-connection-refresh" onClick={() => void window.agentsDock.native.openExternal('https://cursor.com/docs/cli/reference/authentication')}>{t('connections.cursorDocs')}</button>
     </div>
   </section>

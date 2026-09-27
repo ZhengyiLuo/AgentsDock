@@ -17,6 +17,7 @@ import {
 import { memo, useState } from 'react'
 import { useAppStore } from '../store/app-store'
 import { eventErrorText, isTimelineError } from '../lib/timeline'
+import { NativeProviderSignIn } from './NativeProviderSignIn'
 
 export const RuntimeHealthNotice = memo(function RuntimeHealthNotice({ backend, sessionId, codexProvider }: { backend: Backend; sessionId: string; codexProvider?: CodexProvider }) {
   useLocale()
@@ -32,7 +33,7 @@ export function RuntimeHealthPanel() {
   ))
   return <section className="runtime-health-panel">
     <header>
-      <div><strong>{t("ui.RuntimeHealth.RuntimeHealthPanel.runtimes_prerequisites_52df820")}</strong><small>{t("ui.RuntimeHealth.RuntimeHealthPanel.server_prerequisites_and_provider_readines_2793356")}</small></div>
+      <div><strong>{t('connections.nativeTitle')}</strong><small>{t('connections.nativeHelp')}</small></div>
       <button type="button" className="quiet-button" disabled={refreshing} onClick={() => void recheck()}>
         <RefreshCw className={refreshing ? 'spin' : ''} size={13} />{" "}{t("ui.RuntimeHealth.RuntimeHealthPanel.recheck_clis_a388594")}</button>
     </header>
@@ -128,6 +129,9 @@ function RuntimeStatus({
   useLocale()
   const health = useAppStore(state => state.health)
   const catalog = useAppStore(state => state.runtimeCatalog)
+  const connected = useAppStore(state => state.connected)
+  const profileId = useAppStore(state => state.activeProfileId)
+  const profileGeneration = useAppStore(state => state.profileGeneration)
   const cursorCapability = backend === 'opencode' ? health?.capabilities?.opencode_backend : health?.capabilities?.cursor_backend
   // Keep compact notices independent from ordinary live timeline growth. The
   // selector still observes a newly relevant run error, but its stable string
@@ -151,7 +155,9 @@ function RuntimeStatus({
     ? cursorUnavailable || Boolean(diagnostic && diagnostic.status !== 'ready' && (!passiveClaudeAuth || chatError))
     : cursorUnavailable || runtimeDiagnosticNeedsAttention(diagnostic)
   if (compact && !chatError && !providerNeedsAttention) return null
-  const tone = chatError ? 'warning' : cursorUnavailable ? 'error' : runtimeDiagnosticTone(diagnostic)
+  const tone = chatError ? 'warning' : !compact && diagnostic?.installed !== false
+    ? connected && diagnostic?.authenticated === true && diagnostic.status === 'ready' ? 'ready' : 'unknown'
+    : cursorUnavailable ? 'error' : runtimeDiagnosticTone(diagnostic)
   const Icon = tone === 'ready' ? CheckCircle2 : tone === 'error' ? XCircle : tone === 'warning' ? AlertTriangle : CircleHelp
   const provider = backend === 'claude' ? 'Claude Code' : backend === 'cursor' ? 'Cursor' : backend === 'opencode' ? 'OpenCode' : codexProvider === 'custom' ? t('codexProvider.label') : 'Codex'
   const cursorUnavailableDetail = cursorUnavailable
@@ -162,7 +168,10 @@ function RuntimeStatus({
     || (!compact ? runtimeDiagnosticCurrentError(diagnostic) : '')
     || diagnostic?.message
     || `${provider} has not been checked yet.`
-  const label = compact && chatError ? 'Latest chat error' : cursorUnavailable ? 'Unavailable' : runtimeDiagnosticLabel(diagnostic)
+  const label = !compact && !connected ? t('connections.unavailable')
+    : !compact && diagnostic?.installed !== false
+      ? tone === 'ready' ? t('connections.signedIn') : diagnostic?.authenticated === false ? t('codexAuth.signedOut') : t('connections.loginUnknown')
+      : compact && chatError ? 'Latest chat error' : cursorUnavailable ? 'Unavailable' : runtimeDiagnosticLabel(diagnostic)
   const cursorAction = diagnostic?.action?.trim() || cursorCapability?.action?.trim()
   const action = cursorUnavailable
     ? cursorAction && !cursorUnavailableDetail.includes(cursorAction) ? cursorAction : undefined
@@ -173,6 +182,7 @@ function RuntimeStatus({
       <strong>{provider} <span>{label}</span></strong>
       <small>{detail}</small>
       {action ? <small className="runtime-action">{action}</small> : null}
+      {!compact && <NativeProviderSignIn key={`${backend}:${profileId}:${profileGeneration}`} backend={backend} disabled={!connected} />}
     </div>
     {compact && providerNeedsAttention && onRecheck
       ? <button

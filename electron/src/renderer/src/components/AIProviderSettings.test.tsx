@@ -52,7 +52,7 @@ it('opens existing provider controls on their own page without probing or changi
   expect(api.runtime.catalog).not.toHaveBeenCalled()
   expect(api.codex.provider).toHaveBeenCalledOnce()
 
-  fireEvent.click(screen.getByRole('button', { name: 'Custom endpoint' }))
+  fireEvent.click(screen.getAllByRole('button', { name: 'Configure API' })[0])
   const input = await screen.findByLabelText('API key for this endpoint')
   await waitFor(() => expect(input).toBeEnabled())
   fireEvent.change(input, { target: { value: 'synthetic-unsaved-key' } })
@@ -102,7 +102,7 @@ it('supports the provider deep link and keeps disconnected controls read-only', 
   render(<AppSettingsDialog />)
   act(() => window.dispatchEvent(new CustomEvent('agentsdock:app-settings-section', { detail: 'providers' })))
   expect(screen.getByRole('button', { name: 'AI Providers' })).toHaveAttribute('aria-current', 'page')
-  expect(screen.getByRole('button', { name: 'Custom endpoint' })).toBeDisabled()
+  expect(screen.getAllByRole('button', { name: 'Configure API' })[0]).toBeDisabled()
   expect(api.codex.auth).not.toHaveBeenCalled()
   expect(api.runtime.catalog).not.toHaveBeenCalled()
 })

@@ -1,5 +1,30 @@
 # Public development log
 
+## 2026-09-27 — Visible provider connection state and login guidance
+
+- Put API configuration near the top of AI Providers and use the same
+  Configure API action for Codex, Claude Code and OpenCode. Unconnected,
+  unknown, draft and failed states have neutral icons; only verified saved
+  API connections get a green check. A failed settings read is not signed-out
+  or connected evidence. Native account identity remains separate.
+- Show native sign-in guidance with fixed, copyable commands for the selected
+  server, rather than executing login on a possibly unrelated desktop. Keep
+  installed-but-unconfirmed runtimes neutral. Claude still confirms auth on
+  actual sends; opening settings does not renew its credentials. Cursor's
+  unsupported generic API configuration remains explicitly labeled.
+- Exercise real Electron mouse/keyboard input through production IPC/native
+  HTTP, native-admin authorization and endpoint storage against an isolated
+  loopback API. Verify all three connections, bad-key retry, key clearing,
+  navigation/reopen, login instructions and light/dark narrow presentation.
+  Fixture credentials do not certify third-party accounts or native login.
+- TypeScript and production compilation pass. Related settings/CSS tests pass;
+  the full suite found one outdated translated-label assertion and one
+  unrelated workspace timeout. Correct the label, and pass focused settings
+  tests and all 134 workspace tests on rerun.
+- Update the explicitly designated development server with this feature
+  branch, preserving identity and saved credentials; verify new settings routes
+  and credential-check support. No public release or main-branch merge.
+
 ## 2026-09-27 — Clear custom API identity and connection state
 
 - Separate the native Codex account from custom API credentials and billing.

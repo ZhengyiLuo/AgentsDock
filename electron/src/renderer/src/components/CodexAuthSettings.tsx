@@ -274,8 +274,12 @@ export function CodexAuthSettings({ connected, profileId, profileGeneration, ser
       : currentStatus?.auth_mode === 'other' ? t('codexAuth.other')
         : currentStatus?.requires_openai_auth === false ? t('codexAuth.notRequired') : t('codexAuth.signedOut')
 
-  return <><section className="codex-auth-settings" aria-label={t('codexAuth.title')} aria-busy={loading}>
-    <span className="codex-auth-settings-icon"><KeyRound size={17} /></span>
+  const nativeSignedIn = !loading && !error && currentStatus?.available === true
+    && (currentStatus.auth_mode === 'chatgpt' || currentStatus.auth_mode === 'apiKey')
+  const apiVerified = !providerLoading && !saving && !testing && !showForm && !providerError && !providerReadFailed
+    && currentProvider?.configured === true && currentProvider.connection_verified === true
+  return <><section className={`codex-auth-settings ${nativeSignedIn ? 'connection-connected' : 'connection-unconfirmed'}`} aria-label={t('codexAuth.title')} aria-busy={loading}>
+    <span className="codex-auth-settings-icon">{nativeSignedIn ? <CheckCircle2 size={18} /> : <KeyRound size={17} />}</span>
     <div className="codex-auth-settings-copy">
       <div className="codex-auth-settings-heading">
         <div><strong>{t('codexAuth.title')}</strong>{serverTitle && <small>{serverTitle}</small>}</div>
@@ -292,20 +296,20 @@ export function CodexAuthSettings({ connected, profileId, profileGeneration, ser
       {error && <small className="codex-auth-settings-error" role="alert">{t(`codexAuth.${error}`)}</small>}
     </div>
   </section>
-  <section className="codex-auth-settings provider-connection" aria-label={t('connections.title', { provider: 'Codex' })} aria-busy={saving || providerLoading || testing}>
-    <span className="codex-auth-settings-icon"><KeyRound size={17} /></span>
+  <section className={`codex-auth-settings provider-connection ${apiVerified ? 'connection-connected' : 'connection-unconfirmed'}`} aria-label={t('connections.title', { provider: 'Codex' })} aria-busy={saving || providerLoading || testing}>
+    <span className="codex-auth-settings-icon">{apiVerified ? <CheckCircle2 size={18} /> : <KeyRound size={17} />}</span>
     <div className="codex-auth-settings-copy">
       <div className="codex-auth-settings-heading">
         <div><strong>{t('connections.title', { provider: 'Codex' })}</strong><small>{t('codexAuth.independentAPI')}</small></div>
-        {!showForm && <button type="button" className="quiet-button" disabled={!canOpenSettings} onClick={() => {
+        {!showForm && <button type="button" className={apiVerified ? 'quiet-button' : 'primary-button'} disabled={!canOpenSettings} onClick={() => {
           clearKey(); invalidateTest(); setFormOpen(true)
           if (!currentProvider && !providerReadFailed && !providerLoading) void loadProviderConfiguration()
-        }}>{t('codexAuth.customEndpoint')}</button>}
+        }}>{t('connections.configure')}</button>}
       </div>
-      <small role="status" className={currentProvider?.connection_verified && !showForm && !providerError ? 'provider-connection-verified' : ''}>
-        {currentProvider?.connection_verified && !showForm && !providerError && <CheckCircle2 size={14} aria-hidden="true" />}
+      <small role="status" className={apiVerified ? 'provider-connection-verified' : ''}>
+        {apiVerified && <CheckCircle2 size={14} aria-hidden="true" />}
         {providerLoading || saving ? t('connections.working') : showForm ? t('connections.draft')
-          : providerError ? t('connections.unavailable') : currentProvider?.connection_verified ? t('connections.verified')
+          : providerError || providerReadFailed || !currentProvider ? t('connections.unavailable') : apiVerified ? t('connections.verified')
             : currentProvider?.configured ? t('connections.saved') : t('connections.empty')}
       </small>
       {currentProvider?.configured && !showForm && <small>{currentProvider.base_url}</small>}

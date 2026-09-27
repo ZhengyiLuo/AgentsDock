@@ -19,11 +19,11 @@ export function AIProviderSettings() {
       <strong>{profile ? t('settings.providersServer', { server: profile.name }) : t('settings.providersNoServer')}</strong>
       <p>{t('settings.providersScope')}</p>
     </div>
-    <RuntimeHealthPanel />
     <CodexAuthSettings connected={connected} profileId={profileId} profileGeneration={profileGeneration} serverTitle={profile?.name} />
     <ProviderConnectionSettings backend="claude" connected={connected} profileId={profileId} profileGeneration={profileGeneration} />
     <ProviderConnectionSettings backend="opencode" connected={connected} profileId={profileId} profileGeneration={profileGeneration} />
     <CursorEndpointNotice />
+    <RuntimeHealthPanel />
     <EndpointSetupHelp />
   </div>
 }

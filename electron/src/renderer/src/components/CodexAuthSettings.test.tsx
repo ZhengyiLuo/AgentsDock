@@ -28,7 +28,7 @@ function bridge(read = vi.fn().mockResolvedValue(snapshot()), write = vi.fn().mo
 }
 const props = { connected: true, profileId: 'studio', profileGeneration: 1, serverTitle: 'Studio' }
 async function openForm() {
-  const open = screen.getByRole('button', { name: 'Custom endpoint' })
+  const open = screen.getByRole('button', { name: 'Configure API' })
   await waitFor(() => expect(open).toBeEnabled())
   fireEvent.click(open)
   const key = screen.getByLabelText('API key for this endpoint') as HTMLInputElement
@@ -116,7 +116,7 @@ describe('Codex · Native account settings', () => {
     bridge(vi.fn().mockRejectedValue(new Error(message)))
     render(<CodexAuthSettings {...props} />)
     await screen.findByText(expected)
-    expect(screen.getByRole('button', { name: 'Custom endpoint' })).toBeEnabled()
+    expect(screen.getByRole('button', { name: 'Configure API' })).toBeEnabled()
     expect(screen.getByRole('button', { name: 'Recheck' })).toBeEnabled()
     expect(document.body.textContent).not.toContain('synthetic-private-provider-echo')
     expect(await openForm()).toBeEnabled()
@@ -127,10 +127,10 @@ describe('Codex · Native account settings', () => {
     const api = bridge()
     const { rerender } = render(<CodexAuthSettings {...props} connected={false} />)
     expect(screen.getByRole('region', { name: 'Codex · 原生账户' })).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: '自定义端点' })).toBeDisabled()
+    expect(screen.getByRole('button', { name: '配置 API' })).toBeDisabled()
     expect(api.read).not.toHaveBeenCalled()
     rerender(<CodexAuthSettings {...props} />)
-    fireEvent.click(screen.getByRole('button', { name: '自定义端点' }))
+    fireEvent.click(screen.getByRole('button', { name: '配置 API' }))
     await waitFor(() => expect(screen.getByLabelText('此端点的 API 密钥')).toBeEnabled())
     expect(screen.getByText(/独立的 API Key 与计费/)).toBeVisible()
     expect(api.write).not.toHaveBeenCalled()
@@ -225,7 +225,7 @@ describe('Codex custom endpoint settings', () => {
     let resolve: (value: CodexProviderConfiguration) => void = () => {}
     bridge(undefined, undefined, { provider: vi.fn().mockImplementationOnce(() => new Promise(done => { resolve = done })).mockResolvedValue(providerSnapshot()) })
     const { rerender } = render(<CodexAuthSettings {...props} />)
-    fireEvent.click(screen.getByRole('button', { name: 'Custom endpoint' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Configure API' }))
     expect(screen.getByLabelText('API key for this endpoint')).toBeDisabled()
     rerender(<CodexAuthSettings {...props} profileId="other" profileGeneration={2} />)
     await openForm()
@@ -359,7 +359,7 @@ describe('Codex custom endpoint settings', () => {
     await screen.findByText(/Endpoint model discovery succeeded/)
     fireEvent.click(screen.getByRole('button', { name: 'Connect' }))
     rerender(<CodexAuthSettings {...props} profileGeneration={2} />)
-    await waitFor(() => expect(screen.getByRole('button', { name: 'Custom endpoint' })).toBeEnabled())
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Configure API' })).toBeEnabled())
     await act(async () => resolve(providerSnapshot(true)))
     expect(fields.key).toHaveValue('')
     expect(screen.queryByText(/Endpoint model discovery succeeded/)).not.toBeInTheDocument()
@@ -385,8 +385,8 @@ describe('Codex custom endpoint settings', () => {
   it('resets the custom endpoint explicitly without signing in or sending a saved key', async () => {
     const api = bridge(undefined, undefined, { provider: vi.fn().mockResolvedValue(providerSnapshot(true)) })
     render(<CodexAuthSettings {...props} />)
-    await waitFor(() => expect(screen.getByRole('button', { name: 'Custom endpoint' })).toBeEnabled())
-    fireEvent.click(screen.getByRole('button', { name: 'Custom endpoint' }))
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Configure API' })).toBeEnabled())
+    fireEvent.click(screen.getByRole('button', { name: 'Configure API' }))
     await screen.findByRole('button', { name: 'Remove custom endpoint' })
     fireEvent.click(screen.getByRole('button', { name: 'Remove custom endpoint' }))
     await screen.findByText('Endpoint removed for new chats. Existing custom chats keep their saved endpoint credentials.')
@@ -402,8 +402,8 @@ describe('Codex custom endpoint settings', () => {
       resetProvider: vi.fn().mockRejectedValueOnce(new Error('CODEX_PROVIDER_BUSY')).mockResolvedValue(providerSnapshot())
     })
     render(<CodexAuthSettings {...props} />)
-    await waitFor(() => expect(screen.getByRole('button', { name: 'Custom endpoint' })).toBeEnabled())
-    fireEvent.click(screen.getByRole('button', { name: 'Custom endpoint' }))
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Configure API' })).toBeEnabled())
+    fireEvent.click(screen.getByRole('button', { name: 'Configure API' }))
     const reset = await screen.findByRole('button', { name: 'Remove custom endpoint' })
     expect(reset).toBeEnabled()
     expect(screen.getByLabelText('API key for this endpoint')).toBeDisabled()
@@ -426,7 +426,7 @@ describe('Codex custom endpoint settings', () => {
       provider: vi.fn().mockRejectedValueOnce(new Error('CODEX_PROVIDER_FAILED')).mockResolvedValue(providerSnapshot())
     })
     render(<CodexAuthSettings {...props} />)
-    fireEvent.click(await screen.findByRole('button', { name: 'Custom endpoint' }))
+    fireEvent.click(await screen.findByRole('button', { name: 'Configure API' }))
     const reset = await screen.findByRole('button', { name: 'Remove custom endpoint' })
     expect(reset).toBeEnabled()
     expect(screen.queryByRole('button', { name: 'Sign in with API key' })).not.toBeInTheDocument()
@@ -445,7 +445,7 @@ describe('Codex custom endpoint settings', () => {
   it('allows guarded provider editing after a generic account-status failure, without enabling normal sign-in', async () => {
     const api = bridge(vi.fn().mockRejectedValue(new Error('CODEX_AUTH_FAILED')))
     render(<CodexAuthSettings {...props} />)
-    fireEvent.click(await screen.findByRole('button', { name: 'Custom endpoint' }))
+    fireEvent.click(await screen.findByRole('button', { name: 'Configure API' }))
     const key = await screen.findByLabelText('API key for this endpoint') as HTMLInputElement
     await waitFor(() => expect(key).toBeEnabled())
     const fields = { key, endpoint: screen.getByLabelText('Endpoint base URL') }
@@ -463,8 +463,8 @@ describe('Codex custom endpoint settings', () => {
   it.each(['CODEX_PROVIDER_ADMIN', 'CODEX_PROVIDER_UPDATE', 'CODEX_PROVIDER_CONNECTION'])('does not offer metadata recovery for %s', async error => {
     const api = bridge(undefined, undefined, { provider: vi.fn().mockRejectedValue(new Error(error)) })
     render(<CodexAuthSettings {...props} />)
-    await waitFor(() => expect(screen.getByRole('button', { name: 'Custom endpoint' })).toBeEnabled())
-    fireEvent.click(screen.getByRole('button', { name: 'Custom endpoint' }))
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Configure API' })).toBeEnabled())
+    fireEvent.click(screen.getByRole('button', { name: 'Configure API' }))
     await screen.findByRole('alert')
     expect(screen.queryByRole('button', { name: 'Remove custom endpoint' })).not.toBeInTheDocument()
     expect(api.resetProvider).not.toHaveBeenCalled()
