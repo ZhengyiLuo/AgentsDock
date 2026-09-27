@@ -6,7 +6,8 @@ import { tmpdir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 import { test } from 'node:test'
 import { expectedAssets } from '../direct-release-mirror.mjs'
-import { assertReplayRunner, consumeReplayFault, createCandidateReplay, createProductReplay, parseReplayArguments, parseReplayRange, readReplayMetadata, serveProductReplay } from '../product-release-replay.mjs'
+import { assertReplayReadiness, assertReplayRunner, consumeReplayFault, createCandidateReplay, createProductReplay, createReplayStartupDiagnostics,
+  finalizeReplayListener, parseReplayArguments, parseReplayRange, parseReplayStartupDiagnostics, readReplayMetadata, serveProductReplay } from '../product-release-replay.mjs'
 import { assertCandidateRunner, candidateAssets, inspectCandidate, validateCandidateReceipt } from '../product-candidate-receipt.mjs'
 import { newestCompatibleReleaseFromAtom } from '../../electron/src/main/updater-feed.mjs'
 
@@ -327,8 +328,109 @@ test('arguments and hosted-runner restriction fail before certificate reads or l
     env: { ...process.env, GITHUB_ACTIONS: '' }, encoding: 'utf8', timeout: 5000
   })
   assert.equal(child.status, 1)
-  assert.match(child.stderr, /No acceptance result was produced/)
-  assert.equal(child.stdout, '')
+  assert.equal(child.stderr, '')
+  const diagnostics = parseReplayStartupDiagnostics(child.stdout)
+  assert.deepEqual(diagnostics.map(({ stage, status }) => ({ stage, status })), [
+    { stage: 'arguments', status: 'entered' }, { stage: 'runner-guard', status: 'entered' },
+    { stage: 'runner-guard', status: 'failed' }
+  ])
+  assert(diagnostics.every(record => record.releaseAcceptance === false))
+  assert(!child.stdout.includes('/does-not-exist'))
   await assert.rejects(serveProductReplay({ identity: { sourceSha } }, { certificatePath: '/never-read', privateKeyPath: '/never-read' }), /restricted/)
   assert.throws(() => parseReplayRange('bytes=1-2\n', 10))
+})
+
+test('startup diagnostics contain only finite public phases and safe codes, never exception content', () => {
+  let output = ''
+  const diagnostics = createReplayStartupDiagnostics(line => { output += line })
+  diagnostics.stage('arguments'); diagnostics.stage('runner-guard'); diagnostics.stage('listener-bind')
+  diagnostics.failure(Object.assign(new Error('private-token and /private/key.pem'), {
+    code: 'EADDRINUSE', stderr: Buffer.from('private subprocess output'), command: 'secret command'
+  }))
+  const records = parseReplayStartupDiagnostics(Buffer.from(output))
+  assert.equal(records.at(-1).stage, 'listener-bind')
+  assert.equal(records.at(-1).code, 'EADDRINUSE')
+  assert(!/private|secret|command|stderr/.test(output))
+  assert.throws(() => diagnostics.stage('serving'), /phase transition/)
+  const before = output
+  diagnostics.failure(new Error('extra failure'))
+  assert.equal(output, before)
+  let unknown = ''
+  const rejected = createReplayStartupDiagnostics(line => { unknown += line })
+  rejected.stage('arguments'); rejected.failure({ code: 'token=private' })
+  assert.equal(parseReplayStartupDiagnostics(unknown).at(-1).code, 'STARTUP_REJECTED')
+  assert(!unknown.includes('private'))
+})
+
+test('startup parser rejects oversized, raw, extra-field and out-of-order logs', () => {
+  let valid = ''
+  const diagnostics = createReplayStartupDiagnostics(line => { valid += line })
+  diagnostics.stage('arguments'); diagnostics.stage('runner-guard'); diagnostics.stage('serving')
+  assert.equal(parseReplayStartupDiagnostics(valid).at(-1).status, 'ready')
+  const records = parseReplayStartupDiagnostics(valid)
+  const serialize = value => value.map(record => JSON.stringify(record)).join('\n') + '\n'
+  for (const invalid of [Buffer.alloc(32769), '', 'raw stderr with secret', `${valid}private log\n`,
+    serialize(records.map(record => ({ ...record, raw: 'secret' }))),
+    serialize(records.map(record => ({ ...record, sequence: 1 }))),
+    serialize(records.map(record => ({ ...record, stage: 'private/path' }))),
+    serialize(records.map(record => ({ ...record, releaseAcceptance: true }))),
+    serialize([...records, { ...records[0], sequence: 4 }]),
+    serialize([records[0], { ...records[1], status: 'failed', code: 'UNTRUSTED_CODE' }]),
+    serialize([records[0], { ...records[1], status: 'failed', code: 'EACCES' }])]) {
+    assert.throws(() => parseReplayStartupDiagnostics(invalid))
+  }
+})
+
+test('CI readiness diagnostics parse bounded safe records and never print the raw replay log', () => {
+  const workflow = readFileSync(resolve(import.meta.dirname, '../../.github/workflows/ci.yml'), 'utf8')
+  assert.match(workflow, /parseReplayStartupDiagnostics/)
+  assert.match(workflow, /O_NOFOLLOW/)
+  assert.match(workflow, /32769/)
+  assert.match(workflow, /launcherPresent/)
+  assert(!/\b(?:cat|tail|head)\b[^\n]*replay\.log/.test(workflow))
+})
+
+test('post-bind startup failure always closes listener and connections before rejection (inert server mock)', async () => {
+  for (const code of ['EPERM', 'EACCES']) {
+    const calls = [], failure = Object.assign(new Error('private native detail'), { code })
+    const server = { closeAllConnections: () => calls.push('connections-closed'),
+      close: callback => { calls.push('listener-closed'); callback() } }
+    await assert.rejects(finalizeReplayListener(server, async () => { calls.push('initialize'); throw failure }),
+      error => error === failure)
+    assert.deepEqual(calls, ['initialize', 'connections-closed', 'listener-closed'])
+  }
+  let closed = false
+  const server = { closeAllConnections: () => { closed = true }, close: callback => callback() }
+  assert.equal(await finalizeReplayListener(server, async () => {}), server)
+  assert.equal(closed, false)
+})
+
+test('readiness requires finite ready record, private owned PID and exact process (injected ps observation)', async t => {
+  const root = mkdtempSync(join(tmpdir(), 'agentsdock-replay-readiness-unit-'))
+  t.after(() => rmSync(root, { recursive: true, force: true }))
+  const logPath = join(root, 'replay.log'), pidPath = join(root, 'replay.pid')
+  let ready = ''
+  const diagnostics = createReplayStartupDiagnostics(line => { ready += line })
+  diagnostics.stage('arguments'); diagnostics.stage('serving')
+  writeFileSync(logPath, ready)
+  writeFileSync(pidPath, '12345\n', { mode: 0o600 })
+  const command = `${process.execPath} scripts/product-release-replay.mjs serve --scope candidate --private-key ${join(root, 'leaf.key')} --pid-file ${pidPath}`
+  const observed = `12345 ${process.getuid()} ${command}\n`
+  assert.deepEqual(await assertReplayReadiness({ logPath, pidPath }, { queryProcess: pid => {
+    assert.equal(pid, 12345); return observed
+  } }), { ready: true, pid: 12345 })
+  for (const output of ['12345 0 arbitrary-command\n', observed.replace('12345', '12346'),
+    observed.replace(' serve ', ' inspect '), observed.replace(pidPath, `${pidPath}-other`),
+    observed.replace(process.execPath, '/untrusted/node'), `${observed}unexpected second process\n`, 'x'.repeat(8193)]) {
+    await assert.rejects(assertReplayReadiness({ logPath, pidPath }, { queryProcess: () => output }))
+  }
+  chmodSync(pidPath, 0o644)
+  await assert.rejects(assertReplayReadiness({ logPath, pidPath }), /private/)
+  chmodSync(pidPath, 0o600)
+  writeFileSync(logPath, ready.split('\n')[0] + '\n')
+  await assert.rejects(assertReplayReadiness({ logPath, pidPath }), /not completed/)
+  writeFileSync(logPath, Buffer.alloc(32769))
+  await assert.rejects(assertReplayReadiness({ logPath, pidPath }), /bounded/)
+  rmSync(logPath); symlinkSync(pidPath, logPath)
+  await assert.rejects(assertReplayReadiness({ logPath, pidPath }))
 })

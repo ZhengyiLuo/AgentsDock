@@ -235,10 +235,44 @@ jobs:
             --private-key "$RUNNER_TEMP/agentsdock-acceptance-network/leaf.key" \
             --pid-file "$RUNNER_TEMP/agentsdock-acceptance-network/replay.pid" \
             > "$RUNNER_TEMP/agentsdock-acceptance-network/replay.log" 2>&1 &
+          REPLAY_LAUNCHER_PID=$!
+          READINESS_CURL_STATUS=0
           for attempt in {1..60}; do
-            if curl --fail --silent --max-time 2 https://github.com/ZhengyiLuo/AgentsDock/releases.atom > /dev/null; then exit 0; fi
+            if curl --fail --silent --max-time 2 https://github.com/ZhengyiLuo/AgentsDock/releases.atom > /dev/null; then
+              if node --input-type=module - "$RUNNER_TEMP/agentsdock-acceptance-network/replay.log" \
+                "$RUNNER_TEMP/agentsdock-acceptance-network/replay.pid" <<'NODE'
+          import { assertReplayReadiness } from './scripts/product-release-replay.mjs'
+          try { await assertReplayReadiness({logPath: process.argv[2], pidPath: process.argv[3]}) }
+          catch { process.exitCode = 1 }
+          NODE
+              then exit 0; fi
+              READINESS_CURL_STATUS=0
+            else
+              READINESS_CURL_STATUS=$?
+            fi
             sleep 1
           done
+          REPLAY_LAUNCHER_PRESENT=false
+          if /bin/ps -p "$REPLAY_LAUNCHER_PID" -o pid= > /dev/null; then REPLAY_LAUNCHER_PRESENT=true; fi
+          node --input-type=module - "$RUNNER_TEMP/agentsdock-acceptance-network/replay.log" \
+            "$READINESS_CURL_STATUS" "$REPLAY_LAUNCHER_PRESENT" <<'NODE'
+          import { constants, openSync, fstatSync, readSync, closeSync } from 'node:fs'
+          import { parseReplayStartupDiagnostics } from './scripts/product-release-replay.mjs'
+          const status = Number(process.argv[3])
+          const summary = { kind: 'replay-readiness', curlExitCode: Number.isInteger(status) && status >= 0 && status <= 255 ? status : null,
+            launcherPresent: process.argv[4] === 'true' }
+          let fd
+          try {
+            fd = openSync(process.argv[2], constants.O_RDONLY | constants.O_NOFOLLOW)
+            const stat = fstatSync(fd)
+            if (!stat.isFile() || stat.size > 32768) throw new Error('Unbounded diagnostic input')
+            const buffer = Buffer.alloc(32769)
+            const count = readSync(fd, buffer, 0, buffer.length, 0)
+            summary.startup = parseReplayStartupDiagnostics(buffer.subarray(0, count))
+          } catch { summary.diagnosticsUnavailable = true }
+          finally { if (fd !== undefined) closeSync(fd) }
+          console.log(JSON.stringify(summary))
+          NODE
           echo 'Candidate replay did not become ready.' >&2
           exit 1
       - name: Real update click, native replacement, and saved-server reconciliation

@@ -2,12 +2,13 @@
 // Test-only exact-artifact origin replay. This is not a proxy or acceptance proof.
 // It never installs certificates, changes DNS, fetches URLs, or publishes assets.
 import { createHash, createPublicKey, X509Certificate } from 'node:crypto'
+import { execFileSync } from 'node:child_process'
 import { constants } from 'node:fs'
 import { lstat, open, realpath, rename, writeFile } from 'node:fs/promises'
 import { createServer } from 'node:https'
 import { createSecureContext } from 'node:tls'
 import { dirname, isAbsolute, join, relative, resolve } from 'node:path'
-import { pathToFileURL } from 'node:url'
+import { fileURLToPath, pathToFileURL } from 'node:url'
 import { pipeline } from 'node:stream/promises'
 import { expectedAssets, verifyAssets } from './direct-release-mirror.mjs'
 import { validatePreparationRun, verifyReceiptBundle } from './product-release.mjs'
@@ -20,6 +21,109 @@ const MAX_FILE = 2 * 1024 * 1024 * 1024
 const MAX_METADATA = 32768
 const digest = bytes => createHash('sha256').update(bytes).digest('hex')
 const need = (condition, message) => { if (!condition) throw new Error(message) }
+const STARTUP_STAGES = Object.freeze(['arguments', 'runner-guard', 'input-containment', 'artifact-verification',
+  'checkout-verification', 'tls-input-validation', 'certificate-validation', 'tls-context', 'listener-bind',
+  'drop-privileges', 'pid-write', 'serving'])
+const STARTUP_CODES = new Set(['EACCES', 'EPERM', 'ENOENT', 'ENOTDIR', 'EADDRINUSE', 'EADDRNOTAVAIL',
+  'EMFILE', 'ENFILE', 'ENOMEM', 'EPIPE', 'ERR_ASSERTION', 'ERR_OSSL_PEM_NO_START_LINE', 'ERR_OSSL_UNSUPPORTED',
+  'ERR_CRYPTO_INVALID_KEY_OBJECT_TYPE', 'ERR_CRYPTO_INVALID_KEYTYPE', 'STARTUP_REJECTED'])
+
+// No messages, subprocess output, paths, URLs, environment or request data may
+// enter these records. They diagnose disposable test infrastructure, not product
+// acceptance. The workflow must validate the complete bounded JSONL log before
+// making any of it public.
+export function parseReplayStartupDiagnostics(bytes) {
+  need(typeof bytes === 'string' || Buffer.isBuffer(bytes), 'Invalid startup diagnostic input.')
+  need(Buffer.byteLength(bytes) <= 32768, 'Startup diagnostic input exceeds its size limit.')
+  const lines = bytes.toString().trim().split('\n')
+  need(lines.length > 0 && lines.length <= STARTUP_STAGES.length + 1 && lines.every(Boolean), 'Invalid startup diagnostic record count.')
+  let previous = -1, terminal = false
+  return lines.map((line, index) => {
+    const value = JSON.parse(line)
+    need(value && typeof value === 'object' && !Array.isArray(value), 'Invalid startup diagnostic record.')
+    const keys = ['schema', 'kind', 'sequence', 'stage', 'status', 'releaseAcceptance', ...(value.status === 'failed' ? ['code'] : [])]
+    need(JSON.stringify(Object.keys(value).sort()) === JSON.stringify(keys.sort()), 'Unexpected startup diagnostic field.')
+    const stage = STARTUP_STAGES.indexOf(value.stage)
+    need(value.schema === 1 && value.kind === 'replay-startup-diagnostic' && value.releaseAcceptance === false
+      && value.sequence === index + 1 && !terminal && stage >= 0, 'Invalid startup diagnostic identity.')
+    if (value.status === 'failed') {
+      need(stage === previous && STARTUP_CODES.has(value.code), 'Invalid startup failure diagnostic.')
+      terminal = true
+    } else {
+      need(stage > previous && (value.status === 'entered' && value.stage !== 'serving'
+        || value.status === 'ready' && value.stage === 'serving'), 'Invalid startup phase transition.')
+      previous = stage
+      terminal = value.status === 'ready'
+    }
+    return value
+  })
+}
+
+export function createReplayStartupDiagnostics(write) {
+  let sequence = 0, previous = -1, terminal = false
+  const emit = value => write(`${JSON.stringify({ schema: 1, kind: 'replay-startup-diagnostic',
+    sequence: ++sequence, ...value, releaseAcceptance: false })}\n`)
+  return Object.freeze({
+    stage(name) {
+      const position = STARTUP_STAGES.indexOf(name)
+      need(!terminal && position > previous, 'Invalid startup phase transition.')
+      previous = position
+      terminal = name === 'serving'
+      emit({ stage: name, status: terminal ? 'ready' : 'entered' })
+    },
+    failure(error) {
+      if (terminal) return
+      need(previous >= 0, 'Startup diagnostic requires an initial phase.')
+      terminal = true
+      emit({ stage: STARTUP_STAGES[previous], status: 'failed',
+        code: STARTUP_CODES.has(error?.code) ? error.code : 'STARTUP_REJECTED' })
+    }
+  })
+}
+
+export async function assertReplayReadiness({ logPath, pidPath }, { queryProcess = pid => execFileSync('/bin/ps',
+  ['-p', String(pid), '-o', 'pid=', '-o', 'uid=', '-o', 'command='],
+  { encoding: 'utf8', timeout: 5000, maxBuffer: 8192, stdio: ['ignore', 'pipe', 'pipe'] }) } = {}) {
+  need(isAbsolute(logPath) && isAbsolute(pidPath) && dirname(logPath) === dirname(pidPath)
+    && !/[\r\n\0]/.test(logPath + pidPath), 'Invalid replay readiness paths.')
+  const records = parseReplayStartupDiagnostics(await regular(logPath, 32768))
+  need(records.at(-1)?.stage === 'serving' && records.at(-1)?.status === 'ready', 'Replay startup has not completed.')
+  const file = await open(pidPath, constants.O_RDONLY | constants.O_NOFOLLOW)
+  let pid
+  try {
+    const stat = await file.stat()
+    need(stat.isFile() && stat.size <= 32 && (stat.mode & 0o077) === 0 && stat.uid === process.getuid?.()
+      && stat.uid > 0, 'Replay PID file must be private and owned by the non-root runner.')
+    const text = await file.readFile('utf8')
+    need(/^[1-9][0-9]{0,9}\n$/.test(text), 'Invalid replay PID identity.')
+    pid = Number(text.trim())
+  } finally { await file.close() }
+  const output = await queryProcess(pid)
+  need(typeof output === 'string' && Buffer.byteLength(output) <= 8192, 'Invalid replay process observation.')
+  const match = /^\s*(\d+)\s+(\d+)\s+([^\r\n]+)\n?$/.exec(output)
+  need(match && Number(match[1]) === pid && Number(match[2]) === process.getuid?.(), 'Replay process identity differs.')
+  const command = match[3]
+  need([`scripts/product-release-replay.mjs`, fileURLToPath(import.meta.url)]
+    .some(script => command.startsWith(`${process.execPath} ${script} serve `))
+    && command.split(/\s+/).filter(token => token === '--pid-file').length === 1
+    && command.includes(` --pid-file ${pidPath}`)
+    && command.split(` --pid-file ${pidPath}`)[1].match(/^(?:\s|$)/)
+    && command.includes(` --private-key ${join(dirname(pidPath), 'leaf.key')} `),
+  'Replay process is not the expected owned listener.')
+  return { ready: true, pid }
+}
+
+// Unit tests inject only this completion callback and an inert server-shaped
+// object. Native serving still uses the real privilege drop and PID write.
+export async function finalizeReplayListener(server, initialize) {
+  try { await initialize() }
+  catch (error) {
+    try { server.closeAllConnections() }
+    finally { await new Promise(done => server.close(done)) }
+    throw error
+  }
+  return server
+}
 
 async function regular(path, maximum = MAX_METADATA) {
   const file = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW)
@@ -273,12 +377,14 @@ async function insideRunner(path) {
 // reviewed disposable-runner setup must route the three HTTPS origins to this
 // listener and trust its ephemeral certificate. Never run that setup locally.
 export async function serveProductReplay(replay, { certificatePath, privateKeyPath, port = 443,
-  faultControlPath, faultObservedPath, pidPath }) {
+  faultControlPath, faultObservedPath, pidPath, diagnostics }) {
+  diagnostics?.stage('checkout-verification')
   if (replay.identity.kind === 'candidate') assertCandidateCheckout(replay.identity)
   else {
     assertReplayRunner()
     need(replay.identity.sourceSha === process.env.GITHUB_SHA, 'Replay must run at the exact accepted product source.')
   }
+  diagnostics?.stage('tls-input-validation')
   need(Number.isInteger(port) && port >= 1 && port <= 65535, 'Invalid replay listener port.')
   await insideRunner(certificatePath); await insideRunner(privateKeyPath)
   const keyStat = await lstat(privateKeyPath)
@@ -289,15 +395,19 @@ export async function serveProductReplay(replay, { certificatePath, privateKeyPa
     need(isAbsolute(path), 'Replay control paths must be absolute.')
   }
   const cert = await regular(certificatePath, 16384), key = await regular(privateKeyPath, 16384)
+  diagnostics?.stage('certificate-validation')
   const x509 = new X509Certificate(cert)
   need(!x509.ca && Date.parse(x509.validFrom) <= Date.now() && Date.parse(x509.validTo) > Date.now()
     && HOSTS.every(host => x509.checkHost(host, { wildcards: false }) === host), 'Ephemeral certificate must cover every exact replay hostname.')
   need(createPublicKey(key).export({ type: 'spki', format: 'der' }).equals(x509.publicKey.export({ type: 'spki', format: 'der' })), 'Ephemeral TLS key does not match its certificate.')
+  diagnostics?.stage('tls-context')
   const context = createSecureContext({ cert, key })
+  let ready = false
   const server = createServer({ cert, key, minVersion: 'TLSv1.2', maxHeaderSize: 16384,
     SNICallback: (host, done) => done(HOSTS.includes(host) ? null : new Error('Replay SNI refused.'), context) }, async (request, response) => {
     let result
     try {
+      need(ready, 'Replay startup has not completed.')
       need(request.socket.servername === request.headers.host?.replace(/:443$/, ''), 'Replay SNI and Host differ.')
       result = await replay.respond({ method: request.method, host: request.headers.host, path: request.url, headers: request.headers })
       const fault = faultControlPath && request.method === 'GET' && result.status === 200
@@ -329,16 +439,22 @@ export async function serveProductReplay(replay, { certificatePath, privateKeyPa
   server.on('connect', (_request, socket) => socket.destroy())
   server.on('upgrade', (_request, socket) => socket.destroy())
   server.requestTimeout = 30000; server.headersTimeout = 10000; server.keepAliveTimeout = 5000
+  diagnostics?.stage('listener-bind')
   await new Promise((done, fail) => { server.once('error', fail); server.listen(port, '127.0.0.1', done) })
   // Only binding the privileged port needs root. All request processing and
   // one-shot fault observations run as the disposable runner account.
-  if (process.getuid?.() === 0) {
-    need(keyStat.uid > 0 && keyStat.gid > 0, 'Root listener must drop to the ephemeral key owner.')
-    process.setgroups([])
-    process.setgid(keyStat.gid); process.setuid(keyStat.uid)
-  }
-  if (pidPath) await writeFile(pidPath, `${process.pid}\n`, { flag: 'wx', mode: 0o600 })
-  return server
+  return finalizeReplayListener(server, async () => {
+    diagnostics?.stage('drop-privileges')
+    if (process.getuid?.() === 0) {
+      need(keyStat.uid > 0 && keyStat.gid > 0, 'Root listener must drop to the ephemeral key owner.')
+      process.setgroups([])
+      process.setgid(keyStat.gid); process.setuid(keyStat.uid)
+    }
+    diagnostics?.stage('pid-write')
+    if (pidPath) await writeFile(pidPath, `${process.pid}\n`, { flag: 'wx', mode: 0o600 })
+    ready = true
+    diagnostics?.stage('serving')
+  })
 }
 
 export async function consumeReplayFault(replay, controlPath, host, path) {
@@ -381,14 +497,17 @@ export function parseReplayArguments(argv) {
   return { operation, options }
 }
 
-async function main() {
+async function main(diagnostics) {
   const { operation, options } = parseReplayArguments(process.argv.slice(2))
   if (operation === 'serve') {
+    diagnostics?.stage('runner-guard')
     if (options['--scope'] === 'candidate') assertCandidateRunner()
     else assertReplayRunner()
+    diagnostics?.stage('input-containment')
     for (const name of ['--receipt', '--prepare-run', '--server-assets', '--desktop-assets']) if (options[name]) await insideRunner(options[name])
     if (options['--baseline-desktop']) await insideRunner(options['--baseline-desktop'])
   }
+  diagnostics?.stage('artifact-verification')
   const replay = await (options['--scope'] === 'candidate' ? createCandidateReplay : createProductReplay)({ receiptPath: options['--receipt'], acceptedReceiptSha256: options['--receipt-sha256'],
     preparationRunPath: options['--prepare-run'], serverDirectory: options['--server-assets'], desktopDirectory: options['--desktop-assets'],
     baselineDesktopDirectory: options['--baseline-desktop'], baselineVersion: options['--baseline-version'] })
@@ -396,13 +515,18 @@ async function main() {
   else {
     const server = await serveProductReplay(replay, { certificatePath: options['--certificate'], privateKeyPath: options['--private-key'],
       port: options['--port'] === undefined ? 443 : Number(options['--port']), pidPath: options['--pid-file'],
-      faultControlPath: options['--fault-control'], faultObservedPath: options['--fault-observed'] })
-    process.stdout.write(`${JSON.stringify({ ...replay.identity, listening: '127.0.0.1', port: server.address().port })}\n`)
+      faultControlPath: options['--fault-control'], faultObservedPath: options['--fault-observed'], diagnostics })
     const close = () => { server.closeAllConnections(); server.close() }
     process.once('SIGTERM', close); process.once('SIGINT', close)
   }
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {
-  main().catch(() => { process.stderr.write('Exact-artifact replay failed; verify inputs and disposable-runner prerequisites. No acceptance result was produced.\n'); process.exitCode = 1 })
+  const diagnostics = process.argv[2] === 'serve' ? createReplayStartupDiagnostics(line => process.stdout.write(line)) : undefined
+  diagnostics?.stage('arguments')
+  main(diagnostics).catch(error => {
+    if (diagnostics) diagnostics.failure(error)
+    else process.stderr.write('Exact-artifact replay failed; verify inputs and disposable-runner prerequisites. No acceptance result was produced.\n')
+    process.exitCode = 1
+  })
 }

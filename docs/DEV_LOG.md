@@ -1,5 +1,22 @@
 # Public development log
 
+## 2026-09-27 — Observe fresh native installation; diagnose replay startup
+
+- In candidate CI run `36343746182`, the frozen beta.18 npm package passes
+  macOS installation, 116-file runtime comparison, permanent/cache-independent
+  service restart, safe existing-install refusal, persisted API session and
+  signature/server/process-identity rejection checks.
+- The signed app verifier and legacy installation also pass. Exact-origin
+  replay setup/restoration succeeds, but HTTPS readiness times out before the
+  update click. This is not proof of either updater success or an app defect.
+- Add finite, bounded startup diagnostics and readiness status without copying
+  private listener logs or credentials to CI output. Retain the same candidate
+  bytes. Real provider work, busy drain, interactive installer paths and actual
+  logout/reboot remain unverified; publication remains blocked.
+- Close a partially initialized listener on failure and require the completed
+  startup record plus owned process identity, not HTTP alone, for readiness.
+  Pass 256 JavaScript release/CLI tests, 84 Python helper tests and workflow lint.
+
 ## 2026-09-27 — Retry native rehearsal without rebuilding accepted packages
 
 - The first beta.18 native rehearsal verified the frozen inputs but stopped
