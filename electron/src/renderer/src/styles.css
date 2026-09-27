@@ -1845,6 +1845,10 @@ button.tool-event-toggle:hover { background: #242424; }
 .app-settings-section { width: 100%; max-width: 650px; margin: 0 auto; }
 .app-settings-section > header { margin-bottom: 18px; }
 .app-settings-section h2 { margin: 0; color: var(--text); font-size: var(--font-size-display); font-weight: var(--font-weight-strong); letter-spacing: -.018em; }
+.app-settings-provider-page { display: grid; gap: var(--space-7); min-width: 0; }
+.app-settings-provider-context { min-width: 0; overflow-wrap: anywhere; }
+.app-settings-provider-context strong { font-size: var(--text-size-ui); font-weight: var(--text-weight-label); }
+.app-settings-provider-context p, .app-settings-provider-help { margin: var(--space-2) 0 0; color: var(--muted); font-size: var(--text-size-meta); line-height: var(--line-height-body); }
 .app-settings-list { width: 100%; border-top: 1px solid var(--border-soft); }
 .app-settings-row { min-height: 50px; display: flex; align-items: center; justify-content: space-between; gap: 18px; padding: 9px 2px; background: transparent; border-bottom: 1px solid var(--border-soft); }
 .app-settings-row-title { color: var(--text); font-size: var(--text-size-ui); font-weight: var(--text-weight-body); }

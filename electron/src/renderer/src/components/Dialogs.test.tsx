@@ -917,6 +917,7 @@ describe('SessionDialog runtime selection', () => {
 
   it('opens Settings for an unconfigured custom option without creating a normal Codex chat', async () => {
     const create = vi.fn()
+    const navigate = vi.spyOn(window, 'dispatchEvent')
     Object.defineProperty(window, 'agentsDock', { configurable: true, value: { sessions: { create } } as unknown as AgentsDockAPI })
     useAppStore.setState({ sessions: [], runtimeCatalog, health: { ok: true },
       modals: { settings: false, appSettings: false, newChat: true, resume: false, folder: false, digest: false, job: false, search: false, review: false, importChats: false }
@@ -926,6 +927,7 @@ describe('SessionDialog runtime selection', () => {
     await user.click(screen.getByRole('button', { name: /Codex runtime · Custom endpoint · Configure in Settings/ }))
     expect(useAppStore.getState().modals.appSettings).toBe(true)
     expect(useAppStore.getState().modals.newChat).toBe(false)
+    expect(navigate).toHaveBeenCalledWith(expect.objectContaining({ type: 'agentsdock:app-settings-section', detail: 'providers' }))
     expect(create).not.toHaveBeenCalled()
   })
 

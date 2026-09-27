@@ -23,13 +23,12 @@ import { captureWorkspaceScope } from '../lib/workspace-preferences'
 import { saveNewChatDefaults, useAppStore, waitForWorkspaceReady } from '../store/app-store'
 import { BackendMark } from './BackendMark'
 import { ChatShareDialog } from './ChatShareDialog'
-import { CodexAuthSettings } from './CodexAuthSettings'
+import { AIProviderSettings } from './AIProviderSettings'
 import { CodexModelDiscovery } from './CodexModelDiscovery'
 import { ReasoningDisplaySettings } from './ReasoningDisplaySettings'
 import { CoordinatedServerUpdateRow } from './CoordinatedServerUpdateRow'
 import { CodexServerSettings } from './CodexServerSettings'
 import { CodexSubagentSettings } from './CodexSubagentSettings'
-import { RuntimeHealthPanel } from './RuntimeHealth'
 import { ServerManagement } from './ServerManagement'
 import { KeyboardShortcutsSettings } from './KeyboardShortcutsSettings'
 import { ShortcutKey } from './ShortcutTooltip'
@@ -457,7 +456,7 @@ export function Dialogs() {
   </>
 }
 
-type AppSettingsSection = 'general' | 'shortcuts' | 'server' | 'updates'
+type AppSettingsSection = 'general' | 'shortcuts' | 'server' | 'providers' | 'updates'
 
 export function AppSettingsDialog({ serverSettings, serverUpdates, onServerUpdatesVisible, onServerReleaseChecksVisible, onCoordinatedServerUpdate }: {
   serverSettings?: ReactNode; serverUpdates?: ReactNode; onServerUpdatesVisible?: (visible: boolean) => void
@@ -491,7 +490,7 @@ export function AppSettingsDialog({ serverSettings, serverUpdates, onServerUpdat
     const selectSection = (event: Event) => {
       const next = (event as CustomEvent<AppSettingsSection | 'appearance'>).detail
       if (next === 'appearance') setSection('general')
-      else if (next === 'general' || next === 'shortcuts' || next === 'server' || next === 'updates') setSection(next)
+      else if (next === 'general' || next === 'shortcuts' || next === 'server' || next === 'providers' || next === 'updates') setSection(next)
     }
     window.addEventListener('agentsdock:app-settings-section', selectSection)
     return () => window.removeEventListener('agentsdock:app-settings-section', selectSection)
@@ -585,6 +584,7 @@ export function AppSettingsDialog({ serverSettings, serverUpdates, onServerUpdat
             <button ref={section === 'general' ? activeSectionRef : undefined} type="button" className={section === 'general' ? 'active' : ''} aria-current={section === 'general' ? 'page' : undefined} onClick={() => setSection('general')}><span>{t('settings.general')}</span></button>
             <button ref={section === 'shortcuts' ? activeSectionRef : undefined} type="button" className={section === 'shortcuts' ? 'active' : ''} aria-current={section === 'shortcuts' ? 'page' : undefined} onClick={() => setSection('shortcuts')}><span>{t('settings.keyboardShortcuts')}</span></button>
             <button ref={section === 'server' ? activeSectionRef : undefined} type="button" className={section === 'server' ? 'active' : ''} aria-current={section === 'server' ? 'page' : undefined} onClick={() => setSection('server')}><span>{t('settings.server')}</span></button>
+            <button ref={section === 'providers' ? activeSectionRef : undefined} type="button" className={section === 'providers' ? 'active' : ''} aria-current={section === 'providers' ? 'page' : undefined} onClick={() => setSection('providers')}><span>{t('settings.aiProviders')}</span></button>
             <button ref={section === 'updates' ? activeSectionRef : undefined} type="button" className={section === 'updates' ? 'active' : ''} aria-current={section === 'updates' ? 'page' : undefined} onClick={() => setSection('updates')}><span>{t('settings.updates')}</span></button>
           </nav>
         </aside>
@@ -620,6 +620,10 @@ export function AppSettingsDialog({ serverSettings, serverUpdates, onServerUpdat
             </div>
           </section>}
           {section === 'shortcuts' && <KeyboardShortcutsSettings />}
+          {section === 'providers' && <section className="app-settings-section" aria-labelledby="app-settings-providers-title">
+            <header><h2 id="app-settings-providers-title">{t('settings.aiProviders')}</h2></header>
+            <AIProviderSettings />
+          </section>}
           {section === 'server' && <section className="app-settings-section" aria-labelledby="app-settings-server-title">
             <header><h2 id="app-settings-server-title">{t('settings.server')}</h2></header>
             {serverSettings}
@@ -2819,8 +2823,6 @@ export function SettingsDialog() {
   const serverSettingsContent = <div className="dialog-form settings-dialog-body app-settings-server-page">
     <ServerManagement addRequest={addServerRequest} manageRequest={manageServersRequest} />
     <div className={`server-health ${connected ? degraded ? 'degraded' : 'online' : 'offline'}`}><span /><div className="server-health-copy"><strong>{connected ? degraded ? t("ui.Dialogs.SettingsDialog.connected_limited_a6733ca") : t("ui.Dialogs.SettingsDialog.connected_2296556") : t("ui.Dialogs.SettingsDialog.offline_a179478")}</strong><small>{health?.server_identity || t("ui.Dialogs.SettingsDialog.connection_settings_are_stored_on_this_mac_7348bfb")}</small>{restartNotice && <small className={`server-restart-notice ${restartNotice.kind}`} role={restartNotice.kind === 'error' ? 'alert' : 'status'} aria-live="polite">{restartNotice.message}</small>}</div>{restartServerButton()}</div>
-    <RuntimeHealthPanel />
-    <CodexAuthSettings connected={connected} profileId={activeProfileId} profileGeneration={profileGeneration} serverTitle={activeProfile?.name} />
     <CodexServerSettings
       connected={connected}
       profileId={activeProfileId}
@@ -2993,7 +2995,7 @@ export function SessionDialog({ mode }: { mode: 'newChat' | 'resume' }) {
         return <button type="button" className={backendChoice === value ? 'active' : ''} key={value} aria-pressed={backendChoice === value} title={needsConfiguration ? t('codexProvider.configure') : unavailable ? (value === 'opencode' ? opencodeBackendUnavailableReason(health, catalog) : cursorUnavailableReason) ?? undefined : undefined} onClick={() => {
           if (needsConfiguration) {
             useAppStore.getState().setModal(mode, false)
-            window.dispatchEvent(new CustomEvent('agentsdock:app-settings-section', { detail: 'server' }))
+            window.dispatchEvent(new CustomEvent('agentsdock:app-settings-section', { detail: 'providers' }))
             useAppStore.getState().setModal('appSettings', true)
             return
           }

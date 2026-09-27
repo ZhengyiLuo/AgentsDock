@@ -75,7 +75,7 @@ OpenCode appears in the chat backend picker. A matching standalone
 AgentsServer must advertise the OpenCode v1 contract; an older server shows
 an upgrade requirement and cannot silently switch the chat to another backend.
 Install the server-supported OpenCode CLI and configure its provider on the
-server host, not in Electron. Settings → Runtimes → Recheck CLIs reports
+server host, not in Electron. Settings → AI Providers → Recheck CLIs reports
 readiness and setup guidance. OpenCode is optional and does not block other
 providers when it is absent.
 

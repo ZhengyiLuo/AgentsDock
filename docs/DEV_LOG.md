@@ -1,5 +1,28 @@
 # Public development log
 
+## 2026-09-27 — Dedicated desktop AI Providers settings
+
+- Add an AI Providers section with the selected server's existing runtime
+  diagnostics, Codex account information and Custom endpoint controls. Move
+  those controls out of Server settings and retarget endpoint configuration
+  links. Keep authentication, credential storage, transport and server behavior
+  unchanged; do not introduce another provider's endpoint implementation.
+- Validate the local `1.0.7-providers.local` desktop package, based on main
+  `f50595b4`, through native renderer mouse/keyboard input and the production
+  IPC/HTTP connection. Open and reopen the page, read the actual account and
+  endpoint configuration, enter an unsaved synthetic key, navigate away, and
+  verify it is cleared. Follow the composer configuration link into the new
+  section. Remove the empty disposable chat used for that navigation check.
+- Inspect dark and light presentation, a narrow viewport, scrolling and
+  keyboard focus. Chinese copy, disconnected controls and stale server
+  responses are covered by component tests, not live multi-server testing.
+  Do not save credentials, probe an endpoint or send provider messages during
+  these UI-only checks; those unchanged workflows are not re-certified here.
+- Pass 4,932 desktop tests (five skipped), TypeScript, production compilation,
+  package audit and local signature verification. Preserve the existing app
+  profile. Availability: local branch and ad-hoc package only; no server
+  restart, release or publication.
+
 ## 2026-09-27 — Run-bound Cursor chat tools under native permissions
 
 - Replace Shell-based helper instructions for Cursor with a private per-run

@@ -3371,7 +3371,7 @@ function BackendMenu({ session, running, admitting }: { session: Session; runnin
   return <Tooltip.Provider delayDuration={250}><DropdownMenu.Root><DropdownMenu.Trigger asChild>{chip}</DropdownMenu.Trigger><DropdownMenu.Portal><DropdownMenu.Content className="menu-content" side="top" align="start">{backends.map(choice => {
     const { backend, codex_provider } = chatBackendSelection(choice)
     if (choice === 'codex-custom' && !codexCustomProviderAvailable(health, catalog)) return <DropdownMenu.Item key={choice} className="menu-item" onSelect={() => {
-      window.dispatchEvent(new CustomEvent('agentsdock:app-settings-section', { detail: 'server' }))
+      window.dispatchEvent(new CustomEvent('agentsdock:app-settings-section', { detail: 'providers' }))
       useAppStore.getState().setModal('appSettings', true)
     }}><BackendMark backend="codex" size={15} />{t('codexProvider.label')}{' '}<span className="menu-item-locked-hint">{t('codexProvider.configure')}</span></DropdownMenu.Item>
     const unavailable = backend === 'cursor' && !cursorAvailable || backend === 'opencode' && !openCodeAvailable

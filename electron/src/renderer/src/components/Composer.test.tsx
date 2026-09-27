@@ -1390,12 +1390,14 @@ describe('Composer', () => {
 
   it('routes an unconfigured custom choice to Settings without changing the chat', async () => {
     const update = vi.fn()
+    const navigate = vi.spyOn(window, 'dispatchEvent')
     window.agentsDock.sessions = { update } as unknown as AgentsDockAPI['sessions']
     const user = userEvent.setup()
     render(<Composer />)
     await user.click(screen.getByTitle('Change backend'))
     await user.click(screen.getByRole('menuitem', { name: 'Codex runtime · Custom endpoint Configure in Settings' }))
     expect(useAppStore.getState().modals.appSettings).toBe(true)
+    expect(navigate).toHaveBeenCalledWith(expect.objectContaining({ type: 'agentsdock:app-settings-section', detail: 'providers' }))
     expect(update).not.toHaveBeenCalled()
   })
 
