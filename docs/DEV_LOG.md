@@ -9,9 +9,22 @@
   remains read-only with no Disconnect/logout action. Keep default-model selection
   visible and save a selection automatically; remove routine reload/manual-toggle,
   save-default and saved-key-check controls from connected cards.
-- Focused regression tests and production compilation pass. Live provider and
-  actual desktop acceptance are tracked separately before local handoff; no
-  public release or production deployment is included.
+- Verification: 244 isolated server checks and 606 desktop checks pass, with
+  TypeScript, production compilation and signed local-bundle validation. Two
+  real OpenCode A → B → A mailbox round trips complete with nonduplicate receipts
+  and preserved delegation; the second starts through desktop mention selection
+  and Send, including IPC/native HTTP and advertised client capabilities.
+- OpenCode 1.18.29 executes the run-bound tool with default permissions. Its Plan
+  agent also executes the bridge using a tool-capable custom API model; the free
+  model's Plan request returned a provider-side 403. This does not certify every
+  model or endpoint. Live stopped/busy-turn acceptance remains pending; ownership,
+  cancellation and transport fences have isolated regression coverage.
+- Actual desktop checks cover connected-card presentation/catalog loading and,
+  against a disposable native-admin API fixture, Forget cancellation and confirmed
+  removal without changing any real account. Default-model autosave has component
+  coverage; native select-menu interaction and light/localized visual acceptance
+  remain unverified. Update only the designated local development server/app;
+  no public release or production deployment is included.
 
 ## 2026-09-27 — Independent custom API model catalogs
 
