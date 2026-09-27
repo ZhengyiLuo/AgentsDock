@@ -51,6 +51,13 @@ class ProductServerTests(unittest.TestCase):
             target.parent.mkdir(exist_ok=True)
             shutil.copyfile(ROOT / "server" / name, target)
         self.git("init", "--quiet")
+        # Git can start detached auto-maintenance after a commit. These tiny,
+        # short-lived repositories need no background work, which otherwise
+        # races TemporaryDirectory cleanup of .git/objects on newer Git.
+        # Keep every setting local to this disposable repository.
+        for key, value in (("maintenance.auto", "false"), ("maintenance.autoDetach", "false"),
+                           ("gc.auto", "0"), ("gc.autoDetach", "false")):
+            self.git("config", "--local", key, value)
         self.git("config", "user.name", "Product Bundle Fixture")
         self.git("config", "user.email", "fixture@example.invalid")
         self.commit()
@@ -77,6 +84,12 @@ class ProductServerTests(unittest.TestCase):
     def assert_no_candidate(self):
         self.assertFalse(self.output.exists())
         self.assertEqual(self.git("status", "--porcelain", "--untracked-files=all"), "")
+
+    def test_disposable_repository_disables_background_git_maintenance(self):
+        for key, value in (("maintenance.auto", "false"), ("maintenance.autoDetach", "false"),
+                           ("gc.auto", "0"), ("gc.autoDetach", "false")):
+            with self.subTest(key=key):
+                self.assertEqual(self.git("config", "--local", "--get", key), value)
 
     def test_real_offline_pack_signatures_exact_assets_and_source_identity(self):
         before_refs = self.git("show-ref")

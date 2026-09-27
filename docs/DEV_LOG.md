@@ -17,9 +17,12 @@
 - Add the separate-machine Apple Silicon manual checklist and sanitized result
   template. An unpublished package is not discoverable through production feeds;
   manual installation is not proof of the one-click updater journey.
-- Pass 228 release/CLI JavaScript tests, 52 Python helper tests and workflow
+- Pass 228 release/CLI JavaScript tests, 53 Python helper tests and workflow
   linting. Independent review checks the real worker command, exact candidate
   transaction and PID ownership before any disposable-runner fault signal.
+- Disable background Git maintenance only in disposable packaging-test
+  repositories after Linux CI exposed a teardown race. Keep cleanup strict;
+  do not change the developer's Git settings or release-package behavior.
 - Availability: source and helper tests only. No native acceptance run, matched
   production candidate, user-service mutation, npm/desktop publication or
   TestFlight/App Store upload is established by this change. Reuse existing
