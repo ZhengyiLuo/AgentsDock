@@ -185,7 +185,7 @@ export function supportedCrossChatTargetBackends(health: Health | null | undefin
   const advertised = health?.capabilities?.cross_chat_handoffs_v1?.supported_target_backends
   if (!Array.isArray(advertised)) return ['codex', 'claude']
   return advertised.filter((backend): backend is Backend => (
-    backend === 'codex' || backend === 'claude' || backend === 'cursor'
+    backend === 'codex' || backend === 'claude' || backend === 'cursor' || backend === 'opencode'
   ))
 }
 

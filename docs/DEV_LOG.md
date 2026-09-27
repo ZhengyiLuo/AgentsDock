@@ -1,5 +1,18 @@
 # Public development log
 
+## 2026-09-27 — OpenCode chat tools and concise provider settings
+
+- Add a run-bound native MCP bridge for OpenCode, preserving server authorization,
+  exact process ownership, permission boundaries and private endpoint settings.
+  Enable OpenCode source/target choices only on supporting servers.
+- Custom API cards offer a confirmed **⋯ → Forget endpoint** action. CLI Login
+  remains read-only with no Disconnect/logout action. Keep default-model selection
+  visible and save a selection automatically; remove routine reload/manual-toggle,
+  save-default and saved-key-check controls from connected cards.
+- Focused regression tests and production compilation pass. Live provider and
+  actual desktop acceptance are tracked separately before local handoff; no
+  public release or production deployment is included.
+
 ## 2026-09-27 — Independent custom API model catalogs
 
 - Keep native CLI model catalogs separate from custom API inventories. Discover

@@ -8,6 +8,7 @@ import './CodexAuthSettings.css'
 import './ProviderConnectionSettings.css'
 import { useAppStore } from '../store/app-store'
 import { CustomModelSettings } from './CustomModelSettings'
+import { EndpointMenu } from './EndpointMenu'
 
 type Props = { connected: boolean; profileId: string | null; profileGeneration: number; expanded?: boolean; onStatus?: (value: boolean) => void }
 type Failure = ConnectionResult | 'update' | 'admin' | 'stale' | 'invalid' | 'failed'
@@ -27,7 +28,6 @@ export function ProviderConnectionSettings({ backend, ...props }: Props & { back
   const [open, setOpen] = useState(false)
   const [error, setError] = useState<Failure | null>(null)
   const [reload, setReload] = useState(0)
-  const [confirmForget, setConfirmForget] = useState(false)
   const [baseURL, setBaseURL] = useState('')
   const [model, setModel] = useState('')
   const [protocol, setProtocol] = useState<ConnectionProtocol>('anthropic')
@@ -48,7 +48,7 @@ export function ProviderConnectionSettings({ backend, ...props }: Props & { back
   }
   useEffect(() => {
     const n = ++serial.current
-    clearKey(); setSaved(null); setOpen(false); setError(null); setConfirmForget(false)
+    clearKey(); setSaved(null); setOpen(false); setError(null)
     setBaseURL(''); setModel(''); setBusy(false)
     if (!props.connected || !props.profileId) return
     const scope = { profileId: props.profileId, profileGeneration: props.profileGeneration }
@@ -63,7 +63,7 @@ export function ProviderConnectionSettings({ backend, ...props }: Props & { back
   }, [backend, props.connected, props.profileId, props.profileGeneration, reload])
 
   function configure() {
-    clearKey(); setError(null); setConfirmForget(false)
+    clearKey(); setError(null)
     setBaseURL(saved?.base_url ?? (backend === 'claude' ? 'https://openrouter.ai/api' : 'https://openrouter.ai/api/v1'))
     setModel(saved?.model ?? '')
     setProtocol(saved?.protocol ?? (backend === 'claude' ? 'anthropic' : 'chat_completions'))
@@ -75,7 +75,7 @@ export function ProviderConnectionSettings({ backend, ...props }: Props & { back
     if (!request) { setError('update'); return }
     const n = ++serial.current
     const scope = { profileId: props.profileId, profileGeneration: props.profileGeneration }
-    setBusy(true); setError(null); setConfirmForget(false)
+    setBusy(true); setError(null)
     const input = action === 'save' ? { base_url: baseURL, model: model.trim() || null, protocol, auth_header: authHeader,
       api_key: key.current?.value ?? '', expected_revision: saved.revision } : { expected_revision: saved.revision }
     try {
@@ -105,25 +105,21 @@ export function ProviderConnectionSettings({ backend, ...props }: Props & { back
     <div className="codex-auth-settings-copy">
       <div className="codex-auth-settings-heading">
         <div><strong>{t('connections.customAPI')}</strong>{saved?.scope === 'settings_only' && <small>{t('connections.settingsOnly')}</small>}</div>
-        {!open && <button type="button" className={verified ? 'quiet-button' : 'primary-button'} disabled={!editable} onClick={configure}>{t('connections.configure')}</button>}
+        {!open && (saved?.configured
+          ? <EndpointMenu disabled={!editable} scopeKey={`${props.profileId}:${props.profileGeneration}:${backend}:${saved.revision}`} onForget={() => void operate('forget')} />
+          : <button type="button" className="primary-button" disabled={!editable} onClick={configure}>{t('connections.configure')}</button>)}
       </div>
       <small className={verified ? 'provider-connection-verified' : ''} role="status">
         {verified && <CheckCircle2 size={14} aria-hidden="true" />}
         {busy ? t('connections.working') : verified ? t('connections.verified')
           : open ? t('connections.draft') : unavailable ? t('connections.unavailable') : saved?.configured ? t('connections.saved') : t('connections.empty')}
       </small>
-      {saved?.checked_at && !open && <small>{t('connections.checkedAt', { time: new Date(saved.checked_at).toLocaleString() })}</small>}
       <CustomModelSettings backend={backend} active={props.expanded === true && verified} onSaved={() => setReload(n => n + 1)} />
       {error && <small role="alert" className={error === 'update' ? '' : 'codex-auth-settings-error'}>{t(`connections.error.${error}`)}</small>}
       {!error && !open && saved?.last_result && saved.last_result !== 'verified' && <small role="alert" className="codex-auth-settings-error">{t(`connections.error.${saved.last_result}`)}</small>}
       {!open && saved?.configured && <>
-        <small>{saved.base_url}{saved.model ? ` · ${saved.model}` : ''}</small>
-        <div className="codex-auth-settings-actions">
-          <button type="button" className="quiet-button" disabled={!editable} onClick={() => void operate('check')}>{t('connections.check')}</button>
-          <button type="button" className="quiet-button" disabled={!editable} onClick={() => confirmForget ? void operate('forget') : setConfirmForget(true)}>{t(confirmForget ? 'connections.confirmForget' : 'connections.forget')}</button>
-          {confirmForget && <button type="button" className="quiet-button" onClick={() => setConfirmForget(false)}>{t('connections.cancel')}</button>}
-        </div>
-        {confirmForget && <small>{t('connections.forgetHelp')}</small>}
+        <small>{saved.base_url}</small>
+        {!verified && <button type="button" className="quiet-button" disabled={!editable} onClick={configure}>{t('connections.configure')}</button>}
       </>}
       {!open && error && <button type="button" className="quiet-button provider-connection-refresh" disabled={busy || !props.connected} onClick={() => setReload(n => n + 1)}>{t('connections.refresh')}</button>}
       {open && <form className="codex-auth-settings-form" onSubmit={event => { event.preventDefault(); void operate('save') }}>

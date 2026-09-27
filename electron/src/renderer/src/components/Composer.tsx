@@ -696,7 +696,8 @@ export const Composer = memo(function Composer({ dropActive = false, sessionId, 
   const hasReferenceFallback = hasStructuredReferences && (!hasInlineReferences || !editorMirrorAligned)
   const supportedChatActions = useMemo(() => supportedCrossChatActions(health), [healthRevision])
   const supportedTargetBackends = useMemo(() => supportedCrossChatTargetBackends(health), [healthRevision])
-  const routeHintsSupported = session?.backend !== 'opencode' && routeHintMentionsAvailable(health)
+  const routeHintsSupported = routeHintMentionsAvailable(health)
+    && (session?.backend !== 'opencode' || supportedTargetBackends.includes('opencode'))
   const teamMentionsSupported = teamMessagesAvailable(health)
   const teamAllServersSupported = teamAllServersAliasAvailable(health)
   const teamMessagesAdvertised = health?.capabilities?.agent_team_messages_v1?.available === true

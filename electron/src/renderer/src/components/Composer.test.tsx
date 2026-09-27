@@ -1357,6 +1357,10 @@ describe('Composer', () => {
   })
 
   it('does not offer Cursor backend switching on a legacy server', async () => {
+    useAppStore.setState({ runtimeCatalog: { backends: {
+      claude: { native_credentials_present: true, models: [], efforts: [] },
+      codex: { native_credentials_present: true, models: [], efforts: [] }
+    } } })
     const user = userEvent.setup()
     render(<Composer />)
 
@@ -1371,7 +1375,7 @@ describe('Composer', () => {
     const update = vi.fn().mockImplementation(async (id, patch) => ({ id, title: 'Chat', ...patch }))
     window.agentsDock.sessions = { update } as unknown as AgentsDockAPI['sessions']
     useAppStore.setState({ health: { ok: true, capabilities: { codex_provider_v1: { per_chat: true, per_chat_models: true } } }, runtimeCatalog: {
-      backends: { codex: { models: [], efforts: [], custom_provider: {
+      backends: { codex: { native_credentials_present: true, models: [], efforts: [], custom_provider: {
         configured: true, available: true, model: 'gpt-6-astra', base_url: 'https://inference.example/v1'
       } } }
     } })
@@ -1463,7 +1467,7 @@ describe('Composer', () => {
     useAppStore.setState({ connected: true, profileGeneration: 818, sessions: [session], health: { ok: true, capabilities: {
       opencode_backend: { available: true, required: false, action: null, message: 'Supported', version: 1 },
       local_provider_commands_v1: { available: true, required: false, action: null, message: 'Skills', version: 1, supported_backends: ['opencode'] }
-    } }, runtimeCatalog: { backends: { opencode: { available: true, models: [{ value: '', label: 'OpenCode default' }], efforts: [] } } } })
+    } }, runtimeCatalog: { backends: { opencode: { native_credentials_present: true, available: true, models: [{ value: '', label: 'OpenCode default' }], efforts: [] } } } })
     const user = userEvent.setup()
     render(<Composer />)
     expect(list).not.toHaveBeenCalled()
@@ -1488,7 +1492,7 @@ describe('Composer', () => {
     const user = userEvent.setup()
     render(<Composer />)
     await user.click(screen.getByTitle('Change backend'))
-    expect(screen.getByRole('menuitem', { name: /OpenCode.*Unavailable/ })).toHaveAttribute('aria-disabled', 'true')
+    expect(screen.queryByRole('menuitem', { name: /OpenCode.*Unavailable/ })).not.toBeInTheDocument()
     await user.keyboard('{Escape}')
     await user.type(screen.getByPlaceholderText('Message'), '/')
     expect(list).not.toHaveBeenCalled()
@@ -1515,6 +1519,7 @@ describe('Composer', () => {
       runtimeCatalog: {
         backends: {
           cursor: {
+            native_credentials_present: true,
             available: true,
             models: [{ value: 'auto', label: 'Auto' }],
             efforts: []
@@ -1548,6 +1553,7 @@ describe('Composer', () => {
           cursor: {
             backend: 'cursor',
             status: 'ready',
+            authenticated: true,
             available: true,
             message: 'Cursor is installed and authenticated.',
             checked_at: '2026-08-30T12:00:00Z'
@@ -6056,6 +6062,20 @@ describe('Composer', () => {
     expect(editor).toHaveValue('@')
     expect(useAppStore.getState().chatReferencesBySession['chat-1'] ?? []).toEqual([])
     expect(useAppStore.getState().error).toMatch(/names beginning with @ cannot be referenced/i)
+  })
+
+  it('allows OpenCode source and target mentions only when the server advertises support', async () => {
+    useAppStore.setState({
+      sessions: [{ id: 'chat-1', title: 'Source', backend: 'opencode' }, { id: 'chat-2', title: 'OpenCode target', backend: 'opencode' }],
+      health: { ok: true, capabilities: { cross_chat_handoffs_v1: durableComposerCapability({ supported_target_backends: ['codex', 'claude', 'cursor', 'opencode'] }) } }
+    })
+    const user = userEvent.setup()
+    render(<Composer />)
+    await user.type(screen.getByPlaceholderText('Message'), 'Ask @Open')
+    expect(await screen.findByRole('option', { name: /OpenCode target/ })).toBeInTheDocument()
+    expect(screen.queryByText('Server update required')).not.toBeInTheDocument()
+    act(() => useAppStore.setState({ health: { ok: true, capabilities: { cross_chat_handoffs_v1: durableComposerCapability({ supported_target_backends: ['codex', 'claude'] }) } } }))
+    expect(screen.queryByRole('option', { name: /OpenCode target/ })).not.toBeInTheDocument()
   })
 
   it('does not silently downgrade new @ semantics on an older server while legacy references remain readable', async () => {

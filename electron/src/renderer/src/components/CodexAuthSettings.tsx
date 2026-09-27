@@ -4,6 +4,7 @@ import { t } from '@shared/i18n'
 import type { CodexAuthStatus, CodexProviderConfiguration, CodexProviderTestResult, CodexServerSettingsScope } from '@shared/types'
 import { useLocale } from '../lib/i18n'
 import { CustomModelSettings } from './CustomModelSettings'
+import { EndpointMenu } from './EndpointMenu'
 import { CodexModelCompatibilityCheck } from './CodexModelCompatibilityCheck'
 import './CodexAuthSettings.css'
 import './ProviderConnectionSettings.css'
@@ -306,11 +307,13 @@ export function CodexAuthSettings({ connected, profileId, profileGeneration, ser
     <span className="codex-auth-settings-icon">{apiVerified ? <CheckCircle2 size={18} /> : <KeyRound size={17} />}</span>
     <div className="codex-auth-settings-copy">
       <div className="codex-auth-settings-heading">
-        <div><strong>{t('connections.title', { provider: 'Codex' })}</strong><small>{t('codexAuth.independentAPI')}</small></div>
-        {!showForm && <button type="button" className={apiVerified ? 'quiet-button' : 'primary-button'} disabled={!canOpenSettings} onClick={() => {
+        <div><strong>{t('connections.customAPI')}</strong></div>
+        {!showForm && (currentProvider?.configured || providerReadFailed
+          ? <EndpointMenu disabled={!canResetProvider} scopeKey={`${profileId}:${profileGeneration}:${currentProvider?.credential_id}`} onForget={() => void resetProvider()} />
+          : <button type="button" className="primary-button" disabled={!canOpenSettings} onClick={() => {
           clearKey(); invalidateTest(); setFormOpen(true)
           if (!currentProvider && !providerReadFailed && !providerLoading) void loadProviderConfiguration()
-        }}>{t('connections.configure')}</button>}
+        }}>{t('connections.configure')}</button>)}
       </div>
       <small role="status" className={apiVerified ? 'provider-connection-verified' : ''}>
         {apiVerified && <CheckCircle2 size={14} aria-hidden="true" />}
@@ -319,6 +322,7 @@ export function CodexAuthSettings({ connected, profileId, profileGeneration, ser
             : currentProvider?.configured ? t('connections.saved') : t('connections.empty')}
       </small>
       {currentProvider?.configured && !showForm && <small>{currentProvider.base_url}</small>}
+      {currentProvider?.configured && !showForm && !apiVerified && <button type="button" className="quiet-button" disabled={!canOpenSettings} onClick={() => { clearKey(); invalidateTest(); setFormOpen(true) }}>{t('connections.configure')}</button>}
       <CustomModelSettings backend="codex" active={expanded === true && apiVerified} onSaved={() => setReload(value => value + 1)} />
       {showForm && <form className="codex-auth-settings-form" onSubmit={event => { event.preventDefault(); void saveProvider() }}>
         {providerLoading && <small>{t('codexAuth.providerLoading')}</small>}
@@ -343,10 +347,6 @@ export function CodexAuthSettings({ connected, profileId, profileGeneration, ser
           <small>{t('codexAuth.testHelp')}</small>
           <button type="button" className="quiet-button" disabled={!providerEditable || !providerDraftComplete || testing}
             onClick={() => { void testConnection() }}>{testing && <LoaderCircle className="spin" size={14} />}{t(testing ? 'codexAuth.testing' : 'codexAuth.test')}</button>
-        {(currentProvider?.configured || providerReadFailed) && <div className="codex-auth-provider-reset">
-          <button type="button" className="quiet-button" disabled={!canResetProvider} title={t('codexAuth.providerResetHelp')}
-            onClick={() => { void resetProvider() }}>{t('codexAuth.providerResetAction')}</button>
-        </div>}
         {testResult && <small role={tested ? 'status' : 'alert'} className={tested ? undefined : 'codex-auth-settings-error'}>
           {t(`codexAuth.testResult.${testResult.ok && testResult.status === 'ready' ? 'ready' : testResult.status === 'ready' ? 'failed' : testResult.status}`)}
         </small>}
