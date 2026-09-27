@@ -6,7 +6,7 @@ import { tmpdir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 import { test } from 'node:test'
 import { expectedAssets } from '../direct-release-mirror.mjs'
-import { assertReplayRunner, createProductReplay, parseReplayArguments, parseReplayRange, readReplayMetadata, serveProductReplay } from '../product-release-replay.mjs'
+import { assertReplayRunner, consumeReplayFault, createProductReplay, parseReplayArguments, parseReplayRange, readReplayMetadata, serveProductReplay } from '../product-release-replay.mjs'
 import { newestCompatibleReleaseFromAtom } from '../../electron/src/main/updater-feed.mjs'
 
 const hash = bytes => createHash('sha256').update(bytes).digest('hex')
@@ -119,6 +119,39 @@ test('stable replay exposes stable aliases but a beta never becomes latest', asy
     assert.deepEqual(await consume(response), readFileSync(join(f.options.serverDirectory, 'legacy', name)))
   }
   assert(!replay.inventory().some(entry => entry.url.endsWith('/beta-mac.yml')))
+})
+
+test('beta replay preserves a checksum-bound stable desktop baseline instead of making beta latest', async t => {
+  const f = fixture(t), directory = join(f.root, 'baseline')
+  mkdirSync(directory)
+  const names = { 'AgentsDock-1.0.6-mac-universal.zip': Buffer.from('unit fixture only'),
+    'latest-mac.yml': Buffer.from('version: 1.0.6\n') }
+  for (const [name, bytes] of Object.entries(names)) writeFileSync(join(directory, name), bytes)
+  writeFileSync(join(directory, 'SHA256SUMS'), Object.entries(names).map(([name, bytes]) => `${hash(bytes)}  ${name}\n`).join(''))
+  const replay = await createProductReplay({ ...f.options, baselineDesktopDirectory: directory, baselineVersion: '1.0.6' })
+  const latest = await replay.respond({ method: 'GET', host: 'github.com', path: '/ZhengyiLuo/AgentsDock/releases/latest' })
+  assert.equal(JSON.parse(await consume(latest)).tag_name, 'v1.0.6')
+  const yaml = await replay.respond({ method: 'GET', host: 'github.com', path: '/ZhengyiLuo/AgentsDock/releases/latest/download/latest-mac.yml' })
+  assert.equal((await consume(yaml)).toString(), 'version: 1.0.6\n')
+  writeFileSync(join(directory, 'latest-mac.yml'), 'version: 1.0.7\n')
+  await assert.rejects(createProductReplay({ ...f.options, baselineDesktopDirectory: directory, baselineVersion: '1.0.6' }), /differ/)
+})
+
+test('fault control admits one exact legacy download only and never mutates packages', async t => {
+  const f = fixture(t), replay = await createProductReplay(f.options)
+  const control = join(f.root, 'fault.json')
+  const request = replay.inventory().find(item => item.url.endsWith('.tar.gz') && item.url.includes('/AgentsServer/'))
+  const url = new URL(request.url)
+  writeFileSync(control, JSON.stringify({ schema: 1, kind: 'truncate-legacy-once', sourceSha,
+    releaseReceiptSha256: replay.identity.releaseReceiptSha256 }), { mode: 0o600 })
+  assert.equal(await consumeReplayFault(replay, control, 'registry.npmjs.org', url.pathname), null)
+  const values = await Promise.all([consumeReplayFault(replay, control, url.host, url.pathname),
+    consumeReplayFault(replay, control, url.host, url.pathname)])
+  assert.equal(values.filter(Boolean).length, 1)
+  assert.equal(values.find(Boolean).sha256, request.sha256)
+  assert.equal(await consumeReplayFault(replay, control, url.host, url.pathname), null)
+  const bytes = await consume(await replay.respond({ method: 'GET', host: url.host, path: url.pathname }))
+  assert.equal(hash(bytes), request.sha256)
 })
 
 test('GET, HEAD and valid single ranges preserve exact bytes; unsafe ranges fail', async t => {

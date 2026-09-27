@@ -52,17 +52,17 @@ export function assertMigrationTrack(track, status, persistedTrack) {
   assert.equal(persistedTrack.trim(), track, 'Saved update track changed during migration')
 }
 
-function run(command, args) {
+export function run(command, args) {
   return execFileSync(command, args, { encoding: 'utf8', timeout: 10 * 60 * 1000, maxBuffer: 4 * 1024 * 1024 }).trim()
 }
 
-async function hashFile(path) {
+export async function hashFile(path) {
   const hash = createHash('sha256')
   for await (const chunk of createReadStream(path)) hash.update(chunk)
   return hash.digest('hex')
 }
 
-async function until(label, action, milliseconds = 60_000) {
+export async function until(label, action, milliseconds = 60_000) {
   const deadline = Date.now() + milliseconds
   let lastError
   do {
@@ -96,11 +96,11 @@ async function releaseApp(base, version, output, name) {
   return { app, zipSHA256: checksum, asarSHA256: await hashFile(join(app, 'Contents/Resources/app.asar')) }
 }
 
-function appVersion(app) {
+export function appVersion(app) {
   return run('/usr/libexec/PlistBuddy', ['-c', 'Print :CFBundleShortVersionString', join(app, 'Contents/Info.plist')])
 }
 
-function verifyApp(app, version) {
+export function verifyApp(app, version) {
   assert.equal(appVersion(app), version)
   run('/usr/bin/codesign', ['--verify', '--deep', '--strict', '--verbose=2', app])
   // Verify the signer instead of trusting an Info.plist string or parsing the
@@ -110,7 +110,7 @@ function verifyApp(app, version) {
   assert(!existsSync(join(app, 'Contents/Resources/disable-auto-update')), 'A local update-disabled package is not valid migration evidence')
 }
 
-async function freePort() {
+export async function freePort() {
   const server = createServer()
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve))
   const port = server.address().port
@@ -118,7 +118,7 @@ async function freePort() {
   return port
 }
 
-async function connect(port) {
+export async function connect(port) {
   const targets = await fetch(`http://127.0.0.1:${port}/json/list`, { signal: AbortSignal.timeout(2000) }).then(response => response.json())
   const target = targets.find(item => item.type === 'page' && item.webSocketDebuggerUrl && item.url.startsWith('file:'))
   assert(target, 'Owned app renderer is not available')
@@ -188,14 +188,14 @@ export function locateMigrationUpdateSettings(document) {
   return 'inline'
 }
 
-async function openMigrationUpdateSettings(client) {
+export async function openMigrationUpdateSettings(client) {
   await client.clickButton(['Open app settings', 'App settings', 'Settings'])
   const target = await until('App update settings navigation', () =>
     client.evaluate(`(${locateMigrationUpdateSettings.toString()})(document)`))
   if (target === 'tab') await client.clickButton(['Updates'])
 }
 
-function processesFor(app) {
+export function processesFor(app) {
   const executable = `${app}/Contents/MacOS/AgentsDock`
   return run('/bin/ps', ['-axo', 'pid=,command=']).split('\n').flatMap(line => {
     const match = /^\s*(\d+)\s+(.+)$/.exec(line)
@@ -203,7 +203,7 @@ function processesFor(app) {
   })
 }
 
-async function stopOwned(app) {
+export async function stopOwned(app) {
   for (const pid of processesFor(app)) {
     try { process.kill(pid, 'SIGTERM') } catch (error) { if (error.code !== 'ESRCH') throw error }
   }

@@ -6,6 +6,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { test } from 'node:test'
 import { ACCEPTANCE_CHECKS, releaseIdentity, validateReceipt, verifyReceiptBundle, validatePreparationRun, validateAcceptance, receiptOutputs } from '../product-release.mjs'
+import { collectAcceptance, REQUIRED_NATIVE_REPORTS } from '../product-acceptance.mjs'
 
 const hash = bytes => createHash('sha256').update(bytes).digest('hex')
 const sourceSha = 'a'.repeat(40), workflowSha = 'b'.repeat(40)
@@ -150,10 +151,14 @@ test('preparation run binds receipt to exact canonical workflow, branch and succ
 
 function acceptance() {
   const value = receipt(), receiptHash = '2'.repeat(64)
-  const run = { id: 101, event: 'workflow_dispatch', status: 'completed', conclusion: 'success', head_sha: sourceSha,
+  const run = { id: 101, run_attempt: 1, event: 'workflow_dispatch', status: 'completed', conclusion: 'success', head_sha: sourceSha,
     head_repository: { full_name: 'ZhengyiLuo/AgentsDock' }, path: '.github/workflows/product-release-acceptance.yml' }
-  const report = { schema: 1, version: value.version, sourceSha, releaseReceiptSha256: receiptHash, runId: '101',
-    checks: ACCEPTANCE_CHECKS.map(name => ({ name, result: 'passed' })) }
+  const reports = Object.fromEntries(REQUIRED_NATIVE_REPORTS.map(name => [name, {
+    schema: 1, version: value.version, sourceSha, releaseReceiptSha256: receiptHash, runId: '101', runAttempt: '1',
+    platform: name.endsWith('-linux') ? 'linux' : 'darwin',
+    checks: ACCEPTANCE_CHECKS.map(name => ({ name, status: 'passed', observations: { unitFixture: true } }))
+  }]))
+  const report = collectAcceptance(value, receiptHash, reports, '101', '1')
   return { value, receiptHash, run, report }
 }
 
@@ -164,7 +169,7 @@ test('publication requires successful exact-source native acceptance, not packag
     { head_repository: { full_name: 'someone/AgentsDock' } }, { path: '.github/workflows/product-release.yml' }, { event: 'pull_request' }]) {
     assert.throws(() => validateAcceptance(f.report, f.value, f.receiptHash, { ...f.run, ...change }))
   }
-  for (const change of [{ schema: 2 }, { sourceSha: workflowSha }, { version: '1.0.7' }, { releaseReceiptSha256: '3'.repeat(64) }, { runId: '102' }]) {
+  for (const change of [{ schema: 1 }, { sourceSha: workflowSha }, { version: '1.0.7' }, { releaseReceiptSha256: '3'.repeat(64) }, { runId: '102' }, { runAttempt: '2' }, { evidence: [] }]) {
     assert.throws(() => validateAcceptance({ ...f.report, ...change }, f.value, f.receiptHash, f.run))
   }
 })

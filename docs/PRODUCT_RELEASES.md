@@ -15,9 +15,12 @@ runtime update behavior. It has not established production CI, signing,
 registry publication, or native end-to-end acceptance.
 
 **Publication is intentionally blocked pending phase-two native acceptance.**
-The required `product-release-acceptance.yml` workflow does not yet exist.
-Successful packaging, a signed descriptor, or a manually written acceptance
-file cannot satisfy that missing workflow. Do not bypass the gate with the
+The explicit `product-release-acceptance.yml` workflow and native harnesses now
+exist, but have not run against a complete sealed production candidate. Their
+reports keep unobserved scenarios blocked. Successful packaging, a signed
+descriptor, or a manually written acceptance file cannot satisfy this gate.
+See [native acceptance status and procedure](PRODUCT_ACCEPTANCE.md).
+Do not bypass the gate with the
 older manual publishers to treat this implementation as an accepted product
 release.
 
@@ -45,11 +48,14 @@ TLS key, and rejects unknown routes, credentials and mutations. It does not
 install a CA, change DNS, forward requests, install software or emit acceptance
 results. No developer-host trust or routing changes are permitted by this tool.
 
-This is transport infrastructure, **not the missing acceptance workflow**.
-The disposable runner's trust/routing setup and real native installer, service,
-reboot, provider and multi-client scenarios still need implementation and
-execution against the sealed production packages. Unit tests use fixture keys
-and synthetic package contents; their success is not native acceptance.
+The acceptance workflow now supplies guarded disposable-runner trust/routing,
+real npm/legacy installation and service checks, and native desktop UI/update
+journeys. One-shot transport interruption never changes signed archive bytes.
+The listener drops elevated privileges after binding its loopback port. Trust
+and routing are restored before uploading only sanitized JSON observations.
+Reboot, authenticated provider/busy-work and execution of the post-takeover
+rollback harness remain explicitly unproven. Unit tests use fixture keys and synthetic package
+contents; their success is not native acceptance.
 
 ## Prepare, accept, then publish
 
@@ -84,11 +90,12 @@ Store targets.
    bundle hashes. Independently review and retain the exact `release.json`
    SHA-256 reported by the run. The artifact retention period is 30 days; do
    not assume an expired artifact can be reconstructed under its old receipt.
-4. Phase two must run the real native acceptance workflow on disposable
-   installations using those exact bytes. It must produce an
+4. Dispatch the native acceptance workflow at the exact prepared source on a
+   reviewed `main` or `release/*` branch, supplying the preparation run and
+   accepted receipt hash. It uses disposable hosted installations and must produce an
    `AgentsDock-VERSION-acceptance` artifact containing `acceptance.json`, bound
    to the product receipt hash and successful canonical acceptance run. This
-   workflow and its real-use harness remain to be implemented.
+   workflow fails closed until every required native scenario is observed.
 5. Only after acceptance and separate publication approval, dispatch `publish`
    with the same `source_sha`/`source_ref`, `prepare_run_id`, independently
    reviewed `accepted_receipt_sha256`, and `acceptance_run_id`. Preserve the
@@ -108,7 +115,10 @@ draft requires operator review, not automatic deletion or asset replacement.
 The required acceptance checks are `native-app-update`, `fresh-server-install`,
 `legacy-server-upgrade`, `busy-server-drain`, `offline-server-reconnect`,
 `interrupted-update-recovery`, `rollback-data-preservation`, `multiple-clients`,
-and `stable-beta-channels`. Every check must have one passed result. The run
+and `stable-beta-channels`. Every check must have one passed result backed by
+the collected native job observations. The schema-2 evidence bundle pins the
+run attempt as well as source, packages and receipt; a stale report from an
+earlier attempt cannot pass. The run
 must be successful in the canonical repository, identify
 `.github/workflows/product-release-acceptance.yml`, and run at the exact product
 source SHA. These are evidence requirements, not permission to manufacture
@@ -170,7 +180,9 @@ implementation does not provision secrets, change npm settings, or repair tags.
   signing/notarization credentials listed in [direct releases](DIRECT_RELEASES.md).
   `AGENTSDOCK_RELEASE_TOKEN` also needs Contents write access to AgentsDock,
   AgentsDock-Releases, and AgentsServer: the latter is required for the exact
-  source-export branch and compatibility draft/publication. No release token
+  source-export branch and compatibility draft/publication. Source exports that
+  change `.github/workflows` also require Workflows write access on AgentsServer
+  (or a separately reviewed source-export credential). No release token
   belongs inside the app or a release artifact.
 - Provision `AGENTS_SERVER_RELEASE_PRIVATE_KEY_B64` in that protected canonical
   environment through an authorized secret-management path. It must be the

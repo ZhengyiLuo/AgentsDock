@@ -7,6 +7,7 @@ import { join, resolve } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { validateDesktopBuildNumber } from './validate_desktop_build_number.mjs'
 import { verifyCoordinatedDirectory, verifyLegacyBridge } from './coordinated-release.mjs'
+import { validateCollectedEvidence } from './product-acceptance.mjs'
 
 const need = (condition, message) => { if (!condition) throw new Error(message) }
 const sha = value => createHash('sha256').update(value).digest('hex')
@@ -111,13 +112,14 @@ export function validateAcceptance(report, receipt, receiptSha256, run) {
     && run.head_sha === receipt.sourceSha && run.head_repository?.full_name === 'ZhengyiLuo/AgentsDock'
     && run.path === '.github/workflows/product-release-acceptance.yml'
     && ['workflow_dispatch', 'workflow_call'].includes(run.event), 'Acceptance must be a successful canonical product-acceptance workflow at the exact product source.')
-  need(report?.schema === 1 && report.version === receipt.version && report.sourceSha === receipt.sourceSha
+  need(report?.schema === 2 && report.version === receipt.version && report.sourceSha === receipt.sourceSha
     && report.releaseReceiptSha256 === receiptSha256 && String(report.runId) === String(run.id), 'Acceptance evidence belongs to another release, run or payload.')
   need(Array.isArray(report.checks), 'Acceptance evidence is missing required native update checks.')
   for (const name of ACCEPTANCE_CHECKS) {
     const checks = report.checks.filter(check => check.name === name)
     need(checks.length === 1 && checks[0].result === 'passed', `Required product acceptance has not passed: ${name}.`)
   }
+  validateCollectedEvidence(report, receipt, receiptSha256, run)
   return true
 }
 
@@ -172,7 +174,7 @@ function main() {
     const [reportPath, receiptPath, receiptHash, runPath] = args
     const bytes = regular(receiptPath)
     need(sha(bytes) === receiptHash, 'Acceptance receipt hash differs.')
-    validateAcceptance(JSON.parse(regular(reportPath)), JSON.parse(bytes), receiptHash, JSON.parse(regular(runPath)))
+    validateAcceptance(JSON.parse(regular(reportPath, 512 * 1024)), JSON.parse(bytes), receiptHash, JSON.parse(regular(runPath)))
     emit({ acceptance: 'passed' })
   } else throw new Error('Unknown product release operation.')
 }

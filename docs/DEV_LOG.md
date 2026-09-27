@@ -1,5 +1,31 @@
 # Public development log
 
+## 2026-09-27 — Add receipt-bound native acceptance and a manual test handoff
+
+- Add an explicit, read-only-credential acceptance workflow on disposable
+  hosted Linux/macOS runners. Verify the exact prepared source, signed server
+  bundle and native artifact manifest before installation or origin replay.
+- Implement real npm/legacy installer and service harnesses, macOS UI-driven
+  desktop replacement/relaunch, offline reconciliation, two-client coordination
+  and Stable/Beta observations. Retain both legacy root permission layouts.
+- Add exact-archive transfer interruption/retry and an owned Linux candidate
+  process health-fault/rollback harness. Never change signed package bytes,
+  disable TLS checks, signal an incumbent process, or patch the app updater.
+- Bind collected observations to the source, receipt, workflow run and attempt.
+  Keep unobserved provider chats, populated history, busy/queued work,
+  interactive installation and logout/reboot explicitly blocked.
+- Add the separate-machine Apple Silicon manual checklist and sanitized result
+  template. An unpublished package is not discoverable through production feeds;
+  manual installation is not proof of the one-click updater journey.
+- Pass 228 release/CLI JavaScript tests, 52 Python helper tests and workflow
+  linting. Independent review checks the real worker command, exact candidate
+  transaction and PID ownership before any disposable-runner fault signal.
+- Availability: source and helper tests only. No native acceptance run, matched
+  production candidate, user-service mutation, npm/desktop publication or
+  TestFlight/App Store upload is established by this change. Reuse existing
+  signing identities and trust keys; canonical release configuration remains
+  an operator prerequisite.
+
 ## 2026-09-27 — Integrate the next product candidate without publication
 
 - Merge main through `f50595b4`, including passive Claude discovery, run-bound

@@ -11,7 +11,7 @@ For normal paired app/server releases, use the
 [unified product pipeline](PRODUCT_RELEASES.md). It derives one version from
 committed `server/VERSION`, stages signed packages, and separately publishes an
 accepted immutable receipt. Its publication gate intentionally remains closed
-until the phase-two native acceptance workflow exists and passes. The desktop
+until the phase-two native acceptance workflow passes with complete evidence. The desktop
 workflows described below are reusable components and retained manual
 compatibility/emergency paths, not the normal independent release entry points.
 

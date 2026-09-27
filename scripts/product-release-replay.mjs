@@ -3,10 +3,10 @@
 // It never installs certificates, changes DNS, fetches URLs, or publishes assets.
 import { createHash, createPublicKey, X509Certificate } from 'node:crypto'
 import { constants } from 'node:fs'
-import { lstat, open, realpath } from 'node:fs/promises'
+import { lstat, open, realpath, rename, writeFile } from 'node:fs/promises'
 import { createServer } from 'node:https'
 import { createSecureContext } from 'node:tls'
-import { isAbsolute, join, relative, resolve } from 'node:path'
+import { dirname, isAbsolute, join, relative, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { pipeline } from 'node:stream/promises'
 import { expectedAssets, verifyAssets } from './direct-release-mirror.mjs'
@@ -101,7 +101,7 @@ export function parseReplayRange(value, size) {
  * the CLI always uses the committed production trust root. No acceptance result
  * is produced by successful replay construction or by serving a response. */
 export async function createProductReplay({ receiptPath, acceptedReceiptSha256, preparationRunPath,
-  serverDirectory, desktopDirectory, publicKey }) {
+  serverDirectory, desktopDirectory, baselineDesktopDirectory, baselineVersion, publicKey }) {
   const bytes = await regular(receiptPath)
   need(/^[a-f0-9]{64}$/.test(acceptedReceiptSha256) && digest(bytes) === acceptedReceiptSha256,
     'Replay receipt differs from the independently accepted SHA-256.')
@@ -123,6 +123,29 @@ export async function createProductReplay({ receiptPath, acceptedReceiptSha256, 
   const sums = new Map((await readReplayMetadata(join(desktopDirectory, 'SHA256SUMS'), receipt.desktopManifestSha256)).toString('utf8').trimEnd()
     .split('\n').map(line => [line.slice(66), line.slice(0, 64)]))
   const routes = new Map()
+  let baselineSums
+  if (baselineDesktopDirectory || baselineVersion) {
+    need(baselineDesktopDirectory && /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/.test(baselineVersion),
+      'Replay baseline must be an explicit stable desktop release.')
+    need(baselineVersion.split('.').some((part, index) => {
+      const previous = baselineVersion.split('.').slice(0, index).join('.')
+      const target = receipt.version.split('-')[0].split('.')
+      return previous === target.slice(0, index).join('.') && Number(part) < Number(target[index])
+    }), 'Replay baseline must be older than the candidate base version.')
+    await directory(baselineDesktopDirectory)
+    const bytes = await regular(join(baselineDesktopDirectory, 'SHA256SUMS'))
+    const lines = bytes.toString('utf8').trimEnd().split('\n')
+    need(lines.every(line => /^[a-f0-9]{64}  [A-Za-z0-9._-]+$/.test(line)), 'Invalid baseline checksum manifest.')
+    baselineSums = new Map(lines.map(line => [line.slice(66), line.slice(0, 64)]))
+    need(baselineSums.size === lines.length, 'Duplicate baseline asset checksum.')
+    for (const name of [`AgentsDock-${baselineVersion}-mac-universal.zip`, 'latest-mac.yml']) {
+      need(baselineSums.has(name), 'Baseline updater metadata or ZIP is missing its checksum.')
+      const file = await verifiedFile(join(baselineDesktopDirectory, name), { sha256: baselineSums.get(name) })
+      await file.file.close()
+    }
+    const yaml = (await regular(join(baselineDesktopDirectory, 'latest-mac.yml'))).toString('utf8')
+    need(yaml.split('\n').includes(`version: ${baselineVersion}`), 'Baseline channel metadata has the wrong version.')
+  }
   const add = (url, record) => { need(!routes.has(url), 'Duplicate replay route.'); routes.set(url, Object.freeze(record)) }
   const generated = (url, value, type) => {
     const body = Buffer.from(value)
@@ -140,21 +163,38 @@ export async function createProductReplay({ receiptPath, acceptedReceiptSha256, 
   for (const repository of [...DESKTOP_REPOSITORIES, SERVER_REPOSITORY]) {
     const release = releaseDocument(repository)
     const root = `https://github.com/${repository}/releases`
-    generated(`${root}.atom`, `<?xml version="1.0" encoding="UTF-8"?><feed xmlns="http://www.w3.org/2005/Atom"><id>${root}</id><title>Disposable release replay</title><updated>2000-01-01T00:00:00Z</updated><entry><id>${release.html_url}</id><title>${receipt.version}</title><updated>2000-01-01T00:00:00Z</updated><link href="${release.html_url}"/><content type="text">Exact-artifact replay</content></entry></feed>`, 'application/atom+xml')
-    generated(`https://api.github.com/repos/${repository}/releases?per_page=100`, JSON.stringify([release]), 'application/json')
+    const baseline = baselineSums && DESKTOP_REPOSITORIES.includes(repository)
+      ? { tag_name: `v${baselineVersion}`, name: `AgentsDock ${baselineVersion}`, draft: false, prerelease: false,
+        html_url: `${root}/tag/v${baselineVersion}`, body: 'Previously published baseline; disposable replay.' } : null
+    const releases = [release, ...(baseline ? [baseline] : [])]
+    const entries = releases.map(item => `<entry><id>${item.html_url}</id><title>${item.tag_name.slice(1)}</title><updated>2000-01-01T00:00:00Z</updated><link href="${item.html_url}"/><content type="text">Exact-artifact replay</content></entry>`).join('')
+    generated(`${root}.atom`, `<?xml version="1.0" encoding="UTF-8"?><feed xmlns="http://www.w3.org/2005/Atom"><id>${root}</id><title>Disposable release replay</title><updated>2000-01-01T00:00:00Z</updated>${entries}</feed>`, 'application/atom+xml')
+    generated(`https://api.github.com/repos/${repository}/releases?per_page=100`, JSON.stringify(releases), 'application/json')
     generated(`https://api.github.com/repos/${repository}/releases/tags/v${receipt.version}`, JSON.stringify(release), 'application/json')
     // Never manufacture a stable latest alias for a beta candidate.
     if (receipt.track === 'stable') {
       generated(`https://api.github.com/repos/${repository}/releases/latest`, JSON.stringify(release), 'application/json')
       // GitHubProvider requests this web endpoint with Accept: application/json.
       generated(`${root}/latest`, JSON.stringify(release), 'application/json')
+    } else if (baseline) {
+      generated(`https://api.github.com/repos/${repository}/releases/latest`, JSON.stringify(baseline), 'application/json')
+      generated(`${root}/latest`, JSON.stringify(baseline), 'application/json')
     }
+    if (baseline) generated(`https://api.github.com/repos/${repository}/releases/tags/v${baselineVersion}`, JSON.stringify(baseline), 'application/json')
   }
   for (const repository of DESKTOP_REPOSITORIES) {
     for (const name of expectedAssets(receipt.version, receipt.track, true)) {
       const path = join(desktopDirectory, name), sha256 = name === 'SHA256SUMS' ? receipt.desktopManifestSha256 : sums.get(name)
       await asset(`https://github.com/${repository}/releases/download/v${receipt.version}/${name}`, path, sha256)
       if (receipt.track === 'stable') await asset(`https://github.com/${repository}/releases/latest/download/${name}`, path, sha256)
+    }
+    if (baselineSums) {
+      for (const name of [`AgentsDock-${baselineVersion}-mac-universal.zip`, 'latest-mac.yml']) {
+        await asset(`https://github.com/${repository}/releases/download/v${baselineVersion}/${name}`,
+          join(baselineDesktopDirectory, name), baselineSums.get(name))
+        if (receipt.track === 'beta') await asset(`https://github.com/${repository}/releases/latest/download/${name}`,
+          join(baselineDesktopDirectory, name), baselineSums.get(name))
+      }
     }
   }
   for (const name of ['agents-server-manifest.json', 'agents-server-manifest.sig', legacy.archive.name]) {
@@ -218,12 +258,19 @@ async function insideRunner(path) {
 // No DNS, trust-store or packet-routing changes are made here. An independently
 // reviewed disposable-runner setup must route the three HTTPS origins to this
 // listener and trust its ephemeral certificate. Never run that setup locally.
-export async function serveProductReplay(replay, { certificatePath, privateKeyPath, port = 443 }) {
+export async function serveProductReplay(replay, { certificatePath, privateKeyPath, port = 443,
+  faultControlPath, faultObservedPath, pidPath }) {
   assertReplayRunner()
   need(replay.identity.sourceSha === process.env.GITHUB_SHA, 'Replay must run at the exact accepted product source.')
   need(Number.isInteger(port) && port >= 1 && port <= 65535, 'Invalid replay listener port.')
   await insideRunner(certificatePath); await insideRunner(privateKeyPath)
-  need(((await lstat(privateKeyPath)).mode & 0o077) === 0, 'Ephemeral TLS key permissions must be private.')
+  const keyStat = await lstat(privateKeyPath)
+  need((keyStat.mode & 0o077) === 0, 'Ephemeral TLS key permissions must be private.')
+  need(Boolean(faultControlPath) === Boolean(faultObservedPath), 'Both one-shot fault paths are required.')
+  for (const path of [faultControlPath, faultObservedPath, pidPath].filter(Boolean)) {
+    await insideRunner(dirname(path))
+    need(isAbsolute(path), 'Replay control paths must be absolute.')
+  }
   const cert = await regular(certificatePath, 16384), key = await regular(privateKeyPath, 16384)
   const x509 = new X509Certificate(cert)
   need(!x509.ca && Date.parse(x509.validFrom) <= Date.now() && Date.parse(x509.validTo) > Date.now()
@@ -236,7 +283,25 @@ export async function serveProductReplay(replay, { certificatePath, privateKeyPa
     try {
       need(request.socket.servername === request.headers.host?.replace(/:443$/, ''), 'Replay SNI and Host differ.')
       result = await replay.respond({ method: request.method, host: request.headers.host, path: request.url, headers: request.headers })
+      const fault = faultControlPath && request.method === 'GET' && result.status === 200
+        && !request.headers.range && await consumeReplayFault(replay, faultControlPath, request.headers.host, request.url)
       response.writeHead(result.status, result.headers)
+      if (fault) {
+        const totalBytes = Number(result.headers['content-length']), limit = Math.max(1, Math.floor(totalBytes / 2))
+        let offered = 0
+        for await (const chunk of result.body) {
+          const bytes = chunk.subarray(0, Math.min(chunk.length, limit - offered))
+          response.write(bytes); offered += bytes.length
+          if (offered >= limit) break
+        }
+        response.destroy()
+        need(offered > 0 && offered < totalBytes, 'Fault did not interrupt an incomplete body.')
+        await writeFile(faultObservedPath, `${JSON.stringify({ schema: 1, kind: 'truncate-legacy-once',
+          sourceSha: replay.identity.sourceSha, releaseReceiptSha256: replay.identity.releaseReceiptSha256,
+          archiveSha256: fault.sha256, interrupted: true, socketDestroyed: true, bytesOffered: offered, totalBytes })}\n`,
+        { flag: 'wx', mode: 0o600 })
+        return
+      }
       if (Buffer.isBuffer(result.body)) response.end(result.body)
       else await pipeline(result.body, response)
     } catch {
@@ -248,20 +313,52 @@ export async function serveProductReplay(replay, { certificatePath, privateKeyPa
   server.on('upgrade', (_request, socket) => socket.destroy())
   server.requestTimeout = 30000; server.headersTimeout = 10000; server.keepAliveTimeout = 5000
   await new Promise((done, fail) => { server.once('error', fail); server.listen(port, '127.0.0.1', done) })
+  // Only binding the privileged port needs root. All request processing and
+  // one-shot fault observations run as the disposable runner account.
+  if (process.getuid?.() === 0) {
+    need(keyStat.uid > 0 && keyStat.gid > 0, 'Root listener must drop to the ephemeral key owner.')
+    process.setgroups([])
+    process.setgid(keyStat.gid); process.setuid(keyStat.uid)
+  }
+  if (pidPath) await writeFile(pidPath, `${process.pid}\n`, { flag: 'wx', mode: 0o600 })
   return server
+}
+
+export async function consumeReplayFault(replay, controlPath, host, path) {
+  if (host !== 'github.com') return null
+  const entry = replay.inventory().find(item => item.url === `https://${host}${path}` && !item.generated
+    && item.url.startsWith(`https://github.com/${SERVER_REPOSITORY}/releases/download/v${replay.identity.version}/`)
+    && item.url.endsWith('.tar.gz'))
+  if (!entry) return null
+  let stat
+  try { stat = await lstat(controlPath) } catch (error) { if (error.code === 'ENOENT') return null; throw error }
+  need(stat.isFile() && !(stat.mode & 0o077) && stat.uid === process.getuid(), 'Fault control must be a private owned regular file.')
+  const control = JSON.parse(await regular(controlPath))
+  need(control.schema === 1 && control.kind === 'truncate-legacy-once' && control.sourceSha === replay.identity.sourceSha
+    && control.releaseReceiptSha256 === replay.identity.releaseReceiptSha256, 'Fault control belongs to another prepared product.')
+  // Rename is the one-shot admission lock. Concurrent downloads cannot both
+  // consume the same control file. It never modifies signed package bytes.
+  try { await lstat(`${controlPath}.consumed`); throw new Error('One-shot fault was already consumed.') }
+  catch (error) { if (error.code !== 'ENOENT') throw error }
+  try { await rename(controlPath, `${controlPath}.consumed`) }
+  catch (error) { if (error.code === 'ENOENT') return null; throw error }
+  return entry
 }
 
 export function parseReplayArguments(argv) {
   const [operation, ...args] = argv
   need(['inspect', 'serve'].includes(operation), 'Usage: product-release-replay.mjs inspect|serve --receipt PATH --receipt-sha256 SHA256 --prepare-run PATH --server-assets DIR --desktop-assets DIR [--certificate PATH --private-key PATH --port NUMBER]')
   const required = ['--receipt', '--receipt-sha256', '--prepare-run', '--server-assets', '--desktop-assets']
-  const allowed = operation === 'serve' ? [...required, '--certificate', '--private-key', '--port'] : required
+  const common = [...required, '--baseline-desktop', '--baseline-version']
+  const allowed = operation === 'serve' ? [...common, '--certificate', '--private-key', '--port', '--pid-file', '--fault-control', '--fault-observed'] : common
   const options = {}
   for (let i = 0; i < args.length; i += 2) {
     need(allowed.includes(args[i]) && args[i + 1] && options[args[i]] === undefined, 'Unknown, incomplete or duplicate replay argument.')
     options[args[i]] = args[i + 1]
   }
   need(required.every(name => options[name]), 'Missing replay artifact inputs.')
+  need(Boolean(options['--baseline-desktop']) === Boolean(options['--baseline-version']), 'Baseline directory and version must be supplied together.')
+  need(Boolean(options['--fault-control']) === Boolean(options['--fault-observed']), 'Both one-shot fault paths are required.')
   if (operation === 'serve') need(options['--certificate'] && options['--private-key'], 'Ephemeral replay certificate and private key are required.')
   return { operation, options }
 }
@@ -271,13 +368,16 @@ async function main() {
   if (operation === 'serve') {
     assertReplayRunner()
     for (const name of ['--receipt', '--prepare-run', '--server-assets', '--desktop-assets']) await insideRunner(options[name])
+    if (options['--baseline-desktop']) await insideRunner(options['--baseline-desktop'])
   }
   const replay = await createProductReplay({ receiptPath: options['--receipt'], acceptedReceiptSha256: options['--receipt-sha256'],
-    preparationRunPath: options['--prepare-run'], serverDirectory: options['--server-assets'], desktopDirectory: options['--desktop-assets'] })
+    preparationRunPath: options['--prepare-run'], serverDirectory: options['--server-assets'], desktopDirectory: options['--desktop-assets'],
+    baselineDesktopDirectory: options['--baseline-desktop'], baselineVersion: options['--baseline-version'] })
   if (operation === 'inspect') process.stdout.write(`${JSON.stringify({ ...replay.identity, routes: replay.inventory() }, null, 2)}\n`)
   else {
     const server = await serveProductReplay(replay, { certificatePath: options['--certificate'], privateKeyPath: options['--private-key'],
-      port: options['--port'] === undefined ? 443 : Number(options['--port']) })
+      port: options['--port'] === undefined ? 443 : Number(options['--port']), pidPath: options['--pid-file'],
+      faultControlPath: options['--fault-control'], faultObservedPath: options['--fault-observed'] })
     process.stdout.write(`${JSON.stringify({ ...replay.identity, listening: '127.0.0.1', port: server.address().port })}\n`)
     const close = () => { server.closeAllConnections(); server.close() }
     process.once('SIGTERM', close); process.once('SIGINT', close)
