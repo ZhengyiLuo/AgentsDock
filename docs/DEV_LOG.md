@@ -1,5 +1,21 @@
 # Public development log
 
+## 2026-09-27 — Avoid duplicate goal follow-ups after history sync
+
+- Match native Codex history against exact accepted-message identities even
+  when provider callbacks arrive in a different order. Consume each receipt
+  once and persist out-of-order consumption across paged synchronization.
+  Preserve genuine repeats, inherited fork history and other providers.
+- Pass 100 server history tests, including real loader and cursor persistence
+  coverage. Replay the reported transcript ordering with no duplicate user
+  imports. Existing copies already imported need separate historical repair.
+- Verify the signed desktop `1.0.7-beta.16`, build `1221`, against a disposable
+  full server using a synthetic native history fixture. Opening the chat with
+  the original server imports a duplicate follow-up; with the correction all
+  three user messages appear once, including after app reload. This exercises
+  real app transport and history loading without starting a provider turn.
+- Availability: tested server source only; no production deployment or release.
+
 ## 2026-09-27 — Keep Send now available during native goals
 
 - Allow text and attachment follow-ups to reach a paused goal's still-running
