@@ -58712,6 +58712,9 @@ def record_runtime_failure(
     if backend == BACKEND_CLAUDE and auth_failure is None:
         is_auth_failure = is_auth_failure or "oauth session expired and could not be refreshed" in lower
     if is_auth_failure:
+        if backend == BACKEND_CLAUDE:
+            from claude_model_catalog import clear_native_models
+            clear_native_models()
         current = runtime_diagnostic_payload(
             backend,
             "unauthenticated",
@@ -59261,17 +59264,12 @@ def claude_fallback_model_options() -> list[dict[str, Any]]:
     ]
 
 
-def discover_claude_native_models(*, candidates: tuple[str, ...] | None = None) -> tuple[list[dict[str, Any]], str]:
-    from claude_model_catalog import probe_native_models
+def discover_claude_native_models() -> tuple[list[dict[str, Any]], str]:
+    from claude_model_catalog import cached_native_models
 
     try:
-        models = probe_native_models(
-            CLAUDE_BIN,
-            env=runner_env(),
-            timeout=runtime_probe_timeout(min(RUNTIME_CATALOG_TIMEOUT_SECONDS, 6.0)),
-            candidates=candidates,
-        )
-        return models, "success"
+        models = cached_native_models(CLAUDE_BIN, env=runner_env())
+        return (models, "success") if models is not None else ([], "unavailable")
     except Exception as exc:
         # Optional metadata must neither poison readiness nor leak the init
         # response (which contains account data), stderr, or subprocess args.
@@ -59293,10 +59291,7 @@ def parse_claude_help_catalog() -> dict[str, Any]:
     # Optional candidate discovery must leave time for the native picker,
     # especially if a configured API endpoint is slow or unreachable.
     provider_options, provider_status = discover_claude_provider_models(timeout_seconds=2.0)
-    native_options, native_status = discover_claude_native_models(
-        candidates=tuple(option["value"] for option in provider_options)
-        if provider_status == "success" else None,
-    )
+    native_options, native_status = discover_claude_native_models()
     help_text = ""
     help_available = False
     try:
@@ -59348,7 +59343,7 @@ def parse_claude_help_catalog() -> dict[str, Any]:
 
     model_sources = []
     if native_status == "success":
-        model_sources.append("Claude SDK initialize")
+        model_sources.append("Cached Claude SDK initialize")
     elif provider_status == "success":
         model_sources.append("Anthropic Models API")
     if native_status != "success":

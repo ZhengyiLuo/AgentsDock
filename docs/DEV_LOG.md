@@ -1,5 +1,19 @@
 # Public development log
 
+## 2026-09-27 — Keep Claude model discovery passive
+
+- Remove disposable authenticated model-discovery processes and their forced
+  teardown. Reuse bounded model metadata from real SDK initialization, with
+  configuration-scoped expiry and invalidation after native auth failures.
+- Preserve passive readiness, native alias labels, explicit empty pickers and
+  fallback discovery. Do not promote project-specific model settings into the
+  global catalog or retain private initialization/account fields.
+- Pass 271 focused server tests covering catalog behavior, readiness, SDK
+  lifecycle and runner integration; compile changed runtime modules and check
+  the diff. Regression tests use synthetic credentials and isolated state.
+- Availability: source only at this checkpoint. Native app/server acceptance
+  and a real token-renewal cycle remain pending; no public release.
+
 ## 2026-09-26 — Reauthorize fresh file selections across chats
 
 - Let a fresh native drop, paste, or file-picker selection grant an idle file
