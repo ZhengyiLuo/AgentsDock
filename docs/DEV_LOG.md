@@ -1,5 +1,25 @@
 # Public development log
 
+## 2026-09-26 — Keep attachments working across native Codex continuations
+
+- Resolve helper calls through the exact live native thread and turn when
+  Codex omits optional client metadata on an automatic continuation. Preserve
+  validation of supplied metadata, existing run authority and call replay.
+- Remove the publication check that rejected all native operations, including
+  continued goals. Publication still requires the existing authorized live
+  chat/run capability and respects Stop and run replacement.
+- Pass 103 focused server tests, including real file publication, missing or
+  incorrect authority, malformed metadata, stale turns and ownership changes.
+  Reproduce both rejection paths before their corrections.
+- Reproduce the metadata omission with real Codex `0.153.4`, then run a fresh
+  two-turn goal through an isolated full server: publish text in the initial
+  turn and a synthetic MP4 in the automatic continuation. Both publications
+  succeed under the same logical run; downloaded bytes match their sources.
+- In signed desktop `1.0.7-beta.15`, build `1218`, click the resulting video
+  and verify playback through the production transport. Reload preserves both
+  attachments and the video plays again, with no renderer exceptions. This
+  acceptance uses the real provider and server; no app rebuild is required.
+
 ## 2026-09-26 — Verify custom-endpoint reasoning summary delivery
 
 - Pass 67 isolated provider, reasoning-stream and native-turn projection tests.
