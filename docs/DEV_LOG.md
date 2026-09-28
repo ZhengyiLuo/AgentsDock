@@ -1,5 +1,29 @@
 # Public development log
 
+## 2026-09-27 — Custom API live acceptance and API-only chat routing
+
+- Cursor and OpenCode advertise cross-chat transport when their CLI is installed
+  and this server has a verified custom API connection, even without native
+  account login. This does not mark native login ready or bypass per-chat
+  admission, credential revocation, CLI compatibility or route authorization.
+  Capability reads use local metadata, not additional provider requests.
+- Live acceptance used disposable chats and workspaces with real provider
+  requests. Cursor used its official API-key service; Claude Code, Codex and
+  OpenCode used a verified OpenRouter connection. All four produced a response.
+  OpenCode ↔ Cursor and Claude Code ↔ Codex delivered one request and one reply
+  each through the run-bound tool and mailbox, verified against server events.
+  The native desktop rendered replies and recovered a successful Claude tool
+  attempt after an initial model attempt used an unavailable shell command.
+- A nonexistent-route attempt was rejected with no extra delivery. This is not
+  a substitute for the isolated cross-chat ownership/authorization regressions.
+  Settings rejected unverified credentials without saving them or falling back
+  to native accounts. Direct Anthropic/OpenAI key acceptance remains unverified;
+  gateway success does not certify every endpoint/model combination.
+- Validation: 373 provider/server tests, 1,126 desktop tests, then 175 targeted
+  routing/binding tests passed (server batches overlap). Native UI checks used
+  a separate desktop profile and the designated test server. No release is
+  published by this acceptance record.
+
 ## 2026-09-27 — Reconnect existing API chats and check on send
 
 - Existing custom API chats can resume after explicitly verifying the same

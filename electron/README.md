@@ -91,8 +91,10 @@ commands automatically; **Plan only** applies a read-only tool policy, not an
 operating-system sandbox. Changing the permission mode or working directory
 resets native OpenCode context while retaining the visible AgentsDock timeline.
 
+OpenCode supports explicitly authorized cross-chat routes through the run-bound
+AgentsDock tool on matching servers, including tool-capable custom API models.
 This beta does not provide external history import, native session forks,
-side chats, live steering, native goals, or cross-chat routes for OpenCode.
+side chats, live steering, or native goals for OpenCode.
 Ordinary queued follow-ups and Stop remain available. A copied-memory fork
 is not presented as a native clone.
 
