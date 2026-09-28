@@ -867,8 +867,9 @@ describe('SessionDialog runtime selection', () => {
 
   const runtimeCatalog: RuntimeCatalog = {
     backends: {
-      claude: { models: [{ value: 'sonnet', label: 'Sonnet' }], efforts: [] },
+      claude: { native_credentials_present: true, models: [{ value: 'sonnet', label: 'Sonnet' }], efforts: [] },
       codex: {
+        native_credentials_present: true,
         default_model: 'gpt-5.6-sol', default_effort: 'medium',
         models: [
           { value: 'gpt-5.6-sol', label: 'GPT-5.6-Sol', efforts: [
@@ -915,17 +916,17 @@ describe('SessionDialog runtime selection', () => {
     await waitFor(() => expect(create).toHaveBeenCalledWith(expect.objectContaining({ backend: 'codex', codex_provider: 'custom', model: 'provider/unlisted', effort: null })))
   })
 
-  it('opens Settings for an unconfigured custom option without creating a normal Codex chat', async () => {
+  it('hides an unconfigured custom option without creating a normal Codex chat', async () => {
     const create = vi.fn()
+    const navigate = vi.spyOn(window, 'dispatchEvent')
     Object.defineProperty(window, 'agentsDock', { configurable: true, value: { sessions: { create } } as unknown as AgentsDockAPI })
     useAppStore.setState({ sessions: [], runtimeCatalog, health: { ok: true },
       modals: { settings: false, appSettings: false, newChat: true, resume: false, folder: false, digest: false, job: false, search: false, review: false, importChats: false }
     })
-    const user = userEvent.setup()
     render(<SessionDialog mode="newChat" />)
-    await user.click(screen.getByRole('button', { name: /Codex runtime · Custom endpoint · Configure in Settings/ }))
-    expect(useAppStore.getState().modals.appSettings).toBe(true)
-    expect(useAppStore.getState().modals.newChat).toBe(false)
+    expect(screen.queryByRole('button', { name: /Codex runtime · Custom endpoint/ })).not.toBeInTheDocument()
+    expect(useAppStore.getState().modals.newChat).toBe(true)
+    expect(navigate).not.toHaveBeenCalledWith(expect.objectContaining({ type: 'agentsdock:app-settings-section' }))
     expect(create).not.toHaveBeenCalled()
   })
 
@@ -1125,6 +1126,7 @@ describe('SessionDialog runtime selection', () => {
       backends: {
         ...runtimeCatalog.backends,
         cursor: {
+          native_credentials_present: true,
           available: true,
           default_model: 'auto',
           models: [
@@ -1198,7 +1200,7 @@ describe('SessionDialog runtime selection', () => {
           ok: true,
           runtimes: {
             cursor: {
-              backend: 'cursor', status: 'ready', available: true,
+              backend: 'cursor', status: 'ready', available: true, authenticated: true,
               message: 'Cursor is installed and authenticated.',
               checked_at: '2026-08-30T12:00:00Z'
             }
@@ -1245,7 +1247,7 @@ describe('SessionDialog runtime selection', () => {
       runtimeCatalog: {
         backends: {
           ...runtimeCatalog.backends,
-          cursor: { available: true, models: [{ value: 'auto', label: 'Auto' }], efforts: [] }
+          cursor: { native_credentials_present: true, available: true, models: [{ value: 'auto', label: 'Auto' }], efforts: [] }
         }
       },
       health: { ok: true, capabilities: { cursor_backend: {

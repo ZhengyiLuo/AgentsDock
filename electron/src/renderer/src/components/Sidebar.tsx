@@ -234,7 +234,7 @@ export function Sidebar({ hidden = false }: { hidden?: boolean }) {
         <strong>AgentsDock</strong>
         <div className="toolbar-cluster">
           <ShortcutTooltip shortcut="toggleSidebar" label={t('ui.sidebar.hideChatList')}><button className="icon-button" aria-label={t('ui.sidebar.hideChatList')} onClick={() => window.dispatchEvent(new Event('agentsdock:toggle-sidebar'))}><PanelLeftClose size={15} /></button></ShortcutTooltip>
-          <button className="icon-button" title={connected ? t("ui.Sidebar.Sidebar.refresh_0e91610") : t("ui.Sidebar.Sidebar.reconnect_bf8a9ea")} aria-label={connected ? t("ui.Sidebar.Sidebar.refresh_chats_bf904ec") : t("ui.Sidebar.Sidebar.reconnect_server_558abe3")} disabled={Boolean(switchingProfileId)} onClick={() => void useAppStore.getState().refreshSessions()}><RefreshCw size={15} /></button>
+          <button className="icon-button" title={connected ? t("ui.Sidebar.Sidebar.refresh_0e91610") : t("ui.Sidebar.Sidebar.reconnect_bf8a9ea")} aria-label={connected ? t("ui.Sidebar.Sidebar.refresh_chats_bf904ec") : t("ui.Sidebar.Sidebar.reconnect_server_558abe3")} disabled={Boolean(switchingProfileId)} onClick={() => void useAppStore.getState().refreshSessions(true)}><RefreshCw size={15} /></button>
           <ShortcutTooltip shortcut="newChat"><button className="icon-button" aria-label={t("ui.Sidebar.Sidebar.new_chat_db18382")} disabled={Boolean(switchingProfileId) || creatingChat} onClick={() => void useAppStore.getState().requestNewChat()}><Plus size={17} /></button></ShortcutTooltip>
         </div>
       </div>

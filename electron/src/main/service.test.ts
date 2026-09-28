@@ -1103,6 +1103,80 @@ describe('Codex account status profile isolation', () => {
   })
 })
 
+describe('settings-only provider connection profile isolation', () => {
+  const caller = { profileId: 'endpoint-a', profileGeneration: 1 }
+  function harness() {
+    const client = { providerConnectionRequest: vi.fn().mockResolvedValue({ ok: false, status: 'authentication_failed' }) }
+    const service = Object.create(AppService.prototype) as AppService
+    Object.assign(service, { scope: { profileId: caller.profileId, generation: 1, namespace: 'profile:endpoint-a', client },
+      activeProfileId: caller.profileId, profileGeneration: 1, validatedGeneration: 1,
+      profileResetIsPending: vi.fn().mockReturnValue(false) })
+    return { service, client }
+  }
+  it.each(['claude', 'opencode', 'cursor'] as const)('forgets %s immediately and fences an older in-flight catalog', async backend => {
+    const { service, client } = harness()
+    const oldCatalog = { ...runtimeCatalog, backends: { ...runtimeCatalog.backends,
+      [backend]: { models: [{ value: 'native', label: 'Native' }], efforts: [],
+        custom_provider: { configured: true, available: true, model: 'old', base_url: 'https://example.test' } } } }
+    const pending = deferred<typeof oldCatalog>()
+    Object.assign(client, { runtimeCatalog: vi.fn().mockReturnValue(pending.promise) })
+    const emitRuntime = vi.fn()
+    const native = { id: 'native', backend, title: 'Native' }
+    const customChat = { id: 'custom', backend, title: 'Custom', provider_connection: 'custom',
+      provider_connection_catalog: oldCatalog.backends[backend].custom_provider }
+    const emitSessions = vi.fn(), putSessions = vi.fn()
+    Object.assign(service, { runtimeCatalog: oldCatalog, sessions: [native, customChat],
+      cache: { putPreference: vi.fn(), putSessions }, emitRuntime, emitSessions })
+    const internals = service as unknown as { scope: unknown; loadRuntimeCatalog(scope: unknown): Promise<void>; runtimeCatalog: typeof oldCatalog }
+    const read = internals.loadRuntimeCatalog(internals.scope)
+    client.providerConnectionRequest.mockResolvedValueOnce({ configuration: {
+      backend, scope: 'per_chat', configured: false, has_api_key: false, revision: 2,
+      base_url: null, model: null, protocol: null, auth_header: null, checked_at: null, last_result: null,
+    } } as never)
+    await service.providerConnectionRequest(caller, backend, 'forget', { expected_revision: 1 })
+    expect(internals.runtimeCatalog.backends[backend].custom_provider).toMatchObject({ configured: false, available: false })
+    pending.resolve(oldCatalog)
+    await read
+    expect(internals.runtimeCatalog.backends[backend].custom_provider).toMatchObject({ configured: false, available: false })
+    expect(emitRuntime).toHaveBeenCalledOnce()
+    expect(putSessions).toHaveBeenCalledWith('profile:endpoint-a', [native, expect.objectContaining({
+      provider_connection_catalog: expect.objectContaining({ configured: false, available: false })
+    })])
+    expect(emitSessions).toHaveBeenCalledOnce()
+  })
+  it('rejects stale callers before dispatch and late results after switching servers', async () => {
+    const { service, client } = harness()
+    await expect(service.providerConnectionRequest({ ...caller, profileGeneration: 0 }, 'claude', 'get')).rejects.toThrow('superseded')
+    expect(client.providerConnectionRequest).not.toHaveBeenCalled()
+    const response = deferred<{ ok: boolean; status: string }>(), called = deferred<void>()
+    client.providerConnectionRequest.mockImplementation(() => { called.resolve(); return response.promise })
+    const pending = service.providerConnectionRequest(caller, 'opencode', 'check', { expected_revision: 1 })
+    await called.promise
+    Object.assign(service, { activeProfileId: 'endpoint-b', profileGeneration: 2 })
+    response.resolve({ ok: false, status: 'authentication_failed' })
+    await expect(pending).rejects.toThrow('superseded')
+    expect(client.providerConnectionRequest).toHaveBeenCalledExactlyOnceWith('opencode', 'check', { expected_revision: 1 })
+  })
+  it('fences custom model discovery and reconciles catalog without probing native authentication', async () => {
+    const { service, client } = harness()
+    const response = deferred<{ backend: string; revision: number; default_model: null }>(), called = deferred<void>()
+    const read = vi.fn().mockImplementation(() => { called.resolve(); return response.promise })
+    const refresh = vi.fn().mockResolvedValue(undefined)
+    Object.assign(client, { customModels: read }); Object.assign(service, { refreshRuntime: refresh })
+    await expect(service.customModels({ ...caller, profileGeneration: 0 }, 'claude')).rejects.toThrow('superseded')
+    expect(read).not.toHaveBeenCalled()
+    const pending = service.customModels(caller, 'claude')
+    await called.promise
+    Object.assign(service, { activeProfileId: 'endpoint-b', profileGeneration: 2 })
+    response.resolve({ backend: 'claude', revision: 1, default_model: null })
+    await expect(pending).rejects.toThrow('superseded')
+    expect(refresh).not.toHaveBeenCalled()
+    Object.assign(service, { activeProfileId: caller.profileId, profileGeneration: 1 })
+    await service.customModels(caller, 'claude')
+    expect(refresh).toHaveBeenCalledExactlyOnceWith(true, false, expect.anything(), true)
+  })
+})
+
 describe('Codex endpoint request profile isolation', () => {
   const caller = { profileId: 'provider-a', profileGeneration: 1 }
   const configuration = { available: true, configured: true, base_url: 'https://gateway.example/v1',

@@ -47,13 +47,15 @@ describe('provider account usage', () => {
   })
 
   it('does not show fabricated quota for unavailable custom API endpoints or older servers', async () => {
-    const { usage } = fixture({ ...snapshot, status: 'unavailable', account_kind: 'custom', windows: [], credits: undefined })
+    // Even if the server would return the native account, custom API chats
+    // must never query or display that unrelated identity/quota.
+    const { usage } = fixture(snapshot)
     render(<ProviderUsageIndicator session={{ ...chat, codex_provider: 'custom' }} />)
-    await waitFor(() => expect(usage).toHaveBeenCalledOnce())
+    expect(usage).not.toHaveBeenCalled()
     expect(screen.queryByRole('button')).not.toBeInTheDocument()
     act(() => useAppStore.setState({ health: { capabilities: {} } as Health }))
     expect(screen.queryByRole('button')).not.toBeInTheDocument()
-    expect(usage).toHaveBeenCalledOnce()
+    expect(usage).not.toHaveBeenCalled()
   })
 
   it('drops a late response from another server before displaying quota', async () => {

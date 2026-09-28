@@ -999,7 +999,7 @@ describe('instant new chat defaults', () => {
       requestNewChat,
       profiles: [profile], activeProfileId: profile.id, profileGeneration: 1, switchingProfileId: null,
       sessions: [{ id: 'older', title: 'Older chat', folder: 'Older', cwd: '/work/older', backend: 'codex', model: 'gpt-old' }],
-      selectedSessionId: 'older', folderOrder: ['Older', 'Fresh'], health: { ok: true }, runtimeCatalog: null,
+      selectedSessionId: 'older', folderOrder: ['Older', 'Fresh'], health: { ok: true }, runtimeCatalog: { backends: { claude: { native_credentials_present: true, models: [], efforts: [] } } },
       refreshSessions: refresh, selectSession: select, creatingChat: false, modals: closedModals
     })
 
@@ -1041,7 +1041,7 @@ describe('instant new chat defaults', () => {
       requestNewChat,
       profiles: [profile], activeProfileId: profile.id, profileGeneration: 1, switchingProfileId: null,
       sessions: [{ id: 'selected', title: 'Selected chat', folder: 'Research', cwd: '/work/research', backend: 'codex', model: 'gpt-current' }],
-      selectedSessionId: 'selected', folderOrder: ['Older', 'Research'], health: { ok: true }, runtimeCatalog: null,
+      selectedSessionId: 'selected', folderOrder: ['Older', 'Research'], health: { ok: true }, runtimeCatalog: { backends: { claude: { native_credentials_present: true, models: [], efforts: [] } } },
       refreshSessions: vi.fn().mockResolvedValue(undefined), selectSession: vi.fn().mockResolvedValue(undefined),
       creatingChat: false, modals: closedModals
     })
@@ -1078,7 +1078,7 @@ describe('instant new chat defaults', () => {
         { id: 'first', title: 'First chat', folder: 'First', cwd: '/work/first', backend: 'codex' },
         { id: 'second', title: 'Second chat', folder: 'Second', cwd: '/work/second', backend: 'codex' }
       ],
-      selectedSessionId: 'first', folderOrder: ['First', 'Second'], health: { ok: true }, runtimeCatalog: null,
+      selectedSessionId: 'first', folderOrder: ['First', 'Second'], health: { ok: true }, runtimeCatalog: { backends: { claude: { native_credentials_present: true, models: [], efforts: [] } } },
       refreshSessions: vi.fn().mockResolvedValue(undefined), selectSession: vi.fn().mockResolvedValue(undefined),
       creatingChat: false, modals: closedModals
     })
@@ -4523,6 +4523,7 @@ describe('timeline memory cache', () => {
 })
 
 describe('untouched startup chat cleanup', () => {
+  const refreshSessions = useAppStore.getState().refreshSessions
   const profile: PublicServerProfile = {
     ...profileFor('cleanup-profile'),
     serverIdentity: 'cleanup-server'
@@ -4549,6 +4550,44 @@ describe('untouched startup chat cleanup', () => {
 
   afterEach(() => vi.restoreAllMocks())
 
+  it('cleans a marked blank on explicit refresh, but preserves unsaved local drafts', async () => {
+    const empty = untouchedStartupChat('refresh-empty')
+    const draft = untouchedStartupChat('refresh-draft')
+    const harness = installStartupCleanupHarness(profile, [empty, draft])
+    useAppStore.setState({ profiles: [profile], activeProfileId: profile.id, profileGeneration: 7,
+      sessions: [empty, draft], jobs: [], creatingChat: false, drafts: { [draft.id]: 'not sent yet' } })
+    await refreshSessions(true)
+    expect(harness.remove).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ profileId: profile.id }), empty.id, empty.updated_at)
+    expect(useAppStore.getState().sessions.map(s => s.id)).toEqual([draft.id])
+  })
+
+  it('does not fall back to ordinary Delete when the server rejects conditional cleanup', async () => {
+    const placeholder = untouchedStartupChat('old-server')
+    const harness = installStartupCleanupHarness(profile, [placeholder])
+    harness.remove.mockRejectedValueOnce(new Error('404: discard-empty unavailable'))
+    await useAppStore.getState().initialize()
+    expect(harness.remove).toHaveBeenCalledOnce()
+    expect(window.agentsDock.sessions.remove).not.toHaveBeenCalled()
+    expect(useAppStore.getState().sessions).toEqual([placeholder])
+  })
+
+  it('flushes the live composer before proving emptiness and blocks admission during discard', async () => {
+    const placeholder = untouchedStartupChat('live-editor-draft')
+    const harness = installStartupCleanupHarness(profile, [placeholder])
+    useAppStore.setState({ profiles: [profile], activeProfileId: profile.id, profileGeneration: 7,
+      sessions: [placeholder], jobs: [], drafts: {}, creatingChat: false, turnAdmissionTokens: {} })
+    const flush = () => {
+      expect(useAppStore.getState().discardingEmptyChats[placeholder.id]).toBe(`${profile.id}:7`)
+      expect(useAppStore.getState().beginTurnAdmission(placeholder.id)).toBeNull()
+      useAppStore.getState().setDraftForSession(placeholder.id, 'still in the editor, not persisted')
+    }
+    window.addEventListener('agentsdock:flush-draft', flush)
+    try { await refreshSessions(true) } finally { window.removeEventListener('agentsdock:flush-draft', flush) }
+    expect(harness.remove).not.toHaveBeenCalled()
+    expect(useAppStore.getState().sessions).toEqual([placeholder])
+    expect(useAppStore.getState().discardingEmptyChats).toEqual({})
+  })
+
   it('removes only a marked, fully untouched direct-create placeholder', async () => {
     const placeholder = untouchedStartupChat('untouched')
     const harness = installStartupCleanupHarness(profile, [placeholder])
@@ -4557,7 +4596,7 @@ describe('untouched startup chat cleanup', () => {
     await settleMicrotasks()
 
     expect(harness.remove).toHaveBeenCalledOnce()
-    expect(harness.remove).toHaveBeenCalledWith(placeholder.id)
+    expect(harness.remove).toHaveBeenCalledWith(expect.objectContaining({ profileId: profile.id, serverIdentity: profile.serverIdentity }), placeholder.id, placeholder.updated_at)
     expect(harness.setScoped).toHaveBeenCalledWith(
       expect.objectContaining({
         profileId: profile.id,
@@ -6257,6 +6296,7 @@ function untouchedStartupChat(id: string, patch: Partial<Session> = {}): Session
     model: 'gpt-5.6',
     effort: 'medium',
     created_at: '2026-09-08T12:00:00Z',
+    updated_at: '2026-09-08T12:00:00Z',
     latest_event_seq: 1,
     latest_event_type: 'session_created',
     latest_agent_event_seq: 0,
@@ -6326,7 +6366,7 @@ function installStartupCleanupHarness(
     currentSessions = sessions
     return sessions
   })
-  const remove = vi.fn(async (sessionId: string) => {
+  const remove = vi.fn(async (_scope: unknown, sessionId: string) => {
     currentSessions = currentSessions.filter(session => session.id !== sessionId)
     return true
   })
@@ -6376,7 +6416,7 @@ function installStartupCleanupHarness(
     configurable: true,
     value: {
       bootstrap: vi.fn().mockResolvedValue(bootstrapPayload),
-      sessions: { list: sessionsList, remove },
+      sessions: { list: sessionsList, discardEmpty: remove, remove: vi.fn(() => { throw new Error('Automatic cleanup must not use ordinary Delete') }) },
       jobs: { list: jobsList },
       ports: { list: portsList },
       preferences: {

@@ -1357,6 +1357,10 @@ describe('Composer', () => {
   })
 
   it('does not offer Cursor backend switching on a legacy server', async () => {
+    useAppStore.setState({ runtimeCatalog: { backends: {
+      claude: { native_credentials_present: true, models: [], efforts: [] },
+      codex: { native_credentials_present: true, models: [], efforts: [] }
+    } } })
     const user = userEvent.setup()
     render(<Composer />)
 
@@ -1371,7 +1375,7 @@ describe('Composer', () => {
     const update = vi.fn().mockImplementation(async (id, patch) => ({ id, title: 'Chat', ...patch }))
     window.agentsDock.sessions = { update } as unknown as AgentsDockAPI['sessions']
     useAppStore.setState({ health: { ok: true, capabilities: { codex_provider_v1: { per_chat: true, per_chat_models: true } } }, runtimeCatalog: {
-      backends: { codex: { models: [], efforts: [], custom_provider: {
+      backends: { codex: { native_credentials_present: true, models: [], efforts: [], custom_provider: {
         configured: true, available: true, model: 'gpt-6-astra', base_url: 'https://inference.example/v1'
       } } }
     } })
@@ -1388,14 +1392,15 @@ describe('Composer', () => {
     await waitFor(() => expect(update).toHaveBeenLastCalledWith('chat-1', expect.objectContaining({ backend: 'codex', codex_provider: 'default' })))
   })
 
-  it('routes an unconfigured custom choice to Settings without changing the chat', async () => {
+  it('hides an unconfigured custom choice without changing the chat', async () => {
     const update = vi.fn()
+    const navigate = vi.spyOn(window, 'dispatchEvent')
     window.agentsDock.sessions = { update } as unknown as AgentsDockAPI['sessions']
     const user = userEvent.setup()
     render(<Composer />)
     await user.click(screen.getByTitle('Change backend'))
-    await user.click(screen.getByRole('menuitem', { name: 'Codex runtime · Custom endpoint Configure in Settings' }))
-    expect(useAppStore.getState().modals.appSettings).toBe(true)
+    expect(screen.queryByText(/Codex runtime · Custom endpoint/)).not.toBeInTheDocument()
+    expect(navigate).not.toHaveBeenCalledWith(expect.objectContaining({ type: 'agentsdock:app-settings-section' }))
     expect(update).not.toHaveBeenCalled()
   })
 
@@ -1462,7 +1467,7 @@ describe('Composer', () => {
     useAppStore.setState({ connected: true, profileGeneration: 818, sessions: [session], health: { ok: true, capabilities: {
       opencode_backend: { available: true, required: false, action: null, message: 'Supported', version: 1 },
       local_provider_commands_v1: { available: true, required: false, action: null, message: 'Skills', version: 1, supported_backends: ['opencode'] }
-    } }, runtimeCatalog: { backends: { opencode: { available: true, models: [{ value: '', label: 'OpenCode default' }], efforts: [] } } } })
+    } }, runtimeCatalog: { backends: { opencode: { native_credentials_present: true, available: true, models: [{ value: '', label: 'OpenCode default' }], efforts: [] } } } })
     const user = userEvent.setup()
     render(<Composer />)
     expect(list).not.toHaveBeenCalled()
@@ -1487,7 +1492,7 @@ describe('Composer', () => {
     const user = userEvent.setup()
     render(<Composer />)
     await user.click(screen.getByTitle('Change backend'))
-    expect(screen.getByRole('menuitem', { name: /OpenCode.*Unavailable/ })).toHaveAttribute('aria-disabled', 'true')
+    expect(screen.queryByRole('menuitem', { name: /OpenCode.*Unavailable/ })).not.toBeInTheDocument()
     await user.keyboard('{Escape}')
     await user.type(screen.getByPlaceholderText('Message'), '/')
     expect(list).not.toHaveBeenCalled()
@@ -1514,6 +1519,7 @@ describe('Composer', () => {
       runtimeCatalog: {
         backends: {
           cursor: {
+            native_credentials_present: true,
             available: true,
             models: [{ value: 'auto', label: 'Auto' }],
             efforts: []
@@ -1547,6 +1553,7 @@ describe('Composer', () => {
           cursor: {
             backend: 'cursor',
             status: 'ready',
+            authenticated: true,
             available: true,
             message: 'Cursor is installed and authenticated.',
             checked_at: '2026-08-30T12:00:00Z'
@@ -2842,6 +2849,8 @@ describe('Composer', () => {
   })
 
   it('shows an actionable provider warning and preserves the draft when the CLI is unavailable', async () => {
+    const send = vi.fn().mockRejectedValue(new Error('Codex is not installed. Install Codex and retry.'))
+    window.agentsDock.turns = { ...window.agentsDock.turns, send }
     useAppStore.setState({
       health: {
         ok: true,
@@ -2855,16 +2864,67 @@ describe('Composer', () => {
     })
     const user = userEvent.setup()
     render(<Composer />)
-    expect(screen.getByText('Codex is not installed on the server.')).toBeInTheDocument()
+    expect(screen.queryByText('Codex is not installed on the server.')).not.toBeInTheDocument()
     const editor = screen.getByPlaceholderText('Message')
     await user.type(editor, 'Keep this draft')
     await user.click(screen.getByRole('button', { name: 'Send message' }))
+    await waitFor(() => expect(send).toHaveBeenCalledOnce())
     expect(editor).toHaveValue('Keep this draft')
     expect(useAppStore.getState().error).toContain('Install Codex')
   })
 
-  it.each(['missing', 'error'] as const)('does not bypass a %s Claude executable when retrying', async status => {
-    const send = vi.fn()
+  it.each((['cursor', 'claude', 'opencode', 'codex'] as const).flatMap(backend =>
+    [false, true].map(refreshed => ({ backend, refreshed }))))('retries $backend custom API on send with reconnected catalog=$refreshed', async ({ backend, refreshed }) => {
+    const session: Session = { id: 'chat-1', title: 'Existing API chat', backend,
+      model: 'fixture/model', codex_provider: backend === 'codex' ? 'custom' : 'default',
+      provider_connection: backend !== 'codex' ? 'custom' : 'default',
+      provider_connection_catalog: { configured: false, available: false, model: null, base_url: null } }
+    const send = vi.fn().mockRejectedValueOnce(new Error("Error invoking remote method 'turns:send': Error: API connection is disconnected. Reconnect and retry."))
+      .mockResolvedValueOnce({ session, event: { id: 'accepted', session_id: 'chat-1', type: 'turn_started', seq: 1, ts: '', run_id: 'reconnected' } })
+    window.agentsDock.turns = { ...window.agentsDock.turns, send }
+    useAppStore.setState({ sessions: [session], health: { ok: true, capabilities: {
+      provider_connections_v1: { per_chat: true, available: true },
+      codex_provider_v1: { per_chat: true, per_chat_models: true, available: true },
+      cursor_backend: { version: 2, available: true, required: false, message: '', action: null }, opencode_backend: { version: 1, available: true, required: false, message: '', action: null },
+    } }, runtimeCatalog: { backends: { [backend]: { models: [], efforts: [], custom_provider: { configured: false, available: false, model: null, base_url: null } } } } })
+    const user = userEvent.setup()
+    render(<Composer />)
+    expect(screen.queryByRole('button', { name: 'Configure API' })).not.toBeInTheDocument()
+    const editor = screen.getByPlaceholderText('Message')
+    await user.type(editor, 'Retry my connection')
+    expect(send).not.toHaveBeenCalled()
+    await user.click(screen.getByRole('button', { name: 'Send message' }))
+    await waitFor(() => expect(send).toHaveBeenCalledOnce())
+    await waitFor(() => expect(editor).toHaveValue('Retry my connection'))
+    expect(screen.getByRole('button', { name: 'Configure API' })).toBeInTheDocument()
+    expect(screen.getByText('Check failed')).toBeInTheDocument()
+    expect(screen.queryByText(/Error invoking remote method/)).not.toBeInTheDocument()
+    act(() => { const state = useAppStore.getState(); useAppStore.setState({ runtimeCatalog: {
+      ...state.runtimeCatalog, backends: { ...state.runtimeCatalog!.backends,
+        [backend]: { ...state.runtimeCatalog!.backends[backend], custom_provider: { ...state.runtimeCatalog!.backends[backend].custom_provider! } } }
+    } }) })
+    expect(screen.getByRole('button', { name: 'Configure API' })).toBeInTheDocument()
+    if (refreshed) {
+      act(() => { const state = useAppStore.getState(); useAppStore.setState({ runtimeCatalog: {
+        ...state.runtimeCatalog, backends: { ...state.runtimeCatalog!.backends,
+          [backend]: { ...state.runtimeCatalog!.backends[backend], custom_provider: {
+            ...state.runtimeCatalog!.backends[backend].custom_provider!, configured: true, available: true,
+          } } }
+      } }) })
+      expect(screen.queryByRole('button', { name: 'Configure API' })).not.toBeInTheDocument()
+      expect(useAppStore.getState().error).toBeNull()
+    }
+    // The server connection was repaired; no client catalog refresh is needed
+    // to send again. The actual request is the readiness decision.
+    expect(screen.getByRole('button', { name: 'Send message' })).toBeEnabled()
+    await user.click(screen.getByRole('button', { name: 'Send message' }))
+    await waitFor(() => expect(send).toHaveBeenCalledTimes(2))
+    expect(screen.queryByRole('button', { name: 'Configure API' })).not.toBeInTheDocument()
+    expect(useAppStore.getState().error).toBeNull()
+  })
+
+  it.each(['missing', 'error'] as const)('lets the server recheck a cached %s Claude executable when retrying', async status => {
+    const send = vi.fn().mockRejectedValue(new Error('Claude executable is unavailable.'))
     Object.defineProperty(window, 'agentsDock', {
       configurable: true,
       value: { ...window.agentsDock, turns: { send } } as unknown as AgentsDockAPI,
@@ -2881,7 +2941,7 @@ describe('Composer', () => {
     const editor = screen.getByPlaceholderText('Message')
     await user.type(editor, 'Keep this Claude draft')
     await user.click(screen.getByRole('button', { name: 'Send message' }))
-    expect(send).not.toHaveBeenCalled()
+    await waitFor(() => expect(send).toHaveBeenCalledOnce())
     expect(editor).toHaveValue('Keep this Claude draft')
     expect(useAppStore.getState().error).toBe('Claude executable is unavailable.')
   })
@@ -3382,8 +3442,8 @@ describe('Composer', () => {
     expect(runNow).not.toHaveBeenCalled()
   })
 
-  it('blocks a previously selected locked model instead of sending through it', async () => {
-    const send = vi.fn()
+  it('lets the server decide whether a previously locked model is still unavailable', async () => {
+    const send = vi.fn().mockRejectedValue(new Error('Upgrade required.'))
     Object.defineProperty(window, 'agentsDock', {
       configurable: true,
       value: {
@@ -3402,10 +3462,11 @@ describe('Composer', () => {
     render(<Composer />)
 
     await user.type(screen.getByPlaceholderText('Message'), 'Run this')
-    expect(screen.getByRole('button', { name: 'Send message' })).toBeDisabled()
-    expect(screen.getByText('Upgrade required.')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Send message' })).toBeEnabled()
+    expect(screen.queryByText('Upgrade required.')).not.toBeInTheDocument()
     fireEvent.keyDown(screen.getByPlaceholderText('Message'), { key: 'Enter' })
-    expect(send).not.toHaveBeenCalled()
+    await waitFor(() => expect(send).toHaveBeenCalledOnce())
+    await waitFor(() => expect(screen.getByText('Upgrade required.')).toBeInTheDocument())
   })
 
   it('does not reinterpret a blocked draft shortcut as Send now for a queued turn', async () => {
@@ -6055,6 +6116,33 @@ describe('Composer', () => {
     expect(editor).toHaveValue('@')
     expect(useAppStore.getState().chatReferencesBySession['chat-1'] ?? []).toEqual([])
     expect(useAppStore.getState().error).toMatch(/names beginning with @ cannot be referenced/i)
+  })
+
+  it('allows OpenCode source and target mentions only when the server advertises support', async () => {
+    const session: Session = { id: 'chat-1', title: 'Source', backend: 'opencode', model: 'opencode/big-pickle' }
+    const send = vi.fn().mockResolvedValue({ session, queued: false })
+    window.agentsDock.turns = { send } as unknown as AgentsDockAPI['turns']
+    useAppStore.setState({
+      sessions: [session, { id: 'chat-2', title: 'OpenCode target', backend: 'opencode' }],
+      runtimeCatalog: { backends: { opencode: { available: true, native_credentials_present: true, models: [{ value: 'opencode/big-pickle', label: 'Big Pickle' }], efforts: [] } } },
+      health: { ok: true, capabilities: {
+        opencode_backend: { available: true, required: false, message: '', action: null, version: 1 },
+        cross_chat_handoffs_v1: durableComposerCapability({ supported_target_backends: ['codex', 'claude', 'cursor', 'opencode'] }) } }
+    })
+    const user = userEvent.setup()
+    render(<Composer />)
+    await user.type(screen.getByPlaceholderText('Message'), 'Ask @Open')
+    expect(await screen.findByRole('option', { name: /OpenCode target/ })).toBeInTheDocument()
+    expect(screen.queryByText('Server update required')).not.toBeInTheDocument()
+    await user.click(screen.getByRole('option', { name: /OpenCode target/ }))
+    await user.click(screen.getByRole('button', { name: 'Send message' }))
+    await waitFor(() => expect(send).toHaveBeenCalledOnce())
+    expect(send.mock.calls[0][0].chatReferences[0].session_id).toBe('chat-2')
+    expect(send.mock.calls[0][0].clientCapabilities).toContain('agent_cross_chat_routes_v2')
+    expect(send.mock.calls[0][0].clientCapabilities).not.toContain('codex_interactive_v1')
+    await user.type(screen.getByPlaceholderText('Message'), '@Open')
+    act(() => useAppStore.setState({ health: { ok: true, capabilities: { cross_chat_handoffs_v1: durableComposerCapability({ supported_target_backends: ['codex', 'claude'] }) } } }))
+    expect(screen.queryByRole('option', { name: /OpenCode target/ })).not.toBeInTheDocument()
   })
 
   it('does not silently downgrade new @ semantics on an older server while legacy references remain readable', async () => {

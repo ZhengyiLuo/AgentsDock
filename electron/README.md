@@ -75,7 +75,7 @@ OpenCode appears in the chat backend picker. A matching standalone
 AgentsServer must advertise the OpenCode v1 contract; an older server shows
 an upgrade requirement and cannot silently switch the chat to another backend.
 Install the server-supported OpenCode CLI and configure its provider on the
-server host, not in Electron. Settings → Runtimes → Recheck CLIs reports
+server host, not in Electron. Settings → AI Providers → Recheck CLIs reports
 readiness and setup guidance. OpenCode is optional and does not block other
 providers when it is absent.
 
@@ -91,8 +91,10 @@ commands automatically; **Plan only** applies a read-only tool policy, not an
 operating-system sandbox. Changing the permission mode or working directory
 resets native OpenCode context while retaining the visible AgentsDock timeline.
 
+OpenCode supports explicitly authorized cross-chat routes through the run-bound
+AgentsDock tool on matching servers, including tool-capable custom API models.
 This beta does not provide external history import, native session forks,
-side chats, live steering, native goals, or cross-chat routes for OpenCode.
+side chats, live steering, or native goals for OpenCode.
 Ordinary queued follow-ups and Stop remain available. A copied-memory fork
 is not presented as a native clone.
 

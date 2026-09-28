@@ -1,5 +1,8 @@
 import type { ProviderUsageScope, ProviderUsageSnapshot, UsageBackend } from '../shared/provider-usage'
+import { customModelBackend, customModelInput, type CustomModelBackend, type CustomModelInput } from '../shared/custom-models'
+import { cliAccountBackend, type CLIAccountBackend, connectionRequest, type ConnectionBackend, type ConnectionAction, type ProviderConnectionRequest, type ProviderConnectionReply } from '../shared/provider-connections'
 import { app, BrowserWindow, dialog, nativeImage, Notification, shell } from 'electron'
+import { discoverLocalServers, type DiscoveredLocalServer } from './local-server-discovery'
 import { applyOpenCodeSessionEvent } from '../shared/opencode'
 import { chmodSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
 import { open, rename, rm, stat, writeFile } from 'node:fs/promises'
@@ -26,6 +29,8 @@ import {
 } from '../shared/local-session-import'
 import type {
   AddServerProfileInput,
+  Backend,
+  RuntimeBackendCatalog,
   AgentFile,
   AgentCrossChatRoute,
   AgentCrossChatRouteUpdateResult,
@@ -337,6 +342,7 @@ interface SemanticTimelineCapability {
 }
 
 export interface AppServiceOptions {
+  localServerDiscovery?: () => Promise<DiscoveredLocalServer[]>
   /** Reconcile authorized updates on existing health observations, without another polling loop. */
   onServerReachable?: (profileId: string, health: Health) => void
   onServerUnavailable?: (profileId: string) => void
@@ -362,6 +368,8 @@ export interface AppServiceOptions {
 }
 
 export class AppService {
+  private readonly localServerDiscovery: () => Promise<DiscoveredLocalServer[]>
+  private localDiscoveryStarted = false
   readonly settings: SettingsStore
   readonly cache: LocalCache
   client: AgentServerClient
@@ -430,6 +438,7 @@ export class AppService {
   private sessions: Session[] = []
   private jobs: Job[] = []
   private runtimeCatalog: RuntimeCatalog | null = null
+  private providerCatalogRevision = 0
   private runtimeRefreshInFlight = new Map<number, { task: Promise<void>; forceProbe: boolean }>()
   private runtimeRefreshNextAt = 0
   /** Last server process we fetched a runtime catalog from. A different
@@ -468,6 +477,7 @@ export class AppService {
   } | null = null
 
   constructor(options: AppServiceOptions = {}) {
+    this.localServerDiscovery = options.localServerDiscovery ?? (options.settings || options.clientFactory ? async () => [] : discoverLocalServers)
     appLog('startup', 'loading settings')
     this.settings = options.settings ?? new SettingsStore()
     appLog('startup', 'settings loaded')
@@ -595,6 +605,10 @@ export class AppService {
     if (this.running) return
     if (!this.clientAvailable) this.activateProfile(this.activeProfileId, false, true)
     this.running = true
+    if (!this.localDiscoveryStarted) {
+      this.localDiscoveryStarted = true
+      void this.discoverManagedLocalServers()
+    }
     void this.runBackgroundRefresh(true, this.captureScope())
     void this.refreshInactiveProfileHealth()
     this.pollTimer = setInterval(
@@ -1498,6 +1512,33 @@ export class AppService {
     return this.settings.getProfile(profile.id, this.runtimeForProfile(profile.id)) ?? profile
   }
 
+  private async discoverManagedLocalServers(): Promise<void> {
+    const epoch = this.shutdownEpoch
+    const intent = this.profileSelectionIntent
+    try {
+      const found = await this.localServerDiscovery()
+      if (!this.running || this.shutdownEpoch !== epoch) return
+      for (const server of found) {
+        if (!this.running || this.shutdownEpoch !== epoch) return
+        const profiles = this.settings.listProfiles()
+        const existing = profiles.find(profile => profile.serverUrl.replace(/\/$/, '') === server.serverUrl || profile.serverIdentity === server.serverIdentity)
+        if (existing) {
+          // Only fill an unconfigured bootstrap profile. Never overwrite saved
+          // remote credentials, a trusted identity, or a user's selection.
+          if (!existing.hasAccessToken && !existing.serverIdentity && existing.serverUrl.replace(/\/$/, '') === server.serverUrl) {
+            this.settings.updateProfile(existing.id, { accessToken: server.accessToken, serverIdentity: server.serverIdentity, serverSetupComplete: true }, process.platform === 'darwin')
+            if (existing.id === this.activeProfileId && intent === this.profileSelectionIntent) await this.switchServer(existing.id, true)
+          }
+          continue
+        }
+        const profile = this.settings.addProfile({ ...server, serverSetupComplete: true }, process.platform === 'darwin')
+        this.setProfileRuntime(profile.id, { connectionState: 'cached', lastConnectionCheckedAt: null })
+        this.emitProfiles()
+      }
+      if (this.running && this.shutdownEpoch === epoch) await this.refreshInactiveProfileHealth()
+    } catch { appLog('startup', 'local server discovery unavailable; saved profiles unchanged') }
+  }
+
   async updateServer(profileId: string, patch: UpdateServerProfilePatch): Promise<PublicServerProfile> {
     return patch.resetServerIdentity || this.profileAuthorityOperations.has(profileId)
       ? this.withProfileAuthorityOperation(profileId, () => this.updateServerOnce(profileId, patch))
@@ -2196,12 +2237,87 @@ export class AppService {
     return result
   }
 
+  async providerConnectionRequest(expected: CodexServerSettingsScope, backend: ConnectionBackend, action: ConnectionAction, input?: ProviderConnectionRequest): Promise<ProviderConnectionReply> {
+    const checked = connectionRequest(backend, action, input)
+    const scope = this.requireProfileScope(expected?.profileId, expected?.profileGeneration)
+    await this.ensureValidatedScope(scope)
+    this.assertCurrentScope(scope)
+    const result = await scope.client.providerConnectionRequest(backend, action, checked)
+    this.assertCurrentScope(scope)
+    if (action !== 'get' && result.configuration) {
+      const value = result.configuration
+      this.reconcileProviderConnection(scope, backend, {
+        configured: value.configured,
+        available: value.configured && value.scope === 'per_chat' && value.last_result === 'verified'
+          && this.runtimeCatalog?.backends[backend]?.diagnostic?.installed === true,
+        base_url: value.base_url, model: value.model, default_model: value.model,
+      })
+    }
+    return result
+  }
+
+  private reconcileProviderConnection(scope: ConnectionScope, backend: Backend, custom: NonNullable<RuntimeBackendCatalog['custom_provider']>): void {
+    this.assertCurrentScope(scope)
+    // A catalog request started before Save/Forget cannot resurrect old credentials.
+    this.providerCatalogRevision = (this.providerCatalogRevision ?? 0) + 1
+    this.runtimeRefreshNextAt = 0
+    if (!custom.configured) {
+      // Forget revokes existing bindings as well as the new-chat connection.
+      const affected = (this.sessions ?? []).filter(session => session.backend === backend
+        && (backend === 'codex' ? session.codex_provider : session.provider_connection) === 'custom')
+      if (affected.length) {
+        const ids = new Set(affected.map(session => session.id))
+        const field = backend === 'codex' ? 'codex_provider_catalog' : 'provider_connection_catalog'
+        this.sessions = this.sessions.map(session => ids.has(session.id)
+          ? { ...session, [field]: { configured: false, available: false, models: [], efforts: [], model: null, base_url: null } }
+          : session)
+        this.cache.putSessions(scope.namespace, this.sessions)
+        this.emitSessions(scope, this.sessions)
+      }
+    }
+    if (!this.runtimeCatalog?.backends[backend]) return
+    const catalog = { ...this.runtimeCatalog, backends: { ...this.runtimeCatalog.backends,
+      [backend]: { ...this.runtimeCatalog.backends[backend], custom_provider: custom } } }
+    this.runtimeCatalog = catalog
+    this.cache.putPreference(scope.namespace, RUNTIME_CATALOG_CACHE_KEY, catalog)
+    this.emitRuntime(scope, catalog)
+  }
+
   async codexAuth(expected: CodexServerSettingsScope): Promise<CodexAuthStatus> {
     const scope = this.requireProfileScope(expected?.profileId, expected?.profileGeneration)
     await this.ensureValidatedScope(scope)
     this.assertCurrentScope(scope)
     const result = await scope.client.codexAuth()
     this.assertCurrentScope(scope)
+    return result
+  }
+
+  async providerAccount(expected: CodexServerSettingsScope, backend: CLIAccountBackend) {
+    const checked = cliAccountBackend(backend)
+    const scope = this.requireProfileScope(expected?.profileId, expected?.profileGeneration)
+    await this.ensureValidatedScope(scope)
+    this.assertCurrentScope(scope)
+    const result = await scope.client.providerAccount(checked)
+    this.assertCurrentScope(scope)
+    return result
+  }
+  async customModels(expected: CodexServerSettingsScope, backend: CustomModelBackend, input?: CustomModelInput, sessionId?: string) {
+    const checked = customModelBackend(backend)
+    const body = input ? customModelInput(checked, input) : undefined
+    const scope = this.requireProfileScope(expected?.profileId, expected?.profileGeneration)
+    await this.ensureValidatedScope(scope)
+    this.assertCurrentScope(scope)
+    const result = await scope.client.customModels(checked, body, sessionId)
+    this.assertCurrentScope(scope)
+    if (sessionId) {
+      const page = await scope.client.sessionPage(sessionId, { limit: 1 })
+      this.assertCurrentScope(scope)
+      this.upsertSession(scope, page.session)
+    } else {
+      // One reconciliation per explicit discovery/save, never per keystroke.
+      try { await this.refreshRuntime(true, false, scope, true) } catch { /* metadata operation still succeeded */ }
+      this.assertCurrentScope(scope)
+    }
     return result
   }
 
@@ -2280,6 +2396,9 @@ export class AppService {
     this.assertCurrentScope(scope)
     const result = await scope.client.resetCodexProvider()
     this.assertCurrentScope(scope)
+    if (!result.configured) this.reconcileProviderConnection(scope, 'codex', {
+      configured: false, available: false, base_url: null, model: null,
+    })
     await this.refreshCodexProviderRuntime(scope)
     return result
   }
@@ -2351,6 +2470,7 @@ export class AppService {
     await this.ensureValidatedScope(scope)
     this.assertCurrentScope(scope)
     this.requirePerChatCodexProvider(input.codex_provider)
+    this.requirePerChatProviderConnection(input.provider_connection)
     this.requirePerChatSubagentLimit(input.subagent_limit)
     const session = await scope.client.createSession(input)
     this.assertCurrentScope(scope)
@@ -2363,6 +2483,7 @@ export class AppService {
     await this.ensureValidatedScope(scope)
     this.assertCurrentScope(scope)
     this.requirePerChatCodexProvider(input.codex_provider)
+    if (input.provider_connection === 'custom') throw new Error('Import native conversations with their native login.')
     this.requirePerChatSubagentLimit(input.subagent_limit)
     const session = await scope.client.createSession(input)
     this.assertCurrentScope(scope)
@@ -2441,6 +2562,7 @@ export class AppService {
     await this.ensureValidatedScope(scope)
     this.assertCurrentScope(scope)
     this.requirePerChatCodexProvider(patch.codex_provider)
+    this.requirePerChatProviderConnection(patch.provider_connection)
     this.requirePerChatSubagentLimit(patch.subagent_limit)
     const session = await scope.client.updateSession(sessionId, patch)
     this.assertCurrentScope(scope)
@@ -2472,6 +2594,12 @@ export class AppService {
     }
   }
 
+  private requirePerChatProviderConnection(selection: unknown): void {
+    if (selection === undefined || selection === 'default') return
+    if (selection !== 'custom') throw new Error('Invalid API connection selection.')
+    if (this.health?.capabilities?.provider_connections_v1?.per_chat !== true) throw new Error('Update AgentsServer to use this custom API in chats.')
+  }
+
   private requireCodexProviderModels(): void {
     if (this.health?.capabilities?.codex_provider_v1?.per_chat_models !== true) throw new Error('CODEX_PROVIDER_UPDATE')
   }
@@ -2494,6 +2622,23 @@ export class AppService {
       this.portTunnels.disposeSession(sessionId)
       this.sessions = this.sessions.filter(session => session.id !== sessionId)
       this.cache.removeSession(scope.namespace, sessionId)
+      this.emitSessions(scope, this.sessions)
+      this.refreshProfileUnread(scope)
+    }
+    return removed
+  }
+
+  async discardEmptySession(expected: WorkspaceProfileScope, sessionId: string, updatedAt: string): Promise<boolean> {
+    const scope = this.requireProfileScope(expected?.profileId, expected?.profileGeneration)
+    await this.ensureValidatedScope(scope)
+    this.assertCurrentScope(scope)
+    if (!expected.serverIdentity || expected.serverIdentity !== this.settings.getProfile(scope.profileId)?.serverIdentity) throw staleProfileError()
+    if (typeof updatedAt !== 'string' || !updatedAt || updatedAt.length > 64) return false
+    const removed = await scope.client.discardEmptySession(sessionId, updatedAt)
+    this.assertCurrentScope(scope)
+    if (removed) {
+      this.cache.removeSession(scope.namespace, sessionId)
+      this.sessions = this.sessions.filter(session => session.id !== sessionId)
       this.emitSessions(scope, this.sessions)
       this.refreshProfileUnread(scope)
     }
@@ -5241,9 +5386,11 @@ export class AppService {
 
   private async loadRuntimeCatalog(scope: ConnectionScope, forceProbe = false, announce = false): Promise<void> {
     const started = Date.now()
+    const providerRevision = this.providerCatalogRevision ?? 0
     try {
       const catalog = await scope.client.runtimeCatalog(forceProbe)
       if (!this.isCurrentScope(scope)) return
+      if (providerRevision !== (this.providerCatalogRevision ?? 0)) return
       if (!runtimeCatalogHasSelectableModels(catalog)) {
         throw new Error('Server returned no selectable Claude/Codex models')
       }

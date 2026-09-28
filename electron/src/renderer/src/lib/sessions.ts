@@ -14,6 +14,7 @@ export function isUntouchedNewChat(session: Session): boolean {
     && !session.claude_session_id
     && !session.codex_thread_id
     && !session.cursor_session_id
+    && !session.opencode_session_id
     && !session.parent_id
     && !session.pinned
     && !session.archived

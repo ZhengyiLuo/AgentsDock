@@ -29,7 +29,9 @@ export function validateCodexProviderInput(value: unknown): CodexProviderInput {
   if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('CODEX_PROVIDER_INVALID')
   const input = value as Record<string, unknown>
   try {
+    if (input.verify_connection !== undefined && typeof input.verify_connection !== 'boolean') throw new Error()
     return { base_url: validateCodexProviderURL(input.base_url),
+      ...(input.verify_connection === true ? { verify_connection: true } : {}),
       ...(input.model == null || input.model === '' ? {} : { model: modelID(input.model) }),
       api_key: validateCodexApiKey(input.api_key) }
   } catch { throw new Error('CODEX_PROVIDER_INVALID') }
@@ -52,6 +54,8 @@ export function parseCodexProviderConfiguration(value: unknown): CodexProviderCo
   try {
     if (!item.configured && (item.base_url !== null || item.model !== null || item.has_api_key)) throw new Error()
     return { available: item.available, configured: item.configured, has_api_key: item.has_api_key,
+      ...(item.connection_verified === true && item.configured ? { connection_verified: true } : {}),
+      ...(item.connection_check_available === true ? { connection_check_available: true } : {}),
       base_url: item.configured ? validateCodexProviderURL(item.base_url) : null,
       model: item.configured && item.model != null && item.model !== '' ? modelID(item.model) : null, wire_api: 'responses',
       ...(typeof item.credential_id === 'string' && /^[a-f0-9]{32}$/.test(item.credential_id) ? { credential_id: item.credential_id } : {}) }

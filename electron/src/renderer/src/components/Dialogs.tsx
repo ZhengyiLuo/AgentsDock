@@ -20,16 +20,16 @@ import { effectiveScheduleKind, formatScheduleWallTime, jobLoopsForever, parseSc
 import { digestTargetSections, orderedActiveSessions, rankSessionsForSearch, sessionNameMatchRank } from '../lib/sessions'
 import { useTransientClose } from '../lib/transient-close'
 import { captureWorkspaceScope } from '../lib/workspace-preferences'
-import { saveNewChatDefaults, useAppStore, waitForWorkspaceReady } from '../store/app-store'
+import { markNewChatPlaceholder, saveNewChatDefaults, useAppStore, waitForWorkspaceReady } from '../store/app-store'
 import { BackendMark } from './BackendMark'
 import { ChatShareDialog } from './ChatShareDialog'
-import { CodexAuthSettings } from './CodexAuthSettings'
+import { AIProviderSettings } from './AIProviderSettings'
+import { openAIProviderSettings } from '../lib/provider-settings'
 import { CodexModelDiscovery } from './CodexModelDiscovery'
 import { ReasoningDisplaySettings } from './ReasoningDisplaySettings'
 import { CoordinatedServerUpdateRow } from './CoordinatedServerUpdateRow'
 import { CodexServerSettings } from './CodexServerSettings'
 import { CodexSubagentSettings } from './CodexSubagentSettings'
-import { RuntimeHealthPanel } from './RuntimeHealth'
 import { ServerManagement } from './ServerManagement'
 import { KeyboardShortcutsSettings } from './KeyboardShortcutsSettings'
 import { ShortcutKey } from './ShortcutTooltip'
@@ -457,7 +457,7 @@ export function Dialogs() {
   </>
 }
 
-type AppSettingsSection = 'general' | 'shortcuts' | 'server' | 'updates'
+type AppSettingsSection = 'general' | 'shortcuts' | 'server' | 'providers' | 'updates'
 
 export function AppSettingsDialog({ serverSettings, serverUpdates, onServerUpdatesVisible, onServerReleaseChecksVisible, onCoordinatedServerUpdate }: {
   serverSettings?: ReactNode; serverUpdates?: ReactNode; onServerUpdatesVisible?: (visible: boolean) => void
@@ -474,6 +474,7 @@ export function AppSettingsDialog({ serverSettings, serverUpdates, onServerUpdat
   const activeProfileId = useAppStore(state => state.activeProfileId)
   const open = appSettingsOpen || legacyServerSettingsOpen
   const [section, setSection] = useState<AppSettingsSection>('general')
+  const [providerRequest, setProviderRequest] = useState<{ backend?: Backend }>()
   const [appearance, setAppearance] = useState<AppearanceMode>('system')
   const [update, setUpdate] = useState<AppUpdateStatus | null>(null)
   const [updateTrackBusy, setUpdateTrackBusy] = useState(false)
@@ -489,9 +490,14 @@ export function AppSettingsDialog({ serverSettings, serverUpdates, onServerUpdat
   useTransientClose(open, closeSettings)
   useEffect(() => {
     const selectSection = (event: Event) => {
-      const next = (event as CustomEvent<AppSettingsSection | 'appearance'>).detail
+      const next = (event as CustomEvent<AppSettingsSection | 'appearance' | { section: 'providers'; backend?: Backend }>).detail
+      if (next && typeof next === 'object' && next.section === 'providers') {
+        setSection('providers')
+        setProviderRequest({ backend: next.backend })
+        return
+      }
       if (next === 'appearance') setSection('general')
-      else if (next === 'general' || next === 'shortcuts' || next === 'server' || next === 'updates') setSection(next)
+      else if (next === 'general' || next === 'shortcuts' || next === 'server' || next === 'providers' || next === 'updates') setSection(next)
     }
     window.addEventListener('agentsdock:app-settings-section', selectSection)
     return () => window.removeEventListener('agentsdock:app-settings-section', selectSection)
@@ -585,6 +591,7 @@ export function AppSettingsDialog({ serverSettings, serverUpdates, onServerUpdat
             <button ref={section === 'general' ? activeSectionRef : undefined} type="button" className={section === 'general' ? 'active' : ''} aria-current={section === 'general' ? 'page' : undefined} onClick={() => setSection('general')}><span>{t('settings.general')}</span></button>
             <button ref={section === 'shortcuts' ? activeSectionRef : undefined} type="button" className={section === 'shortcuts' ? 'active' : ''} aria-current={section === 'shortcuts' ? 'page' : undefined} onClick={() => setSection('shortcuts')}><span>{t('settings.keyboardShortcuts')}</span></button>
             <button ref={section === 'server' ? activeSectionRef : undefined} type="button" className={section === 'server' ? 'active' : ''} aria-current={section === 'server' ? 'page' : undefined} onClick={() => setSection('server')}><span>{t('settings.server')}</span></button>
+            <button ref={section === 'providers' ? activeSectionRef : undefined} type="button" className={section === 'providers' ? 'active' : ''} aria-current={section === 'providers' ? 'page' : undefined} onClick={() => setSection('providers')}><span>{t('settings.aiProviders')}</span></button>
             <button ref={section === 'updates' ? activeSectionRef : undefined} type="button" className={section === 'updates' ? 'active' : ''} aria-current={section === 'updates' ? 'page' : undefined} onClick={() => setSection('updates')}><span>{t('settings.updates')}</span></button>
           </nav>
         </aside>
@@ -620,6 +627,10 @@ export function AppSettingsDialog({ serverSettings, serverUpdates, onServerUpdat
             </div>
           </section>}
           {section === 'shortcuts' && <KeyboardShortcutsSettings />}
+          {section === 'providers' && <section className="app-settings-section" aria-labelledby="app-settings-providers-title">
+            <header><h2 id="app-settings-providers-title">{t('settings.aiProviders')}</h2></header>
+            <AIProviderSettings requested={providerRequest} />
+          </section>}
           {section === 'server' && <section className="app-settings-section" aria-labelledby="app-settings-server-title">
             <header><h2 id="app-settings-server-title">{t('settings.server')}</h2></header>
             {serverSettings}
@@ -2819,8 +2830,6 @@ export function SettingsDialog() {
   const serverSettingsContent = <div className="dialog-form settings-dialog-body app-settings-server-page">
     <ServerManagement addRequest={addServerRequest} manageRequest={manageServersRequest} />
     <div className={`server-health ${connected ? degraded ? 'degraded' : 'online' : 'offline'}`}><span /><div className="server-health-copy"><strong>{connected ? degraded ? t("ui.Dialogs.SettingsDialog.connected_limited_a6733ca") : t("ui.Dialogs.SettingsDialog.connected_2296556") : t("ui.Dialogs.SettingsDialog.offline_a179478")}</strong><small>{health?.server_identity || t("ui.Dialogs.SettingsDialog.connection_settings_are_stored_on_this_mac_7348bfb")}</small>{restartNotice && <small className={`server-restart-notice ${restartNotice.kind}`} role={restartNotice.kind === 'error' ? 'alert' : 'status'} aria-live="polite">{restartNotice.message}</small>}</div>{restartServerButton()}</div>
-    <RuntimeHealthPanel />
-    <CodexAuthSettings connected={connected} profileId={activeProfileId} profileGeneration={profileGeneration} serverTitle={activeProfile?.name} />
     <CodexServerSettings
       connected={connected}
       profileId={activeProfileId}
@@ -2919,14 +2928,15 @@ export function SessionDialog({ mode }: { mode: 'newChat' | 'resume' }) {
   const [cwd, setCwd] = useState('')
   const [providerId, setProviderId] = useState('')
   const [backendChoice, setBackendChoice] = useState<ChatBackendChoice>('codex')
-  const { backend, codex_provider } = chatBackendSelection(backendChoice)
+  const { backend, codex_provider, provider_connection } = chatBackendSelection(backendChoice)
+  const connectionMode = provider_connection === 'custom' ? 'custom' : codex_provider
   const [model, setModel] = useState('')
   const [manualModel, setManualModel] = useState(false)
   const [effort, setEffort] = useState('')
   const [systemPrompt, setSystemPrompt] = useState('')
   const [saving, setSaving] = useState(false)
   const folders = useMemo(() => [...new Set(sessions.map(session => session.folder || 'General'))].sort(), [sessions])
-  const backendOptions = useMemo(() => selectableChatBackendChoices(health, catalog).filter(choice => mode !== 'resume' || choice !== 'opencode'), [catalog, health, mode])
+  const backendOptions = useMemo(() => selectableChatBackendChoices(health, catalog).filter(choice => mode !== 'resume' || choice !== 'opencode' && !choice.endsWith('-custom')), [catalog, health, mode])
   useEffect(() => {
     if (!open) return
     setTitle(mode === 'newChat' ? 'New chat' : 'Resumed chat')
@@ -2939,7 +2949,7 @@ export function SessionDialog({ mode }: { mode: 'newChat' | 'resume' }) {
   }, [defaultCwd, mode, open])
   useEffect(() => {
     if (!open || backendOptions.includes(backendChoice)) return
-    setBackendChoice('codex')
+    if (backendOptions[0]) setBackendChoice(backendOptions[0])
     setModel('')
     setEffort('')
   }, [backendChoice, backendOptions, open])
@@ -2949,27 +2959,28 @@ export function SessionDialog({ mode }: { mode: 'newChat' | 'resume' }) {
       const state = useAppStore.getState()
       const preferenceScope = captureWorkspaceScope(state)
       if (!selectableChatBackends(state.health, state.runtimeCatalog).includes(backend)) throw new Error(`${backendLabel(backend)} is unavailable on this AgentsServer.`)
-      const runtimeError = runtimeSelectionError(state.health, state.runtimeCatalog, backend, model, codex_provider)
+      if (!backendOptions.includes(backendChoice)) throw new Error(t('connections.noneReady'))
+      const runtimeError = runtimeSelectionError(state.health, state.runtimeCatalog, backend, model, connectionMode)
       if (runtimeError) throw new Error(runtimeError)
-      const input = { title: title.trim() || 'New chat', folder: folder.trim() || 'General', cwd: cwd.trim(), backend, codex_provider, model: model || null, effort: effort || null, system_prompt: systemPrompt.trim() || null, cursor_permission_mode: backend === 'cursor' ? 'default' as const : null, opencode_permission_mode: backend === 'opencode' ? 'default' as const : null }
+      const input = { title: title.trim() || 'New chat', folder: folder.trim() || 'General', cwd: cwd.trim(), backend, codex_provider, provider_connection, model: model || null, effort: effort || null, system_prompt: systemPrompt.trim() || null, cursor_permission_mode: backend === 'cursor' ? 'default' as const : null, opencode_permission_mode: backend === 'opencode' ? 'default' as const : null }
       const session = mode === 'resume' ? await window.agentsDock.sessions.resume({ ...input, providerId: providerId.trim() }) : await window.agentsDock.sessions.create(input)
       if (mode === 'newChat') {
         trackEvent('chat_created')
-        await saveNewChatDefaults(preferenceScope, input).catch(() => undefined)
+        await Promise.all([saveNewChatDefaults(preferenceScope, input), markNewChatPlaceholder(preferenceScope, session)]).catch(() => undefined)
       } else {
         trackEvent('chat_resumed')
       }
       await useAppStore.getState().refreshSessions(); useAppStore.getState().setModal(mode, false); await useAppStore.getState().selectSession(session.id)
     } catch (error) { useAppStore.getState().setError(message(error)) } finally { setSaving(false) }
   }
-  const modelOptions = runtimeCatalogOptions(catalog, backend, 'models', model, codex_provider)
-  const effortOptions = runtimeEffortOptions(catalog, backend, model, effort, codex_provider)
+  const modelOptions = runtimeCatalogOptions(catalog, backend, 'models', model, connectionMode)
+  const effortOptions = runtimeEffortOptions(catalog, backend, model, effort, connectionMode)
   const hasReasoning = backend !== 'cursor' && backend !== 'opencode' && effortOptions.some(option => Boolean(option.value))
   const selectModel = (value: string) => {
     setModel(value)
-    setEffort(runtimeEffortAfterModelChange(catalog, backend, value || null, effort, codex_provider) || '')
+    setEffort(runtimeEffortAfterModelChange(catalog, backend, value || null, effort, connectionMode) || '')
   }
-  const runtimeError = runtimeSelectionError(health, catalog, backend, model, codex_provider)
+  const runtimeError = !backendOptions.includes(backendChoice) ? t('connections.noneReady') : runtimeSelectionError(health, catalog, backend, model, connectionMode)
   const cursorAvailable = cursorBackendAvailable(health, catalog)
   const cursorUnavailableReason = cursorBackendUnavailableReason(health, catalog)
   const resumeDescription = backend === 'cursor'
@@ -2989,26 +3000,29 @@ export function SessionDialog({ mode }: { mode: 'newChat' | 'resume' }) {
       <fieldset className="span-two"><legend>{t("ui.Dialogs.SessionDialog.backend_2fb4019")}</legend><div className="segmented session-backend-choices">{backendOptions.map(value => {
         const selection = chatBackendSelection(value)
         const needsConfiguration = value === 'codex-custom' && !codexCustomProviderAvailable(health, catalog)
-        const unavailable = value === 'cursor' && !cursorAvailable || value === 'opencode' && !opencodeBackendAvailable(health, catalog)
+        const unavailable = selection.provider_connection !== 'custom' && (value === 'cursor' && !cursorAvailable || value === 'opencode' && !opencodeBackendAvailable(health, catalog))
         return <button type="button" className={backendChoice === value ? 'active' : ''} key={value} aria-pressed={backendChoice === value} title={needsConfiguration ? t('codexProvider.configure') : unavailable ? (value === 'opencode' ? opencodeBackendUnavailableReason(health, catalog) : cursorUnavailableReason) ?? undefined : undefined} onClick={() => {
           if (needsConfiguration) {
             useAppStore.getState().setModal(mode, false)
-            window.dispatchEvent(new CustomEvent('agentsdock:app-settings-section', { detail: 'server' }))
+            window.dispatchEvent(new CustomEvent('agentsdock:app-settings-section', { detail: 'providers' }))
             useAppStore.getState().setModal('appSettings', true)
             return
           }
           setBackendChoice(value); setModel(''); setEffort(''); setManualModel(false)
-        }}><BackendMark backend={selection.backend} size={16} />{backendLabel(selection.backend, selection.codex_provider)}{needsConfiguration ? ` · ${t('codexProvider.configure')}` : unavailable ? t("ui.Dialogs.unavailable_77649d6") : ''}</button>
-      })}</div></fieldset>
+        }}><BackendMark backend={selection.backend} size={16} />{backendLabel(selection.backend, selection.provider_connection === 'custom' ? 'custom' : selection.codex_provider)}{needsConfiguration ? ` · ${t('codexProvider.configure')}` : unavailable ? t("ui.Dialogs.unavailable_77649d6") : ''}</button>
+      })}</div>{mode === 'newChat' && <button type="button" className="quiet-button" onClick={() => {
+        useAppStore.getState().setModal(mode, false)
+        openAIProviderSettings()
+      }}>{t('connections.addAgent')}</button>}</fieldset>
       <label className={hasReasoning ? undefined : 'span-two'}><span>{t("ui.Dialogs.SessionDialog.model_5e2c614")}</span><select value={manualModel ? '__manual__' : model} onChange={event => {
         const value = event.target.value
         setManualModel(value === '__manual__')
         if (value !== '__manual__') selectModel(value)
-      }}>{modelOptions.map(option => <option value={option.value} key={option.value || 'default'} disabled={option.locked} title={option.locked ? option.locked_reason ?? undefined : undefined}>{option.label}{option.locked && codex_provider !== 'custom' ? t("ui.Dialogs.upgrade_required_d38f0e0") : ''}</option>)}{codex_provider === 'custom' && <option value="__manual__">{t('codexProvider.manualModel')}</option>}</select></label>
+      }}>{modelOptions.map(option => <option value={option.value} key={option.value || 'default'} disabled={option.locked} title={option.locked ? option.locked_reason ?? undefined : undefined}>{option.label}{option.locked && connectionMode !== 'custom' ? t("ui.Dialogs.upgrade_required_d38f0e0") : ''}</option>)}{connectionMode === 'custom' && <option value="__manual__">{t('codexProvider.manualModel')}</option>}</select></label>
       {hasReasoning && <label><span>Reasoning</span><select value={effort} onChange={event => setEffort(event.target.value)}>{effortOptions.map(option => <option value={option.value} key={option.value || 'default'}>{option.label}</option>)}</select></label>}
-      {codex_provider === 'custom' && <div className="span-two">
+      {connectionMode === 'custom' && <div className="span-two">
         {manualModel && <label><span>{t('codexAuth.model')}</span><input aria-label={t('codexAuth.model')} value={model} maxLength={256} autoComplete="off" spellCheck={false} onChange={event => selectModel(event.target.value)} /><small>{t('codexProvider.manualModelHelp')}</small></label>}
-        <CodexModelDiscovery />
+        {backend !== 'cursor' && <CodexModelDiscovery backend={backend} />}
       </div>}
       {runtimeError && <small className="span-two schedule-validation error" role="alert">{runtimeError}</small>}
       <label className="span-two"><span>{t("ui.Dialogs.SessionDialog.system_prompt_561257c")}</span><textarea rows={4} value={systemPrompt} onChange={event => setSystemPrompt(event.target.value)} placeholder={t("ui.Dialogs.SessionDialog.optional_per_chat_instructions_454671b")} /></label>
@@ -4335,7 +4349,7 @@ export function JobDialog() {
       currentState.runtimeCatalog,
       selectedBackend,
       selectedBackend === currentSession.backend ? currentSession.model : null,
-      selectedBackend === currentSession.backend ? currentSession.codex_provider : undefined, currentSession.codex_provider_catalog
+      selectedBackend === currentSession.backend ? (currentSession.provider_connection === 'custom' ? 'custom' : currentSession.codex_provider) : undefined, (currentSession.provider_connection_catalog ?? currentSession.codex_provider_catalog)
     )
     if (enabled && currentRuntimeError) {
       currentState.setError(currentRuntimeError)
@@ -4345,7 +4359,7 @@ export function JobDialog() {
     const leadingWhitespace = prompt.length - prompt.trimStart().length
     const cleanPrompt = prompt.trim()
     const sameServerChatReferences = chatReferences.filter(reference => reference.target_kind !== 'secure_peer')
-    if (selectedBackend === 'opencode' && sameServerChatReferences.length) {
+    if (selectedBackend === 'opencode' && sameServerChatReferences.length && !supportedCrossChatTargetBackends(currentState.health).includes('opencode')) {
       currentState.setError(t('opencode.crossChatUnavailable'))
       setSaving(false)
       return
@@ -4468,14 +4482,14 @@ export function JobDialog() {
       <label><span>{t("ui.Dialogs.JobDialog.title_7e8cd20")}</span><input value={title} onChange={event => setTitle(event.target.value)} required /></label>
       <fieldset><legend>{t("ui.Dialogs.JobDialog.backend_2fb4019")}</legend><div className="segmented">{selectableBackends.map(value => {
         const unavailable = value === 'cursor' && !cursorBackendAvailable(health, catalog) || value === 'opencode' && !opencodeBackendAvailable(health, catalog)
-        return <button type="button" key={value} className={backend === value ? 'active' : ''} aria-pressed={backend === value} aria-describedby={unavailable ? `job-${value}-runtime-help` : undefined} disabled={unavailable} title={unavailable ? (value === 'opencode' ? opencodeBackendUnavailableReason(health, catalog) : cursorUnavailableReason) ?? undefined : undefined} onClick={() => setBackend(value)}><BackendMark backend={value} size={14} />{backendLabel(value, value === session?.backend ? session.codex_provider : undefined)}{unavailable ? t("ui.Dialogs.unavailable_77649d6") : ''}</button>
+        return <button type="button" key={value} className={backend === value ? 'active' : ''} aria-pressed={backend === value} aria-describedby={unavailable ? `job-${value}-runtime-help` : undefined} disabled={unavailable} title={unavailable ? (value === 'opencode' ? opencodeBackendUnavailableReason(health, catalog) : cursorUnavailableReason) ?? undefined : undefined} onClick={() => setBackend(value)}><BackendMark backend={value} size={14} />{backendLabel(value, value === session?.backend ? (session.provider_connection === 'custom' ? 'custom' : session.codex_provider) : undefined)}{unavailable ? t("ui.Dialogs.unavailable_77649d6") : ''}</button>
       })}</div>{selectableBackends.includes('cursor') && !cursorBackendAvailable(health, catalog) && cursorUnavailableReason
         ? <small id="job-cursor-runtime-help" className="runtime-option-help">{cursorUnavailableReason}</small>
         : null}{selectableBackends.includes('opencode') && !opencodeBackendAvailable(health, catalog)
           && <small id="job-opencode-runtime-help" className="runtime-option-help">{opencodeBackendUnavailableReason(health, catalog)}</small>}</fieldset>
       <fieldset className="job-context-fieldset"><legend>{t("ui.Dialogs.JobDialog.run_context_20887b3")}</legend><div className={`job-context-picker${supportsIndependentRuns ? '' : ' single'}`} role="group" aria-label={t("ui.Dialogs.JobDialog.run_context_20887b3")}>
         <button type="button" className={contextMode === 'chat' ? 'active' : ''} aria-pressed={contextMode === 'chat'} onClick={() => selectContextMode('chat')}><strong>{t("ui.Dialogs.JobDialog.continue_in_this_chat_eed3ae3")}</strong><small>{t("ui.Dialogs.JobDialog.use_this_chat_s_existing_context_and_add_e_d7db2e4")}</small></button>
-        {supportsIndependentRuns && <button type="button" className={contextMode === 'standalone' ? 'active' : ''} aria-pressed={contextMode === 'standalone'} onClick={() => selectContextMode('standalone')}><strong>{t("ui.Dialogs.JobDialog.independent_runs_3d32d40")}</strong><small>{t('ui.job.independentHelp', { backend: backendLabel(backend, backend === session?.backend ? session.codex_provider : undefined) })}</small></button>}
+        {supportsIndependentRuns && <button type="button" className={contextMode === 'standalone' ? 'active' : ''} aria-pressed={contextMode === 'standalone'} onClick={() => selectContextMode('standalone')}><strong>{t("ui.Dialogs.JobDialog.independent_runs_3d32d40")}</strong><small>{t('ui.job.independentHelp', { backend: backendLabel(backend, backend === session?.backend ? (session.provider_connection === 'custom' ? 'custom' : session.codex_provider) : undefined) })}</small></button>}
       </div>{!supportsIndependentRuns && <small className="job-context-unavailable">{t("ui.Dialogs.JobDialog.update_agentsserver_to_add_independent_run_6138641")}</small>}</fieldset>
       {runtimeError && <small className="schedule-validation error" role="alert">{runtimeError}{enabled ? t("ui.Dialogs.JobDialog.pause_this_job_or_choose_an_available_runt_1d574aa") : ''}</small>}
       <fieldset className="schedule-builder"><legend>{t("ui.Dialogs.JobDialog.schedule_f4830a1")}</legend><div className="segmented schedule-kind">{(['interval', 'cron', 'rrule'] as JobScheduleKind[]).map(kind => <button type="button" key={kind} className={scheduleKind === kind ? 'active' : ''} aria-pressed={scheduleKind === kind} onClick={() => setScheduleKind(kind)}>{kind === 'rrule' ? 'RRULE' : kind[0].toUpperCase() + kind.slice(1)}</button>)}</div>
@@ -4493,7 +4507,7 @@ export function JobDialog() {
         health={health}
         sessions={sessions}
         folderOrder={folderOrder}
-        chatSupported={selectedBackend !== 'opencode' && scheduledJobMentionActionsAvailable(health)}
+        chatSupported={(selectedBackend !== 'opencode' || supportedCrossChatTargetBackends(health).includes('opencode')) && scheduledJobMentionActionsAvailable(health)}
         teamSupported={teamMessagesAvailable(health)}
         value={prompt}
         chatReferences={chatReferences}

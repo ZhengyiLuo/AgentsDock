@@ -23,7 +23,8 @@ export function ProviderUsageIndicator({ session }: { session: Session }) {
   const serverIdentity = useAppStore(state => state.health?.server_identity)
   const serverInstance = useAppStore(state => state.health?.server_instance_id)
   const available = useAppStore(state => state.health?.capabilities?.provider_usage?.available === true)
-  const backend = session.backend === 'codex' || session.backend === 'claude' ? session.backend : null
+  const backend = session.backend === 'codex' && session.codex_provider === 'custom' ? null
+    : session.backend === 'codex' || session.backend === 'claude' ? session.backend : null
   const key = JSON.stringify([profileId, profileGeneration, serverIdentity, serverInstance, session.id, backend, session.codex_provider])
   const [state, setState] = useState<UsageState>({ key: '', value: null, refreshing: false, failed: false })
   const [open, setOpen] = useState(false)

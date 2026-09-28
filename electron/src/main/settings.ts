@@ -241,7 +241,7 @@ export class SettingsStore {
     })
   }
 
-  addProfile(input: AddServerProfileInput): PublicServerProfile {
+  addProfile(input: AddServerProfileInput, keychainOnly = false): PublicServerProfile {
     const serverUrl = normalizeServerURL(input.serverUrl)
     const serverIdentity = cleanIdentity(input.serverIdentity)
     const duplicateURL = this.value.profiles.find(profile => normalizeServerURL(profile.serverUrl) === serverUrl)
@@ -261,7 +261,7 @@ export class SettingsStore {
       updatedAt: timestamp
     }
     const credential = input.accessToken !== undefined
-      ? this.stageAccessToken(profile, input.accessToken ?? '')
+      ? this.stageAccessToken(profile, input.accessToken ?? '', keychainOnly)
       : unchangedCredential(profile)
     profile = credential.profile
     const next = cloneSettings(this.value)
@@ -277,7 +277,7 @@ export class SettingsStore {
     return this.publicProfile(profile)
   }
 
-  updateProfile(profileId: string, patch: UpdateServerProfileInput): PublicServerProfile {
+  updateProfile(profileId: string, patch: UpdateServerProfileInput, keychainOnly = false): PublicServerProfile {
     const current = this.requireProfile(profileId)
     const keepsCredential = patch.accessToken === undefined || patch.accessToken === '__KEEP__'
     if (keepsCredential && (patch.accessToken === '__KEEP__' || patch.serverUrl !== undefined)
@@ -306,7 +306,7 @@ export class SettingsStore {
 
     const credential = keepsCredential
       ? unchangedCredential(updated)
-      : this.stageAccessToken(updated, patch.accessToken ?? '')
+      : this.stageAccessToken(updated, patch.accessToken ?? '', keychainOnly)
     const next = cloneSettings(this.value)
     next.profiles = next.profiles.map(profile => profile.id === profileId ? credential.profile : profile)
     try {
@@ -639,7 +639,7 @@ export class SettingsStore {
     try { return this.secureStorage.decryptString(Buffer.from(value, 'base64')) } catch { return '' }
   }
 
-  private stageAccessToken(profile: StoredServerProfile, token: string): CredentialMutation {
+  private stageAccessToken(profile: StoredServerProfile, token: string, keychainOnly = false): CredentialMutation {
     const next = { ...profile }
     const account = profileKeychainAccount(profile.id)
     const oldToken = this.readProfileToken(profile)
@@ -654,7 +654,10 @@ export class SettingsStore {
     }
 
     let encryptedAccessToken: string | undefined
-    if (secureCredentialStorageAvailable(this.secureStorage)) {
+    // Startup discovery on macOS uses the bounded existing Keychain helper.
+    // Avoid synchronously entering Chromium OSCrypt while its startup threads
+    // are also opening Keychain. Failure must not fall back to plaintext.
+    if (!keychainOnly && secureCredentialStorageAvailable(this.secureStorage)) {
       encryptedAccessToken = this.secureStorage.encryptString(token).toString('base64')
     }
     const wroteKeychain = this.useKeychain && this.keychain.write(account, token)
