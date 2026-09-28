@@ -1,5 +1,29 @@
 # Public development log
 
+## 2026-09-28 — Activate queue recovery and provider-selection fixes
+
+- Deploy committed server source `d5b5dab`, including independent startup queue
+  recovery and completion-driven Codex endpoint switching. Verify installed
+  source hashes and authenticated health. All chats finish queue recovery with
+  zero failures, and the affected chat has a private durable queue checkpoint.
+- Verify the affected saved selection applies to normal Codex, its original
+  native thread loads successfully, and its blocked goal remains identical.
+  Existing mailbox routes remain available and legacy exchanges remain disabled.
+- Exercise custom-to-normal and normal-to-custom switching in native Codex
+  0.156.1 and an isolated offscreen beta.20 desktop payload (build 1225). Use
+  the actual picker and authenticated transport; observe Saved clear after the
+  held callback completes, then send contextual follow-ups to each endpoint.
+  Preserve the same history and goal while an unrelated native turn completes.
+- Inspect both resulting UI screenshots and clean up the disposable app,
+  credentials and provider processes. Model responses use a local synthetic
+  endpoint. The fixture configuration gains only a native project-trust entry;
+  its original provider configuration and authentication remain unchanged.
+- The authorized forced worker restart interrupts active agent turns. Verify
+  the gateway, server identity, protected installation files and independent
+  tmux processes remain unchanged. No maintenance hold remains afterward.
+- Availability: deployed server source hotfix. The installed version label
+  remains beta.16; no desktop, npm or mobile release is required or published.
+
 ## 2026-09-28 — Apply saved Codex endpoint selections after transient work
 
 - Fix Codex/Custom selections remaining marked Saved after a shared runtime's
