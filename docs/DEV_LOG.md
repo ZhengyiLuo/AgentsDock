@@ -1,5 +1,18 @@
 # Public development log
 
+## 2026-09-28 — Keep shared chats visible when edit paths are omitted
+
+- Fix a file-change card that crashed the entire shared transcript when the
+  public projection omitted private filesystem paths. Keep edit totals and
+  display the filenames that are available.
+- Reproduce the failure in two real timeline component cases, then pass all
+  149 timeline tests and TypeScript checks with the fix.
+- Build the shared web renderer from committed source `85b9920`. Exercise token
+  entry and reload against the affected live conversation in an isolated browser
+  using the candidate web assets; confirm the transcript and composer remain
+  visible without an uncaught exception. Deployed-asset acceptance follows
+  separately; API success alone does not establish renderer acceptance.
+
 ## 2026-09-28 — Publish server beta.21 with shared-chat and queue fixes
 
 - Publish [AgentsServer 1.0.7-beta.21](https://github.com/ZhengyiLuo/AgentsServer/releases/tag/v1.0.7-beta.21)
