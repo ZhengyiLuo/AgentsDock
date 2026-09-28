@@ -248,8 +248,13 @@ class NpmNativeAcceptanceTests(unittest.TestCase):
             self.assertNotIn(str(root), json.dumps(result))
             self.assertNotIn("never-print-this", json.dumps(result))
             self.assertNotIn("PRIVATE_TOKEN", json.dumps(result))
-            with self.assertRaises(RuntimeError):
+            before = dict(env)
+            # The fixture account must not depend on a macOS-specific UID
+            # existing in the host passwd database (Linux runners use another).
+            with patch.object(MOD.pwd, "getpwuid", return_value=SimpleNamespace(pw_dir=str(root / "actual-account"))), \
+                    self.assertRaises(RuntimeError):
                 MOD.guard(args, environment=env, uid=501, system="Linux")
+            self.assertEqual(env, before)
 
     def test_only_observed_real_account_linux_xdg_default_is_removed_after_all_guards(self):
         with tempfile.TemporaryDirectory() as temporary:
