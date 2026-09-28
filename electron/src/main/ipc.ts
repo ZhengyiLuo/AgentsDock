@@ -250,6 +250,7 @@ export function registerIpc(
   handle('sessions:update', (sessionId, patch, expectedScope) => service.updateSession(sessionId, patch, expectedScope))
   handle('sessions:provider:reload', sessionId => service.reloadProvider(sessionId))
   handle('sessions:remove', sessionId => service.removeSession(sessionId))
+  handle('sessions:discard-empty', (scope, sessionId, updatedAt) => service.discardEmptySession(scope, sessionId, updatedAt))
   handle('sessions:fork', sessionId => service.forkSession(sessionId))
   handle('sessions:reorder', (sessionId, relativeTo, placement, targetFolder) => service.reorderSession(sessionId, relativeTo, placement, targetFolder))
   handle('sessions:search-history', (query, limit) => service.searchSessions(query, limit))

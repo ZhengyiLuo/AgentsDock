@@ -18,11 +18,12 @@ import { memo, useState } from 'react'
 import { useAppStore } from '../store/app-store'
 import { eventErrorText, isTimelineError } from '../lib/timeline'
 import { NativeProviderSignIn } from './NativeProviderSignIn'
+import { openAIProviderSettings } from '../lib/provider-settings'
 
-export const RuntimeHealthNotice = memo(function RuntimeHealthNotice({ backend, sessionId, codexProvider }: { backend: Backend; sessionId: string; codexProvider?: CodexProvider }) {
+export const RuntimeHealthNotice = memo(function RuntimeHealthNotice({ backend, sessionId, codexProvider, admissionError }: { backend: Backend; sessionId: string; codexProvider?: CodexProvider; admissionError?: string }) {
   useLocale()
   const { refreshing, recheck } = useRuntimeRecheck()
-  return <RuntimeStatus backend={backend} codexProvider={codexProvider} compact sessionId={sessionId} refreshing={refreshing} onRecheck={recheck} />
+  return <RuntimeStatus backend={backend} codexProvider={codexProvider} admissionError={admissionError} compact sessionId={sessionId} refreshing={refreshing} onRecheck={recheck} />
 })
 
 export function RuntimeHealthPanel() {
@@ -114,6 +115,7 @@ function TmuxStatus() {
 function RuntimeStatus({
   backend,
   codexProvider,
+  admissionError,
   compact = false,
   sessionId,
   refreshing = false,
@@ -121,6 +123,7 @@ function RuntimeStatus({
 }: {
   backend: Backend
   codexProvider?: CodexProvider
+  admissionError?: string
   compact?: boolean
   sessionId?: string
   refreshing?: boolean
@@ -154,7 +157,8 @@ function RuntimeStatus({
   const providerNeedsAttention = compact
     ? cursorUnavailable || Boolean(diagnostic && diagnostic.status !== 'ready' && (!passiveClaudeAuth || chatError))
     : cursorUnavailable || runtimeDiagnosticNeedsAttention(diagnostic)
-  if (compact && !chatError && !providerNeedsAttention) return null
+  const customAdmissionError = codexProvider === 'custom' ? admissionError : undefined
+  if (compact && !chatError && !providerNeedsAttention && !customAdmissionError) return null
   const tone = chatError ? 'warning' : !compact && diagnostic?.installed !== false
     ? connected && diagnostic?.authenticated === true && diagnostic.status === 'ready' ? 'ready' : 'unknown'
     : cursorUnavailable ? 'error' : runtimeDiagnosticTone(diagnostic)
@@ -164,6 +168,7 @@ function RuntimeStatus({
     ? (backend === 'opencode' ? opencodeBackendUnavailableReason(health, catalog) : cursorBackendUnavailableReason(health, catalog)) || ''
     : ''
   const detail = chatError
+    || customAdmissionError
     || cursorUnavailableDetail
     || (!compact ? runtimeDiagnosticCurrentError(diagnostic) : '')
     || diagnostic?.message
@@ -184,7 +189,8 @@ function RuntimeStatus({
       {action ? <small className="runtime-action">{action}</small> : null}
       {!compact && tone !== 'ready' && <NativeProviderSignIn key={`${backend}:${profileId}:${profileGeneration}`} backend={backend} disabled={!connected} />}
     </div>
-    {compact && providerNeedsAttention && onRecheck
+    {compact && codexProvider === 'custom' && <button type="button" className="quiet-button runtime-recheck-button" onClick={() => openAIProviderSettings(backend)}>{t('connections.configure')}</button>}
+    {compact && codexProvider !== 'custom' && providerNeedsAttention && onRecheck
       ? <button
           type="button"
           className="quiet-button runtime-recheck-button"

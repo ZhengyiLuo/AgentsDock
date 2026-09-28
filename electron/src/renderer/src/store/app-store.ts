@@ -10,7 +10,7 @@ import { mailHintPending, type MailArrivalCursor, type MailboxCoverage, type Mai
 import { bulletinHintPending, type BulletinHintRefresh } from '@shared/team-bulletin-hints'
 import { applyOpenCodeSessionEvent, openCodeProviderCommandsAvailable } from '@shared/opencode'
 import { t } from '@shared/i18n'
-import { runtimeSelectionError, selectableChatBackends } from '@shared/runtime-catalog'
+import { chatBackendChoice, runtimeSelectionError, selectableChatBackendChoices } from '@shared/runtime-catalog'
 import { isAsyncCrossChatMessage, isNativeGoalSteerEvent, isNativeSteerTransitionStop, timelineSemanticUnits } from '@shared/semantic-timeline'
 import { turnSendErrorMessage } from '@shared/server-errors'
 import { completedPrefixForkAvailable, RUNNING_FORK_UNAVAILABLE } from '@shared/session-fork'
@@ -256,7 +256,7 @@ interface AppState {
   attachPathsForSession(sessionId: string, files: NativeFileRef[]): Promise<void>
   removeUpload(fileId: string): void
   removeUploadForSession(sessionId: string, fileId: string): void
-  refreshSessions(): Promise<void>
+  refreshSessions(cleanupEmpty?: boolean): Promise<void>
   requestNewChat(): Promise<void>
   updateSession(
     sessionId: string,
@@ -369,6 +369,7 @@ function directChatPlaceholderFingerprint(session: Session): string {
     folder: session.folder?.trim() || 'General',
     cwd: session.cwd?.trim() || '',
     backend: session.backend,
+    ...(session.provider_connection === 'custom' ? { providerConnection: 'custom' } : {}),
     ...(session.backend === 'codex' && (session.provider_connection === 'custom' ? 'custom' : session.codex_provider) === 'custom' ? { codexProvider: 'custom' } : {}),
     model: session.model?.trim() || null,
     effort: session.effort?.trim() || null,
@@ -386,6 +387,10 @@ function directChatPlaceholderFingerprint(session: Session): string {
 
 function directChatPlaceholderMarker(session: Session): DirectChatPlaceholderMarker {
   return { version: 1, fingerprint: directChatPlaceholderFingerprint(session) }
+}
+
+export async function markNewChatPlaceholder(scope: WorkspaceProfileScope | null, session: Session): Promise<void> {
+  if (scope && session.title === 'New chat') await setWorkspacePreference(scope, directChatPlaceholderKey(session.id), directChatPlaceholderMarker(session))
 }
 
 function isDirectChatPlaceholderMarker(value: unknown): value is DirectChatPlaceholderMarker {
@@ -2032,12 +2037,20 @@ export const useAppStore = create<AppState>((set, get) => ({
       [id]: (state.uploadsBySession[id] ?? []).filter(file => file.id !== fileId)
     } }))
   },
-  async refreshSessions() {
+  async refreshSessions(cleanupEmpty = false) {
     if (get().switchingProfileId) return
     const scope = captureProfileScope(get())
     try {
-      const incoming = applyPendingSessionPatches(await window.agentsDock.sessions.list())
+      let incoming = applyPendingSessionPatches(await window.agentsDock.sessions.list())
       if (!profileScopeMatches(scope, get())) return
+      if (cleanupEmpty && !get().creatingChat) {
+        const state = get()
+        const payload = { activeProfileId: state.activeProfileId ?? undefined, profileGeneration: state.profileGeneration,
+          profiles: state.profiles, sessions: incoming, jobs: state.jobs }
+        const cleanup = startupChatCleanupFromBootstrap(payload)
+        if (cleanup) incoming = (await removeUntouchedStartupChats(payload, cleanup, () => profileScopeMatches(scope, get()))).sessions
+        if (!profileScopeMatches(scope, get())) return
+      }
       set(state => {
         const sessions = reconcileSessions(state.sessions, incoming)
         return sessions === state.sessions ? state : { sessions }
@@ -2089,7 +2102,7 @@ export const useAppStore = create<AppState>((set, get) => ({
         cwd: lastOpenedCwd ?? (defaults.cwd || defaultCwd)
       }
       if (
-        !selectableChatBackends(current.health, current.runtimeCatalog).includes(defaults.backend)
+        !selectableChatBackendChoices(current.health, current.runtimeCatalog).includes(chatBackendChoice(defaults))
         || runtimeSelectionError(current.health, current.runtimeCatalog, defaults.backend, defaults.model, defaults.provider_connection === 'custom' ? 'custom' : defaults.codex_provider)
       ) {
         set({ creatingChat: false })
@@ -2114,7 +2127,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       trackEvent('chat_created')
       await Promise.all([
         saveNewChatDefaults(preferenceScope, input),
-        setWorkspacePreference(preferenceScope, directChatPlaceholderKey(session.id), directChatPlaceholderMarker(session))
+        markNewChatPlaceholder(preferenceScope, session)
       ]).catch(() => undefined)
       if (!workspaceScopeMatches(preferenceScope, get()) || !profileScopeMatches(profileScope, get())) return
       await get().refreshSessions()
@@ -3159,7 +3172,9 @@ async function runProfileRefresh(
   }
 }
 
-function startupChatCleanupFromBootstrap(payload: BootstrapPayload): StartupChatCleanup | null {
+type CleanupSnapshot = Pick<BootstrapPayload, 'activeProfileId' | 'profileGeneration' | 'profiles' | 'sessions' | 'jobs'>
+
+function startupChatCleanupFromBootstrap(payload: CleanupSnapshot): StartupChatCleanup | null {
   if (!payload.activeProfileId || !payload.profiles) return null
   const serverIdentity = payload.profiles?.find(profile => profile.id === payload.activeProfileId)?.serverIdentity?.trim()
   if (!serverIdentity) return null
@@ -3175,11 +3190,12 @@ function startupChatCleanupFromBootstrap(payload: BootstrapPayload): StartupChat
   } : null
 }
 
-async function removeUntouchedStartupChats(
-  payload: BootstrapPayload,
+async function removeUntouchedStartupChats<T extends CleanupSnapshot>(
+  payload: T,
   cleanup: StartupChatCleanup,
   profileScopeIsCurrent: () => boolean
-): Promise<BootstrapPayload> {
+): Promise<T> {
+  if (!window.agentsDock.sessions.discardEmpty) return payload
   if (!profileScopeIsCurrent()) return payload
   if (payload.activeProfileId !== cleanup.profileId || (payload.profileGeneration ?? 0) !== cleanup.profileGeneration) return payload
   const serverIdentity = payload.profiles?.find(profile => profile.id === payload.activeProfileId)?.serverIdentity?.trim()
@@ -3207,6 +3223,13 @@ async function removeUntouchedStartupChats(
 
     for (const [sessionId, marker] of markers) {
       if (!profileScopeIsCurrent()) return payload
+      const hasLocalWork = () => {
+        const state = useAppStore.getState()
+        return Boolean(state.drafts[sessionId]?.length || state.uploadsBySession[sessionId]?.length
+          || state.uploadPathsBySession[sessionId]?.length || state.pendingTurnSubmissions[sessionId]
+          || state.chatReferencesBySession[sessionId]?.length || state.teamReferencesBySession[sessionId]?.length)
+      }
+      if (hasLocalWork()) continue
       const session = liveSessions.find(candidate => candidate.id === sessionId)
       if (!session || !isUntouchedNewChat(session)) continue
       if (liveJobs.some(job => job.session_id === sessionId) || livePorts.some(port => port.sessionId === sessionId)) continue
@@ -3237,8 +3260,8 @@ async function removeUntouchedStartupChats(
           || terminal.exists
         ) continue
 
-        // Re-read the remotely authoritative records immediately before the
-        // unconditional legacy DELETE. Any uncertainty preserves the chat.
+        // Re-read before the server's conditional discard. The server repeats
+        // its proof under the lifecycle lock; never fall back to ordinary DELETE.
         ;[liveSessions, liveJobs, livePorts] = await Promise.all([
           window.agentsDock.sessions.list(),
           window.agentsDock.jobs.list(),
@@ -3257,7 +3280,8 @@ async function removeUntouchedStartupChats(
         // guard adjacent to the destructive IPC so a profile transition during
         // any of the awaited proof reads cannot delete from the new workspace.
         if (!profileScopeIsCurrent()) return payload
-        if (await window.agentsDock.sessions.remove(sessionId)) {
+        if (hasLocalWork() || !confirmed.updated_at) continue
+        if (await window.agentsDock.sessions.discardEmpty(preferenceScope, sessionId, confirmed.updated_at)) {
           removed.add(sessionId)
           await setWorkspacePreference(preferenceScope, directChatPlaceholderKey(sessionId), false).catch(() => undefined)
         }

@@ -29,6 +29,8 @@ import {
 } from '../shared/local-session-import'
 import type {
   AddServerProfileInput,
+  Backend,
+  RuntimeBackendCatalog,
   AgentFile,
   AgentCrossChatRoute,
   AgentCrossChatRouteUpdateResult,
@@ -436,6 +438,7 @@ export class AppService {
   private sessions: Session[] = []
   private jobs: Job[] = []
   private runtimeCatalog: RuntimeCatalog | null = null
+  private providerCatalogRevision = 0
   private runtimeRefreshInFlight = new Map<number, { task: Promise<void>; forceProbe: boolean }>()
   private runtimeRefreshNextAt = 0
   /** Last server process we fetched a runtime catalog from. A different
@@ -2241,7 +2244,29 @@ export class AppService {
     this.assertCurrentScope(scope)
     const result = await scope.client.providerConnectionRequest(backend, action, checked)
     this.assertCurrentScope(scope)
+    if (action !== 'get' && result.configuration) {
+      const value = result.configuration
+      this.reconcileProviderConnection(scope, backend, {
+        configured: value.configured,
+        available: value.configured && value.scope === 'per_chat' && value.last_result === 'verified'
+          && this.runtimeCatalog?.backends[backend]?.diagnostic?.installed === true,
+        base_url: value.base_url, model: value.model,
+      })
+    }
     return result
+  }
+
+  private reconcileProviderConnection(scope: ConnectionScope, backend: Backend, custom: NonNullable<RuntimeBackendCatalog['custom_provider']>): void {
+    this.assertCurrentScope(scope)
+    // A catalog request started before Save/Forget cannot resurrect old credentials.
+    this.providerCatalogRevision = (this.providerCatalogRevision ?? 0) + 1
+    this.runtimeRefreshNextAt = 0
+    if (!this.runtimeCatalog?.backends[backend]) return
+    const catalog = { ...this.runtimeCatalog, backends: { ...this.runtimeCatalog.backends,
+      [backend]: { ...this.runtimeCatalog.backends[backend], custom_provider: custom } } }
+    this.runtimeCatalog = catalog
+    this.cache.putPreference(scope.namespace, RUNTIME_CATALOG_CACHE_KEY, catalog)
+    this.emitRuntime(scope, catalog)
   }
 
   async codexAuth(expected: CodexServerSettingsScope): Promise<CodexAuthStatus> {
@@ -2357,6 +2382,9 @@ export class AppService {
     this.assertCurrentScope(scope)
     const result = await scope.client.resetCodexProvider()
     this.assertCurrentScope(scope)
+    if (!result.configured) this.reconcileProviderConnection(scope, 'codex', {
+      configured: false, available: false, base_url: null, model: null,
+    })
     await this.refreshCodexProviderRuntime(scope)
     return result
   }
@@ -2580,6 +2608,23 @@ export class AppService {
       this.portTunnels.disposeSession(sessionId)
       this.sessions = this.sessions.filter(session => session.id !== sessionId)
       this.cache.removeSession(scope.namespace, sessionId)
+      this.emitSessions(scope, this.sessions)
+      this.refreshProfileUnread(scope)
+    }
+    return removed
+  }
+
+  async discardEmptySession(expected: WorkspaceProfileScope, sessionId: string, updatedAt: string): Promise<boolean> {
+    const scope = this.requireProfileScope(expected?.profileId, expected?.profileGeneration)
+    await this.ensureValidatedScope(scope)
+    this.assertCurrentScope(scope)
+    if (!expected.serverIdentity || expected.serverIdentity !== this.settings.getProfile(scope.profileId)?.serverIdentity) throw staleProfileError()
+    if (typeof updatedAt !== 'string' || !updatedAt || updatedAt.length > 64) return false
+    const removed = await scope.client.discardEmptySession(sessionId, updatedAt)
+    this.assertCurrentScope(scope)
+    if (removed) {
+      this.cache.removeSession(scope.namespace, sessionId)
+      this.sessions = this.sessions.filter(session => session.id !== sessionId)
       this.emitSessions(scope, this.sessions)
       this.refreshProfileUnread(scope)
     }
@@ -5327,9 +5372,11 @@ export class AppService {
 
   private async loadRuntimeCatalog(scope: ConnectionScope, forceProbe = false, announce = false): Promise<void> {
     const started = Date.now()
+    const providerRevision = this.providerCatalogRevision ?? 0
     try {
       const catalog = await scope.client.runtimeCatalog(forceProbe)
       if (!this.isCurrentScope(scope)) return
+      if (providerRevision !== (this.providerCatalogRevision ?? 0)) return
       if (!runtimeCatalogHasSelectableModels(catalog)) {
         throw new Error('Server returned no selectable Claude/Codex models')
       }

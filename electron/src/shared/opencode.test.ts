@@ -9,6 +9,7 @@ const health: Health = { ok: true, capabilities: {
   local_provider_commands_v1: { available: true, required: false, action: null, version: 1, message: 'Skills', supported_backends: ['opencode'] }
 } }
 const catalog: RuntimeCatalog = { backends: { opencode: {
+  native_credentials_present: true,
   available: true, models: [{ value: '', label: 'OpenCode default' }, { value: 'provider/model', label: 'Model' }], efforts: [],
   permission_modes: ['default', 'full_access', 'plan']
 } } }
@@ -30,7 +31,8 @@ describe('OpenCode optional backend contract', () => {
     expect(opencodeBackendAvailable(health, catalog)).toBe(true)
     expect(selectableChatBackends(health, null)).toContain('opencode')
     expect(selectableChatBackends({ ok: true }, catalog)).not.toContain('opencode')
-    expect(selectableChatBackendChoices({ ok: true }, catalog)).toContain('opencode')
+    expect(selectableChatBackendChoices({ ok: true }, catalog)).not.toContain('opencode')
+    expect(selectableChatBackendChoices(health, catalog)).toContain('opencode')
     expect(runtimeSelectionError({ ok: true }, catalog, 'opencode')).toMatch(/Update the server/)
     expect(runtimeSelectionError(health, null, 'opencode')).toMatch(/loading/)
     expect(runtimeSelectionError(health, catalog, 'opencode', '')).toBeNull()

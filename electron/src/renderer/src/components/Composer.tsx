@@ -1,5 +1,6 @@
 // Localized display strings use semantic catalog keys.
 import { t, getLocale } from '@shared/i18n'
+import { openAIProviderSettings } from '../lib/provider-settings'
 import { isSharedChatCollaborator } from '@shared/chat-shares'
 import { useLocale } from '../lib/i18n'
 import { forwardRef, memo, useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from 'react'
@@ -1860,8 +1861,8 @@ export const Composer = memo(function Composer({ dropActive = false, sessionId, 
       />
         </fieldset>
       {(uploads.length > 0 || uploadPaths.length > 0) && <AttachmentShelf sessionId={session.id} profileId={activeProfileId} profileGeneration={profileGeneration} files={uploads} pending={uploadPaths} />}
-      <RuntimeHealthNotice backend={session.backend} codexProvider={(session.provider_connection === 'custom' ? 'custom' : session.codex_provider)} sessionId={session.id} />
-      {selectedRuntimeError && !(session.backend === 'cursor' && !cursorPermissionsAvailable) && <span className="chat-reference-warning">{selectedRuntimeError}</span>}
+      <RuntimeHealthNotice backend={session.backend} codexProvider={(session.provider_connection === 'custom' ? 'custom' : session.codex_provider)} sessionId={session.id} admissionError={selectedRuntimeError || undefined} />
+      {selectedRuntimeError && session.provider_connection !== 'custom' && session.codex_provider !== 'custom' && !(session.backend === 'cursor' && !cursorPermissionsAvailable) && <span className="chat-reference-warning">{selectedRuntimeError}</span>}
       {activeInboundDeliveryKind && <span className={activeInboundDeliveryKind === 'unknown' ? 'composer-sync-status' : 'chat-reference-warning'} role="status">{activeInboundDeliveryKind === 'unknown'
         ? t("ui.Composer.Composer.an_active_turn_is_running_while_chat_sync__2265ac1")
         : activeInboundDeliveryKind === 'secure_peer'
@@ -3390,7 +3391,7 @@ function BackendMenu({ session, running, admitting }: { session: Session; runnin
       <Tooltip.Portal><Tooltip.Content className="shortcut-tooltip backend-unavailable-tooltip" side="right" sideOffset={7}><span>{unavailableReason}</span><Tooltip.Arrow className="shortcut-tooltip-arrow" /></Tooltip.Content></Tooltip.Portal>
     </Tooltip.Root>
     return <DropdownMenu.CheckboxItem key={choice} className="menu-item" checked={chatBackendChoice(session) === choice} onCheckedChange={() => void useAppStore.getState().updateSession(session.id, { backend, codex_provider, provider_connection, model: null, effort: null })}><BackendMark backend={backend} size={15} />{backendLabel(backend, provider_connection === 'custom' ? 'custom' : codex_provider)}</DropdownMenu.CheckboxItem>
-  })}</DropdownMenu.Content></DropdownMenu.Portal></DropdownMenu.Root></Tooltip.Provider>
+  })}<DropdownMenu.Separator className="menu-separator" /><DropdownMenu.Item className="menu-item" onSelect={() => openAIProviderSettings()}><Plus size={15} />{t('connections.addAgent')}</DropdownMenu.Item></DropdownMenu.Content></DropdownMenu.Portal></DropdownMenu.Root></Tooltip.Provider>
 }
 
 function AttachmentShelf({ sessionId, profileId, profileGeneration, files, pending }: { sessionId: string; profileId: string | null; profileGeneration: number; files: AgentFile[]; pending: NativeFileRef[] }) {

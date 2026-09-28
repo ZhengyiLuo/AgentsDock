@@ -6,7 +6,6 @@ import type { ConnectionAction, ConnectionBackend, ConnectionProtocol, Connectio
 import { useLocale } from '../lib/i18n'
 import './CodexAuthSettings.css'
 import './ProviderConnectionSettings.css'
-import { useAppStore } from '../store/app-store'
 import { CustomModelSettings } from './CustomModelSettings'
 import { EndpointMenu } from './EndpointMenu'
 
@@ -64,10 +63,10 @@ export function ProviderConnectionSettings({ backend, ...props }: Props & { back
 
   function configure() {
     clearKey(); setError(null)
-    setBaseURL(saved?.base_url ?? (backend === 'claude' ? 'https://openrouter.ai/api' : 'https://openrouter.ai/api/v1'))
+    setBaseURL(saved?.base_url ?? (backend === 'claude' ? 'https://api.anthropic.com' : ''))
     setModel(saved?.model ?? '')
     setProtocol(saved?.protocol ?? (backend === 'claude' ? 'anthropic' : 'chat_completions'))
-    setAuthHeader(saved?.auth_header ?? 'bearer'); setOpen(true)
+    setAuthHeader(saved?.auth_header ?? (backend === 'claude' ? 'x-api-key' : 'bearer')); setOpen(true)
   }
   async function operate(action: Exclude<ConnectionAction, 'get'>) {
     if (busy || !saved || !props.connected || !props.profileId) return
@@ -84,11 +83,6 @@ export function ProviderConnectionSettings({ backend, ...props }: Props & { back
       if (reply.configuration) setSaved(reply.configuration)
       if (reply.ok === false) setError(reply.status ?? 'failed')
       else setOpen(false)
-      if (reply.configuration && window.agentsDock.runtime?.catalog) {
-        void window.agentsDock.runtime.catalog(false).then(runtimeCatalog => {
-          if (owns(n, scope)) useAppStore.setState({ runtimeCatalog })
-        }).catch(() => undefined)
-      }
     } catch (reason) { if (owns(n, scope)) setError(failure(reason)) }
     finally {
       if ('api_key' in input) input.api_key = ''
@@ -124,12 +118,13 @@ export function ProviderConnectionSettings({ backend, ...props }: Props & { back
       {!open && error && <button type="button" className="quiet-button provider-connection-refresh" disabled={busy || !props.connected} onClick={() => setReload(n => n + 1)}>{t('connections.refresh')}</button>}
       {open && <form className="codex-auth-settings-form" onSubmit={event => { event.preventDefault(); void operate('save') }}>
         <label htmlFor={`${id}-url`}>{t('connections.baseURL')}</label>
-        <input id={`${id}-url`} value={baseURL} maxLength={2048} disabled={busy} onChange={e => {
+        <input id={`${id}-url`} value={baseURL} placeholder="https://…" maxLength={2048} disabled={busy} onChange={e => {
           setBaseURL(e.target.value)
           if (backend === 'claude') {
             try { setAuthHeader(new URL(e.target.value).hostname === 'api.anthropic.com' ? 'x-api-key' : 'bearer') } catch { /* incomplete URL */ }
           }
         }} autoComplete="off" spellCheck={false} />
+        {backend === 'opencode' && <small>{t('connections.openCodeEndpointHelp')}{' '}<a href="https://opencode.ai/docs/zen/" onClick={event => { event.preventDefault(); void window.agentsDock.native.openExternal('https://opencode.ai/docs/zen/') }}>{t('connections.readMore')}</a></small>}
         <label htmlFor={`${id}-key`}>{t('connections.key')}</label>
         <input id={`${id}-key`} type="password" ref={attachKey} maxLength={4096} disabled={busy} onChange={e => setHasKey(Boolean(e.target.value.trim()))} autoComplete="off" autoCapitalize="none" autoCorrect="off" spellCheck={false} data-1p-ignore data-lpignore="true" />
         <details className="provider-connection-advanced"><summary>{t('connections.advanced')}</summary>
@@ -139,7 +134,7 @@ export function ProviderConnectionSettings({ backend, ...props }: Props & { back
           </select></>}
         {protocol === 'anthropic' && <><label htmlFor={`${id}-auth`}>{t('connections.authHeader')}</label>
           <select id={`${id}-auth`} value={authHeader} disabled={busy} onChange={e => setAuthHeader(e.target.value as 'bearer' | 'x-api-key')}>
-            <option value="bearer">Bearer (OpenRouter)</option><option value="x-api-key">x-api-key (Anthropic)</option>
+            <option value="bearer">Bearer</option><option value="x-api-key">x-api-key</option>
           </select></>}
         <label htmlFor={`${id}-model`}>{t('connections.model')}</label>
         <input id={`${id}-model`} value={model} maxLength={256} disabled={busy} onChange={e => setModel(e.target.value)} autoComplete="off" spellCheck={false} />
@@ -169,7 +164,7 @@ export function CursorEndpointNotice() {
     <div className="codex-auth-settings-icon"><KeyRound size={16} /></div>
     <div className="codex-auth-settings-copy"><strong>{t('connections.title', { provider: 'Cursor' })}</strong>
       <small role="status">{t('connections.unsupported')}</small><small>{t('connections.cursorHelp')}</small>
-      <a href="https://cursor.com/docs" onClick={event => { event.preventDefault(); void window.agentsDock.native.openExternal('https://cursor.com/docs') }}>{t('connections.readMore')}</a>
+      <a href="https://cursor.com/docs/cli/reference/authentication" onClick={event => { event.preventDefault(); void window.agentsDock.native.openExternal('https://cursor.com/docs/cli/reference/authentication') }}>{t('connections.readMore')}</a>
     </div>
   </section>
 }

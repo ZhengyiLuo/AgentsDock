@@ -1055,6 +1055,12 @@ export class AgentServerClient {
     return response.deleted !== false
   }
 
+  async discardEmptySession(sessionId: string, updatedAt: string): Promise<boolean> {
+    const query = new URLSearchParams({ expected_updated_at: updatedAt })
+    const response = await this.post<{ deleted?: boolean }>(`/api/sessions/${encodeURIComponent(sessionId)}/discard-empty?${query}`, {})
+    return response.deleted === true
+  }
+
   async forkSession(sessionId: string): Promise<{ session: Session; sessions?: Session[] }> {
     return this.post(`/api/sessions/${encodeURIComponent(sessionId)}/fork`, {})
   }

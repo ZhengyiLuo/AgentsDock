@@ -39,7 +39,7 @@ function CLIAccountCard({ backend, signedIn, open }: { backend: CLIAccountBacken
   </section>
 }
 
-function ProviderGroup({ backend }: { backend: Backend }) {
+function ProviderGroup({ backend, requested }: { backend: Backend; requested?: { backend?: Backend } }) {
   const connected = useAppStore(state => state.connected)
   const profileId = useAppStore(state => state.activeProfileId)
   const profileGeneration = useAppStore(state => state.profileGeneration)
@@ -47,10 +47,11 @@ function ProviderGroup({ backend }: { backend: Backend }) {
   const [api, setAPI] = useState(false)
   const [codexNative, setCodexNative] = useState(false)
   const [open, setOpen] = useState(false)
+  useEffect(() => { if (requested?.backend === backend) setOpen(true) }, [requested, backend])
   const signedIn = backend === 'codex' ? codexNative || native : native
   const ready = connected && (signedIn || api)
   const name = { codex: 'Codex', claude: 'Claude Code', cursor: 'Cursor', opencode: 'OpenCode' }[backend]
-  return <details className={`provider-group ${ready ? 'is-connected' : ''}`} onToggle={event => setOpen(event.currentTarget.open)}>
+  return <details open={open} className={`provider-group ${ready ? 'is-connected' : ''}`} onToggle={event => setOpen(event.currentTarget.open)}>
     <summary><ChevronRight size={16} className="provider-group-chevron" /><strong>{name}</strong>
       <span className="provider-group-status">{ready ? <CheckCircle2 size={17} /> : <Circle size={17} />}{t(ready ? 'connections.connected' : 'connections.empty')}</span>
     </summary>
@@ -63,7 +64,7 @@ function ProviderGroup({ backend }: { backend: Backend }) {
   </details>
 }
 
-export function AIProviderSettings() {
+export function AIProviderSettings({ requested }: { requested?: { backend?: Backend } } = {}) {
   useLocale()
   const profile = useAppStore(state => state.profiles.find(item => item.id === state.activeProfileId))
   const generation = useAppStore(state => state.profileGeneration)
@@ -75,6 +76,6 @@ export function AIProviderSettings() {
       <strong>{profile ? t('settings.providersServer', { server: profile.name }) : t('settings.providersNoServer')}</strong>
       <button type="button" className="quiet-button" disabled={!connected || refreshing} onClick={() => void recheck().then(() => setRevision(value => value + 1))}><RefreshCw size={14} className={refreshing ? 'spin' : ''} />{t('connections.refresh')}</button>
     </div>
-    {(['codex', 'claude', 'cursor', 'opencode'] as Backend[]).map(backend => <ProviderGroup key={`${profile?.id}:${generation}:${revision}:${backend}`} backend={backend} />)}
+    {(['codex', 'claude', 'cursor', 'opencode'] as Backend[]).map(backend => <ProviderGroup key={`${profile?.id}:${generation}:${revision}:${backend}`} backend={backend} requested={requested} />)}
   </div>
 }

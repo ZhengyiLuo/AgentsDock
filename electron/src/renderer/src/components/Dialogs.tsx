@@ -20,10 +20,11 @@ import { effectiveScheduleKind, formatScheduleWallTime, jobLoopsForever, parseSc
 import { digestTargetSections, orderedActiveSessions, rankSessionsForSearch, sessionNameMatchRank } from '../lib/sessions'
 import { useTransientClose } from '../lib/transient-close'
 import { captureWorkspaceScope } from '../lib/workspace-preferences'
-import { saveNewChatDefaults, useAppStore, waitForWorkspaceReady } from '../store/app-store'
+import { markNewChatPlaceholder, saveNewChatDefaults, useAppStore, waitForWorkspaceReady } from '../store/app-store'
 import { BackendMark } from './BackendMark'
 import { ChatShareDialog } from './ChatShareDialog'
 import { AIProviderSettings } from './AIProviderSettings'
+import { openAIProviderSettings } from '../lib/provider-settings'
 import { CodexModelDiscovery } from './CodexModelDiscovery'
 import { ReasoningDisplaySettings } from './ReasoningDisplaySettings'
 import { CoordinatedServerUpdateRow } from './CoordinatedServerUpdateRow'
@@ -473,6 +474,7 @@ export function AppSettingsDialog({ serverSettings, serverUpdates, onServerUpdat
   const activeProfileId = useAppStore(state => state.activeProfileId)
   const open = appSettingsOpen || legacyServerSettingsOpen
   const [section, setSection] = useState<AppSettingsSection>('general')
+  const [providerRequest, setProviderRequest] = useState<{ backend?: Backend }>()
   const [appearance, setAppearance] = useState<AppearanceMode>('system')
   const [update, setUpdate] = useState<AppUpdateStatus | null>(null)
   const [updateTrackBusy, setUpdateTrackBusy] = useState(false)
@@ -488,7 +490,12 @@ export function AppSettingsDialog({ serverSettings, serverUpdates, onServerUpdat
   useTransientClose(open, closeSettings)
   useEffect(() => {
     const selectSection = (event: Event) => {
-      const next = (event as CustomEvent<AppSettingsSection | 'appearance'>).detail
+      const next = (event as CustomEvent<AppSettingsSection | 'appearance' | { section: 'providers'; backend?: Backend }>).detail
+      if (next && typeof next === 'object' && next.section === 'providers') {
+        setSection('providers')
+        setProviderRequest({ backend: next.backend })
+        return
+      }
       if (next === 'appearance') setSection('general')
       else if (next === 'general' || next === 'shortcuts' || next === 'server' || next === 'providers' || next === 'updates') setSection(next)
     }
@@ -622,7 +629,7 @@ export function AppSettingsDialog({ serverSettings, serverUpdates, onServerUpdat
           {section === 'shortcuts' && <KeyboardShortcutsSettings />}
           {section === 'providers' && <section className="app-settings-section" aria-labelledby="app-settings-providers-title">
             <header><h2 id="app-settings-providers-title">{t('settings.aiProviders')}</h2></header>
-            <AIProviderSettings />
+            <AIProviderSettings requested={providerRequest} />
           </section>}
           {section === 'server' && <section className="app-settings-section" aria-labelledby="app-settings-server-title">
             <header><h2 id="app-settings-server-title">{t('settings.server')}</h2></header>
@@ -2959,7 +2966,7 @@ export function SessionDialog({ mode }: { mode: 'newChat' | 'resume' }) {
       const session = mode === 'resume' ? await window.agentsDock.sessions.resume({ ...input, providerId: providerId.trim() }) : await window.agentsDock.sessions.create(input)
       if (mode === 'newChat') {
         trackEvent('chat_created')
-        await saveNewChatDefaults(preferenceScope, input).catch(() => undefined)
+        await Promise.all([saveNewChatDefaults(preferenceScope, input), markNewChatPlaceholder(preferenceScope, session)]).catch(() => undefined)
       } else {
         trackEvent('chat_resumed')
       }
@@ -3003,7 +3010,10 @@ export function SessionDialog({ mode }: { mode: 'newChat' | 'resume' }) {
           }
           setBackendChoice(value); setModel(''); setEffort(''); setManualModel(false)
         }}><BackendMark backend={selection.backend} size={16} />{backendLabel(selection.backend, selection.provider_connection === 'custom' ? 'custom' : selection.codex_provider)}{needsConfiguration ? ` · ${t('codexProvider.configure')}` : unavailable ? t("ui.Dialogs.unavailable_77649d6") : ''}</button>
-      })}</div></fieldset>
+      })}</div>{mode === 'newChat' && <button type="button" className="quiet-button" onClick={() => {
+        useAppStore.getState().setModal(mode, false)
+        openAIProviderSettings()
+      }}>{t('connections.addAgent')}</button>}</fieldset>
       <label className={hasReasoning ? undefined : 'span-two'}><span>{t("ui.Dialogs.SessionDialog.model_5e2c614")}</span><select value={manualModel ? '__manual__' : model} onChange={event => {
         const value = event.target.value
         setManualModel(value === '__manual__')

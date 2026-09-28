@@ -50,6 +50,20 @@ beforeEach(() => {
   useAppStore.setState({ error: null })
 })
 
+it('opens the relevant provider settings from a missing custom API without rechecking CLI', async () => {
+  useAppStore.setState({ health: null, runtimeCatalog: readyCatalog, snapshots: {}, sessions: [],
+    modals: { ...useAppStore.getState().modals, appSettings: false } })
+  const listener = vi.fn()
+  window.addEventListener('agentsdock:app-settings-section', listener)
+  try {
+    render(<RuntimeHealthNotice backend="claude" codexProvider="custom" sessionId="missing" admissionError="Configure your API endpoint" />)
+    await userEvent.click(screen.getByRole('button', { name: 'Configure API' }))
+    expect(listener.mock.calls[0][0].detail).toEqual({ section: 'providers', backend: 'claude' })
+    expect(useAppStore.getState().modals.appSettings).toBe(true)
+    expect(window.agentsDock.runtime.catalog).not.toHaveBeenCalled()
+  } finally { window.removeEventListener('agentsdock:app-settings-section', listener) }
+})
+
 describe('passive Claude authentication in the composer', () => {
   const message = 'Claude Code is installed. Authentication will be checked by Claude when you send a message.'
   const failure = 'Not logged in. Please run claude auth login and retry your message.'

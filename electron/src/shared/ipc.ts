@@ -381,6 +381,7 @@ export interface AgentsDockAPI {
     update(sessionId: string, patch: UpdateSessionInput, expectedScope?: WorkspaceProfileScope): Promise<Session>
     reloadProvider(sessionId: string): Promise<ProviderReloadResult>
     remove(sessionId: string): Promise<boolean>
+    discardEmpty(scope: WorkspaceProfileScope, sessionId: string, updatedAt: string): Promise<boolean>
     fork(sessionId: string): Promise<Session>
     reorder(sessionId: string, relativeTo: string, placement: 'before' | 'after', targetFolder?: string): Promise<Session[]>
     searchHistory(query: string, limit?: number): Promise<TimelineSearchResult[]>

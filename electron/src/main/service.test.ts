@@ -1113,6 +1113,28 @@ describe('settings-only provider connection profile isolation', () => {
       profileResetIsPending: vi.fn().mockReturnValue(false) })
     return { service, client }
   }
+  it.each(['claude', 'opencode'] as const)('forgets %s immediately and fences an older in-flight catalog', async backend => {
+    const { service, client } = harness()
+    const oldCatalog = { ...runtimeCatalog, backends: { ...runtimeCatalog.backends,
+      [backend]: { models: [{ value: 'native', label: 'Native' }], efforts: [],
+        custom_provider: { configured: true, available: true, model: 'old', base_url: 'https://example.test' } } } }
+    const pending = deferred<typeof oldCatalog>()
+    Object.assign(client, { runtimeCatalog: vi.fn().mockReturnValue(pending.promise) })
+    const emitRuntime = vi.fn()
+    Object.assign(service, { runtimeCatalog: oldCatalog, cache: { putPreference: vi.fn() }, emitRuntime })
+    const internals = service as unknown as { scope: unknown; loadRuntimeCatalog(scope: unknown): Promise<void>; runtimeCatalog: typeof oldCatalog }
+    const read = internals.loadRuntimeCatalog(internals.scope)
+    client.providerConnectionRequest.mockResolvedValueOnce({ configuration: {
+      backend, scope: 'per_chat', configured: false, has_api_key: false, revision: 2,
+      base_url: null, model: null, protocol: null, auth_header: null, checked_at: null, last_result: null,
+    } } as never)
+    await service.providerConnectionRequest(caller, backend, 'forget', { expected_revision: 1 })
+    expect(internals.runtimeCatalog.backends[backend].custom_provider).toMatchObject({ configured: false, available: false })
+    pending.resolve(oldCatalog)
+    await read
+    expect(internals.runtimeCatalog.backends[backend].custom_provider).toMatchObject({ configured: false, available: false })
+    expect(emitRuntime).toHaveBeenCalledOnce()
+  })
   it('rejects stale callers before dispatch and late results after switching servers', async () => {
     const { service, client } = harness()
     await expect(service.providerConnectionRequest({ ...caller, profileGeneration: 0 }, 'claude', 'get')).rejects.toThrow('superseded')

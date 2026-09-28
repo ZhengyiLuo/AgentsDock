@@ -1,5 +1,30 @@
 # Public development log
 
+## 2026-09-27 — Provider onboarding and safe empty-chat cleanup
+
+- Default new Claude API configurations to the official Anthropic endpoint and
+  authentication header; preserve previously configured third-party endpoints.
+  OpenCode no longer defaults to OpenRouter. Link its official Zen documentation
+  and explain protocol selection. Distinguish Cursor-issued API keys from
+  arbitrary third-party model endpoints; settings-based Cursor key storage is
+  not implemented by this change.
+- Reconcile endpoint Save/Forget immediately and fence older catalog responses.
+  Offer only connected Agent choices, including the direct-new-chat shortcut.
+  Add Agent opens AI Providers; custom-API error recovery opens the matching
+  provider section without rechecking native CLI authentication.
+- Mark new blank placeholders from both creation paths. On startup or explicit
+  list refresh, preserve drafts, attachments, references, jobs and terminals;
+  discard only proven unused placeholders through a separate conditional server
+  endpoint. Unsupported servers preserve the chat instead of falling back to
+  ordinary Delete. The server checks again under lifecycle/deletion fences and
+  preserves malformed or nonempty history. Native provider history is untouched.
+- Desktop regression: 4,969 passed, 5 skipped. Server focused regression: 97
+  passed. Native Electron against a disposable authenticated endpoint fixture
+  verifies official Claude defaults, disconnected choices hidden, Add Agent
+  navigation, successful API setup, and confirmed Forget immediately removing
+  the custom choice. No real account keys were changed during fixture testing.
+  Additional live conditional-cleanup and packaged-app acceptance are pending.
+
 ## 2026-09-27 — Endpoint confirmation spacing
 
 - Use a compact, centered confirmation with consistent 24px insets, 16px content

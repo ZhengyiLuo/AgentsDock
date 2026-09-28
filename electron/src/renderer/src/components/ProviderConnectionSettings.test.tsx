@@ -55,8 +55,8 @@ it('only checks on submit, shows a bounded API check and clears the key', async 
   })
   fireEvent.click(screen.getByRole('button', { name: 'Connect' }))
   await screen.findByText('Connected')
-  expect(submitted).toEqual({ base_url: 'https://openrouter.ai/api', model: 'test/model', api_key: 'synthetic-test-key',
-    protocol: 'anthropic', auth_header: 'bearer', expected_revision: 0 })
+  expect(submitted).toEqual({ base_url: 'https://api.anthropic.com', model: 'test/model', api_key: 'synthetic-test-key',
+    protocol: 'anthropic', auth_header: 'x-api-key', expected_revision: 0 })
   expect(key).toHaveValue('')
   expect(screen.getByText('Settings only — not used by chats yet.')).toBeVisible()
   expect(screen.getByRole('button', { name: 'Endpoint options' })).toBeEnabled()
@@ -114,8 +114,17 @@ it('makes old-server and Cursor limitations visible without fake success', async
   render(<><ProviderConnectionSettings {...props} /><CursorEndpointNotice /></>)
   expect(await screen.findByRole('alert')).toHaveTextContent('does not expose these endpoint settings yet')
   expect(screen.getByRole('button', { name: 'Configure API' })).toBeDisabled()
-  expect(screen.getByText(/Custom model APIs are not supported here by Cursor CLI/)).toBeVisible()
+  expect(screen.getByText(/Cursor supports its own API keys through CURSOR_API_KEY/)).toBeVisible()
   expect(screen.getByText('Connection status unavailable')).toBeVisible()
-  expect(screen.getByText('Custom API not supported')).toBeVisible()
+  expect(screen.getByText('Cursor API key: configure in CLI')).toBeVisible()
   expect(screen.queryByText('Connected')).not.toBeInTheDocument()
+})
+
+it('does not silently choose OpenRouter for OpenCode', async () => {
+  bridge().mockResolvedValue({ configuration: { ...empty, backend: 'opencode' } })
+  render(<ProviderConnectionSettings {...props} backend="opencode" />)
+  await waitFor(() => expect(screen.getByRole('button', { name: 'Configure API' })).toBeEnabled())
+  fireEvent.click(screen.getByRole('button', { name: 'Configure API' }))
+  expect(screen.getByLabelText('API base URL')).toHaveValue('')
+  expect(screen.getByText(/OpenCode Zen and Go are official options/)).toBeVisible()
 })
