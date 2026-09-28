@@ -1,5 +1,36 @@
 # Public development log
 
+## 2026-09-27 — Mailbox input ownership and scoped macOS file discovery
+
+- Integrate the existing native-continuation ownership fix: retain the initial
+  Codex input turn ID separately from its later continuation. Older history
+  requires exact, unambiguous assistant-item and completed-run evidence before
+  classifying a replay as internal. Genuine user messages with identical words
+  remain visible; original provider transcripts and audit events are not edited.
+- Recursive workspace search from Home or an ancestor no longer enters the
+  macOS user's private/system-managed home trees. Skip these paths before
+  opening or inspecting them, including empty queries; bypass Git's recursive
+  untracked-file enumeration for these broad scopes. Explicit project scopes,
+  direct opens, normal same-named project folders and OS permission errors retain
+  their existing behavior. This is not a new sandbox or a permission grant.
+- Validation: server batches of 290 and 131 focused tests passed (overlapping);
+  desktop batches of 140 and 60 passed (overlapping), plus TypeScript checking
+  and production compilation. New privacy regressions cover broad and explicit
+  scopes, Git fallback, empty/missing searches, aliases, symlinks and denied access.
+- Isolated offscreen production Electron reproduced both discovery of synthetic
+  app-container files and a duplicate internal input with the old history repair.
+  Through real IPC, authenticated HTTP, WebSocket catch-up and local cache, verify
+  corrected history, older-page loading, refresh and app reopening. One genuine
+  same-text user input and the original replies remain. Opening the file palette,
+  searching, switching workspace and explicitly opening a synthetic private path
+  exercise the new search boundary. Fixture transcript/ledger hashes are unchanged.
+- Limits: no real private app data or macOS TCC settings were accessed; the
+  reported permission dialog and remote customer's exact ledger were not tested.
+  Provider records are synthetic; continuation execution is covered by controlled
+  native-router regressions, not a new live-model request. No mobile, packaged
+  release, existing service restart or deployment is claimed. A new server
+  candidate must include these changes; frozen release artifacts are unchanged.
+
 ## 2026-09-27 — Readable default server names
 
 - Unnamed desktop server connections use their URL host and port rather than
