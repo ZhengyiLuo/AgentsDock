@@ -2849,6 +2849,8 @@ describe('Composer', () => {
   })
 
   it('shows an actionable provider warning and preserves the draft when the CLI is unavailable', async () => {
+    const send = vi.fn().mockRejectedValue(new Error('Codex is not installed. Install Codex and retry.'))
+    window.agentsDock.turns = { ...window.agentsDock.turns, send }
     useAppStore.setState({
       health: {
         ok: true,
@@ -2862,16 +2864,67 @@ describe('Composer', () => {
     })
     const user = userEvent.setup()
     render(<Composer />)
-    expect(screen.getByText('Codex is not installed on the server.')).toBeInTheDocument()
+    expect(screen.queryByText('Codex is not installed on the server.')).not.toBeInTheDocument()
     const editor = screen.getByPlaceholderText('Message')
     await user.type(editor, 'Keep this draft')
     await user.click(screen.getByRole('button', { name: 'Send message' }))
+    await waitFor(() => expect(send).toHaveBeenCalledOnce())
     expect(editor).toHaveValue('Keep this draft')
     expect(useAppStore.getState().error).toContain('Install Codex')
   })
 
-  it.each(['missing', 'error'] as const)('does not bypass a %s Claude executable when retrying', async status => {
-    const send = vi.fn()
+  it.each((['cursor', 'claude', 'opencode', 'codex'] as const).flatMap(backend =>
+    [false, true].map(refreshed => ({ backend, refreshed }))))('retries $backend custom API on send with reconnected catalog=$refreshed', async ({ backend, refreshed }) => {
+    const session: Session = { id: 'chat-1', title: 'Existing API chat', backend,
+      model: 'fixture/model', codex_provider: backend === 'codex' ? 'custom' : 'default',
+      provider_connection: backend !== 'codex' ? 'custom' : 'default',
+      provider_connection_catalog: { configured: false, available: false, model: null, base_url: null } }
+    const send = vi.fn().mockRejectedValueOnce(new Error("Error invoking remote method 'turns:send': Error: API connection is disconnected. Reconnect and retry."))
+      .mockResolvedValueOnce({ session, event: { id: 'accepted', session_id: 'chat-1', type: 'turn_started', seq: 1, ts: '', run_id: 'reconnected' } })
+    window.agentsDock.turns = { ...window.agentsDock.turns, send }
+    useAppStore.setState({ sessions: [session], health: { ok: true, capabilities: {
+      provider_connections_v1: { per_chat: true, available: true },
+      codex_provider_v1: { per_chat: true, per_chat_models: true, available: true },
+      cursor_backend: { version: 2, available: true, required: false, message: '', action: null }, opencode_backend: { version: 1, available: true, required: false, message: '', action: null },
+    } }, runtimeCatalog: { backends: { [backend]: { models: [], efforts: [], custom_provider: { configured: false, available: false, model: null, base_url: null } } } } })
+    const user = userEvent.setup()
+    render(<Composer />)
+    expect(screen.queryByRole('button', { name: 'Configure API' })).not.toBeInTheDocument()
+    const editor = screen.getByPlaceholderText('Message')
+    await user.type(editor, 'Retry my connection')
+    expect(send).not.toHaveBeenCalled()
+    await user.click(screen.getByRole('button', { name: 'Send message' }))
+    await waitFor(() => expect(send).toHaveBeenCalledOnce())
+    await waitFor(() => expect(editor).toHaveValue('Retry my connection'))
+    expect(screen.getByRole('button', { name: 'Configure API' })).toBeInTheDocument()
+    expect(screen.getByText('Check failed')).toBeInTheDocument()
+    expect(screen.queryByText(/Error invoking remote method/)).not.toBeInTheDocument()
+    act(() => { const state = useAppStore.getState(); useAppStore.setState({ runtimeCatalog: {
+      ...state.runtimeCatalog, backends: { ...state.runtimeCatalog!.backends,
+        [backend]: { ...state.runtimeCatalog!.backends[backend], custom_provider: { ...state.runtimeCatalog!.backends[backend].custom_provider! } } }
+    } }) })
+    expect(screen.getByRole('button', { name: 'Configure API' })).toBeInTheDocument()
+    if (refreshed) {
+      act(() => { const state = useAppStore.getState(); useAppStore.setState({ runtimeCatalog: {
+        ...state.runtimeCatalog, backends: { ...state.runtimeCatalog!.backends,
+          [backend]: { ...state.runtimeCatalog!.backends[backend], custom_provider: {
+            ...state.runtimeCatalog!.backends[backend].custom_provider!, configured: true, available: true,
+          } } }
+      } }) })
+      expect(screen.queryByRole('button', { name: 'Configure API' })).not.toBeInTheDocument()
+      expect(useAppStore.getState().error).toBeNull()
+    }
+    // The server connection was repaired; no client catalog refresh is needed
+    // to send again. The actual request is the readiness decision.
+    expect(screen.getByRole('button', { name: 'Send message' })).toBeEnabled()
+    await user.click(screen.getByRole('button', { name: 'Send message' }))
+    await waitFor(() => expect(send).toHaveBeenCalledTimes(2))
+    expect(screen.queryByRole('button', { name: 'Configure API' })).not.toBeInTheDocument()
+    expect(useAppStore.getState().error).toBeNull()
+  })
+
+  it.each(['missing', 'error'] as const)('lets the server recheck a cached %s Claude executable when retrying', async status => {
+    const send = vi.fn().mockRejectedValue(new Error('Claude executable is unavailable.'))
     Object.defineProperty(window, 'agentsDock', {
       configurable: true,
       value: { ...window.agentsDock, turns: { send } } as unknown as AgentsDockAPI,
@@ -2888,7 +2941,7 @@ describe('Composer', () => {
     const editor = screen.getByPlaceholderText('Message')
     await user.type(editor, 'Keep this Claude draft')
     await user.click(screen.getByRole('button', { name: 'Send message' }))
-    expect(send).not.toHaveBeenCalled()
+    await waitFor(() => expect(send).toHaveBeenCalledOnce())
     expect(editor).toHaveValue('Keep this Claude draft')
     expect(useAppStore.getState().error).toBe('Claude executable is unavailable.')
   })
@@ -3389,8 +3442,8 @@ describe('Composer', () => {
     expect(runNow).not.toHaveBeenCalled()
   })
 
-  it('blocks a previously selected locked model instead of sending through it', async () => {
-    const send = vi.fn()
+  it('lets the server decide whether a previously locked model is still unavailable', async () => {
+    const send = vi.fn().mockRejectedValue(new Error('Upgrade required.'))
     Object.defineProperty(window, 'agentsDock', {
       configurable: true,
       value: {
@@ -3409,10 +3462,11 @@ describe('Composer', () => {
     render(<Composer />)
 
     await user.type(screen.getByPlaceholderText('Message'), 'Run this')
-    expect(screen.getByRole('button', { name: 'Send message' })).toBeDisabled()
-    expect(screen.getByText('Upgrade required.')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Send message' })).toBeEnabled()
+    expect(screen.queryByText('Upgrade required.')).not.toBeInTheDocument()
     fireEvent.keyDown(screen.getByPlaceholderText('Message'), { key: 'Enter' })
-    expect(send).not.toHaveBeenCalled()
+    await waitFor(() => expect(send).toHaveBeenCalledOnce())
+    await waitFor(() => expect(screen.getByText('Upgrade required.')).toBeInTheDocument())
   })
 
   it('does not reinterpret a blocked draft shortcut as Send now for a queued turn', async () => {

@@ -10,7 +10,7 @@ import { mailHintPending, type MailArrivalCursor, type MailboxCoverage, type Mai
 import { bulletinHintPending, type BulletinHintRefresh } from '@shared/team-bulletin-hints'
 import { applyOpenCodeSessionEvent, openCodeProviderCommandsAvailable } from '@shared/opencode'
 import { t } from '@shared/i18n'
-import { chatBackendChoice, runtimeSelectionError, selectableChatBackendChoices } from '@shared/runtime-catalog'
+import { chatBackendChoice, runtimeSelectionError, runtimeSendAdmissionError, selectableChatBackendChoices } from '@shared/runtime-catalog'
 import { isAsyncCrossChatMessage, isNativeGoalSteerEvent, isNativeSteerTransitionStop, timelineSemanticUnits } from '@shared/semantic-timeline'
 import { turnSendErrorMessage } from '@shared/server-errors'
 import { completedPrefixForkAvailable, RUNNING_FORK_UNAVAILABLE } from '@shared/session-fork'
@@ -1792,7 +1792,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       set({ error: 'The selected chat is no longer available.' })
       return false
     }
-    const runtimeError = runtimeSelectionError(get().health, get().runtimeCatalog, currentTarget.backend, currentTarget.model, (currentTarget.provider_connection === 'custom' ? 'custom' : currentTarget.codex_provider), (currentTarget.provider_connection_catalog ?? currentTarget.codex_provider_catalog))
+    const runtimeError = runtimeSendAdmissionError(get().health, currentTarget.backend, currentTarget.provider_connection === 'custom' ? 'custom' : currentTarget.codex_provider)
     if (runtimeError) {
       set({ error: runtimeError })
       return false
@@ -1836,7 +1836,8 @@ export const useAppStore = create<AppState>((set, get) => ({
         uploadsBySession: { ...state.uploadsBySession, [sessionId]: [] },
         uploadPathsBySession: { ...state.uploadPathsBySession, [sessionId]: [] }
       } : {}),
-      pendingTurnSubmissions: { ...state.pendingTurnSubmissions, [sessionId]: pendingSubmission }
+      pendingTurnSubmissions: { ...state.pendingTurnSubmissions, [sessionId]: pendingSubmission },
+      error: null,
     }))
     if (!stagedSubmission) window.dispatchEvent(new CustomEvent('agentsdock:local-send', { detail: { sessionId } }))
     try {

@@ -157,8 +157,9 @@ function RuntimeStatus({
   const providerNeedsAttention = compact
     ? cursorUnavailable || Boolean(diagnostic && diagnostic.status !== 'ready' && (!passiveClaudeAuth || chatError))
     : cursorUnavailable || runtimeDiagnosticNeedsAttention(diagnostic)
-  const customAdmissionError = codexProvider === 'custom' ? admissionError : undefined
-  if (compact && !chatError && !providerNeedsAttention && !customAdmissionError) return null
+  // Only an actual failed send/run belongs above the composer. Cached login
+  // status can outlive reconnection and must never demand configuration here.
+  if (compact && !chatError && !admissionError) return null
   const tone = chatError ? 'warning' : !compact && diagnostic?.installed !== false
     ? connected && diagnostic?.authenticated === true && diagnostic.status === 'ready' ? 'ready' : 'unknown'
     : cursorUnavailable ? 'error' : runtimeDiagnosticTone(diagnostic)
@@ -167,8 +168,8 @@ function RuntimeStatus({
   const cursorUnavailableDetail = cursorUnavailable
     ? (backend === 'opencode' ? opencodeBackendUnavailableReason(health, catalog) : cursorBackendUnavailableReason(health, catalog)) || ''
     : ''
-  const detail = chatError
-    || customAdmissionError
+  const detail = admissionError
+    || chatError
     || cursorUnavailableDetail
     || (!compact ? runtimeDiagnosticCurrentError(diagnostic) : '')
     || diagnostic?.message
@@ -176,7 +177,7 @@ function RuntimeStatus({
   const label = !compact && !connected ? t('connections.unavailable')
     : !compact && diagnostic?.installed !== false
       ? tone === 'ready' ? t('connections.signedIn') : diagnostic?.authenticated === false ? t('codexAuth.signedOut') : t('connections.loginUnknown')
-      : compact && chatError ? 'Latest chat error' : cursorUnavailable ? 'Unavailable' : runtimeDiagnosticLabel(diagnostic)
+      : compact && admissionError ? t('connections.checkFailed') : compact && chatError ? 'Latest chat error' : cursorUnavailable ? 'Unavailable' : runtimeDiagnosticLabel(diagnostic)
   const cursorAction = diagnostic?.action?.trim() || cursorCapability?.action?.trim()
   const action = cursorUnavailable
     ? cursorAction && !cursorUnavailableDetail.includes(cursorAction) ? cursorAction : undefined

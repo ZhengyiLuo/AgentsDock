@@ -1,5 +1,26 @@
 # Public development log
 
+## 2026-09-27 — Reconnect existing API chats and check on send
+
+- Existing custom API chats can resume after explicitly verifying the same
+  original URL and API key again. Forget still blocks new turns immediately;
+  a different endpoint or key cannot silently take over an old chat. Applies
+  to Codex, Claude Code, Cursor and OpenCode, including legacy bindings.
+- The composer no longer blocks Send based on cached login, model or connection
+  readiness. Server capability and ordinary submission safeguards remain.
+  Actual rejected sends preserve the draft and show Check failed with the
+  Configure API action. Retrying or reconnecting clears the matching old error;
+  equivalent catalog refreshes do not erase a real failure notice.
+- Verification: 108 isolated server tests and 502 focused desktop tests passed;
+  TypeScript checking and production compilation passed. Isolated native
+  Electron exercised Forget, a rejected send, draft retention, Configure API,
+  reconnect and successful resubmission in the same chat through IPC, native
+  HTTP authorization, production connection storage and send admission. The
+  provider adapter was synthetic: live paid-provider inference remains a
+  separate acceptance check. No real user's chat received a test message.
+- Availability: local feature branch; authorized local app/server installation
+  tracked separately. No release publication or merge is implied.
+
 ## 2026-09-27 — Forget revokes existing custom API chats
 
 - Forget now durably revokes this server's existing custom API bindings for

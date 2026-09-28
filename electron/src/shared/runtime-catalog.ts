@@ -209,9 +209,22 @@ export function runtimeModelLockReason(
 }
 
 /**
- * Fail closed before an action is admitted when its backend contract is not
- * available or its explicit model is currently locked.
+ * Reject unsupported backend contracts, not stale cached account/model status.
  */
+export function runtimeSendAdmissionError(
+  health: Health | null | undefined, backend: Backend, connection?: CodexProvider
+): string | null {
+  // Capability mismatches are structural. Cached auth/model readiness is not:
+  // the server and real provider request decide that on every send.
+  if (connection === 'custom') {
+    if (backend === 'codex' && !codexCustomProviderSupported(health)) return t('codexProvider.update')
+    if (backend !== 'codex' && health?.capabilities?.provider_connections_v1?.per_chat !== true) return t('codexProvider.update')
+  }
+  if (backend === 'cursor' && !cursorBackendSupported(health)) return cursorBackendUnavailableReason(health, null)
+  if (backend === 'opencode' && !opencodeBackendSupported(health)) return opencodeBackendUnavailableReason(health, null)
+  return null
+}
+
 export function runtimeSelectionError(
   health: Health | null | undefined,
   catalog: RuntimeCatalog | null | undefined,

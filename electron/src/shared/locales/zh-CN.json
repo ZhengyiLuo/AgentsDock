@@ -774,6 +774,7 @@
   "connections.unsupported": "Cursor API Key：通过 CLI 配置",
   "connections.settingsOnly": "仅保存设置，暂不用于会话。",
   "connections.configure": "配置 API",
+  "connections.checkFailed": "连接检查失败",
   "connections.working": "检查中…",
   "connections.verified": "已连接",
   "connections.options": "接口选项",

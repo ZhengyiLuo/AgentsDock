@@ -774,6 +774,7 @@
   "connections.unsupported": "Cursor API key: configure in CLI",
   "connections.settingsOnly": "Settings only — not used by chats yet.",
   "connections.configure": "Configure API",
+  "connections.checkFailed": "Check failed",
   "connections.working": "Checking…",
   "connections.verified": "Connected",
   "connections.options": "Endpoint options",

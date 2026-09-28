@@ -13,7 +13,7 @@ import { effectiveFileContentType } from '@shared/file-content-type'
 import { localSessionImportSupported } from '@shared/local-session-import'
 import type { AgentCrossChatRoute, AgentTeamMailRoute, AgentTeamMailRoutesSnapshot, AgentFile, ChatReference, ChatReferenceAction, ClaudePermissionMode, Event as AgentEvent, Health, NativeFileRef, ProviderCommand, ProviderCommandSelection, ProviderCommandsSnapshot, QueuedTurn, RuntimeCatalog, Session, TeamReference } from '@shared/types'
 import { teamAllServersAliasAvailable, teamBulletinAliasAvailable, type TeamNetworkServer } from '@shared/team-network'
-import { chatBackendChoice, chatBackendSelection, codexCustomProviderAvailable, cursorBackendAvailable, cursorBackendUnavailableReason, runtimeCatalogOptions, runtimeDiagnosticFor, runtimeEffortAfterModelChange, runtimeEffortOptions, runtimeSelectionError, selectableChatBackendChoices } from '@shared/runtime-catalog'
+import { chatBackendChoice, chatBackendSelection, codexCustomProviderAvailable, cursorBackendAvailable, cursorBackendUnavailableReason, runtimeCatalogOptions, runtimeEffortAfterModelChange, runtimeEffortOptions, runtimeSelectionError, runtimeSendAdmissionError, selectableChatBackendChoices } from '@shared/runtime-catalog'
 import { trackEvent } from '../lib/analytics'
 import { backendLabel, formatBytes, runtimeLabel } from '../lib/format'
 import { CodexModelDiscovery } from './CodexModelDiscovery'
@@ -750,7 +750,20 @@ export const Composer = memo(function Composer({ dropActive = false, sessionId, 
   const unsupportedAllServersReference = !teamAllServersSupported && hasAllServersReference(teamReferences)
   const composerTeamReferencesSupported = (teamReferences.length === 0 || teamMentionsSupported) && !unsupportedAllServersReference
   const referencesSupported = chatReferencesSupported && composerTeamReferencesSupported
+  const sendContext = `${activeProfileId}:${profileGeneration}:${selectedId}`
   const selectedRuntimeError = sessionRuntimeAdmissionError(session, health, catalog)
+  const [sendFailure, setSendFailure] = useState<{ context: string; message: string } | null>(null)
+  const currentCustomConnection = session && catalog?.backends[session.backend]?.custom_provider
+  const connectionIdentity = JSON.stringify([currentCustomConnection?.configured ?? null,
+    currentCustomConnection?.base_url ?? null, currentCustomConnection?.available ?? null])
+  useEffect(() => {
+    // A successful reconnect dismisses only this composer's last send error.
+    // Equivalent catalog refreshes must not erase a real failed-send notice.
+    const state = useAppStore.getState()
+    if (currentCustomConnection?.configured && sendFailure?.context === sendContext
+      && state.error === sendFailure.message) state.setError(null)
+    setSendFailure(null)
+  }, [sendContext, connectionIdentity])
   const canSend = !writeDisabled && !selectedRuntimeError && !admitting && uploadPaths.length === 0 && referencesSupported && (Boolean(draft.trim()) || uploads.length > 0)
   const codexControls = health?.capabilities?.codex_controls
   const claudeControls = health?.capabilities?.claude_controls
@@ -1214,6 +1227,7 @@ export const Composer = memo(function Composer({ dropActive = false, sessionId, 
 
   const send = async (steer = false, promptOverride?: string, consumeComposer = true) => {
     if (writeDisabled) return
+    setSendFailure(null)
     if (steer && running && session?.backend === 'opencode') { useAppStore.getState().setError(t('opencode.steerUnavailable')); return }
     if (!profileIsActive(activeProfileId, profileGeneration)) return
     let steerConsent: InboundDeliveryConsent | undefined
@@ -1380,15 +1394,6 @@ export const Composer = memo(function Composer({ dropActive = false, sessionId, 
     }
     let submissionAccepted = false
     try {
-      const runtimeSnapshot = useAppStore.getState()
-      const diagnostic = runtimeDiagnosticFor(runtimeSnapshot.health, runtimeSnapshot.runtimeCatalog, session.backend, (session.provider_connection === 'custom' ? 'custom' : session.codex_provider), (session.provider_connection_catalog ?? session.codex_provider_catalog))
-      // Claude owns login verification on the real request. Its cached failure
-      // can outlive an external login; do not prevent the retry that proves it.
-      const nativeClaudeAuthRetry = session.backend === 'claude' && diagnostic?.status === 'unauthenticated'
-      if (diagnostic && !['ready', 'unknown'].includes(diagnostic.status) && !nativeClaudeAuthRetry) {
-        useAppStore.getState().setError([diagnostic.message, diagnostic.action].filter(Boolean).join(' '))
-        return
-      }
       if (session.backend === 'codex') {
         try {
           await awaitCodexPermissionUpdates(session.id)
@@ -1445,6 +1450,10 @@ export const Composer = memo(function Composer({ dropActive = false, sessionId, 
           : undefined
       })
       submissionAccepted = sent
+      if (!sent && composerSessionIsCurrent(activeProfileId, profileGeneration, serverIdentity, session.id, draftContextRef, mountedRef)) {
+        const message = useAppStore.getState().error
+        if (message) setSendFailure({ context: sendContext, message })
+      }
       if (sent) {
         trackEvent('message_sent')
         if (boundProviderCommand) {
@@ -1863,8 +1872,7 @@ export const Composer = memo(function Composer({ dropActive = false, sessionId, 
       />
         </fieldset>
       {(uploads.length > 0 || uploadPaths.length > 0) && <AttachmentShelf sessionId={session.id} profileId={activeProfileId} profileGeneration={profileGeneration} files={uploads} pending={uploadPaths} />}
-      <RuntimeHealthNotice backend={session.backend} codexProvider={(session.provider_connection === 'custom' ? 'custom' : session.codex_provider)} sessionId={session.id} admissionError={selectedRuntimeError || undefined} />
-      {selectedRuntimeError && session.provider_connection !== 'custom' && session.codex_provider !== 'custom' && !(session.backend === 'cursor' && !cursorPermissionsAvailable) && <span className="chat-reference-warning">{selectedRuntimeError}</span>}
+      <RuntimeHealthNotice backend={session.backend} codexProvider={(session.provider_connection === 'custom' ? 'custom' : session.codex_provider)} sessionId={session.id} admissionError={(sendFailure?.context === sendContext ? cleanActionError(sendFailure.message) : undefined) || selectedRuntimeError || undefined} />
       {activeInboundDeliveryKind && <span className={activeInboundDeliveryKind === 'unknown' ? 'composer-sync-status' : 'chat-reference-warning'} role="status">{activeInboundDeliveryKind === 'unknown'
         ? t("ui.Composer.Composer.an_active_turn_is_running_while_chat_sync__2265ac1")
         : activeInboundDeliveryKind === 'secure_peer'
@@ -4475,7 +4483,7 @@ function sessionRuntimeAdmissionError(
   health: Parameters<typeof runtimeSelectionError>[0],
   catalog: Parameters<typeof runtimeSelectionError>[1]
 ): string | null {
-  return session ? runtimeSelectionError(health, catalog, session.backend, session.model, (session.provider_connection === 'custom' ? 'custom' : session.codex_provider), (session.provider_connection_catalog ?? session.codex_provider_catalog)) : null
+  return session ? runtimeSendAdmissionError(health, session.backend, session.provider_connection === 'custom' ? 'custom' : session.codex_provider) : null
 }
 
 function queuedTurnRuntimeAdmissionError(
