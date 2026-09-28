@@ -1,5 +1,410 @@
 # Public development log
 
+## 2026-09-28 — Verify frozen candidate download recovery
+
+- Run `36387432761` passes all source gates and all three native macOS
+  rehearsal jobs on harness `8d81b6d`. Reuse unchanged beta.18 / build `1223`
+  packages from source `78e113f806b023a1caa925bb9ff763adc79c2842`.
+- Interrupt the exact signed legacy download once, observe the incumbent
+  process and persisted fixture staying healthy and unchanged, then retry the
+  same accepted version through the production updater. Native activation and
+  all 116 installed runtime files verify; disposable trust/routing cleanup
+  succeeds. Recovery evidence SHA-256 is
+  `69cd64fe6a6ef7e1c56b09bbb538f5e881a6f428257e30c9cb5d4e0f2cd2db24`.
+- Repeat fresh installation and the real app-first/offline/shared-client
+  upgrade. These scoped jobs do not claim provider-native history, busy/queued
+  work, logout/reboot or post-takeover rollback. Their reports explicitly
+  remain ineligible for production publication and retain blocked checks.
+- Carry the recovery harness into PR #44; the combined source passes all 279
+  JavaScript release-tooling/CLI tests and workflow lint. Clarify that required
+  authenticated and manual acceptance journeys need implementation, not merely
+  another dispatch or release credentials. Stable `1.0.7` needs its own exact
+  rebuilt and accepted package set; beta.18 cannot be relabeled as stable.
+- No npm/app publication, dist-tag change, signing-key change or merge.
+
+## 2026-09-28 — Prepare the first stable registry transition
+
+- Resolve the product-pipeline PR against current `main`, retaining both
+  development histories and the new provider modules in server packaging.
+  Preserve the signed beta.18 test artifacts and their original source pin;
+  source checks on the combined branch do not extend their native acceptance.
+- Record the tester's report that real chats and the requested manual checks
+  passed on beta.18. This is manual candidate evidence, not a synthesized CI
+  result or proof of unobserved busy-provider migration and rollback cases.
+- Add an explicit first-stable publication input pinned to the exact prior
+  prerelease on npm `latest`. Require the accepted same-base stable candidate,
+  no other stable registry version, unchanged `beta`, signed exact bytes and
+  strict registry readback. Default/beta behavior remains fail-closed. No
+  preparatory tag removal, registry write or acceptance bypass is introduced.
+- Recheck the first-stable registry inventory on both preflight and refreshed
+  readback; reject newly appearing stable or unsupported versions before
+  downloading bytes. Independent review and the original race regression pass.
+- Pass 276 JavaScript release-tooling/CLI tests, 106 Python helper tests,
+  23 server packaging tests and workflow lint. The combined desktop source
+  passes 4,984 tests with five existing skips, eight compile/license checks,
+  type checking and production compilation. Correct local test prerequisites
+  before rerunning; these are source checks, not a new signed native release.
+- Production credentials, workflow registration and full prepared-candidate
+  acceptance remain required. No npm/app publication or signing-key change.
+
+## 2026-09-27 — Pass the frozen macOS candidate rehearsal
+
+- Candidate replay `36352117281`, harness `59fcdc7`, passes source checks and
+  both native jobs against unchanged `1.0.7-beta.18` / build `1223` packages
+  from `78e113f806b023a1caa925bb9ff763adc79c2842`. No signing key, package,
+  publication state or existing user service is changed.
+- Observe one real app update from `1.0.6` while server `1.0.3` is offline,
+  native replacement/relaunch and automatic reconciliation after reconnect.
+  Two native clients share one completed server operation, with no manual
+  server-update or retry click. Stable excludes the beta in the isolated feed;
+  Beta installs the exact signed candidate. Owned routing/trust cleanup passes.
+- Verify all 116 installed server runtime files and the persisted fixture's
+  identity, token, settings, paths and history projection. The only recognized
+  schema additions are absent `codex_provider` and `opencode_permission_mode`
+  becoming `default`. The preservation report hash is independently matched to
+  both the desktop check and its completed paired-service event.
+- Keep real provider history/native session IDs, busy/queued work, interactive
+  installer cases, actual logout/reboot and native recovery acceptance blocked
+  until observed. These rehearsal reports explicitly remain ineligible for
+  publication. All 11 PR source checks pass on implementation commit `2016efd`;
+  PR #44 remains draft pending the remaining evidence and configuration.
+
+## 2026-09-27 — Carry replay hardening into production acceptance
+
+- Bring the full macOS/Linux acceptance workflow in line with the isolated
+  rehearsal: exact TLS/startup/PID readiness, owned detached-updater trust
+  setup/cleanup and bounded failure diagnostics. Verify the signed macOS app
+  against the receipt's build number and exact coordinated descriptor before
+  changing disposable trust or routing.
+- Retain all production receipt/source/run/attempt checks, native matrices and
+  required observations. Supplemental diagnostic/preservation files cannot
+  satisfy required acceptance reports. Candidate rehearsals remain explicitly
+  ineligible for production publication.
+- Pass workflow lint, shell/embedded JavaScript syntax checks, 266 JavaScript
+  release-tooling tests and independent review. This is workflow preparation,
+  not a completed production acceptance run or publication approval.
+
+## 2026-09-27 — Add a frozen-candidate download recovery rehearsal
+
+- Extend the explicitly dispatched macOS candidate matrix with a separate
+  signed legacy download interruption/retry case. Reuse the unchanged beta.18
+  receipt, signed server packages and existing failure harness; leave runtime
+  source and the candidate provenance allowlist unchanged.
+- Check incumbent authenticated health, process identity and persisted fixture
+  after the one-shot partial transfer, then retry through the real update API.
+  Keep recovery observations non-publishing and collect only bounded sanitized
+  JSON after disposable-runner trust/routing cleanup.
+- Materialize the lockfile-pinned Electron runtime once before parallel source
+  test imports, avoiding concurrent lazy extraction into the same directory.
+- Verify 269 JavaScript release-tooling/CLI tests, 76 native-harness/network
+  Python tests and workflow linting. Fixture tests also reject private fields,
+  oversized or symlinked reports, and forged publication eligibility.
+- Availability: source-only workflow change pending its hosted native run.
+  This adds no claim of provider history, busy-work, candidate-health rollback,
+  complete production acceptance or public delivery.
+
+## 2026-09-27 — Observe the matched native app/server upgrade
+
+- Run `36351034285` passes source CI and fresh native npm installation, then
+  exercises the real app update from `1.0.6` with its `1.0.3` server offline.
+  Squirrel replaces/relaunches the exact signed beta.18 app. Reconnection
+  triggers one automatic server update, shared by two real clients, to the
+  matching beta.18 gateway and execution runtime with the original identity.
+  The update journal completes and maintenance is released; no manual server
+  update or retry click is used. Owned routing/trust cleanup passes.
+- The job then fails its preservation comparison. Signed baseline `1.0.3`
+  omits `codex_provider` and `opencode_permission_mode` from session metadata;
+  the candidate explicitly reports their newly introduced `default` values.
+  The old snapshot conflated absent fields with explicit null. Preserve field
+  presence and narrowly distinguish these known schema additions from changed
+  user settings; retain strict identity, history, permission and path checks.
+  Full preservation and release acceptance remain unproven pending the retry.
+- Limit schema-default recognition to absent baseline `1.0.3` fields gaining
+  exactly `default` on unchanged non-OpenCode sessions, after authenticated
+  exact-candidate health. Explicit null/configured values receive no exception.
+  Emit measured default additions and finite changed-field names, never raw
+  session values. Pass 266 JavaScript tests, 106 Python tests and workflow lint;
+  keep the original signed candidate and supplemental preservation evidence.
+
+## 2026-09-27 — Narrow the paired upgrade failure without changing packages
+
+- Run `36348933303` again passes source checks, fresh npm installation, signed
+  package verification, exact-origin replay setup and real desktop replacement.
+- Independent diagnostics show the baseline server is healthy and reachable
+  with its original identity and configured port; its current runtime remains
+  `1.0.3`. The candidate update journal is failed, and the app coordinator is
+  failed and paused for the expected server and target. This rules out a
+  persistent server outage in this run, but does not identify the update error.
+- The old updater stores exception details in its journal message, not the
+  structured error fields previously observed. Keep raw messages private and
+  add only bounded, fixed diagnostic classifications. Preserve the frozen
+  beta.18 artifacts and keep publication blocked. Routing/trust cleanup passes.
+- Identify a replay-only trust-seeding gap in the signed legacy source: a new
+  detached tmux daemon intentionally drops CA environment hints, while the
+  harness configured hints only on an already-running daemon. Keep an owned
+  disposable sentinel session alive, inject and verify the exact test CA, and
+  clean up only its native ID plus run-owned name. This is TLS plumbing, not
+  a busy-provider acceptance test or proof of the previous failure's cause.
+- Stop the native journey promptly on two consecutive paused failures for the
+  exact paired identity and candidate, retaining diagnostic collection. Pass
+  266 JavaScript tests, 99 Python tests, workflow lint and independent review;
+  recheck that all frozen candidate/handoff hashes are unchanged.
+
+## 2026-09-27 — Observe native app replacement; investigate paired service activation
+
+- Run `36347084458` passes source checks, fresh npm installation, signed native
+  package verification and the corrected exact-origin HTTPS replay setup.
+- The real app shows no beta on Stable, downloads the exact beta.18 on Beta,
+  accepts a real update-button click with its server offline, and replaces and
+  relaunches itself through Squirrel. The installed ASAR matches the frozen
+  candidate. It visibly preserves the offline pending state, and two native
+  clients wait on that same saved server before service restart is requested.
+- The fixture's restart result proves native service registration, not HTTP
+  readiness; its original "reconnected" event must not be read as that proof.
+  After that request, automatic paired server reconciliation
+  times out with failed health fetches. This does not establish a completed
+  server upgrade or identify its cause. Trust/routing cleanup succeeds. Keep
+  publication blocked and retain the same candidate bytes for diagnosis.
+- Add finite native-stage progress, a bounded diagnostic WebSocket handshake,
+  and independent app/health snapshots that retain coordinator state when a
+  health fetch fails. Capture read-only owned service/activation diagnostics
+  using fixed fields and bounded log categories; never upload raw private logs
+  or run recovery automatically. Pass 265 JavaScript tests, 94 Python tests,
+  workflow lint and independent privacy review before the same-artifact retry.
+
+## 2026-09-27 — Isolate replay certificate generation from runner defaults
+
+- Run `36346325878` repeats fresh npm and signed package verification, then
+  fails offline chain validation before any trust/routing activation. Cleanup
+  succeeds; no update click has yet been exercised.
+- Reproduce the same verification failure locally when LibreSSL combines
+  default CA extensions with additive command-line extensions. Generate the
+  disposable CA and leaf using explicit, owned configurations instead; retain
+  strict hostname/chain verification and the original app/server signing keys.
+  The CI runner's exact prior configuration has not been independently observed.
+- Verify unique extensions, all three replay hostnames, unrelated-hostname
+  rejection and private-key modes using temporary fixtures across OpenSSL and
+  LibreSSL. Pass 259 JavaScript tests, 89 Python tests and workflow lint.
+  Frozen candidate and manual-handoff hashes remain unchanged.
+
+## 2026-09-27 — Verify replay chains before trust and use an exact TLS probe
+
+- Run `36345413985` again verifies fresh installation and the signed packages.
+  Its listener is ready and reached over loopback, but curl still reports
+  issuer-chain verification failure (`20`). No update click was exercised.
+- Verify the generated leaf against the ephemeral CA for all three exact
+  hostnames before any trust-store or hosts-file mutation; keep failures
+  sanitized and partial setup recoverable.
+- Use a bounded Node HTTPS readiness probe with explicit CA and normal
+  hostname/TLS verification, exact served-leaf match, loopback, expected response
+  marker and owned ready listener. Curl remains an independent diagnostic.
+  The production app's native TLS/update checks are unchanged and still must
+  pass the real upgrade journey. Do not treat infrastructure readiness as an
+  updater pass or publication approval.
+- Pass 259 JavaScript release/CLI tests, 87 Python helper tests and workflow
+  lint; independent review passes the TLS and diagnostic boundaries.
+
+## 2026-09-27 — Pin replay-probe trust and connection identity
+
+- Candidate run `36344660122` repeats the fresh npm and signed app/legacy
+  successes. Safe diagnostics show the listener fully initialized, while the
+  readiness probe exits with TLS verification code 60 before any update click.
+- Bind the probe explicitly to its ephemeral CA, retain certificate validation,
+  and require loopback, successful TLS verification, HTTP 200 and the exact
+  replay response marker as well as completed startup and owned listener PID.
+  Emit only bounded connection facts, never raw headers or private logs.
+- An unprivileged loopback TLS fixture accepts the same generated chain with
+  both environment CA hints and explicit CA input. This validates the probe
+  mechanism but does not prove why the CI trust check failed. No developer
+  trust-store/DNS or signed app/server artifact changes are made.
+- Pass 257 JavaScript release/CLI tests and workflow lint before the next retry.
+
+## 2026-09-27 — Observe fresh native installation; diagnose replay startup
+
+- In candidate CI run `36343746182`, the frozen beta.18 npm package passes
+  macOS installation, 116-file runtime comparison, permanent/cache-independent
+  service restart, safe existing-install refusal, persisted API session and
+  signature/server/process-identity rejection checks.
+- The signed app verifier and legacy installation also pass. Exact-origin
+  replay setup/restoration succeeds, but HTTPS readiness times out before the
+  update click. This is not proof of either updater success or an app defect.
+- Add finite, bounded startup diagnostics and readiness status without copying
+  private listener logs or credentials to CI output. Retain the same candidate
+  bytes. Real provider work, busy drain, interactive installer paths and actual
+  logout/reboot remain unverified; publication remains blocked.
+- Close a partially initialized listener on failure and require the completed
+  startup record plus owned process identity, not HTTP alone, for readiness.
+  Pass 256 JavaScript release/CLI tests, 84 Python helper tests and workflow lint.
+
+## 2026-09-27 — Retry native rehearsal without rebuilding accepted packages
+
+- The first beta.18 native rehearsal verified the frozen inputs but stopped
+  before the update journey: its desktop verifier lacked the explicit expected
+  coordinated descriptor paths, and the fresh service harness reported a
+  launchctl failure. Do not record these observations as an updater pass.
+- Retain the exact signed beta.18 app/npm/legacy packages and original receipt.
+  Bind a separately recorded CI harness commit through clean-checkout, ancestry
+  and strict changed-path checks. Reject runtime/build/signing changes; leave
+  the production publication/acceptance contracts unchanged.
+- Pass 251 release/CLI JavaScript tests, 84 Python helper tests, workflow
+  linting and diff checks before retrying. These are harness checks, not native
+  acceptance or permission to publish.
+
+## 2026-09-27 — Verify the unpublished beta.18 macOS/app-server candidate
+
+- Build `1.0.7-beta.18`, native build `1223`, from pinned source
+  `78e113f806b023a1caa925bb9ff763adc79c2842`. Reuse server signing run
+  `36342006391` and the original trust key; verify artifact provenance, both
+  signatures and exact npm/legacy runtime parity. Offline npm staging reports
+  the matching version, including the pinned Claude and Cursor modules.
+- Verify the universal desktop ZIP and DMG with the existing Developer ID:
+  notarization/stapling, Gatekeeper, strict signatures, signed app parity,
+  updater metadata/blockmap and an isolated launch smoke test all pass.
+  The app embeds the exact signed matching npm descriptor, not the server runtime.
+- Seal a non-publishing macOS candidate receipt with SHA-256
+  `18b3f793b3d54a017f27b385dd4422e56f78d7cf07ea599d606a587ff17faffd`.
+  Keep its artifact source commit pinned; later harness/documentation changes
+  do not rebuild packages.
+- Source CI passes Electron/release tooling/mobile checks and all eight server
+  shards. Provide a separate-account macOS test handoff; real provider chats,
+  logout/reboot and the native one-click replay are not established by this
+  package verification. No npm/public desktop release, key rotation, existing
+  service mutation or App Store/TestFlight upload has occurred.
+
+## 2026-09-27 — Match native acceptance to the installer entry-point mode
+
+- Reserve `1.0.7-beta.18`, native build `1223`, for the corrected rehearsal.
+  The beta.17 server-only signing attempt succeeded, but no desktop package,
+  acceptance receipt or public release was produced from it.
+- Verify installed runtime permissions against the actual installer contract:
+  its entry point is made executable during installation. Preserve exact
+  package hashes and the existing signing key; do not mutate signed archives.
+- Match the native update test's click to the actual baseline's "Update
+  AgentsDock" button while retaining support for the older restart label.
+  These changes affect acceptance automation, not app update behavior.
+- Pass 242 release/CLI JavaScript tests, 72 Python helper tests and workflow
+  linting before the new source pin. Native build and replay remain pending.
+
+## 2026-09-27 — Reuse signing custody for an unpublished macOS rehearsal
+
+- Reuse the existing standalone artifact-only server signer without moving or
+  replacing its private key. Verify the exact canonical export, successful
+  signer run, original artifact ZIP digest, signed inventories and runtime parity.
+- Add a separate macOS/app-server candidate receipt and an explicit branch-only
+  source-CI replay route. Keep these non-publishing observations distinct from
+  full product acceptance; do not relax the production publication gate.
+- Reuse local Developer ID signing and existing Apple notarization credentials.
+  No new certificate, server trust key or copied signing secret is required for
+  the scoped candidate. Keep native trust/routing changes on disposable runners.
+- Document exact fresh npm installation commands for a separate Apple Silicon
+  macOS account, cache independence, identity/history checks and result reporting.
+- Stabilize a cancellation test by waiting for its observer-start precondition;
+  application behavior is unchanged. All 4,927 desktop tests pass locally, with
+  five existing skips. All 241 release/CLI JavaScript tests, 69 Python helper
+  tests and workflow linting pass. Native candidate build/replay results remain pending and
+  must be recorded separately; this source change establishes no public release.
+
+## 2026-09-27 — Add receipt-bound native acceptance and a manual test handoff
+
+- Add an explicit, read-only-credential acceptance workflow on disposable
+  hosted Linux/macOS runners. Verify the exact prepared source, signed server
+  bundle and native artifact manifest before installation or origin replay.
+- Implement real npm/legacy installer and service harnesses, macOS UI-driven
+  desktop replacement/relaunch, offline reconciliation, two-client coordination
+  and Stable/Beta observations. Retain both legacy root permission layouts.
+- Add exact-archive transfer interruption/retry and an owned Linux candidate
+  process health-fault/rollback harness. Never change signed package bytes,
+  disable TLS checks, signal an incumbent process, or patch the app updater.
+- Bind collected observations to the source, receipt, workflow run and attempt.
+  Keep unobserved provider chats, populated history, busy/queued work,
+  interactive installation and logout/reboot explicitly blocked.
+- Add the separate-machine Apple Silicon manual checklist and sanitized result
+  template. An unpublished package is not discoverable through production feeds;
+  manual installation is not proof of the one-click updater journey.
+- Pass 228 release/CLI JavaScript tests, 53 Python helper tests and workflow
+  linting. Independent review checks the real worker command, exact candidate
+  transaction and PID ownership before any disposable-runner fault signal.
+- Disable background Git maintenance only in disposable packaging-test
+  repositories after Linux CI exposed a teardown race. Keep cleanup strict;
+  do not change the developer's Git settings or release-package behavior.
+- Availability: source and helper tests only. No native acceptance run, matched
+  production candidate, user-service mutation, npm/desktop publication or
+  TestFlight/App Store upload is established by this change. Reuse existing
+  signing identities and trust keys; canonical release configuration remains
+  an operator prerequisite.
+
+## 2026-09-27 — Integrate the next product candidate without publication
+
+- Merge main through `f50595b4`, including passive Claude discovery, run-bound
+  Cursor chat tools, cross-chat file-selection reauthorization and Codex goal
+  steering, into the unmerged product-pipeline candidate branch. Reserve
+  `1.0.7-beta.17` after checking existing local and remote reservations; the
+  source's local-build reservation is `1222`, not a product CI allocation.
+- Add independent provider-inventory regression coverage for both server
+  formats. The 116-file inventories include the current Cursor MCP module and
+  Claude integration source with exact bytes and executable permissions.
+- Fail product preparation early when protected signing/publishing credentials
+  are missing. Check presence only, without passing secret bytes to that check;
+  leave publication ordering, trust roots and channel guards unchanged.
+- Add receipt-bound offline package replay infrastructure for future disposable
+  native tests. Restrict routes and require exact sealed bytes; label synthetic
+  discovery and never manufacture acceptance results. TLS routing, the real
+  acceptance workflow and native service/update scenarios remain unfinished.
+- Pass 4,927 desktop tests (five skipped), type checking, production compilation,
+  204 release/CLI tests and 16 offline packaging-helper tests. The longer targeted
+  server validation is still in progress and is not recorded as passed.
+- Availability: candidate source only. No completed production artifact set,
+  native acceptance, server deployment, npm publication, desktop publication or
+  App Store/TestFlight submission. Canonical signing configuration, release
+  approvals and npm stable-default policy still require operator action.
+
+## 2026-09-26 — Verify an unmerged product-pipeline test candidate
+
+- Reserve desktop and server `1.0.7-beta.15`, desktop build `1217`, for an
+  explicitly authorized artifact-only signing and local packaging exercise.
+  Keep this candidate on a separate test release branch, without merging the
+  product-pipeline PR or changing the default branch.
+- Reuse the established server signing key inside the standalone repository's
+  controlled CI; upload only the signed npm/legacy packages and bundle receipt.
+  No npm publication, GitHub release drafts, service deployment, installation,
+  Apple upload or public release is authorized by this test.
+- Verify the candidate from source `db71d58`: signing CI run `36230682181`
+  prepares both server formats twice with byte-identical results. Independently
+  verify signatures, source and inventory hashes, and all 115 matching runtime
+  files. An offline npm install into disposable local storage reports the
+  expected package/runtime version without lifecycle scripts or service actions.
+- Pass source CI run `36230681065`, including 4,912 desktop tests (five skipped),
+  type checking and production compilation. The local Apple-silicon desktop
+  passes bundle audit, strict Developer ID signature validation, exact signed
+  descriptor comparison, and version/build checks for beta.15/build 1217.
+- Availability: CI server artifacts and a local desktop package only. The app
+  was not launched, installed or notarized and disables automatic updates.
+  Native startup and update acceptance remain pending; this packaging test
+  does not establish the phase-two one-click app/server update journey.
+
+## 2026-09-26 — Prepare a unified desktop and server release pipeline
+
+- Add a manual product preparation/publication workflow deriving desktop,
+  npm server and legacy server versions from one committed `server/VERSION`.
+  Build both signed server formats from the exact source, require matching
+  runtime contents and permissions, and bundle that descriptor in native apps.
+- Bind staged artifacts to a reviewed receipt and verify source/export commits,
+  signatures, archive inventories and native checksum seals before publication.
+  Publish and read back npm first, then the legacy server bridge, then both
+  desktop feeds. Validate public Stable/Beta discovery and platform metadata.
+- Guard npm channel separation and immutable retries, serialize desktop writers,
+  isolate pinned server CI from ordinary push cancellation, and reserve a
+  separate native-build range. Repeated server preparation uses reproducible
+  archive metadata. Existing compatibility entry points remain available.
+- Pass 187 Node release/CLI tests and 38 Python packaging/export tests, including
+  real offline fixture packaging, signature checks, byte-identical repeated
+  preparation and negative acceptance cases. Actionlint and whitespace checks
+  pass. Source CI now runs the release-tooling regression suite without secrets.
+- No app runtime changes, native release builds, service deployments or public
+  publication were performed. Production CI and signing remain unexecuted.
+  Product publication intentionally requires the phase-two native acceptance
+  workflow, which is not yet implemented. Document the external signing/OIDC
+  configuration and operator-reviewed npm channel repair required before use.
 ## 2026-09-27 — Custom API live acceptance and API-only chat routing
 
 - Cursor and OpenCode advertise cross-chat transport when their CLI is installed

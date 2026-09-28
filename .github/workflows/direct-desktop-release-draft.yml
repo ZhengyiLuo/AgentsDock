@@ -1,6 +1,46 @@
 name: Prepare direct desktop release
 
 on:
+  workflow_call:
+    inputs:
+      version:
+        required: true
+        type: string
+      build_number:
+        required: true
+        type: string
+      source_sha:
+        required: true
+        type: string
+      source_ref:
+        required: true
+        type: string
+      track:
+        required: true
+        type: string
+      release_notes:
+        required: true
+        type: string
+      coordinated_manifest_base64:
+        required: true
+        type: string
+      coordinated_signature_base64:
+        required: true
+        type: string
+      product_release:
+        type: boolean
+        default: true
+      allow_unsigned_windows:
+        type: boolean
+        default: false
+      artifacts_only:
+        type: boolean
+        default: false
+    outputs:
+      manifest_sha256:
+        value: ${{ jobs.create-draft.outputs.manifest_sha256 }}
+      windows_signing_policy:
+        value: ${{ jobs.build-windows-x64.outputs.signing_policy }}
   workflow_dispatch:
     inputs:
       version:
@@ -89,7 +129,11 @@ jobs:
         env:
           REQUESTED_BUILD: ${{ inputs.build_number }}
           WORKFLOW_RUN: ${{ github.run_number }}
-        run: node scripts/validate_desktop_build_number.mjs "$REQUESTED_BUILD" "$WORKFLOW_RUN" >> "$GITHUB_OUTPUT"
+          PRODUCT_RELEASE: ${{ inputs.product_release }}
+        run: |
+          PIPELINE=desktop
+          if [[ "$PRODUCT_RELEASE" = true ]]; then PIPELINE=product; fi
+          node scripts/validate_desktop_build_number.mjs "$REQUESTED_BUILD" "$WORKFLOW_RUN" "$PIPELINE" >> "$GITHUB_OUTPUT"
 
       - name: Validate the explicit public source pin
         env:
@@ -130,7 +174,12 @@ jobs:
           SOURCE_SHA: ${{ inputs.source_sha }}
           COORDINATED_MANIFEST_BASE64: ${{ inputs.coordinated_manifest_base64 }}
           COORDINATED_SIGNATURE_BASE64: ${{ inputs.coordinated_signature_base64 }}
+          PRODUCT_RELEASE: ${{ inputs.product_release }}
         run: |
+          if [[ "$PRODUCT_RELEASE" = true ]]; then
+            test -n "$COORDINATED_MANIFEST_BASE64" && test -n "$COORDINATED_SIGNATURE_BASE64"
+            test "$(cat release-source/server/VERSION)" = "$RELEASE_VERSION"
+          fi
           if [[ -n "$COORDINATED_MANIFEST_BASE64" || -n "$COORDINATED_SIGNATURE_BASE64" ]]; then
             cmp server/release-public-key.pem release-source/server/release-public-key.pem
             test -f release-source/scripts/prepare_electron_coordinated_config.mjs
@@ -570,6 +619,8 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     environment: direct-production
+    outputs:
+      manifest_sha256: ${{ steps.product-seal.outputs.manifest_sha256 }}
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
         with:
@@ -630,6 +681,10 @@ jobs:
           path: release/*
           if-no-files-found: error
           retention-days: 14
+
+      - id: product-seal
+        name: Record the prepared desktop seal
+        run: echo "manifest_sha256=$(sha256sum release/SHA256SUMS | cut -d ' ' -f 1)" >> "$GITHUB_OUTPUT"
 
       - name: Create reviewed GitHub draft
         env:

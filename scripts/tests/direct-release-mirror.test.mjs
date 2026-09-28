@@ -387,7 +387,7 @@ test('workflows keep public source pinning, build once, guarded mirror writes an
   assert.match(draft, /direct-release-mirror\.mjs stage/)
   assert.match(publish, /direct-release-mirror\.mjs inspect/)
   assert.match(publish, /direct-release-mirror\.mjs publish/)
-  assert.match(publish, /for RELEASE_REPOSITORY in ZhengyiLuo\/AgentsDock ZhengyiLuo\/AgentsDock-Releases/)
+  assert.match(publish, /name: Verify public updater metadata[\s\S]*run: node scripts\/verify_public_desktop_feed\.mjs/)
   assert.match(publish, /platform verifiers observed different checksum manifests/)
   assert.equal((draft.match(/repository: ZhengyiLuo\/AgentsDock\n/g) ?? []).length, 5)
   assert.equal((publish.match(/repository: ZhengyiLuo\/AgentsDock\n/g) ?? []).length, 5)
@@ -399,18 +399,21 @@ test('workflows keep public source pinning, build once, guarded mirror writes an
   assert.match(publish, /"from":"1\.0\.0-beta\.2","track":"beta"/)
   assert.match(publish, /--track "\$MIGRATION_TRACK"/)
   assert.equal((publish.match(/--legacy-tag "\$LEGACY_RELEASE_TAG"/g) ?? []).length, 2)
-  assert.match(publish, /\[\[ "\$RELEASE_REPOSITORY" = ZhengyiLuo\/AgentsDock-Releases && -n "\$LEGACY_RELEASE_TAG" \]\]/)
-  assert.match(publish, /"\$LATEST_TAG" = "\$RELEASE_TAG"/)
+  const publicVerification = publish.split('      - name: Verify public updater metadata\n')[1].split('\n  verify-native-migration:')[0]
+  assert.match(publicVerification, /RELEASE_VERSION: \$\{\{ inputs\.version \}\}/)
+  assert.match(publicVerification, /RELEASE_TRACK: \$\{\{ inputs\.track \}\}/)
+  assert.match(publicVerification, /LEGACY_RELEASE_TAG: \$\{\{ inputs\.legacy_tag \}\}/)
   assert.match(publish, /native-migration-\$\{\{ matrix\.journey\.from \}\}-\$\{\{ matrix\.journey\.track \}\}/)
   assert.doesNotMatch(`${draft}\n${publish}`, /--clobber|release upload|release delete|git push/)
 })
 
 test('public native automation is manual, canonical, source-pinned and environment-gated before secrets', () => {
   const guard = "github.event_name == 'workflow_dispatch' && github.repository == 'ZhengyiLuo/AgentsDock' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/release/'))"
-  for (const [name, expectedJobs] of [['draft', 6], ['publish', 7]]) {
+  for (const [name, expectedJobs] of [['draft', 6], ['publish', 8]]) {
     const workflow = readFileSync(new URL(`../../.github/workflows/direct-desktop-release-${name}.yml`, import.meta.url), 'utf8')
-    assert.match(workflow, /^on:\n  workflow_dispatch:/m)
-    assert.doesNotMatch(workflow, /^  (?:pull_request(?:_target)?|push|workflow_run|workflow_call|schedule|release):/m)
+    assert.match(workflow, /^  workflow_dispatch:/m)
+    assert.match(workflow, /^  workflow_call:/m)
+    assert.doesNotMatch(workflow, /^  (?:pull_request(?:_target)?|push|workflow_run|schedule|release):/m)
     assert.match(workflow, /^permissions:\n  contents: read\n/m)
     assert.doesNotMatch(workflow, /contents: write|id-token: write|secrets: inherit|AgentsDock-Internal/)
     const jobs = workflow.split(/^  (?=[a-z][a-z0-9-]+:\n)/m).filter(section => /^[-a-z0-9]+:\n/.test(section) && /^    runs-on:/m.test(section))

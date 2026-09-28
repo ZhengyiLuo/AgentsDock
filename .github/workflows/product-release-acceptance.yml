@@ -1,0 +1,736 @@
+name: Accept prepared AgentsDock product
+
+# Never runs on pull_request and never receives production signing credentials.
+# This installs software and changes trust/routing ONLY on disposable hosted VMs.
+on:
+  workflow_dispatch:
+    inputs:
+      prepare_run_id:
+        description: Successful Release AgentsDock preparation run
+        type: string
+        required: true
+      accepted_receipt_sha256:
+        description: Independently reviewed release.json SHA-256
+        type: string
+        required: true
+      baseline_app:
+        description: Published stable app for the real updater journey
+        type: string
+        default: '1.0.6'
+        required: true
+      baseline_server:
+        description: Published signed legacy server for migration
+        type: string
+        default: '1.0.3'
+        required: true
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: product-acceptance-${{ inputs.prepare_run_id }}
+  cancel-in-progress: false
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  native-server:
+    if: github.repository == 'ZhengyiLuo/AgentsDock' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/release/'))
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-24.04
+            platform: linux
+          - runner: macos-15
+            platform: darwin
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        with:
+          node-version: 24
+          package-manager-cache: false
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: false
+      - name: Prepare native prerequisites, not application state
+        run: |
+          uv python install 3.13
+          if [[ "$RUNNER_OS" == Linux ]]; then
+            sudo apt-get update
+            sudo apt-get install -y tmux
+            sudo loginctl enable-linger "$(id -un)"
+            systemctl --user show-environment > /dev/null
+          else
+            command -v tmux || brew install tmux
+          fi
+      - uses: ./.github/actions/product-acceptance-inputs
+        with:
+          prepare_run_id: ${{ inputs.prepare_run_id }}
+          receipt_sha256: ${{ inputs.accepted_receipt_sha256 }}
+          baseline_app: ${{ inputs.baseline_app }}
+          baseline_server: ${{ inputs.baseline_server }}
+          github_token: ${{ github.token }}
+      - name: Install exact npm package through its real CLI and native service manager
+        env:
+          RECEIPT_SHA256: ${{ inputs.accepted_receipt_sha256 }}
+          TEST_PLATFORM: ${{ matrix.platform }}
+        run: |
+          umask 022
+          python3 scripts/product_server_acceptance.py bootstrap --kind fresh \
+            --receipt "$RUNNER_TEMP/product-inputs/product/release.json" --receipt-sha256 "$RECEIPT_SHA256" \
+            --prepare-run "$RUNNER_TEMP/product-inputs/prepare-run.json" --bundle "$RUNNER_TEMP/product-inputs/product/server" \
+            --work "$RUNNER_TEMP/agentsdock-acceptance-fresh" \
+            --fixture "$RUNNER_TEMP/agentsdock-acceptance-fresh/server.json" \
+            --evidence "$RUNNER_TEMP/agentsdock-acceptance-fresh/bootstrap.json"
+      - name: Inspect failed owned service state without exposing private logs
+        if: failure()
+        timeout-minutes: 3
+        env:
+          RECEIPT_SHA256: ${{ inputs.accepted_receipt_sha256 }}
+        run: |
+          if [[ -f "$RUNNER_TEMP/agentsdock-acceptance-fresh/server.json" ]]; then
+            if ! python3 scripts/product_server_acceptance.py diagnose \
+              --receipt "$RUNNER_TEMP/product-inputs/product/release.json" --receipt-sha256 "$RECEIPT_SHA256" \
+              --prepare-run "$RUNNER_TEMP/product-inputs/prepare-run.json" --bundle "$RUNNER_TEMP/product-inputs/product/server" \
+              --work "$RUNNER_TEMP/agentsdock-acceptance-fresh" --fixture "$RUNNER_TEMP/agentsdock-acceptance-fresh/server.json" \
+              --evidence "$RUNNER_TEMP/agentsdock-acceptance-fresh/workflow-diagnostics.json" \
+              > "$RUNNER_TEMP/agentsdock-acceptance-fresh/diagnostics-private.log" 2>&1; then
+              echo 'Bounded service diagnostics unavailable.'
+            fi
+          fi
+      - name: Collect only bounded public observations and failure categories
+        if: always()
+        env:
+          EVIDENCE_LABEL: server-${{ matrix.platform }}
+        run: |
+          node --input-type=module - "$RUNNER_TEMP/agentsdock-acceptance-fresh" "$RUNNER_TEMP/public-evidence" "$EVIDENCE_LABEL" <<'NODE'
+          import { constants, openSync, fstatSync, readSync, closeSync, mkdirSync, writeFileSync } from 'node:fs'
+          import { join } from 'node:path'
+          const [source, destination, label] = process.argv.slice(2)
+          if (!/^(server-(linux|darwin)|desktop-075[05]|(recovery|rollback)-linux)$/.test(label)) throw new Error('Invalid public evidence label')
+          mkdirSync(destination, { mode: 0o700 })
+          const pairs = [["bootstrap.json",""],["workflow-diagnostics.json","diagnostic-"]]
+          let copied = 0
+          try {
+            for (const [input, prefix] of pairs) {
+              let fd
+              try { fd = openSync(join(source, input), constants.O_RDONLY | constants.O_NOFOLLOW) }
+              catch (error) { if (error.code === 'ENOENT') continue; throw error }
+              let bytes
+              try {
+                const stat = fstatSync(fd)
+                if (!stat.isFile() || stat.uid !== process.getuid() || stat.size > 512 * 1024) throw new Error('Invalid public evidence file')
+                const buffer = Buffer.alloc(512 * 1024 + 1)
+                const count = readSync(fd, buffer, 0, buffer.length, 0)
+                if (count > 512 * 1024 || count !== stat.size) throw new Error('Unbounded public evidence')
+                bytes = buffer.subarray(0, count)
+                JSON.parse(bytes)
+                if (/"(?:token|password|authorization|privateKey|cookie)"\s*:/i.test(bytes.toString('utf8'))) throw new Error('Private fields in public evidence')
+              } finally { closeSync(fd) }
+              writeFileSync(join(destination, `${prefix}${label}.json`), bytes, { flag: 'wx', mode: 0o600 })
+              copied++
+            }
+            console.log(JSON.stringify({ publicEvidenceFiles: copied }))
+          } catch { console.error('Public evidence collection failed safely.'); process.exitCode = 1 }
+          NODE
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        if: always()
+        with:
+          name: native-acceptance-${{ github.run_attempt }}-server-${{ matrix.platform }}
+          path: ${{ runner.temp }}/public-evidence/*.json
+          if-no-files-found: warn
+          retention-days: 14
+
+  native-desktop:
+    if: github.repository == 'ZhengyiLuo/AgentsDock' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/release/'))
+    strategy:
+      fail-fast: false
+      matrix:
+        legacy_mode: ['0755', '0750']
+    runs-on: macos-15
+    timeout-minutes: 75
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        with:
+          node-version: 24
+          package-manager-cache: false
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: false
+      - name: Prepare native prerequisites before origin routing
+        run: |
+          uv python install 3.13
+          command -v tmux || brew install tmux
+          /bin/launchctl print "gui/$(id -u)" > /dev/null
+      - id: product
+        uses: ./.github/actions/product-acceptance-inputs
+        with:
+          prepare_run_id: ${{ inputs.prepare_run_id }}
+          receipt_sha256: ${{ inputs.accepted_receipt_sha256 }}
+          baseline_app: ${{ inputs.baseline_app }}
+          baseline_server: ${{ inputs.baseline_server }}
+          github_token: ${{ github.token }}
+      - uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v6
+        with:
+          version: 11.9.0
+          run_install: false
+      - name: Verify signed app and exact coordinated descriptor before trust or routing changes
+        env:
+          PRODUCT_VERSION: ${{ steps.product.outputs.version }}
+        run: |
+          pnpm --dir electron install --frozen-lockfile --ignore-scripts
+          export AGENTSDOCK_EXPECTED_BUILD_NUMBER="$(node -p 'JSON.parse(require("fs").readFileSync(process.argv[1])).buildNumber' "$RUNNER_TEMP/product-inputs/product/release.json")"
+          PRODUCT_TRACK="$(node -p 'JSON.parse(require("fs").readFileSync(process.argv[1])).track' "$RUNNER_TEMP/product-inputs/product/release.json")"
+          export AGENTSDOCK_COORDINATED_MANIFEST="$RUNNER_TEMP/product-inputs/product/server/npm/agents-server-npm-manifest.json"
+          export AGENTSDOCK_COORDINATED_SIGNATURE="$RUNNER_TEMP/product-inputs/product/server/npm/agents-server-npm-manifest.sig"
+          scripts/verify_electron_release.sh "$RUNNER_TEMP/product-inputs/desktop" "$PRODUCT_VERSION" "$PRODUCT_TRACK"
+      - name: Install signed legacy fixture without touching any existing installation
+        env:
+          RECEIPT_SHA256: ${{ inputs.accepted_receipt_sha256 }}
+          BASELINE_SERVER: ${{ inputs.baseline_server }}
+          LEGACY_MODE: ${{ matrix.legacy_mode }}
+        run: |
+          umask 022
+          python3 scripts/product_server_acceptance.py bootstrap --kind legacy \
+            --receipt "$RUNNER_TEMP/product-inputs/product/release.json" --receipt-sha256 "$RECEIPT_SHA256" \
+            --prepare-run "$RUNNER_TEMP/product-inputs/prepare-run.json" --bundle "$RUNNER_TEMP/product-inputs/product/server" \
+            --work "$RUNNER_TEMP/agentsdock-acceptance-legacy" \
+            --fixture "$RUNNER_TEMP/agentsdock-acceptance-legacy/server.json" \
+            --evidence "$RUNNER_TEMP/agentsdock-acceptance-legacy/bootstrap.json" \
+            --baseline-archive "$RUNNER_TEMP/product-inputs/baseline-server/agents-server-$BASELINE_SERVER.tar.gz" \
+            --baseline-manifest "$RUNNER_TEMP/product-inputs/baseline-server/agents-server-manifest.json" \
+            --baseline-signature "$RUNNER_TEMP/product-inputs/baseline-server/agents-server-manifest.sig" \
+            --legacy-root-mode "$LEGACY_MODE"
+      - name: Configure ephemeral exact-origin replay on the disposable VM only
+        env:
+          RECEIPT_SHA256: ${{ inputs.accepted_receipt_sha256 }}
+          BASELINE_APP: ${{ inputs.baseline_app }}
+        run: |
+          python3 scripts/product_acceptance_network.py setup \
+            --receipt "$RUNNER_TEMP/product-inputs/product/release.json" --receipt-sha256 "$RECEIPT_SHA256" \
+            --work "$RUNNER_TEMP/agentsdock-acceptance-network"
+          set -a
+          source "$RUNNER_TEMP/agentsdock-acceptance-network/trust.env"
+          set +a
+          /bin/launchctl setenv SSL_CERT_FILE "$SSL_CERT_FILE"
+          /bin/launchctl setenv NODE_EXTRA_CA_CERTS "$NODE_EXTRA_CA_CERTS"
+          # The signed legacy server strips CA hints when starting a new tmux
+          # daemon. Keep this disposable runner's default daemon alive BEFORE
+          # injecting replay trust. This owned sleeper is only TLS plumbing;
+          # it is never evidence of a running provider job or busy-update drain.
+          REPLAY_TMUX_SESSION="agentsdock-replay-trust-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
+          env -i HOME="$HOME" USER="$USER" LOGNAME="$LOGNAME" PATH="$PATH" TMPDIR="${TMPDIR:-/tmp}" SHELL=/bin/bash \
+            tmux new-session -d -s "$REPLAY_TMUX_SESSION" -P -F '#{session_id}' 'exec /bin/sleep 5400' \
+            > "$RUNNER_TEMP/agentsdock-acceptance-network/tmux-session-id"
+          tmux set-environment -g SSL_CERT_FILE "$SSL_CERT_FILE"
+          tmux set-environment -g NODE_EXTRA_CA_CERTS "$NODE_EXTRA_CA_CERTS"
+          [[ "$(tmux show-environment -g SSL_CERT_FILE)" == "SSL_CERT_FILE=$SSL_CERT_FILE" ]]
+          [[ "$(tmux show-environment -g NODE_EXTRA_CA_CERTS)" == "NODE_EXTRA_CA_CERTS=$NODE_EXTRA_CA_CERTS" ]]
+          python3 scripts/product_server_acceptance.py service --action restart \
+            --receipt "$RUNNER_TEMP/product-inputs/product/release.json" --receipt-sha256 "$RECEIPT_SHA256" \
+            --prepare-run "$RUNNER_TEMP/product-inputs/prepare-run.json" --bundle "$RUNNER_TEMP/product-inputs/product/server" \
+            --work "$RUNNER_TEMP/agentsdock-acceptance-legacy" --fixture "$RUNNER_TEMP/agentsdock-acceptance-legacy/server.json" \
+            --evidence "$RUNNER_TEMP/agentsdock-acceptance-legacy/restarted.json"
+          sudo env GITHUB_ACTIONS="$GITHUB_ACTIONS" RUNNER_ENVIRONMENT="$RUNNER_ENVIRONMENT" RUNNER_OS="$RUNNER_OS" \
+            GITHUB_REPOSITORY="$GITHUB_REPOSITORY" GITHUB_WORKFLOW_REF="$GITHUB_WORKFLOW_REF" \
+            GITHUB_EVENT_NAME="$GITHUB_EVENT_NAME" GITHUB_RUN_ID="$GITHUB_RUN_ID" GITHUB_RUN_ATTEMPT="$GITHUB_RUN_ATTEMPT" \
+            GITHUB_SHA="$GITHUB_SHA" RUNNER_TEMP="$RUNNER_TEMP" \
+            "$(command -v node)" scripts/product-release-replay.mjs serve \
+            --receipt "$RUNNER_TEMP/product-inputs/product/release.json" --receipt-sha256 "$RECEIPT_SHA256" \
+            --prepare-run "$RUNNER_TEMP/product-inputs/prepare-run.json" \
+            --server-assets "$RUNNER_TEMP/product-inputs/product/server" --desktop-assets "$RUNNER_TEMP/product-inputs/desktop" \
+            --baseline-desktop "$RUNNER_TEMP/product-inputs/baseline-desktop" --baseline-version "$BASELINE_APP" \
+            --certificate "$RUNNER_TEMP/agentsdock-acceptance-network/leaf.pem" \
+            --private-key "$RUNNER_TEMP/agentsdock-acceptance-network/leaf.key" \
+            --pid-file "$RUNNER_TEMP/agentsdock-acceptance-network/replay.pid" \
+            > "$RUNNER_TEMP/agentsdock-acceptance-network/replay.log" 2>&1 &
+          REPLAY_LAUNCHER_PID=$!
+          for attempt in {1..20}; do
+            if node --input-type=module - "$RUNNER_TEMP/agentsdock-acceptance-network/replay.log" \
+              "$RUNNER_TEMP/agentsdock-acceptance-network/replay.pid" \
+              "$RUNNER_TEMP/agentsdock-acceptance-network/ca.pem" \
+              "$RUNNER_TEMP/agentsdock-acceptance-network/leaf.pem" \
+              "$RUNNER_TEMP/agentsdock-acceptance-network/origin-probe.json" <<'NODE'
+          import { writeFile } from 'node:fs/promises'
+          import { assertReplayReadiness, probeReplayOrigin } from './scripts/product-release-replay.mjs'
+          try {
+            const nodeProbe = await probeReplayOrigin({caPath: process.argv[4], expectedLeafPath: process.argv[5]})
+            await writeFile(process.argv[6], JSON.stringify(nodeProbe), {mode: 0o600})
+            await assertReplayReadiness({logPath: process.argv[2], pidPath: process.argv[3], nodeProbe})
+          }
+          catch { process.exitCode = 1 }
+          NODE
+            then exit 0; fi
+            sleep 1
+          done
+          # Curl is an independent diagnostic, not a substitute for the verified
+          # Node HTTPS probe or the real Electron updater's unchanged TLS checks.
+          READINESS_CURL_STATUS=0
+          if curl --fail --silent --max-time 5 --cacert "$RUNNER_TEMP/agentsdock-acceptance-network/ca.pem" \
+            --dump-header "$RUNNER_TEMP/agentsdock-acceptance-network/readiness.headers" --output /dev/null \
+            --write-out '%{remote_ip}|%{ssl_verify_result}|%{http_code}\n' \
+            https://github.com/ZhengyiLuo/AgentsDock/releases.atom \
+            > "$RUNNER_TEMP/agentsdock-acceptance-network/readiness.metadata"; then
+            READINESS_CURL_STATUS=0
+          else READINESS_CURL_STATUS=$?; fi
+          curl --version
+          openssl version
+          REPLAY_LAUNCHER_PRESENT=false
+          if /bin/ps -p "$REPLAY_LAUNCHER_PID" -o pid= > /dev/null; then REPLAY_LAUNCHER_PRESENT=true; fi
+          node --input-type=module - "$RUNNER_TEMP/agentsdock-acceptance-network/replay.log" \
+            "$READINESS_CURL_STATUS" "$REPLAY_LAUNCHER_PRESENT" \
+            "$RUNNER_TEMP/agentsdock-acceptance-network/readiness.metadata" \
+            "$RUNNER_TEMP/agentsdock-acceptance-network/readiness.headers" \
+            "$RUNNER_TEMP/agentsdock-acceptance-network/origin-probe.json" <<'NODE'
+          import { constants, openSync, fstatSync, readSync, closeSync } from 'node:fs'
+          import { parseReplayStartupDiagnostics, parseReplayProbeDiagnostics, parseReplayOriginProbe } from './scripts/product-release-replay.mjs'
+          const status = Number(process.argv[3])
+          const summary = { kind: 'replay-readiness', curlExitCode: Number.isInteger(status) && status >= 0 && status <= 255 ? status : null,
+            launcherPresent: process.argv[4] === 'true' }
+          function bounded(path) {
+            const fd = openSync(path, constants.O_RDONLY | constants.O_NOFOLLOW)
+            try {
+              const stat = fstatSync(fd)
+              if (!stat.isFile() || stat.size > 32768) throw new Error('Unbounded diagnostic input')
+              const buffer = Buffer.alloc(32769)
+              const count = readSync(fd, buffer, 0, buffer.length, 0)
+              return buffer.subarray(0, count)
+            } finally { closeSync(fd) }
+          }
+          try { summary.startup = parseReplayStartupDiagnostics(bounded(process.argv[2])) }
+          catch { summary.diagnosticsUnavailable = true }
+          try { summary.probe = parseReplayProbeDiagnostics(bounded(process.argv[5]), bounded(process.argv[6])) }
+          catch { summary.probeDiagnosticsUnavailable = true }
+          try { summary.nodeProbe = parseReplayOriginProbe(bounded(process.argv[7])) }
+          catch { summary.nodeProbeDiagnosticsUnavailable = true }
+          console.log(JSON.stringify(summary))
+          NODE
+          echo 'Ephemeral replay did not become ready.' >&2
+          exit 1
+      - name: Click update, observe native replacement, and reconcile saved server profiles
+        env:
+          RECEIPT_SHA256: ${{ inputs.accepted_receipt_sha256 }}
+          BASELINE_APP: ${{ inputs.baseline_app }}
+          LEGACY_MODE: ${{ matrix.legacy_mode }}
+        run: |
+          set -a
+          source "$RUNNER_TEMP/agentsdock-acceptance-network/trust.env"
+          set +a
+          node scripts/product_desktop_acceptance.mjs \
+            --receipt "$RUNNER_TEMP/product-inputs/product/release.json" --receipt-sha256 "$RECEIPT_SHA256" \
+            --preparation-run "$RUNNER_TEMP/product-inputs/prepare-run.json" \
+            --server-directory "$RUNNER_TEMP/product-inputs/product/server" --desktop-directory "$RUNNER_TEMP/product-inputs/desktop" \
+            --baseline-directory "$RUNNER_TEMP/product-inputs/baseline-desktop" --baseline-version "$BASELINE_APP" \
+            --server-fixture "$RUNNER_TEMP/agentsdock-acceptance-legacy/server.json" \
+            --output "$RUNNER_TEMP/agentsdock-acceptance-legacy/desktop"
+      - name: Inspect failed owned service state without exposing private logs
+        if: failure()
+        timeout-minutes: 3
+        env:
+          RECEIPT_SHA256: ${{ inputs.accepted_receipt_sha256 }}
+        run: |
+          if [[ -f "$RUNNER_TEMP/agentsdock-acceptance-legacy/server.json" ]]; then
+            if ! python3 scripts/product_server_acceptance.py diagnose \
+              --receipt "$RUNNER_TEMP/product-inputs/product/release.json" --receipt-sha256 "$RECEIPT_SHA256" \
+              --prepare-run "$RUNNER_TEMP/product-inputs/prepare-run.json" --bundle "$RUNNER_TEMP/product-inputs/product/server" \
+              --work "$RUNNER_TEMP/agentsdock-acceptance-legacy" --fixture "$RUNNER_TEMP/agentsdock-acceptance-legacy/server.json" \
+              --evidence "$RUNNER_TEMP/agentsdock-acceptance-legacy/workflow-diagnostics.json" \
+              > "$RUNNER_TEMP/agentsdock-acceptance-legacy/diagnostics-private.log" 2>&1; then
+              echo 'Bounded service diagnostics unavailable.'
+            fi
+          fi
+      - name: Restore native trust and routing before artifact upload
+        if: always()
+        run: |
+          /bin/launchctl unsetenv SSL_CERT_FILE
+          /bin/launchctl unsetenv NODE_EXTRA_CA_CERTS
+          if tmux show-environment -g > /dev/null 2>&1; then
+            tmux set-environment -gu SSL_CERT_FILE
+            tmux set-environment -gu NODE_EXTRA_CA_CERTS
+          fi
+          REPLAY_TMUX_CLEANUP_OK=true
+          if [[ -s "$RUNNER_TEMP/agentsdock-acceptance-network/tmux-session-id" ]]; then
+            # Check both native session ID and exact run-owned name. Never kill
+            # the default daemon, another session, or the chat's live terminal.
+            (
+              REPLAY_TMUX_ID="$(cat "$RUNNER_TEMP/agentsdock-acceptance-network/tmux-session-id")"
+              [[ "$REPLAY_TMUX_ID" =~ ^\$[0-9]+$ ]] || exit 1
+              if tmux has-session -t "$REPLAY_TMUX_ID" 2>/dev/null; then
+                [[ "$(tmux display-message -p -t "$REPLAY_TMUX_ID" '#{session_name}')" == "agentsdock-replay-trust-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT" ]] || exit 1
+                tmux kill-session -t "$REPLAY_TMUX_ID" || exit 1
+              fi
+            ) || REPLAY_TMUX_CLEANUP_OK=false
+          fi
+          if [[ -f "$RUNNER_TEMP/agentsdock-acceptance-network/replay.pid" ]]; then
+            REPLAY_PID="$(cat "$RUNNER_TEMP/agentsdock-acceptance-network/replay.pid")"
+            [[ "$REPLAY_PID" =~ ^[1-9][0-9]*$ ]]
+            if ps -p "$REPLAY_PID" -o command= | grep -F 'scripts/product-release-replay.mjs serve' | grep -F "$RUNNER_TEMP/agentsdock-acceptance-network/leaf.key" > /dev/null; then
+              kill -TERM "$REPLAY_PID"
+            fi
+          fi
+          if [[ -f "$RUNNER_TEMP/agentsdock-acceptance-network/owner.json" ]]; then
+            python3 scripts/product_acceptance_network.py teardown --work "$RUNNER_TEMP/agentsdock-acceptance-network"
+          fi
+          [[ "$REPLAY_TMUX_CLEANUP_OK" == true ]]
+      - name: Collect only bounded public observations and failure categories
+        if: always()
+        env:
+          EVIDENCE_LABEL: desktop-${{ matrix.legacy_mode }}
+        run: |
+          node --input-type=module - "$RUNNER_TEMP/agentsdock-acceptance-legacy" "$RUNNER_TEMP/public-evidence" "$EVIDENCE_LABEL" <<'NODE'
+          import { constants, openSync, fstatSync, readSync, closeSync, mkdirSync, writeFileSync } from 'node:fs'
+          import { join } from 'node:path'
+          const [source, destination, label] = process.argv.slice(2)
+          if (!/^(server-(linux|darwin)|desktop-075[05]|(recovery|rollback)-linux)$/.test(label)) throw new Error('Invalid public evidence label')
+          mkdirSync(destination, { mode: 0o700 })
+          const pairs = [["desktop/desktop-evidence.json",""],["desktop/server-preservation.json","preservation-"],["desktop/failure-observations.json","failure-"],["desktop/server-diagnostics.json","diagnostic-native-"],["workflow-diagnostics.json","diagnostic-workflow-"]]
+          let copied = 0
+          try {
+            for (const [input, prefix] of pairs) {
+              let fd
+              try { fd = openSync(join(source, input), constants.O_RDONLY | constants.O_NOFOLLOW) }
+              catch (error) { if (error.code === 'ENOENT') continue; throw error }
+              let bytes
+              try {
+                const stat = fstatSync(fd)
+                if (!stat.isFile() || stat.uid !== process.getuid() || stat.size > 512 * 1024) throw new Error('Invalid public evidence file')
+                const buffer = Buffer.alloc(512 * 1024 + 1)
+                const count = readSync(fd, buffer, 0, buffer.length, 0)
+                if (count > 512 * 1024 || count !== stat.size) throw new Error('Unbounded public evidence')
+                bytes = buffer.subarray(0, count)
+                JSON.parse(bytes)
+                if (/"(?:token|password|authorization|privateKey|cookie)"\s*:/i.test(bytes.toString('utf8'))) throw new Error('Private fields in public evidence')
+              } finally { closeSync(fd) }
+              writeFileSync(join(destination, `${prefix}${label}.json`), bytes, { flag: 'wx', mode: 0o600 })
+              copied++
+            }
+            console.log(JSON.stringify({ publicEvidenceFiles: copied }))
+          } catch { console.error('Public evidence collection failed safely.'); process.exitCode = 1 }
+          NODE
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        if: always()
+        with:
+          name: native-acceptance-${{ github.run_attempt }}-desktop-${{ matrix.legacy_mode }}
+          path: ${{ runner.temp }}/public-evidence/*.json
+          if-no-files-found: warn
+          retention-days: 14
+
+  native-recovery:
+    if: github.repository == 'ZhengyiLuo/AgentsDock' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/release/'))
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - operation: failure-retry
+            evidence: recovery-linux
+          - operation: rollback-retry
+            evidence: rollback-linux
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        with:
+          node-version: 24
+          package-manager-cache: false
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: false
+      - name: Prepare native prerequisites
+        run: |
+          uv python install 3.13
+          sudo apt-get update
+          sudo apt-get install -y tmux
+          sudo loginctl enable-linger "$(id -un)"
+          systemctl --user show-environment > /dev/null
+      - uses: ./.github/actions/product-acceptance-inputs
+        with:
+          prepare_run_id: ${{ inputs.prepare_run_id }}
+          receipt_sha256: ${{ inputs.accepted_receipt_sha256 }}
+          baseline_app: ${{ inputs.baseline_app }}
+          baseline_server: ${{ inputs.baseline_server }}
+          github_token: ${{ github.token }}
+      - name: Install the actual signed legacy baseline
+        env:
+          RECEIPT_SHA256: ${{ inputs.accepted_receipt_sha256 }}
+          BASELINE_SERVER: ${{ inputs.baseline_server }}
+        run: |
+          umask 022
+          python3 scripts/product_server_acceptance.py bootstrap --kind legacy \
+            --receipt "$RUNNER_TEMP/product-inputs/product/release.json" --receipt-sha256 "$RECEIPT_SHA256" \
+            --prepare-run "$RUNNER_TEMP/product-inputs/prepare-run.json" --bundle "$RUNNER_TEMP/product-inputs/product/server" \
+            --work "$RUNNER_TEMP/agentsdock-acceptance-recovery" \
+            --fixture "$RUNNER_TEMP/agentsdock-acceptance-recovery/server.json" \
+            --evidence "$RUNNER_TEMP/agentsdock-acceptance-recovery/bootstrap.json" \
+            --baseline-archive "$RUNNER_TEMP/product-inputs/baseline-server/agents-server-$BASELINE_SERVER.tar.gz" \
+            --baseline-manifest "$RUNNER_TEMP/product-inputs/baseline-server/agents-server-manifest.json" \
+            --baseline-signature "$RUNNER_TEMP/product-inputs/baseline-server/agents-server-manifest.sig"
+      - name: Route exact packages with a one-shot interrupted-download control
+        env:
+          RECEIPT_SHA256: ${{ inputs.accepted_receipt_sha256 }}
+          BASELINE_APP: ${{ inputs.baseline_app }}
+        run: |
+          python3 scripts/product_acceptance_network.py setup \
+            --receipt "$RUNNER_TEMP/product-inputs/product/release.json" --receipt-sha256 "$RECEIPT_SHA256" \
+            --work "$RUNNER_TEMP/agentsdock-acceptance-network"
+          set -a
+          source "$RUNNER_TEMP/agentsdock-acceptance-network/trust.env"
+          set +a
+          systemctl --user set-environment SSL_CERT_FILE="$SSL_CERT_FILE" NODE_EXTRA_CA_CERTS="$NODE_EXTRA_CA_CERTS"
+          # The signed legacy server strips CA hints when starting a new tmux
+          # daemon. Keep this disposable runner's default daemon alive BEFORE
+          # injecting replay trust. This owned sleeper is only TLS plumbing;
+          # it is never evidence of a running provider job or busy-update drain.
+          REPLAY_TMUX_SESSION="agentsdock-replay-trust-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
+          env -i HOME="$HOME" USER="$USER" LOGNAME="$LOGNAME" PATH="$PATH" TMPDIR="${TMPDIR:-/tmp}" SHELL=/bin/bash \
+            tmux new-session -d -s "$REPLAY_TMUX_SESSION" -P -F '#{session_id}' 'exec /bin/sleep 5400' \
+            > "$RUNNER_TEMP/agentsdock-acceptance-network/tmux-session-id"
+          tmux set-environment -g SSL_CERT_FILE "$SSL_CERT_FILE"
+          tmux set-environment -g NODE_EXTRA_CA_CERTS "$NODE_EXTRA_CA_CERTS"
+          [[ "$(tmux show-environment -g SSL_CERT_FILE)" == "SSL_CERT_FILE=$SSL_CERT_FILE" ]]
+          [[ "$(tmux show-environment -g NODE_EXTRA_CA_CERTS)" == "NODE_EXTRA_CA_CERTS=$NODE_EXTRA_CA_CERTS" ]]
+          python3 scripts/product_server_acceptance.py service --action restart \
+            --receipt "$RUNNER_TEMP/product-inputs/product/release.json" --receipt-sha256 "$RECEIPT_SHA256" \
+            --prepare-run "$RUNNER_TEMP/product-inputs/prepare-run.json" --bundle "$RUNNER_TEMP/product-inputs/product/server" \
+            --work "$RUNNER_TEMP/agentsdock-acceptance-recovery" --fixture "$RUNNER_TEMP/agentsdock-acceptance-recovery/server.json" \
+            --evidence "$RUNNER_TEMP/agentsdock-acceptance-recovery/restarted.json"
+          sudo env GITHUB_ACTIONS="$GITHUB_ACTIONS" RUNNER_ENVIRONMENT="$RUNNER_ENVIRONMENT" RUNNER_OS="$RUNNER_OS" \
+            GITHUB_REPOSITORY="$GITHUB_REPOSITORY" GITHUB_WORKFLOW_REF="$GITHUB_WORKFLOW_REF" \
+            GITHUB_EVENT_NAME="$GITHUB_EVENT_NAME" GITHUB_RUN_ID="$GITHUB_RUN_ID" GITHUB_RUN_ATTEMPT="$GITHUB_RUN_ATTEMPT" \
+            GITHUB_SHA="$GITHUB_SHA" RUNNER_TEMP="$RUNNER_TEMP" \
+            "$(command -v node)" scripts/product-release-replay.mjs serve \
+            --receipt "$RUNNER_TEMP/product-inputs/product/release.json" --receipt-sha256 "$RECEIPT_SHA256" \
+            --prepare-run "$RUNNER_TEMP/product-inputs/prepare-run.json" \
+            --server-assets "$RUNNER_TEMP/product-inputs/product/server" --desktop-assets "$RUNNER_TEMP/product-inputs/desktop" \
+            --baseline-desktop "$RUNNER_TEMP/product-inputs/baseline-desktop" --baseline-version "$BASELINE_APP" \
+            --certificate "$RUNNER_TEMP/agentsdock-acceptance-network/leaf.pem" \
+            --private-key "$RUNNER_TEMP/agentsdock-acceptance-network/leaf.key" \
+            --pid-file "$RUNNER_TEMP/agentsdock-acceptance-network/replay.pid" \
+            --fault-control "$RUNNER_TEMP/agentsdock-acceptance-recovery/fault.json" \
+            --fault-observed "$RUNNER_TEMP/agentsdock-acceptance-recovery/fault-observed.json" \
+            > "$RUNNER_TEMP/agentsdock-acceptance-network/replay.log" 2>&1 &
+          REPLAY_LAUNCHER_PID=$!
+          for attempt in {1..20}; do
+            if node --input-type=module - "$RUNNER_TEMP/agentsdock-acceptance-network/replay.log" \
+              "$RUNNER_TEMP/agentsdock-acceptance-network/replay.pid" \
+              "$RUNNER_TEMP/agentsdock-acceptance-network/ca.pem" \
+              "$RUNNER_TEMP/agentsdock-acceptance-network/leaf.pem" \
+              "$RUNNER_TEMP/agentsdock-acceptance-network/origin-probe.json" <<'NODE'
+          import { writeFile } from 'node:fs/promises'
+          import { assertReplayReadiness, probeReplayOrigin } from './scripts/product-release-replay.mjs'
+          try {
+            const nodeProbe = await probeReplayOrigin({caPath: process.argv[4], expectedLeafPath: process.argv[5]})
+            await writeFile(process.argv[6], JSON.stringify(nodeProbe), {mode: 0o600})
+            await assertReplayReadiness({logPath: process.argv[2], pidPath: process.argv[3], nodeProbe})
+          }
+          catch { process.exitCode = 1 }
+          NODE
+            then exit 0; fi
+            sleep 1
+          done
+          # Curl is an independent diagnostic, not a substitute for the verified
+          # Node HTTPS probe or the real Electron updater's unchanged TLS checks.
+          READINESS_CURL_STATUS=0
+          if curl --fail --silent --max-time 5 --cacert "$RUNNER_TEMP/agentsdock-acceptance-network/ca.pem" \
+            --dump-header "$RUNNER_TEMP/agentsdock-acceptance-network/readiness.headers" --output /dev/null \
+            --write-out '%{remote_ip}|%{ssl_verify_result}|%{http_code}\n' \
+            https://github.com/ZhengyiLuo/AgentsDock/releases.atom \
+            > "$RUNNER_TEMP/agentsdock-acceptance-network/readiness.metadata"; then
+            READINESS_CURL_STATUS=0
+          else READINESS_CURL_STATUS=$?; fi
+          curl --version
+          openssl version
+          REPLAY_LAUNCHER_PRESENT=false
+          if /bin/ps -p "$REPLAY_LAUNCHER_PID" -o pid= > /dev/null; then REPLAY_LAUNCHER_PRESENT=true; fi
+          node --input-type=module - "$RUNNER_TEMP/agentsdock-acceptance-network/replay.log" \
+            "$READINESS_CURL_STATUS" "$REPLAY_LAUNCHER_PRESENT" \
+            "$RUNNER_TEMP/agentsdock-acceptance-network/readiness.metadata" \
+            "$RUNNER_TEMP/agentsdock-acceptance-network/readiness.headers" \
+            "$RUNNER_TEMP/agentsdock-acceptance-network/origin-probe.json" <<'NODE'
+          import { constants, openSync, fstatSync, readSync, closeSync } from 'node:fs'
+          import { parseReplayStartupDiagnostics, parseReplayProbeDiagnostics, parseReplayOriginProbe } from './scripts/product-release-replay.mjs'
+          const status = Number(process.argv[3])
+          const summary = { kind: 'replay-readiness', curlExitCode: Number.isInteger(status) && status >= 0 && status <= 255 ? status : null,
+            launcherPresent: process.argv[4] === 'true' }
+          function bounded(path) {
+            const fd = openSync(path, constants.O_RDONLY | constants.O_NOFOLLOW)
+            try {
+              const stat = fstatSync(fd)
+              if (!stat.isFile() || stat.size > 32768) throw new Error('Unbounded diagnostic input')
+              const buffer = Buffer.alloc(32769)
+              const count = readSync(fd, buffer, 0, buffer.length, 0)
+              return buffer.subarray(0, count)
+            } finally { closeSync(fd) }
+          }
+          try { summary.startup = parseReplayStartupDiagnostics(bounded(process.argv[2])) }
+          catch { summary.diagnosticsUnavailable = true }
+          try { summary.probe = parseReplayProbeDiagnostics(bounded(process.argv[5]), bounded(process.argv[6])) }
+          catch { summary.probeDiagnosticsUnavailable = true }
+          try { summary.nodeProbe = parseReplayOriginProbe(bounded(process.argv[7])) }
+          catch { summary.nodeProbeDiagnosticsUnavailable = true }
+          console.log(JSON.stringify(summary))
+          NODE
+          echo 'Ephemeral replay did not become ready.' >&2
+          exit 1
+      - name: Exercise owned native failure, preserve incumbent data, then retry exact bytes
+        env:
+          RECEIPT_SHA256: ${{ inputs.accepted_receipt_sha256 }}
+          RECOVERY_OPERATION: ${{ matrix.operation }}
+          EVIDENCE_NAME: ${{ matrix.evidence }}
+        run: |
+          set -a
+          source "$RUNNER_TEMP/agentsdock-acceptance-network/trust.env"
+          set +a
+          python3 scripts/product_server_acceptance.py "$RECOVERY_OPERATION" \
+            --receipt "$RUNNER_TEMP/product-inputs/product/release.json" --receipt-sha256 "$RECEIPT_SHA256" \
+            --prepare-run "$RUNNER_TEMP/product-inputs/prepare-run.json" --bundle "$RUNNER_TEMP/product-inputs/product/server" \
+            --work "$RUNNER_TEMP/agentsdock-acceptance-recovery" \
+            --fixture "$RUNNER_TEMP/agentsdock-acceptance-recovery/server.json" \
+            --evidence "$RUNNER_TEMP/agentsdock-acceptance-recovery/recovery.json" \
+            --fault-control "$RUNNER_TEMP/agentsdock-acceptance-recovery/fault.json" \
+            --fault-observed "$RUNNER_TEMP/agentsdock-acceptance-recovery/fault-observed.json"
+      - name: Inspect failed owned service state without exposing private logs
+        if: failure()
+        timeout-minutes: 3
+        env:
+          RECEIPT_SHA256: ${{ inputs.accepted_receipt_sha256 }}
+        run: |
+          if [[ -f "$RUNNER_TEMP/agentsdock-acceptance-recovery/server.json" ]]; then
+            if ! python3 scripts/product_server_acceptance.py diagnose \
+              --receipt "$RUNNER_TEMP/product-inputs/product/release.json" --receipt-sha256 "$RECEIPT_SHA256" \
+              --prepare-run "$RUNNER_TEMP/product-inputs/prepare-run.json" --bundle "$RUNNER_TEMP/product-inputs/product/server" \
+              --work "$RUNNER_TEMP/agentsdock-acceptance-recovery" --fixture "$RUNNER_TEMP/agentsdock-acceptance-recovery/server.json" \
+              --evidence "$RUNNER_TEMP/agentsdock-acceptance-recovery/workflow-diagnostics.json" \
+              > "$RUNNER_TEMP/agentsdock-acceptance-recovery/diagnostics-private.log" 2>&1; then
+              echo 'Bounded service diagnostics unavailable.'
+            fi
+          fi
+      - name: Restore native trust and routing before artifact upload
+        if: always()
+        run: |
+          systemctl --user unset-environment SSL_CERT_FILE NODE_EXTRA_CA_CERTS
+          if tmux show-environment -g > /dev/null 2>&1; then
+            tmux set-environment -gu SSL_CERT_FILE
+            tmux set-environment -gu NODE_EXTRA_CA_CERTS
+          fi
+          REPLAY_TMUX_CLEANUP_OK=true
+          if [[ -s "$RUNNER_TEMP/agentsdock-acceptance-network/tmux-session-id" ]]; then
+            # Check both native session ID and exact run-owned name. Never kill
+            # the default daemon, another session, or the chat's live terminal.
+            (
+              REPLAY_TMUX_ID="$(cat "$RUNNER_TEMP/agentsdock-acceptance-network/tmux-session-id")"
+              [[ "$REPLAY_TMUX_ID" =~ ^\$[0-9]+$ ]] || exit 1
+              if tmux has-session -t "$REPLAY_TMUX_ID" 2>/dev/null; then
+                [[ "$(tmux display-message -p -t "$REPLAY_TMUX_ID" '#{session_name}')" == "agentsdock-replay-trust-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT" ]] || exit 1
+                tmux kill-session -t "$REPLAY_TMUX_ID" || exit 1
+              fi
+            ) || REPLAY_TMUX_CLEANUP_OK=false
+          fi
+          if [[ -f "$RUNNER_TEMP/agentsdock-acceptance-network/replay.pid" ]]; then
+            REPLAY_PID="$(cat "$RUNNER_TEMP/agentsdock-acceptance-network/replay.pid")"
+            [[ "$REPLAY_PID" =~ ^[1-9][0-9]*$ ]]
+            if ps -p "$REPLAY_PID" -o command= | grep -F 'scripts/product-release-replay.mjs serve' | grep -F "$RUNNER_TEMP/agentsdock-acceptance-network/leaf.key" > /dev/null; then
+              kill -TERM "$REPLAY_PID"
+            fi
+          fi
+          if [[ -f "$RUNNER_TEMP/agentsdock-acceptance-network/owner.json" ]]; then
+            python3 scripts/product_acceptance_network.py teardown --work "$RUNNER_TEMP/agentsdock-acceptance-network"
+          fi
+          [[ "$REPLAY_TMUX_CLEANUP_OK" == true ]]
+      - name: Collect only bounded public observations and failure categories
+        if: always()
+        env:
+          EVIDENCE_LABEL: ${{ matrix.evidence }}
+        run: |
+          node --input-type=module - "$RUNNER_TEMP/agentsdock-acceptance-recovery" "$RUNNER_TEMP/public-evidence" "$EVIDENCE_LABEL" <<'NODE'
+          import { constants, openSync, fstatSync, readSync, closeSync, mkdirSync, writeFileSync } from 'node:fs'
+          import { join } from 'node:path'
+          const [source, destination, label] = process.argv.slice(2)
+          if (!/^(server-(linux|darwin)|desktop-075[05]|(recovery|rollback)-linux)$/.test(label)) throw new Error('Invalid public evidence label')
+          mkdirSync(destination, { mode: 0o700 })
+          const pairs = [["recovery.json",""],["workflow-diagnostics.json","diagnostic-"]]
+          let copied = 0
+          try {
+            for (const [input, prefix] of pairs) {
+              let fd
+              try { fd = openSync(join(source, input), constants.O_RDONLY | constants.O_NOFOLLOW) }
+              catch (error) { if (error.code === 'ENOENT') continue; throw error }
+              let bytes
+              try {
+                const stat = fstatSync(fd)
+                if (!stat.isFile() || stat.uid !== process.getuid() || stat.size > 512 * 1024) throw new Error('Invalid public evidence file')
+                const buffer = Buffer.alloc(512 * 1024 + 1)
+                const count = readSync(fd, buffer, 0, buffer.length, 0)
+                if (count > 512 * 1024 || count !== stat.size) throw new Error('Unbounded public evidence')
+                bytes = buffer.subarray(0, count)
+                JSON.parse(bytes)
+                if (/"(?:token|password|authorization|privateKey|cookie)"\s*:/i.test(bytes.toString('utf8'))) throw new Error('Private fields in public evidence')
+              } finally { closeSync(fd) }
+              writeFileSync(join(destination, `${prefix}${label}.json`), bytes, { flag: 'wx', mode: 0o600 })
+              copied++
+            }
+            console.log(JSON.stringify({ publicEvidenceFiles: copied }))
+          } catch { console.error('Public evidence collection failed safely.'); process.exitCode = 1 }
+          NODE
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        if: always()
+        with:
+          name: native-acceptance-${{ github.run_attempt }}-${{ matrix.evidence }}
+          path: ${{ runner.temp }}/public-evidence/*.json
+          if-no-files-found: warn
+          retention-days: 14
+
+  acceptance:
+    needs: [native-server, native-desktop, native-recovery]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        with:
+          node-version: 24
+          package-manager-cache: false
+      - uses: actions/download-artifact@018cc2cf5baa6db3ef3c5f8a56943fffe632ef53 # v6
+        with:
+          name: product-release-${{ inputs.prepare_run_id }}
+          run-id: ${{ inputs.prepare_run_id }}
+          github-token: ${{ github.token }}
+          path: product
+      - uses: actions/download-artifact@018cc2cf5baa6db3ef3c5f8a56943fffe632ef53 # v6
+        with:
+          pattern: native-acceptance-${{ github.run_attempt }}-*
+          merge-multiple: true
+          path: observations
+      - id: report
+        name: Require every native scenario; missing, blocked, stale or failed evidence cannot pass
+        env:
+          RECEIPT_SHA256: ${{ inputs.accepted_receipt_sha256 }}
+        run: |
+          mkdir accepted
+          node scripts/product-acceptance.mjs product/release.json "$RECEIPT_SHA256" observations accepted/acceptance.json
+          node --input-type=module <<'NODE' >> "$GITHUB_OUTPUT"
+          import { readFileSync } from 'node:fs'
+          const report = JSON.parse(readFileSync('accepted/acceptance.json'))
+          console.log(`version=${report.version}`)
+          NODE
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: AgentsDock-${{ steps.report.outputs.version }}-acceptance
+          path: accepted/acceptance.json
+          if-no-files-found: error
+          retention-days: 14

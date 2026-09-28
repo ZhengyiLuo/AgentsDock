@@ -6,16 +6,20 @@ import { pathToFileURL } from 'node:url'
 // build numbers after migrating from private CI. A rerun retains its reservation;
 // publishing an existing sealed draft does not consume another native build.
 const LAST_ACCEPTED_BUILD = 1185
-export function validateDesktopBuildNumber(requested, runNumber) {
+export function validateDesktopBuildNumber(requested, runNumber, pipeline = 'desktop') {
+  if (!['desktop', 'product'].includes(pipeline)) throw new Error('Unknown native build reservation pipeline.')
   if (!/^[1-9]\d*$/.test(String(requested)) || !/^[1-9]\d*$/.test(String(runNumber))) throw new Error('An explicit positive native build number and workflow run number are required.')
   const build = Number(requested), run = Number(runNumber)
   if (!Number.isSafeInteger(build) || !Number.isSafeInteger(run) || run > Number.MAX_SAFE_INTEGER - LAST_ACCEPTED_BUILD) throw new Error('Native build number exceeds the supported range.')
-  const floor = LAST_ACCEPTED_BUILD + run
+  // The product workflow has its own run counter. Reserve a disjoint range,
+  // never reinterpret that counter as the old desktop workflow's counter.
+  const floor = (pipeline === 'product' ? 5000 : LAST_ACCEPTED_BUILD) + run
+  if (floor > (pipeline === 'product' ? 9999 : 4999)) throw new Error('Native build reservation range exhausted; review the next range before building.')
   if (build !== floor) throw new Error(`Native build ${build} does not match its reservation; this prepare run requires exactly ${floor}.`)
   return String(build)
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
-  try { process.stdout.write(`build_number=${validateDesktopBuildNumber(process.argv[2], process.argv[3])}\n`) }
+  try { process.stdout.write(`build_number=${validateDesktopBuildNumber(process.argv[2], process.argv[3], process.argv[4])}\n`) }
   catch (error) { process.stderr.write(`${error.message}\n`); process.exitCode = 1 }
 }

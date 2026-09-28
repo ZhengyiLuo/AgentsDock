@@ -1,0 +1,77 @@
+name: Verify prepared product inputs
+description: Download retained exact packages before any disposable origin routing
+inputs:
+  prepare_run_id:
+    required: true
+    description: Successful canonical product preparation run
+  receipt_sha256:
+    required: true
+    description: Independently accepted release receipt SHA-256
+  baseline_app:
+    required: true
+    description: Published stable desktop baseline
+  baseline_server:
+    required: true
+    description: Published signed legacy server baseline
+  github_token:
+    required: true
+    description: Read-only Actions token, used only before routing changes
+outputs:
+  version:
+    value: ${{ steps.inputs.outputs.version }}
+    description: Version verified from the receipt
+runs:
+  using: composite
+  steps:
+    - id: inputs
+      shell: bash
+      env:
+        GH_TOKEN: ${{ inputs.github_token }}
+        PREPARE_RUN: ${{ inputs.prepare_run_id }}
+        RECEIPT_SHA256: ${{ inputs.receipt_sha256 }}
+        BASELINE_APP: ${{ inputs.baseline_app }}
+        BASELINE_SERVER: ${{ inputs.baseline_server }}
+      run: |
+        set -euo pipefail
+        umask 077
+        [[ "$PREPARE_RUN" =~ ^[1-9][0-9]*$ ]]
+        [[ "$RECEIPT_SHA256" =~ ^[a-f0-9]{64}$ ]]
+        [[ "$BASELINE_APP" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]
+        [[ "$BASELINE_SERVER" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]
+        test "$GITHUB_REPOSITORY" = ZhengyiLuo/AgentsDock
+        test "$RUNNER_ENVIRONMENT" = github-hosted
+        mkdir "$RUNNER_TEMP/product-inputs"
+        gh api "repos/$GITHUB_REPOSITORY/actions/runs/$PREPARE_RUN" > "$RUNNER_TEMP/product-inputs/prepare-run.json"
+        gh run download "$PREPARE_RUN" --repo "$GITHUB_REPOSITORY" \
+          --name "product-release-$PREPARE_RUN" --dir "$RUNNER_TEMP/product-inputs/product"
+        node scripts/product-release.mjs inspect "$RUNNER_TEMP/product-inputs/product/release.json" \
+          "$RECEIPT_SHA256" "$RUNNER_TEMP/product-inputs/prepare-run.json" "$RUNNER_TEMP/product-inputs/product/server" \
+          > "$RUNNER_TEMP/product-inputs/identity.txt"
+        grep -Fx "source_sha=$GITHUB_SHA" "$RUNNER_TEMP/product-inputs/identity.txt"
+        PRODUCT_VERSION="$(sed -n 's/^version=//p' "$RUNNER_TEMP/product-inputs/identity.txt")"
+        echo "version=$PRODUCT_VERSION" >> "$GITHUB_OUTPUT"
+        gh run download "$PREPARE_RUN" --repo "$GITHUB_REPOSITORY" \
+          --name "AgentsDock-$PRODUCT_VERSION-verified" --dir "$RUNNER_TEMP/product-inputs/desktop"
+        for pair in "AgentsDock-Releases:$BASELINE_APP" "AgentsServer:$BASELINE_SERVER"; do
+          BASELINE_REPO="${pair%%:*}"
+          BASELINE_VERSION="${pair#*:}"
+          gh release view "v$BASELINE_VERSION" --repo "ZhengyiLuo/$BASELINE_REPO" \
+            --json tagName,isDraft,isPrerelease > "$RUNNER_TEMP/product-inputs/$BASELINE_REPO.json"
+          node --input-type=module - "$RUNNER_TEMP/product-inputs/$BASELINE_REPO.json" "$BASELINE_VERSION" <<'NODE'
+        import { readFileSync } from 'node:fs'
+        const release = JSON.parse(readFileSync(process.argv[2]))
+        if (release.tagName !== `v${process.argv[3]}` || release.isDraft || release.isPrerelease) throw new Error('Baseline must be a published stable release')
+        NODE
+        done
+        gh release download "v$BASELINE_APP" --repo ZhengyiLuo/AgentsDock-Releases \
+          --pattern "AgentsDock-$BASELINE_APP-mac-universal.zip" --pattern SHA256SUMS --pattern latest-mac.yml \
+          --dir "$RUNNER_TEMP/product-inputs/baseline-desktop"
+        gh release download "v$BASELINE_SERVER" --repo ZhengyiLuo/AgentsServer \
+          --pattern "agents-server-$BASELINE_SERVER.tar.gz" --pattern agents-server-manifest.json --pattern agents-server-manifest.sig \
+          --dir "$RUNNER_TEMP/product-inputs/baseline-server"
+        node scripts/product-release-replay.mjs inspect \
+          --receipt "$RUNNER_TEMP/product-inputs/product/release.json" --receipt-sha256 "$RECEIPT_SHA256" \
+          --prepare-run "$RUNNER_TEMP/product-inputs/prepare-run.json" \
+          --server-assets "$RUNNER_TEMP/product-inputs/product/server" --desktop-assets "$RUNNER_TEMP/product-inputs/desktop" \
+          --baseline-desktop "$RUNNER_TEMP/product-inputs/baseline-desktop" --baseline-version "$BASELINE_APP" \
+          > "$RUNNER_TEMP/product-inputs/replay-inventory.json"

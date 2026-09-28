@@ -331,6 +331,9 @@ describe('automatic secure peer approval completion', () => {
     })
     render(<SecurePeerPanel status={peerStatus} onActivated={finish} />)
     await join()
+    // This case cancels an existing observer. The pending label can commit
+    // before the effect has started it, so wait for that actual precondition.
+    await waitFor(() => expect(teamHub.waitForSecurePeerPairingCompletion).toHaveBeenCalledTimes(1))
     fireEvent.click(screen.getByRole('button', { name: 'Cancel' }))
     expect(teamHub.stopSecurePeerPairingCompletionWait).toHaveBeenCalledTimes(1)
     expect(localStorage.getItem(consentKey())).toBeNull()

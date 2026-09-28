@@ -3,6 +3,29 @@ name: Prepare or publish reviewed npm server release
 # Manual only. Descriptor signing and native/migration acceptance happen between
 # prepare and publish. This workflow never creates or publishes a GitHub release.
 on:
+  workflow_call:
+    inputs:
+      operation:
+        required: true
+        type: string
+      source_sha:
+        required: true
+        type: string
+      workflow_sha:
+        type: string
+        default: ''
+      source_ref:
+        required: true
+        type: string
+      candidate_tag:
+        required: true
+        type: string
+      accepted_manifest_sha256:
+        required: true
+        type: string
+      first_stable_from_latest:
+        type: string
+        default: ''
   workflow_dispatch:
     inputs:
       operation:
@@ -31,6 +54,10 @@ on:
       accepted_manifest_sha256:
         description: Publish only; SHA-256 of the exact descriptor accepted with the native app
         type: string
+      first_stable_from_latest:
+        description: Publish only; explicitly approved exact beta currently on latest for its first same-base stable release
+        type: string
+        default: ''
 
 permissions:
   contents: read
@@ -56,8 +83,10 @@ jobs:
         env:
           SOURCE_SHA: ${{ inputs.source_sha }}
           SOURCE_REF: ${{ inputs.source_ref }}
+          FIRST_STABLE_FROM_LATEST: ${{ inputs.first_stable_from_latest }}
         shell: bash
         run: |
+          test -z "$FIRST_STABLE_FROM_LATEST"
           [[ "$SOURCE_SHA" =~ ^[0-9a-f]{40}$ ]]
           [[ "$SOURCE_REF" == main || "$SOURCE_REF" =~ ^release/[A-Za-z0-9][A-Za-z0-9._/-]*$ ]]
           git check-ref-format "refs/heads/$SOURCE_REF"
@@ -99,6 +128,7 @@ jobs:
       REVIEWED_WORKFLOW_SHA: ${{ inputs.workflow_sha || inputs.source_sha }}
       CANDIDATE_TAG: ${{ inputs.candidate_tag }}
       ACCEPTED_MANIFEST_SHA256: ${{ inputs.accepted_manifest_sha256 }}
+      FIRST_STABLE_FROM_LATEST: ${{ inputs.first_stable_from_latest }}
     steps:
       - name: Require the reviewed workflow and source commit
         env:
@@ -150,7 +180,13 @@ jobs:
           gh release download "$CANDIDATE_TAG" --repo "$GITHUB_REPOSITORY" --dir "$RUNNER_TEMP/npm-candidate" --pattern agents-server-npm-manifest.json --pattern agents-server-npm-manifest.sig --pattern "server-$version.tgz"
       - name: Verify acceptance pin, signature, exact payload and registry preconditions
         id: candidate
-        run: node scripts/verify_npm_publication.mjs preflight "$RUNNER_TEMP/npm-candidate" "$SOURCE_SHA" "$ACCEPTED_MANIFEST_SHA256" "$RUNNER_TEMP/npm-candidate-release.json"
+        shell: bash
+        run: |
+          approval=()
+          if [[ -n "$FIRST_STABLE_FROM_LATEST" ]]; then
+            approval=(--first-stable-from-latest "$FIRST_STABLE_FROM_LATEST")
+          fi
+          node scripts/verify_npm_publication.mjs preflight "$RUNNER_TEMP/npm-candidate" "$SOURCE_SHA" "$ACCEPTED_MANIFEST_SHA256" "$RUNNER_TEMP/npm-candidate-release.json" "$RUNNER_TEMP/npm-registry-before.json" "${approval[@]}"
       - name: Publish the verified tarball with npm trusted publishing
         if: steps.candidate.outputs.publish == 'true'
         env:
@@ -165,7 +201,7 @@ jobs:
         # Retry only the unchanged read-only verifier, never npm publish.
         run: |
           for ((attempt = 1; attempt <= 61; attempt++)); do
-            if node scripts/verify_npm_publication.mjs verify "$RUNNER_TEMP/npm-candidate" "$SOURCE_SHA" "$ACCEPTED_MANIFEST_SHA256" "$RUNNER_TEMP/npm-candidate-release.json"; then
+            if node scripts/verify_npm_publication.mjs verify "$RUNNER_TEMP/npm-candidate" "$SOURCE_SHA" "$ACCEPTED_MANIFEST_SHA256" "$RUNNER_TEMP/npm-candidate-release.json" "$RUNNER_TEMP/npm-registry-before.json"; then
               exit 0
             fi
             if ((attempt < 61)); then

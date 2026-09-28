@@ -1,0 +1,177 @@
+import assert from 'node:assert/strict'
+import { execFileSync } from 'node:child_process'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { dirname, join } from 'node:path'
+import { test } from 'node:test'
+import { assertCandidateCheckout, CANDIDATE_HARNESS_PATHS } from '../product-candidate-receipt.mjs'
+
+// Pure guard tests with disposable Git repositories. The injected CI metadata
+// is synthetic; no native app/service/network/trust helper is ever invoked.
+function fixture(t) {
+  const root = mkdtempSync(join(tmpdir(), 'candidate-checkout-unit-'))
+  t.after(() => rmSync(root, { recursive: true, force: true }))
+  const git = (...args) => execFileSync('git', ['-C', root, '-c', 'core.hooksPath=/dev/null',
+    '-c', 'user.name=Candidate guard fixture', '-c', 'user.email=fixture@example.invalid', ...args], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim()
+  const put = (name, content) => { mkdirSync(dirname(join(root, name)), { recursive: true }); writeFileSync(join(root, name), content) }
+  git('init', '-q')
+  put('server/runtime.py', 'original server\n')
+  put('electron/runtime.ts', 'original app\n')
+  put('scripts/build_electron_release.sh', 'original build\n')
+  put('scripts/product_server_acceptance.py', 'original harness\n')
+  put('docs/PRODUCT_ACCEPTANCE.md', 'original docs\n')
+  put('.gitignore', 'node_modules/\n')
+  git('add', '.'); git('commit', '-qm', 'sealed source')
+  const sourceSha = git('rev-parse', 'HEAD'), sourceRef = 'release/candidate-fixture'
+  const identity = { sourceSha, sourceRef }
+  const environment = () => ({ GITHUB_ACTIONS: 'true', RUNNER_ENVIRONMENT: 'github-hosted', GITHUB_REPOSITORY: 'ZhengyiLuo/AgentsDock',
+    GITHUB_EVENT_NAME: 'workflow_dispatch', GITHUB_WORKFLOW_REF: `ZhengyiLuo/AgentsDock/.github/workflows/ci.yml@refs/heads/${sourceRef}`,
+    GITHUB_SHA: git('rev-parse', 'HEAD'), GITHUB_RUN_ID: '123', GITHUB_RUN_ATTEMPT: '2', RUNNER_OS: 'macOS' })
+  const check = (env = environment(), value = identity) => assertCandidateCheckout(value, { env, platform: 'darwin', repositoryDirectory: root })
+  return { root, git, put, identity, environment, check }
+}
+
+test('exact source and allowlisted descendant harness preserve separate truthful commit identities', t => {
+  const f = fixture(t)
+  assert.deepEqual(f.check().changedPaths, [])
+  f.put('scripts/product_server_acceptance.py', 'fixed harness\n')
+  f.git('add', '.'); f.git('commit', '-qm', 'harness-only retry')
+  f.put('node_modules/ignored-dependency', 'dependency fixture')
+  const observed = f.check()
+  assert.equal(observed.sourceSha, f.identity.sourceSha)
+  assert.equal(observed.harnessSourceSha, f.git('rev-parse', 'HEAD'))
+  assert.notEqual(observed.harnessSourceSha, observed.sourceSha)
+  assert.deepEqual(observed.changedPaths, ['scripts/product_server_acceptance.py'])
+  assert.equal(observed.publicationEligible, false)
+})
+
+test('runtime, build payload and production authorization changes cannot be a harness-only retry', t => {
+  for (const path of ['server/runtime.py', 'electron/runtime.ts', 'scripts/build_electron_release.sh',
+    'scripts/product-release.mjs', '.github/workflows/product-release.yml', '.github/workflows/product-release-acceptance.yml']) {
+    const f = fixture(t)
+    f.put(path, 'changed\n'); f.git('add', '.'); f.git('commit', '-qm', 'forbidden change')
+    assert.throws(() => f.check(), /non-allowlisted/)
+    assert(!CANDIDATE_HARNESS_PATHS.includes(path))
+  }
+})
+
+test('renaming runtime into allowed documentation still exposes the forbidden deletion', t => {
+  const f = fixture(t)
+  renameSync(join(f.root, 'server/runtime.py'), join(f.root, 'docs/PRODUCT_ACCEPTANCE.md'))
+  f.git('add', '-A'); f.git('commit', '-qm', 'runtime rename must not evade scope')
+  assert.throws(() => f.check(), /non-allowlisted/)
+})
+
+test('dirty tracked files and untracked source are rejected while ignored dependencies are permitted', t => {
+  for (const path of ['docs/PRODUCT_ACCEPTANCE.md', 'untracked.py']) {
+    const f = fixture(t)
+    f.put(path, 'uncommitted\n')
+    assert.throws(() => f.check(), /clean/)
+  }
+})
+
+test('different branch, forged workflow commit and unrelated source ancestry are rejected', t => {
+  const f = fixture(t), env = f.environment()
+  assert.throws(() => f.check({ ...env, GITHUB_WORKFLOW_REF: env.GITHUB_WORKFLOW_REF.replace('candidate-fixture', 'unreviewed') }), /reviewed release branch/)
+  assert.throws(() => f.check({ ...env, GITHUB_SHA: 'a'.repeat(40) }), /truthful/)
+  assert.throws(() => f.check({ ...env, GITHUB_EVENT_NAME: 'pull_request' }), /explicit canonical/)
+  f.git('checkout', '--orphan', 'unrelated-history')
+  f.git('commit', '-qm', 'unrelated root')
+  assert.throws(() => f.check(), /descend/)
+})
+
+test('root listener git inspection trusts only the explicit checkout and suppresses optional writes', t => {
+  const f = fixture(t), calls = []
+  assertCandidateCheckout(f.identity, { env: f.environment(), platform: 'darwin', repositoryDirectory: f.root,
+    execute: (command, args, options) => { calls.push(args); return execFileSync(command, args, options) } })
+  assert(calls.every(args => args[0] === '--no-optional-locks' && args[1] === '-c' && args[2] === `safe.directory=${f.root}`))
+  const diff = calls.find(args => args.includes('diff'))
+  assert(diff.includes('--no-renames') && diff.includes('-z') && diff.includes('--no-ext-diff'))
+  assert(!calls.flat().includes('safe.directory=*'))
+})
+
+test('candidate workflow retains sealed artifact pins and supplies exact expected coordinated resources', () => {
+  const workflow = readFileSync(new URL('../../.github/workflows/ci.yml', import.meta.url), 'utf8')
+  const inputs = readFileSync(new URL('../../.github/actions/product-candidate-inputs/action.yml', import.meta.url), 'utf8')
+  const candidateJob = workflow.slice(workflow.indexOf('  candidate-native:'))
+  assert.match(candidateJob, /fetch-depth: 0/)
+  assert.match(candidateJob, /export AGENTSDOCK_COORDINATED_MANIFEST="\$RUNNER_TEMP\/candidate-inputs\/payload\/server\/npm\/agents-server-npm-manifest\.json"/)
+  assert.match(candidateJob, /export AGENTSDOCK_COORDINATED_SIGNATURE="\$RUNNER_TEMP\/candidate-inputs\/payload\/server\/npm\/agents-server-npm-manifest\.sig"/)
+  assert.match(inputs, /draft\.targetCommitish === receipt\.sourceSha/)
+  assert.match(inputs, /validate-runner/)
+  assert.match(inputs, /--source-sha "\$ARTIFACT_SOURCE_SHA" --candidate-rehearsal true/)
+  assert.doesNotMatch(inputs, /export GITHUB_SHA=|GITHUB_SHA:|--source-sha "\$GITHUB_SHA"/)
+})
+
+test('source CI materializes the pinned Electron runtime before concurrent test imports', () => {
+  const workflow = readFileSync(new URL('../../.github/workflows/ci.yml', import.meta.url), 'utf8')
+  const electron = workflow.slice(workflow.indexOf('\n  electron:'), workflow.indexOf('\n  mobile-source:'))
+  const install = electron.indexOf('run: pnpm install --frozen-lockfile')
+  const materialize = electron.indexOf('run: node node_modules/electron/install.js')
+  const test = electron.indexOf('run: pnpm test')
+  assert(install >= 0 && install < materialize && materialize < test)
+  assert.match(electron, /name: Materialize Electron runtime before parallel test imports\n        run: node node_modules\/electron\/install.js\n        working-directory: electron/)
+})
+
+test('candidate recovery rehearses one exact download failure and retry without production acceptance', () => {
+  const workflow = readFileSync(new URL('../../.github/workflows/ci.yml', import.meta.url), 'utf8')
+  const candidateJob = workflow.slice(workflow.indexOf('  candidate-native:'))
+  assert.match(candidateJob, /kind: \[fresh, legacy, recovery\]/)
+  assert.match(candidateJob, /runs-on: macos-15/)
+  assert.match(candidateJob, /if \[\[ "\$CANDIDATE_KIND" == recovery \]\]; then INSTALL_KIND=legacy; fi/)
+  assert.match(candidateJob, /bootstrap --candidate --kind "\$INSTALL_KIND"/)
+  assert.match(candidateJob, /Configure exact-origin replay[^\n]*\n        if: matrix\.kind != 'fresh'/)
+  assert.match(candidateJob, /if \[\[ "\$CANDIDATE_KIND" == recovery \]\]; then\n            fault_args=/)
+  assert.match(candidateJob, /--pid-file "\$RUNNER_TEMP\/agentsdock-acceptance-network\/replay.pid" "\$\{fault_args\[@\]\}"/)
+  for (const option of ['--fault-control', '--fault-observed']) {
+    assert.equal(candidateJob.split(option).length - 1, 2, 'Replay and real failure-retry must share the exact fault paths')
+  }
+  assert.match(candidateJob, /failure-retry --candidate --kind legacy/)
+  assert.match(candidateJob, /diagnose --candidate --kind legacy/)
+  assert.match(candidateJob, /Restore disposable routing and trust[^\n]*\n        if: always\(\) && matrix\.kind != 'fresh'/)
+  assert.match(candidateJob, /\['recovery.json', 'recovery.json'\]/)
+  assert.match(candidateJob, /report\.publicationEligible !== false \|\| report\.releaseAcceptance !== false/)
+  assert.match(candidateJob, /constants\.O_NOFOLLOW/)
+  assert.match(candidateJob, /stat\.uid !== process\.getuid\(\)/)
+  assert.match(candidateJob, /Private fields in public evidence/)
+  assert.doesNotMatch(candidateJob, /rollback-retry|secrets\.|id-token: write|npm publish|release create|--clobber/)
+  assert(candidateJob.indexOf('uses: ./.github/actions/product-candidate-inputs') < candidateJob.indexOf('bootstrap --candidate'))
+  assert(candidateJob.indexOf('Restore disposable routing and trust') < candidateJob.indexOf('uses: actions/upload-artifact'))
+})
+
+test('candidate evidence collector only copies bounded sanitized non-publishing recovery observations', t => {
+  const workflow = readFileSync(new URL('../../.github/workflows/ci.yml', import.meta.url), 'utf8')
+  const section = workflow.slice(workflow.indexOf('      - name: Collect bounded public observations'))
+  const script = section.match(/<<'NODE'\n([\s\S]*?)\n          NODE/)[1].replace(/^          /gm, '')
+  for (const kind of ['valid', 'private', 'eligible', 'oversized', 'symlink']) {
+    const root = mkdtempSync(join(tmpdir(), 'candidate-evidence-unit-'))
+    t.after(() => rmSync(root, { recursive: true, force: true }))
+    const source = join(root, 'source'), output = join(root, 'public')
+    mkdirSync(source)
+    const report = { kind: 'candidate-server-observations', publicationEligible: false, releaseAcceptance: false }
+    if (kind === 'private') report.token = 'fixture-secret-never-published'
+    if (kind === 'eligible') report.publicationEligible = true
+    if (kind === 'oversized') report.extra = 'x'.repeat(512 * 1024)
+    const bytes = `${JSON.stringify(report)}\n`
+    const target = join(source, 'recovery.json')
+    if (kind === 'symlink') {
+      writeFileSync(join(root, 'other.json'), bytes)
+      symlinkSync(join(root, 'other.json'), target)
+    } else writeFileSync(target, bytes)
+    writeFileSync(join(source, 'server.json'), '{"token":"private-fixture"}\n')
+    writeFileSync(join(source, 'diagnostics-private.log'), 'private log\n')
+    const run = () => execFileSync(process.execPath, ['--input-type=module', '-', source, output], {
+      input: script, encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe']
+    })
+    if (kind === 'valid') {
+      assert.equal(JSON.parse(run()).publicEvidenceFiles, 1)
+      assert.equal(readFileSync(join(output, 'recovery.json'), 'utf8'), bytes)
+      assert.equal(statSync(join(output, 'recovery.json')).mode & 0o777, 0o600)
+    } else {
+      assert.throws(run, error => error.status === 1 && !error.stderr.toString().includes('fixture-secret'))
+      assert(!existsSync(join(output, 'recovery.json')))
+    }
+    assert(!existsSync(join(output, 'server.json')))
+    assert(!existsSync(join(output, 'diagnostics-private.log')))
+  }
+})
