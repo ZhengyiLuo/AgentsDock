@@ -2199,8 +2199,8 @@ export class AgentServerClient {
             if (notice.session_id === sessionId && (notice.backend === 'codex' || notice.backend === 'claude')) onProviderUsageChanged?.(notice.backend)
             return
           }
-          if (isProviderRuntimeChanged(packet)) {
-            if (packet.session_id === sessionId) onProviderRuntime?.(packet)
+          if (packet && typeof packet === 'object' && 'type' in packet && packet.type === 'provider_runtime_changed') {
+            if (isProviderRuntimeChanged(packet) && packet.session_id === sessionId) onProviderRuntime?.(packet)
             return
           }
           if (isTimelinePinsChanged(packet)) {
@@ -2753,12 +2753,24 @@ function isEmergencySessionPacket(value: unknown): value is Session {
 function isProviderRuntimeChanged(value: unknown): value is ProviderRuntimeChanged {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return false
   const packet = value as Record<string, unknown>
-  return packet.type === 'provider_runtime_changed'
+  const envelope = packet.type === 'provider_runtime_changed'
     && packet.ephemeral === true
-    && packet.runtime === 'context_usage'
     && (packet.backend === 'claude' || packet.backend === 'codex')
     && typeof packet.session_id === 'string'
     && packet.session_id.length > 0
+  if (!envelope) return false
+  if (packet.runtime === 'context_usage') return true
+  if (packet.runtime !== 'subagent_limit' || packet.backend !== 'codex') return false
+  const limit = (value: unknown) => value === null || (typeof value === 'number' && Number.isSafeInteger(value) && value > 0)
+  const control = packet.subagent_limit_control
+  if (!control || typeof control !== 'object' || Array.isArray(control)) return false
+  const fields = control as Record<string, unknown>
+  return limit(packet.subagent_limit)
+    && fields.supported === true
+    && fields.applies_to === 'automatically_when_idle'
+    && ['applied', 'pending', 'next_start'].includes(String(fields.application_state))
+    && limit(fields.requested_limit)
+    && limit(fields.effective_limit)
 }
 
 function isTimelinePinsChanged(value: unknown): value is TimelinePinsChanged {

@@ -1,5 +1,25 @@
 # Public development log
 
+## 2026-09-27 — Apply saved Codex subagent limits automatically
+
+- Apply per-chat and inherited server limits at the existing idle lifecycle
+  boundary. Keep active turns, goals, descendants and terminals running;
+  saving remains immediate. Retry from completion events and ordinary turn
+  preparation, without polling or requiring a manual provider reload.
+- Track the limit acknowledged by each native thread and report saved versus
+  active values. Update the inspector through its existing runtime event stream;
+  preserve the legacy-server help and Claude behavior.
+- Verify Codex 0.153.4 with its real native spawn executor and an owned local
+  response fixture: loaded-thread resume and configuration hot reload retain
+  the old cap; a fully idle unsubscribe/resume applies the new cap and restores
+  inheritance when cleared. Reloading with live children resets accounting,
+  which is why automatic application waits for all current work to finish.
+- Reproduce the bug through a signed packaged desktop and a real model turn:
+  after saving 2 and completing its child, the loaded thread still records 1.
+  Pass focused server lifecycle tests and 210 desktop tests, TypeScript checks
+  and production compilation. Corrected packaged acceptance is recorded below
+  once completed. No public release or production activation in this commit.
+
 ## 2026-09-27 — Verify and activate goal and history corrections
 
 - Apply the tested server corrections from `3b6a424` to the requested existing

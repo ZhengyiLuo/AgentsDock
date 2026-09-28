@@ -829,6 +829,23 @@ export const useAppStore = create<AppState>((set, get) => ({
       window.agentsDock.events.on('server:runtime', payload => {
         if (profileEventMatches(payload, get())) set({ runtimeCatalog: payload.runtimeCatalog })
       }),
+      window.agentsDock.events.on('server:provider-runtime', payload => {
+        if (!profileEventMatches(payload, get()) || payload.event.runtime !== 'subagent_limit') return
+        const event = payload.event
+        set(state => {
+          const session = state.sessions.find(candidate => candidate.id === event.session_id)
+          if (!session || session.backend !== 'codex') return state
+          const patch = { subagent_limit: event.subagent_limit, subagent_limit_control: event.subagent_limit_control }
+          const updated = { ...session, ...patch }
+          const snapshot = state.snapshots[session.id]
+          return {
+            sessions: state.sessions.map(candidate => candidate.id === session.id ? updated : candidate),
+            snapshots: snapshot ? { ...state.snapshots, [session.id]: {
+              ...snapshot, session: { ...snapshot.session, ...patch }
+            } } : state.snapshots
+          }
+        })
+      }),
       window.agentsDock.events.on('ports:changed', payload => {
         const current = get()
         const changingToAnotherProfile = Boolean(

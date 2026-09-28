@@ -1717,6 +1717,38 @@ describe('AgentServerClient live stream', () => {
     stop()
   })
 
+  it('routes acknowledged subagent limits without treating them as timeline events', () => {
+    vi.useFakeTimers()
+    vi.spyOn(Math, 'random').mockReturnValue(0)
+    vi.stubGlobal('WebSocket', FakeWebSocket)
+    const received = vi.fn()
+    const runtime = vi.fn()
+    const client = new AgentServerClient('http://example.test:7850', 'token')
+    const stop = client.stream('chat', 5, received, () => {}, runtime)
+    const first = FakeWebSocket.instances[0]
+    const pending = {
+      type: 'provider_runtime_changed', session_id: 'chat', backend: 'codex', runtime: 'subagent_limit', ephemeral: true,
+      subagent_limit: 64, subagent_limit_control: { supported: true, applies_to: 'automatically_when_idle',
+        application_state: 'pending', requested_limit: 64, effective_limit: 16 }
+    }
+    const applied = { ...pending, subagent_limit_control: { ...pending.subagent_limit_control,
+      application_state: 'applied', effective_limit: 64 } }
+    first.emit('message', JSON.stringify(pending))
+    first.emit('message', JSON.stringify(applied))
+    first.emit('message', JSON.stringify({ ...applied, session_id: 'another-chat' }))
+    for (const subagent_limit of [undefined, -1, 0, '64', 1.5]) {
+      first.emit('message', JSON.stringify({ ...applied, seq: 900, subagent_limit }))
+    }
+    first.emit('message', JSON.stringify({ ...applied, seq: 900, subagent_limit_control: { ...applied.subagent_limit_control, effective_limit: '64' } }))
+    first.emit('message', JSON.stringify({ id: 'e6', session_id: 'chat', seq: 6, type: 'assistant_text', ts: 'now' }))
+    first.emit('close')
+    vi.advanceTimersByTime(500)
+    expect(runtime.mock.calls.map(([value]) => value)).toEqual([pending, applied])
+    expect(received).toHaveBeenCalledOnce()
+    expect(String(FakeWebSocket.instances[1].url)).toContain('after=6')
+    stop()
+  })
+
   it('routes ephemeral pinned-item invalidations without advancing the durable cursor', () => {
     vi.useFakeTimers()
     vi.spyOn(Math, 'random').mockReturnValue(0)

@@ -346,7 +346,7 @@ export interface CodexSubagentsConfiguration {
   message: string
   scope?: 'server'
   provider_config_key?: string
-  applies_to?: 'new_or_reloaded_threads'
+  applies_to?: 'new_or_reloaded_threads' | 'automatically_when_idle'
 }
 
 export type CodexReviewTarget =
@@ -418,7 +418,12 @@ export interface SessionSubagentLimitControl {
   /** Default fields may be omitted from compact session-list responses. */
   scope?: 'chat'
   mode?: 'native_concurrent'
-  applies_to?: 'new_or_reloaded_threads' | 'next_idle_provider_start' | 'next_provider_process_start'
+  applies_to?: 'new_or_reloaded_threads' | 'next_idle_provider_start' | 'next_provider_process_start' | 'automatically_when_idle'
+  application_state?: 'applied' | 'pending' | 'next_start'
+  /** Desired limit after resolving this chat's override and the server default. */
+  requested_limit?: number | null
+  /** Limit acknowledged by the loaded provider; null means it is not known. */
+  effective_limit?: number | null
   reason?: string | null
   message?: string
 }
@@ -1858,18 +1863,25 @@ export interface ProfileAgentEvent extends ProfileEventContext {
   activeSession?: boolean
   activeRunId?: string | null
 }
-export interface ProviderRuntimeChanged {
+interface ProviderRuntimeChangedBase {
   type: 'provider_runtime_changed'
   session_id: string
   backend: Backend
-  runtime: 'context_usage'
   ephemeral: true
+}
+export type ProviderRuntimeChanged = ProviderRuntimeChangedBase & ({
+  runtime: 'context_usage'
   context_usage_state?: 'available' | 'cleared' | 'unavailable' | null
   usage_generation?: number | null
   provider_session_id?: string | null
   context_usage_snapshot?: CodexTokenUsage | ClaudeTokenUsage | null
   context_usage?: CodexTokenUsage | ClaudeTokenUsage | null
-}
+} | {
+  runtime: 'subagent_limit'
+  backend: 'codex'
+  subagent_limit: number | null
+  subagent_limit_control: SessionSubagentLimitControl
+})
 export interface ProfileProviderRuntimeEvent extends ProfileEventContext { event: ProviderRuntimeChanged }
 export interface ProfileReasoningStreamEvent extends ProfileEventContext {
   sessionId: string
