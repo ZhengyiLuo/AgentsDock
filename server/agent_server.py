@@ -77,6 +77,8 @@ import chat_mailbox
 import workspace_git
 import codex_auth
 import codex_provider
+import provider_connections
+import cursor_api_key
 import server_instances
 import local_session_ownership
 import cursor_history
@@ -406,6 +408,7 @@ SERVER_RESTART_STATUS_FILE = SERVER_ADMIN_ROOT / "server-restart.json"
 TEAM_HUB_HOST_CONTROL_STATUS_FILE = SERVER_ADMIN_ROOT / "team-hub-host.json"
 CODEX_SETTINGS_FILE = SERVER_ADMIN_ROOT / "codex-settings.json"
 CODEX_PROVIDER_STORE = codex_provider.ProviderStore(SERVER_ADMIN_ROOT / "codex-provider")
+PROVIDER_CONNECTION_STORE = provider_connections.ConnectionStore(SERVER_ADMIN_ROOT / "provider-connections")
 ABANDONED_FORK_THREADS_FILE = SERVER_ADMIN_ROOT / "abandoned-fork-threads.json"
 # Process-group ids of provider children this server spawned in their own
 # session (``start_new_session=True``). A SIGKILL of the server cannot reach
@@ -6286,6 +6289,7 @@ class CreateSessionRequest(BaseModel):
     cwd: str | None = None
     backend: str | None = None
     codex_provider: Literal["default", "custom"] | None = None
+    provider_connection: Literal["default", "custom"] | None = None
     model: str | None = None
     effort: str | None = None
     subagent_limit: int | None = Field(default=None, strict=True, ge=1)
@@ -6359,6 +6363,7 @@ class UpdateSessionRequest(BaseModel):
     cwd: str | None = None
     backend: str | None = None
     codex_provider: Literal["default", "custom"] | None = None
+    provider_connection: Literal["default", "custom"] | None = None
     model: str | None = None
     effort: str | None = None
     subagent_limit: int | None = Field(default=None, strict=True, ge=1)
@@ -6386,6 +6391,7 @@ SESSION_LIFECYCLE_UPDATE_FIELDS = frozenset({
     "cwd",
     "backend",
     "codex_provider",
+    "provider_connection",
     "model",
     "effort",
     "system_prompt",
@@ -7177,6 +7183,15 @@ def preview_session_runtime_update(
     if provider_changed and session_backend_locked(sess):
         raise HTTPException(409, "Codex provider is locked after the chat starts; create a new chat to use another provider.")
 
+    current_connection = sess.get("provider_connection") or "default"
+    connection = (patch.get("provider_connection") or "default") if "provider_connection" in patch else "default" if backend_changed else current_connection
+    if connection not in {"default", "custom"} or connection == "custom" and prospective_backend not in {BACKEND_CLAUDE, BACKEND_OPENCODE, BACKEND_CURSOR}:
+        raise HTTPException(400, "This backend does not support that API connection.")
+    connection_changed = current_connection != connection
+    if connection_changed and session_backend_locked(sess):
+        raise HTTPException(409, "API connection is locked after the chat starts; create a new chat to change it.")
+    provider_changed = provider_changed or connection_changed
+
     prospective_model = (
         str(patch.get("model") or "").strip() or None
         if "model" in patch
@@ -7203,6 +7218,13 @@ def preview_session_runtime_update(
         preview.pop("codex_provider_revision", None)
     preview["model"] = prospective_model
     preview["effort"] = normalized_effort
+    preview["provider_connection"] = connection
+    if connection_changed or connection == "default":
+        preview.pop("provider_connection_revision", None)
+    if connection == "custom":
+        selected_connection = PROVIDER_CONNECTION_STORE.bind(preview)
+        preview["provider_connection_revision"] = selected_connection["credential_id"]
+        preview["model"] = selected_connection.get("model")
     if prospective_provider == "custom" and {"backend", "codex_provider", "model", "effort"}.intersection(patch):
         if CODEX_TRANSPORT == CODEX_TRANSPORT_EXEC:
             raise HTTPException(409, "Custom endpoints require native Codex app-server transport.")
@@ -7222,6 +7244,23 @@ def preview_session_runtime_update(
         }[prospective_backend]
         preview["session_id"] = sess.get(provider_id_field)
     return preview
+
+
+def effective_codex_approval_policy(sess: dict[str, Any]) -> str:
+    policy = str(sess.get("codex_approval_policy") or CODEX_DEFAULT_APPROVAL_POLICY)
+    return policy if policy in CODEX_APPROVAL_POLICIES else CODEX_DEFAULT_APPROVAL_POLICY
+
+
+def active_codex_approval_policy(session_id: str, thread_id: str) -> str:
+    """Use the current native turn's policy, not next-turn settings edits."""
+    active = ACTIVE.get(session_id) or {}
+    captured = str(active.get("codex_approval_policy") or "")
+    if (
+        str(active.get("provider_thread_id") or "") == thread_id
+        and captured in CODEX_APPROVAL_POLICIES
+    ):
+        return captured
+    return effective_codex_approval_policy(STORE.sessions.get(session_id) or {})
 
 
 def effective_claude_permission_mode(sess: dict[str, Any]) -> str:
@@ -10484,8 +10523,13 @@ class SessionStore:
             runtime_source.update({name: parent.get(name) for name in (
                 "codex_provider", "codex_provider_binding", "codex_provider_revision",
             )})
+        if initializing_fork and parent_id and req.provider_connection == "custom":
+            parent = self.sessions.get(parent_id) or {}
+            runtime_source.update({name: parent.get(name) for name in ("provider_connection", "provider_connection_revision")})
+        if req.provider_connection == "custom" and not initializing_fork and any((req.provider_session_id, req.session_id, req.claude_session_id, req.opencode_session_id)):
+            raise HTTPException(409, "Import native conversations with their native login. Create a new chat for a custom API.")
         runtime = preview_session_runtime_update(runtime_source, {
-            "codex_provider": req.codex_provider, "model": req.model, "effort": req.effort,
+            "codex_provider": req.codex_provider, "provider_connection": req.provider_connection, "model": req.model, "effort": req.effort,
         })
         model, effort = runtime["model"], runtime["effort"]
         session_cwd = req.cwd or DEFAULT_CWD
@@ -10582,6 +10626,8 @@ class SessionStore:
             "codex_provider": runtime["codex_provider"],
             "codex_provider_binding": runtime.get("codex_provider_binding"),
             "codex_provider_revision": runtime.get("codex_provider_revision"),
+            "provider_connection": runtime["provider_connection"],
+            "provider_connection_revision": runtime.get("provider_connection_revision"),
             "model": model,
             "effort": effort,
             "system_prompt": clean_session_system_prompt(req.system_prompt),
@@ -10702,7 +10748,7 @@ class SessionStore:
                 raise HTTPException(status_code=404, detail="session not found")
             if "subagent_limit" in patch:
                 validate_session_subagent_limit({**sess, "backend": patch.get("backend") or sess.get("backend")}, patch["subagent_limit"])
-            previous_provider_runtime = dict(sess) if {"codex_provider", "subagent_limit"}.intersection(patch) else None
+            previous_provider_runtime = dict(sess) if {"codex_provider", "provider_connection", "subagent_limit"}.intersection(patch) else None
             missing_policy = object()
             previous_provider_jobs_access = sess.get(
                 "provider_jobs_access",
@@ -10715,6 +10761,7 @@ class SessionStore:
             ).lower()
             backend_changed = prospective_backend != current_backend
             provider_changed = runtime_preview["codex_provider"] != codex_provider.session_choice(sess.get("codex_provider"))
+            provider_changed = provider_changed or runtime_preview["provider_connection"] != (sess.get("provider_connection") or "default")
             previous_opencode_permission_mode = (
                 effective_opencode_permission_mode(sess)
             )
@@ -10783,6 +10830,9 @@ class SessionStore:
                 sess["codex_provider"] = runtime_preview["codex_provider"]
                 sess["codex_provider_binding"] = runtime_preview.get("codex_provider_binding")
                 sess["codex_provider_revision"] = runtime_preview.get("codex_provider_revision")
+            if "provider_connection" in patch or backend_changed:
+                sess["provider_connection"] = runtime_preview["provider_connection"]
+                sess["provider_connection_revision"] = runtime_preview.get("provider_connection_revision")
             if provider_changed:
                 sess["model"] = runtime_preview["model"]
                 sess["effort"] = runtime_preview["effort"]
@@ -16846,6 +16896,9 @@ async def append_event(
     event_type: str,
     payload: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
+    connection_session = STORE.sessions.get(session_id) or {}
+    if connection_session.get("provider_connection") == "custom" and payload:
+        payload = PROVIDER_CONNECTION_STORE.redact(connection_session, payload)
     def discarded_event() -> dict[str, Any]:
         return {
             "seq": 0,
@@ -20650,7 +20703,7 @@ def provider_tool_active_matches(
     expected_transport = (
         CODEX_TRANSPORT_APP_SERVER
         if backend == BACKEND_CODEX
-        else "exec" if backend == BACKEND_CURSOR
+        else "exec" if backend in {BACKEND_CURSOR, BACKEND_OPENCODE}
         else CLAUDE_TRANSPORT_AGENT_SDK
     )
     matches = bool(
@@ -20675,11 +20728,13 @@ def provider_tool_active_matches(
             and str(active.get("provider_turn_id") or "") == provider_turn_id
             and active.get("provider_turn_ready") is True
         )
-    elif backend == BACKEND_CURSOR:
+    elif backend in {BACKEND_CURSOR, BACKEND_OPENCODE}:
         proc = active.get("proc")
         matches = bool(
             matches and cursor_owner_token
-            and hmac.compare_digest(str(active.get("cursor_mcp_owner_token") or ""), cursor_owner_token)
+            # Historical argument name; both exec transports use an exact,
+            # backend-specific owner, never an interchangeable session token.
+            and hmac.compare_digest(str(active.get(f"{backend}_mcp_owner_token") or ""), cursor_owner_token)
             and proc is not None and proc.returncode is None
             and active.get("provider_turn_ready") is True
             and isinstance(ready, asyncio.Event) and ready.is_set()
@@ -20746,7 +20801,7 @@ async def provider_tool_capability_snapshot(
                      and codex_native_mailbox_owner_matches(session_id, run_id, provider_thread_id, provider_turn_id))
         ):
             raise ProviderToolError("provider tool turn is stale")
-    elif backend != BACKEND_CURSOR:
+    elif backend not in {BACKEND_CURSOR, BACKEND_OPENCODE}:
         raise ProviderToolError("provider tool backend is unsupported")
 
     async with ACTIVE_LOCK:
@@ -38394,17 +38449,22 @@ def cross_chat_supported_target_backends() -> list[str]:
         and claude_sdk_dependency_available()
     ):
         supported.append(BACKEND_CLAUDE)
-    # Cursor has no separately selectable transport: the compatibility and
-    # authentication probe is the transport gate.  Use only the cached probe
-    # here so /api/health never blocks on CLI subprocesses.  Startup and the
-    # runtime catalog refresh this diagnostic, while actual turn admission
-    # calls ensure_runtime_available() again before any provider launch.
-    with RUNTIME_DIAGNOSTICS_LOCK:
-        cursor_diagnostic = dict(
-            RUNTIME_DIAGNOSTICS.get(BACKEND_CURSOR) or {}
-        )
-    if cursor_diagnostic.get("status") == "ready":
-        supported.append(BACKEND_CURSOR)
+    # Native login and an explicitly verified API connection are independent.
+    # Only cached diagnostics/private metadata are read here; health must not
+    # launch CLIs or authenticate remotely. Each target's actual turn admission
+    # still checks its own binding, CLI compatibility and selected login mode.
+    for backend in (BACKEND_CURSOR, BACKEND_OPENCODE):
+        with RUNTIME_DIAGNOSTICS_LOCK:
+            diagnostic = dict(RUNTIME_DIAGNOSTICS.get(backend) or {})
+        ready = diagnostic.get("status") == "ready"
+        if not ready and diagnostic.get("installed") is True:
+            try:
+                connection = PROVIDER_CONNECTION_STORE.public(backend)
+                ready = connection.get("configured") is True and connection.get("last_result") == "verified"
+            except HTTPException:
+                pass  # Unreadable/unverified API settings never grant readiness.
+        if ready:
+            supported.append(backend)
     return supported
 
 
@@ -38427,12 +38487,12 @@ def cross_chat_handoffs_capability() -> dict[str, Any]:
     else:
         message = (
             "Cross-chat handoffs require native Codex app-server, Claude "
-            "Agent SDK, or a compatible authenticated Cursor CLI target "
+            "Agent SDK, or a ready Cursor/OpenCode CLI target "
             "transport."
         )
         action = (
             "Enable Codex app-server, install and enable Claude Agent SDK, "
-            "or install and authenticate a compatible Cursor CLI."
+            "or install and authenticate a compatible Cursor/OpenCode CLI."
         )
     return {
         "available": available,
@@ -38556,8 +38616,12 @@ def cross_chat_handoffs_capability() -> dict[str, Any]:
             BACKEND_CODEX: CODEX_TRANSPORT_APP_SERVER,
             BACKEND_CLAUDE: CLAUDE_TRANSPORT_AGENT_SDK,
             BACKEND_CURSOR: "headless-stream-json",
+            BACKEND_OPENCODE: "headless-stream-json",
         },
     }
+
+
+OPENCODE_CROSS_CHAT_CLIENT_CAPABILITY = "opencode_cross_chat_v1"
 
 
 def cross_chat_delivery_client_capabilities(target: dict[str, Any]) -> list[str]:
@@ -38589,6 +38653,10 @@ def cross_chat_delivery_client_capabilities(target: dict[str, Any]) -> list[str]
         # An empty immutable client-capability set selects that exact headless
         # path; request/reply final answers are relayed by the server ledger.
         return []
+    if backend == BACKEND_OPENCODE:
+        if not cross_chat_target_backend_supported(backend):
+            raise HTTPException(status_code=409, detail="target OpenCode chat requires a ready OpenCode CLI for cross-chat delivery")
+        return [OPENCODE_CROSS_CHAT_CLIENT_CAPABILITY]
     raise HTTPException(
         status_code=409,
         detail=f"target backend {backend!r} does not support cross-chat delivery",
@@ -38599,6 +38667,7 @@ CROSS_CHAT_DELIVERY_CAPABILITIES_BY_BACKEND: dict[str, frozenset[str]] = {
     BACKEND_CODEX: frozenset({CODEX_INTERACTIVE_CLIENT_CAPABILITY}),
     BACKEND_CLAUDE: frozenset({CLAUDE_SDK_INTERACTIVE_CLIENT_CAPABILITY}),
     BACKEND_CURSOR: frozenset(),
+    BACKEND_OPENCODE: frozenset({OPENCODE_CROSS_CHAT_CLIENT_CAPABILITY}),
 }
 
 
@@ -47972,7 +48041,8 @@ def active_generated_title_work_labels() -> list[str]:
 
 def title_runtime_key(sess: dict[str, Any]) -> tuple:
     return (sess.get("backend") or DEFAULT_BACKEND, session_provider_id(sess),
-            sess.get("model"), sess.get("codex_provider"), sess.get("codex_provider_revision"))
+            sess.get("model"), sess.get("codex_provider"), sess.get("codex_provider_revision"),
+            sess.get("provider_connection"), sess.get("provider_connection_revision"))
 
 
 def generated_title_eligible(sess: dict[str, Any], *, allow_attempted: bool = False) -> bool:
@@ -48036,6 +48106,9 @@ async def generate_session_title(session_id: str, snapshot: dict, reply: str) ->
             options["executable"] = resolve_cursor_executable()
             if not options["executable"]:
                 return
+            if snapshot.get("provider_connection") == "custom":
+                await cursor_api_key.require_isolation(options["executable"], options["env"])
+                options["env"].update(PROVIDER_CONNECTION_STORE.cursor_overrides(snapshot))
         result = await title_generation.generate_title(
             snapshot["backend"], snapshot["_title_seed"], reply, **options,
         )
@@ -51422,6 +51495,14 @@ def public_session(sess: dict[str, Any], *, summary: bool = False) -> dict[str, 
     # UI still needs the authoritative first-turn backend fence.
     public["backend_locked"] = session_backend_locked(sess)
     public["codex_provider"] = codex_provider.session_choice(sess.get("codex_provider"))
+    connection = sess.get("provider_connection") or "default"
+    # Keep legacy native summaries sparse, but retain a stored default as the
+    # tombstone that clears a previously selected custom API in client caches.
+    if not summary or "provider_connection" in sess:
+        public["provider_connection"] = connection
+    if connection == "custom":
+        public["provider_connection_catalog"] = PROVIDER_CONNECTION_STORE.catalog(sess["backend"], session=sess, summary=summary)
+    public.pop("provider_connection_revision", None)
     if public["codex_provider"] == "custom":
         public["codex_provider_catalog"] = CODEX_PROVIDER_STORE.catalog(
             available=CODEX_TRANSPORT != CODEX_TRANSPORT_EXEC, session=sess, summary=summary,
@@ -53678,6 +53759,7 @@ async def handle_codex_server_request(
     *,
     side_session_id: str | None = None,
     side_owner_is_current: Any = None,
+    side_approval_policy: str | None = None,
     source_manager: CodexAppServerManager | None = None,
 ) -> dict[str, Any]:
     """Bridge one app-server prompt to the owning AgentsDock chat, fail closed."""
@@ -53712,6 +53794,16 @@ async def handle_codex_server_request(
         ):
             pending = None
         else:
+            if method == "item/tool/requestUserInput":
+                policy = (
+                    side_approval_policy or CODEX_DEFAULT_APPROVAL_POLICY
+                    if side_session_id is not None
+                    else active_codex_approval_policy(session_id, thread_id)
+                )
+                if policy == "never":
+                    # Native questions are optional input, not permission to
+                    # invent an answer. Skip before installing any UI waiter.
+                    return await decline_server_request(request_id, method, params)
             manager = (None if side_session_id is not None else source_manager or
                        existing_codex_app_server_manager_for_thread(thread_id))
             generation = manager.generation if manager is not None else 0
@@ -54112,15 +54204,20 @@ async def handle_claude_tool_permission(
 
             # The SDK normally shadows can_use_tool in bypassPermissions mode,
             # but the callback itself is not proof that approval is required.
-            # Honor the current persisted mode at the ownership fence so an
+            # Honor the captured mode at the ownership fence so an
             # unexpected callback cannot manufacture a desktop approval card.
-            # Explicit AskUserQuestion interactions remain user-facing questions.
+            permission_mode = active_claude_permission_mode(session_id, active)
+            if (
+                tool_name == "AskUserQuestion"
+                and permission_mode in {"bypassPermissions", "dontAsk"}
+            ):
+                return PermissionResultDeny(
+                    message="This question was skipped because this turn is configured not to prompt the user.",
+                    interrupt=False,
+                )
             if (
                 tool_name != "AskUserQuestion"
-                and active_claude_permission_mode(
-                    session_id,
-                    active,
-                ) == "bypassPermissions"
+                and permission_mode == "bypassPermissions"
             ):
                 return PermissionResultAllow(updated_input=dict(input_data))
 
@@ -56355,6 +56452,7 @@ async def acquire_codex_control_thread(
                     "provider_turn_id": None,
                     "provider_turn_ready": False,
                     "interactive_app_server": True,
+                    "codex_approval_policy": effective_codex_approval_policy(session),
                     "codex_native_operation": True,
                     "codex_native_operation_kind": None,
                     "owner_task": reservation_task,
@@ -58792,6 +58890,15 @@ def record_runtime_success(backend: str) -> None:
 
 async def ensure_runtime_available(backend: str, *, session: dict[str, Any] | None = None) -> dict[str, Any]:
     diagnostic = await asyncio.to_thread(runtime_diagnostic, backend)
+    if (session or {}).get("provider_connection") == "custom":
+        selected = PROVIDER_CONNECTION_STORE.for_session(session)
+        if backend != BACKEND_CURSOR:
+            provider_connections.require_model(selected)
+        else:
+            await cursor_api_key.require_isolation(await asyncio.to_thread(resolve_cursor_executable), runner_env())
+        if backend not in {BACKEND_CLAUDE, BACKEND_OPENCODE, BACKEND_CURSOR} or diagnostic.get("installed") is not True:
+            raise HTTPException(503, "Install this provider's native CLI to use its custom API.")
+        diagnostic = {**diagnostic, "status": "ready", "authenticated": True}
     if (
         backend == BACKEND_CLAUDE
         and diagnostic.get("installed") is True
@@ -59594,6 +59701,9 @@ def discover_runtime_backend_catalog(backend: str, *, force_runtime_probe: bool 
         })
     catalog["diagnostic"] = public_runtime_diagnostic(diagnostic)
     catalog["available"] = ready
+    catalog["native_credentials_present"] = provider_connections.native_credentials_present(backend, diagnostic)
+    if backend in {BACKEND_CLAUDE, BACKEND_OPENCODE, BACKEND_CURSOR}:
+        catalog["custom_provider"] = PROVIDER_CONNECTION_STORE.catalog(backend, installed=diagnostic.get("installed") is True)
     return catalog
 
 
@@ -60442,6 +60552,12 @@ def build_claude_cmd(
         cmd.extend(["--settings", json.dumps({"env": {
             "CLAUDE_CODE_MAX_CONCURRENT_SUBAGENTS": str(subagent_limit),
         }}, separators=(",", ":"))])
+    if sess.get("provider_connection") == "custom":
+        _, settings_path = PROVIDER_CONNECTION_STORE.claude_overrides(sess)
+        if "--settings" in cmd:
+            index = cmd.index("--settings")
+            del cmd[index:index + 2]
+        cmd.extend(["--settings", settings_path])
     if no_session_persistence and not provider_id:
         cmd.append("--no-session-persistence")
     if provider_id:
@@ -60497,6 +60613,7 @@ def claude_sdk_configuration_key(
         "allowed_tools": [CLAUDE_PROVIDER_MCP_TOOL_NAME],
         "thinking": {"type": "adaptive", "display": "summarized"},
         "agentsdock_provider_tool": 1,
+        "provider_connection_revision": sess.get("provider_connection_revision"),
     }
     subagent_limit = sess.get("subagent_limit")
     if type(subagent_limit) is int and subagent_limit > 0:
@@ -60545,6 +60662,10 @@ def build_claude_sdk_options(
             {"env": subagent_env}, separators=(",", ":"),
         )
     cli_path = claude_sdk_cli_path(env)
+    if sess.get("provider_connection") == "custom":
+        custom_env, custom_settings = PROVIDER_CONNECTION_STORE.claude_overrides(sess)
+        env.update(custom_env)
+        subagent_settings["settings"] = custom_settings
     system_prompt = session_system_prompt(session_id, sess, manifest_path)
     provider_id = resolve_claude_resume_provider(sess, cwd)[0]
     if sess.get("fork_resume_session_at") and not (provider_id and sess.get("fork_from")):
@@ -60682,7 +60803,7 @@ def build_claude_sdk_options(
         stderr=lambda line: logger.warning(
             "Claude SDK stderr session=%s: %s",
             session_id,
-            compact_memory_text(line, 2_000),
+            compact_memory_text(PROVIDER_CONNECTION_STORE.redact(sess, line), 2_000),
         ),
     )
     def bind_provider_tool_owner(ownership_token: str, run_id: str) -> None:
@@ -63296,7 +63417,7 @@ async def run_claude_print(
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
             cwd=cwd,
-            env=agent_runner_env(session_id, runtime_env),
+            env={**agent_runner_env(session_id, runtime_env), **PROVIDER_CONNECTION_STORE.claude_overrides(sess)[0]} if sess.get("provider_connection") == "custom" else agent_runner_env(session_id, runtime_env),
             limit=PROCESS_STREAM_LIMIT,
             start_new_session=True,
         )
@@ -66922,6 +67043,9 @@ async def run_cursor_process(
     await append_event(session_id, "process_started", {"run_id": run_id, "backend": BACKEND_CURSOR, "argv": public_cmd, "cwd": cwd})
     env = agent_runner_env(session_id)
     env.update(sess.get("_cursor_tool_env") or {})
+    # Last overlay: a saved key cannot inherit an auth-token override, write
+    # the shared CLI credential store, or be redirected by project direnv.
+    env.update(PROVIDER_CONNECTION_STORE.cursor_overrides(sess))
     cursor_dir = os.path.dirname(os.path.abspath(cursor_bin))
     if cursor_dir and cursor_dir not in env.get("PATH", "").split(os.pathsep):
         env["PATH"] = cursor_dir + os.pathsep + env.get("PATH", "")
@@ -67557,7 +67681,7 @@ async def run_cursor_process(
     )
     cursor_auth_state = (
         await asyncio.to_thread(cursor_auth_probe_state, cursor_bin)
-        if cursor_auth_signal
+        if cursor_auth_signal and sess.get("provider_connection") != "custom"
         else None
     )
     cursor_auth_failed = cursor_auth_state == "unauthenticated"
@@ -67644,7 +67768,7 @@ async def run_cursor_process(
             else None
         )
     )
-    if not stopped and (
+    if not stopped and sess.get("provider_connection") != "custom" and (
         timeout_error
         or stream_error
         or protocol_error
@@ -67662,7 +67786,7 @@ async def run_cursor_process(
             auth_failure=cursor_auth_failed,
             runtime_error=cursor_auth_validation_error,
         )
-    elif not stopped:
+    elif not stopped and sess.get("provider_connection") != "custom":
         record_runtime_success(BACKEND_CURSOR)
 
     successful_terminal = bool(
@@ -68183,6 +68307,45 @@ async def run_opencode(
     prompt: str,
     sess: dict[str, Any],
     manifest_path: Path,
+    **kwargs: Any,
+) -> None:
+    """Attach a private native MCP only for an admitted helper-capable run."""
+    from cursor_provider_mcp import CursorToolBroker
+
+    async with CROSS_CHAT_CAPABILITY_LOCK:
+        has_authority = any(c.get("source_session_id") == session_id
+                            and c.get("source_run_id") == run_id
+                            for c in CROSS_CHAT_CAPABILITIES.values())
+    if not has_authority:
+        return await run_opencode_process(session_id, run_id, prompt, sess, manifest_path, **kwargs)
+    owner = secrets.token_urlsafe(48)
+    name = "agentsdock_" + secrets.token_hex(16)
+
+    async def execute(value: Any, key: str) -> tuple[str, bool]:
+        try:
+            return await execute_provider_tool_once(
+                session_id, run_id, value, replay_key="opencode:" + key,
+                backend=BACKEND_OPENCODE, cursor_owner_token=owner,
+            )
+        except ProviderToolError as exc:
+            return str(exc), True
+
+    broker = CursorToolBroker(codex_provider_mcp_tool_definition(), execute)
+    try:
+        tool_env = await broker.start()
+        selected = {**sess, "_opencode_mcp_owner_token": owner,
+                    "_opencode_tool_env": tool_env, "_opencode_tool_name": name}
+        await run_opencode_process(session_id, run_id, prompt, selected, manifest_path, **kwargs)
+    finally:
+        await broker.close()
+
+
+async def run_opencode_process(
+    session_id: str,
+    run_id: str,
+    prompt: str,
+    sess: dict[str, Any],
+    manifest_path: Path,
     *,
     standalone_provider_context: bool = False,
     provider_command: ProviderCommandRecord | None = None,
@@ -68206,6 +68369,7 @@ async def run_opencode(
         OpenCodeEventParseError,
         build_opencode_cmd,
         build_opencode_env_overrides,
+        build_opencode_mcp_overrides,
         merge_opencode_usage,
         new_opencode_enforced_agent_name,
         normalize_opencode_stream_event,
@@ -68216,6 +68380,19 @@ async def run_opencode(
 
     runtime_env = validate_provider_runtime_env(provider_runtime_env)
     redact_helper_output = opencode_helper_output_redactor(session_id, run_id, runtime_env)
+    tool_env = dict(sess.get("_opencode_tool_env") or {})
+    tool_name = str(sess.get("_opencode_tool_name") or "")
+    tool_owner = str(sess.get("_opencode_mcp_owner_token") or "")
+    if tool_name:
+        from cursor_provider_mcp import ENV_SECRET
+        original_redact = redact_helper_output
+
+        def redact_helper_output(value: Any) -> str:
+            text = original_redact(value)
+            for private in (tool_env.get(ENV_SECRET), tool_owner):
+                if private:
+                    text = text.replace(private, "<provider-private>")
+            return text
     if standalone_provider_context:
         sess = standalone_provider_session(sess)
     requested_cwd = str(sess.get("cwd") or DEFAULT_CWD)
@@ -68328,6 +68505,18 @@ async def run_opencode(
         provider_prompt, instruction_hash, _injected, memory_injected = (
             build_opencode_provider_prompt(session_id, sess, prompt, manifest_path)
         )
+    if tool_name:
+        # The key changes on every run. Old transcript tool names/IPC bearers
+        # cannot grant access to a later turn. No helper shell fallback.
+        provider_prompt = (
+            f"[Current run provider tool]\nUse only {tool_name}_run for the AgentsDock "
+            "Chats, Jobs, Publish, Emergency, Mail and Team helpers. Pass helper, arguments "
+            "and optional stdin; never pass authority or chat identity flags. "
+            "This replaces any earlier internal provider tool name. Its server checks "
+            "this exact live run and existing user authorization. Do not use shell "
+            "helper commands or unrelated MCP servers for these actions.\n\n"
+            + provider_prompt.replace(CLAUDE_PROVIDER_MCP_TOOL_NAME, tool_name + "_run")
+        )
     permission_mode = effective_opencode_permission_mode(sess)
     enforced_agent_name = (
         new_opencode_enforced_agent_name()
@@ -68343,7 +68532,7 @@ async def run_opencode(
     cmd = build_opencode_cmd(
         {
             "opencode_session_id": resumed_provider_id,
-            "model": sess.get("model"),
+            "model": "agentsdock_custom/" + provider_connections.require_model(PROVIDER_CONNECTION_STORE.for_session(sess)) if sess.get("provider_connection") == "custom" else sess.get("model"),
             "effort": sess.get("effort"),
         },
         "",
@@ -68379,6 +68568,7 @@ async def run_opencode(
                 instruction_content
             )
         env = agent_runner_env(session_id, runtime_env)
+        env.update(PROVIDER_CONNECTION_STORE.opencode_overrides(sess, env))
         env.update(build_opencode_env_overrides(
             permission_mode,
             existing_config=env.get("OPENCODE_CONFIG_CONTENT"),
@@ -68388,6 +68578,12 @@ async def run_opencode(
             deny_skill_tool=provider_command is not None,
             enforced_agent_name=enforced_agent_name,
         ))
+        if tool_name:
+            env.update(build_opencode_mcp_overrides(
+                env.get("OPENCODE_CONFIG_CONTENT"), name=tool_name,
+                command=[sys.executable, str(CURSOR_PROCESS_GUARD.with_name("cursor_provider_mcp.py")), "--mcp"],
+                environment=tool_env, enforced_agent_name=enforced_agent_name,
+            ))
         opencode_dir = os.path.dirname(os.path.abspath(opencode_bin))
         if opencode_dir and opencode_dir not in env.get("PATH", "").split(os.pathsep):
             env["PATH"] = opencode_dir + os.pathsep + env.get("PATH", "")
@@ -68452,6 +68648,8 @@ async def run_opencode(
                 "run_id": run_id,
                 "backend": BACKEND_OPENCODE,
                 "transport": "exec",
+                "opencode_mcp_owner_token": tool_owner,
+                "provider_tools_ready": asyncio.Event(),
                 "pid": proc.pid,
                 "pgid": pgid,
                 "cwd": cwd,
@@ -68861,6 +69059,10 @@ async def run_opencode(
                     provider_id = event_provider_id
                     provider_started = True
                     await mark_provider_turn_ready(session_id, run_id, provider_id)
+                    async with ACTIVE_LOCK:
+                        active = ACTIVE.get(session_id) or {}
+                        if active.get("run_id") == run_id and isinstance(active.get("provider_tools_ready"), asyncio.Event):
+                            active["provider_tools_ready"].set()
             if normalized is None:
                 continue
             # Detect the forbidden tool on the raw normalized event. In
@@ -69559,6 +69761,11 @@ async def run_codex_app_server(
         sess = standalone_provider_session(sess)
     requested_cwd = str(sess.get("cwd") or DEFAULT_CWD)
     cwd = existing_cwd(requested_cwd)
+    approval_policy = (
+        effective_codex_approval_policy(sess)
+        if interactive_app_server
+        else CODEX_NONINTERACTIVE_APPROVAL_POLICY
+    )
     if diff_baseline is None:
         diff_baseline = await capture_git_baseline(session_id, run_id, cwd)
     if str(Path(requested_cwd).expanduser()) != cwd:
@@ -71347,6 +71554,7 @@ async def run_codex_app_server(
                 "native_interrupt_sent": False,
                 "codex_app_server_turn": None,
                 "interactive_app_server": interactive_app_server,
+                "codex_approval_policy": approval_policy,
                 # turn/steer cannot replace the run-bound Responses metadata.
                 # Authority-bearing Force Send therefore uses the existing
                 # Stop -> queued fresh-start lifecycle; the thread remains
@@ -71439,23 +71647,7 @@ async def run_codex_app_server(
                     if interactive_app_server
                     else ""
                 )
-                approval_policy = (
-                    str(
-                        sess.get("codex_approval_policy")
-                        or CODEX_DEFAULT_APPROVAL_POLICY
-                    )
-                    if interactive_app_server
-                    else CODEX_NONINTERACTIVE_APPROVAL_POLICY
-                )
-                overrides["approvalPolicy"] = (
-                    approval_policy
-                    if approval_policy in CODEX_APPROVAL_POLICIES
-                    else (
-                        CODEX_DEFAULT_APPROVAL_POLICY
-                        if interactive_app_server
-                        else CODEX_NONINTERACTIVE_APPROVAL_POLICY
-                    )
-                )
+                overrides["approvalPolicy"] = approval_policy
                 if permission_profile:
                     # Permission profiles are an experimental app-server
                     # override and are mutually exclusive with sandbox policy,
@@ -79015,6 +79207,8 @@ async def require_agent_token(request: Request, call_next):
         "/api/admin/codex/auth", "/api/admin/codex/auth/api-key",
         "/api/admin/codex/provider", "/api/admin/codex/provider/test",
         "/api/admin/codex/provider/models",
+        "/api/admin/provider-connections/claude", "/api/admin/provider-connections/claude/check",
+        "/api/admin/provider-connections/opencode", "/api/admin/provider-connections/opencode/check",
     }
     public_chat_shares_admin_route = (
         request.url.path == "/api/admin/chat-shares"
@@ -79214,10 +79408,12 @@ async def require_agent_token(request: Request, call_next):
             if body_error is not None:
                 status_code, detail = body_error
                 return JSONResponse({"detail": detail}, status_code=status_code)
-        elif request.url.path in {"/api/admin/codex/provider", "/api/admin/codex/provider/test", "/api/admin/codex/provider/models"} and request.method.upper() in {"PUT", "POST"}:
+        elif (request.url.path in {"/api/admin/codex/provider", "/api/admin/codex/provider/test", "/api/admin/codex/provider/models"}
+              and request.method.upper() in {"PUT", "POST"}) or (request.url.path.startswith("/api/admin/provider-connections/")
+              and request.method.upper() in {"PUT", "POST", "DELETE"}):
             declared_size, transport_error = privileged_native_json_transport(
                 request, max_body_bytes=codex_provider.MAX_BODY_BYTES,
-                label="Codex endpoint", require_content_length=True,
+                label="Provider endpoint", require_content_length=True,
             )
             if transport_error is not None:
                 status_code, detail = transport_error
@@ -81550,6 +81746,7 @@ async def health() -> dict[str, Any]:
             "side_questions": side_questions.capability(),
             "codex_auth_v1": codex_auth.capability(available=bool(AGENT_TOKEN) and CODEX_TRANSPORT != CODEX_TRANSPORT_EXEC),
             "codex_provider_v1": {"available": bool(AGENT_TOKEN) and CODEX_TRANSPORT != CODEX_TRANSPORT_EXEC, "wire_api": "responses", "per_chat": True, "per_chat_models": True, "model_discovery": True, "model_compatibility": True},
+            "provider_connections_v1": {"available": bool(AGENT_TOKEN), "per_chat": True, "backends": [BACKEND_CLAUDE, BACKEND_OPENCODE, BACKEND_CURSOR]},
             "team_mail_hints_v1": SECURE_PEER_RUNTIME.team_mail_hint_capability(),
             "team_mail_hints_v2": SECURE_PEER_RUNTIME.team_notification_hint_capability(),
             "websocket_auth_v1": {
@@ -82977,6 +83174,38 @@ async def custom_codex_discovery_native_models() -> dict:
     return await asyncio.to_thread(lambda: json.loads(Path(path).read_text(encoding="utf-8")))
 
 
+async def set_codex_default_model(model: str | None, expected_revision):
+    async with CODEX_PROVIDER_SETTINGS_LOCK:
+        selected = await asyncio.to_thread(CODEX_PROVIDER_STORE.selection, include_key=True, include_revision=True)
+        if not selected or selected.get("credential_id") != expected_revision:
+            raise HTTPException(409, "Endpoint settings changed. Refresh and try again.")
+        status = await asyncio.to_thread(CODEX_PROVIDER_STORE.status)
+        if status.get("connection_verified") is not True:
+            raise HTTPException(409, "Check this API connection first.")
+        replacement = {"base_url": selected["base_url"], "api_key": selected["api_key"],
+                       "model": model, "connection_verified": True}
+        task = asyncio.create_task(replace_codex_provider_settings(replacement))
+        try:
+            await asyncio.shield(task)
+        except BaseException:
+            with suppress(BaseException): await join_task_despite_caller_cancellation(task)
+            raise
+        current = await asyncio.to_thread(CODEX_PROVIDER_STORE.status)
+        return {"backend": "codex", "revision": current["credential_id"], "default_model": current["model"]}
+
+
+app.include_router(provider_connections.create_router(
+    authorize=require_native_admin_control, store=PROVIDER_CONNECTION_STORE,
+    cursor_catalog=lambda selected: cursor_api_key.catalog(selected, executable=resolve_cursor_executable(), env=runner_env()),
+    codex_store=CODEX_PROVIDER_STORE, codex_set_model=set_codex_default_model,
+    session_lookup=lambda session_id: STORE.sessions.get(session_id),
+    account=lambda backend: provider_connections.native_account_metadata(
+        backend, env=runner_env(),
+        cursor_executable=shutil.which(CURSOR_BIN, path=runner_env().get("PATH")) if backend == BACKEND_CURSOR else None,
+        command=lambda cmd: runtime_command(cmd, timeout_seconds=4),
+    ),
+))
+
 app.include_router(codex_provider.create_router(
     authorize=require_native_admin_control,
     store=CODEX_PROVIDER_STORE,
@@ -82985,6 +83214,7 @@ app.include_router(codex_provider.create_router(
     available=lambda: CODEX_TRANSPORT != CODEX_TRANSPORT_EXEC,
     session_lookup=lambda session_id: STORE.sessions.get(session_id),
     native_models=custom_codex_discovery_native_models,
+    check_credentials=provider_connections.probe_credentials,
 ))
 
 
@@ -83116,7 +83346,8 @@ async def create_native_side_chat(session_id: str, *, persisted_state=None, pers
                                         and self.codex.thread_id
                                         and str(params.get("threadId") or "") == self.codex.thread_id)
                         return await handle_codex_server_request(request_id, method, params,
-                            side_session_id=session_id, side_owner_is_current=is_current)
+                            side_session_id=session_id, side_owner_is_current=is_current,
+                            side_approval_policy=approval_policy)
 
                     provider_selection = CODEX_PROVIDER_STORE.for_session(current, include_key=True)
                     if provider_selection:
@@ -89811,8 +90042,68 @@ async def acknowledge_session_emergency(
         return {"session": public_session(sess), "acknowledged": True}
 
 
+async def ensure_discardable_empty_session(session_id: str, expected_updated_at: str) -> None:
+    """Fail closed while the caller holds the lifecycle lock/deletion fence.
+
+    Automatic placeholder cleanup must never behave like an explicit Delete:
+    it may not interrupt a turn, cancel queued work or remove uploaded content.
+    Local drafts are additionally checked by the originating desktop client.
+    """
+    def untouched() -> bool:
+        session = STORE.sessions.get(session_id)
+        return bool(
+            session and expected_updated_at
+            and session.get("updated_at") == expected_updated_at
+            and session.get("title") == "New chat"
+            and not session_backend_locked(session)
+            and not any(session.get(key) for key in (
+                "parent_id", "pinned", "archived", "manual_unread",
+                "codex_goal", "claude_goal", "emergency_alert",
+            ))
+            and session_id not in ACTIVE and session_id not in BUSY_SESSIONS
+            and session_id not in CURRENT_TURNS
+            and not QUEUED_TURNS.get(session_id)
+            and session_id not in RUN_NOW_TURNS
+            and session_id not in RUN_NOW_REQUESTS
+            and not any(not task.done() for task in SESSION_TURN_TASKS.get(session_id, ()))
+            and not any(job.get("session_id") == session_id for job in JOBS.jobs.values())
+            and not PORT_TUNNELS._sockets.get(session_id)
+        )
+
+    def only_creation_event() -> bool:
+        # Unlike timeline projection, do not skip malformed/hidden records.
+        # Any extra byte or uncertain history preserves the chat.
+        with events_path(session_id).open("rb") as stream:
+            line = stream.readline(65537)
+            if not line or len(line) > 65536 or stream.read(1):
+                return False
+        try:
+            event = json.loads(line)
+        except (ValueError, UnicodeError):
+            return False
+        return isinstance(event, dict) and event.get("type") == "session_created" and event.get("seq") == 1
+
+    if not untouched():
+        raise HTTPException(status_code=409, detail="Chat is no longer an unused placeholder; it was preserved.")
+    history_empty, files, terminal = await asyncio.gather(
+        asyncio.to_thread(only_creation_event),
+        asyncio.to_thread(list_session_file_records, session_id),
+        asyncio.to_thread(terminal_windows_snapshot, session_id),
+    )
+    if not untouched() or not history_empty or files or terminal.get("exists"):
+        raise HTTPException(status_code=409, detail="Chat has content or resources; it was preserved.")
+
+
+@app.post("/api/sessions/{session_id}/discard-empty")
+async def discard_empty_session(session_id: str, expected_updated_at: str) -> dict[str, Any]:
+    # A separate route makes old servers fail safely with 404, rather than
+    # ignoring a conditional DELETE query and deleting a real conversation.
+    await wait_for_queue_recovery_admission()
+    return await delete_session(session_id, discard_updated_at=expected_updated_at)
+
+
 @app.delete("/api/sessions/{session_id}")
-async def delete_session(session_id: str) -> dict[str, Any]:
+async def delete_session(session_id: str, discard_updated_at: str | None = None) -> dict[str, Any]:
     async with session_lifecycle_lock(session_id):
         ensure_session_not_initializing(session_id)
         if session_id in DELETED_SESSION_TOMBSTONES:
@@ -89847,9 +90138,11 @@ async def delete_session(session_id: str) -> dict[str, Any]:
                 ),
             )
         DELETING_SESSIONS.add(session_id)
-        cancel_generated_session_title(session_id)
         deleted = False
         try:
+            if discard_updated_at is not None:
+                await ensure_discardable_empty_session(session_id, discard_updated_at)
+            cancel_generated_session_title(session_id)
             if (
                 session_id in CLAUDE_STOP_FENCE_SESSIONS
                 or session_id in CLAUDE_STOP_FENCE_RETRY_TASKS
@@ -90107,6 +90400,8 @@ async def delete_session(session_id: str) -> dict[str, Any]:
                             "the session was not deleted. Retry shortly."
                         ),
                     )
+            if discard_updated_at is not None:
+                await ensure_discardable_empty_session(session_id, discard_updated_at)
             await fence_secure_peer_chat_retirement(session_id)
             try:
                 await asyncio.to_thread(
@@ -90190,6 +90485,8 @@ async def delete_session(session_id: str) -> dict[str, Any]:
                 await asyncio.to_thread(kill_terminal_session, session_id)
             async def finish_committed_delete() -> dict[str, Any]:
                 async with event_delivery_lock(session_id):
+                    if discard_updated_at is not None:
+                        await ensure_discardable_empty_session(session_id, discard_updated_at)
                     committed_deleted = await STORE.delete(session_id)
                     DELETED_SESSION_TOMBSTONES.add(session_id)
                     DELETING_SESSIONS.discard(session_id)
@@ -90574,6 +90871,7 @@ async def _fork_session_locked(
             cwd=parent.get("cwd"),
             backend=parent_backend,
             codex_provider=codex_provider.session_choice(parent.get("codex_provider")),
+            provider_connection=parent.get("provider_connection") or "default",
             model=parent.get("model"),
             effort=parent.get("effort"),
             subagent_limit=parent.get("subagent_limit"),

@@ -250,6 +250,7 @@ export function registerIpc(
   handle('sessions:update', (sessionId, patch, expectedScope) => service.updateSession(sessionId, patch, expectedScope))
   handle('sessions:provider:reload', sessionId => service.reloadProvider(sessionId))
   handle('sessions:remove', sessionId => service.removeSession(sessionId))
+  handle('sessions:discard-empty', (scope, sessionId, updatedAt) => service.discardEmptySession(scope, sessionId, updatedAt))
   handle('sessions:fork', sessionId => service.forkSession(sessionId))
   handle('sessions:reorder', (sessionId, relativeTo, placement, targetFolder) => service.reorderSession(sessionId, relativeTo, placement, targetFolder))
   handle('sessions:search-history', (query, limit) => service.searchSessions(query, limit))
@@ -282,6 +283,10 @@ export function registerIpc(
   handle('turns:stop', sessionId => service.stopTurn(sessionId))
 
   handle('codex:server-goals:get', () => service.codexServerGoals())
+  handle('provider-connections:request', (scope, backend, action, input) => service.providerConnectionRequest(scope, backend, action, input))
+  handle('provider-accounts:read', (scope, backend) => service.providerAccount(scope, backend))
+  handle('custom-models:read', (scope, backend, sessionId) => service.customModels(scope, backend, undefined, sessionId))
+  handle('custom-models:save', (scope, backend, input) => service.customModels(scope, backend, input))
   handle('codex:auth:get', scope => service.codexAuth(scope))
   handle('codex:provider:get', scope => service.codexProvider(scope))
   handle('codex:provider:models', (scope, sessionId) => service.codexProviderModels(scope, sessionId))

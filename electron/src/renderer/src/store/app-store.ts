@@ -10,7 +10,7 @@ import { mailHintPending, type MailArrivalCursor, type MailboxCoverage, type Mai
 import { bulletinHintPending, type BulletinHintRefresh } from '@shared/team-bulletin-hints'
 import { applyOpenCodeSessionEvent, openCodeProviderCommandsAvailable } from '@shared/opencode'
 import { t } from '@shared/i18n'
-import { runtimeSelectionError, selectableChatBackends } from '@shared/runtime-catalog'
+import { chatBackendChoice, runtimeSelectionError, runtimeSendAdmissionError, selectableChatBackendChoices } from '@shared/runtime-catalog'
 import { isAsyncCrossChatMessage, isNativeGoalSteerEvent, isNativeSteerTransitionStop, timelineSemanticUnits } from '@shared/semantic-timeline'
 import { turnSendErrorMessage } from '@shared/server-errors'
 import { completedPrefixForkAvailable, RUNNING_FORK_UNAVAILABLE } from '@shared/session-fork'
@@ -214,6 +214,7 @@ interface AppState {
   inspectorVisible: boolean
   activeSessionIds: Set<string>
   turnAdmissionTokens: Record<string, string>
+  discardingEmptyChats: Record<string, string>
   pendingTurnSubmissions: Record<string, PendingTurnSubmission>
   stoppingSessionIds: Set<string>
   storageFull: boolean
@@ -256,7 +257,7 @@ interface AppState {
   attachPathsForSession(sessionId: string, files: NativeFileRef[]): Promise<void>
   removeUpload(fileId: string): void
   removeUploadForSession(sessionId: string, fileId: string): void
-  refreshSessions(): Promise<void>
+  refreshSessions(cleanupEmpty?: boolean): Promise<void>
   requestNewChat(): Promise<void>
   updateSession(
     sessionId: string,
@@ -293,17 +294,19 @@ export interface NewChatDefaults {
   cwd: string
   backend: Backend
   codex_provider?: CreateSessionInput['codex_provider']
+  provider_connection?: CreateSessionInput['provider_connection']
   model: string | null
   effort: string | null
 }
 
-function normalizedNewChatDefaults(input: Pick<CreateSessionInput, 'folder' | 'cwd' | 'backend' | 'codex_provider' | 'model' | 'effort'>): NewChatDefaults {
+function normalizedNewChatDefaults(input: Pick<CreateSessionInput, 'folder' | 'cwd' | 'backend' | 'codex_provider' | 'provider_connection' | 'model' | 'effort'>): NewChatDefaults {
   return {
     version: 1,
     folder: input.folder.trim() || 'General',
     cwd: input.cwd.trim(),
     backend: input.backend,
     ...(input.backend === 'codex' && input.codex_provider === 'custom' ? { codex_provider: 'custom' as const } : {}),
+    ...(input.provider_connection === 'custom' ? { provider_connection: 'custom' as const } : {}),
     model: input.model?.trim() || null,
     effort: input.effort?.trim() || null
   }
@@ -316,6 +319,7 @@ function parseNewChatDefaults(value: unknown): NewChatDefaults | null {
     candidate.version !== 1
     || !['claude', 'codex', 'cursor', 'opencode'].includes(String(candidate.backend))
     || candidate.codex_provider !== undefined && !['default', 'custom'].includes(candidate.codex_provider)
+    || candidate.provider_connection !== undefined && !['default', 'custom'].includes(candidate.provider_connection)
     || typeof candidate.folder !== 'string'
     || typeof candidate.cwd !== 'string'
     || candidate.model !== null && typeof candidate.model !== 'string'
@@ -341,12 +345,13 @@ function sessionNewChatDefaults(session: Session, defaultCwd: string): NewChatDe
     cwd: session.cwd || defaultCwd,
     backend: session.backend,
     codex_provider: session.codex_provider,
+    provider_connection: session.provider_connection,
     model: session.model,
     effort: session.effort
   })
 }
 
-export function saveNewChatDefaults(scope: WorkspaceProfileScope | null, input: Pick<CreateSessionInput, 'folder' | 'cwd' | 'backend' | 'codex_provider' | 'model' | 'effort'>): Promise<void> {
+export function saveNewChatDefaults(scope: WorkspaceProfileScope | null, input: Pick<CreateSessionInput, 'folder' | 'cwd' | 'backend' | 'codex_provider' | 'provider_connection' | 'model' | 'effort'>): Promise<void> {
   try {
     return setWorkspacePreference(scope, NEW_CHAT_DEFAULTS_PREFERENCE_KEY, normalizedNewChatDefaults(input))
   } catch (error) {
@@ -365,7 +370,8 @@ function directChatPlaceholderFingerprint(session: Session): string {
     folder: session.folder?.trim() || 'General',
     cwd: session.cwd?.trim() || '',
     backend: session.backend,
-    ...(session.backend === 'codex' && session.codex_provider === 'custom' ? { codexProvider: 'custom' } : {}),
+    ...(session.provider_connection === 'custom' ? { providerConnection: 'custom' } : {}),
+    ...(session.backend === 'codex' && (session.provider_connection === 'custom' ? 'custom' : session.codex_provider) === 'custom' ? { codexProvider: 'custom' } : {}),
     model: session.model?.trim() || null,
     effort: session.effort?.trim() || null,
     systemPrompt: session.system_prompt ?? null,
@@ -382,6 +388,10 @@ function directChatPlaceholderFingerprint(session: Session): string {
 
 function directChatPlaceholderMarker(session: Session): DirectChatPlaceholderMarker {
   return { version: 1, fingerprint: directChatPlaceholderFingerprint(session) }
+}
+
+export async function markNewChatPlaceholder(scope: WorkspaceProfileScope | null, session: Session): Promise<void> {
+  if (scope && session.title === 'New chat') await setWorkspacePreference(scope, directChatPlaceholderKey(session.id), directChatPlaceholderMarker(session))
 }
 
 function isDirectChatPlaceholderMarker(value: unknown): value is DirectChatPlaceholderMarker {
@@ -508,6 +518,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   inspectorVisible: false,
   activeSessionIds: new Set(),
   turnAdmissionTokens: {},
+  discardingEmptyChats: {},
   pendingTurnSubmissions: {},
   stoppingSessionIds: new Set(),
   error: null,
@@ -1493,7 +1504,9 @@ export const useAppStore = create<AppState>((set, get) => ({
 
   async refreshAgentRoutes(sessionId) {
     const current = get()
-    if (!agentCrossChatRoutesAvailable(current.health) || current.sessions.find(session => session.id === sessionId)?.backend === 'opencode') {
+    if (!agentCrossChatRoutesAvailable(current.health)
+      || (current.sessions.find(session => session.id === sessionId)?.backend === 'opencode'
+        && !supportedCrossChatTargetBackends(current.health).includes('opencode'))) {
       set(state => {
         const agentRoutesBySession = { ...state.agentRoutesBySession }
         const agentRouteErrorsBySession = { ...state.agentRouteErrorsBySession }
@@ -1605,6 +1618,7 @@ export const useAppStore = create<AppState>((set, get) => ({
 
   beginTurnAdmission(sessionId) {
     const current = get()
+    if (current.discardingEmptyChats[sessionId] === `${current.activeProfileId}:${current.profileGeneration}`) return null
     if (current.switchingProfileId || current.turnAdmissionTokens[sessionId]) return null
     const token = `${current.activeProfileId ?? 'local'}:${current.profileGeneration}:${++turnAdmissionCounter}`
     let admitted = false
@@ -1703,7 +1717,8 @@ export const useAppStore = create<AppState>((set, get) => ({
     )
     const chatReferences = validatedReferences.chatReferences
     const teamReferences = validatedReferences.teamReferences
-    if (chatReferences.length && get().sessions.find(session => session.id === sessionId)?.backend === 'opencode') {
+    if (chatReferences.length && get().sessions.find(session => session.id === sessionId)?.backend === 'opencode'
+      && !supportedCrossChatTargetBackends(get().health).includes('opencode')) {
       set({ error: t('opencode.crossChatUnavailable') }); return false
     }
     if (requestedReferences.length !== chatReferences.length) {
@@ -1777,7 +1792,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       set({ error: 'The selected chat is no longer available.' })
       return false
     }
-    const runtimeError = runtimeSelectionError(get().health, get().runtimeCatalog, currentTarget.backend, currentTarget.model, currentTarget.codex_provider, currentTarget.codex_provider_catalog)
+    const runtimeError = runtimeSendAdmissionError(get().health, currentTarget.backend, currentTarget.provider_connection === 'custom' ? 'custom' : currentTarget.codex_provider)
     if (runtimeError) {
       set({ error: runtimeError })
       return false
@@ -1821,7 +1836,8 @@ export const useAppStore = create<AppState>((set, get) => ({
         uploadsBySession: { ...state.uploadsBySession, [sessionId]: [] },
         uploadPathsBySession: { ...state.uploadPathsBySession, [sessionId]: [] }
       } : {}),
-      pendingTurnSubmissions: { ...state.pendingTurnSubmissions, [sessionId]: pendingSubmission }
+      pendingTurnSubmissions: { ...state.pendingTurnSubmissions, [sessionId]: pendingSubmission },
+      error: null,
     }))
     if (!stagedSubmission) window.dispatchEvent(new CustomEvent('agentsdock:local-send', { detail: { sessionId } }))
     try {
@@ -2025,12 +2041,20 @@ export const useAppStore = create<AppState>((set, get) => ({
       [id]: (state.uploadsBySession[id] ?? []).filter(file => file.id !== fileId)
     } }))
   },
-  async refreshSessions() {
+  async refreshSessions(cleanupEmpty = false) {
     if (get().switchingProfileId) return
     const scope = captureProfileScope(get())
     try {
-      const incoming = applyPendingSessionPatches(await window.agentsDock.sessions.list())
+      let incoming = applyPendingSessionPatches(await window.agentsDock.sessions.list())
       if (!profileScopeMatches(scope, get())) return
+      if (cleanupEmpty && !get().creatingChat) {
+        const state = get()
+        const payload = { activeProfileId: state.activeProfileId ?? undefined, profileGeneration: state.profileGeneration,
+          profiles: state.profiles, sessions: incoming, jobs: state.jobs }
+        const cleanup = startupChatCleanupFromBootstrap(payload)
+        if (cleanup) incoming = (await removeUntouchedStartupChats(payload, cleanup, () => profileScopeMatches(scope, get()))).sessions
+        if (!profileScopeMatches(scope, get())) return
+      }
       set(state => {
         const sessions = reconcileSessions(state.sessions, incoming)
         return sessions === state.sessions ? state : { sessions }
@@ -2082,8 +2106,8 @@ export const useAppStore = create<AppState>((set, get) => ({
         cwd: lastOpenedCwd ?? (defaults.cwd || defaultCwd)
       }
       if (
-        !selectableChatBackends(current.health, current.runtimeCatalog).includes(defaults.backend)
-        || runtimeSelectionError(current.health, current.runtimeCatalog, defaults.backend, defaults.model, defaults.codex_provider)
+        !selectableChatBackendChoices(current.health, current.runtimeCatalog).includes(chatBackendChoice(defaults))
+        || runtimeSelectionError(current.health, current.runtimeCatalog, defaults.backend, defaults.model, defaults.provider_connection === 'custom' ? 'custom' : defaults.codex_provider)
       ) {
         set({ creatingChat: false })
         current.setModal('newChat', true)
@@ -2095,6 +2119,7 @@ export const useAppStore = create<AppState>((set, get) => ({
         cwd: defaults.cwd,
         backend: defaults.backend,
         ...(defaults.codex_provider === 'custom' ? { codex_provider: 'custom' as const } : {}),
+        ...(defaults.provider_connection === 'custom' ? { provider_connection: 'custom' as const } : {}),
         model: defaults.model,
         effort: defaults.effort,
         system_prompt: null,
@@ -2106,7 +2131,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       trackEvent('chat_created')
       await Promise.all([
         saveNewChatDefaults(preferenceScope, input),
-        setWorkspacePreference(preferenceScope, directChatPlaceholderKey(session.id), directChatPlaceholderMarker(session))
+        markNewChatPlaceholder(preferenceScope, session)
       ]).catch(() => undefined)
       if (!workspaceScopeMatches(preferenceScope, get()) || !profileScopeMatches(profileScope, get())) return
       await get().refreshSessions()
@@ -3151,7 +3176,9 @@ async function runProfileRefresh(
   }
 }
 
-function startupChatCleanupFromBootstrap(payload: BootstrapPayload): StartupChatCleanup | null {
+type CleanupSnapshot = Pick<BootstrapPayload, 'activeProfileId' | 'profileGeneration' | 'profiles' | 'sessions' | 'jobs'>
+
+function startupChatCleanupFromBootstrap(payload: CleanupSnapshot): StartupChatCleanup | null {
   if (!payload.activeProfileId || !payload.profiles) return null
   const serverIdentity = payload.profiles?.find(profile => profile.id === payload.activeProfileId)?.serverIdentity?.trim()
   if (!serverIdentity) return null
@@ -3167,11 +3194,12 @@ function startupChatCleanupFromBootstrap(payload: BootstrapPayload): StartupChat
   } : null
 }
 
-async function removeUntouchedStartupChats(
-  payload: BootstrapPayload,
+async function removeUntouchedStartupChats<T extends CleanupSnapshot>(
+  payload: T,
   cleanup: StartupChatCleanup,
   profileScopeIsCurrent: () => boolean
-): Promise<BootstrapPayload> {
+): Promise<T> {
+  if (!window.agentsDock.sessions.discardEmpty) return payload
   if (!profileScopeIsCurrent()) return payload
   if (payload.activeProfileId !== cleanup.profileId || (payload.profileGeneration ?? 0) !== cleanup.profileGeneration) return payload
   const serverIdentity = payload.profiles?.find(profile => profile.id === payload.activeProfileId)?.serverIdentity?.trim()
@@ -3199,11 +3227,26 @@ async function removeUntouchedStartupChats(
 
     for (const [sessionId, marker] of markers) {
       if (!profileScopeIsCurrent()) return payload
+      const hasLocalWork = () => {
+        const state = useAppStore.getState()
+        return Boolean(state.drafts[sessionId]?.length || state.uploadsBySession[sessionId]?.length
+          || state.uploadPathsBySession[sessionId]?.length || state.pendingTurnSubmissions[sessionId]
+          || state.chatReferencesBySession[sessionId]?.length || state.teamReferencesBySession[sessionId]?.length)
+      }
       const session = liveSessions.find(candidate => candidate.id === sessionId)
       if (!session || !isUntouchedNewChat(session)) continue
       if (liveJobs.some(job => job.session_id === sessionId) || livePorts.some(port => port.sessionId === sessionId)) continue
 
+      const cleanupOwner = `${cleanup.profileId}:${cleanup.profileGeneration}`
+      if (useAppStore.getState().discardingEmptyChats[sessionId]) continue
+      useAppStore.setState(state => ({ discardingEmptyChats: { ...state.discardingEmptyChats, [sessionId]: cleanupOwner } }))
       try {
+        // The editor deliberately keeps typing local until its debounce. Flush
+        // its live refs, not just disk/store state, and freeze editing while the
+        // conditional discard is in flight so a new draft cannot be stranded.
+        await flushActiveWorkspace()
+        if (!profileScopeIsCurrent()) return payload
+        if (hasLocalWork()) continue
         const [draft, chatReferences, teamReferences, timeline, queuedTurns, files, terminal] = await Promise.all([
           getWorkspacePreference<unknown>(preferenceScope, `draft:${sessionId}`, ''),
           getWorkspacePreference<unknown>(preferenceScope, chatReferencesPreferenceKey(sessionId), []),
@@ -3229,8 +3272,8 @@ async function removeUntouchedStartupChats(
           || terminal.exists
         ) continue
 
-        // Re-read the remotely authoritative records immediately before the
-        // unconditional legacy DELETE. Any uncertainty preserves the chat.
+        // Re-read before the server's conditional discard. The server repeats
+        // its proof under the lifecycle lock; never fall back to ordinary DELETE.
         ;[liveSessions, liveJobs, livePorts] = await Promise.all([
           window.agentsDock.sessions.list(),
           window.agentsDock.jobs.list(),
@@ -3245,11 +3288,10 @@ async function removeUntouchedStartupChats(
           || liveJobs.some(job => job.session_id === sessionId)
           || livePorts.some(port => port.sessionId === sessionId)
         ) continue
-        // `sessions.remove` targets the main process' active profile. Keep this
-        // guard adjacent to the destructive IPC so a profile transition during
-        // any of the awaited proof reads cannot delete from the new workspace.
+        // Keep the renderer guard adjacent to the scope-bound conditional IPC.
         if (!profileScopeIsCurrent()) return payload
-        if (await window.agentsDock.sessions.remove(sessionId)) {
+        if (hasLocalWork() || !confirmed.updated_at) continue
+        if (await window.agentsDock.sessions.discardEmpty(preferenceScope, sessionId, confirmed.updated_at)) {
           removed.add(sessionId)
           await setWorkspacePreference(preferenceScope, directChatPlaceholderKey(sessionId), false).catch(() => undefined)
         }
@@ -3258,6 +3300,13 @@ async function removeUntouchedStartupChats(
           sessionId,
           error: errorMessage(error)
         }).catch(() => undefined)
+      } finally {
+        useAppStore.setState(state => {
+          if (state.discardingEmptyChats[sessionId] !== cleanupOwner) return state
+          const discardingEmptyChats = { ...state.discardingEmptyChats }
+          delete discardingEmptyChats[sessionId]
+          return { discardingEmptyChats }
+        })
       }
     }
 
@@ -4838,6 +4887,7 @@ function normalizeSessionPatch(patch: Partial<Session>) { return {
   cwd: patch.cwd ?? undefined,
   backend: patch.backend,
   codex_provider: patch.codex_provider,
+  provider_connection: patch.provider_connection,
   model: patch.model,
   effort: patch.effort,
   system_prompt: patch.system_prompt,
@@ -4859,8 +4909,11 @@ export function interactiveClientCapabilities(
   health: Health | null,
   selectedSkill = false
 ): string[] {
-  if (session?.backend === 'opencode') return selectedSkill && openCodeProviderCommandsAvailable(health) ? ['opencode_provider_commands_v1'] : []
-  const capabilities = ['codex_interactive_v1', 'codex_goal_steer_v1']
+  const opencode = session?.backend === 'opencode'
+  const capabilities = opencode
+    ? selectedSkill && openCodeProviderCommandsAvailable(health) ? ['opencode_provider_commands_v1'] : []
+    : ['codex_interactive_v1', 'codex_goal_steer_v1']
+  if (opencode && !supportedCrossChatTargetBackends(health).includes('opencode')) return capabilities
   if (crossChatHandoffsAvailable(health)) capabilities.push('cross_chat_handoffs_v1')
   if (
     crossChatHandoffsAvailable(health)

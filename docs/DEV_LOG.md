@@ -1,5 +1,407 @@
 # Public development log
 
+## 2026-09-27 — Custom API live acceptance and API-only chat routing
+
+- Cursor and OpenCode advertise cross-chat transport when their CLI is installed
+  and this server has a verified custom API connection, even without native
+  account login. This does not mark native login ready or bypass per-chat
+  admission, credential revocation, CLI compatibility or route authorization.
+  Capability reads use local metadata, not additional provider requests.
+- Live acceptance used disposable chats and workspaces with real provider
+  requests. Cursor used its official API-key service; Claude Code, Codex and
+  OpenCode used a verified OpenRouter connection. All four produced a response.
+  OpenCode ↔ Cursor and Claude Code ↔ Codex delivered one request and one reply
+  each through the run-bound tool and mailbox, verified against server events.
+  The native desktop rendered replies and recovered a successful Claude tool
+  attempt after an initial model attempt used an unavailable shell command.
+- A nonexistent-route attempt was rejected with no extra delivery. This is not
+  a substitute for the isolated cross-chat ownership/authorization regressions.
+  Settings rejected unverified credentials without saving them or falling back
+  to native accounts. Direct Anthropic/OpenAI key acceptance remains unverified;
+  gateway success does not certify every endpoint/model combination.
+- Validation: 373 provider/server tests, 1,126 desktop tests, then 175 targeted
+  routing/binding tests passed (server batches overlap). Native UI checks used
+  a separate desktop profile and the designated test server. No release is
+  published by this acceptance record.
+- Full CI exposed summary-size and OpenAPI operation-ID regressions, an outdated
+  lifecycle-lock field assertion, and two Chinese terminology inconsistencies.
+  Keep legacy native connection defaults sparse while retaining explicit cache
+  tombstones; keep model inventories out of per-session summaries; register
+  method-specific API routes. The focused follow-up passed 108 server tests
+  and 56 desktop/localization tests without relaxing the original guards.
+
+## 2026-09-27 — Reconnect existing API chats and check on send
+
+- Existing custom API chats can resume after explicitly verifying the same
+  original URL and API key again. Forget still blocks new turns immediately;
+  a different endpoint or key cannot silently take over an old chat. Applies
+  to Codex, Claude Code, Cursor and OpenCode, including legacy bindings.
+- The composer no longer blocks Send based on cached login, model or connection
+  readiness. Server capability and ordinary submission safeguards remain.
+  Actual rejected sends preserve the draft and show Check failed with the
+  Configure API action. Retrying or reconnecting clears the matching old error;
+  equivalent catalog refreshes do not erase a real failure notice.
+- Verification: 108 isolated server tests and 502 focused desktop tests passed;
+  TypeScript checking and production compilation passed. Isolated native
+  Electron exercised Forget, a rejected send, draft retention, Configure API,
+  reconnect and successful resubmission in the same chat through IPC, native
+  HTTP authorization, production connection storage and send admission. The
+  provider adapter was synthetic: live paid-provider inference remains a
+  separate acceptance check. No real user's chat received a test message.
+- Availability: local feature branch; authorized local app/server installation
+  tracked separately. No release publication or merge is implied.
+- Local acceptance: source `a4042410`, desktop `1.0.7-providers.15.local`,
+  server `1.0.7-beta.15+providers.a4042410`. Bundle audit, ad-hoc signing and
+  packaged-source comparison passed; the installed app loaded with its active
+  profile preserved. The designated server retained its identity and provider
+  settings. Read-only verification confirmed the reconnected existing chat's
+  API binding is available, without sending a test message to that chat.
+
+## 2026-09-27 — Forget revokes existing custom API chats
+
+- Forget now durably revokes this server's existing custom API bindings for
+  Codex, Claude Code, Cursor and OpenCode. New turns and model checks fail
+  closed without native-login fallback; history and other instances remain
+  untouched. Saving again creates a new connection, not a silent reassignment
+  of old chats. Already-dispatched requests are not forcibly terminated.
+- Migrate earlier empty Forget records on read. Atomic revision/epoch markers
+  survive restart and later saves. Keep historical key material private for
+  in-flight redaction; revocation is not secure deletion of credential files.
+- Desktop immediately invalidates associated cached chat readiness and explains
+  the effect in confirmation. CLI Login has no logout/disconnect action.
+- Verification: 107 isolated server regressions and 443 focused desktop tests
+  passed. Typecheck and production compilation passed. Actual isolated native
+  Electron exercised cancellation, confirmed Forget, recovery navigation and
+  reconnect through IPC, native HTTP authorization and production storage;
+  the production admission function rejected the revoked chat with HTTP 409.
+  Its Cursor success adapter was synthetic, not live inference. A separate
+  installed-CLI loopback probe verified Cursor's dedicated key-exchange protocol
+  and rejection of standalone local-agent flags; arbitrary model URLs remain
+  unsupported. No real user's chat was sent a test message.
+- Availability: local feature branch; local app/server installation tracked
+  separately. No release publication or merge is implied.
+- Local acceptance: source `c3784f6d`, desktop
+  `1.0.7-providers.14.local`, server `1.0.7-beta.15+providers.c3784f6d`.
+  Packaged-source comparison, bundle audit and ad-hoc signature checks passed.
+  A read-only installed-server check confirmed a previously forgotten legacy
+  chat remains readable but its API connection is unavailable. Only the
+  authorized test instance was restarted; connection settings were preserved.
+
+## 2026-09-27 — Cursor API-key connection
+
+- Add a key-only Cursor API card in AI Providers, separate from CLI Login.
+  Connect validates through the native Cursor model-list command before storing
+  the key; new chats offer `Cursor API key` only while configured and verified.
+  Models belong to that key, with `auto` as the initial default. This is not an
+  arbitrary OpenAI-compatible endpoint.
+- Store credentials privately per AgentsServer with revision fencing and
+  immutable per-chat bindings. Forget removes the current connection for new
+  chats, not keys already bound to existing chats; no machine logout occurs.
+  Native transport remains administrator-only, keys are never returned, and
+  failed replacement preserves the previously verified key.
+- Cursor can persist API-exchanged tokens by default. Key-bound runs, checks,
+  and title requests therefore use its in-memory credential store, clear
+  higher-priority auth tokens, force the official service, and disable direnv
+  credential overrides. Require CLI 2026.09.26 or newer (the tested isolation
+  baseline). API-key turns do not change the native login diagnostic.
+- Verification: 139 focused server tests passed, including a real subprocess
+  runner fixture asserting the pinned key/environment and no key in argv or
+  events. Native Electron → IPC → administrator HTTP → production router/store
+  → rendered status exercised Connect, invalid key, and confirmed Forget with
+  a synthetic Cursor adapter. The actual installed Cursor CLI rejected an
+  invalid key with no native-login fallback. A valid user key and successful
+  Cursor inference are still required for full live acceptance.
+- Full desktop run: 4,971 passed, 3 failed, 5 skipped. The three failures were
+  in unrelated sharing/editor tests; rerunning those suites together with the
+  changed provider suites passed all 212 tests. Typecheck and native build are
+  checked separately. No claim of a completely green full-suite run.
+- Final focused reruns passed: 83 server tests and 53 desktop provider tests.
+  Local ad-hoc desktop build `1.0.7-providers.13.local` passed the bundle audit,
+  signature verification, and byte-for-byte comparison of 88 compiled files.
+  Its actual settings page exposes the enabled key-only form. The selected
+  development server was restarted and its authenticated health and Cursor
+  credential route verified; other server instances were not restarted.
+
+### Cursor API-key usage
+
+Settings → AI Providers → Cursor → Configure API → paste a Cursor-issued key →
+Connect. Create a new chat with **Cursor API key**. CLI Login remains a separate
+choice and identity. The key comes from Cursor Dashboard → API Keys; see the
+[Cursor authentication guide](https://cursor.com/docs/cli/reference/authentication).
+Forget is in the API card's three-dot menu and requires confirmation.
+
+## 2026-09-27 — Provider onboarding and safe empty-chat cleanup
+
+- Default new Claude API configurations to the official Anthropic endpoint and
+  authentication header; preserve previously configured third-party endpoints.
+  OpenCode no longer defaults to OpenRouter. Link its official Zen documentation
+  and explain protocol selection. Distinguish Cursor-issued API keys from
+  arbitrary third-party model endpoints; settings-based Cursor key storage is
+  not implemented by this change.
+- Reconcile endpoint Save/Forget immediately and fence older catalog responses.
+  Offer only connected Agent choices, including the direct-new-chat shortcut.
+  Add Agent opens AI Providers; custom-API error recovery opens the matching
+  provider section without rechecking native CLI authentication.
+- Mark new blank placeholders from both creation paths. On startup or explicit
+  list refresh, preserve drafts, attachments, references, jobs and terminals;
+  discard only proven unused placeholders through a separate conditional server
+  endpoint. Unsupported servers preserve the chat instead of falling back to
+  ordinary Delete. The server checks again under lifecycle/deletion fences and
+  preserves malformed or nonempty history. Native provider history is untouched.
+- Desktop regression: 4,969 passed, 5 skipped. Server focused regression: 97
+  passed. Native Electron against a disposable authenticated endpoint fixture
+  verifies official Claude defaults, disconnected choices hidden, Add Agent
+  navigation, successful API setup, and confirmed Forget immediately removing
+  the custom choice. No real account keys were changed during fixture testing.
+  Verify the API recovery button in the native composer opens the matching
+  settings group. Live development-server cleanup removes only disposable
+  empty test chats and retains an unsent draft. This check uncovered the editor's
+  deferred draft persistence; flush live editor refs and temporarily block
+  editing/admission during discard. Re-run 843 affected desktop tests after
+  that fix; all pass. Verify immediate type → refresh preserves the draft and
+  clear → refresh discards the same disposable placeholder, without a debounce
+  wait. The signed local desktop package passes bundle audit; all 88 compiled
+  files match the tested build. Verify AI Providers in the installed app,
+  preserve the active server profile, and leave normal launch/debugging disabled.
+  Official Cursor API-key and OpenCode Zen/Go model calls are not live-tested;
+  their documentation does not imply arbitrary endpoint/model compatibility.
+
+## 2026-09-27 — Endpoint confirmation spacing
+
+- Use a compact, centered confirmation with consistent 24px insets, 16px content
+  spacing and an 8px button gap. Wrap the actions on narrow screens; preserve
+  the existing confirmation, cancellation and endpoint-only deletion semantics.
+- Reproduce zero body padding in the native app, then verify real menu selection,
+  centered geometry, dark/light and narrow layouts, keyboard selection, Escape,
+  Cancel and repeated opening. Recheck the signed packaged code with an isolated
+  profile, then leave the installed app's active server selection unchanged.
+  No live endpoint is forgotten during this appearance-only check; localized
+  visual acceptance remains pending.
+- All 60 focused tests, type checking, compilation and 8 build/license checks
+  pass. The full desktop suite reports 4,963 passes, 5 skips and 2 failures in
+  unchanged Chinese terminology/OpenCode catalog assertions; retain these for
+  separate follow-up. No server update, publication or merge is included.
+
+## 2026-09-27 — Visible endpoint menu inside Settings
+
+- Fix the custom endpoint menu painting behind the Settings dialog. Give this
+  nested menu and its confirmation overlay/dialog explicit, narrowly scoped
+  layers above Settings; CLI Login and endpoint removal semantics are unchanged.
+- Reproduce the hidden menu in the real desktop before fixing it. Verify visible
+  menu/confirmation, repeated opening, Cancel/Escape and keyboard selection in
+  an isolated native app connected to the development server. Check dark and
+  light/narrow presentation, then repeat menu/confirmation/cancel in the signed
+  installed local package. No real credentials are removed; confirmed deletion
+  transport is unchanged and covered by the preceding disposable-fixture check.
+- The layering regression fails before the CSS fix; all 59 focused checks,
+  TypeScript and production compilation pass. Local package only; no server
+  update or public release. Localized visual acceptance is not repeated.
+
+## 2026-09-27 — OpenCode chat tools and concise provider settings
+
+- Add a run-bound native MCP bridge for OpenCode, preserving server authorization,
+  exact process ownership, permission boundaries and private endpoint settings.
+  Enable OpenCode source/target choices only on supporting servers.
+- Custom API cards offer a confirmed **⋯ → Forget endpoint** action. CLI Login
+  remains read-only with no Disconnect/logout action. Keep default-model selection
+  visible and save a selection automatically; remove routine reload/manual-toggle,
+  save-default and saved-key-check controls from connected cards.
+- Verification: 244 isolated server checks and 606 desktop checks pass, with
+  TypeScript, production compilation and signed local-bundle validation. Two
+  real OpenCode A → B → A mailbox round trips complete with nonduplicate receipts
+  and preserved delegation; the second starts through desktop mention selection
+  and Send, including IPC/native HTTP and advertised client capabilities.
+- OpenCode 1.18.29 executes the run-bound tool with default permissions. Its Plan
+  agent also executes the bridge using a tool-capable custom API model; the free
+  model's Plan request returned a provider-side 403. This does not certify every
+  model or endpoint. Live stopped/busy-turn acceptance remains pending; ownership,
+  cancellation and transport fences have isolated regression coverage.
+- Actual desktop checks cover connected-card presentation/catalog loading and,
+  against a disposable native-admin API fixture, Forget cancellation and confirmed
+  removal without changing any real account. Default-model autosave has component
+  coverage; native select-menu interaction and light/localized visual acceptance
+  remain unverified. Update only the designated local development server/app;
+  no public release or production deployment is included.
+
+## 2026-09-27 — Independent custom API model catalogs
+
+- Keep native CLI model catalogs separate from custom API inventories. Discover
+  endpoint models with bounded pagination, readable labels and conservative
+  non-chat/tool filtering; use OpenRouter's user-filtered inventory.
+- Add a default-model dropdown and manual-ID fallback to connected API cards.
+  Save only the model/revision, without resubmitting keys or claiming a new
+  authentication check. Never automatically select the first model.
+- Preserve existing chat bindings and legacy inferred choices for started Codex
+  threads. Fence discovery and saves to the selected server/revision, and expose
+  explicit catalog refresh for each supported custom provider in chat selectors.
+- Verification: 76 isolated server checks and 96 focused desktop checks pass,
+  with TypeScript, compilation and signed local-bundle validation. The real
+  desktop reads all three endpoint inventories through IPC/native administration;
+  manual default save, reopen and clear succeed without a key prompt. Browser
+  administration is rejected. Dark/narrow layout is checked. Native select-menu
+  keyboard selection, light/localized visual checks and paid model/tool requests
+  remain unverified. The temporary empty UI-test chat is removed; no real provider
+  history is touched. No public release is part of this validation.
+
+## 2026-09-27 — CLI login account cards
+
+- Match CLI Login and Custom API card styling in all provider groups. Show
+  available CLI email/plan separately from custom API billing; omit unknown
+  fields. Claude metadata is explicitly a saved profile, not a login probe.
+- Add a read-only, native-administration account route and profile-fenced desktop
+  transport. Opening a card never renews credentials or runs model inference.
+- Model discovery/default selection is unchanged; catalog/compatibility UX
+  improvements remain a separate research recommendation.
+- Verification: 55 focused desktop checks and 17 isolated server checks pass,
+  along with TypeScript, production compilation and local bundle validation.
+  The installed development app exercises expansion/reopening through IPC and
+  native HTTP into the real administration guard: Claude and Cursor return
+  email/plan only in their CLI cards. Dark/narrow layout is checked. Light-theme
+  and full localization visual acceptance remain pending. No inference, login
+  renewal, credential changes or public release is part of this check.
+
+## 2026-09-27 — Folded provider settings and managed local discovery
+
+- Present four expandable provider groups. Separate native credential presence
+  from explicit API connection checks, with brief CLI guidance only when absent.
+  Chat choices show connected native and custom methods separately, native first.
+- Wire Claude and OpenCode custom connections into explicit per-chat runtime
+  bindings. Pin private credentials, preserve native login/settings, reject
+  cross-login resume, inherit bindings on forks and fail closed without a model.
+  Cursor generic third-party endpoints remain unsupported, not falsely verified.
+- Discover owned managed local installations once at desktop startup; check
+  listener ownership before authentication and verify durable identity. Preserve
+  saved profiles and current selection; never scan LAN addresses or start services.
+- Keep macOS automatic credential writes in the existing bounded Keychain helper,
+  avoiding concurrent startup OSCrypt/Keychain blocking. Fail closed if secure
+  storage is unavailable; normal explicit credential editing remains unchanged.
+- Focused synthetic checks cover credential isolation, transport, UI and discovery.
+  TypeScript and production build are checked. Real third-party model/tool
+  compatibility remains user acceptance work; no broad regression or release.
+
+## 2026-09-27 — Visible provider connection state and login guidance
+
+- Put API configuration near the top of AI Providers and use the same
+  Configure API action for Codex, Claude Code and OpenCode. Unconnected,
+  unknown, draft and failed states have neutral icons; only verified saved
+  API connections get a green check. A failed settings read is not signed-out
+  or connected evidence. Native account identity remains separate.
+- Show native sign-in guidance with fixed, copyable commands for the selected
+  server, rather than executing login on a possibly unrelated desktop. Keep
+  installed-but-unconfirmed runtimes neutral. Claude still confirms auth on
+  actual sends; opening settings does not renew its credentials. Cursor's
+  unsupported generic API configuration remains explicitly labeled.
+- Exercise real Electron mouse/keyboard input through production IPC/native
+  HTTP, native-admin authorization and endpoint storage against an isolated
+  loopback API. Verify all three connections, bad-key retry, key clearing,
+  navigation/reopen, login instructions and light/dark narrow presentation.
+  Fixture credentials do not certify third-party accounts or native login.
+- TypeScript and production compilation pass. Related settings/CSS tests pass;
+  the full suite found one outdated translated-label assertion and one
+  unrelated workspace timeout. Correct the label, and pass focused settings
+  tests and all 134 workspace tests on rerun.
+- Update the explicitly designated development server with this feature
+  branch, preserving identity and saved credentials; verify new settings routes
+  and credential-check support. No public release or main-branch merge.
+
+## 2026-09-27 — Clear custom API identity and connection state
+
+- Separate the native Codex account from custom API credentials and billing.
+  Hide unconfigured custom choices in new-chat/composer menus without changing
+  existing custom chats. Never query native account quota for a custom chat.
+- Reduce forms to URL, key and Connect; fold protocol/model controls into
+  Advanced. Default checks use protected read-only APIs, not model inference.
+  Public catalogs cannot verify keys; known OpenRouter connections use its
+  private key-status API. Claude/OpenCode model probes remain explicit opt-ins.
+- Codex Connect saves only after server-side credential verification. Bind
+  the saved proof to the immutable credential revision; legacy saves remain
+  compatible but unverified. Preserve prior credentials on a failed replacement
+  and clear entered keys after completion. Keep native login unchanged.
+- Verify real Electron mouse/keyboard → production IPC/native HTTP → actual
+  native-admin guard, router and storage → loopback HTTP checks. All three
+  supported settings cards verify with synthetic keys; bad-key retry, reopen,
+  saved recheck, separate account identity and dark/light narrow layouts pass.
+  No third-party credentials, paid requests or native agent sends are exercised.
+- Pass 89 related server tests. The desktop suite passes 4,944 tests (five
+  skipped) with one missing CSS token; fix the token and pass its three-test
+  suite. TypeScript, production build, bundle audit and ad-hoc signature pass;
+  all 88 compiled files match the packaged application.
+- Replace and reopen the local development App as `1.0.7-providers.2.local`,
+  retaining its profile and previous bundle. Confirm the existing server's
+  saved Codex endpoint is unverified, not tied to the native account. That
+  server lacks the new verification/settings routes: deployment remains
+  pending operator approval. Claude/OpenCode are settings-only; Cursor has
+  no generic API form. Availability: local App/source only; no public release.
+
+## 2026-09-27 — Settings-only Claude Code and OpenCode API connections
+
+- Extend desktop AI Providers with separate Claude Code and OpenCode endpoint
+  profiles. Explicitly verify a small model request before saving, show a
+  timestamped API-check result, recheck saved credentials, and confirm removal.
+  Keep native login and chat routing unchanged. Add OpenRouter setup guidance
+  and a Cursor notice explaining why a generic model gateway is not a Cursor
+  CLI service endpoint.
+- Add native-only, revision-fenced server routes with private atomic storage,
+  bounded request/response sizes, timeouts, no redirects or implicit proxy
+  credentials, and credential-free responses. Preserve old credentials on a
+  failed replacement; reject browser-origin and stale-server requests.
+- Exercise the production desktop build in an isolated native profile through
+  renderer mouse/keyboard input, IPC, native HTTP transport, the actual server
+  authorization functions, new router/storage and real outbound HTTP. Verify
+  both forms, a failed-key retry, saved recheck, removal, cancel, navigation
+  and reopen. Inspect light/dark presentation and narrow layout. The model API,
+  health/session data and initial server profile are synthetic fixtures; no
+  user credentials, native provider login or live chat was changed.
+- Pass 4,940 desktop tests (five skipped), then targeted profile-isolation
+  coverage; pass 73 related server tests and nine packaging-manifest checks.
+  TypeScript and production compilation pass. Chinese copy, stale responses
+  and disconnected/old-server behavior are covered by component/transport
+  tests. Actual third-party API and agent-tool compatibility remain unverified
+  until a user supplies a test endpoint/key. Availability: local source and
+  development build only; compatible client and server updates are required.
+
+## 2026-09-27 — Dedicated desktop AI Providers settings
+
+- Add an AI Providers section with the selected server's existing runtime
+  diagnostics, Codex account information and Custom endpoint controls. Move
+  those controls out of Server settings and retarget endpoint configuration
+  links. Keep authentication, credential storage, transport and server behavior
+  unchanged; do not introduce another provider's endpoint implementation.
+- Validate the local `1.0.7-providers.local` desktop package, based on main
+  `f50595b4`, through native renderer mouse/keyboard input and the production
+  IPC/HTTP connection. Open and reopen the page, read the actual account and
+  endpoint configuration, enter an unsaved synthetic key, navigate away, and
+  verify it is cleared. Follow the composer configuration link into the new
+  section. Remove the empty disposable chat used for that navigation check.
+- Inspect dark and light presentation, a narrow viewport, scrolling and
+  keyboard focus. Chinese copy, disconnected controls and stale server
+  responses are covered by component tests, not live multi-server testing.
+  Do not save credentials, probe an endpoint or send provider messages during
+  these UI-only checks; those unchanged workflows are not re-certified here.
+- Pass 4,932 desktop tests (five skipped), TypeScript, production compilation,
+  package audit and local signature verification. Preserve the existing app
+  profile. Availability: local branch and ad-hoc package only; no server
+  restart, release or publication.
+
+## 2026-09-27 — Skip native questions in no-prompt modes
+
+- Skip Codex user-input questions under `never` and Claude SDK questions under
+  `dontAsk` or `bypassPermissions` through the existing empty-answer/skip
+  responses. Do not create waiting interaction cards, invent answers or grant
+  additional tool permissions.
+- Keep ownership, Stop and deletion checks. Use the current turn's captured
+  policy, including independent Codex side conversations; preserve questions
+  and answer handling in normal prompting modes.
+- Pass 290 scoped server tests. A broader 299-test run has one existing
+  idle-thread runtime fixture failure, reproduced against unchanged main.
+  New skip regressions fail against unchanged main and pass with this fix.
+- Integrate with the AI Providers settings work on one development branch.
+  Pass 360 combined isolated server regressions covering question handling,
+  runner policy capture, side conversations, API settings and packaging.
+- Availability: source-only change; no deployment or release. Native provider
+  and real App acceptance remain pending. See
+  `server/docs/NO_PROMPT_USER_INPUT.md` for the local acceptance checklist.
+
 ## 2026-09-27 — Run-bound Cursor chat tools under native permissions
 
 - Replace Shell-based helper instructions for Cursor with a private per-run

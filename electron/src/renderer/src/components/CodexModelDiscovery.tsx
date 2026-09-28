@@ -4,9 +4,10 @@ import { LoaderCircle, RefreshCw } from 'lucide-react'
 import { t } from '@shared/i18n'
 import { useAppStore } from '../store/app-store'
 import { useLocale } from '../lib/i18n'
+import type { CustomModelBackend } from '@shared/custom-models'
 
 /** Discovery only runs after an explicit click; editing and idle never fetch. */
-export function CodexModelDiscovery({ menu = false, sessionId }: { menu?: boolean; sessionId?: string }) {
+export function CodexModelDiscovery({ menu = false, sessionId, backend = 'codex' }: { menu?: boolean; sessionId?: string; backend?: CustomModelBackend }) {
   useLocale()
   const profileId = useAppStore(state => state.activeProfileId)
   const profileGeneration = useAppStore(state => state.profileGeneration)
@@ -18,14 +19,18 @@ export function CodexModelDiscovery({ menu = false, sessionId }: { menu?: boolea
     setLoading(false)
     setFailed(false)
     return () => { requestRef.current += 1 }
-  }, [profileId, profileGeneration, sessionId])
+  }, [profileId, profileGeneration, sessionId, backend])
   const refresh = async () => {
     if (!profileId || loading) return
     const request = ++requestRef.current
     setLoading(true)
     setFailed(false)
     try {
-      await window.agentsDock.codex.providerModels({ profileId, profileGeneration }, sessionId)
+      if (window.agentsDock.customModels) {
+        const result = await window.agentsDock.customModels.read({ profileId, profileGeneration }, backend, sessionId)
+        if (result.discovery_status === 'unavailable' || result.discovery_status === 'authentication_failed') throw new Error('Model discovery unavailable')
+      } else if (backend === 'codex') await window.agentsDock.codex.providerModels({ profileId, profileGeneration }, sessionId)
+      else throw new Error('Update required')
     } catch {
       if (requestRef.current === request) setFailed(true)
     } finally {

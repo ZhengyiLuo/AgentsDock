@@ -193,6 +193,7 @@ const api: AgentsDockAPI = {
     update: (sessionId, patch, expectedScope) => ipcRenderer.invoke('sessions:update', sessionId, patch, ...(expectedScope ? [expectedScope] : [])),
     reloadProvider: sessionId => ipcRenderer.invoke('sessions:provider:reload', sessionId),
     remove: sessionId => ipcRenderer.invoke('sessions:remove', sessionId),
+    discardEmpty: (scope, sessionId, updatedAt) => ipcRenderer.invoke('sessions:discard-empty', scope, sessionId, updatedAt),
     fork: sessionId => ipcRenderer.invoke('sessions:fork', sessionId),
     reorder: (sessionId, relativeTo, placement, targetFolder) => ipcRenderer.invoke('sessions:reorder', sessionId, relativeTo, placement, targetFolder),
     searchHistory: (query, limit) => ipcRenderer.invoke('sessions:search-history', query, limit),
@@ -227,6 +228,16 @@ const api: AgentsDockAPI = {
   turns: {
     send: input => ipcRenderer.invoke('turns:send', input),
     stop: sessionId => ipcRenderer.invoke('turns:stop', sessionId)
+  },
+  providerConnections: {
+    request: (scope, backend, action, input) => ipcRenderer.invoke('provider-connections:request', scope, backend, action, input)
+  },
+  providerAccounts: {
+    read: (scope, backend) => ipcRenderer.invoke('provider-accounts:read', scope, backend)
+  },
+  customModels: {
+    read: (scope, backend, sessionId) => ipcRenderer.invoke('custom-models:read', scope, backend, sessionId),
+    save: (scope, backend, input) => ipcRenderer.invoke('custom-models:save', scope, backend, input)
   },
   codex: {
     serverGoals: () => ipcRenderer.invoke('codex:server-goals:get'),

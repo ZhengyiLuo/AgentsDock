@@ -1,6 +1,8 @@
 import { createReadStream, openAsBlob } from 'node:fs'
 import { parseProviderUsage, type ProviderUsageSnapshot, type UsageBackend } from '../shared/provider-usage'
 import { parseCodexAuthStatus } from '../shared/codex-auth'
+import { customModelBackend, customModelInput, parseCustomModels, type CustomModelBackend, type CustomModelInput } from '../shared/custom-models'
+import { cliAccountBackend, parseCLIAccount, type CLIAccountBackend, connectionBackend, connectionRequest, parseConnectionReply, type ConnectionBackend, type ConnectionAction, type ProviderConnectionRequest, type ProviderConnectionReply } from '../shared/provider-connections'
 import { parseCodexProviderConfiguration, parseCodexProviderModels, parseCodexProviderTestResult, validateCodexProviderInput, validateCodexProviderModelTestInput, validateCodexProviderSelection } from '../shared/codex-provider'
 import { randomUUID } from 'node:crypto'
 import { request as httpRequest, type IncomingMessage } from 'node:http'
@@ -809,8 +811,36 @@ export class AgentServerClient {
   codexServerSubagents(): Promise<CodexSubagentsConfiguration> {
     return this.privilegedNativeRequest('/api/admin/codex/subagents')
   }
+  async providerConnectionRequest(backend: ConnectionBackend, action: ConnectionAction, input?: ProviderConnectionRequest): Promise<ProviderConnectionReply> {
+    const checked = connectionRequest(backend, action, input)
+    const path = `/api/admin/provider-connections/${connectionBackend(backend)}${action === 'check' ? '/check' : ''}`
+    const method = { get: 'GET', save: 'PUT', check: 'POST', forget: 'DELETE' }[action]
+    try {
+      return parseConnectionReply(backend, action, await this.privilegedNativeRequest(path, {
+        method, ...(checked ? { body: JSON.stringify(checked) } : {})
+      }, 35_000, 200, 8192))
+    } catch (error) {
+      if (error instanceof ServerError) {
+        const code = [401, 403].includes(error.status) ? 'ADMIN' : [404, 405, 501].includes(error.status) ? 'UPDATE'
+          : error.status === 409 ? 'STALE' : [400, 413, 415, 422].includes(error.status) ? 'INVALID' : 'FAILED'
+        throw new Error(`PROVIDER_CONNECTION_${code}`)
+      }
+      throw new Error('PROVIDER_CONNECTION_FAILED')
+    }
+  }
   codexProvider(): Promise<CodexProviderConfiguration> {
     return this.codexProviderRequest('/api/admin/codex/provider', {}, parseCodexProviderConfiguration)
+  }
+  async providerAccount(backend: CLIAccountBackend) {
+    const checked = cliAccountBackend(backend)
+    return parseCLIAccount(checked, await this.privilegedNativeRequest(`/api/admin/provider-accounts/${checked}`, {}, 15_000, 200, 8192))
+  }
+  async customModels(backend: CustomModelBackend, input?: CustomModelInput, sessionId?: string) {
+    const checked = customModelBackend(backend)
+    if (sessionId !== undefined && (input || typeof sessionId !== 'string' || !sessionId || sessionId.length > 256)) throw new Error('CUSTOM_MODELS_INVALID')
+    const body = input ? customModelInput(checked, input) : undefined
+    const path = `/api/admin/provider-models/${checked}${sessionId ? `?${new URLSearchParams({ session_id: sessionId })}` : ''}`
+    return parseCustomModels(checked, await this.privilegedNativeRequest(path, body ? { method: 'PUT', body: JSON.stringify(body) } : {}, 30_000, 200, 512 * 1024), !body)
   }
   codexProviderModels(sessionId?: string): Promise<CodexProviderModels> {
     if (sessionId !== undefined && (typeof sessionId !== 'string' || !sessionId || sessionId.length > 256)) throw new Error('CODEX_PROVIDER_INVALID')
@@ -923,6 +953,8 @@ export class AgentServerClient {
   }
 
   async createSession(input: CreateSessionInput | ResumeSessionInput): Promise<Session> {
+    const connection = validateCodexProviderSelection(input.provider_connection)
+    if (connection === 'custom' && !['claude', 'opencode'].includes(input.backend)) throw new Error('Unsupported custom API backend.')
     const codexProvider = validateCodexProviderSelection(input.codex_provider)
     if (codexProvider === 'custom' && input.backend !== 'codex') throw new Error('Custom endpoints require Codex.')
     const providerId = 'providerId' in input ? input.providerId : undefined
@@ -932,6 +964,7 @@ export class AgentServerClient {
       folder: input.folder,
       cwd: input.cwd,
       backend: input.backend,
+      ...(connection !== undefined ? { provider_connection: connection } : {}),
       ...(codexProvider !== undefined ? { codex_provider: codexProvider } : {}),
       model: input.model || null,
       effort: input.effort || null,
@@ -982,6 +1015,7 @@ export class AgentServerClient {
   }
 
   async updateSession(sessionId: string, patch: UpdateSessionInput): Promise<Session> {
+    validateCodexProviderSelection(patch.provider_connection)
     const codexProvider = validateCodexProviderSelection(patch.codex_provider)
     if (codexProvider === 'custom' && patch.backend !== undefined && patch.backend !== 'codex') throw new Error('Custom endpoints require Codex.')
     const openCodePatch = patch.opencode_permission_mode === undefined ? patch : {
@@ -1019,6 +1053,12 @@ export class AgentServerClient {
   async deleteSession(sessionId: string): Promise<boolean> {
     const response = await this.delete<{ deleted?: boolean }>(`/api/sessions/${encodeURIComponent(sessionId)}`)
     return response.deleted !== false
+  }
+
+  async discardEmptySession(sessionId: string, updatedAt: string): Promise<boolean> {
+    const query = new URLSearchParams({ expected_updated_at: updatedAt })
+    const response = await this.post<{ deleted?: boolean }>(`/api/sessions/${encodeURIComponent(sessionId)}/discard-empty?${query}`, {})
+    return response.deleted === true
   }
 
   async forkSession(sessionId: string): Promise<{ session: Session; sessions?: Session[] }> {
@@ -3157,6 +3197,10 @@ function isPrivilegedNativeControlTarget(
       && /^[A-Za-z0-9_-]{1,128}$/.test(target.searchParams.get('session_id') ?? '')
       && (!target.searchParams.has('refresh') || target.searchParams.get('refresh') === 'true')
   }
+  if (/^\/api\/admin\/provider-connections\/(claude|opencode|cursor)$/.test(path)) return !target.search && ['GET', 'PUT', 'DELETE'].includes(method)
+  if (/^\/api\/admin\/provider-connections\/(claude|opencode|cursor)\/check$/.test(path)) return !target.search && method === 'POST'
+  if (/^\/api\/admin\/provider-accounts\/(claude|cursor|opencode)$/.test(path)) return !target.search && method === 'GET'
+  if (/^\/api\/admin\/provider-models\/(codex|claude|opencode|cursor)$/.test(path)) return method === 'PUT' ? !target.search : method === 'GET' && [...target.searchParams.keys()].every(key => key === 'session_id') && target.searchParams.getAll('session_id').length <= 1
   if (path === '/api/admin/codex/auth') return !target.search && method === 'GET'
   if (path === '/api/admin/codex/provider') return !target.search && ['GET', 'PUT', 'DELETE'].includes(method)
   if (path === '/api/admin/codex/provider/test') return !target.search && method === 'POST'
