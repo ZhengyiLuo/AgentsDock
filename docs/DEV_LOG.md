@@ -1,5 +1,27 @@
 # Public development log
 
+## 2026-09-28 — Recover chat queues independently at startup
+
+- Recover each chat independently and prioritize the chat being opened. A slow
+  legacy transcript no longer blocks unrelated chats from opening or sending.
+  Expose queue recovery readiness separately from HTTP server health.
+- Persist a validated queue projection beside each transcript and process only
+  new events on restart. Preserve queue order, Stop pauses and durable ownership;
+  rebuild safely when the projection is missing or invalid.
+- Pass focused queue projection, recovery and restart regressions. Exercise the
+  full server lifespan, authentication and durable storage through two process
+  restarts, including a blocked 48 MiB legacy transcript.
+- In the isolated hidden beta.20 desktop (build 1225), open another chat and type
+  and submit two messages through its production transport. Verify existing
+  messages run first, both follow-ups complete in order, and all seven accepted
+  queued messages start exactly once. The warm restart performs no queue scan
+  from the beginning of a transcript.
+- The provider and slow-read barrier are synthetic. Actual app input, rendered
+  completion and HTTP responses are verified; hidden-window screenshot capture
+  is unavailable. Remove the disposable credentials and close owned processes.
+- Availability: tested server source. Production activation is recorded after
+  deployment; no desktop, npm or mobile release is published by this change.
+
 ## 2026-09-28 — Activate mailbox-only server hotfix
 
 - Deploy committed server source `199cdc8` to the authorized split-service
