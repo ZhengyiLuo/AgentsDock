@@ -211,6 +211,130 @@ test('beta readback preserves stable latest exactly, including an absent first-s
   }
 })
 
+test('explicit first-stable approval publishes only its exact same-base transition and preserves beta', async t => {
+  const { options, bytes } = fixture(t, { version: '1.0.7' })
+  const candidate = validateCandidate(options)
+  const firstStableFromLatest = '1.0.7-beta.5'
+  const before = registry(candidate, bytes, { published: false, tag: firstStableFromLatest, tags: { beta: firstStableFromLatest } })
+  const initialMetadata = structuredClone(before.metadata)
+  const { publish, snapshot } = await publicationPreflight(candidate, { ...before, firstStableFromLatest })
+  assert.equal(publish, true)
+  assert.equal(snapshot.firstStableFromLatest, firstStableFromLatest)
+  assert.deepEqual(snapshot.distTags, { latest: firstStableFromLatest, beta: firstStableFromLatest })
+  assert.equal(before.requests.length, 1)
+  assert.deepEqual(before.metadata, initialMetadata, 'preflight must never mutate registry metadata')
+  const after = registry(candidate, bytes, { tags: { beta: firstStableFromLatest } })
+  assert.equal((await verifyRegistry(candidate, { ...after, snapshot })).verified, true)
+  assert.equal(after.requests.at(-1), candidate.descriptor.archive.url)
+  // The same explicit input can survive a workflow retry, but only normal exact
+  // metadata and downloaded-byte verification may acknowledge prior publication.
+  const retry = await publicationPreflight(candidate, { ...after, firstStableFromLatest })
+  assert.equal(retry.publish, false)
+  assert.equal(retry.snapshot.firstStableFromLatest, firstStableFromLatest)
+  assert.deepEqual(retry.snapshot.distTags, { latest: '1.0.7', beta: firstStableFromLatest })
+})
+
+test('first-stable approval rejects beta candidates, different bases and malformed prior versions before registry access', async t => {
+  for (const version of ['1.0.7-beta.6', '1.0.8', '2.0.0']) {
+    const { options, bytes } = fixture(t, { version })
+    const candidate = validateCandidate(options)
+    const remote = registry(candidate, bytes)
+    await assert.rejects(publicationPreflight(candidate, { ...remote, firstStableFromLatest: '1.0.7-beta.5' }), /First-stable approval/)
+    assert.equal(remote.requests.length, 0)
+  }
+  const { options, bytes } = fixture(t, { version: '1.0.7' })
+  const candidate = validateCandidate(options)
+  for (const firstStableFromLatest of ['', null, true, 'latest', '1.0.7', '1.0.7-rc.1', '1.0.7-beta.0', '1.0.7-beta.5\n']) {
+    const remote = registry(candidate, bytes)
+    await assert.rejects(publicationPreflight(candidate, { ...remote, firstStableFromLatest }), /First-stable approval|unsupported version/)
+    assert.equal(remote.requests.length, 0)
+  }
+})
+
+test('first-stable approval rejects mismatched current latest and any existing stable version', async t => {
+  const { options, bytes } = fixture(t, { version: '1.0.7' })
+  const candidate = validateCandidate(options)
+  const firstStableFromLatest = '1.0.7-beta.5'
+  for (const latest of [undefined, '1.0.7-beta.4', '1.0.7-beta.6', '1.0.6', '1.0.8']) {
+    const remote = registry(candidate, bytes, { published: false, tag: latest, tags: { beta: firstStableFromLatest }, mutate: metadata => { if (latest === undefined) delete metadata['dist-tags'].latest } })
+    await assert.rejects(publicationPreflight(candidate, { ...remote, firstStableFromLatest }), /First-stable approval does not match|latest must select a stable/)
+  }
+  for (const existing of ['1.0.6', '1.0.8', '2.0.0', '1.0.6-rc.1', 'unexpected-version']) {
+    const remote = registry(candidate, bytes, { published: false, tag: firstStableFromLatest, tags: { beta: firstStableFromLatest }, mutate: metadata => { metadata.versions[existing] = { name: metadata.name, version: existing } } })
+    await assert.rejects(publicationPreflight(candidate, { ...remote, firstStableFromLatest }), /no existing stable|unsupported version/)
+  }
+})
+
+test('first-stable approval cannot repair an existing target or weaken exact-byte retries', async t => {
+  const { options, bytes } = fixture(t, { version: '1.0.7' })
+  const candidate = validateCandidate(options)
+  const firstStableFromLatest = '1.0.7-beta.5'
+  const tags = { beta: firstStableFromLatest }
+  const stale = registry(candidate, bytes, { tag: firstStableFromLatest, tags })
+  await assert.rejects(publicationPreflight(candidate, { ...stale, firstStableFromLatest }), /target already exists.*no tag will be repaired/)
+  assert.equal(stale.requests.length, 1)
+  for (const mutate of [metadata => { metadata.versions['1.0.7'].dist.integrity = 'sha512-bad' }, metadata => { metadata.versions['1.0.7'].dist.tarball = 'https://example.com/archive.tgz' }]) {
+    await assert.rejects(publicationPreflight(candidate, { ...registry(candidate, bytes, { tags, mutate }), firstStableFromLatest }), /differs from the accepted/)
+  }
+  const changed = Buffer.from(bytes)
+  changed[changed.length - 1] ^= 1
+  await assert.rejects(publicationPreflight(candidate, { ...registry(candidate, changed, { tags }), firstStableFromLatest }), /Archive bytes/)
+  const before = registry(candidate, bytes, { tags })
+  const after = registry(candidate, bytes, { tags: { beta: '1.0.7-beta.6' } })
+  let requests = 0
+  await assert.rejects(publicationPreflight(candidate, { firstStableFromLatest, fetchImpl: (...args) => (++requests === 1 ? before : after).fetchImpl(...args) }), /untouched npm beta/)
+})
+
+test('first-stable readback keeps current latest strict and validates the candidate-bound historical exception', async t => {
+  const { options, bytes } = fixture(t, { version: '1.0.7' })
+  const candidate = validateCandidate(options)
+  const firstStableFromLatest = '1.0.7-beta.5'
+  const tags = { beta: firstStableFromLatest }
+  const { snapshot } = await publicationPreflight(candidate, { ...registry(candidate, bytes, { published: false, tag: firstStableFromLatest, tags }), firstStableFromLatest })
+  for (const latest of [firstStableFromLatest, '1.0.7-beta.6', '1.0.6', '1.0.8']) {
+    await assert.rejects(verifyRegistry(candidate, { ...registry(candidate, bytes, { tag: latest, tags }), snapshot }), /latest must select a stable|does not select the accepted version/)
+  }
+  for (const beta of [undefined, '1.0.7-beta.6', '1.0.7']) {
+    await assert.rejects(verifyRegistry(candidate, { ...registry(candidate, bytes, { tags: beta === undefined ? {} : { beta } }), snapshot }), /untouched npm beta/)
+  }
+  const remote = registry(candidate, bytes, { tags })
+  for (const approval of [null, '', '1.0.7', '1.0.8-beta.5', '1.0.7-beta.6']) {
+    await assert.rejects(verifyRegistry(candidate, { ...remote, snapshot: { ...snapshot, firstStableFromLatest: approval } }), /First-stable|unsupported version/)
+  }
+  const missingApproval = { ...snapshot }
+  delete missingApproval.firstStableFromLatest
+  await assert.rejects(verifyRegistry(candidate, { ...remote, snapshot: missingApproval }), /latest must select a stable/)
+  assert.equal(remote.requests.length, 0)
+})
+
+test('first-stable readback rejects added stable and unsupported versions even with unchanged tags and target bytes', async t => {
+  const { options, bytes } = fixture(t, { version: '1.0.7' })
+  const candidate = validateCandidate(options)
+  const firstStableFromLatest = '1.0.7-beta.5'
+  const tags = { beta: firstStableFromLatest }
+  const { snapshot } = await publicationPreflight(candidate, { ...registry(candidate, bytes, { published: false, tag: firstStableFromLatest, tags }), firstStableFromLatest })
+  for (const existing of ['1.0.6', '1.0.8', '1.0.6-rc.1', 'unexpected-version']) {
+    const remote = registry(candidate, bytes, { tags, mutate: metadata => { metadata.versions[existing] = { name: metadata.name, version: existing } } })
+    await assert.rejects(verifyRegistry(candidate, { ...remote, snapshot }), /no existing stable|unsupported version/)
+    assert.deepEqual(remote.requests, ['https://registry.npmjs.org/@agentsdock%2fserver'], 'reject changed inventory before downloading otherwise accepted bytes')
+  }
+})
+
+test('first-stable immutable retries recheck inventory on the refreshed registry observation', async t => {
+  const { options, bytes } = fixture(t, { version: '1.0.7' })
+  const candidate = validateCandidate(options)
+  const firstStableFromLatest = '1.0.7-beta.5'
+  const tags = { beta: firstStableFromLatest }
+  for (const existing of ['1.0.6', '1.0.8', '1.0.6-rc.1', 'unexpected-version']) {
+    const before = registry(candidate, bytes, { tags })
+    const after = registry(candidate, bytes, { tags, mutate: metadata => { metadata.versions[existing] = { name: metadata.name, version: existing } } })
+    let requests = 0
+    await assert.rejects(publicationPreflight(candidate, { firstStableFromLatest, fetchImpl: (...args) => (++requests === 1 ? before : after).fetchImpl(...args) }), /no existing stable|unsupported version/)
+    assert.equal(requests, 2)
+    assert.deepEqual(after.requests, ['https://registry.npmjs.org/@agentsdock%2fserver'])
+  }
+})
+
 test('stable publication preserves beta and supports the first stable latest tag', async t => {
   const { options, bytes } = fixture(t, { version: '1.0.4' })
   const candidate = validateCandidate(options)
@@ -335,4 +459,55 @@ test('immutable retry detects an untouched channel changing during byte verifica
   let requests = 0
   await assert.rejects(publicationPreflight(candidate, { fetchImpl: (...args) => (++requests === 1 ? before : after).fetchImpl(...args) }), /untouched npm latest/)
   assert.equal(requests, 2)
+})
+
+test('first-stable CLI requires an explicit preflight-only flag and records approval without weakening readback', t => {
+  const { options, bytes } = fixture(t, { version: '1.0.7' })
+  const candidate = validateCandidate(options)
+  const scripts = join(options.directory, 'scripts')
+  const server = join(options.directory, 'server')
+  mkdirSync(scripts)
+  mkdirSync(server)
+  for (const name of ['verify_npm_publication.mjs', 'stage_coordinated_release.mjs']) copyFileSync(new URL(`../${name}`, import.meta.url), join(scripts, name))
+  writeFileSync(join(server, 'release-public-key.pem'), options.publicKey)
+  writeFileSync(join(server, 'VERSION'), options.appVersion)
+  const release = join(options.directory, 'draft.json')
+  const snapshotPath = join(options.directory, 'registry-before.json')
+  const registryPath = join(options.directory, 'registry.json')
+  const output = join(options.directory, 'actions-output')
+  const summary = join(options.directory, 'actions-summary')
+  const preload = join(options.directory, 'read-only-registry.mjs')
+  writeFileSync(release, JSON.stringify(options.release))
+  writeFileSync(preload, `import { readFileSync } from 'node:fs'
+globalThis.fetch = async (url, options) => {
+  if (options.redirect !== 'error' || (options.method && options.method !== 'GET')) throw Error('Only read-only registry access is allowed')
+  const fixture = JSON.parse(readFileSync(process.env.TEST_REGISTRY_PATH, 'utf8'))
+  if (url === 'https://registry.npmjs.org/@agentsdock%2fserver') return new Response(JSON.stringify(fixture.metadata))
+  if (url === fixture.archiveURL) return new Response(Buffer.from(fixture.archive, 'base64'))
+  throw Error('Unexpected registry request')
+}
+`)
+  const firstStableFromLatest = '1.0.7-beta.5'
+  const tags = { beta: firstStableFromLatest }
+  const writeRegistry = remote => writeFileSync(registryPath, JSON.stringify({ metadata: remote.metadata, archiveURL: candidate.descriptor.archive.url, archive: bytes.toString('base64') }))
+  writeRegistry(registry(candidate, bytes, { published: false, tag: firstStableFromLatest, tags }))
+  const env = { ...process.env, NODE_OPTIONS: '', TEST_REGISTRY_PATH: registryPath, GITHUB_OUTPUT: output, GITHUB_STEP_SUMMARY: summary }
+  const run = (operation, flags = []) => execFileSync(process.execPath, ['--import', preload, join(scripts, 'verify_npm_publication.mjs'), operation, options.directory, options.sourceSHA, options.acceptedManifestSHA256, release, snapshotPath, ...flags], { env, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] })
+  assert.throws(() => run('preflight'), error => error.status === 1 && /latest must select a stable/.test(error.stderr))
+  for (const flags of [['--first-stable-from-latest'], ['--first-stable-from-latest', ''], ['--allow-prerelease-latest', firstStableFromLatest], ['--first-stable-from-latest', firstStableFromLatest, 'extra']]) {
+    assert.throws(() => run('preflight', flags), error => error.status === 1 && /Usage:/.test(error.stderr))
+  }
+  const result = JSON.parse(run('preflight', ['--first-stable-from-latest', firstStableFromLatest]))
+  assert.equal(result.publish, true)
+  assert.equal(result.firstStableFromLatest, firstStableFromLatest)
+  assert.deepEqual(result.observedDistTags, { latest: firstStableFromLatest, beta: firstStableFromLatest })
+  const snapshot = readFileSync(snapshotPath, 'utf8')
+  assert.equal(JSON.parse(snapshot).firstStableFromLatest, firstStableFromLatest)
+  assert.match(readFileSync(summary, 'utf8'), /Explicit first-stable npm approval: latest `1\.0\.7-beta\.5` → `1\.0\.7`/)
+  assert.match(readFileSync(output, 'utf8'), /dist_tag=latest/)
+  assert.throws(() => run('verify'), error => error.status === 1 && /latest must select a stable/.test(error.stderr))
+  assert.throws(() => run('verify', ['--first-stable-from-latest', firstStableFromLatest]), error => error.status === 1 && /Only preflight accepts/.test(error.stderr))
+  writeRegistry(registry(candidate, bytes, { tags }))
+  assert.equal(JSON.parse(run('verify')).verified, true)
+  assert.equal(readFileSync(snapshotPath, 'utf8'), snapshot)
 })

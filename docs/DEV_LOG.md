@@ -1,5 +1,30 @@
 # Public development log
 
+## 2026-09-28 — Prepare the first stable registry transition
+
+- Resolve the product-pipeline PR against current `main`, retaining both
+  development histories and the new provider modules in server packaging.
+  Preserve the signed beta.18 test artifacts and their original source pin;
+  source checks on the combined branch do not extend their native acceptance.
+- Record the tester's report that real chats and the requested manual checks
+  passed on beta.18. This is manual candidate evidence, not a synthesized CI
+  result or proof of unobserved busy-provider migration and rollback cases.
+- Add an explicit first-stable publication input pinned to the exact prior
+  prerelease on npm `latest`. Require the accepted same-base stable candidate,
+  no other stable registry version, unchanged `beta`, signed exact bytes and
+  strict registry readback. Default/beta behavior remains fail-closed. No
+  preparatory tag removal, registry write or acceptance bypass is introduced.
+- Recheck the first-stable registry inventory on both preflight and refreshed
+  readback; reject newly appearing stable or unsupported versions before
+  downloading bytes. Independent review and the original race regression pass.
+- Pass 276 JavaScript release-tooling/CLI tests, 106 Python helper tests,
+  23 server packaging tests and workflow lint. The combined desktop source
+  passes 4,984 tests with five existing skips, eight compile/license checks,
+  type checking and production compilation. Correct local test prerequisites
+  before rerunning; these are source checks, not a new signed native release.
+- Production credentials, workflow registration and full prepared-candidate
+  acceptance remain required. No npm/app publication or signing-key change.
+
 ## 2026-09-27 — Pass the frozen macOS candidate rehearsal
 
 - Candidate replay `36352117281`, harness `59fcdc7`, passes source checks and

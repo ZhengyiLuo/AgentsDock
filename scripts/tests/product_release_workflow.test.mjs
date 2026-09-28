@@ -125,6 +125,17 @@ test('publication cannot bypass exact receipt and native acceptance or publish n
   assert(publication.indexOf('verify_public_desktop_feed.mjs') < publication.indexOf('Record publication completion'))
 })
 
+test('product first-stable opt-in defaults empty and passes only through the accepted npm publication path', () => {
+  assert.match(workflow, /first_stable_from_latest:\n        description: Publish only;[^\n]*\n        type: string\n        default: ''/)
+  assert.match(job('validate'), /FIRST_STABLE_FROM_LATEST: \$\{\{ inputs\.first_stable_from_latest \}\}/)
+  assert.match(job('validate'), /\[\[ "\$RELEASE_OPERATION" == publish \|\| -z "\$FIRST_STABLE_FROM_LATEST" \]\]/)
+  assert.match(job('publish-npm'), /first_stable_from_latest: \$\{\{ inputs\.first_stable_from_latest \}\}/)
+  assert.match(job('publish-npm'), /needs: \[inspect-product, verify-desktop\]/)
+  for (const name of ['prepare-prerequisites', 'prepare-server', 'prepare-desktop', 'inspect-product', 'verify-desktop', 'publish-product']) {
+    assert.doesNotMatch(job(name), /first_stable_from_latest|FIRST_STABLE_FROM_LATEST/)
+  }
+})
+
 test('reused workflows retain protected environments, distinct locks, exact outputs and cross-tag snapshot', () => {
   const draft = read('direct-desktop-release-draft.yml'), publish = read('direct-desktop-release-publish.yml'), npm = read('server-npm-publish.yml')
   for (const value of [draft, publish, npm]) assert.match(value, /workflow_call:/)

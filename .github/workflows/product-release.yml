@@ -43,6 +43,10 @@ on:
         description: Prepare only; reuse an exact successful AgentsServer product-bundle signing run
         type: string
         default: ''
+      first_stable_from_latest:
+        description: Publish only; explicitly approved exact beta currently on npm latest for its first same-base stable release
+        type: string
+        default: ''
 
 permissions:
   contents: read
@@ -76,7 +80,10 @@ jobs:
           SOURCE_SHA: ${{ inputs.source_sha }}
           SOURCE_REF: ${{ inputs.source_ref }}
           WORKFLOW_SHA: ${{ github.sha }}
+          RELEASE_OPERATION: ${{ inputs.operation }}
+          FIRST_STABLE_FROM_LATEST: ${{ inputs.first_stable_from_latest }}
         run: |
+          [[ "$RELEASE_OPERATION" == publish || -z "$FIRST_STABLE_FROM_LATEST" ]]
           [[ "$SOURCE_SHA" =~ ^[a-f0-9]{40}$ ]]
           [[ "$SOURCE_REF" == main || "$SOURCE_REF" =~ ^release/[A-Za-z0-9][A-Za-z0-9._/-]*$ ]]
           git check-ref-format "refs/heads/$SOURCE_REF"
@@ -419,6 +426,7 @@ jobs:
       workflow_sha: ${{ github.sha }}
       candidate_tag: ${{ needs.inspect-product.outputs.candidate_tag }}
       accepted_manifest_sha256: ${{ needs.inspect-product.outputs.npm_manifest_sha256 }}
+      first_stable_from_latest: ${{ inputs.first_stable_from_latest }}
 
   publish-product:
     if: inputs.operation == 'publish'

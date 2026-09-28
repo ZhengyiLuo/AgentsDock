@@ -24,6 +24,14 @@ the two proven absent-to-default settings additions. That fixture contains no
 real provider-native conversation history or queued user message; their required
 checks remain blocked, despite the successful scoped CI jobs.
 
+The beta.18 tester subsequently reported real chats working and all requested
+manual checks passing, following the separate-account reopen/resume and
+logout/reboot checklist. Retain this as user-reported manual acceptance of that
+exact candidate, not as a new automated report or proof of migration with busy
+provider work, populated native history, or rollback. New runtime changes from
+`main` require their own candidate validation; they do not inherit beta.18's
+artifact acceptance.
+
 Implemented native coverage (execution status is recorded separately above):
 
 - Exact receipt/source/signature/runtime/permission verification before tests.

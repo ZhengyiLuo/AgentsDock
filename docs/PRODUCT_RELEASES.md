@@ -256,12 +256,33 @@ implementation does not provision secrets, change npm settings, or repair tags.
   token is introduced. See [npm trusted publishing](https://docs.npmjs.com/trusted-publishers/).
 
 The read-only registry audit on 2026-09-25 found both `latest` and `beta` selecting
-`1.0.7-beta.5`. That is not a valid stable default. The new npm preflight rejects
-`latest` pointing at a prerelease, so the observed state needs an explicit
-operator-reviewed repair before publication. Review current registry state and
-whether an accepted stable package actually exists; do not relabel a beta as
-stable or select an unverified substitute automatically. No repair was performed
-as part of this implementation.
+`1.0.7-beta.5`. That is not a valid stable default. npm preflight rejects
+`latest` pointing at a prerelease by default, including all beta publications.
+Do not remove a tag as a preparatory repair, relabel a beta as stable, or select
+an unverified substitute automatically. No repair was performed as part of this
+implementation.
+
+For the first accepted stable release only, the protected product `publish`
+dispatch accepts an explicit `first_stable_from_latest` value, such as the
+independently reviewed `1.0.7-beta.5`. Leave this input empty for ordinary
+releases; it is rejected during preparation. This is not a publication or
+acceptance bypass: the full production receipt, native acceptance, signed
+candidate and exact source/manifest checks remain required. The accepted target
+must be the same-base stable version (`1.0.7` in this example), observed `latest`
+must exactly match the approved prior beta, and no stable npm version may
+already exist. Unknown version formats fail closed. The normal single
+`npm publish --tag latest` of the accepted stable tarball performs the transition;
+there is no separate `npm dist-tag` operation or pre-publication tag removal.
+
+The read-only preflight records the explicit prior-version approval in its
+candidate-bound immutable snapshot and Actions summary, alongside observed
+`latest` and `beta`. Readback still requires stable `latest` selecting the exact
+accepted target, unchanged `beta`, and exact downloaded tarball bytes. A retry
+may retain the same approval only when that exact stable target is already on
+`latest`, no other stable versions exist, and normal metadata/byte verification
+passes; it never republishes or repairs a moved tag. The preflight-only CLI
+option is `--first-stable-from-latest EXACT_BETA_VERSION`; verification accepts
+only the saved snapshot, not a fresh override.
 
 The 2026-09-27 read-only recheck found the same two tags and only the beta.5
 npm version, so there is no published stable npm version to select automatically.
