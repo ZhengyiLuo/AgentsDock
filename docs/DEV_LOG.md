@@ -1,5 +1,16 @@
 # Public development log
 
+## 2026-09-27 — Activate paired endpoint fixes on the local server
+
+- Complete the authorized local split-service update after current work ends.
+  Both worker and gateway report `1.0.7-beta.19`, API contract 28, with the exact
+  endpoint and provider runtime corrections from `96e7c1e`.
+- Verify authenticated live health and installed source hashes after activation.
+  Preserve server identity, connection token and provider files. Team Hub stays
+  available; execution maintenance and activation records clear normally.
+- Availability: updated local server installation. The paired local desktop is
+  beta.20 build `1225`; this operation publishes no npm package or release feed.
+
 ## 2026-09-27 — Accept local desktop beta.20
 
 - Accept signed Apple silicon desktop `1.0.7-beta.20`, build `1225`, from
