@@ -8,6 +8,14 @@ Do not interpret passing helper unit tests as an accepted release. Publication
 remains blocked; the workflow does not generate passed records for unobserved
 scenarios.
 
+The explicit macOS candidate rehearsal now includes an isolated `recovery`
+job against the same frozen candidate bytes. It interrupts one signed legacy
+archive transfer, checks that the incumbent process and persisted fixture remain
+healthy and unchanged, then retries the same version through the real update
+API. Reports remain `publicationEligible: false` and `releaseAcceptance: false`.
+This is not candidate-health rollback, busy/provider-history, or production
+acceptance. Native execution of this added job is pending.
+
 Implemented, awaiting execution against sealed packages:
 
 - Exact receipt/source/signature/runtime/permission verification before tests.

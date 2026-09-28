@@ -1,5 +1,24 @@
 # Public development log
 
+## 2026-09-27 — Add a frozen-candidate download recovery rehearsal
+
+- Extend the explicitly dispatched macOS candidate matrix with a separate
+  signed legacy download interruption/retry case. Reuse the unchanged beta.18
+  receipt, signed server packages and existing failure harness; leave runtime
+  source and the candidate provenance allowlist unchanged.
+- Check incumbent authenticated health, process identity and persisted fixture
+  after the one-shot partial transfer, then retry through the real update API.
+  Keep recovery observations non-publishing and collect only bounded sanitized
+  JSON after disposable-runner trust/routing cleanup.
+- Materialize the lockfile-pinned Electron runtime once before parallel source
+  test imports, avoiding concurrent lazy extraction into the same directory.
+- Verify 269 JavaScript release-tooling/CLI tests, 76 native-harness/network
+  Python tests and workflow linting. Fixture tests also reject private fields,
+  oversized or symlinked reports, and forged publication eligibility.
+- Availability: source-only workflow change pending its hosted native run.
+  This adds no claim of provider history, busy-work, candidate-health rollback,
+  complete production acceptance or public delivery.
+
 ## 2026-09-27 — Observe the matched native app/server upgrade
 
 - Run `36351034285` passes source CI and fresh native npm installation, then

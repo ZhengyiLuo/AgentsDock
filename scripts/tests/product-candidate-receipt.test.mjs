@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { execFileSync } from 'node:child_process'
-import { mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { test } from 'node:test'
@@ -101,4 +101,77 @@ test('candidate workflow retains sealed artifact pins and supplies exact expecte
   assert.match(inputs, /validate-runner/)
   assert.match(inputs, /--source-sha "\$ARTIFACT_SOURCE_SHA" --candidate-rehearsal true/)
   assert.doesNotMatch(inputs, /export GITHUB_SHA=|GITHUB_SHA:|--source-sha "\$GITHUB_SHA"/)
+})
+
+test('source CI materializes the pinned Electron runtime before concurrent test imports', () => {
+  const workflow = readFileSync(new URL('../../.github/workflows/ci.yml', import.meta.url), 'utf8')
+  const electron = workflow.slice(workflow.indexOf('\n  electron:'), workflow.indexOf('\n  mobile-source:'))
+  const install = electron.indexOf('run: pnpm install --frozen-lockfile')
+  const materialize = electron.indexOf('run: node node_modules/electron/install.js')
+  const test = electron.indexOf('run: pnpm test')
+  assert(install >= 0 && install < materialize && materialize < test)
+  assert.match(electron, /name: Materialize Electron runtime before parallel test imports\n        run: node node_modules\/electron\/install.js\n        working-directory: electron/)
+})
+
+test('candidate recovery rehearses one exact download failure and retry without production acceptance', () => {
+  const workflow = readFileSync(new URL('../../.github/workflows/ci.yml', import.meta.url), 'utf8')
+  const candidateJob = workflow.slice(workflow.indexOf('  candidate-native:'))
+  assert.match(candidateJob, /kind: \[fresh, legacy, recovery\]/)
+  assert.match(candidateJob, /runs-on: macos-15/)
+  assert.match(candidateJob, /if \[\[ "\$CANDIDATE_KIND" == recovery \]\]; then INSTALL_KIND=legacy; fi/)
+  assert.match(candidateJob, /bootstrap --candidate --kind "\$INSTALL_KIND"/)
+  assert.match(candidateJob, /Configure exact-origin replay[^\n]*\n        if: matrix\.kind != 'fresh'/)
+  assert.match(candidateJob, /if \[\[ "\$CANDIDATE_KIND" == recovery \]\]; then\n            fault_args=/)
+  assert.match(candidateJob, /--pid-file "\$RUNNER_TEMP\/agentsdock-acceptance-network\/replay.pid" "\$\{fault_args\[@\]\}"/)
+  for (const option of ['--fault-control', '--fault-observed']) {
+    assert.equal(candidateJob.split(option).length - 1, 2, 'Replay and real failure-retry must share the exact fault paths')
+  }
+  assert.match(candidateJob, /failure-retry --candidate --kind legacy/)
+  assert.match(candidateJob, /diagnose --candidate --kind legacy/)
+  assert.match(candidateJob, /Restore disposable routing and trust[^\n]*\n        if: always\(\) && matrix\.kind != 'fresh'/)
+  assert.match(candidateJob, /\['recovery.json', 'recovery.json'\]/)
+  assert.match(candidateJob, /report\.publicationEligible !== false \|\| report\.releaseAcceptance !== false/)
+  assert.match(candidateJob, /constants\.O_NOFOLLOW/)
+  assert.match(candidateJob, /stat\.uid !== process\.getuid\(\)/)
+  assert.match(candidateJob, /Private fields in public evidence/)
+  assert.doesNotMatch(candidateJob, /rollback-retry|secrets\.|id-token: write|npm publish|release create|--clobber/)
+  assert(candidateJob.indexOf('uses: ./.github/actions/product-candidate-inputs') < candidateJob.indexOf('bootstrap --candidate'))
+  assert(candidateJob.indexOf('Restore disposable routing and trust') < candidateJob.indexOf('uses: actions/upload-artifact'))
+})
+
+test('candidate evidence collector only copies bounded sanitized non-publishing recovery observations', t => {
+  const workflow = readFileSync(new URL('../../.github/workflows/ci.yml', import.meta.url), 'utf8')
+  const section = workflow.slice(workflow.indexOf('      - name: Collect bounded public observations'))
+  const script = section.match(/<<'NODE'\n([\s\S]*?)\n          NODE/)[1].replace(/^          /gm, '')
+  for (const kind of ['valid', 'private', 'eligible', 'oversized', 'symlink']) {
+    const root = mkdtempSync(join(tmpdir(), 'candidate-evidence-unit-'))
+    t.after(() => rmSync(root, { recursive: true, force: true }))
+    const source = join(root, 'source'), output = join(root, 'public')
+    mkdirSync(source)
+    const report = { kind: 'candidate-server-observations', publicationEligible: false, releaseAcceptance: false }
+    if (kind === 'private') report.token = 'fixture-secret-never-published'
+    if (kind === 'eligible') report.publicationEligible = true
+    if (kind === 'oversized') report.extra = 'x'.repeat(512 * 1024)
+    const bytes = `${JSON.stringify(report)}\n`
+    const target = join(source, 'recovery.json')
+    if (kind === 'symlink') {
+      writeFileSync(join(root, 'other.json'), bytes)
+      symlinkSync(join(root, 'other.json'), target)
+    } else writeFileSync(target, bytes)
+    writeFileSync(join(source, 'server.json'), '{"token":"private-fixture"}\n')
+    writeFileSync(join(source, 'diagnostics-private.log'), 'private log\n')
+    const run = () => execFileSync(process.execPath, ['--input-type=module', '-', source, output], {
+      input: script, encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe']
+    })
+    if (kind === 'valid') {
+      assert.equal(JSON.parse(run()).publicEvidenceFiles, 1)
+      assert.equal(readFileSync(join(output, 'recovery.json'), 'utf8'), bytes)
+      assert.equal(statSync(join(output, 'recovery.json')).mode & 0o777, 0o600)
+    } else {
+      assert.throws(run, error => error.status === 1 && !error.stderr.toString().includes('fixture-secret'))
+      assert(!existsSync(join(output, 'recovery.json')))
+    }
+    assert(!existsSync(join(output, 'server.json')))
+    assert(!existsSync(join(output, 'diagnostics-private.log')))
+  }
 })
