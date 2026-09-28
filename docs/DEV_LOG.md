@@ -1,5 +1,28 @@
 # Public development log
 
+## 2026-09-28 — Accept the npm-only native candidate; publication awaits npm authorization
+
+- Native CI run `36394271455`, attempt 1, passes on hosted Apple-silicon macOS
+  and Linux with reviewed harness `19f26169bb0128ff46dc6dd00fa3aa256a66fbc6`.
+  Both reports independently verify fresh installation, authenticated health,
+  116 exact runtime files and permissions, safe existing-install refusal,
+  cache-independent service restart, and preserved server identity/token.
+- Keep the accepted signed source at
+  `e883d6fc047d2ba2749c30976750193d91aa067a`, descriptor SHA-256
+  `f5454747f2cbadae2b8386bb4f468ccf31fcb79c2fa058aa43e349acdd4629a6`, and tarball
+  SHA-256 `aafd1af203086921b21b6396e1e57aa6ee92207ab254e28ad827ae327ce9483e`.
+  Reuse these exact three draft assets, without rebuilding or replacing them.
+- Authorized npm-only publication run `36394626496` passes signature, source,
+  packaging and registry preflight, then npm rejects the publish request with
+  `E404` access denial. Public registry verification confirms `1.0.7` is absent
+  and both `latest` and `beta` remain `1.0.7-beta.5`.
+- The publishing workflow requires an npm trusted publisher for canonical
+  `ZhengyiLuo/AgentsDock`, `server-npm-publish.yml`, environment `npm-release`,
+  permitting direct `npm publish`. Package-owner configuration must be checked
+  before retrying; no credential is copied, printed or replaced.
+- This scoped result does not establish full product/provider/upgrade/reboot
+  acceptance. No desktop/mobile release or installed-user service is changed.
+
 ## 2026-09-28 — Confirm macOS npm validation and identify the Linux runner default
 
 - Native run `36393582036` passes the macOS npm fresh-install and service-restart
