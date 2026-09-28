@@ -10,8 +10,14 @@
   Preserve authentication, revocation, and session/event ownership validation.
 - Pass 49 route and native integration tests, including initial reads, cookie
   reuse, stream reconnects, recovery status, metadata omission, and revocation.
-- Availability: committed and tested server source; activation and release
-  acceptance are recorded separately.
+- Deploy source `c33d9f3` with the explicitly authorized worker restart. Verify
+  authenticated shared-chat reads and cookie reuse return HTTP 200 against the
+  affected conversation, then revoke the temporary verification share and
+  confirm the original share remains valid.
+- Verify the gateway, identity, credentials and independent terminal processes
+  remain unchanged, and no maintenance hold remains. The installed version
+  label remains beta.16 until a packaged upgrade; beta release acceptance is
+  recorded separately.
 
 ## 2026-09-28 — Activate queue recovery and provider-selection fixes
 
