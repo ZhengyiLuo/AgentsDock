@@ -1,5 +1,42 @@
 # Public development log
 
+## 2026-09-28 — Publish server beta.21 with shared-chat and queue fixes
+
+- Publish [AgentsServer 1.0.7-beta.21](https://github.com/ZhengyiLuo/AgentsServer/releases/tag/v1.0.7-beta.21)
+  from canonical product source `c3a1dcd` and standalone export `41e8ec6`.
+  Include shared-chat recovery, completion-driven Codex endpoint switching,
+  independent startup queue recovery, and mailbox-only inter-chat delivery.
+- Accept the full source suite: 5,929 tests pass, with seven existing conditional
+  skips. Verify the established signatures and all 116 packaged runtime files
+  against the accepted source, plus the five npm wrapper files.
+- Exercise the exact signed npm payload through the authenticated managed
+  updater on native Linux and Apple silicon macOS, from the public beta.11
+  baseline. Cover existing installation modes 0755 and 0750; preserve identity,
+  authentication, session metadata and synthetic persisted history. Verify every
+  installed file and mode, queue recovery, and a native restart after cleanup.
+- Native acceptance uses local HTTPS replay of the unchanged signed npm URL and
+  tarball. Each real updater downloads the full archive; the separate connection
+  probe uses HEAD. Restore fixture trust, host mappings and temporary keys before
+  restart. This does not claim public npm transport, npm CLI, desktop updater,
+  real provider turns, busy-work migration, rollback, or reboot acceptance.
+- Keep the tested package unchanged while correcting the native fixture's CA
+  discovery, privileged Python bytecode writes, and certificate extensions.
+  Record passing native acceptance in [run 36484322902](https://github.com/ZhengyiLuo/AgentsServer/actions/runs/36484322902)
+  with separate harness source `e06eb03`.
+- Download the public GitHub page and all three release assets anonymously;
+  verify their bytes match the accepted signed artifacts. Verify the release tag
+  source, keep stable/latest at 1.0.3, and confirm the deployed beta updater
+  discovers beta.21. This release pass does not restart the production worker
+  again or publish a desktop/mobile app.
+
+- Attempt npm trusted publication in [run 36484845092](https://github.com/ZhengyiLuo/AgentsDock/actions/runs/36484845092).
+  All signature, exact-source, payload and registry preflight checks pass; npm
+  rejects the publish request with E404 / permission denied. Verify beta.21 is
+  absent and both npm tags remain at beta.5. Preserve the private signed candidate
+  for an owner-corrected trusted-publisher configuration; do not retry publication
+  or substitute credentials. GitHub beta availability is unaffected.
+
+
 ## 2026-09-28 — Restore interactive shares after queue recovery changes
 
 - Fix authenticated shared-chat snapshots rejecting the new queue recovery
