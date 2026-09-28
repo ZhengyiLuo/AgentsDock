@@ -1,5 +1,27 @@
 # Public development log
 
+## 2026-09-28 — Keep scheduled paired-chat messages in the mailbox
+
+- Give scheduled runs mailbox transport and retain the existing permanent pair
+  for each saved recipient. Previously, a temporary route made scheduled sends
+  fall back to automatic queued exchanges. Question-only references now send
+  independent mailbox questions without a live reply wait.
+- Preserve the saved recipient/action scope and mixed paired/unpaired jobs.
+  Existing unpaired reference behavior remains unchanged. Cancelled requests
+  are not reopened; no database migration or desktop update is required.
+- Pass 234 focused scheduler, route and mailbox regressions. Exercise the full
+  scheduler, authenticated HTTP, provider tool/helper subprocess and SQLite
+  with both ordinary and question-only saved references. Verify three messages,
+  retry deduplication, ordered paged reads, uninterrupted busy recipients and
+  one idle mailbox wake, with no legacy queue, exchange or wait lease.
+- In the isolated native offscreen desktop using the beta.20 compiled payload,
+  click open the inbox group, verify all three messages and no queued delivery,
+  reload and repeat. No renderer exceptions occur. Remove the disposable app,
+  Keychain entry and fixture listener. The upstream provider is synthetic;
+  its runtime-metadata check is outside this mailbox acceptance.
+- Availability: tested server source. Production activation is recorded after
+  deployment; no desktop, npm or mobile release is published by this change.
+
 ## 2026-09-27 — Activate paired endpoint fixes on the local server
 
 - Complete the authorized local split-service update after current work ends.
