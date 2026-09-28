@@ -2299,6 +2299,19 @@ export class AppService {
       this.health = { ...this.health, runtimes: { ...this.health.runtimes, codex: diagnostic } }
       this.emitConnection(scope, true, this.health)
     }
+    // Session catalogs describe the active endpoint and may differ from the
+    // server default while work finishes. Refresh the visible chat once after
+    // an explicit save/reset/discovery, including on servers without notices.
+    const focused = this.sessions.find(session => session.id === this.focusedSessionId)
+    if (focused?.backend === 'codex' && (focused.codex_provider === 'custom'
+      || focused.codex_provider_control?.requested_provider === 'custom')) {
+      try {
+        const page = await scope.client.sessionPage(focused.id, { limit: 1 })
+        this.assertCurrentScope(scope)
+        this.upsertSession(scope, page.session)
+      } catch { /* The saved setting remains valid if this detail refresh fails. */ }
+      this.assertCurrentScope(scope)
+    }
   }
 
   async codexServerSubagents(expected: CodexServerSettingsScope): Promise<CodexSubagentsConfiguration> {
@@ -6778,6 +6791,7 @@ export class AppService {
 
   private emitProviderRuntimeChanged(scope: ConnectionScope, event: ProviderRuntimeChanged): void {
     if (!this.isCurrentScope(scope)) return
+    if (event.runtime === 'codex_provider') this.upsertSession(scope, event.session)
     this.emit('server:provider-runtime', {
       profileId: scope.profileId,
       profileGeneration: scope.generation,
@@ -7631,7 +7645,8 @@ function preserveCustomProviderModels(previous: Session, incoming: Session): Ses
   const saved = previous.codex_provider_catalog
   const summary = incoming.codex_provider_catalog
   if (incoming.codex_provider !== 'custom' || previous.codex_provider !== 'custom' || !saved || !summary
-    || !summary.configured || saved.base_url !== summary.base_url || summary.models !== undefined) return incoming
+    || !summary.configured || saved.base_url !== summary.base_url
+    || saved.credential_id !== summary.credential_id || summary.models !== undefined) return incoming
   return { ...incoming, codex_provider_catalog: {
     ...summary,
     ...(saved.models !== undefined ? { models: saved.models } : {}),

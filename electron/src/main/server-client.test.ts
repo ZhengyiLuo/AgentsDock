@@ -1749,6 +1749,34 @@ describe('AgentServerClient live stream', () => {
     stop()
   })
 
+  it('routes Codex endpoint session changes without advancing the timeline cursor', () => {
+    vi.useFakeTimers()
+    vi.spyOn(Math, 'random').mockReturnValue(0)
+    vi.stubGlobal('WebSocket', FakeWebSocket)
+    const received = vi.fn(), runtime = vi.fn()
+    const client = new AgentServerClient('http://example.test:7850', 'token')
+    const stop = client.stream('chat', 5, received, () => {}, runtime)
+    const first = FakeWebSocket.instances[0]
+    const session = { id: 'chat', title: 'Chat', backend: 'codex', codex_provider: 'custom',
+      model: 'new-model', codex_provider_catalog: { available: true, configured: true,
+        model: 'new-model', base_url: 'https://new.example/v1' } }
+    const packet = { type: 'provider_runtime_changed', session_id: 'chat', backend: 'codex',
+      runtime: 'codex_provider', ephemeral: true, session }
+    first.emit('message', JSON.stringify(packet))
+    for (const invalid of [
+      { ...packet, session_id: 'another-chat' }, { ...packet, session: { ...session, id: 'another-chat' } },
+      { ...packet, backend: 'claude' }, { ...packet, session: null },
+      { ...packet, session: { ...session, codex_provider: 'invalid' } }
+    ]) first.emit('message', JSON.stringify({ ...invalid, seq: 900 }))
+    first.emit('message', JSON.stringify({ id: 'e6', session_id: 'chat', seq: 6, type: 'assistant_text', ts: 'now' }))
+    first.emit('close')
+    vi.advanceTimersByTime(500)
+    expect(runtime).toHaveBeenCalledExactlyOnceWith(packet)
+    expect(received).toHaveBeenCalledOnce()
+    expect(String(FakeWebSocket.instances[1].url)).toContain('after=6')
+    stop()
+  })
+
   it('routes ephemeral pinned-item invalidations without advancing the durable cursor', () => {
     vi.useFakeTimers()
     vi.spyOn(Math, 'random').mockReturnValue(0)

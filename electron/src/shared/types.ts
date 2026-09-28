@@ -436,8 +436,15 @@ export interface Session {
   backend: Backend
   /** Missing on older sessions means native Codex's default provider. */
   codex_provider?: CodexProvider
-  /** Safe catalog for this chat's retained endpoint credentials. */
+  /** Safe catalog for the endpoint currently serving this chat. */
   codex_provider_catalog?: RuntimeBackendCatalog['custom_provider']
+  codex_provider_control?: {
+    pending: boolean
+    requested_provider: CodexProvider
+    active_provider: CodexProvider
+    requested_base_url: string | null
+    active_base_url: string | null
+  }
   model?: string | null
   effort?: string | null
   system_prompt?: string | null
@@ -538,6 +545,8 @@ export interface RuntimeBackendCatalog {
   custom_provider?: {
     configured: boolean
     available: boolean
+    /** Opaque configuration revision; this is not an API key. */
+    credential_id?: string | null
     model: string | null
     base_url: string | null
     models?: RuntimeModelOption[]
@@ -1881,6 +1890,10 @@ export type ProviderRuntimeChanged = ProviderRuntimeChangedBase & ({
   backend: 'codex'
   subagent_limit: number | null
   subagent_limit_control: SessionSubagentLimitControl
+} | {
+  runtime: 'codex_provider'
+  backend: 'codex'
+  session: Session
 })
 export interface ProfileProviderRuntimeEvent extends ProfileEventContext { event: ProviderRuntimeChanged }
 export interface ProfileReasoningStreamEvent extends ProfileEventContext {

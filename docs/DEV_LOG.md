@@ -1,5 +1,34 @@
 # Public development log
 
+## 2026-09-27 — Change Codex endpoints in existing conversations
+
+- Keep the existing Codex conversation when switching between normal Codex
+  and a custom endpoint. The composer remains usable while work runs and
+  distinguishes the active endpoint from a saved change waiting for idle.
+- Apply full session and endpoint catalog updates through the existing runtime
+  stream. Refresh the selected chat after saving endpoint settings; invalidate
+  retained model lists when credentials change, including at the same URL.
+  Update English and Chinese guidance without adding a confirmation step.
+- Pass 829 focused desktop tests, TypeScript, production compilation and the
+  compiled output audit. Existing Claude and unrelated backend selection
+  behavior remains covered. Preserve genuine previous-turn errors after reload;
+  restarting a provider alone does not establish successful authentication.
+- Exercise the source-compiled desktop in an isolated offscreen native window
+  through its real IPC and authenticated server transport, the full server from
+  `96e7c1e`, and native Codex 0.156.1 against a loopback Responses fixture.
+  Save a replacement key in Settings, send another message, reload Codex through
+  its menu, and send again. Requests use the replacement key and retain prior
+  context with the same native thread. Switch custom to normal and back through
+  the composer; verify the active labels and model catalog, then complete a
+  custom reply with the same chat and native thread. No renderer errors occur.
+- The upstream model responses and credentials in this UI acceptance are
+  synthetic. A real ChatGPT account switch and external inference are not
+  covered by this UI run. Busy transitions are covered by focused regressions
+  and separate native-server checks. Clean up the owned app, Keychain item,
+  server and upstream listeners.
+- Availability: desktop source and compiled local output only. No app package,
+  public desktop release, or npm publication is produced by this change.
+
 ## 2026-09-27 — Verify automatic limit changes in the signed desktop
 
 - Accept signed local Apple silicon desktop `1.0.7-beta.19`, build `1224`,

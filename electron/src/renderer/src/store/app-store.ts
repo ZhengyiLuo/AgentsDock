@@ -830,12 +830,14 @@ export const useAppStore = create<AppState>((set, get) => ({
         if (profileEventMatches(payload, get())) set({ runtimeCatalog: payload.runtimeCatalog })
       }),
       window.agentsDock.events.on('server:provider-runtime', payload => {
-        if (!profileEventMatches(payload, get()) || payload.event.runtime !== 'subagent_limit') return
+        if (!profileEventMatches(payload, get()) || !['subagent_limit', 'codex_provider'].includes(payload.event.runtime)) return
         const event = payload.event
         set(state => {
           const session = state.sessions.find(candidate => candidate.id === event.session_id)
           if (!session || session.backend !== 'codex') return state
-          const patch = { subagent_limit: event.subagent_limit, subagent_limit_control: event.subagent_limit_control }
+          const patch = event.runtime === 'codex_provider' ? event.session
+            : event.runtime === 'subagent_limit' ? { subagent_limit: event.subagent_limit, subagent_limit_control: event.subagent_limit_control }
+              : {}
           const updated = { ...session, ...patch }
           const snapshot = state.snapshots[session.id]
           return {

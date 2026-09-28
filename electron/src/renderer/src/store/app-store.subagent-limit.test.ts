@@ -63,4 +63,30 @@ describe('subagent limit acknowledgment stream', () => {
     expect(useAppStore.getState().sessions).toBe(before)
     expect(api.fetch).not.toHaveBeenCalled()
   })
+
+  it('applies endpoint catalog changes to the matching session and snapshot without fetching', async () => {
+    const api = await install()
+    const before = useAppStore.getState()
+    const updated: Session = { ...pending, codex_provider: 'custom', model: 'new-model', effort: 'low',
+      codex_provider_catalog: { configured: true, available: true, base_url: 'https://new.example/v1', model: 'new-model',
+        models: [{ value: 'new-model', label: 'New model' }] },
+      codex_provider_control: { pending: false, active_provider: 'custom', requested_provider: 'custom',
+        active_base_url: 'https://new.example/v1', requested_base_url: 'https://new.example/v1' } }
+    const packet: ProfileProviderRuntimeEvent = { profileId: 'one', profileGeneration: 4,
+      event: { type: 'provider_runtime_changed', session_id: 'chat', backend: 'codex',
+        runtime: 'codex_provider', ephemeral: true, session: updated } }
+    api.receive({ ...packet, profileId: 'two' })
+    api.receive({ ...packet, profileGeneration: 3 })
+    expect(useAppStore.getState().sessions).toBe(before.sessions)
+    api.receive(packet)
+    const after = useAppStore.getState()
+    expect(after.sessions[0]).toEqual(updated)
+    expect(after.snapshots.chat.session.codex_provider_catalog).toBe(updated.codex_provider_catalog)
+    expect(after.snapshots.chat.session.system_prompt).toBe('Fixture full session detail')
+    expect(after.sessions[1]).toBe(api.other)
+    expect(after.snapshots.chat.events).toBe(before.snapshots.chat.events)
+    expect(after.snapshots.chat.queuedTurns).toBe(before.snapshots.chat.queuedTurns)
+    expect(after.activeSessionIds).toBe(before.activeSessionIds)
+    expect(api.fetch).not.toHaveBeenCalled()
+  })
 })

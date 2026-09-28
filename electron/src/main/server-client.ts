@@ -2760,6 +2760,14 @@ function isProviderRuntimeChanged(value: unknown): value is ProviderRuntimeChang
     && packet.session_id.length > 0
   if (!envelope) return false
   if (packet.runtime === 'context_usage') return true
+  if (packet.runtime === 'codex_provider') {
+    const session = packet.session
+    if (packet.backend !== 'codex' || !session || typeof session !== 'object' || Array.isArray(session)) return false
+    const fields = session as Record<string, unknown>
+    return fields.id === packet.session_id && fields.backend === 'codex'
+      && typeof fields.title === 'string'
+      && (fields.codex_provider === 'default' || fields.codex_provider === 'custom')
+  }
   if (packet.runtime !== 'subagent_limit' || packet.backend !== 'codex') return false
   const limit = (value: unknown) => value === null || (typeof value === 'number' && Number.isSafeInteger(value) && value > 0)
   const control = packet.subagent_limit_control

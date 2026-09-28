@@ -3352,10 +3352,16 @@ function BackendMenu({ session, running, admitting }: { session: Session; runnin
   const cursorUnavailableReason = cursorBackendUnavailableReason(health, catalog)
   const openCodeAvailable = opencodeBackendAvailable(health, catalog)
   const openCodeUnavailableReason = opencodeBackendUnavailableReason(health, catalog)
-  const backends = selectableChatBackendChoices(health, catalog)
   const providerLocked = isBackendLocked(session)
-  const disabled = providerLocked || running || admitting
-  const title = providerLocked
+  // Both endpoint choices use the same native Codex conversation. The server
+  // saves changes made during a turn and applies them at its idle boundary.
+  const codexEndpointOnly = session.backend === 'codex' && (providerLocked || running || admitting)
+  const backends = selectableChatBackendChoices(health, catalog)
+    .filter(choice => !codexEndpointOnly || choice === 'codex' || choice === 'codex-custom')
+  const disabled = !codexEndpointOnly && (providerLocked || running || admitting)
+  const title = codexEndpointOnly
+    ? t('codexProvider.changeEndpoint')
+    : providerLocked
     ? 'Backend is fixed after the provider session starts'
     : running
       ? 'Wait for the active turn to finish before changing backend'
@@ -3366,7 +3372,11 @@ function BackendMenu({ session, running, admitting }: { session: Session; runnin
   const compactLabel = session.backend === 'codex' && session.codex_provider === 'custom'
     ? t('codexProvider.compactLabel')
     : providerLabel
-  const chip = <button className="backend-chip" title={title} aria-label={providerLabel} disabled={disabled}><BackendMark backend={session.backend} size={17} /><span>{compactLabel}</span>{!disabled && <ChevronDown size={12} />}</button>
+  const pending = session.codex_provider_control?.pending === true
+  const selectedChoice = pending
+    ? chatBackendChoice({ backend: session.backend, codex_provider: session.codex_provider_control!.requested_provider })
+    : chatBackendChoice(session)
+  const chip = <button className="backend-chip" title={title} aria-label={providerLabel} disabled={disabled}><BackendMark backend={session.backend} size={17} /><span>{compactLabel}</span>{pending && <span title={t('codexProvider.pending')} aria-label={t('codexProvider.pending')}> · {t('codexProvider.saved')}</span>}{!disabled && <ChevronDown size={12} />}</button>
   if (disabled) return chip
   return <Tooltip.Provider delayDuration={250}><DropdownMenu.Root><DropdownMenu.Trigger asChild>{chip}</DropdownMenu.Trigger><DropdownMenu.Portal><DropdownMenu.Content className="menu-content" side="top" align="start">{backends.map(choice => {
     const { backend, codex_provider } = chatBackendSelection(choice)
@@ -3387,7 +3397,9 @@ function BackendMenu({ session, running, admitting }: { session: Session; runnin
       </Tooltip.Trigger>
       <Tooltip.Portal><Tooltip.Content className="shortcut-tooltip backend-unavailable-tooltip" side="right" sideOffset={7}><span>{unavailableReason}</span><Tooltip.Arrow className="shortcut-tooltip-arrow" /></Tooltip.Content></Tooltip.Portal>
     </Tooltip.Root>
-    return <DropdownMenu.CheckboxItem key={choice} className="menu-item" checked={chatBackendChoice(session) === choice} onCheckedChange={() => void useAppStore.getState().updateSession(session.id, { backend, codex_provider, model: null, effort: null })}><BackendMark backend={backend} size={15} />{backendLabel(backend, codex_provider)}</DropdownMenu.CheckboxItem>
+    return <DropdownMenu.CheckboxItem key={choice} className="menu-item" checked={selectedChoice === choice} onCheckedChange={() => {
+      if (selectedChoice !== choice) void useAppStore.getState().updateSession(session.id, { backend, codex_provider, model: null, effort: null })
+    }}><BackendMark backend={backend} size={15} />{backendLabel(backend, codex_provider)}</DropdownMenu.CheckboxItem>
   })}</DropdownMenu.Content></DropdownMenu.Portal></DropdownMenu.Root></Tooltip.Provider>
 }
 

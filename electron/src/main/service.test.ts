@@ -396,6 +396,16 @@ describe('session summary merging', () => {
     expect(mergeSessionSummaries([existing], [{ ...existing, codex_provider_catalog: summary }])[0].codex_provider_catalog).toEqual(catalog)
     expect(mergeSessionSummaries([existing], [{ ...existing, codex_provider_catalog: { ...summary, base_url: 'https://second.example/v1' } }])[0].codex_provider_catalog?.models).toBeUndefined()
   })
+  it('drops the previous account model list when credentials change at the same endpoint', () => {
+    const catalog = { configured: true, available: true, model: null, base_url: 'https://first.example/v1', credential_id: 'revision-one',
+      models: [{ value: 'old-account/model', label: 'Old account model' }], model_efforts: { 'old-account/model': [{ value: 'high', label: 'High' }] } }
+    const existing: Session = { id: 'chat', title: 'Chat', backend: 'codex', codex_provider: 'custom', codex_provider_catalog: catalog }
+    const { models: _models, model_efforts: _efforts, ...summary } = catalog
+    const merged = mergeSessionSummaries([existing], [{ ...existing, codex_provider_catalog: { ...summary, credential_id: 'revision-two' } }])[0]
+    expect(merged.codex_provider_catalog?.models).toBeUndefined()
+    expect(merged.codex_provider_catalog?.model_efforts).toBeUndefined()
+    expect(merged.codex_provider_catalog?.credential_id).toBe('revision-two')
+  })
   it('preserves selected-session details omitted by compact polling', () => {
     const previous: Session[] = [{
       id: 'chat',
@@ -1111,11 +1121,12 @@ describe('Codex endpoint request profile isolation', () => {
   const testResult = { ok: true, status: 'ready', message: '' }
   function harness() {
     const client = { codexProviderModels: vi.fn().mockRejectedValue(new Error('offline discovery')), codexProvider: vi.fn().mockResolvedValue(configuration), testCodexProvider: vi.fn().mockResolvedValue(testResult),
-      setCodexProvider: vi.fn().mockResolvedValue(configuration), resetCodexProvider: vi.fn().mockResolvedValue(configuration) }
+      setCodexProvider: vi.fn().mockResolvedValue(configuration), resetCodexProvider: vi.fn().mockResolvedValue(configuration), sessionPage: vi.fn() }
     const service = Object.create(AppService.prototype) as AppService
     const refreshRuntime = vi.fn().mockResolvedValue(undefined)
     Object.assign(service, { scope: { profileId: caller.profileId, generation: 1, namespace: 'profile:provider-a', client },
       activeProfileId: caller.profileId, profileGeneration: 1, validatedGeneration: 1,
+      sessions: [], focusedSessionId: null, upsertSession: vi.fn(),
       health: { capabilities: { codex_provider_v1: { available: true, per_chat: true, per_chat_models: true } } },
       profileResetIsPending: vi.fn().mockReturnValue(false), refreshRuntime })
     return { service, client, refreshRuntime }
@@ -1163,6 +1174,37 @@ describe('Codex endpoint request profile isolation', () => {
     client.codexProviderModels.mockImplementation(() => new Promise(() => {}))
     await expect(service.setCodexProvider(caller, input)).resolves.toEqual(configuration)
     expect(client.codexProviderModels).toHaveBeenCalledOnce()
+  })
+  it('refreshes the visible custom chat catalog after saving and after model discovery completes', async () => {
+    const { service, client } = harness()
+    const original: Session = { id: 'chat', title: 'Chat', backend: 'codex', codex_provider: 'custom', codex_thread_id: 'native',
+      codex_provider_catalog: { configured: true, available: true, model: 'old-model', base_url: 'https://old.example/v1' } }
+    const updated: Session = { ...original, model: 'new-model', codex_provider_catalog: {
+      configured: true, available: true, model: 'new-model', base_url: configuration.base_url,
+      models: [{ value: 'new-model', label: 'New model' }]
+    } }
+    const discovery = deferred<never>()
+    client.codexProviderModels.mockReturnValue(discovery.promise)
+    client.sessionPage.mockResolvedValue({ session: updated })
+    Object.assign(service, { sessions: [original], focusedSessionId: original.id })
+    await expect(service.setCodexProvider(caller, input)).resolves.toEqual(configuration)
+    expect(client.sessionPage).toHaveBeenCalledExactlyOnceWith('chat', { limit: 1 })
+    expect((service as any).upsertSession).toHaveBeenCalledWith((service as any).scope, updated)
+    discovery.resolve({} as never)
+    await vi.waitFor(() => expect(client.sessionPage).toHaveBeenCalledTimes(2))
+  })
+  it('does not apply a late endpoint session refresh to another server', async () => {
+    const { service, client } = harness()
+    const session: Session = { id: 'chat', title: 'Chat', backend: 'codex', codex_provider: 'custom' }
+    const response = deferred<{ session: Session }>(), started = deferred<void>()
+    Object.assign(service, { sessions: [session], focusedSessionId: session.id })
+    client.sessionPage.mockImplementation(() => { started.resolve(); return response.promise })
+    const pending = service.setCodexProvider(caller, input)
+    await started.promise
+    Object.assign(service, { activeProfileId: 'provider-b', profileGeneration: 2 })
+    response.resolve({ session })
+    await expect(pending).rejects.toThrow('superseded')
+    expect((service as any).upsertSession).not.toHaveBeenCalled()
   })
   it('does not configure a custom endpoint on older global-override servers, but permits recovery reset', async () => {
     const { service, client } = harness()
