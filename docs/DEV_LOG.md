@@ -1,5 +1,30 @@
 # Public development log
 
+## 2026-09-28 — Prepare the short agentsdock npm command
+
+- Add the `agentsdock` CLI package, pinning the exact same-version
+  `@agentsdock/server` runtime. Global npm installation exposes `agentsdock`;
+  local installation uses `npx agentsdock`. Neither runs installation hooks,
+  changes shell configuration nor starts or updates a server automatically.
+- Expose `setup`/`install`, `servers` management, `status`, and per-instance
+  `token` commands. Signed updates and guarded recovery retain the existing
+  implementation. Internal helper commands and the source-installer update
+  bypass are not public CLI commands; existing server signing identities,
+  manifests and scoped-package behavior remain unchanged.
+- Verify 25 JavaScript CLI tests and 15 Python packaging tests. Real offline npm
+  global/local installs of the actual matching packages exercise the executable
+  from another directory, version/help, empty-instance discovery, recovery with
+  no journal, distinct synthetic default/named tokens and safe reinstall refusal.
+  Package inventory, permissions, exact dependency pins, reproducibility and
+  checksum receipts are checked. Add these checks to source CI; hosted execution
+  has not yet run. JavaScript/Python syntax and workflow YAML checks pass.
+- Availability: source and local packaging checks only. No service creation,
+  restart, provider chat, desktop UI change, npm publication or deployment is
+  included. Fresh service creation/control through the new wrapper still needs
+  disposable native acceptance. The new public package requires owned registry
+  publication and release-pipeline integration after that acceptance; current
+  public registry commands and frozen release candidates are unchanged.
+
 ## 2026-09-28 — Combine editor line endings with desktop/server fixes
 
 - Bring contributor PR #24 into the tested desktop/server follow-up branch,
