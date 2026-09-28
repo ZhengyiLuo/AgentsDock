@@ -12,6 +12,14 @@
   using the candidate web assets; confirm the transcript and composer remain
   visible without an uncaught exception. Deployed-asset acceptance follows
   separately; API success alone does not establish renderer acceptance.
+- Deploy generated web module `b3bebb3` from committed source `b671898` with
+  the authorized worker restart. Verify actual server-served assets, token entry,
+  transcript rendering, composer visibility and browser reload. Preserve server
+  identity, credentials, gateway and independent terminal processes.
+- Independently pass 89 shared-chat frontend tests and 129 server projection,
+  routing, native integration, control, storage and media tests. All 64 embedded
+  asset references resolve. Prepare beta.22 so packaged updates retain this fix;
+  release publication acceptance is recorded separately.
 
 ## 2026-09-28 — Publish server beta.21 with shared-chat and queue fixes
 
