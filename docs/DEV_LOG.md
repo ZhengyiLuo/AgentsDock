@@ -28,7 +28,13 @@
   empty test chats and retains an unsent draft. This check uncovered the editor's
   deferred draft persistence; flush live editor refs and temporarily block
   editing/admission during discard. Re-run 843 affected desktop tests after
-  that fix; all pass. Packaged-app acceptance is recorded separately below.
+  that fix; all pass. Verify immediate type → refresh preserves the draft and
+  clear → refresh discards the same disposable placeholder, without a debounce
+  wait. The signed local desktop package passes bundle audit; all 88 compiled
+  files match the tested build. Verify AI Providers in the installed app,
+  preserve the active server profile, and leave normal launch/debugging disabled.
+  Official Cursor API-key and OpenCode Zen/Go model calls are not live-tested;
+  their documentation does not imply arbitrary endpoint/model compatibility.
 
 ## 2026-09-27 — Endpoint confirmation spacing
 
