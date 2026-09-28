@@ -44,6 +44,8 @@ export interface StoredSettingsV2 {
 export interface StoredServerProfile {
   id: string
   name: string
+  /** Missing on older profiles; distinguish user labels from URL-derived defaults. */
+  nameSource?: 'custom' | 'url'
   serverUrl: string
   serverIdentity?: string | null
   encryptedAccessToken?: string
@@ -253,7 +255,8 @@ export class SettingsStore {
     const timestamp = this.now()
     let profile: StoredServerProfile = {
       id,
-      name: cleanProfileName(input.name) || defaultProfileName(serverUrl, serverIdentity),
+      name: cleanProfileName(input.name) || defaultProfileName(serverUrl),
+      nameSource: cleanProfileName(input.name) ? 'custom' : 'url',
       serverUrl,
       serverIdentity,
       serverSetupComplete: input.serverSetupComplete ?? Boolean(serverIdentity),
@@ -284,10 +287,14 @@ export class SettingsStore {
       && hasStoredAccessToken(current) && !this.readProfileToken(current)) {
       throw new Error(UNREADABLE_ACCESS_TOKEN_ERROR)
     }
+    const serverUrl = patch.serverUrl === undefined ? current.serverUrl : normalizeServerURL(patch.serverUrl)
     const updated: StoredServerProfile = {
       ...current,
-      name: patch.name === undefined ? current.name : requireProfileName(patch.name),
-      serverUrl: patch.serverUrl === undefined ? current.serverUrl : normalizeServerURL(patch.serverUrl),
+      name: patch.name === undefined
+        ? current.nameSource === 'url' ? defaultProfileName(serverUrl) : current.name
+        : requireProfileName(patch.name),
+      nameSource: patch.name === undefined ? current.nameSource : 'custom',
+      serverUrl,
       serverIdentity: patch.serverIdentity === undefined ? current.serverIdentity : cleanIdentity(patch.serverIdentity),
       serverSetupComplete: patch.serverSetupComplete ?? current.serverSetupComplete,
       retiredServerNamespaces: patch.retiredServerNamespaces === undefined
@@ -460,7 +467,8 @@ export class SettingsStore {
     const serverIdentity = cleanIdentity(legacy.serverIdentity)
     const profile: StoredServerProfile = {
       id,
-      name: defaultProfileName(serverUrl, serverIdentity),
+      name: defaultProfileName(serverUrl),
+      nameSource: 'url',
       serverUrl,
       serverIdentity,
       encryptedAccessToken: cleanEncryptedToken(legacy.encryptedAccessToken),
@@ -503,7 +511,8 @@ export class SettingsStore {
       activeProfileId: id,
       profiles: [{
         id,
-        name: defaultProfileName(DEFAULT_SERVER_URL, null),
+        name: defaultProfileName(DEFAULT_SERVER_URL),
+        nameSource: 'url',
         serverUrl: DEFAULT_SERVER_URL,
         serverIdentity: null,
         serverSetupComplete: false,
@@ -642,7 +651,6 @@ export class SettingsStore {
   private stageAccessToken(profile: StoredServerProfile, token: string, keychainOnly = false): CredentialMutation {
     const next = { ...profile }
     const account = profileKeychainAccount(profile.id)
-    const oldToken = this.readProfileToken(profile)
     if (!token) {
       next.keychainAccessToken = false
       delete next.encryptedAccessToken
@@ -653,15 +661,24 @@ export class SettingsStore {
       }
     }
 
+    // Rollback restores only the Keychain item. A legacy safeStorage ciphertext
+    // stays in the old settings file until persistence succeeds; decrypting it
+    // here is unnecessary and can synchronously block the main thread on macOS.
+    const oldToken = this.useKeychain && profile.keychainAccessToken ? this.keychain.read(account) : ''
+    if (this.useKeychain && profile.keychainAccessToken && !oldToken) throw new Error(UNREADABLE_ACCESS_TOKEN_ERROR)
+    const macKeychainOnly = process.platform === 'darwin' && this.useKeychain
     let encryptedAccessToken: string | undefined
-    // Startup discovery on macOS uses the bounded existing Keychain helper.
-    // Avoid synchronously entering Chromium OSCrypt while its startup threads
-    // are also opening Keychain. Failure must not fall back to plaintext.
-    if (!keychainOnly && secureCredentialStorageAvailable(this.secureStorage)) {
+    // Apply the bounded Keychain path to every direct macOS save, including
+    // manual Add Server and token replacement, not just startup discovery.
+    // Neither a failed write nor a locked Keychain may enter synchronous OSCrypt.
+    // MAS and other platforms retain their existing secure-storage backend.
+    if (!keychainOnly && !macKeychainOnly && secureCredentialStorageAvailable(this.secureStorage)) {
       encryptedAccessToken = this.secureStorage.encryptString(token).toString('base64')
     }
     const wroteKeychain = this.useKeychain && this.keychain.write(account, token)
-    if (!wroteKeychain && !encryptedAccessToken) throw new Error('Secure token storage is unavailable on this device.')
+    if (!wroteKeychain && !encryptedAccessToken) throw new Error(macKeychainOnly
+      ? 'Secure token storage is unavailable. Unlock your macOS login Keychain, allow AgentsDock access if prompted, then try again.'
+      : 'Secure token storage is unavailable on this device.')
     next.keychainAccessToken = wroteKeychain
     if (encryptedAccessToken) next.encryptedAccessToken = encryptedAccessToken
     else delete next.encryptedAccessToken
@@ -765,11 +782,10 @@ function requireProfileName(value: string): string {
   return name
 }
 
-function defaultProfileName(serverUrl: string, serverIdentity: string | null): string {
-  if (serverIdentity) return serverIdentity
+function defaultProfileName(serverUrl: string): string {
   try {
     const url = new URL(serverUrl)
-    return url.hostname || url.host || 'AgentsServer'
+    return url.host || 'AgentsServer'
   } catch {
     return 'AgentsServer'
   }
@@ -810,11 +826,19 @@ function normalizeProfile(value: unknown, timestamp: string, index: number): Sto
   if (!id) throw new Error(`Server profile ${index + 1} has no ID.`)
   const serverUrl = normalizeServerURL(typeof value.serverUrl === 'string' ? value.serverUrl : DEFAULT_SERVER_URL)
   const serverIdentity = cleanIdentity(typeof value.serverIdentity === 'string' ? value.serverIdentity : null)
+  const savedName = cleanProfileName(typeof value.name === 'string' ? value.name : undefined)
+  // Previous releases used the opaque identity (or hostname before connection)
+  // as the default. Only those exact legacy defaults are repaired, not arbitrary
+  // hash-looking user labels. Explicit custom labels always survive a reload.
+  const nameSource = value.nameSource === 'custom' || value.nameSource === 'url'
+    ? value.nameSource
+    : !savedName || savedName === serverIdentity || savedName === new URL(serverUrl).hostname ? 'url' : 'custom'
   const createdAt = typeof value.createdAt === 'string' && value.createdAt ? value.createdAt : timestamp
   const updatedAt = typeof value.updatedAt === 'string' && value.updatedAt ? value.updatedAt : createdAt
   return {
     id,
-    name: cleanProfileName(typeof value.name === 'string' ? value.name : undefined) || defaultProfileName(serverUrl, serverIdentity),
+    name: nameSource === 'url' || !savedName ? defaultProfileName(serverUrl) : savedName,
+    nameSource,
     serverUrl,
     serverIdentity,
     encryptedAccessToken: cleanEncryptedToken(value.encryptedAccessToken),

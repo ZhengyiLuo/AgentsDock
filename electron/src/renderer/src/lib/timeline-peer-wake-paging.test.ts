@@ -8,38 +8,42 @@ import { isAgentVisibleEvent, messageItemText, projectTimeline, renderTimelineIt
 import { buildTimelineLandmarks } from './timeline-minimap'
 import { activeInboundDelivery } from './queue-actions'
 import { cachedTimelineProjection, clearTimelineProjectionCache } from './timeline-projection-cache'
-import { PAGED_MAILBOX_WAKE_PROMPT, peerMailboxWakePagingFixture } from './test-fixtures/peer-mailbox-wake-paging'
+import { DELEGATED_MAILBOX_WAKE_PROMPT, PAGED_MAILBOX_WAKE_PROMPT, peerMailboxWakePagingFixture } from './test-fixtures/peer-mailbox-wake-paging'
 
 vi.mock('electron', () => ({ app: { getPath: () => '/tmp' } }))
 import { LocalCache } from '../../../main/persistence'
 
-const fixture = peerMailboxWakePagingFixture()
-const snapshot = (events: Event[]): SessionSnapshot => ({
-  session: { id: fixture.sessionId, title: fixture.title, backend: 'codex',
-    latest_agent_event_seq: 107, last_read_agent_event_seq: 107 },
-  events, files: [], queuedTurns: [], hasMoreEvents: false, filesTotal: 0, cachedAt: 0, generation: 0
-})
 const project = (events: Event[]) => renderTimelineItems(projectTimeline(events, []))
-function assertVisibleHistory(events: Event[]) {
-  const rows = project(events)
-  expect(rows.flatMap(row => row.kind === 'message' && row.role === 'user' ? [row.event.id] : []))
-    .toEqual(['mixed-106'])
-  expect(rows.flatMap(row => row.kind === 'message' && row.role === 'assistant' ? [messageItemText(row)] : []))
-    .toEqual([fixture.wakeAnswer, fixture.humanAnswer])
-  expect(rows.filter(row => row.kind === 'system' && row.mailboxMessages)).toMatchObject([{
-    seq: 4, anchorTs: '2026-09-13T12:00:04Z',
-    mailboxMessages: [{ event: { message_id: 'synthetic-peer-message', inbox_state: 'read' } }]
-  }])
-  const landmarks = buildTimelineLandmarks(rows)
-  expect(landmarks.some(item => item.start_seq === 102 || item.title === PAGED_MAILBOX_WAKE_PROMPT && item.start_seq !== 106)).toBe(false)
-  expect(events.reduce(updateActiveSessions, new Set<string>())).toEqual(new Set())
-  expect(activeInboundDelivery(events)).toBeNull()
-  return rows
-}
 
-describe('source-proven paged peer mailbox wake history', () => {
+describe.each([
+  ['original paged helper', PAGED_MAILBOX_WAKE_PROMPT],
+  ['delegated authorization helper', DELEGATED_MAILBOX_WAKE_PROMPT]
+])('source-proven peer mailbox wake history: %s', (_name, wakeText) => {
+  const fixture = peerMailboxWakePagingFixture(wakeText)
+  const snapshot = (events: Event[]): SessionSnapshot => ({
+    session: { id: fixture.sessionId, title: fixture.title, backend: 'codex',
+      latest_agent_event_seq: 107, last_read_agent_event_seq: 107 },
+    events, files: [], queuedTurns: [], hasMoreEvents: false, filesTotal: 0, cachedAt: 0, generation: 0
+  })
+  function assertVisibleHistory(events: Event[]) {
+    const rows = project(events)
+    expect(rows.flatMap(row => row.kind === 'message' && row.role === 'user' ? [row.event.id] : []))
+      .toEqual(['mixed-106'])
+    expect(rows.flatMap(row => row.kind === 'message' && row.role === 'assistant' ? [messageItemText(row)] : []))
+      .toEqual([fixture.wakeAnswer, fixture.humanAnswer])
+    expect(rows.filter(row => row.kind === 'system' && row.mailboxMessages)).toMatchObject([{
+      seq: 4, anchorTs: '2026-09-13T12:00:04Z',
+      mailboxMessages: [{ event: { message_id: 'synthetic-peer-message', inbox_state: 'read' } }]
+    }])
+    const landmarks = buildTimelineLandmarks(rows)
+    expect(landmarks.some(item => item.start_seq === 102 || item.title === wakeText && item.start_seq !== 106)).toBe(false)
+    expect(events.reduce(updateActiveSessions, new Set<string>())).toEqual(new Set())
+    expect(activeInboundDelivery(events)).toBeNull()
+    return rows
+  }
+
   it('requires proof for the exact full helper and preserves a genuine identical human input', () => {
-    expect(PAGED_MAILBOX_WAKE_PROMPT).toContain('Continue a paged read with the same key and cursor.')
+    expect(wakeText).toContain('Continue a paged read with the same key and cursor.')
     expect(project(fixture.beforeEvents).flatMap(row => row.kind === 'message' && row.role === 'user' ? [row.event.id] : []))
       .toEqual(['mixed-102', 'mixed-106'])
     assertVisibleHistory(fixture.afterEvents)
@@ -71,7 +75,7 @@ describe('source-proven paged peer mailbox wake history', () => {
     expect(partial.reduce(updateActiveSessions, new Set<string>())).toEqual(new Set())
     expect(activeInboundDelivery(partial)).toBeNull()
     const unproven = partial.map(event => event.id === proof.id ? {
-      ...event, prompt: PAGED_MAILBOX_WAKE_PROMPT, metadata_only: undefined,
+      ...event, prompt: wakeText, metadata_only: undefined,
       provider_history_repair: undefined, provider_origin: undefined
     } : event)
     expect(project(unproven).some(row => row.kind === 'message' && row.role === 'user')).toBe(true)

@@ -1,5 +1,146 @@
 # Public development log
 
+## 2026-09-28 — Combine editor line endings with desktop/server fixes
+
+- Bring contributor PR #24 into the tested desktop/server follow-up branch,
+  retaining Haokai Ding's authored commit and original commit reference. The
+  runtime/editor test patch is unchanged; resolve only the development log by
+  retaining both histories. The provider/API feature baseline is already in main
+  through PR #47; this integration does not reintroduce it as an unmerged change.
+- On the combined source, 339 editor/workspace/transport tests and 292 isolated
+  server workspace/history/runtime tests passed, plus TypeScript and production
+  compilation. Actual offscreen Electron exercised CRLF, LF and CR edit/save,
+  undo/save and redo/save against a disposable authenticated AgentsServer: nine
+  exact on-disk byte assertions passed. No clipboard access was used in this
+  integration check. Native Windows UI was not exercised.
+- Installed test apps and existing server instances are unchanged by this PR
+  preparation. The contributor's fix is newly included in source, not in the
+  previously installed local test package. No release or deployment is implied.
+
+## 2026-09-28 — Manual server connection saves on macOS
+
+- Direct macOS builds now use the bounded Keychain credential path for manual
+  server creation and token replacement, not only automatic local discovery.
+  Saving no longer enters synchronous Electron OSCrypt. Failed writes keep the
+  old connection intact, report a recoverable error and never store plaintext.
+- Rollback does not decrypt legacy ciphertext unnecessarily. Printable tokens
+  containing command-parser punctuation use Keychain's hexadecimal stdin input;
+  secrets remain absent from process arguments. MAS and other-platform secure
+  storage paths remain unchanged. Existing custom server labels are retained.
+- Validation: 473 focused desktop tests and a full suite of 5,005 tests passed
+  (5 skipped). After extending printable-token transport, all 85 focused
+  settings/Keychain/Team Hub tests passed again. TypeScript, production build and
+  eight package/license checks passed.
+- Real offscreen Electron UI exercised manual Test connection, Add & switch,
+  token replacement, custom rename and process reopening against two isolated
+  authenticated AgentsServer instances, using the actual macOS Keychain, not a
+  credential mock. Reopened connections and both custom names survived. Failure
+  rollback and secure-store denial are regression-tested; the user's remote
+  machine/network and a physically locked Keychain were not exercised.
+- Availability: local test build; no server restart, publication or deployment.
+
+## 2026-09-27 — Mailbox input ownership and scoped macOS file discovery
+
+- Integrate the existing native-continuation ownership fix: retain the initial
+  Codex input turn ID separately from its later continuation. Older history
+  requires exact, unambiguous assistant-item and completed-run evidence before
+  classifying a replay as internal. Genuine user messages with identical words
+  remain visible; original provider transcripts and audit events are not edited.
+- Recursive workspace search from Home or an ancestor no longer enters the
+  macOS user's private/system-managed home trees. Skip these paths before
+  opening or inspecting them, including empty queries; bypass Git's recursive
+  untracked-file enumeration for these broad scopes. Explicit project scopes,
+  direct opens, normal same-named project folders and OS permission errors retain
+  their existing behavior. This is not a new sandbox or a permission grant.
+- Validation: server batches of 290 and 131 focused tests passed (overlapping);
+  desktop batches of 140 and 60 passed (overlapping), plus TypeScript checking
+  and production compilation. New privacy regressions cover broad and explicit
+  scopes, Git fallback, empty/missing searches, aliases, symlinks and denied access.
+- Isolated offscreen production Electron reproduced both discovery of synthetic
+  app-container files and a duplicate internal input with the old history repair.
+  Through real IPC, authenticated HTTP, WebSocket catch-up and local cache, verify
+  corrected history, older-page loading, refresh and app reopening. One genuine
+  same-text user input and the original replies remain. Opening the file palette,
+  searching, switching workspace and explicitly opening a synthetic private path
+  exercise the new search boundary. Fixture transcript/ledger hashes are unchanged.
+- Limits: no real private app data or macOS TCC settings were accessed; the
+  reported permission dialog and remote customer's exact ledger were not tested.
+  Provider records are synthetic; continuation execution is covered by controlled
+  native-router regressions, not a new live-model request. No mobile, packaged
+  release, existing service restart or deployment is claimed. A new server
+  candidate must include these changes; frozen release artifacts are unchanged.
+
+## 2026-09-27 — Readable default server names
+
+- Unnamed desktop server connections use their URL host and port rather than
+  the opaque server identity. Remember whether a label is automatic or custom;
+  automatic labels follow URL edits, while explicit names remain unchanged.
+- Normalize exact legacy identity/hostname defaults on settings load without
+  changing profile IDs, server identities, credentials or cached chat ownership.
+- Validation: 64 focused settings/selector/management tests, TypeScript and
+  production compilation passed. Two full-suite attempts each passed 4,997 tests
+  (5 skipped) but encountered different unrelated UI timing failures; the
+  WorkspaceEditor and WorkingDirectoryPopover files passed all 136 tests on
+  isolated retries. Full-suite green is not claimed. Eight package/license
+  checks also passed.
+- Actual isolated offscreen Electron exercised legacy-name migration, adding
+  an unnamed server through authenticated native HTTP, manual rename, app
+  restart and switching servers. Dark/light and narrow layout were inspected.
+  No live app replacement, existing service restart, mobile change or release.
+
+## 2026-09-27 — My Agents and clearer chat deletion copy
+
+- Rename the desktop settings section to **My Agents** / **我的 Agent**,
+  including navigation, onboarding guidance, accessible card labels and server
+  recovery instructions. Fill Chinese endpoint/model/key wording without
+  translating product names, CLI commands or API protocol identifiers.
+- Label chat deletion **Delete from AgentsDock** and explain that history in
+  the original agent is retained. Sidebar, header and confirmation use the
+  same wording; deletion behavior is unchanged. Correct the obsolete Codex
+  Forget success message to describe blocked sends until reconnection.
+- Validation: 4,991 desktop tests passed, 5 skipped, plus 8 package checks;
+  41 isolated server tests, TypeScript and production compilation passed.
+  The focused bilingual regression set contains 167 passing tests (included
+  in the desktop total). Audited 144 connection/account/model locale entries.
+- Actual offscreen production Electron with disposable profile/server state
+  exercised English and Chinese settings navigation, Claude/Cursor/OpenCode API forms,
+  authentication-error copy, model discovery against a synthetic loopback
+  endpoint, Forget confirmation/cancellation, and chat deletion cancellation.
+  Production IPC/native HTTP/storage ran intact; no real provider inference
+  or native-history deletion acceptance was repeated for this copy-only change.
+  Light/dark and narrow layout were inspected. Chinese startup was seeded in
+  the disposable language preference; native language-popup interaction was
+  not certified by this offscreen run.
+- Availability: local source/build only. No live app replacement, existing
+  server restart, mobile change, publication or deployment.
+
+## 2026-09-27 — Desktop line-ending integration accepted locally
+
+- Integrated PR #24 from contributor commit `3f29f4d9` as `a4f6b281`, retaining
+  the original author. Only the development-log conflict required resolution.
+- Reproduced CRLF-to-LF rewriting on the preceding main build. The candidate
+  preserves CRLF, LF and CR through native edit/save, undo and redo; mixed files
+  normalize to the first separator. Native clipboard paste, external reloads,
+  restored YAML folds/cursor positions, UTF-8/CRLF byte-limit boundaries and
+  stale-save rejection/reload recovery passed with byte-level file checks.
+- Acceptance used isolated offscreen Electron 43.1.1, the production app build
+  and AgentsServer `1.0.7-beta.11`, through real IPC, authenticated HTTP and
+  revision-checked filesystem writes. Only disposable credential storage and
+  fixture setup were synthetic; no provider inference was needed or claimed.
+- Validation: 339 focused desktop tests and 53 server workspace-file tests,
+  TypeScript checking and production compilation passed. Availability: local
+  source/build only; no package installation, release, deployment or merge.
+
+## 2026-09-17 — Preserve desktop editor line endings
+
+- Preserve a file's first line-ending style when emitting edits, including undo
+  and redo. External reloads adopt the newly loaded style; mixed line endings
+  normalize to the first separator on edit.
+- Count UTF-8 limits against serialized output, including both bytes of CRLF.
+  Keep cursor, fold and replacement ranges in CodeMirror's logical coordinates.
+- Add regressions for line-ending preservation, external reloads, LF inserts in
+  CRLF documents, byte limits, cursor clamping and fold restoration.
+
 ## 2026-09-27 — Custom API live acceptance and API-only chat routing
 
 - Cursor and OpenCode advertise cross-chat transport when their CLI is installed

@@ -1121,7 +1121,7 @@ function FolderDialog() {
   </Shell>
 }
 
-function ConfirmDeleteDialog() {
+export function ConfirmDeleteDialog() {
   useLocale()
   const [session, setSession] = useState<Session | null>(null)
   const [deleting, setDeleting] = useState(false)

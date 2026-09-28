@@ -63,6 +63,10 @@ The access token is stored as a generic macOS Keychain password under the
 `com.zhengyiluo.AgentsDock` service. Packaged startup never decrypts legacy
 Electron `safeStorage` data synchronously; that can block before a window exists
 when an ad-hoc signing identity changes.
+Direct macOS builds also use the bounded Keychain helper when manually adding
+servers or replacing tokens. A failed write leaves the existing connection
+intact and reports an error; it never falls back to synchronous OSCrypt or
+plaintext. Sandboxed Mac App Store and other-platform storage is unchanged.
 
 The app uses a local SQLite cache at the same application-support location.
 Server identity scopes sessions, preferences, timeline rows, read state, jobs,
