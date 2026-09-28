@@ -1,5 +1,18 @@
 # Public development log
 
+## 2026-09-28 — Restore interactive shares after queue recovery changes
+
+- Fix authenticated shared-chat snapshots rejecting the new queue recovery
+  status. This caused a successful token entry to lead to a generic unavailable
+  page instead of the conversation.
+- Project the supported public fields and omit unknown additive metadata, so
+  internal additions cannot leak or make the entire shared chat unavailable.
+  Preserve authentication, revocation, and session/event ownership validation.
+- Pass 49 route and native integration tests, including initial reads, cookie
+  reuse, stream reconnects, recovery status, metadata omission, and revocation.
+- Availability: committed and tested server source; activation and release
+  acceptance are recorded separately.
+
 ## 2026-09-28 — Activate queue recovery and provider-selection fixes
 
 - Deploy committed server source `d5b5dab`, including independent startup queue
