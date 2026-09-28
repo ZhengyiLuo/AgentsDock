@@ -1,5 +1,24 @@
 # Public development log
 
+## 2026-09-27 — Accept local desktop beta.20
+
+- Accept signed Apple silicon desktop `1.0.7-beta.20`, build `1225`, from
+  committed source `d84c3e2`, including existing-chat endpoint switching and
+  refreshed endpoint credentials. Pair it with the server fix from `96e7c1e`.
+- Pass 4,954 desktop tests (five intentional skips), TypeScript, production
+  compilation, bundle audit and deep signature verification. All 88 packaged
+  production files match the compiled snapshot exactly. Verify the Developer
+  ID identity, hardened runtime, architecture and local-build update setting.
+- Use the real desktop IPC, authenticated full server and native Codex workflow
+  acceptance recorded below. Its upstream Responses fixture remains synthetic;
+  this local package does not establish external-provider compatibility.
+- Install the complete verified bundle on the requested test machine. Match
+  all 603 transferred bundle entries, including file hashes, modes and links;
+  verify the installed signature and app payload again. Quit normally, preserve
+  the previous bundle, reopen, and verify a fresh stable application process.
+- Availability: installed local desktop build with automatic updating disabled.
+  No public desktop feed, npm package or mobile release is published here.
+
 ## 2026-09-27 — Change Codex endpoints in existing conversations
 
 - Keep the existing Codex conversation when switching between normal Codex
