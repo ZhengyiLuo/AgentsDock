@@ -8,19 +8,23 @@ const { spawnSync } = require('node:child_process')
 
 const HELP = `Usage: agentsdock setup [--port PORT] [--bind IP] [--non-interactive] [--dry-run]
        agentsdock install [same options as setup]
-       agentsdock servers [list | info NAME | new [--name NAME] [--port PORT] [--bind IP]]
-       agentsdock servers start|stop|restart|remove NAME
-       agentsdock token [--instance NAME]
-       agentsdock status [--instance NAME]
+       agentsdock list
+       agentsdock info NAME
+       agentsdock new [NAME] [--port PORT] [--bind IP]
+       agentsdock start|stop|restart|remove NAME
+       agentsdock token [NAME]
+       agentsdock status [NAME]
        agentsdock update --server-url URL --server-identity ID --server-instance-id ID
          --token-file PATH --manifest PATH --signature PATH
        agentsdock recover
        agentsdock --version
 
-setup/install creates a fresh default server. Use servers new for another instance.
-servers remove asks for confirmation and preserves history by default.
+setup/install creates a fresh default server. Use new for another instance.
+remove (also uninstall) asks for confirmation and preserves history by default.
 token shows the existing token (default instance if omitted); keep it private.
 update uses the signed managed updater; npm installation alone never upgrades a running server.
+start/stop/restart/remove also accept --all [--exclude NAME]; an omitted target never selects all.
+new --name NAME, token/status --instance NAME, and servers/instances ACTION remain supported.
 Install this command globally with npm install -g agentsdock, or use npx agentsdock.
 `
 const ROOT_SELECTORS = ['AGENTS_SERVER_INSTALL_DIR', 'AGENTS_SERVER_CONFIG_DIR',
@@ -31,18 +35,32 @@ const ENV_KEYS = ['PATH', 'USER', 'LOGNAME', 'SHELL', 'TMPDIR', 'LANG', 'LC_ALL'
 
 function selector(args, fallback) {
   if (!args.length) return fallback
-  if (args.length !== 2 || args[0] !== '--instance' || !/^[a-z][a-z0-9-]{0,31}$/.test(args[1])) {
-    throw new Error('Use --instance NAME to select one server.')
+  const name = args.length === 1 ? args[0] : args.length === 2 && args[0] === '--instance' ? args[1] : ''
+  if (!/^[a-z][a-z0-9-]{0,31}$/.test(name)) throw new Error('Use NAME or --instance NAME to select one server.')
+  return name
+}
+
+const INSTANCE_ACTIONS = ['list', 'info', 'new', 'start', 'stop', 'restart', 'remove']
+function instanceRequest(action, args) {
+  if (!INSTANCE_ACTIONS.includes(action)) {
+    throw new Error('Use list, info, new, start, stop, restart, or remove. Use agentsdock update for signed updates.')
   }
-  return args[1]
+  if (action === 'new' && args[0] && !args[0].startsWith('-')) {
+    const name = selector([args[0]])
+    if (args.slice(1).some(value => value === '--name' || value.startsWith('--name='))) {
+      throw new Error('Select the new instance name once: NAME or --name NAME.')
+    }
+    args = ['--name', name, ...args.slice(1)]
+  }
+  return { kind: 'local', script: 'instances.sh', args: [action, ...args] }
 }
 
 function parse(argv) {
   const [command = '--help', ...args] = argv
   if (argv.some(value => /[\x00-\x1f\x7f]/.test(value))) throw new Error('Invalid control character in arguments.')
-  if (['help', '--help', '-h', '--version'].includes(command)) {
+  if (['help', '--help', '-h', '--version', 'version'].includes(command)) {
     if (args.length) throw new Error('Unexpected arguments.')
-    return { kind: command === '--version' ? 'version' : 'help' }
+    return { kind: ['--version', 'version'].includes(command) ? 'version' : 'help' }
   }
   if (['setup', 'install', 'update', 'recover'].includes(command)) {
     return { kind: 'core', args: [command === 'setup' ? 'install' : command, ...args] }
@@ -54,14 +72,14 @@ function parse(argv) {
     const name = selector(args)
     return { kind: 'local', script: 'instances.sh', args: name ? ['info', name] : ['list'] }
   }
+  if (INSTANCE_ACTIONS.includes(command) || command === 'uninstall') {
+    return instanceRequest(command === 'uninstall' ? 'remove' : command, args)
+  }
   if (['servers', 'instances'].includes(command)) {
     const [action = 'list', ...rest] = args
     // Internal binding helpers, manifests and the checkout-only update bypass
     // are not public npm commands. Python retains all instance/path validation.
-    if (!['list', 'info', 'new', 'start', 'stop', 'restart', 'remove'].includes(action)) {
-      throw new Error('Use servers list, info, new, start, stop, restart, or remove. Use agentsdock update for signed updates.')
-    }
-    return { kind: 'local', script: 'instances.sh', args: [action, ...rest] }
+    return instanceRequest(action, rest)
   }
   throw new Error('Unknown command. Run agentsdock --help.')
 }

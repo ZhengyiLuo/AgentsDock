@@ -112,8 +112,8 @@ the update migration.
 
 The public [`agentsdock` CLI](npm/agentsdock/README.md) is being prepared as the
 short entry point. After publication, install it with `npm install -g agentsdock`
-and use `agentsdock setup`, `agentsdock servers list`, and
-`agentsdock token --instance NAME`. Local npm installs use `npx agentsdock`.
+and use `agentsdock setup`, `agentsdock list`, `agentsdock restart NAME`, and
+`agentsdock token NAME`. Local npm installs use `npx agentsdock`.
 The CLI pins the same-version `@agentsdock/server` runtime and preserves its
 signed update protocol. Installing the npm command alone does not start or
 upgrade a service. Existing published scoped-package instructions remain

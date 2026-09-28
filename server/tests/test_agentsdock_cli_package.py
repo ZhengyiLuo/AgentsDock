@@ -107,8 +107,11 @@ class AgentsDockCliPackageTests(unittest.TestCase):
                 "--no-audit", "--no-fund", "--offline", *archives])
         env["PATH"] = str(prefix / "bin") + os.pathsep + env["PATH"]
         self.assertEqual(invoke(["agentsdock", "--version"]).strip(), cli["version"])
+        self.assertEqual(invoke(["agentsdock", "version"]).strip(), cli["version"])
         self.assertIn("agentsdock setup", invoke(["agentsdock", "--help"]))
+        self.assertIn("agentsdock list", invoke(["agentsdock", "help"]))
         self.assertIn("No installations found", invoke(["agentsdock", "servers", "list"]))
+        self.assertIn("No installations found", invoke(["agentsdock", "list"]))
         self.assertIn("No installations found", invoke(["agentsdock", "status"]))
         self.assertIn("No unfinished default", invoke(["agentsdock", "recover"]))
         # Private synthetic config; no service or real credential is involved.
@@ -124,6 +127,7 @@ class AgentsDockCliPackageTests(unittest.TestCase):
         named_env.write_text("AGENTSDOCK_AGENT_TOKEN=separate-fixture-token\n")
         named_env.chmod(0o600)
         self.assertEqual(invoke(["agentsdock", "token", "--instance", "work"]).strip(), "separate-fixture-token")
+        self.assertEqual(invoke(["agentsdock", "token", "work"]).strip(), "separate-fixture-token")
         self.assertEqual(invoke(["agentsdock", "token", "--instance", "default"]).strip(), "fixture-only-token")
         before = private_env.read_bytes()
         rejected = subprocess.run(["agentsdock", "install", "--dry-run"], cwd=outside,
@@ -131,6 +135,12 @@ class AgentsDockCliPackageTests(unittest.TestCase):
         self.assertNotEqual(rejected.returncode, 0)
         self.assertIn("existing server installation or state", rejected.stderr)
         self.assertEqual(private_env.read_bytes(), before)
+        for command in ("restart", "remove", "uninstall"):
+            rejected = subprocess.run(["agentsdock", command], cwd=outside, env=env,
+                                      capture_output=True, text=True, timeout=20)
+            self.assertNotEqual(rejected.returncode, 0)
+            self.assertIn("Select exactly one instance or --all", rejected.stderr)
+            self.assertEqual(private_env.read_bytes(), before)
         self.assertFalse((home / "Library/LaunchAgents").exists())
         self.assertFalse((home / ".config/systemd").exists())
 

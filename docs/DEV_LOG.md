@@ -1,5 +1,22 @@
 # Public development log
 
+## 2026-09-28 — Flatten public CLI instance commands
+
+- Make `agentsdock list`, `info`, `new`, `start`, `stop`, `restart` and `remove`
+  the primary instance interface. Accept `new NAME`, `token NAME`, `status NAME`,
+  `uninstall NAME` and `version`; preserve the earlier `servers`/`instances`
+  commands and explicit name flags. Conflicting positional/flag selectors are
+  rejected rather than silently choosing a different instance.
+- Document the full old/new public command mapping, bulk selectors and actual
+  differences: fresh-only setup, signed updates, guarded recovery, and explicit
+  uninstall targets. Source-only reconfiguration, bulk manifests, Team Hub and
+  developer/transaction controls are not presented as implemented short commands.
+- Validation: 27 JavaScript CLI tests and four Python packaging tests passed.
+  Actual npm global/local installations exercise the flat command, version,
+  per-instance token reads and rejection of restart/remove without a target.
+  Synthetic configuration is retained and no service is created or controlled.
+  No existing server restart, provider execution, deployment or npm publication.
+
 ## 2026-09-28 — Prepare the short agentsdock npm command
 
 - Add the `agentsdock` CLI package, pinning the exact same-version

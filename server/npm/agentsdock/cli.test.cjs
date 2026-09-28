@@ -67,6 +67,37 @@ test('status and public server commands delegate exact argument arrays with term
   }
 })
 
+test('flat commands and positional selectors produce the same native request as existing forms', async t => {
+  const f = fixture(t)
+  for (const action of ['list', 'info', 'new', 'start', 'stop', 'restart', 'remove']) {
+    const args = action === 'list' ? [] : action === 'new' ? ['--name', 'work'] : ['work']
+    assert.deepEqual(parse([action, ...args]), parse(['servers', action, ...args]))
+    await run([action, ...args], f.context)
+    assert.deepEqual(f.calls.at(-1)[1], [path.join(f.payload, 'instances.sh'), action, ...args])
+  }
+  for (const action of ['token', 'status']) {
+    assert.deepEqual(parse([action, 'work']), parse([action, '--instance', 'work']))
+    assert.throws(() => parse([action, 'work', '--instance', 'other']), /select one server/)
+  }
+  assert.deepEqual(parse(['new', 'work', '--port', '7854']), parse(['new', '--name', 'work', '--port', '7854']))
+  assert.deepEqual(parse(['servers', 'new', 'work']), parse(['new', '--name', 'work']))
+  assert.deepEqual(parse(['uninstall', 'work']), parse(['remove', 'work']))
+  assert.deepEqual(parse(['version']), parse(['--version']))
+  for (const args of [['new', 'work', '--name', 'other'], ['new', 'work', '--name=other'],
+    ['new', '../other'], ['token', '../other'], ['status', '--all']]) assert.throws(() => parse(args))
+})
+
+test('flat destructive controls preserve explicit selectors and never infer a bulk target', () => {
+  for (const action of ['start', 'stop', 'restart', 'remove', 'uninstall']) {
+    const native = action === 'uninstall' ? 'remove' : action
+    assert.deepEqual(parse([action]).args, [native]) // native helper rejects the missing target
+    assert.deepEqual(parse([action, '--all', '--exclude', 'default']).args, [native, '--all', '--exclude', 'default'])
+  }
+  assert.deepEqual(parse(['remove', 'work', '--purge-state']).args, ['remove', 'work', '--purge-state'])
+  assert.throws(() => parse(['servers', 'update', 'work']), /signed updates/)
+  assert.throws(() => parse(['servers', 'install', '--manifest', 'batch.json']), /signed updates/)
+})
+
 test('local helpers reject root/custom selectors and strip shell/Python startup and credentials', async t => {
   const f = fixture(t)
   for (const env of [{ AGENTSDOCK_STATE_DIR: '/other' }, { AGENTS_SERVER_INSTANCE: 'other' },
