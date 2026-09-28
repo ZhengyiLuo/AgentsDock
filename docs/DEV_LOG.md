@@ -1,5 +1,19 @@
 # Public development log
 
+## 2026-09-28 — Add scoped native validation for the npm-only release
+
+- Add an explicit, non-publishing CI dispatch for the exact three-file signed
+  npm draft. Bind installation to its source, manifest hash, workflow run and
+  attempt; require clean disposable hosted macOS/Linux accounts.
+- Exercise fresh installation, authenticated health, exact runtime bytes and
+  permissions, refusal over existing state, permanent/cache-independent native
+  restart and identity/token preservation. Upload only bounded sanitized
+  observations. No developer services, desktop builds or trust routing change.
+- Keep the full product acceptance gate unchanged. This lane does not claim
+  provider chats, reboot, migration, busy/queued work or coordinated updates.
+- Pass 263 release-tooling/CLI tests, 78 Python helper tests, workflow lint and
+  independent review. Actual signing/native execution/publication are pending.
+
 ## 2026-09-28 — Prepare an explicitly scoped npm-only stable release
 
 - Prepare `@agentsdock/server@1.0.7` from the server runtime in tested
