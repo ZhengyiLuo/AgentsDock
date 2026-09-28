@@ -12,7 +12,7 @@ own versioned installation directory, never from an npm or npx cache.
 After this package is published, a fresh user installation can use:
 
 ```sh
-npx @agentsdock/server@beta install --port 7850
+npx @agentsdock/server@1.0.7 install --port 7850
 ```
 
 Use an exact package version for reproducible installations. The command needs
@@ -32,7 +32,7 @@ If the withdrawn 1.0.4 update left an existing server stuck, run this once as
 the server's user, on the computer hosting it:
 
 ```sh
-npx @agentsdock/server@1.0.5 recover
+npx @agentsdock/server@1.0.7 recover
 ```
 
 Then choose **Retry server update** in AgentsDock's Settings → Updates. This

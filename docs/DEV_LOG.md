@@ -1,5 +1,23 @@
 # Public development log
 
+## 2026-09-28 — Prepare an explicitly scoped npm-only stable release
+
+- Prepare `@agentsdock/server@1.0.7` from the server runtime in tested
+  `1.0.7-beta.18`, source `78e113f806b023a1caa925bb9ff763adc79c2842`.
+  Do not substitute the newer provider-settings runtime from main. The only
+  server-tree changes are the public version and npm README commands; the
+  latter no longer points recovery users to withdrawn `1.0.5`.
+- Backport the reviewed exact first-stable npm transition guard. The explicit
+  publication approval targets `latest` from `1.0.7-beta.5` to `1.0.7`, with
+  `beta` unchanged and exact signed-package registry readback required.
+- This is a separately authorized npm-only release, not completed bundled
+  product acceptance. Reuse the existing server signer in place; no desktop
+  feed, GitHub product release, app build or mobile submission is included.
+- Pass 252 release-tooling/CLI tests, 11 offline npm packaging tests and
+  workflow lint. Independent review confirms unchanged server runtime and
+  preservation of the explicit first-stable signature/source/channel guards.
+- Signing, exact stable-package verification and npm publication remain pending.
+
 ## 2026-09-27 — Match native acceptance to the installer entry-point mode
 
 - Reserve `1.0.7-beta.18`, native build `1223`, for the corrected rehearsal.

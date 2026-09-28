@@ -25,6 +25,7 @@ function runStep(name) {
 const identityGuard = runStep('Require the reviewed workflow and source commit')
 const ancestryGuard = runStep('Bind accepted product source to the reviewed publishing workflow')
 const registryVerification = runStep('Verify the public registry metadata and exact downloaded bytes')
+const registryPreflight = runStep('Verify acceptance pin, signature, exact payload and registry preconditions')
 
 function bash(script, env, cwd) {
   return spawnSync('/bin/bash', ['--noprofile', '--norc', '-e', '-o', 'pipefail', '-c', `${script}\nprintf 'publication-authorized\\n'`], {
@@ -96,6 +97,28 @@ test('checkout and publication verification remain pinned to the accepted produc
   assert.match(publish, /npm publish "\$ARCHIVE" --ignore-scripts --access public --tag "\$DIST_TAG"/)
   assert.doesNotMatch(publish, /npm (?:pack|dist-tag)|package_npm_release\.py --output/)
   assert(publish.indexOf('Bind accepted product source') < publish.indexOf('Download the accepted signed bundle'))
+})
+
+test('first-stable opt-in is explicit, empty by default, and reaches only read-only preflight', t => {
+  assert.equal((workflow.match(/      first_stable_from_latest:\n/g) ?? []).length, 2)
+  assert.match(workflow, /first_stable_from_latest:\n        type: string\n        default: ''/)
+  assert.match(workflow, /first_stable_from_latest:\n        description: Publish only;[^\n]*\n        type: string\n        default: ''/)
+  assert.match(publish, /FIRST_STABLE_FROM_LATEST: \$\{\{ inputs\.first_stable_from_latest \}\}/)
+  assert.doesNotMatch(registryVerification, /FIRST_STABLE|--first-stable/)
+  const base = mkdtempSync(join(tmpdir(), 'agentsdock-first-stable-workflow-'))
+  t.after(() => rmSync(base, { recursive: true, force: true }))
+  const argsPath = join(base, 'arguments')
+  writeFileSync(join(base, 'node'), '#!/bin/bash\nprintf \'%s\\0\' "$@" > "$QA_ARGUMENTS"\n', { mode: 0o700 })
+  for (const approved of ['', '1.0.7-beta.5', 'unexpected value; must remain one argument']) {
+    const env = { ...pins('a'.repeat(40)), PATH: base, RUNNER_TEMP: join(base, 'runner temp'), QA_ARGUMENTS: argsPath, FIRST_STABLE_FROM_LATEST: approved }
+    const result = bash(registryPreflight, env, base)
+    assert.equal(result.status, 0, result.stderr)
+    assert.deepEqual(readFileSync(argsPath, 'utf8').split('\0').slice(0, -1), [
+      'scripts/verify_npm_publication.mjs', 'preflight', `${env.RUNNER_TEMP}/npm-candidate`, env.SOURCE_SHA,
+      env.ACCEPTED_MANIFEST_SHA256, `${env.RUNNER_TEMP}/npm-candidate-release.json`, `${env.RUNNER_TEMP}/npm-registry-before.json`,
+      ...(approved ? ['--first-stable-from-latest', approved] : []),
+    ])
+  }
 })
 
 test('manual guard accepts equal pins and an explicitly reviewed workflow descendant', () => {

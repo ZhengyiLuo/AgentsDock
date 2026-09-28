@@ -88,7 +88,7 @@ async function packument(fetchImpl) {
 
 function versionParts(version) {
   const match = typeof version === 'string' && /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-beta\.([1-9]\d*))?$/.exec(version)
-  if (!match) throw new Error('Registry dist-tag has an unsupported version; review it before publishing.')
+  if (!match || match[0] !== version) throw new Error('Registry dist-tag has an unsupported version; review it before publishing.')
   return [BigInt(match[1]), BigInt(match[2]), BigInt(match[3]), match[4] === undefined ? null : BigInt(match[4])]
 }
 
@@ -101,18 +101,33 @@ function advancesVersion(candidate, current) {
   return next[3] === null || (previous[3] !== null && next[3] > previous[3])
 }
 
-function validateChannelTags(tags) {
+function validateFirstStableFromLatest(candidate, expectedLatest) {
+  const target = versionParts(candidate.descriptor.version)
+  const previous = versionParts(expectedLatest)
+  if (candidate.distTag !== 'latest' || candidate.descriptor.track !== 'stable' || target[3] !== null || previous[3] === null || target.slice(0, 3).some((part, index) => part !== previous[index])) throw new Error('First-stable approval requires an exact beta latest and its accepted same-base stable candidate.')
+}
+
+function validateFirstStableInventory(candidate, metadata) {
+  // Recheck every observed packument, including publication readback and the
+  // refreshed metadata used by immutable retries. Only the accepted target may
+  // appear as stable; unknown formats cannot establish a first-stable inventory.
+  for (const existing of Object.keys(metadata.versions)) {
+    if (versionParts(existing)[3] === null && existing !== candidate.descriptor.version) throw new Error('First-stable approval requires no existing stable npm versions other than the exact accepted target.')
+  }
+}
+
+function validateChannelTags(tags, firstStableFromLatest) {
   if (!isRecord(tags) || Object.keys(tags).sort().join(',') !== 'beta,latest') throw new Error('Registry snapshot has invalid channel tags.')
   for (const tag of ['latest', 'beta']) {
     if (tags[tag] === null) continue
     const parts = versionParts(tags[tag])
-    if (tag === 'latest' && parts[3] !== null) throw new Error('npm latest must select a stable version, never a prerelease. Review the registry state explicitly; no tag will be repaired automatically.')
+    if (tag === 'latest' && parts[3] !== null && tags.latest !== firstStableFromLatest) throw new Error('npm latest must select a stable version, never a prerelease. Review the registry state explicitly; no tag will be repaired automatically.')
   }
 }
 
-function registryChannelTags(metadata) {
+function registryChannelTags(metadata, firstStableFromLatest) {
   const tags = Object.fromEntries(['latest', 'beta'].map(tag => [tag, Object.hasOwn(metadata['dist-tags'], tag) ? metadata['dist-tags'][tag] : null]))
-  validateChannelTags(tags)
+  validateChannelTags(tags, firstStableFromLatest)
   for (const tag of ['latest', 'beta']) {
     if (tags[tag] === null) {
       if (Object.hasOwn(metadata['dist-tags'], tag)) throw new Error(`Registry ${tag} dist-tag is malformed; review it before publishing.`)
@@ -124,13 +139,17 @@ function registryChannelTags(metadata) {
   return tags
 }
 
-function registrySnapshot(candidate, metadata) {
-  return { schema: 1, package: candidate.descriptor.npm.name, version: candidate.descriptor.version, distTag: candidate.distTag, sourceSHA: candidate.descriptor.commit, manifestSHA256: candidate.manifestSHA256, distTags: registryChannelTags(metadata) }
+function registrySnapshot(candidate, metadata, firstStableFromLatest) {
+  return { schema: 1, package: candidate.descriptor.npm.name, version: candidate.descriptor.version, distTag: candidate.distTag, sourceSHA: candidate.descriptor.commit, manifestSHA256: candidate.manifestSHA256, distTags: registryChannelTags(metadata, firstStableFromLatest), ...(firstStableFromLatest === undefined ? {} : { firstStableFromLatest }) }
 }
 
 function validateSnapshot(candidate, snapshot) {
   if (!isRecord(snapshot) || snapshot.schema !== 1 || snapshot.package !== candidate.descriptor.npm.name || snapshot.version !== candidate.descriptor.version || snapshot.distTag !== candidate.distTag || snapshot.sourceSHA !== candidate.descriptor.commit || snapshot.manifestSHA256 !== candidate.manifestSHA256) throw new Error('Registry verification requires the preflight snapshot bound to this exact accepted candidate.')
-  validateChannelTags(snapshot.distTags)
+  if (Object.hasOwn(snapshot, 'firstStableFromLatest')) {
+    validateFirstStableFromLatest(candidate, snapshot.firstStableFromLatest)
+    if (![snapshot.firstStableFromLatest, candidate.descriptor.version].includes(snapshot.distTags?.latest)) throw new Error('First-stable snapshot does not match its explicitly approved latest transition.')
+  }
+  validateChannelTags(snapshot.distTags, snapshot.firstStableFromLatest)
 }
 
 function verifyChannelSnapshot(candidate, metadata, snapshot) {
@@ -152,15 +171,26 @@ export async function verifyRegistry(candidate, { fetchImpl = fetch, snapshot } 
   const metadata = await packument(fetchImpl)
   verifyChannelSnapshot(candidate, metadata, snapshot)
   verifyPublishedMetadata(candidate, metadata)
+  if (Object.hasOwn(snapshot, 'firstStableFromLatest')) validateFirstStableInventory(candidate, metadata)
   const archive = await requestBytes(candidate.descriptor.archive.url, candidate.descriptor.archive.size, fetchImpl)
   verifyArchiveBytes(archive, candidate.descriptor)
   return { version: candidate.descriptor.version, distTag: candidate.distTag, integrity: candidate.descriptor.npm.integrity, verified: true }
 }
 
-export async function publicationPreflight(candidate, { fetchImpl = fetch } = {}) {
+export async function publicationPreflight(candidate, { fetchImpl = fetch, firstStableFromLatest } = {}) {
+  if (firstStableFromLatest !== undefined) validateFirstStableFromLatest(candidate, firstStableFromLatest)
   const metadata = await packument(fetchImpl)
-  const snapshot = registrySnapshot(candidate, metadata)
+  const snapshot = registrySnapshot(candidate, metadata, firstStableFromLatest)
   const version = candidate.descriptor.version
+  if (firstStableFromLatest !== undefined) {
+    // This approval is not a general tag repair. The only two admissible states
+    // are the exact reviewed prior beta, or an already-published exact target.
+    if (![firstStableFromLatest, version].includes(snapshot.distTags.latest)) throw new Error('First-stable approval does not match the observed latest dist-tag.')
+    const alreadyPublished = Object.hasOwn(metadata.versions, version)
+    if (snapshot.distTags.latest === firstStableFromLatest && alreadyPublished) throw new Error('First-stable target already exists without selecting latest; no tag will be repaired automatically.')
+    if (snapshot.distTags.latest === version && !alreadyPublished) throw new Error('First-stable latest must select an existing matching package version.')
+    validateFirstStableInventory(candidate, metadata)
+  }
   if (Object.hasOwn(metadata.versions, version)) {
     // A retry after successful publication verifies identical bytes, and never
     // republishes an immutable version or silently moves a dist-tag backward.
@@ -175,19 +205,21 @@ export async function publicationPreflight(candidate, { fetchImpl = fetch } = {}
 }
 
 async function main() {
-  const [operation, directory, sourceSHA, acceptedManifestSHA256, releasePath, snapshotPath] = process.argv.slice(2)
-  if (!['inspect', 'preflight', 'verify'].includes(operation) || !releasePath || (operation === 'inspect' ? process.argv.length !== 7 : process.argv.length !== 8 || !snapshotPath)) throw new Error('Usage: verify_npm_publication.mjs inspect DIRECTORY SOURCE_SHA ACCEPTED_MANIFEST_SHA256 DRAFT_RELEASE_JSON; preflight|verify requires an additional REGISTRY_SNAPSHOT_JSON path.')
+  const [operation, directory, sourceSHA, acceptedManifestSHA256, releasePath, snapshotPath, approvalFlag, firstStableFromLatest] = process.argv.slice(2)
+  const explicitFirstStable = operation === 'preflight' && process.argv.length === 10 && approvalFlag === '--first-stable-from-latest' && firstStableFromLatest
+  if (!['inspect', 'preflight', 'verify'].includes(operation) || !releasePath || (operation === 'inspect' ? process.argv.length !== 7 : (process.argv.length !== 8 && !explicitFirstStable) || !snapshotPath)) throw new Error('Usage: verify_npm_publication.mjs inspect DIRECTORY SOURCE_SHA ACCEPTED_MANIFEST_SHA256 DRAFT_RELEASE_JSON; preflight|verify requires an additional REGISTRY_SNAPSHOT_JSON path. Only preflight accepts --first-stable-from-latest EXACT_BETA_VERSION.')
   const candidate = validateCandidate({ directory, sourceSHA, acceptedManifestSHA256, appVersion: readFileSync(join(ROOT, 'server/VERSION'), 'utf8').trim(), release: JSON.parse(readRegular(releasePath, 1024 * 1024)) })
   if (operation === 'inspect') {
     console.log(JSON.stringify({ version: candidate.descriptor.version, distTag: candidate.distTag, archive: candidate.archive, manifestSHA256: candidate.manifestSHA256 }))
   } else if (operation === 'preflight') {
     if (!process.env.GITHUB_OUTPUT) throw new Error('Publication preflight requires a GitHub Actions output file.')
-    const { publish, snapshot } = await publicationPreflight(candidate)
+    const { publish, snapshot } = await publicationPreflight(candidate, { firstStableFromLatest })
     // Never replace a prior observation or follow a symlink. The same snapshot
     // must survive publication and every read-only verification retry.
     writeFileSync(snapshotPath, `${JSON.stringify(snapshot)}\n`, { flag: 'wx', mode: 0o600 })
     appendFileSync(process.env.GITHUB_OUTPUT, `publish=${publish}\narchive=${candidate.archive}\ndist_tag=${candidate.distTag}\n`)
-    console.log(JSON.stringify({ version: candidate.descriptor.version, distTag: candidate.distTag, publish, manifestSHA256: candidate.manifestSHA256 }))
+    console.log(JSON.stringify({ version: candidate.descriptor.version, distTag: candidate.distTag, publish, manifestSHA256: candidate.manifestSHA256, ...(firstStableFromLatest === undefined ? {} : { firstStableFromLatest, observedDistTags: snapshot.distTags }) }))
+    if (firstStableFromLatest !== undefined && process.env.GITHUB_STEP_SUMMARY) appendFileSync(process.env.GITHUB_STEP_SUMMARY, `Explicit first-stable npm approval: latest \`${firstStableFromLatest}\` → \`${candidate.descriptor.version}\`; observed latest \`${snapshot.distTags.latest}\`, preserved beta \`${snapshot.distTags.beta ?? '(absent)'}\`. Accepted source \`${sourceSHA}\`, manifest \`${acceptedManifestSHA256}\`; publication required: ${publish}.\n`)
   } else {
     const result = await verifyRegistry(candidate, { snapshot: JSON.parse(readRegular(snapshotPath, 8192)) })
     console.log(JSON.stringify(result))
