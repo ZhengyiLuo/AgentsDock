@@ -44,6 +44,8 @@ export interface StoredSettingsV2 {
 export interface StoredServerProfile {
   id: string
   name: string
+  /** Missing on older profiles; distinguish user labels from URL-derived defaults. */
+  nameSource?: 'custom' | 'url'
   serverUrl: string
   serverIdentity?: string | null
   encryptedAccessToken?: string
@@ -253,7 +255,8 @@ export class SettingsStore {
     const timestamp = this.now()
     let profile: StoredServerProfile = {
       id,
-      name: cleanProfileName(input.name) || defaultProfileName(serverUrl, serverIdentity),
+      name: cleanProfileName(input.name) || defaultProfileName(serverUrl),
+      nameSource: cleanProfileName(input.name) ? 'custom' : 'url',
       serverUrl,
       serverIdentity,
       serverSetupComplete: input.serverSetupComplete ?? Boolean(serverIdentity),
@@ -284,10 +287,14 @@ export class SettingsStore {
       && hasStoredAccessToken(current) && !this.readProfileToken(current)) {
       throw new Error(UNREADABLE_ACCESS_TOKEN_ERROR)
     }
+    const serverUrl = patch.serverUrl === undefined ? current.serverUrl : normalizeServerURL(patch.serverUrl)
     const updated: StoredServerProfile = {
       ...current,
-      name: patch.name === undefined ? current.name : requireProfileName(patch.name),
-      serverUrl: patch.serverUrl === undefined ? current.serverUrl : normalizeServerURL(patch.serverUrl),
+      name: patch.name === undefined
+        ? current.nameSource === 'url' ? defaultProfileName(serverUrl) : current.name
+        : requireProfileName(patch.name),
+      nameSource: patch.name === undefined ? current.nameSource : 'custom',
+      serverUrl,
       serverIdentity: patch.serverIdentity === undefined ? current.serverIdentity : cleanIdentity(patch.serverIdentity),
       serverSetupComplete: patch.serverSetupComplete ?? current.serverSetupComplete,
       retiredServerNamespaces: patch.retiredServerNamespaces === undefined
@@ -460,7 +467,8 @@ export class SettingsStore {
     const serverIdentity = cleanIdentity(legacy.serverIdentity)
     const profile: StoredServerProfile = {
       id,
-      name: defaultProfileName(serverUrl, serverIdentity),
+      name: defaultProfileName(serverUrl),
+      nameSource: 'url',
       serverUrl,
       serverIdentity,
       encryptedAccessToken: cleanEncryptedToken(legacy.encryptedAccessToken),
@@ -503,7 +511,8 @@ export class SettingsStore {
       activeProfileId: id,
       profiles: [{
         id,
-        name: defaultProfileName(DEFAULT_SERVER_URL, null),
+        name: defaultProfileName(DEFAULT_SERVER_URL),
+        nameSource: 'url',
         serverUrl: DEFAULT_SERVER_URL,
         serverIdentity: null,
         serverSetupComplete: false,
@@ -765,11 +774,10 @@ function requireProfileName(value: string): string {
   return name
 }
 
-function defaultProfileName(serverUrl: string, serverIdentity: string | null): string {
-  if (serverIdentity) return serverIdentity
+function defaultProfileName(serverUrl: string): string {
   try {
     const url = new URL(serverUrl)
-    return url.hostname || url.host || 'AgentsServer'
+    return url.host || 'AgentsServer'
   } catch {
     return 'AgentsServer'
   }
@@ -810,11 +818,19 @@ function normalizeProfile(value: unknown, timestamp: string, index: number): Sto
   if (!id) throw new Error(`Server profile ${index + 1} has no ID.`)
   const serverUrl = normalizeServerURL(typeof value.serverUrl === 'string' ? value.serverUrl : DEFAULT_SERVER_URL)
   const serverIdentity = cleanIdentity(typeof value.serverIdentity === 'string' ? value.serverIdentity : null)
+  const savedName = cleanProfileName(typeof value.name === 'string' ? value.name : undefined)
+  // Previous releases used the opaque identity (or hostname before connection)
+  // as the default. Only those exact legacy defaults are repaired, not arbitrary
+  // hash-looking user labels. Explicit custom labels always survive a reload.
+  const nameSource = value.nameSource === 'custom' || value.nameSource === 'url'
+    ? value.nameSource
+    : !savedName || savedName === serverIdentity || savedName === new URL(serverUrl).hostname ? 'url' : 'custom'
   const createdAt = typeof value.createdAt === 'string' && value.createdAt ? value.createdAt : timestamp
   const updatedAt = typeof value.updatedAt === 'string' && value.updatedAt ? value.updatedAt : createdAt
   return {
     id,
-    name: cleanProfileName(typeof value.name === 'string' ? value.name : undefined) || defaultProfileName(serverUrl, serverIdentity),
+    name: nameSource === 'url' || !savedName ? defaultProfileName(serverUrl) : savedName,
+    nameSource,
     serverUrl,
     serverIdentity,
     encryptedAccessToken: cleanEncryptedToken(value.encryptedAccessToken),

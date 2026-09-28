@@ -1,5 +1,23 @@
 # Public development log
 
+## 2026-09-27 — Readable default server names
+
+- Unnamed desktop server connections use their URL host and port rather than
+  the opaque server identity. Remember whether a label is automatic or custom;
+  automatic labels follow URL edits, while explicit names remain unchanged.
+- Normalize exact legacy identity/hostname defaults on settings load without
+  changing profile IDs, server identities, credentials or cached chat ownership.
+- Validation: 64 focused settings/selector/management tests, TypeScript and
+  production compilation passed. Two full-suite attempts each passed 4,997 tests
+  (5 skipped) but encountered different unrelated UI timing failures; the
+  WorkspaceEditor and WorkingDirectoryPopover files passed all 136 tests on
+  isolated retries. Full-suite green is not claimed. Eight package/license
+  checks also passed.
+- Actual isolated offscreen Electron exercised legacy-name migration, adding
+  an unnamed server through authenticated native HTTP, manual rename, app
+  restart and switching servers. Dark/light and narrow layout were inspected.
+  No live app replacement, existing service restart, mobile change or release.
+
 ## 2026-09-27 — My Agents and clearer chat deletion copy
 
 - Rename the desktop settings section to **My Agents** / **我的 Agent**,

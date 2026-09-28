@@ -99,6 +99,71 @@ it('keeps automatic local discovery in Keychain without entering startup OSCrypt
   expect(settings.listProfiles().some(item => item.name === 'Denied')).toBe(false)
 })
 
+describe('server profile default names', () => {
+  it.each([
+    ['http://127.0.0.1:7854', '127.0.0.1:7854'],
+    ['https://agents.example:9443/prefix?ignored=yes', 'agents.example:9443'],
+    ['https://agents.example', 'agents.example'],
+    ['http://[::1]:7854', '[::1]:7854']
+  ])('uses the host and port for an unnamed %s, not its identity', (serverUrl, expected) => {
+    const path = settingsPath()
+    const options = { path, keychain: new MemoryKeychain(), safeStorage: memorySafeStorage }
+    const store = new SettingsStore(options)
+    const added = store.addProfile({ name: '  ', serverUrl, serverIdentity: '1234567890abcdef12345678' })
+    expect(added.name).toBe(expected)
+    expect(new SettingsStore(options).getProfile(added.id)?.name).toBe(expected)
+    expect(stored(path).profiles.find(profile => profile.id === added.id)?.nameSource).toBe('url')
+  })
+
+  it('keeps unnamed ports distinct and follows URL edits without renaming custom labels', () => {
+    const store = new SettingsStore({ path: settingsPath(), keychain: new MemoryKeychain(), safeStorage: memorySafeStorage })
+    expect(store.getActiveProfile().name).toBe('127.0.0.1:7850')
+    const automatic = store.addProfile({ serverUrl: 'http://127.0.0.1:7854' })
+    expect(automatic.name).toBe('127.0.0.1:7854')
+    expect(store.updateProfile(automatic.id, { serverIdentity: 'opaque-server-id' }).name).toBe('127.0.0.1:7854')
+    expect(store.updateProfile(automatic.id, { serverUrl: 'https://other.example:9443' }).name).toBe('other.example:9443')
+    store.updateProfile(automatic.id, { name: 'My server' })
+    expect(store.updateProfile(automatic.id, { serverUrl: 'https://renamed.example' }).name).toBe('My server')
+  })
+
+  it('repairs exact legacy defaults on reload without touching identity, credentials, or custom names', () => {
+    const path = settingsPath()
+    const options = { path, keychain: new MemoryKeychain(), safeStorage: memorySafeStorage }
+    const store = new SettingsStore(options)
+    const legacy = store.addProfile({ serverUrl: 'http://legacy.example:7854', serverIdentity: '1234567890abcdef12345678', accessToken: 'retained-test-token' })
+    const custom = store.addProfile({ name: 'My server', serverUrl: 'http://custom.example:7854' })
+    const similar = store.addProfile({ name: 'abcdef1234567890abcdef12', serverUrl: 'http://similar.example:7854', serverIdentity: 'different-server-id' })
+    const snapshot = stored(path)
+    for (const profile of snapshot.profiles) delete profile.nameSource
+    snapshot.profiles.find(profile => profile.id === legacy.id)!.name = legacy.serverIdentity!
+    snapshot.profiles[0].name = '127.0.0.1'
+    writeFileSync(path, JSON.stringify(snapshot))
+    const reopened = new SettingsStore(options)
+    expect(reopened.getActiveProfile().name).toBe('127.0.0.1:7850')
+    expect(reopened.getProfile(legacy.id)).toMatchObject({ name: 'legacy.example:7854', serverIdentity: legacy.serverIdentity, hasAccessToken: true })
+    expect(reopened.accessToken(legacy.id)).toBe('retained-test-token')
+    expect(reopened.getProfile(custom.id)?.name).toBe('My server')
+    expect(reopened.getProfile(similar.id)?.name).toBe(similar.name)
+    expect(stored(path).profiles.find(profile => profile.id === legacy.id)).toMatchObject({
+      ...snapshot.profiles.find(profile => profile.id === legacy.id), name: 'legacy.example:7854', nameSource: 'url'
+    })
+    const normalized = readFileSync(path, 'utf8')
+    new SettingsStore(options)
+    expect(readFileSync(path, 'utf8')).toBe(normalized)
+  })
+
+  it('preserves explicitly chosen names even when they equal the identity or hostname', () => {
+    const options = { path: settingsPath(), keychain: new MemoryKeychain(), safeStorage: memorySafeStorage }
+    const store = new SettingsStore(options)
+    const identity = '1234567890abcdef12345678'
+    const named = store.addProfile({ name: identity, serverUrl: 'http://named.example:7854', serverIdentity: identity })
+    const host = store.addProfile({ name: 'host.example', serverUrl: 'http://host.example:7854' })
+    const reopened = new SettingsStore(options)
+    expect(reopened.getProfile(named.id)?.name).toBe(identity)
+    expect(reopened.getProfile(host.id)?.name).toBe('host.example')
+  })
+})
+
 describe('SettingsStore schema v2 migration', () => {
   it('reads configured profile metadata without accessing Keychain or decrypting credentials', () => {
     const keychain = new MemoryKeychain()
@@ -149,7 +214,8 @@ describe('SettingsStore schema v2 migration', () => {
       activeProfileId: 'profile-alpha',
       profiles: [{
         id: 'profile-alpha',
-        name: 'server-alpha',
+        name: 'server.example:7850',
+        nameSource: 'url',
         serverUrl: 'http://server.example:7850',
         serverIdentity: 'server-alpha',
         encryptedAccessToken: legacy.encryptedAccessToken,
