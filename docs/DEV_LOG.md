@@ -23,7 +23,12 @@
   verifies official Claude defaults, disconnected choices hidden, Add Agent
   navigation, successful API setup, and confirmed Forget immediately removing
   the custom choice. No real account keys were changed during fixture testing.
-  Additional live conditional-cleanup and packaged-app acceptance are pending.
+  Verify the API recovery button in the native composer opens the matching
+  settings group. Live development-server cleanup removes only disposable
+  empty test chats and retains an unsent draft. This check uncovered the editor's
+  deferred draft persistence; flush live editor refs and temporarily block
+  editing/admission during discard. Re-run 843 affected desktop tests after
+  that fix; all pass. Packaged-app acceptance is recorded separately below.
 
 ## 2026-09-27 — Endpoint confirmation spacing
 

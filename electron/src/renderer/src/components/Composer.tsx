@@ -489,13 +489,15 @@ function confirmInboundDeliveryInterruption(
     : null
 }
 
-export const Composer = memo(function Composer({ dropActive = false, sessionId, writeDisabled = false }: { dropActive?: boolean; sessionId?: string | null; writeDisabled?: boolean }) {
+export const Composer = memo(function Composer({ dropActive = false, sessionId, writeDisabled: externallyWriteDisabled = false }: { dropActive?: boolean; sessionId?: string | null; writeDisabled?: boolean }) {
   useLocale()
   const activeProfileId = useAppStore(state => state.activeProfileId)
   const profileGeneration = useAppStore(state => state.profileGeneration)
   const serverIdentity = useAppStore(state => state.profiles.find(profile => profile.id === state.activeProfileId)?.serverIdentity ?? null)
   const focusedSessionId = useAppStore(state => state.selectedSessionId)
   const selectedId = sessionId === undefined ? focusedSessionId : sessionId
+  const discardingEmpty = useAppStore(state => Boolean(selectedId && state.discardingEmptyChats[selectedId] === `${state.activeProfileId}:${state.profileGeneration}`))
+  const writeDisabled = externallyWriteDisabled || discardingEmpty
   const session = useAppStore(state => state.sessions.find(candidate => candidate.id === selectedId) ?? null)
   const queuedTurns = useAppStore(state => selectedId ? state.snapshots[selectedId]?.queuedTurns ?? EMPTY_QUEUED_TURNS : EMPTY_QUEUED_TURNS)
   const visibleQueuedTurns = useMemo(() => queuedTurns.filter(isVisibleQueuedTurn), [queuedTurns])
@@ -1885,6 +1887,7 @@ export const Composer = memo(function Composer({ dropActive = false, sessionId, 
         />}
         <textarea
           ref={textareaRef}
+          disabled={discardingEmpty}
           value={messageProjection.text}
           rows={1}
           placeholder={t("ui.Composer.Composer.message_2f77668")}

@@ -214,6 +214,7 @@ interface AppState {
   inspectorVisible: boolean
   activeSessionIds: Set<string>
   turnAdmissionTokens: Record<string, string>
+  discardingEmptyChats: Record<string, string>
   pendingTurnSubmissions: Record<string, PendingTurnSubmission>
   stoppingSessionIds: Set<string>
   storageFull: boolean
@@ -517,6 +518,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   inspectorVisible: false,
   activeSessionIds: new Set(),
   turnAdmissionTokens: {},
+  discardingEmptyChats: {},
   pendingTurnSubmissions: {},
   stoppingSessionIds: new Set(),
   error: null,
@@ -1616,6 +1618,7 @@ export const useAppStore = create<AppState>((set, get) => ({
 
   beginTurnAdmission(sessionId) {
     const current = get()
+    if (current.discardingEmptyChats[sessionId] === `${current.activeProfileId}:${current.profileGeneration}`) return null
     if (current.switchingProfileId || current.turnAdmissionTokens[sessionId]) return null
     const token = `${current.activeProfileId ?? 'local'}:${current.profileGeneration}:${++turnAdmissionCounter}`
     let admitted = false
@@ -3229,12 +3232,20 @@ async function removeUntouchedStartupChats<T extends CleanupSnapshot>(
           || state.uploadPathsBySession[sessionId]?.length || state.pendingTurnSubmissions[sessionId]
           || state.chatReferencesBySession[sessionId]?.length || state.teamReferencesBySession[sessionId]?.length)
       }
-      if (hasLocalWork()) continue
       const session = liveSessions.find(candidate => candidate.id === sessionId)
       if (!session || !isUntouchedNewChat(session)) continue
       if (liveJobs.some(job => job.session_id === sessionId) || livePorts.some(port => port.sessionId === sessionId)) continue
 
+      const cleanupOwner = `${cleanup.profileId}:${cleanup.profileGeneration}`
+      if (useAppStore.getState().discardingEmptyChats[sessionId]) continue
+      useAppStore.setState(state => ({ discardingEmptyChats: { ...state.discardingEmptyChats, [sessionId]: cleanupOwner } }))
       try {
+        // The editor deliberately keeps typing local until its debounce. Flush
+        // its live refs, not just disk/store state, and freeze editing while the
+        // conditional discard is in flight so a new draft cannot be stranded.
+        await flushActiveWorkspace()
+        if (!profileScopeIsCurrent()) return payload
+        if (hasLocalWork()) continue
         const [draft, chatReferences, teamReferences, timeline, queuedTurns, files, terminal] = await Promise.all([
           getWorkspacePreference<unknown>(preferenceScope, `draft:${sessionId}`, ''),
           getWorkspacePreference<unknown>(preferenceScope, chatReferencesPreferenceKey(sessionId), []),
@@ -3276,9 +3287,7 @@ async function removeUntouchedStartupChats<T extends CleanupSnapshot>(
           || liveJobs.some(job => job.session_id === sessionId)
           || livePorts.some(port => port.sessionId === sessionId)
         ) continue
-        // `sessions.remove` targets the main process' active profile. Keep this
-        // guard adjacent to the destructive IPC so a profile transition during
-        // any of the awaited proof reads cannot delete from the new workspace.
+        // Keep the renderer guard adjacent to the scope-bound conditional IPC.
         if (!profileScopeIsCurrent()) return payload
         if (hasLocalWork() || !confirmed.updated_at) continue
         if (await window.agentsDock.sessions.discardEmpty(preferenceScope, sessionId, confirmed.updated_at)) {
@@ -3290,6 +3299,13 @@ async function removeUntouchedStartupChats<T extends CleanupSnapshot>(
           sessionId,
           error: errorMessage(error)
         }).catch(() => undefined)
+      } finally {
+        useAppStore.setState(state => {
+          if (state.discardingEmptyChats[sessionId] !== cleanupOwner) return state
+          const discardingEmptyChats = { ...state.discardingEmptyChats }
+          delete discardingEmptyChats[sessionId]
+          return { discardingEmptyChats }
+        })
       }
     }
 

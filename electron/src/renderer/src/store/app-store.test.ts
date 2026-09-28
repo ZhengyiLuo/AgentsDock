@@ -4571,6 +4571,23 @@ describe('untouched startup chat cleanup', () => {
     expect(useAppStore.getState().sessions).toEqual([placeholder])
   })
 
+  it('flushes the live composer before proving emptiness and blocks admission during discard', async () => {
+    const placeholder = untouchedStartupChat('live-editor-draft')
+    const harness = installStartupCleanupHarness(profile, [placeholder])
+    useAppStore.setState({ profiles: [profile], activeProfileId: profile.id, profileGeneration: 7,
+      sessions: [placeholder], jobs: [], drafts: {}, creatingChat: false, turnAdmissionTokens: {} })
+    const flush = () => {
+      expect(useAppStore.getState().discardingEmptyChats[placeholder.id]).toBe(`${profile.id}:7`)
+      expect(useAppStore.getState().beginTurnAdmission(placeholder.id)).toBeNull()
+      useAppStore.getState().setDraftForSession(placeholder.id, 'still in the editor, not persisted')
+    }
+    window.addEventListener('agentsdock:flush-draft', flush)
+    try { await refreshSessions(true) } finally { window.removeEventListener('agentsdock:flush-draft', flush) }
+    expect(harness.remove).not.toHaveBeenCalled()
+    expect(useAppStore.getState().sessions).toEqual([placeholder])
+    expect(useAppStore.getState().discardingEmptyChats).toEqual({})
+  })
+
   it('removes only a marked, fully untouched direct-create placeholder', async () => {
     const placeholder = untouchedStartupChat('untouched')
     const harness = installStartupCleanupHarness(profile, [placeholder])
