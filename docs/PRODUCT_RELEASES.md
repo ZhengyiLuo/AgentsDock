@@ -18,8 +18,11 @@ not satisfy the full production gate.
 
 **Publication is intentionally blocked pending phase-two native acceptance.**
 The explicit `product-release-acceptance.yml` workflow and native harnesses now
-exist, but have not run against a complete sealed production candidate. Their
-reports keep unobserved scenarios blocked. Successful packaging, a signed
+exist, but have not run against a complete sealed production candidate. Real
+provider/busy-work and manual service-survival journeys still need
+implementation as well as execution; the current harness cannot pass those
+checks through its existing parameters. Release credentials alone are not
+sufficient. Reports keep unobserved scenarios blocked. Successful packaging, a signed
 descriptor, or a manually written acceptance file cannot satisfy this gate.
 See [native acceptance status and procedure](PRODUCT_ACCEPTANCE.md).
 Do not bypass the gate with the

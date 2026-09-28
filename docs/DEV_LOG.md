@@ -1,5 +1,27 @@
 # Public development log
 
+## 2026-09-28 — Verify frozen candidate download recovery
+
+- Run `36387432761` passes all source gates and all three native macOS
+  rehearsal jobs on harness `8d81b6d`. Reuse unchanged beta.18 / build `1223`
+  packages from source `78e113f806b023a1caa925bb9ff763adc79c2842`.
+- Interrupt the exact signed legacy download once, observe the incumbent
+  process and persisted fixture staying healthy and unchanged, then retry the
+  same accepted version through the production updater. Native activation and
+  all 116 installed runtime files verify; disposable trust/routing cleanup
+  succeeds. Recovery evidence SHA-256 is
+  `69cd64fe6a6ef7e1c56b09bbb538f5e881a6f428257e30c9cb5d4e0f2cd2db24`.
+- Repeat fresh installation and the real app-first/offline/shared-client
+  upgrade. These scoped jobs do not claim provider-native history, busy/queued
+  work, logout/reboot or post-takeover rollback. Their reports explicitly
+  remain ineligible for production publication and retain blocked checks.
+- Carry the recovery harness into PR #44; the combined source passes all 279
+  JavaScript release-tooling/CLI tests and workflow lint. Clarify that required
+  authenticated and manual acceptance journeys need implementation, not merely
+  another dispatch or release credentials. Stable `1.0.7` needs its own exact
+  rebuilt and accepted package set; beta.18 cannot be relabeled as stable.
+- No npm/app publication, dist-tag change, signing-key change or merge.
+
 ## 2026-09-28 — Prepare the first stable registry transition
 
 - Resolve the product-pipeline PR against current `main`, retaining both

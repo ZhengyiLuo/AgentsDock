@@ -2,7 +2,8 @@
 
 ## Status
 
-The workflow and native harnesses are implemented on the product-pipeline PR.
+The workflow orchestration and scoped native harnesses are implemented on the
+product-pipeline PR. The full acceptance journey is not yet complete.
 No complete production candidate or full production acceptance run is recorded.
 Do not interpret passing helper unit tests as an accepted release. Publication
 remains blocked; the workflow does not generate passed records for unobserved
@@ -37,8 +38,16 @@ job against the same frozen candidate bytes. It interrupts one signed legacy
 archive transfer, checks that the incumbent process and persisted fixture remain
 healthy and unchanged, then retries the same version through the real update
 API. Reports remain `publicationEligible: false` and `releaseAcceptance: false`.
-This is not candidate-health rollback, busy/provider-history, or production
-acceptance. Native execution of this added job is pending.
+All three native jobs in
+[run `36387432761`](https://github.com/ZhengyiLuo/AgentsDock/actions/runs/36387432761)
+passed with owned trust/routing cleanup. The recovery report binds artifact
+source `78e113f806b023a1caa925bb9ff763adc79c2842`, harness
+`8d81b6d8161566834692ffa0be812d926277135a`, the original receipt hash and run
+attempt `1`; its SHA-256 is
+`69cd64fe6a6ef7e1c56b09bbb538f5e881a6f428257e30c9cb5d4e0f2cd2db24`.
+It verifies 116 exact runtime files after the retry. This is not candidate-health
+rollback, busy/provider-history, or production acceptance; the other reports
+retain their blocked checks for unobserved journeys.
 
 Implemented native coverage (execution status is recorded separately above):
 
@@ -61,16 +70,30 @@ Implemented native coverage (execution status is recorded separately above):
   service/process ownership checks; observe real rollback and retry. This
   harness still requires execution against the actual prepared packages.
 
-Required work/observations still blocking acceptance:
+Required implementation and observations still blocking acceptance:
+
+The current fresh-install harness always reports `fresh-server-install` and
+`busy-server-drain` as blocked. It has no input for an authenticated provider
+journey or external manual/reboot evidence. The desktop fixture deliberately
+contains no populated provider-native history. Supplying release secrets or
+rerunning the workflow alone cannot close these gaps, and the collector has no
+manual-signoff override.
 
 - An isolated authenticated provider chat and native session IDs/history, not
   merely an empty API-created session. The existing fixture deliberately does
-  not claim this and marks full legacy preservation blocked.
+  not claim this and marks full legacy preservation blocked. Implement this
+  journey using an explicitly authorized disposable test identity and bounded
+  usage; do not copy a developer's provider credentials into CI.
 - A real running provider turn and queued message during update admission,
   drain and retry. A `tmux sleep` is not an agent run and cannot establish this.
 - Execution of the implemented failure/rollback harnesses with real artifacts.
 - Interactive pairing/token-copy and optional dependency decline/error paths;
   survival of an actual logout/reboot. A service-manager restart is narrower.
+  Add measured installer coverage and a reviewed exact-receipt evidence path
+  for logout/reboot. The collector currently disclaims reboot acceptance even
+  though fresh installation requires that observation; reconcile this contract
+  before enabling publication, without converting manual assertions into
+  generated passed checks.
 - Native Windows acceptance and natural provider OAuth renewal remain separate
   unverified boundaries; this workflow does not claim them.
 
@@ -83,7 +106,10 @@ Required work/observations still blocking acceptance:
 2. Review and register the workflows through the agreed default-branch process.
    They do not run privileged/native acceptance on PR events. Registration is
    not permission to publish or bypass missing native cases.
-3. Commit the complete candidate and reserve an unused beta version. Dispatch
+3. Commit the complete candidate and reserve an unused version. Use the next
+   unused `1.0.7-beta.N` for another beta, or actual `1.0.7` for the approved
+   first stable candidate. Stable requires its own rebuilt and accepted bytes;
+   beta.18 sign-off cannot relabel or authorize a changed stable package. Dispatch
    `Release AgentsDock` with `operation=prepare` and the full source SHA.
    Keep the resulting product receipt hash and exact retained artifacts.
 4. Dispatch `Accept prepared AgentsDock product` on that exact source revision.
