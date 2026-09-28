@@ -1,5 +1,31 @@
 # Public development log
 
+## 2026-09-28 — Release Codex writers before idle handoff and reload
+
+- Release the native writer before moving an idle chat to a fresh Codex
+  process. Unsubscribing alone left the old writer alive and caused later
+  resumes to fail with an active-writer error. Verify ownership using the
+  native paged loaded-thread list, including previously unsubscribed threads.
+- Preserve the original thread, history and paused goal through native
+  archive/unarchive. Retain recovery metadata on failure. Reload uses the same
+  release path and leaves active native goals and unrelated running chats intact.
+- Pass 95 focused lifecycle, login, endpoint-selection and reload regressions,
+  plus compilation and whitespace checks. Reproduce the original conflict in
+  native Codex and verify a second process can resume after writer release.
+- Exercise the final source through authenticated HTTP and native Codex
+  0.156.1: retire an old manager, resume the same conversation, reload twice,
+  retain context on follow-up, and let an unrelated held turn finish normally.
+  The Responses upstream is a deterministic local fixture; native process,
+  storage, server and authentication boundaries are real.
+- In the isolated offscreen desktop using the beta.20 compiled payload, select
+  the idle chat, open its runtime menu and click Reload Codex. Verify real IPC
+  and HTTP reload/load success, then type and submit a contextual follow-up
+  while the other chat stays running. No alerts or renderer exceptions occur.
+  This app check exercises the writer-release change; subsequent ownership and
+  goal-state refinements are covered by the final native HTTP run and regressions.
+- Availability: tested server source. No desktop or npm release is published;
+  production activation of the preventive change is not yet complete.
+
 ## 2026-09-28 — Keep scheduled paired-chat messages in the mailbox
 
 - Give scheduled runs mailbox transport and retain the existing permanent pair
