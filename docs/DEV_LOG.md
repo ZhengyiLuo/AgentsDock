@@ -1,5 +1,23 @@
 # Public development log
 
+## 2026-09-28 — Apply saved Codex endpoint selections after transient work
+
+- Fix Codex/Custom selections remaining marked Saved after a shared runtime's
+  callback, RPC, or caller finishes. Subscribe once to the observed completion
+  and retry the saved chat selection through the existing lifecycle boundary.
+- Preserve active-turn, goal, child-agent, terminal and writer-ownership checks.
+  Keep the same native thread and its history. Do not poll or retry permanent
+  ownership errors through callbacks emitted by their own failing requests.
+- Add metadata-only deferral reasons and task counts so a pending handoff has
+  an observable cause without logging message content or credentials.
+- Pass 45 existing provider selection, refresh and runtime handoff regressions.
+  New regressions exercise the actual client notification and RPC completion
+  lifecycle with synthetic transport, verify automatic handoff after completion,
+  and verify permanent ownership failures remain pending without retry churn.
+- Availability: tested server source. Native runtime, desktop and deployment
+  acceptance are recorded after their respective checks. No client release is
+  required by this server change.
+
 ## 2026-09-28 — Recover chat queues independently at startup
 
 - Recover each chat independently and prioritize the chat being opened. A slow
