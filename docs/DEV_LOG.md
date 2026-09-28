@@ -1,5 +1,29 @@
 # Public development log
 
+## 2026-09-27 — Verify automatic limit changes in the signed desktop
+
+- Accept signed local Apple silicon desktop `1.0.7-beta.19`, build `1224`,
+  from committed source `41b95cd`, with the paired isolated full server.
+  Pass 4,946 desktop tests (five intentional skips), TypeScript, production
+  compilation, bundle audit and signature verification. Pass 133 related
+  server lifecycle tests and 116 broader subagent regressions.
+- In the actual native app, save 2 while a real Codex subagent runs at limit 1.
+  The inspector shows saved 2 / active 1; existing work completes normally.
+  The limit becomes active 2 automatically, without provider reload or chat
+  refresh. Start two real subagents concurrently and verify both succeed.
+- Lower the limit while both children run; both finish, then active 1 appears.
+  Clear the override through the app, verify native default restoration, and
+  verify the empty field and applied state survive app reload. No renderer
+  exceptions occur. Remove disposable processes, copied credentials and the
+  temporary Keychain item; protected provider files remain unchanged.
+- Stage the tested server source and preserve its previous file for the
+  requested installation. Activation is pending a restart decision because
+  production work is active. The new native runtime requires an idle boundary
+  for limit changes; no current subagents are terminated to apply settings.
+- Availability: local desktop and offline server candidates only. Public feeds
+  remain unchanged. The separate product release pipeline is not yet ready for
+  this paired publication; the prior unpublished rehearsal is preserved.
+
 ## 2026-09-27 — Apply saved Codex subagent limits automatically
 
 - Apply per-chat and inherited server limits at the existing idle lifecycle
