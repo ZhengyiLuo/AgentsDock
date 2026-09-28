@@ -20,6 +20,12 @@
   separate acceptance check. No real user's chat received a test message.
 - Availability: local feature branch; authorized local app/server installation
   tracked separately. No release publication or merge is implied.
+- Local acceptance: source `a4042410`, desktop `1.0.7-providers.15.local`,
+  server `1.0.7-beta.15+providers.a4042410`. Bundle audit, ad-hoc signing and
+  packaged-source comparison passed; the installed app loaded with its active
+  profile preserved. The designated server retained its identity and provider
+  settings. Read-only verification confirmed the reconnected existing chat's
+  API binding is available, without sending a test message to that chat.
 
 ## 2026-09-27 — Forget revokes existing custom API chats
 
