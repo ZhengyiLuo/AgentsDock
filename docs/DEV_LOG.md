@@ -1,5 +1,22 @@
 # Public development log
 
+## 2026-09-28 — Combine editor line endings with desktop/server fixes
+
+- Bring contributor PR #24 into the tested desktop/server follow-up branch,
+  retaining Haokai Ding's authored commit and original commit reference. The
+  runtime/editor test patch is unchanged; resolve only the development log by
+  retaining both histories. The provider/API feature baseline is already in main
+  through PR #47; this integration does not reintroduce it as an unmerged change.
+- On the combined source, 339 editor/workspace/transport tests and 292 isolated
+  server workspace/history/runtime tests passed, plus TypeScript and production
+  compilation. Actual offscreen Electron exercised CRLF, LF and CR edit/save,
+  undo/save and redo/save against a disposable authenticated AgentsServer: nine
+  exact on-disk byte assertions passed. No clipboard access was used in this
+  integration check. Native Windows UI was not exercised.
+- Installed test apps and existing server instances are unchanged by this PR
+  preparation. The contributor's fix is newly included in source, not in the
+  previously installed local test package. No release or deployment is implied.
+
 ## 2026-09-28 — Manual server connection saves on macOS
 
 - Direct macOS builds now use the bounded Keychain credential path for manual
@@ -96,6 +113,33 @@
   not certified by this offscreen run.
 - Availability: local source/build only. No live app replacement, existing
   server restart, mobile change, publication or deployment.
+
+## 2026-09-27 — Desktop line-ending integration accepted locally
+
+- Integrated PR #24 from contributor commit `3f29f4d9` as `a4f6b281`, retaining
+  the original author. Only the development-log conflict required resolution.
+- Reproduced CRLF-to-LF rewriting on the preceding main build. The candidate
+  preserves CRLF, LF and CR through native edit/save, undo and redo; mixed files
+  normalize to the first separator. Native clipboard paste, external reloads,
+  restored YAML folds/cursor positions, UTF-8/CRLF byte-limit boundaries and
+  stale-save rejection/reload recovery passed with byte-level file checks.
+- Acceptance used isolated offscreen Electron 43.1.1, the production app build
+  and AgentsServer `1.0.7-beta.11`, through real IPC, authenticated HTTP and
+  revision-checked filesystem writes. Only disposable credential storage and
+  fixture setup were synthetic; no provider inference was needed or claimed.
+- Validation: 339 focused desktop tests and 53 server workspace-file tests,
+  TypeScript checking and production compilation passed. Availability: local
+  source/build only; no package installation, release, deployment or merge.
+
+## 2026-09-17 — Preserve desktop editor line endings
+
+- Preserve a file's first line-ending style when emitting edits, including undo
+  and redo. External reloads adopt the newly loaded style; mixed line endings
+  normalize to the first separator on edit.
+- Count UTF-8 limits against serialized output, including both bytes of CRLF.
+  Keep cursor, fold and replacement ranges in CodeMirror's logical coordinates.
+- Add regressions for line-ending preservation, external reloads, LF inserts in
+  CRLF documents, byte limits, cursor clamping and fold restoration.
 
 ## 2026-09-27 — Custom API live acceptance and API-only chat routing
 
