@@ -1,5 +1,19 @@
 # Public development log
 
+## 2026-09-28 — Confirm macOS npm validation and identify the Linux runner default
+
+- Native run `36393582036` passes the macOS npm fresh-install and service-restart
+  checks for the unchanged signed stable candidate. The Linux job stops before
+  installation because the hosted image exports `XDG_CONFIG_HOME` as its exact
+  default account config directory; sanitized diagnostics confirm the other
+  isolation and ownership checks pass.
+- Normalize only that observed Linux default in the disposable test process,
+  after all host and path guards pass. Custom selectors, macOS overrides and
+  invalid hosts remain rejected. Server/installer behavior and signed artifacts
+  are unchanged. Linux revalidation and npm publication remain pending.
+- Pass all 89 Python helper tests and workflow lint; the new negative cases
+  prove rejected environments remain unchanged.
+
 ## 2026-09-28 — Preserve the signed npm candidate while correcting native validation
 
 - Build and verify the npm-only `1.0.7` candidate from

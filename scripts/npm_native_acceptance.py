@@ -70,7 +70,6 @@ def guard(args: argparse.Namespace, *, environment: dict | None = None,
     native.need(user != 0 and ((host == "Linux" and env.get("RUNNER_OS") == "Linux")
                 or (host == "Darwin" and env.get("RUNNER_OS") == "macOS" and architecture == "arm64")),
                 "A non-root hosted Linux or Apple silicon macOS account is required.")
-    native.need(all(not env.get(name) for name in native.SELECTORS), "Inherited installation selectors are forbidden.")
     home = Path(env.get("HOME", ""))
     temporary = Path(env.get("RUNNER_TEMP", ""))
     native.need(home.is_absolute() and temporary.is_absolute(), "The actual account and runner temporary roots are required.")
@@ -78,6 +77,13 @@ def guard(args: argparse.Namespace, *, environment: dict | None = None,
         native.need(home.resolve() == Path(pwd.getpwuid(user).pw_dir).resolve(), "Redirected account homes are forbidden.")
         native.owned_directory(home)
         native.owned_directory(temporary)
+    # Hosted Ubuntu exports this exact default selector. Normalize only that
+    # observed account default, never a custom root, another selector or macOS.
+    xdg = env.get("XDG_CONFIG_HOME")
+    default_xdg = bool(xdg) and host == "Linux" and xdg == str(home / ".config") \
+        and home.resolve() == Path(pwd.getpwuid(user).pw_dir).resolve()
+    native.need(all(not env.get(name) for name in native.SELECTORS if name != "XDG_CONFIG_HOME")
+                and (not xdg or default_xdg), "Inherited custom installation selectors are forbidden.")
     for path in (args.assets, args.release, args.work, args.report):
         native.contained(path, temporary)
     native.need(args.assets.name == "npm" and args.work.name.startswith("agentsdock-npm-native-")
@@ -85,6 +91,11 @@ def guard(args: argparse.Namespace, *, environment: dict | None = None,
                 and not args.report.exists() and not args.report.is_symlink()
                 and not args.report.is_relative_to(args.work)
                 and not args.report.is_relative_to(args.assets), "Use new, separated bounded native work/report paths.")
+    # Change only this process environment after every host/path guard passes.
+    # No user setting or production CLI rule is changed.
+    args.default_xdg_normalized = default_xdg
+    if default_xdg:
+        env.pop("XDG_CONFIG_HOME")
     return home
 
 
@@ -382,6 +393,7 @@ def report(args: argparse.Namespace, descriptor: dict | None, *, phase: str,
     return {"schema": 1, "kind": "agentsdock-npm-native-validation", "scope": "npm-native-fresh-install",
             "productPublicationEligible": False, "sourceSha": args.source_sha, "sourceRef": args.source_ref,
             "harnessSha": os.environ["GITHUB_SHA"],
+            "defaultXdgNormalized": bool(getattr(args, "default_xdg_normalized", False)),
             "manifestSha256": args.manifest_sha256, "version": descriptor["version"] if descriptor else None,
             "archiveSha256": descriptor["archive"]["sha256"] if descriptor else None,
             "repository": REPOSITORY, "runId": os.environ["GITHUB_RUN_ID"],

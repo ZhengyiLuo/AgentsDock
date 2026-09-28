@@ -9,6 +9,7 @@ import plistlib
 import subprocess
 import sys
 import tempfile
+from types import SimpleNamespace
 import unittest
 from unittest.mock import patch
 
@@ -249,6 +250,48 @@ class NpmNativeAcceptanceTests(unittest.TestCase):
             self.assertNotIn("PRIVATE_TOKEN", json.dumps(result))
             with self.assertRaises(RuntimeError):
                 MOD.guard(args, environment=env, uid=501, system="Linux")
+
+    def test_only_observed_real_account_linux_xdg_default_is_removed_after_all_guards(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary).resolve()
+            args, env = self.arguments(root), self.environment(root)
+            env.update(XDG_CONFIG_HOME=str(root / "account/.config"), UNRELATED_VALUE="preserved")
+            before = dict(env)
+            with patch.object(MOD.pwd, "getpwuid", return_value=SimpleNamespace(pw_dir=str(root / "account"))):
+                self.assertEqual(MOD.guard(args, environment=env, uid=501, system="Linux"), root / "account")
+            self.assertEqual(env, {key: value for key, value in before.items() if key != "XDG_CONFIG_HOME"})
+            self.assertTrue(args.default_xdg_normalized)
+            # An unset selector remains unset; no other environment normalization.
+            args = self.arguments(root)
+            before = dict(env)
+            MOD.guard(args, environment=env, uid=501, system="Linux")
+            self.assertEqual(env, before)
+            self.assertFalse(args.default_xdg_normalized)
+
+    def test_rejected_xdg_other_selectors_and_host_path_failures_leave_environment_unchanged(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary).resolve()
+            base = {**self.environment(root), "XDG_CONFIG_HOME": str(root / "account/.config")}
+            cases = [{"environment": {"XDG_CONFIG_HOME": "/custom/config"}},
+                     {"environment": {"XDG_CONFIG_HOME": "$HOME/.config"}},
+                     {"environment": {"XDG_CONFIG_HOME": str(root / "account/.config/") + "/"}},
+                     {"environment": {"RUNNER_OS": "macOS"}, "system": "Darwin"},
+                     {"uid": 0}, {"environment": {"RUNNER_ENVIRONMENT": "self-hosted"}},
+                     {"badpath": True}, {"wronghome": True}]
+            cases += [{"environment": {name: "/custom"}} for name in MOD.native.SELECTORS if name != "XDG_CONFIG_HOME"]
+            for case in cases:
+                args = self.arguments(root)
+                if case.get("badpath"):
+                    args.work = root
+                env = {**base, **case.get("environment", {})}
+                before = dict(env)
+                account = root / ("different-account" if case.get("wronghome") else "account")
+                with self.subTest(case=case), \
+                        patch.object(MOD.pwd, "getpwuid", return_value=SimpleNamespace(pw_dir=str(account))), \
+                        self.assertRaises(RuntimeError):
+                    MOD.guard(args, environment=env, uid=case.get("uid", 501),
+                              system=case.get("system", "Linux"), machine="arm64")
+                self.assertEqual(env, before)
 
     def test_harness_allowlist_rejects_runtime_key_verifier_unrelated_files_and_modes(self):
         def raw(path, old="100644", new="100644", status="M"):
