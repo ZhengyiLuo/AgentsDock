@@ -2250,7 +2250,7 @@ export class AppService {
         configured: value.configured,
         available: value.configured && value.scope === 'per_chat' && value.last_result === 'verified'
           && this.runtimeCatalog?.backends[backend]?.diagnostic?.installed === true,
-        base_url: value.base_url, model: value.model,
+        base_url: value.base_url, model: value.model, default_model: value.model,
       })
     }
     return result

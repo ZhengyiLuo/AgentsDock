@@ -1,5 +1,42 @@
 # Public development log
 
+## 2026-09-27 — Cursor API-key connection
+
+- Add a key-only Cursor API card in AI Providers, separate from CLI Login.
+  Connect validates through the native Cursor model-list command before storing
+  the key; new chats offer `Cursor API key` only while configured and verified.
+  Models belong to that key, with `auto` as the initial default. This is not an
+  arbitrary OpenAI-compatible endpoint.
+- Store credentials privately per AgentsServer with revision fencing and
+  immutable per-chat bindings. Forget removes the current connection for new
+  chats, not keys already bound to existing chats; no machine logout occurs.
+  Native transport remains administrator-only, keys are never returned, and
+  failed replacement preserves the previously verified key.
+- Cursor can persist API-exchanged tokens by default. Key-bound runs, checks,
+  and title requests therefore use its in-memory credential store, clear
+  higher-priority auth tokens, force the official service, and disable direnv
+  credential overrides. Require CLI 2026.09.26 or newer (the tested isolation
+  baseline). API-key turns do not change the native login diagnostic.
+- Verification: 139 focused server tests passed, including a real subprocess
+  runner fixture asserting the pinned key/environment and no key in argv or
+  events. Native Electron → IPC → administrator HTTP → production router/store
+  → rendered status exercised Connect, invalid key, and confirmed Forget with
+  a synthetic Cursor adapter. The actual installed Cursor CLI rejected an
+  invalid key with no native-login fallback. A valid user key and successful
+  Cursor inference are still required for full live acceptance.
+- Full desktop run: 4,971 passed, 3 failed, 5 skipped. The three failures were
+  in unrelated sharing/editor tests; rerunning those suites together with the
+  changed provider suites passed all 212 tests. Typecheck and native build are
+  checked separately. No claim of a completely green full-suite run.
+
+### Cursor API-key usage
+
+Settings → AI Providers → Cursor → Configure API → paste a Cursor-issued key →
+Connect. Create a new chat with **Cursor API key**. CLI Login remains a separate
+choice and identity. The key comes from Cursor Dashboard → API Keys; see the
+[Cursor authentication guide](https://cursor.com/docs/cli/reference/authentication).
+Forget is in the API card's three-dot menu and requires confirmation.
+
 ## 2026-09-27 — Provider onboarding and safe empty-chat cleanup
 
 - Default new Claude API configurations to the official Anthropic endpoint and

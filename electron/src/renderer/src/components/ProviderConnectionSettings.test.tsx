@@ -2,7 +2,7 @@ import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-libra
 import { afterEach, expect, it, vi } from 'vitest'
 import type { AgentsDockAPI } from '@shared/ipc'
 import { setLocale } from '@shared/i18n'
-import { CursorEndpointNotice, ProviderConnectionSettings } from './ProviderConnectionSettings'
+import { ProviderConnectionSettings } from './ProviderConnectionSettings'
 
 const props = { backend: 'claude' as const, connected: true, profileId: 'test', profileGeneration: 1 }
 const empty = { backend: 'claude', scope: 'settings_only', revision: 0, configured: false, has_api_key: false,
@@ -109,15 +109,40 @@ it('offers forgetting only in the menu, confirms it and never logs out CLI', asy
   expect(request).toHaveBeenLastCalledWith({ profileId: 'test', profileGeneration: 1 }, 'claude', 'forget', { expected_revision: 1 })
 })
 
-it('makes old-server and Cursor limitations visible without fake success', async () => {
+it('makes old-server limitations visible without fake success', async () => {
   bridge().mockRejectedValue(new Error('PROVIDER_CONNECTION_UPDATE'))
-  render(<><ProviderConnectionSettings {...props} /><CursorEndpointNotice /></>)
+  render(<ProviderConnectionSettings {...props} backend="cursor" />)
   expect(await screen.findByRole('alert')).toHaveTextContent('does not expose these endpoint settings yet')
   expect(screen.getByRole('button', { name: 'Configure API' })).toBeDisabled()
-  expect(screen.getByText(/Cursor supports its own API keys through CURSOR_API_KEY/)).toBeVisible()
   expect(screen.getByText('Connection status unavailable')).toBeVisible()
-  expect(screen.getByText('Cursor API key: configure in CLI')).toBeVisible()
   expect(screen.queryByText('Connected')).not.toBeInTheDocument()
+})
+
+it('connects Cursor with a key only, verifies before showing connected, and forgets with confirmation', async () => {
+  const request = bridge().mockResolvedValue({ configuration: { ...empty, backend: 'cursor', scope: 'per_chat' } })
+  render(<ProviderConnectionSettings {...props} backend="cursor" />)
+  await waitFor(() => expect(screen.getByRole('button', { name: 'Configure API' })).toBeEnabled())
+  fireEvent.click(screen.getByRole('button', { name: 'Configure API' }))
+  expect(screen.queryByLabelText('API base URL')).not.toBeInTheDocument()
+  expect(screen.queryByLabelText('Model ID')).not.toBeInTheDocument()
+  fireEvent.change(screen.getByLabelText('API key'), { target: { value: 'synthetic-cursor-key' } })
+  let sent: unknown
+  request.mockImplementationOnce((_scope, backend, action, input) => {
+    sent = { backend, action, ...input }
+    return Promise.resolve({ ok: true, status: 'verified', configuration: { ...saved, backend: 'cursor', scope: 'per_chat', base_url: 'https://api2.cursor.sh', protocol: 'cursor', model: 'auto' } })
+  })
+  expect(screen.queryByText('Connected')).not.toBeInTheDocument()
+  fireEvent.click(screen.getByRole('button', { name: 'Connect' }))
+  await screen.findByText('Connected')
+  expect(sent).toEqual({ backend: 'cursor', action: 'save', base_url: 'https://api2.cursor.sh', protocol: 'cursor', auth_header: 'bearer', model: null, api_key: 'synthetic-cursor-key', expected_revision: 0 })
+  expect(screen.queryByLabelText('API key')).not.toBeInTheDocument()
+  fireEvent.pointerDown(screen.getByRole('button', { name: 'Endpoint options' }), { button: 0, ctrlKey: false })
+  fireEvent.click(await screen.findByRole('menuitem', { name: 'Forget API key' }))
+  expect(screen.getByText(/CLI login and other servers are unchanged/)).toBeVisible()
+  expect(request).toHaveBeenCalledTimes(2)
+  fireEvent.click(screen.getByRole('button', { name: 'Forget API key' }))
+  await screen.findByText('Not connected')
+  expect(request).toHaveBeenLastCalledWith({ profileId: 'test', profileGeneration: 1 }, 'cursor', 'forget', { expected_revision: 1 })
 })
 
 it('does not silently choose OpenRouter for OpenCode', async () => {

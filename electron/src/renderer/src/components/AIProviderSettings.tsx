@@ -9,7 +9,7 @@ import { useAppStore } from '../store/app-store'
 import { CodexAuthSettings } from './CodexAuthSettings'
 import { useRuntimeRecheck } from './RuntimeHealth'
 import { NativeProviderSignIn } from './NativeProviderSignIn'
-import { CursorEndpointNotice, ProviderConnectionSettings } from './ProviderConnectionSettings'
+import { ProviderConnectionSettings } from './ProviderConnectionSettings'
 
 function CLIAccountCard({ backend, signedIn, open }: { backend: CLIAccountBackend; signedIn: boolean; open: boolean }) {
   const connected = useAppStore(state => state.connected)
@@ -58,7 +58,7 @@ function ProviderGroup({ backend, requested }: { backend: Backend; requested?: {
     <div className="provider-group-body">
       {backend === 'codex' ? <CodexAuthSettings expanded={open} connected={connected} profileId={profileId} profileGeneration={profileGeneration} onAPIStatus={setAPI} onNativeStatus={setCodexNative} /> : <>
         <CLIAccountCard backend={backend} signedIn={signedIn} open={open} />
-        {backend === 'cursor' ? <CursorEndpointNotice /> : <ProviderConnectionSettings expanded={open} backend={backend} connected={connected} profileId={profileId} profileGeneration={profileGeneration} onStatus={setAPI} />}
+        <ProviderConnectionSettings expanded={open} backend={backend} connected={connected} profileId={profileId} profileGeneration={profileGeneration} onStatus={setAPI} />
       </>}
     </div>
   </details>

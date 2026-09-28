@@ -3000,7 +3000,7 @@ export function SessionDialog({ mode }: { mode: 'newChat' | 'resume' }) {
       <fieldset className="span-two"><legend>{t("ui.Dialogs.SessionDialog.backend_2fb4019")}</legend><div className="segmented session-backend-choices">{backendOptions.map(value => {
         const selection = chatBackendSelection(value)
         const needsConfiguration = value === 'codex-custom' && !codexCustomProviderAvailable(health, catalog)
-        const unavailable = value === 'cursor' && !cursorAvailable || value === 'opencode' && !opencodeBackendAvailable(health, catalog)
+        const unavailable = selection.provider_connection !== 'custom' && (value === 'cursor' && !cursorAvailable || value === 'opencode' && !opencodeBackendAvailable(health, catalog))
         return <button type="button" className={backendChoice === value ? 'active' : ''} key={value} aria-pressed={backendChoice === value} title={needsConfiguration ? t('codexProvider.configure') : unavailable ? (value === 'opencode' ? opencodeBackendUnavailableReason(health, catalog) : cursorUnavailableReason) ?? undefined : undefined} onClick={() => {
           if (needsConfiguration) {
             useAppStore.getState().setModal(mode, false)

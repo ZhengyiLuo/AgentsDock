@@ -14,6 +14,31 @@ const empty = { ...config, configured: false, has_api_key: false, base_url: null
   auth_header: null, checked_at: null, last_result: null }
 
 describe('settings-only provider connection native transport', () => {
+  it('permits only the exact native Cursor credential and model routes', async () => {
+    const calls: string[] = []
+    const cursorConfig = { ...config, backend: 'cursor', scope: 'per_chat', base_url: 'https://api2.cursor.sh', model: 'auto', protocol: 'cursor' }
+    const server = createServer(async (req, res) => {
+      for await (const _chunk of req) { /* drain synthetic key without logging */ }
+      calls.push(`${req.method} ${req.url}`)
+      expect(req.headers['x-agentsdock-token']).toBe('synthetic-admin')
+      expect(req.headers['sec-fetch-mode']).toBeUndefined()
+      res.setHeader('Content-Type', 'application/json')
+      res.end(JSON.stringify(req.url?.includes('provider-models')
+        ? { backend: 'cursor', revision: 1, default_model: 'auto', models: [{ value: 'auto', label: 'Auto' }], discovery_status: 'ready' }
+        : ['PUT', 'POST'].includes(req.method!) ? { ok: true, status: 'verified', configuration: cursorConfig }
+          : req.method === 'DELETE' ? { ...empty, backend: 'cursor' } : cursorConfig))
+    })
+    await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve))
+    const client = new AgentServerClient(`http://127.0.0.1:${(server.address() as AddressInfo).port}`, 'synthetic-admin')
+    try {
+      await client.providerConnectionRequest('cursor', 'get')
+      await client.providerConnectionRequest('cursor', 'save', { ...input, protocol: 'cursor', base_url: 'https://api2.cursor.sh', model: null })
+      await client.providerConnectionRequest('cursor', 'check', { expected_revision: 1 })
+      await client.customModels('cursor')
+      await client.providerConnectionRequest('cursor', 'forget', { expected_revision: 1 })
+      expect(calls).toHaveLength(5)
+    } finally { client.dispose(); server.closeAllConnections(); await new Promise<void>(resolve => server.close(() => resolve())) }
+  })
   it('reads and saves custom model defaults through native HTTP without resubmitting a key', async () => {
     const calls: { method?: string; url?: string; body: string }[] = []
     const metadata = { backend: 'claude' as const, revision: 1, default_model: 'fixture/one', models: [{ value: 'fixture/one', label: 'Friendly' }], discovery_status: 'ready' }
@@ -90,6 +115,10 @@ describe('settings-only provider connection native transport', () => {
   })
 
   it('rejects malformed and cross-provider selections before transport', () => {
+    const cursor = { ...input, base_url: 'https://api2.cursor.sh', protocol: 'cursor', auth_header: 'bearer', model: null }
+    expect(connectionRequest('cursor', 'save', cursor)).toEqual(cursor)
+    expect(() => connectionRequest('cursor', 'save', { ...cursor, base_url: 'https://gateway.invalid' })).toThrow()
+    expect(() => connectionRequest('opencode', 'save', cursor)).toThrow()
     for (const invalid of [{ ...input, model: [] }, { ...input, protocol: [] }, { ...input, expected_revision: -1 },
       { ...input, base_url: 'http://remote.example' }, { ...input, base_url: 'https://example/api?key=secret' },
       { ...input, protocol: 'responses' }, { ...input, unexpected: true }]) {

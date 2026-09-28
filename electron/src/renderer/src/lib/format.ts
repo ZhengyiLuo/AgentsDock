@@ -3,6 +3,7 @@ import { getLocale, t, type Locale } from '@shared/i18n'
 import { runtimeBackendCatalogFor, runtimeEffortOptions } from '@shared/runtime-catalog'
 
 export function backendLabel(backend: Backend, codexProvider?: CodexProvider): string {
+  if (backend === 'cursor' && codexProvider === 'custom') return t('connections.cursorKey')
   if (backend === 'codex' && codexProvider === 'custom') return t('codexProvider.label')
   if (codexProvider === 'custom') return t('connections.chatLabel', { provider: backend === 'opencode' ? 'OpenCode' : 'Claude' })
   if (backend === 'codex') return 'Codex'

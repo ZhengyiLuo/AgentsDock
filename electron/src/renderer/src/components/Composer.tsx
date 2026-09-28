@@ -3380,7 +3380,7 @@ function BackendMenu({ session, running, admitting }: { session: Session; runnin
       window.dispatchEvent(new CustomEvent('agentsdock:app-settings-section', { detail: 'providers' }))
       useAppStore.getState().setModal('appSettings', true)
     }}><BackendMark backend="codex" size={15} />{t('codexProvider.label')}{' '}<span className="menu-item-locked-hint">{t('codexProvider.configure')}</span></DropdownMenu.Item>
-    const unavailable = backend === 'cursor' && !cursorAvailable || backend === 'opencode' && provider_connection !== 'custom' && !openCodeAvailable
+    const unavailable = backend === 'cursor' && provider_connection !== 'custom' && !cursorAvailable || backend === 'opencode' && provider_connection !== 'custom' && !openCodeAvailable
     const unavailableReason = (backend === 'opencode' ? openCodeUnavailableReason : cursorUnavailableReason) || t('ui.Composer.agentUnavailableFallback')
     if (unavailable) return <Tooltip.Root key={backend}>
       <Tooltip.Trigger asChild>

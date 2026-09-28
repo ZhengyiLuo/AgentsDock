@@ -1,4 +1,4 @@
-export type CustomModelBackend = 'codex' | 'claude' | 'opencode'
+export type CustomModelBackend = 'codex' | 'claude' | 'opencode' | 'cursor'
 export interface CustomModels {
   backend: CustomModelBackend
   revision: number | string
@@ -9,7 +9,7 @@ export interface CustomModels {
 export interface CustomModelInput { model: string | null; expected_revision: number | string }
 function invalid(): never { throw new Error('CUSTOM_MODELS_INVALID') }
 export function customModelBackend(value: unknown): CustomModelBackend {
-  return value === 'codex' || value === 'claude' || value === 'opencode' ? value : invalid()
+  return value === 'codex' || value === 'claude' || value === 'opencode' || value === 'cursor' ? value : invalid()
 }
 function model(value: unknown): string | null {
   return value === null ? null : typeof value === 'string' && /^[\x21-\x7e]{1,256}$/.test(value) ? value : invalid()

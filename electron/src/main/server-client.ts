@@ -3197,10 +3197,10 @@ function isPrivilegedNativeControlTarget(
       && /^[A-Za-z0-9_-]{1,128}$/.test(target.searchParams.get('session_id') ?? '')
       && (!target.searchParams.has('refresh') || target.searchParams.get('refresh') === 'true')
   }
-  if (/^\/api\/admin\/provider-connections\/(claude|opencode)$/.test(path)) return !target.search && ['GET', 'PUT', 'DELETE'].includes(method)
-  if (/^\/api\/admin\/provider-connections\/(claude|opencode)\/check$/.test(path)) return !target.search && method === 'POST'
+  if (/^\/api\/admin\/provider-connections\/(claude|opencode|cursor)$/.test(path)) return !target.search && ['GET', 'PUT', 'DELETE'].includes(method)
+  if (/^\/api\/admin\/provider-connections\/(claude|opencode|cursor)\/check$/.test(path)) return !target.search && method === 'POST'
   if (/^\/api\/admin\/provider-accounts\/(claude|cursor|opencode)$/.test(path)) return !target.search && method === 'GET'
-  if (/^\/api\/admin\/provider-models\/(codex|claude|opencode)$/.test(path)) return method === 'PUT' ? !target.search : method === 'GET' && [...target.searchParams.keys()].every(key => key === 'session_id') && target.searchParams.getAll('session_id').length <= 1
+  if (/^\/api\/admin\/provider-models\/(codex|claude|opencode|cursor)$/.test(path)) return method === 'PUT' ? !target.search : method === 'GET' && [...target.searchParams.keys()].every(key => key === 'session_id') && target.searchParams.getAll('session_id').length <= 1
   if (path === '/api/admin/codex/auth') return !target.search && method === 'GET'
   if (path === '/api/admin/codex/provider') return !target.search && ['GET', 'PUT', 'DELETE'].includes(method)
   if (path === '/api/admin/codex/provider/test') return !target.search && method === 'POST'

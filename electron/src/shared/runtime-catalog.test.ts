@@ -150,6 +150,17 @@ describe('native and custom API choices', () => {
 })
 
 describe('runtimeCatalogHasSelectableModels', () => {
+  it('offers a verified Cursor key separately from native login and removes it after Forget', () => {
+    const health = { ok: true, capabilities: { cursor_backend: { available: true, version: 2 }, provider_connections_v1: { per_chat: true, available: true } } } as Health
+    const custom = { configured: true, available: true, base_url: 'https://api2.cursor.sh', model: 'auto', default_model: 'auto', models: [{ value: 'auto', label: 'Auto' }] }
+    const catalog: RuntimeCatalog = { backends: { ...validCatalog.backends, cursor: { models: [], efforts: [], native_credentials_present: false, custom_provider: custom } } }
+    expect(selectableChatBackendChoices(health, catalog)).toContain('cursor-custom')
+    expect(selectableChatBackendChoices(health, catalog)).not.toContain('cursor')
+    expect(chatBackendSelection('cursor-custom')).toEqual({ backend: 'cursor', codex_provider: 'default', provider_connection: 'custom' })
+    expect(runtimeSelectionError(health, catalog, 'cursor', null, 'custom')).toBeNull()
+    catalog.backends.cursor!.custom_provider = { configured: false, available: false, model: null, base_url: null }
+    expect(selectableChatBackendChoices(health, catalog)).not.toContain('cursor-custom')
+  })
   it('accepts a catalog with concrete choices for both backends', () => {
     expect(runtimeCatalogHasSelectableModels(validCatalog)).toBe(true)
   })

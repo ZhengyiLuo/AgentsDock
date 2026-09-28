@@ -63,9 +63,9 @@ export function ProviderConnectionSettings({ backend, ...props }: Props & { back
 
   function configure() {
     clearKey(); setError(null)
-    setBaseURL(saved?.base_url ?? (backend === 'claude' ? 'https://api.anthropic.com' : ''))
+    setBaseURL(saved?.base_url ?? (backend === 'cursor' ? 'https://api2.cursor.sh' : backend === 'claude' ? 'https://api.anthropic.com' : ''))
     setModel(saved?.model ?? '')
-    setProtocol(saved?.protocol ?? (backend === 'claude' ? 'anthropic' : 'chat_completions'))
+    setProtocol(saved?.protocol ?? (backend === 'cursor' ? 'cursor' : backend === 'claude' ? 'anthropic' : 'chat_completions'))
     setAuthHeader(saved?.auth_header ?? (backend === 'claude' ? 'x-api-key' : 'bearer')); setOpen(true)
   }
   async function operate(action: Exclude<ConnectionAction, 'get'>) {
@@ -89,18 +89,18 @@ export function ProviderConnectionSettings({ backend, ...props }: Props & { back
       if (owns(n, scope)) { clearKey(); setBusy(false) }
     }
   }
-  const name = backend === 'claude' ? 'Claude Code' : 'OpenCode'
+  const name = backend === 'cursor' ? 'Cursor' : backend === 'claude' ? 'Claude Code' : 'OpenCode'
   const editable = props.connected && Boolean(props.profileId) && Boolean(saved) && !busy
   const verified = props.connected && !busy && !open && !error && saved?.configured === true && saved?.last_result === 'verified'
   useEffect(() => { props.onStatus?.(verified) }, [verified, props.onStatus])
   const unavailable = !props.connected || !saved || Boolean(error)
-  return <section className={`codex-auth-settings provider-connection ${verified ? 'connection-connected' : 'connection-unconfirmed'}`} aria-label={`${name} custom endpoint`}>
+  return <section className={`codex-auth-settings provider-connection ${verified ? 'connection-connected' : 'connection-unconfirmed'}`} aria-label={backend === 'cursor' ? 'Cursor API key' : `${name} custom endpoint`}>
     <div className="codex-auth-settings-icon">{verified ? <CheckCircle2 size={18} /> : <KeyRound size={16} />}</div>
     <div className="codex-auth-settings-copy">
       <div className="codex-auth-settings-heading">
-        <div><strong>{t('connections.customAPI')}</strong>{saved?.scope === 'settings_only' && <small>{t('connections.settingsOnly')}</small>}</div>
+        <div><strong>{t(backend === 'cursor' ? 'connections.cursorKey' : 'connections.customAPI')}</strong>{saved?.scope === 'settings_only' && <small>{t('connections.settingsOnly')}</small>}</div>
         {!open && (saved?.configured
-          ? <EndpointMenu disabled={!editable} scopeKey={`${props.profileId}:${props.profileGeneration}:${backend}:${saved.revision}`} onForget={() => void operate('forget')} />
+          ? <EndpointMenu apiKey={backend === 'cursor'} disabled={!editable} scopeKey={`${props.profileId}:${props.profileGeneration}:${backend}:${saved.revision}`} onForget={() => void operate('forget')} />
           : <button type="button" className="primary-button" disabled={!editable} onClick={configure}>{t('connections.configure')}</button>)}
       </div>
       <small className={verified ? 'provider-connection-verified' : ''} role="status">
@@ -109,25 +109,26 @@ export function ProviderConnectionSettings({ backend, ...props }: Props & { back
           : open ? t('connections.draft') : unavailable ? t('connections.unavailable') : saved?.configured ? t('connections.saved') : t('connections.empty')}
       </small>
       <CustomModelSettings backend={backend} active={props.expanded === true && verified} onSaved={() => setReload(n => n + 1)} />
-      {error && <small role="alert" className={error === 'update' ? '' : 'codex-auth-settings-error'}>{t(`connections.error.${error}`)}</small>}
+      {error && <small role="alert" className={error === 'update' ? '' : 'codex-auth-settings-error'}>{t(backend === 'cursor' && error === 'connection_failed' ? 'connections.cursorCheckFailed' : `connections.error.${error}`)}</small>}
       {!error && !open && saved?.last_result && saved.last_result !== 'verified' && <small role="alert" className="codex-auth-settings-error">{t(`connections.error.${saved.last_result}`)}</small>}
       {!open && saved?.configured && <>
-        <small>{saved.base_url}</small>
+        {backend !== 'cursor' && <small>{saved.base_url}</small>}
         {!verified && <button type="button" className="quiet-button" disabled={!editable} onClick={configure}>{t('connections.configure')}</button>}
       </>}
       {!open && error && <button type="button" className="quiet-button provider-connection-refresh" disabled={busy || !props.connected} onClick={() => setReload(n => n + 1)}>{t('connections.refresh')}</button>}
       {open && <form className="codex-auth-settings-form" onSubmit={event => { event.preventDefault(); void operate('save') }}>
-        <label htmlFor={`${id}-url`}>{t('connections.baseURL')}</label>
+        {backend !== 'cursor' && <><label htmlFor={`${id}-url`}>{t('connections.baseURL')}</label>
         <input id={`${id}-url`} value={baseURL} placeholder="https://…" maxLength={2048} disabled={busy} onChange={e => {
           setBaseURL(e.target.value)
           if (backend === 'claude') {
             try { setAuthHeader(new URL(e.target.value).hostname === 'api.anthropic.com' ? 'x-api-key' : 'bearer') } catch { /* incomplete URL */ }
           }
-        }} autoComplete="off" spellCheck={false} />
+        }} autoComplete="off" spellCheck={false} /></>}
+        {backend === 'cursor' && <small>{t('connections.cursorHelp')}{' '}<a href="https://cursor.com/dashboard" onClick={event => { event.preventDefault(); void window.agentsDock.native.openExternal('https://cursor.com/dashboard') }}>{t('connections.readMore')}</a></small>}
         {backend === 'opencode' && <small>{t('connections.openCodeEndpointHelp')}{' '}<a href="https://opencode.ai/docs/zen/" onClick={event => { event.preventDefault(); void window.agentsDock.native.openExternal('https://opencode.ai/docs/zen/') }}>{t('connections.readMore')}</a></small>}
         <label htmlFor={`${id}-key`}>{t('connections.key')}</label>
         <input id={`${id}-key`} type="password" ref={attachKey} maxLength={4096} disabled={busy} onChange={e => setHasKey(Boolean(e.target.value.trim()))} autoComplete="off" autoCapitalize="none" autoCorrect="off" spellCheck={false} data-1p-ignore data-lpignore="true" />
-        <details className="provider-connection-advanced"><summary>{t('connections.advanced')}</summary>
+        {backend !== 'cursor' && <details className="provider-connection-advanced"><summary>{t('connections.advanced')}</summary>
         {backend === 'opencode' && <><label htmlFor={`${id}-protocol`}>{t('connections.protocol')}</label>
           <select id={`${id}-protocol`} value={protocol} disabled={busy} onChange={e => { setProtocol(e.target.value as ConnectionProtocol); setAuthHeader('bearer') }}>
             <option value="chat_completions">OpenAI Chat Completions</option><option value="responses">OpenAI Responses</option><option value="anthropic">Anthropic Messages</option>
@@ -140,7 +141,7 @@ export function ProviderConnectionSettings({ backend, ...props }: Props & { back
         <input id={`${id}-model`} value={model} maxLength={256} disabled={busy} onChange={e => setModel(e.target.value)} autoComplete="off" spellCheck={false} />
         <small>{t('connections.modelHelp')}</small>
         {model.trim() && <small>{t('connections.cost')}</small>}
-        </details>
+        </details>}
         <div className="codex-auth-settings-actions">
           <button type="submit" className="primary-button" disabled={!editable || !hasKey || !baseURL.trim()}>{t('connections.save')}</button>
           <button type="button" className="quiet-button" disabled={busy} onClick={() => { clearKey(); setOpen(false); setError(null) }}>{t('connections.cancel')}</button>
@@ -156,15 +157,4 @@ export function EndpointSetupHelp() {
     <summary>{t('connections.startTitle')}</summary><p>{t('connections.startHelp')}</p>
     <button type="button" className="quiet-button" onClick={() => void window.agentsDock.native.openExternal('https://openrouter.ai/settings/keys')}>{t('connections.openRouter')}</button>
   </details>
-}
-
-export function CursorEndpointNotice() {
-  useLocale()
-  return <section className="codex-auth-settings connection-unconfirmed" aria-label="Cursor custom endpoint">
-    <div className="codex-auth-settings-icon"><KeyRound size={16} /></div>
-    <div className="codex-auth-settings-copy"><strong>{t('connections.title', { provider: 'Cursor' })}</strong>
-      <small role="status">{t('connections.unsupported')}</small><small>{t('connections.cursorHelp')}</small>
-      <a href="https://cursor.com/docs/cli/reference/authentication" onClick={event => { event.preventDefault(); void window.agentsDock.native.openExternal('https://cursor.com/docs/cli/reference/authentication') }}>{t('connections.readMore')}</a>
-    </div>
-  </section>
 }

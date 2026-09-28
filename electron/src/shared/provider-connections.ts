@@ -21,10 +21,10 @@ export function parseCLIAccount(backend: CLIAccountBackend, value: unknown): CLI
   return { backend, email, plan_type: plan, source: item.source as CLIAccountMetadata['source'] }
 }
 
-export type ConnectionBackend = 'claude' | 'opencode'
+export type ConnectionBackend = 'claude' | 'opencode' | 'cursor'
 export type ConnectionAction = 'get' | 'save' | 'check' | 'forget'
-export type ConnectionProtocol = 'anthropic' | 'chat_completions' | 'responses'
-export type ConnectionResult = 'verified' | 'authentication_failed' | 'rate_limited' | 'unsupported' | 'connection_failed' | 'invalid_response' | 'model_required'
+export type ConnectionProtocol = 'anthropic' | 'chat_completions' | 'responses' | 'cursor'
+export type ConnectionResult = 'verified' | 'authentication_failed' | 'rate_limited' | 'unsupported' | 'connection_failed' | 'invalid_response' | 'model_required' | 'cli_update_required'
 export interface ProviderConnectionInput {
   base_url: string; api_key: string; model: string | null; protocol: ConnectionProtocol
   auth_header: 'bearer' | 'x-api-key'; expected_revision: number
@@ -38,10 +38,10 @@ export interface ProviderConnectionReply {
   configuration?: ProviderConnectionConfiguration; ok?: boolean; status?: ConnectionResult
 }
 export type ProviderConnectionRequest = ProviderConnectionInput | { expected_revision: number }
-const results: ConnectionResult[] = ['verified', 'authentication_failed', 'rate_limited', 'unsupported', 'connection_failed', 'invalid_response', 'model_required']
+const results: ConnectionResult[] = ['verified', 'authentication_failed', 'rate_limited', 'unsupported', 'connection_failed', 'invalid_response', 'model_required', 'cli_update_required']
 function invalid(): never { throw new Error('PROVIDER_CONNECTION_INVALID') }
 export function connectionBackend(value: unknown): ConnectionBackend {
-  if (value !== 'claude' && value !== 'opencode') return invalid()
+  if (value !== 'claude' && value !== 'opencode' && value !== 'cursor') return invalid()
   return value
 }
 function revision(value: unknown): number {
@@ -52,7 +52,9 @@ function fields(backend: ConnectionBackend, input: Record<string, unknown>) {
   const base_url = validateCodexProviderURL(input.base_url)
   if (/\/messages\/?$/i.test(base_url) || input.model !== null && (typeof input.model !== 'string' || !/^[\x21-\x7e]{1,256}$/.test(input.model.trim()))) return invalid()
   const protocol = input.protocol as ConnectionProtocol, auth_header = input.auth_header as ProviderConnectionInput['auth_header']
-  if (!['anthropic', 'chat_completions', 'responses'].includes(protocol) || backend === 'claude' && protocol !== 'anthropic'
+  if (!['anthropic', 'chat_completions', 'responses', 'cursor'].includes(protocol) || backend === 'claude' && protocol !== 'anthropic'
+    || (protocol === 'cursor') !== (backend === 'cursor')
+    || backend === 'cursor' && base_url !== 'https://api2.cursor.sh'
     || !['bearer', 'x-api-key'].includes(auth_header) || protocol !== 'anthropic' && auth_header !== 'bearer') return invalid()
   return { base_url, model: typeof input.model === 'string' ? input.model.trim() : null, protocol, auth_header }
 }

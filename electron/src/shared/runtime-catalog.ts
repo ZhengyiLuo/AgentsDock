@@ -2,20 +2,20 @@ import type { Backend, CodexProvider, Health, RuntimeBackendCatalog, RuntimeCata
 import { t } from './i18n'
 
 /** UI identity only: the native runtime remains Codex for both choices. */
-export type ChatBackendChoice = Backend | 'codex-custom' | 'claude-custom' | 'opencode-custom'
+export type ChatBackendChoice = Backend | 'codex-custom' | 'claude-custom' | 'opencode-custom' | 'cursor-custom'
 
 export function chatBackendChoice(session: { backend: Backend; codex_provider?: CodexProvider; provider_connection?: CodexProvider }): ChatBackendChoice {
   return (session.backend === 'codex' ? session.codex_provider : session.provider_connection) === 'custom' ? `${session.backend}-custom` as ChatBackendChoice : session.backend
 }
 
 export function chatBackendSelection(choice: ChatBackendChoice): { backend: Backend; codex_provider: CodexProvider; provider_connection: CodexProvider } {
-  return { backend: choice.replace(/-custom$/, '') as Backend, codex_provider: choice === 'codex-custom' ? 'custom' : 'default', provider_connection: choice === 'claude-custom' || choice === 'opencode-custom' ? 'custom' : 'default' }
+  return { backend: choice.replace(/-custom$/, '') as Backend, codex_provider: choice === 'codex-custom' ? 'custom' : 'default', provider_connection: ['claude-custom', 'opencode-custom', 'cursor-custom'].includes(choice) ? 'custom' : 'default' }
 }
 
 export function customProviderAvailable(health: Health | null | undefined, catalog: RuntimeCatalog | null | undefined, backend: Backend, customCatalog?: RuntimeBackendCatalog['custom_provider']): boolean {
   if (backend === 'codex') return codexCustomProviderAvailable(health, catalog, customCatalog)
   const custom = customCatalog ?? catalog?.backends?.[backend]?.custom_provider
-  return health?.capabilities?.provider_connections_v1?.per_chat === true && ['claude', 'opencode'].includes(backend) && custom?.configured === true && custom.available === true
+  return health?.capabilities?.provider_connections_v1?.per_chat === true && ['claude', 'opencode', 'cursor'].includes(backend) && custom?.configured === true && custom.available === true
 }
 
 export function nativeProviderConnected(health: Health | null | undefined, catalog: RuntimeCatalog | null | undefined, backend: Backend): boolean {
