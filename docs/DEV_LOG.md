@@ -1,5 +1,21 @@
 # Public development log
 
+## 2026-09-27 — Endpoint confirmation spacing
+
+- Use a compact, centered confirmation with consistent 24px insets, 16px content
+  spacing and an 8px button gap. Wrap the actions on narrow screens; preserve
+  the existing confirmation, cancellation and endpoint-only deletion semantics.
+- Reproduce zero body padding in the native app, then verify real menu selection,
+  centered geometry, dark/light and narrow layouts, keyboard selection, Escape,
+  Cancel and repeated opening. Recheck the signed packaged code with an isolated
+  profile, then leave the installed app's active server selection unchanged.
+  No live endpoint is forgotten during this appearance-only check; localized
+  visual acceptance remains pending.
+- All 60 focused tests, type checking, compilation and 8 build/license checks
+  pass. The full desktop suite reports 4,963 passes, 5 skips and 2 failures in
+  unchanged Chinese terminology/OpenCode catalog assertions; retain these for
+  separate follow-up. No server update, publication or merge is included.
+
 ## 2026-09-27 — Visible endpoint menu inside Settings
 
 - Fix the custom endpoint menu painting behind the Settings dialog. Give this
