@@ -16,12 +16,11 @@ export function EndpointMenu({ disabled, scopeKey, onForget }: { disabled: boole
     </DropdownMenu.Root>
     <Dialog.Root open={confirm} onOpenChange={setConfirm}><Dialog.Portal><Dialog.Overlay className="dialog-overlay endpoint-confirm-overlay" />
       <Dialog.Content className="form-dialog endpoint-confirm-dialog">
-        <header><Dialog.Title>{t('connections.confirmForget')}</Dialog.Title></header>
-        <div className="form-dialog-body"><Dialog.Description>{t('connections.forgetHelp')}</Dialog.Description>
-          <div className="codex-auth-settings-actions">
-            <button type="button" className="quiet-button" onClick={() => setConfirm(false)}>{t('connections.cancel')}</button>
-            <button type="button" className="primary-button" disabled={disabled} onClick={() => { setConfirm(false); onForget() }}>{t('connections.forget')}</button>
-          </div>
+        <Dialog.Title>{t('connections.confirmForget')}</Dialog.Title>
+        <Dialog.Description className="endpoint-confirm-description">{t('connections.forgetHelp')}</Dialog.Description>
+        <div className="endpoint-confirm-actions">
+          <button type="button" className="quiet-button" onClick={() => setConfirm(false)}>{t('connections.cancel')}</button>
+          <button type="button" className="primary-button" disabled={disabled} onClick={() => { setConfirm(false); onForget() }}>{t('connections.forget')}</button>
         </div>
       </Dialog.Content>
     </Dialog.Portal></Dialog.Root>

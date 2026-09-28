@@ -132,6 +132,22 @@ describe('renderer CSS custom properties', () => {
     expect(layer('endpoint-confirm-overlay')).toBeGreaterThan(settings)
     expect(layer('endpoint-confirm-dialog')).toBeGreaterThan(layer('endpoint-confirm-overlay'))
   })
+
+  it('gives the endpoint confirmation centered content and consistent insets', () => {
+    const shell = sources.find(({ file }) => file === join(rendererRoot, 'styles.css'))?.source ?? ''
+    const dialog = shell.split('.endpoint-confirm-dialog {')[1]?.split('}')[0] ?? ''
+    expect(dialog).toContain('padding: var(--space-8)')
+    expect(dialog).toContain('gap: var(--space-7)')
+    expect(dialog).toContain('text-align: center')
+    expect(dialog).toContain('width: min(440px, calc(100vw - 48px))')
+    const actions = shell.split('.endpoint-confirm-actions {')[1]?.split('}')[0] ?? ''
+    expect(actions).toContain('justify-content: center')
+    expect(actions).toContain('flex-wrap: wrap')
+    expect(actions).toContain('gap: var(--space-4)')
+    const component = readFileSync(join(rendererRoot, 'components/EndpointMenu.tsx'), 'utf8')
+    expect(component).toContain('className="endpoint-confirm-actions"')
+    expect(component).toContain('className="endpoint-confirm-description"')
+  })
 })
 
 function cssFiles(directory: string): string[] {

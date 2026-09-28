@@ -1844,7 +1844,9 @@ button.tool-event-toggle:hover { background: #242424; }
 /* These body portals belong to Settings, so they must paint above its dialog. */
 .endpoint-menu-content { z-index: 1002; }
 .endpoint-confirm-overlay { z-index: 1002; }
-.endpoint-confirm-dialog { z-index: 1003; }
+.endpoint-confirm-dialog { z-index: 1003; width: min(440px, calc(100vw - 48px)); display: grid; gap: var(--space-7); padding: var(--space-8); text-align: center; }
+.endpoint-confirm-description { margin: 0; color: var(--muted); font-size: var(--text-size-ui); line-height: var(--line-height-body); overflow-wrap: anywhere; }
+.endpoint-confirm-actions { display: flex; flex-wrap: wrap; justify-content: center; gap: var(--space-4); margin-top: var(--space-4); }
 .app-settings-close { position: absolute; z-index: 2; top: 14px; right: 15px; }
 .app-settings-section { width: 100%; max-width: 650px; margin: 0 auto; }
 .app-settings-section > header { margin-bottom: 18px; }
