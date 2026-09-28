@@ -1,5 +1,22 @@
 # Public development log
 
+## 2026-09-27 — Desktop line-ending integration accepted locally
+
+- Integrated PR #24 from contributor commit `3f29f4d9` as `a4f6b281`, retaining
+  the original author. Only the development-log conflict required resolution.
+- Reproduced CRLF-to-LF rewriting on the preceding main build. The candidate
+  preserves CRLF, LF and CR through native edit/save, undo and redo; mixed files
+  normalize to the first separator. Native clipboard paste, external reloads,
+  restored YAML folds/cursor positions, UTF-8/CRLF byte-limit boundaries and
+  stale-save rejection/reload recovery passed with byte-level file checks.
+- Acceptance used isolated offscreen Electron 43.1.1, the production app build
+  and AgentsServer `1.0.7-beta.11`, through real IPC, authenticated HTTP and
+  revision-checked filesystem writes. Only disposable credential storage and
+  fixture setup were synthetic; no provider inference was needed or claimed.
+- Validation: 339 focused desktop tests and 53 server workspace-file tests,
+  TypeScript checking and production compilation passed. Availability: local
+  source/build only; no package installation, release, deployment or merge.
+
 ## 2026-09-17 — Preserve desktop editor line endings
 
 - Preserve a file's first line-ending style when emitting edits, including undo
