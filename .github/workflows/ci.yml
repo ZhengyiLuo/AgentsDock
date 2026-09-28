@@ -34,6 +34,10 @@ on:
         description: Independently reviewed npm descriptor SHA-256 for npm-only validation
         type: string
         default: ''
+      npm_source_sha:
+        description: Exact signed npm candidate source SHA; required for npm-only validation and distinct from the harness commit
+        type: string
+        default: ''
 
 permissions:
   contents: read
@@ -56,6 +60,7 @@ jobs:
           CANDIDATE_REPLAY: ${{ inputs.candidate_replay }}
           NPM_CANDIDATE_TAG: ${{ inputs.npm_candidate_tag }}
           NPM_MANIFEST_SHA256: ${{ inputs.npm_manifest_sha256 }}
+          NPM_SOURCE_SHA: ${{ inputs.npm_source_sha }}
           CANDIDATE_TAG: ${{ inputs.candidate_tag }}
           CANDIDATE_RECEIPT_SHA256: ${{ inputs.candidate_receipt_sha256 }}
           CANDIDATE_BUNDLE_SHA256: ${{ inputs.candidate_bundle_sha256 }}
@@ -66,6 +71,7 @@ jobs:
           if [[ "$NPM_NATIVE_VALIDATION" == false ]]; then
             test -z "$NPM_CANDIDATE_TAG"
             test -z "$NPM_MANIFEST_SHA256"
+            test -z "$NPM_SOURCE_SHA"
             exit 0
           fi
           test "$NPM_NATIVE_VALIDATION" = true
@@ -79,6 +85,7 @@ jobs:
           git check-ref-format "$GITHUB_REF"
           test "$GITHUB_WORKFLOW_REF" = "$GITHUB_REPOSITORY/.github/workflows/ci.yml@$GITHUB_REF"
           [[ "$GITHUB_SHA" =~ ^[0-9a-f]{40}$ ]] || exit 1
+          [[ "$NPM_SOURCE_SHA" =~ ^[0-9a-f]{40}$ ]] || exit 1
           [[ "$NPM_CANDIDATE_TAG" =~ ^npm-candidate-v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-beta\.[1-9][0-9]*)?$ ]] || exit 1
           [[ "$NPM_MANIFEST_SHA256" =~ ^[0-9a-f]{64}$ ]] || exit 1
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
@@ -99,7 +106,7 @@ jobs:
           python3 -m unittest discover -s server/tests -t server -p test_release_file_manifest_isolated.py
 
   electron:
-    if: ${{ !(github.event_name == 'workflow_dispatch' && (inputs.npm_native_validation || inputs.npm_candidate_tag != '' || inputs.npm_manifest_sha256 != '')) }}
+    if: ${{ !(github.event_name == 'workflow_dispatch' && (inputs.npm_native_validation || inputs.npm_candidate_tag != '' || inputs.npm_manifest_sha256 != '' || inputs.npm_source_sha != '')) }}
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
@@ -125,7 +132,7 @@ jobs:
         working-directory: electron
 
   mobile-source:
-    if: ${{ !(github.event_name == 'workflow_dispatch' && (inputs.npm_native_validation || inputs.npm_candidate_tag != '' || inputs.npm_manifest_sha256 != '')) }}
+    if: ${{ !(github.event_name == 'workflow_dispatch' && (inputs.npm_native_validation || inputs.npm_candidate_tag != '' || inputs.npm_manifest_sha256 != '' || inputs.npm_source_sha != '')) }}
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
@@ -199,11 +206,13 @@ jobs:
       CANDIDATE_REPLAY: ${{ inputs.candidate_replay }}
       NPM_CANDIDATE_TAG: ${{ inputs.npm_candidate_tag }}
       NPM_MANIFEST_SHA256: ${{ inputs.npm_manifest_sha256 }}
+      NPM_SOURCE_SHA: ${{ inputs.npm_source_sha }}
       TEST_PLATFORM: ${{ matrix.platform }}
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
         with:
           persist-credentials: false
+          fetch-depth: 0
       - name: Download only the exact canonical npm draft assets
         env:
           GH_TOKEN: ${{ github.token }}
@@ -244,7 +253,7 @@ jobs:
           python3 scripts/npm_native_acceptance.py \
             --assets "$RUNNER_TEMP/npm-native-inputs/npm" \
             --release "$RUNNER_TEMP/npm-native-inputs/release.json" \
-            --source-sha "$GITHUB_SHA" --source-ref "$GITHUB_REF_NAME" \
+            --source-sha "$NPM_SOURCE_SHA" --source-ref "$GITHUB_REF_NAME" \
             --manifest-sha256 "$NPM_MANIFEST_SHA256" \
             --work "$RUNNER_TEMP/agentsdock-npm-native-$TEST_PLATFORM" \
             --report "$RUNNER_TEMP/npm-native-public/report-$TEST_PLATFORM.json"

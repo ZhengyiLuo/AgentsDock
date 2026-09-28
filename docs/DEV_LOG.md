@@ -1,5 +1,26 @@
 # Public development log
 
+## 2026-09-28 — Preserve the signed npm candidate while correcting native validation
+
+- Build and verify the npm-only `1.0.7` candidate from
+  `e883d6fc047d2ba2749c30976750193d91aa067a` with the existing server signing
+  identity. Signing run `36392099463` succeeds; the exact three signed assets
+  remain in an unpublished draft. All runtime bytes and file modes match the
+  tested beta.18 package; only version metadata and the npm README differ.
+- Native run `36392302595` is not accepted: macOS reaches authenticated health
+  but fails during the harness service restart; Linux refuses an early host
+  guard before installation. Do not turn partial execution into acceptance.
+- Keep signed source and package hashes fixed while recording the real reviewed
+  harness commit separately. Permit only the explicit CI/helper/tests/log file
+  corrections; reject runtime, verifier, signing-key and file-mode changes.
+- Add bounded native-command diagnostics without private output, and wait for
+  owned launchd service removal before a narrowly classified bootstrap retry.
+  Linux guard diagnostics remain read-only and do not bypass custom-root checks.
+- Pass 264 release-tooling/CLI tests, 87 Python helper tests, 11 npm packaging
+  tests, workflow lint and independent review of the scoped correction.
+- Native revalidation and npm publication remain pending. No desktop or mobile
+  release, production service change or full product acceptance is included.
+
 ## 2026-09-28 — Add scoped native validation for the npm-only release
 
 - Add an explicit, non-publishing CI dispatch for the exact three-file signed

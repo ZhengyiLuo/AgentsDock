@@ -44,6 +44,7 @@ function pins(changes = {}) {
   return {
     NPM_NATIVE_VALIDATION: 'true', CANDIDATE_REPLAY: 'false',
     NPM_CANDIDATE_TAG: 'npm-candidate-v1.0.7', NPM_MANIFEST_SHA256: 'a'.repeat(64),
+    NPM_SOURCE_SHA: 'e883d6fc047d2ba2749c30976750193d91aa067a',
     CANDIDATE_TAG: '', CANDIDATE_RECEIPT_SHA256: '', CANDIDATE_BUNDLE_SHA256: '',
     GITHUB_EVENT_NAME: 'workflow_dispatch', GITHUB_REPOSITORY: 'ZhengyiLuo/AgentsDock',
     GITHUB_REF: 'refs/heads/release/1.0.7', GITHUB_SHA: 'b'.repeat(40),
@@ -67,7 +68,7 @@ function fixture(t, command) {
   mkdirSync(join(base, 'server'))
   writeFileSync(join(base, 'server/VERSION'), '1.0.7\n')
   const args = join(base, 'arguments')
-  writeFileSync(join(bin, command), '#!/bin/bash\nprintf \'%s\\0\' "$@" >> "$QA_ARGUMENTS"\nprintf \'{}\\n\'\n', { mode: 0o700 })
+  writeFileSync(join(bin, command), '#!/bin/bash\nprintf \'%s\\0\' "$@" >> "$QA_ARGUMENTS"\nprintf \'%s\' "$GITHUB_SHA" > "$QA_ARGUMENTS.github-sha"\nprintf \'{}\\n\'\n', { mode: 0o700 })
   return {
     base, runner, args,
     env: { ...pins(), PATH: `${bin}:${process.env.PATH}`, RUNNER_TEMP: runner, QA_ARGUMENTS: args },
@@ -77,7 +78,7 @@ function fixture(t, command) {
 
 test('npm-only validation is explicit, non-cancelling, canonical and hosted on both native platforms', () => {
   assert.match(workflow, /npm_native_validation:\n        description: [^\n]+\n        type: boolean\n        default: false/)
-  for (const name of ['npm_candidate_tag', 'npm_manifest_sha256']) {
+  for (const name of ['npm_candidate_tag', 'npm_manifest_sha256', 'npm_source_sha']) {
     assert.match(workflow, new RegExp(`${name}:\\n        description: [^\\n]+\\n        type: string\\n        default: ''`))
   }
   assert.match(workflow, /group: verify-source-\$\{\{ github\.ref \}\}\$\{\{ github\.event_name == 'workflow_dispatch' && inputs\.npm_native_validation && '-npm-native' \|\| '' \}\}/)
@@ -93,7 +94,7 @@ test('npm-only validation is explicit, non-cancelling, canonical and hosted on b
 
 test('npm mode skips app jobs without weakening the existing candidate or product acceptance gates', () => {
   for (const name of ['electron', 'mobile-source']) {
-    assert.match(job(name), /if: \$\{\{ !\(github\.event_name == 'workflow_dispatch' && \(inputs\.npm_native_validation \|\| inputs\.npm_candidate_tag != '' \|\| inputs\.npm_manifest_sha256 != ''\)\) \}\}/)
+    assert.match(job(name), /if: \$\{\{ !\(github\.event_name == 'workflow_dispatch' && \(inputs\.npm_native_validation \|\| inputs\.npm_candidate_tag != '' \|\| inputs\.npm_manifest_sha256 != '' \|\| inputs\.npm_source_sha != ''\)\) \}\}/)
   }
   const candidate = job('candidate-native')
   assert.match(candidate, /inputs\.candidate_replay && !inputs\.npm_native_validation/)
@@ -121,7 +122,7 @@ test('the fail-closed manual guard runs before checkout, runtimes and any instal
 })
 
 test('ordinary manual and candidate modes remain valid only without npm-only pins', () => {
-  const ordinary = pins({ NPM_NATIVE_VALIDATION: 'false', NPM_CANDIDATE_TAG: '', NPM_MANIFEST_SHA256: '' })
+  const ordinary = pins({ NPM_NATIVE_VALIDATION: 'false', NPM_CANDIDATE_TAG: '', NPM_MANIFEST_SHA256: '', NPM_SOURCE_SHA: '' })
   const candidate = { ...ordinary, CANDIDATE_REPLAY: 'true', CANDIDATE_TAG: 'candidate-replay-v1.0.7-beta.5',
     CANDIDATE_RECEIPT_SHA256: 'c'.repeat(64), CANDIDATE_BUNDLE_SHA256: 'd'.repeat(64) }
   for (const env of [ordinary, candidate]) {
@@ -129,6 +130,7 @@ test('ordinary manual and candidate modes remain valid only without npm-only pin
     assert.equal(result.status, 0, result.stderr)
     for (const change of [
       { NPM_CANDIDATE_TAG: 'npm-candidate-v1.0.7' }, { NPM_MANIFEST_SHA256: 'a'.repeat(64) },
+      { NPM_SOURCE_SHA: 'e883d6fc047d2ba2749c30976750193d91aa067a' },
       { NPM_NATIVE_VALIDATION: '' }, { NPM_NATIVE_VALIDATION: 'invalid' },
       { CANDIDATE_REPLAY: '' }, { CANDIDATE_REPLAY: 'invalid' },
     ]) denied(bash(guard, { ...env, ...change }), JSON.stringify(change))
@@ -148,6 +150,8 @@ test('manual guard rejects mixed modes, incompatible pins, foreign identities an
     { GITHUB_WORKFLOW_REF: 'ZhengyiLuo/AgentsDock/.github/workflows/server-npm-publish.yml@refs/heads/release/1.0.7' },
     { GITHUB_WORKFLOW_REF: 'ZhengyiLuo/AgentsDock/.github/workflows/ci.yml@refs/heads/main' },
     { GITHUB_SHA: '' }, { GITHUB_SHA: 'b'.repeat(39) }, { GITHUB_SHA: 'B'.repeat(40) },
+    { NPM_SOURCE_SHA: '' }, { NPM_SOURCE_SHA: 'c'.repeat(39) }, { NPM_SOURCE_SHA: 'C'.repeat(40) },
+    { NPM_SOURCE_SHA: 'c'.repeat(40) + '; touch unexpected' },
     { NPM_CANDIDATE_TAG: '' }, { NPM_CANDIDATE_TAG: 'v1.0.7' },
     { NPM_CANDIDATE_TAG: 'npm-candidate-v01.0.7' }, { NPM_CANDIDATE_TAG: 'npm-candidate-v1.0.7-beta.0' },
     { NPM_CANDIDATE_TAG: 'npm-candidate-v1.0.7; touch unexpected' },
@@ -200,6 +204,16 @@ test('native prerequisites use Node 24, uv and real hosted launchd/systemd witho
   assert.doesNotMatch(native, /SSL_CERT_FILE|NODE_EXTRA_CA_CERTS|\/etc\/hosts|add-trusted-cert|trust\.env|replay\.mjs|sudo env/)
 })
 
+test('the real harness checkout retains full ancestry and never impersonates the signed candidate commit', () => {
+  assert.match(native, /uses: actions\/checkout@[a-f0-9]{40}[^\n]*\n        with:\n          persist-credentials: false\n          fetch-depth: 0/)
+  assert.equal((native.match(/uses: actions\/checkout@/g) ?? []).length, 1)
+  assert.doesNotMatch(native, /^\s+ref:|GITHUB_SHA\s*[:=]|git checkout|git reset|GITHUB_ENV/m)
+  assert.match(tooling, /NPM_SOURCE_SHA: \$\{\{ inputs\.npm_source_sha \}\}/)
+  assert.match(native, /NPM_SOURCE_SHA: \$\{\{ inputs\.npm_source_sha \}\}/)
+  assert.match(acceptance, /--source-sha "\$NPM_SOURCE_SHA" --source-ref "\$GITHUB_REF_NAME"/)
+  assert.doesNotMatch(acceptance, /--source-sha "\$GITHUB_SHA"/)
+})
+
 test('only the guarded helper receives exact source and manifest pins, with a separate sanitized report', t => {
   const f = fixture(t, 'python3')
   const env = { ...f.env, GITHUB_REF_NAME: 'release/1.0.7', TEST_PLATFORM: 'linux' }
@@ -208,10 +222,12 @@ test('only the guarded helper receives exact source and manifest pins, with a se
   assert.deepEqual(f.arguments(), [
     'scripts/npm_native_acceptance.py', '--assets', `${f.runner}/npm-native-inputs/npm`,
     '--release', `${f.runner}/npm-native-inputs/release.json`,
-    '--source-sha', env.GITHUB_SHA, '--source-ref', env.GITHUB_REF_NAME,
+    '--source-sha', env.NPM_SOURCE_SHA, '--source-ref', env.GITHUB_REF_NAME,
     '--manifest-sha256', env.NPM_MANIFEST_SHA256,
     '--work', `${f.runner}/agentsdock-npm-native-linux`, '--report', `${f.runner}/npm-native-public/report-linux.json`,
   ])
+  assert.notEqual(env.NPM_SOURCE_SHA, env.GITHUB_SHA)
+  assert.equal(readFileSync(`${f.args}.github-sha`, 'utf8'), env.GITHUB_SHA)
   assert.match(native, /PYTHONDONTWRITEBYTECODE: '1'/)
   assert.match(native, /NPM_NATIVE_VALIDATION: \$\{\{ inputs\.npm_native_validation \}\}/)
   assert.match(native, /CANDIDATE_REPLAY: \$\{\{ inputs\.candidate_replay \}\}/)
