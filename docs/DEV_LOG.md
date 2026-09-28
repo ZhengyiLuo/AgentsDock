@@ -1,5 +1,27 @@
 # Public development log
 
+## 2026-09-28 — Activate mailbox-only server hotfix
+
+- Deploy committed server source `199cdc8` to the authorized split-service
+  installation. This also includes the scheduled-mailbox and idle Codex writer
+  fixes recorded below. The installed version label remains beta.16; this is
+  a source hotfix, not a new desktop or npm release.
+- Verify authenticated health, both installed source hashes, unchanged gateway
+  process, server identity, credential files and independent tmux processes.
+  The forced worker restart interrupts active agent turns; it does not provide
+  uninterrupted agent migration. No maintenance hold remains after startup.
+- Verify live capabilities disable legacy exchanges and advertise mailbox
+  delivery. No pending legacy delivery rows remain, existing mailbox pairs
+  remain available, and the affected inbox can be opened.
+- Verify the affected imported status record now carries exact source-proof
+  metadata and renders no user bubble in the semantic history response. Its
+  original stored content and exchange history remain available. Startup
+  completes without an error signature.
+- Acceptance includes 38 transport/discovery, 67 mailbox, 9 retirement, 43
+  history and 2 provider-prompt regressions, the full HTTP/helper workflows,
+  and the isolated desktop projection check recorded below.
+- Availability: deployed to the requested server. No public release is cut.
+
 ## 2026-09-28 — Retire legacy cross-chat execution
 
 - Route same-server paired Send and Ask through the mailbox, including older
