@@ -28,6 +28,12 @@
   in unrelated sharing/editor tests; rerunning those suites together with the
   changed provider suites passed all 212 tests. Typecheck and native build are
   checked separately. No claim of a completely green full-suite run.
+- Final focused reruns passed: 83 server tests and 53 desktop provider tests.
+  Local ad-hoc desktop build `1.0.7-providers.13.local` passed the bundle audit,
+  signature verification, and byte-for-byte comparison of 88 compiled files.
+  Its actual settings page exposes the enabled key-only form. The selected
+  development server was restarted and its authenticated health and Cursor
+  credential route verified; other server instances were not restarted.
 
 ### Cursor API-key usage
 
