@@ -1113,7 +1113,7 @@ describe('settings-only provider connection profile isolation', () => {
       profileResetIsPending: vi.fn().mockReturnValue(false) })
     return { service, client }
   }
-  it.each(['claude', 'opencode'] as const)('forgets %s immediately and fences an older in-flight catalog', async backend => {
+  it.each(['claude', 'opencode', 'cursor'] as const)('forgets %s immediately and fences an older in-flight catalog', async backend => {
     const { service, client } = harness()
     const oldCatalog = { ...runtimeCatalog, backends: { ...runtimeCatalog.backends,
       [backend]: { models: [{ value: 'native', label: 'Native' }], efforts: [],
@@ -1121,7 +1121,12 @@ describe('settings-only provider connection profile isolation', () => {
     const pending = deferred<typeof oldCatalog>()
     Object.assign(client, { runtimeCatalog: vi.fn().mockReturnValue(pending.promise) })
     const emitRuntime = vi.fn()
-    Object.assign(service, { runtimeCatalog: oldCatalog, cache: { putPreference: vi.fn() }, emitRuntime })
+    const native = { id: 'native', backend, title: 'Native' }
+    const customChat = { id: 'custom', backend, title: 'Custom', provider_connection: 'custom',
+      provider_connection_catalog: oldCatalog.backends[backend].custom_provider }
+    const emitSessions = vi.fn(), putSessions = vi.fn()
+    Object.assign(service, { runtimeCatalog: oldCatalog, sessions: [native, customChat],
+      cache: { putPreference: vi.fn(), putSessions }, emitRuntime, emitSessions })
     const internals = service as unknown as { scope: unknown; loadRuntimeCatalog(scope: unknown): Promise<void>; runtimeCatalog: typeof oldCatalog }
     const read = internals.loadRuntimeCatalog(internals.scope)
     client.providerConnectionRequest.mockResolvedValueOnce({ configuration: {
@@ -1134,6 +1139,10 @@ describe('settings-only provider connection profile isolation', () => {
     await read
     expect(internals.runtimeCatalog.backends[backend].custom_provider).toMatchObject({ configured: false, available: false })
     expect(emitRuntime).toHaveBeenCalledOnce()
+    expect(putSessions).toHaveBeenCalledWith('profile:endpoint-a', [native, expect.objectContaining({
+      provider_connection_catalog: expect.objectContaining({ configured: false, available: false })
+    })])
+    expect(emitSessions).toHaveBeenCalledOnce()
   })
   it('rejects stale callers before dispatch and late results after switching servers', async () => {
     const { service, client } = harness()

@@ -1,5 +1,29 @@
 # Public development log
 
+## 2026-09-27 — Forget revokes existing custom API chats
+
+- Forget now durably revokes this server's existing custom API bindings for
+  Codex, Claude Code, Cursor and OpenCode. New turns and model checks fail
+  closed without native-login fallback; history and other instances remain
+  untouched. Saving again creates a new connection, not a silent reassignment
+  of old chats. Already-dispatched requests are not forcibly terminated.
+- Migrate earlier empty Forget records on read. Atomic revision/epoch markers
+  survive restart and later saves. Keep historical key material private for
+  in-flight redaction; revocation is not secure deletion of credential files.
+- Desktop immediately invalidates associated cached chat readiness and explains
+  the effect in confirmation. CLI Login has no logout/disconnect action.
+- Verification: 107 isolated server regressions and 443 focused desktop tests
+  passed. Typecheck and production compilation passed. Actual isolated native
+  Electron exercised cancellation, confirmed Forget, recovery navigation and
+  reconnect through IPC, native HTTP authorization and production storage;
+  the production admission function rejected the revoked chat with HTTP 409.
+  Its Cursor success adapter was synthetic, not live inference. A separate
+  installed-CLI loopback probe verified Cursor's dedicated key-exchange protocol
+  and rejection of standalone local-agent flags; arbitrary model URLs remain
+  unsupported. No real user's chat was sent a test message.
+- Availability: local feature branch; local app/server installation tracked
+  separately. No release publication or merge is implied.
+
 ## 2026-09-27 — Cursor API-key connection
 
 - Add a key-only Cursor API card in AI Providers, separate from CLI Login.

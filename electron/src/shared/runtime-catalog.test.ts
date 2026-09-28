@@ -98,14 +98,14 @@ describe('per-chat Codex provider selection', () => {
     expect(runtimeEffortAfterModelChange(discovered, 'codex', 'unlisted-model', 'high', 'custom')).toBeNull()
     expect(runtimeSelectionError(health, discovered, 'codex', 'unlisted-model', 'custom')).toBeNull()
   })
-  it('keeps a retained chat available after endpoint removal and uses only that chat’s model catalog', () => {
+  it('blocks a retained chat after endpoint removal without borrowing native models', () => {
     const retained = { configured: true, available: true, model: null, base_url: 'https://first.example/v1',
       models: [{ value: 'first/model', label: 'First' }], efforts: [{ value: 'high', label: 'High' }] }
     const removed: RuntimeCatalog = { backends: { codex: { models: [], efforts: [], custom_provider: {
       configured: false, available: false, model: null, base_url: null
     } } } }
-    expect(runtimeSelectionError(health, removed, 'codex', 'first/model', 'custom', retained)).toBeNull()
-    expect(runtimeDiagnosticFor(health, removed, 'codex', 'custom', retained)?.available).toBe(true)
+    expect(runtimeSelectionError(health, removed, 'codex', 'first/model', 'custom', retained)).not.toBeNull()
+    expect(runtimeDiagnosticFor(health, removed, 'codex', 'custom', retained)?.available).toBe(false)
     expect(runtimeCatalogOptions(catalog, 'codex', 'models', null, 'custom', retained)).toContainEqual({ value: 'first/model', label: 'First · Unverified' })
     expect(runtimeCatalogOptions(catalog, 'codex', 'models', null, 'custom', retained).some(option => option.value === 'gpt-6-astra')).toBe(false)
   })

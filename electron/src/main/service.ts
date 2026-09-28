@@ -2261,6 +2261,20 @@ export class AppService {
     // A catalog request started before Save/Forget cannot resurrect old credentials.
     this.providerCatalogRevision = (this.providerCatalogRevision ?? 0) + 1
     this.runtimeRefreshNextAt = 0
+    if (!custom.configured) {
+      // Forget revokes existing bindings as well as the new-chat connection.
+      const affected = (this.sessions ?? []).filter(session => session.backend === backend
+        && (backend === 'codex' ? session.codex_provider : session.provider_connection) === 'custom')
+      if (affected.length) {
+        const ids = new Set(affected.map(session => session.id))
+        const field = backend === 'codex' ? 'codex_provider_catalog' : 'provider_connection_catalog'
+        this.sessions = this.sessions.map(session => ids.has(session.id)
+          ? { ...session, [field]: { configured: false, available: false, models: [], efforts: [], model: null, base_url: null } }
+          : session)
+        this.cache.putSessions(scope.namespace, this.sessions)
+        this.emitSessions(scope, this.sessions)
+      }
+    }
     if (!this.runtimeCatalog?.backends[backend]) return
     const catalog = { ...this.runtimeCatalog, backends: { ...this.runtimeCatalog.backends,
       [backend]: { ...this.runtimeCatalog.backends[backend], custom_provider: custom } } }

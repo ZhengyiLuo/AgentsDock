@@ -13,6 +13,7 @@ export function chatBackendSelection(choice: ChatBackendChoice): { backend: Back
 }
 
 export function customProviderAvailable(health: Health | null | undefined, catalog: RuntimeCatalog | null | undefined, backend: Backend, customCatalog?: RuntimeBackendCatalog['custom_provider']): boolean {
+  if (catalog?.backends?.[backend]?.custom_provider?.configured === false) return false
   if (backend === 'codex') return codexCustomProviderAvailable(health, catalog, customCatalog)
   const custom = customCatalog ?? catalog?.backends?.[backend]?.custom_provider
   return health?.capabilities?.provider_connections_v1?.per_chat === true && ['claude', 'opencode', 'cursor'].includes(backend) && custom?.configured === true && custom.available === true
@@ -28,6 +29,7 @@ export function codexCustomProviderSupported(health: Health | null | undefined):
 }
 
 export function codexCustomProviderAvailable(health: Health | null | undefined, catalog: RuntimeCatalog | null | undefined, customCatalog?: RuntimeBackendCatalog['custom_provider']): boolean {
+  if (catalog?.backends?.codex?.custom_provider?.configured === false) return false
   const custom = customCatalog ?? catalog?.backends?.codex?.custom_provider
   return codexCustomProviderSupported(health) && custom?.configured === true && custom.available === true
 }
