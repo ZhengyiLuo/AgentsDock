@@ -23,6 +23,12 @@
   unsupported. No real user's chat was sent a test message.
 - Availability: local feature branch; local app/server installation tracked
   separately. No release publication or merge is implied.
+- Local acceptance: source `c3784f6d`, desktop
+  `1.0.7-providers.14.local`, server `1.0.7-beta.15+providers.c3784f6d`.
+  Packaged-source comparison, bundle audit and ad-hoc signature checks passed.
+  A read-only installed-server check confirmed a previously forgotten legacy
+  chat remains readable but its API connection is unavailable. Only the
+  authorized test instance was restarted; connection settings were preserved.
 
 ## 2026-09-27 — Cursor API-key connection
 
