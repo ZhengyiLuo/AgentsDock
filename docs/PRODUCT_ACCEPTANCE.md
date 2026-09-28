@@ -32,6 +32,14 @@ provider work, populated native history, or rollback. New runtime changes from
 `main` require their own candidate validation; they do not inherit beta.18's
 artifact acceptance.
 
+The explicit macOS candidate rehearsal now includes an isolated `recovery`
+job against the same frozen candidate bytes. It interrupts one signed legacy
+archive transfer, checks that the incumbent process and persisted fixture remain
+healthy and unchanged, then retries the same version through the real update
+API. Reports remain `publicationEligible: false` and `releaseAcceptance: false`.
+This is not candidate-health rollback, busy/provider-history, or production
+acceptance. Native execution of this added job is pending.
+
 Implemented native coverage (execution status is recorded separately above):
 
 - Exact receipt/source/signature/runtime/permission verification before tests.

@@ -72,6 +72,9 @@ jobs:
           cache-dependency-path: electron/pnpm-lock.yaml
       - run: pnpm install --frozen-lockfile
         working-directory: electron
+      - name: Materialize Electron runtime before parallel test imports
+        run: node node_modules/electron/install.js
+        working-directory: electron
       - run: pnpm typecheck
         working-directory: electron
       - run: pnpm test
@@ -137,7 +140,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        kind: [fresh, legacy]
+        kind: [fresh, legacy, recovery]
     runs-on: macos-15
     timeout-minutes: 75
     permissions:
@@ -193,18 +196,22 @@ jobs:
         run: |
           umask 022
           extra=()
-          if [[ "$CANDIDATE_KIND" == legacy ]]; then
+          INSTALL_KIND="$CANDIDATE_KIND"
+          if [[ "$CANDIDATE_KIND" == recovery ]]; then INSTALL_KIND=legacy; fi
+          if [[ "$INSTALL_KIND" == legacy ]]; then
             extra=(--baseline-archive "$RUNNER_TEMP/candidate-inputs/baseline-server/agents-server-1.0.3.tar.gz"
               --baseline-manifest "$RUNNER_TEMP/candidate-inputs/baseline-server/agents-server-manifest.json"
               --baseline-signature "$RUNNER_TEMP/candidate-inputs/baseline-server/agents-server-manifest.sig" --legacy-root-mode 0755)
           fi
-          python3 scripts/product_server_acceptance.py bootstrap --candidate --kind "$CANDIDATE_KIND" \
+          python3 scripts/product_server_acceptance.py bootstrap --candidate --kind "$INSTALL_KIND" \
             --receipt "$RUNNER_TEMP/candidate-inputs/candidate.json" --receipt-sha256 "$RECEIPT_SHA256" \
             --bundle "$RUNNER_TEMP/candidate-inputs/payload/server" --work "$RUNNER_TEMP/agentsdock-acceptance-candidate" \
             --fixture "$RUNNER_TEMP/agentsdock-acceptance-candidate/server.json" \
             --evidence "$RUNNER_TEMP/agentsdock-acceptance-candidate/bootstrap.json" "${extra[@]}"
       - name: Configure exact-origin replay only after all signatures and provenance pass
-        if: matrix.kind == 'legacy'
+        if: matrix.kind != 'fresh'
+        env:
+          CANDIDATE_KIND: ${{ matrix.kind }}
         run: |
           python3 scripts/product_acceptance_network.py setup --candidate \
             --receipt "$RUNNER_TEMP/candidate-inputs/candidate.json" --receipt-sha256 "$RECEIPT_SHA256" \
@@ -231,6 +238,11 @@ jobs:
             --bundle "$RUNNER_TEMP/candidate-inputs/payload/server" --work "$RUNNER_TEMP/agentsdock-acceptance-candidate" \
             --fixture "$RUNNER_TEMP/agentsdock-acceptance-candidate/server.json" \
             --evidence "$RUNNER_TEMP/agentsdock-acceptance-candidate/restarted.json"
+          fault_args=()
+          if [[ "$CANDIDATE_KIND" == recovery ]]; then
+            fault_args=(--fault-control "$RUNNER_TEMP/agentsdock-acceptance-candidate/fault.json"
+              --fault-observed "$RUNNER_TEMP/agentsdock-acceptance-candidate/fault-observed.json")
+          fi
           sudo env GITHUB_ACTIONS="$GITHUB_ACTIONS" RUNNER_ENVIRONMENT="$RUNNER_ENVIRONMENT" RUNNER_OS="$RUNNER_OS" \
             GITHUB_REPOSITORY="$GITHUB_REPOSITORY" GITHUB_WORKFLOW_REF="$GITHUB_WORKFLOW_REF" \
             GITHUB_EVENT_NAME="$GITHUB_EVENT_NAME" GITHUB_RUN_ID="$GITHUB_RUN_ID" GITHUB_RUN_ATTEMPT="$GITHUB_RUN_ATTEMPT" \
@@ -241,7 +253,7 @@ jobs:
             --baseline-desktop "$RUNNER_TEMP/candidate-inputs/baseline-desktop" --baseline-version 1.0.6 \
             --certificate "$RUNNER_TEMP/agentsdock-acceptance-network/leaf.pem" \
             --private-key "$RUNNER_TEMP/agentsdock-acceptance-network/leaf.key" \
-            --pid-file "$RUNNER_TEMP/agentsdock-acceptance-network/replay.pid" \
+            --pid-file "$RUNNER_TEMP/agentsdock-acceptance-network/replay.pid" "${fault_args[@]}" \
             > "$RUNNER_TEMP/agentsdock-acceptance-network/replay.log" 2>&1 &
           REPLAY_LAUNCHER_PID=$!
           for attempt in {1..20}; do
@@ -318,8 +330,35 @@ jobs:
             --baseline-directory "$RUNNER_TEMP/candidate-inputs/baseline-desktop" --baseline-version 1.0.6 \
             --server-fixture "$RUNNER_TEMP/agentsdock-acceptance-candidate/server.json" \
             --output "$RUNNER_TEMP/agentsdock-acceptance-candidate/desktop"
+      - name: Interrupt the exact signed legacy transfer, preserve incumbent state, and retry
+        if: matrix.kind == 'recovery'
+        run: |
+          set -a
+          source "$RUNNER_TEMP/agentsdock-acceptance-network/trust.env"
+          set +a
+          python3 scripts/product_server_acceptance.py failure-retry --candidate --kind legacy \
+            --receipt "$RUNNER_TEMP/candidate-inputs/candidate.json" --receipt-sha256 "$RECEIPT_SHA256" \
+            --bundle "$RUNNER_TEMP/candidate-inputs/payload/server" --work "$RUNNER_TEMP/agentsdock-acceptance-candidate" \
+            --fixture "$RUNNER_TEMP/agentsdock-acceptance-candidate/server.json" \
+            --evidence "$RUNNER_TEMP/agentsdock-acceptance-candidate/recovery.json" \
+            --fault-control "$RUNNER_TEMP/agentsdock-acceptance-candidate/fault.json" \
+            --fault-observed "$RUNNER_TEMP/agentsdock-acceptance-candidate/fault-observed.json"
+      - name: Inspect failed owned recovery service without exposing private logs
+        if: failure() && matrix.kind == 'recovery'
+        timeout-minutes: 3
+        run: |
+          if [[ -f "$RUNNER_TEMP/agentsdock-acceptance-candidate/server.json" ]]; then
+            if ! python3 scripts/product_server_acceptance.py diagnose --candidate --kind legacy \
+              --receipt "$RUNNER_TEMP/candidate-inputs/candidate.json" --receipt-sha256 "$RECEIPT_SHA256" \
+              --bundle "$RUNNER_TEMP/candidate-inputs/payload/server" --work "$RUNNER_TEMP/agentsdock-acceptance-candidate" \
+              --fixture "$RUNNER_TEMP/agentsdock-acceptance-candidate/server.json" \
+              --evidence "$RUNNER_TEMP/agentsdock-acceptance-candidate/recovery-diagnostics.json" \
+              > "$RUNNER_TEMP/agentsdock-acceptance-candidate/diagnostics-private.log" 2>&1; then
+              echo 'Bounded recovery diagnostics unavailable.'
+            fi
+          fi
       - name: Restore disposable routing and trust before artifact upload
-        if: always() && matrix.kind == 'legacy'
+        if: always() && matrix.kind != 'fresh'
         run: |
           /bin/launchctl unsetenv SSL_CERT_FILE
           /bin/launchctl unsetenv NODE_EXTRA_CA_CERTS
@@ -354,11 +393,42 @@ jobs:
       - name: Collect bounded public observations, never credentials or private fixture logs
         if: always()
         run: |
-          mkdir "$RUNNER_TEMP/candidate-public-evidence"
-          for pair in bootstrap.json:server.json desktop/desktop-evidence.json:desktop.json desktop/server-preservation.json:server-preservation.json desktop/failure-observations.json:failure.json desktop/server-diagnostics.json:server-diagnostics.json; do
-            SOURCE="$RUNNER_TEMP/agentsdock-acceptance-candidate/${pair%%:*}"
-            if [[ -f "$SOURCE" ]]; then cp "$SOURCE" "$RUNNER_TEMP/candidate-public-evidence/${pair#*:}"; fi
-          done
+          node --input-type=module - "$RUNNER_TEMP/agentsdock-acceptance-candidate" "$RUNNER_TEMP/candidate-public-evidence" <<'NODE'
+          import { constants, openSync, fstatSync, readSync, closeSync, mkdirSync, writeFileSync } from 'node:fs'
+          import { join } from 'node:path'
+          const [source, destination] = process.argv.slice(2)
+          mkdirSync(destination, { mode: 0o700 })
+          const pairs = [['bootstrap.json', 'server.json'], ['recovery.json', 'recovery.json'],
+            ['recovery-diagnostics.json', 'recovery-diagnostics.json'], ['desktop/desktop-evidence.json', 'desktop.json'],
+            ['desktop/server-preservation.json', 'server-preservation.json'], ['desktop/failure-observations.json', 'failure.json'],
+            ['desktop/server-diagnostics.json', 'server-diagnostics.json']]
+          let copied = 0
+          try {
+            for (const [input, output] of pairs) {
+              let fd
+              try { fd = openSync(join(source, input), constants.O_RDONLY | constants.O_NOFOLLOW) }
+              catch (error) { if (error.code === 'ENOENT') continue; throw error }
+              let bytes
+              try {
+                const stat = fstatSync(fd)
+                if (!stat.isFile() || stat.uid !== process.getuid() || stat.size > 512 * 1024) throw new Error('Invalid public evidence file')
+                const buffer = Buffer.alloc(512 * 1024 + 1)
+                const count = readSync(fd, buffer, 0, buffer.length, 0)
+                if (count > 512 * 1024 || count !== stat.size) throw new Error('Unbounded public evidence')
+                bytes = buffer.subarray(0, count)
+                const report = JSON.parse(bytes)
+                if (/"(?:token|password|authorization|privateKey|cookie)"\s*:/i.test(bytes.toString('utf8'))) throw new Error('Private fields in public evidence')
+                if ((input === 'recovery.json' || input === 'recovery-diagnostics.json')
+                  && (report.kind !== 'candidate-server-observations' || report.publicationEligible !== false || report.releaseAcceptance !== false)) {
+                  throw new Error('Recovery rehearsal cannot emit production acceptance')
+                }
+              } finally { closeSync(fd) }
+              writeFileSync(join(destination, output), bytes, { flag: 'wx', mode: 0o600 })
+              copied++
+            }
+            console.log(JSON.stringify({ publicEvidenceFiles: copied }))
+          } catch { console.error('Candidate evidence collection failed safely.'); process.exitCode = 1 }
+          NODE
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         if: always()
         with:
