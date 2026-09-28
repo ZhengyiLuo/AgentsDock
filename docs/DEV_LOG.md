@@ -1,5 +1,27 @@
 # Public development log
 
+## 2026-09-28 — Retire legacy cross-chat execution
+
+- Route same-server paired Send and Ask through the mailbox, including older
+  callers that omit async mode or request a live reply. Stop creating legacy
+  exchanges, automatic final-result obligations and live reply waits. Keep
+  existing pair authorization and secure-peer transport intact.
+- Cancel pending legacy delivery queue entries during recovery, retaining
+  message bodies and history. Keep ordinary user messages and mailbox wakes
+  runnable. Exchange failures update their status without starting an agent.
+- Repair imported status-message duplicates only when exact stored queue,
+  provider-turn and source-text evidence proves server provenance. Preserve
+  identical text that a user actually typed; do not filter by wrapper syntax.
+- Exercise scheduled Send and Ask through the full authenticated HTTP server,
+  provider helper subprocess and SQLite mailbox: retry deduplication, paged
+  reads, busy-recipient preservation and one idle wake all pass without a
+  legacy exchange. The upstream provider is synthetic in these checks.
+- Pass 43 history-projection regressions. In the isolated offscreen beta.20
+  desktop (build 1225), verify the synthetic status duplicate disappears while
+  an identical genuine user message remains visible through real HTTP history.
+- Availability: tested server source. Deployment acceptance is recorded after
+  activation. No desktop or npm release is published by this change.
+
 ## 2026-09-28 — Release Codex writers before idle handoff and reload
 
 - Release the native writer before moving an idle chat to a fresh Codex
