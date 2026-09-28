@@ -23,6 +23,12 @@
   routing/binding tests passed (server batches overlap). Native UI checks used
   a separate desktop profile and the designated test server. No release is
   published by this acceptance record.
+- Full CI exposed summary-size and OpenAPI operation-ID regressions, an outdated
+  lifecycle-lock field assertion, and two Chinese terminology inconsistencies.
+  Keep legacy native connection defaults sparse while retaining explicit cache
+  tombstones; keep model inventories out of per-session summaries; register
+  method-specific API routes. The focused follow-up passed 108 server tests
+  and 56 desktop/localization tests without relaxing the original guards.
 
 ## 2026-09-27 — Reconnect existing API chats and check on send
 
