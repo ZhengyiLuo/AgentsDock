@@ -78,10 +78,81 @@ function stored(path: string): StoredSettingsV2 {
 }
 
 afterEach(() => {
+  vi.restoreAllMocks()
   credentialProcesses.execFile.mockReset()
   credentialProcesses.execFileSync.mockClear()
   delete process.env.AGENTSDOCK_MIGRATE_SAFE_STORAGE
   while (temporaryDirectories.length) rmSync(temporaryDirectories.pop()!, { recursive: true, force: true })
+})
+
+describe('direct macOS credential saves', () => {
+  it('adds and replaces remote tokens without touching synchronous OSCrypt, then reconnects after reload', async () => {
+    vi.spyOn(process, 'platform', 'get').mockReturnValue('darwin')
+    const path = settingsPath(), keychain = new MemoryKeychain()
+    const blocked = vi.fn(() => { throw new Error('Main-thread OSCrypt must not be called') })
+    const options = { path, keychain, safeStorage: {
+      isEncryptionAvailable: blocked, encryptString: blocked, decryptString: blocked
+    }, isMacAppStoreBuild: () => false }
+    const store = new SettingsStore(options)
+    const remote = store.addProfile({ name: 'My remote server', serverUrl: 'https://remote.example', accessToken: 'test-token-one' })
+    store.updateProfile(remote.id, { accessToken: 'test-token-two' })
+    const reopened = new SettingsStore(options)
+    expect(await reopened.accessTokenForConnectionAsync(remote.id)).toBe('test-token-two')
+    expect(reopened.getProfile(remote.id)?.name).toBe('My remote server')
+    expect(stored(path).profiles.find(p => p.id === remote.id)?.encryptedAccessToken).toBeUndefined()
+    expect(readFileSync(path, 'utf8')).not.toContain('test-token')
+    expect(blocked).not.toHaveBeenCalled()
+  })
+
+  it('fails closed on Keychain failure without adding a profile or changing old credentials, and permits retry', () => {
+    vi.spyOn(process, 'platform', 'get').mockReturnValue('darwin')
+    const path = settingsPath(), keychain = new MemoryKeychain()
+    const blocked = vi.fn(() => { throw new Error('No synchronous fallback') })
+    const store = new SettingsStore({ path, keychain, safeStorage: {
+      isEncryptionAvailable: blocked, encryptString: blocked, decryptString: blocked
+    }, isMacAppStoreBuild: () => false })
+    const remote = store.addProfile({ name: 'Keep my name', serverUrl: 'https://remote.example', accessToken: 'old-test-token' })
+    const before = readFileSync(path, 'utf8')
+    keychain.writeEnabled = false
+    expect(() => store.addProfile({ serverUrl: 'https://second.example', accessToken: 'new-test-token' })).toThrow('Unlock your macOS login Keychain')
+    expect(() => store.updateProfile(remote.id, { accessToken: 'replacement-test-token' })).toThrow('Unlock your macOS login Keychain')
+    expect(readFileSync(path, 'utf8')).toBe(before)
+    expect(store.accessToken(remote.id)).toBe('old-test-token')
+    keychain.writeEnabled = true
+    expect(store.addProfile({ serverUrl: 'https://second.example', accessToken: 'new-test-token' }).name).toBe('second.example')
+    expect(blocked).not.toHaveBeenCalled()
+  })
+
+  it('can replace legacy ciphertext without decrypting it and preserves it after a failed disk write', () => {
+    vi.spyOn(process, 'platform', 'get').mockReturnValue('darwin')
+    const path = settingsPath(), keychain = new MemoryKeychain()
+    const store = new SettingsStore({ path, keychain, safeStorage: memorySafeStorage })
+    const snapshot = stored(path), profile = snapshot.profiles[0]
+    profile.encryptedAccessToken = encrypted('old-test-token')
+    profile.keychainAccessToken = false
+    writeFileSync(path, JSON.stringify(snapshot))
+    const blocked = vi.fn(() => { throw new Error('Do not decrypt legacy ciphertext while saving') })
+    const reopened = new SettingsStore({ path, keychain, safeStorage: { ...memorySafeStorage, decryptString: blocked } })
+    const persist = vi.spyOn(reopened as unknown as { persist(): void }, 'persist').mockImplementation(() => { throw new Error('disk write failed') })
+    const before = readFileSync(path, 'utf8')
+    expect(() => reopened.updateProfile(profile.id, { accessToken: 'replacement-test-token' })).toThrow('disk write failed')
+    expect(readFileSync(path, 'utf8')).toBe(before)
+    expect(keychain.values.has(`agent-access-token:${profile.id}`)).toBe(false)
+    persist.mockRestore()
+    reopened.updateProfile(profile.id, { accessToken: 'replacement-test-token' })
+    expect(reopened.accessToken(profile.id)).toBe('replacement-test-token')
+    expect(blocked).not.toHaveBeenCalled()
+  })
+
+  it('keeps the sandboxed Mac App Store encryption path', () => {
+    vi.spyOn(process, 'platform', 'get').mockReturnValue('darwin')
+    const path = settingsPath(), keychain = new MemoryKeychain()
+    const store = new SettingsStore({ path, keychain, safeStorage: memorySafeStorage, isMacAppStoreBuild: () => true })
+    const remote = store.addProfile({ serverUrl: 'https://remote.example', accessToken: 'mas-test-token' })
+    expect(store.accessToken(remote.id)).toBe('mas-test-token')
+    expect(stored(path).profiles.find(p => p.id === remote.id)?.encryptedAccessToken).toBe(encrypted('mas-test-token'))
+    expect(keychain.writes).toEqual([])
+  })
 })
 
 it('keeps automatic local discovery in Keychain without entering startup OSCrypt', () => {
@@ -456,7 +527,8 @@ describe('SettingsStore profile operations', () => {
     expect(keychain.readAsync).toHaveBeenCalledTimes(2)
   })
 
-  it('falls back to safeStorage when Keychain rejects an access token', () => {
+  it('retains secure safeStorage fallback on Linux when Keychain is unavailable', () => {
+    vi.spyOn(process, 'platform', 'get').mockReturnValue('linux')
     const path = settingsPath()
     const keychain = new MemoryKeychain()
     keychain.writeEnabled = false

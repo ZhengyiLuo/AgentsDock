@@ -21,11 +21,9 @@ describe('macOS Keychain command transport', () => {
   })
 
   it.each([
-    ['space', 'refresh token'],
-    ['quote', 'refresh."token'],
-    ['backslash', 'refresh.abc\\def'],
     ['newline', 'refresh.abc\ndef'],
-    ['oversized value', `refresh.${'a'.repeat(505)}`]
+    ['non-ASCII value', 'refresh.中文'],
+    ['oversized value', 'a'.repeat(4097)]
   ])('rejects a %s rather than interpolating it into the interactive command', (_label, token) => {
     expect(buildMacOSKeychainWriteCommand(
       'com.zhengyiluo.AgentsDock.TeamHub',
@@ -33,6 +31,15 @@ describe('macOS Keychain command transport', () => {
       token
     )).toBeNull()
   })
+
+  it.each(['admin token requiring safeStorage', 'token."quoted"', 'token.abc\\def', 'token+/=', 'a'.repeat(4096)])(
+    'safely transports non-literal printable tokens without an OSCrypt fallback', token => {
+      const command = buildMacOSKeychainWriteCommand('com.zhengyiluo.AgentsDock', 'agent-access-token:fixture', token)
+      expect(command?.args).toEqual(['-i'])
+      expect(command?.input).toBe(`add-generic-password -U -s com.zhengyiluo.AgentsDock -a agent-access-token:fixture -X ${Buffer.from(token).toString('hex')}\n`)
+      expect(command?.args.join(' ')).not.toContain(token)
+    }
+  )
 
   it('invokes only security interactive mode and reports command failures', () => {
     const run = vi.fn<MacOSKeychainCommandRunner>()

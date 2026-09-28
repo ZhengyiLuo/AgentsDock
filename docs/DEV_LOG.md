@@ -1,5 +1,27 @@
 # Public development log
 
+## 2026-09-28 — Manual server connection saves on macOS
+
+- Direct macOS builds now use the bounded Keychain credential path for manual
+  server creation and token replacement, not only automatic local discovery.
+  Saving no longer enters synchronous Electron OSCrypt. Failed writes keep the
+  old connection intact, report a recoverable error and never store plaintext.
+- Rollback does not decrypt legacy ciphertext unnecessarily. Printable tokens
+  containing command-parser punctuation use Keychain's hexadecimal stdin input;
+  secrets remain absent from process arguments. MAS and other-platform secure
+  storage paths remain unchanged. Existing custom server labels are retained.
+- Validation: 473 focused desktop tests and a full suite of 5,005 tests passed
+  (5 skipped). After extending printable-token transport, all 85 focused
+  settings/Keychain/Team Hub tests passed again. TypeScript, production build and
+  eight package/license checks passed.
+- Real offscreen Electron UI exercised manual Test connection, Add & switch,
+  token replacement, custom rename and process reopening against two isolated
+  authenticated AgentsServer instances, using the actual macOS Keychain, not a
+  credential mock. Reopened connections and both custom names survived. Failure
+  rollback and secure-store denial are regression-tested; the user's remote
+  machine/network and a physically locked Keychain were not exercised.
+- Availability: local test build; no server restart, publication or deployment.
+
 ## 2026-09-27 — Mailbox input ownership and scoped macOS file discovery
 
 - Integrate the existing native-continuation ownership fix: retain the initial

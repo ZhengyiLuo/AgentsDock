@@ -651,7 +651,6 @@ export class SettingsStore {
   private stageAccessToken(profile: StoredServerProfile, token: string, keychainOnly = false): CredentialMutation {
     const next = { ...profile }
     const account = profileKeychainAccount(profile.id)
-    const oldToken = this.readProfileToken(profile)
     if (!token) {
       next.keychainAccessToken = false
       delete next.encryptedAccessToken
@@ -662,15 +661,24 @@ export class SettingsStore {
       }
     }
 
+    // Rollback restores only the Keychain item. A legacy safeStorage ciphertext
+    // stays in the old settings file until persistence succeeds; decrypting it
+    // here is unnecessary and can synchronously block the main thread on macOS.
+    const oldToken = this.useKeychain && profile.keychainAccessToken ? this.keychain.read(account) : ''
+    if (this.useKeychain && profile.keychainAccessToken && !oldToken) throw new Error(UNREADABLE_ACCESS_TOKEN_ERROR)
+    const macKeychainOnly = process.platform === 'darwin' && this.useKeychain
     let encryptedAccessToken: string | undefined
-    // Startup discovery on macOS uses the bounded existing Keychain helper.
-    // Avoid synchronously entering Chromium OSCrypt while its startup threads
-    // are also opening Keychain. Failure must not fall back to plaintext.
-    if (!keychainOnly && secureCredentialStorageAvailable(this.secureStorage)) {
+    // Apply the bounded Keychain path to every direct macOS save, including
+    // manual Add Server and token replacement, not just startup discovery.
+    // Neither a failed write nor a locked Keychain may enter synchronous OSCrypt.
+    // MAS and other platforms retain their existing secure-storage backend.
+    if (!keychainOnly && !macKeychainOnly && secureCredentialStorageAvailable(this.secureStorage)) {
       encryptedAccessToken = this.secureStorage.encryptString(token).toString('base64')
     }
     const wroteKeychain = this.useKeychain && this.keychain.write(account, token)
-    if (!wroteKeychain && !encryptedAccessToken) throw new Error('Secure token storage is unavailable on this device.')
+    if (!wroteKeychain && !encryptedAccessToken) throw new Error(macKeychainOnly
+      ? 'Secure token storage is unavailable. Unlock your macOS login Keychain, allow AgentsDock access if prompted, then try again.'
+      : 'Secure token storage is unavailable on this device.')
     next.keychainAccessToken = wroteKeychain
     if (encryptedAccessToken) next.encryptedAccessToken = encryptedAccessToken
     else delete next.encryptedAccessToken
