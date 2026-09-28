@@ -2355,7 +2355,11 @@ function jobRunStatus(event: Event, presentation?: ReturnType<typeof jobResultPr
 
 function CodeChangesCard({ fileCount, files, additions, deletions, onOpen }: { fileCount: number; files?: CodeDiffFileSummary[] | null; additions: number; deletions: number; onOpen: () => void }) {
   useLocale()
-  const visibleFiles = files?.slice(0, 3) ?? []
+  // Shared transcripts may omit private paths while retaining change counts.
+  // Keep that summary renderable, including older already-projected events.
+  const visibleFiles = (Array.isArray(files) ? files : [])
+    .filter(file => typeof file?.path === 'string' && file.path.trim().length > 0)
+    .slice(0, 3)
   const remainingFiles = Math.max(0, fileCount - visibleFiles.length)
   return <button type="button" className="changes-card" onClick={onOpen}><FileText size={17} /><span>
     <strong>{timelineCount('editedFiles', fileCount)}</strong>

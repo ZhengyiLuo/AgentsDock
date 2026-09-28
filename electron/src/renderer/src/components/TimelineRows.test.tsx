@@ -3256,6 +3256,49 @@ describe('timeline pin state', () => {
     }
   })
 
+  it('renders shared code changes when the server omits every file path', () => {
+    const canonicalDiff: Event = {
+      id: 'shared-diff', session_id: 'chat-1', seq: 1, type: 'code_diff',
+      ts: '2026-07-10T14:30:00Z', run_id: 'run-1', files_changed: 2,
+      additions: 7, deletions: 3,
+      diff_files: [{ additions: 5, deletions: 2 }, { additions: 2, deletions: 1 }] as Event['diff_files']
+    }
+    const item: ProgressItem = {
+      kind: 'progress', id: 'shared-activity', key: 'shared-activity', seq: 1,
+      events: [canonicalDiff], active: false, hasFinalResponse: true,
+      startedAt: canonicalDiff.ts, finishedAt: canonicalDiff.ts
+    }
+    const { container } = render(<TimelineRowView item={item} sessionId="chat-1" onFindFile={() => {}} pinnedItemIds={new Set()} />)
+    const card = within(container).getByRole('button', { name: /Edited 2 files.*Review/ })
+    expect(card).toHaveTextContent('+7')
+    expect(card).toHaveTextContent('-3')
+    expect(card.querySelectorAll('.changes-file-name')).toHaveLength(0)
+    expect(card).not.toHaveTextContent('undefined')
+  })
+
+  it('shows only valid filenames in a partially redacted change summary', () => {
+    const paths: unknown[] = [undefined, null, 42, {}, '', '  ', 'src/first.ts', 'src/second.ts', 'src/third.ts', 'src/fourth.ts']
+    const canonicalDiff: Event = {
+      id: 'mixed-diff', session_id: 'chat-1', seq: 1, type: 'code_diff',
+      ts: '2026-07-10T14:30:00Z', run_id: 'run-1', files_changed: paths.length,
+      additions: 10, deletions: 0,
+      diff_files: paths.map(path => ({ path, additions: 1, deletions: 0 })) as Event['diff_files']
+    }
+    const item: ProgressItem = {
+      kind: 'progress', id: 'mixed-activity', key: 'mixed-activity', seq: 1,
+      events: [canonicalDiff], active: false, hasFinalResponse: true,
+      startedAt: canonicalDiff.ts, finishedAt: canonicalDiff.ts
+    }
+    const { container } = render(<TimelineRowView item={item} sessionId="chat-1" onFindFile={() => {}} pinnedItemIds={new Set()} />)
+    const card = within(container).getByRole('button', { name: /Edited 10 files.*Review/ })
+    expect(Array.from(card.querySelectorAll('.changes-file-name'), element => element.textContent))
+      .toEqual(['first.ts', 'second.ts', 'third.ts'])
+    expect(within(card).getByText('first.ts')).toHaveAttribute('title', 'src/first.ts')
+    expect(card.querySelector('.changes-file-remaining')).toHaveTextContent('+7')
+    expect(card).toHaveTextContent('+10')
+    expect(card).toHaveTextContent('-0')
+  })
+
   it('retains known filenames and counts when live activity completes without collapsing', () => {
     const readDiff = vi.fn(() => '@@ -1 +1,2 @@\n-old\n+new\n+extra')
     const change = { path: 'src/app.ts', kind: 'update' }
