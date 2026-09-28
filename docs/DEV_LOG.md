@@ -1,5 +1,31 @@
 # Public development log
 
+## 2026-09-27 — My Agents and clearer chat deletion copy
+
+- Rename the desktop settings section to **My Agents** / **我的 Agent**,
+  including navigation, onboarding guidance, accessible card labels and server
+  recovery instructions. Fill Chinese endpoint/model/key wording without
+  translating product names, CLI commands or API protocol identifiers.
+- Label chat deletion **Delete from AgentsDock** and explain that history in
+  the original agent is retained. Sidebar, header and confirmation use the
+  same wording; deletion behavior is unchanged. Correct the obsolete Codex
+  Forget success message to describe blocked sends until reconnection.
+- Validation: 4,991 desktop tests passed, 5 skipped, plus 8 package checks;
+  41 isolated server tests, TypeScript and production compilation passed.
+  The focused bilingual regression set contains 167 passing tests (included
+  in the desktop total). Audited 144 connection/account/model locale entries.
+- Actual offscreen production Electron with disposable profile/server state
+  exercised English and Chinese settings navigation, Claude/Cursor/OpenCode API forms,
+  authentication-error copy, model discovery against a synthetic loopback
+  endpoint, Forget confirmation/cancellation, and chat deletion cancellation.
+  Production IPC/native HTTP/storage ran intact; no real provider inference
+  or native-history deletion acceptance was repeated for this copy-only change.
+  Light/dark and narrow layout were inspected. Chinese startup was seeded in
+  the disposable language preference; native language-popup interaction was
+  not certified by this offscreen run.
+- Availability: local source/build only. No live app replacement, existing
+  server restart, mobile change, publication or deployment.
+
 ## 2026-09-27 — Custom API live acceptance and API-only chat routing
 
 - Cursor and OpenCode advertise cross-chat transport when their CLI is installed

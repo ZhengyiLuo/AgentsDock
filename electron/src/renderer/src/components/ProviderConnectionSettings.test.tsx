@@ -24,6 +24,36 @@ async function fill() {
 }
 afterEach(() => { cleanup(); setLocale('en'); vi.restoreAllMocks() })
 
+it.each(['claude', 'opencode', 'cursor'] as const)('localizes %s configuration and validation errors in Chinese', async backend => {
+  const request = bridge().mockResolvedValue({ configuration: { ...empty, backend, scope: 'per_chat' } })
+  setLocale('zh-CN')
+  render(<ProviderConnectionSettings {...props} backend={backend} />)
+  await waitFor(() => expect(screen.getByRole('button', { name: '配置 API' })).toBeEnabled())
+  fireEvent.click(screen.getByRole('button', { name: '配置 API' }))
+  expect(screen.getByLabelText('API 密钥')).toBeVisible()
+  if (backend !== 'cursor') {
+    expect(screen.getByText('高级选项（可选）')).toBeVisible()
+    fireEvent.change(screen.getByLabelText('API 基础地址'), { target: { value: 'https://api.example.test' } })
+  }
+  fireEvent.change(screen.getByLabelText('API 密钥'), { target: { value: 'synthetic-invalid-key' } })
+  request.mockResolvedValueOnce({ ok: false, status: 'authentication_failed' })
+  fireEvent.click(screen.getByRole('button', { name: '连接' }))
+  expect(await screen.findByRole('alert')).toHaveTextContent('接口拒绝了认证，请检查密钥和认证请求头。')
+  expect(screen.getByRole('button', { name: '取消' })).toBeVisible()
+})
+
+it('localizes the Cursor forget menu and confirmation without forgetting on cancel', async () => {
+  const request = bridge().mockResolvedValue({ configuration: { ...saved, backend: 'cursor' } })
+  setLocale('zh-CN')
+  render(<ProviderConnectionSettings {...props} backend="cursor" />)
+  await screen.findByText('已连接')
+  fireEvent.keyDown(screen.getByRole('button', { name: '接口选项' }), { key: 'Enter' })
+  fireEvent.click(await screen.findByRole('menuitem', { name: '移除 API 密钥' }))
+  expect(screen.getByRole('dialog', { name: '确认移除' })).toHaveTextContent('会话记录保留')
+  fireEvent.click(screen.getByRole('button', { name: '取消' }))
+  expect(request).toHaveBeenCalledTimes(1)
+})
+
 it('connects with only URL and key by default; advanced fields remain collapsed', async () => {
   const request = bridge()
   render(<ProviderConnectionSettings {...props} />)

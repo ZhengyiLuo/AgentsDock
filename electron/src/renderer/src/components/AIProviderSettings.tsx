@@ -26,7 +26,7 @@ function CLIAccountCard({ backend, signedIn, open }: { backend: CLIAccountBacken
     }).catch(() => { /* Optional display metadata must not invalidate working credentials. */ })
     return () => { cancelled = true }
   }, [open, signedIn, connected, profileId, profileGeneration, backend])
-  return <section className={`codex-auth-settings cli-account-card ${signedIn ? 'connection-connected' : 'connection-unconfirmed'}`} aria-label={`${backend} CLI Login`}>
+  return <section className={`codex-auth-settings cli-account-card ${signedIn ? 'connection-connected' : 'connection-unconfirmed'}`} aria-label={t('connections.nativeAccountLabel', { provider: { claude: 'Claude Code', cursor: 'Cursor', opencode: 'OpenCode' }[backend] })}>
     <span className="codex-auth-settings-icon">{signedIn ? <CheckCircle2 size={18} /> : <KeyRound size={17} />}</span>
     <div className="codex-auth-settings-copy">
       <div className="codex-auth-settings-heading"><strong>{t('connections.nativeLogin')}</strong></div>

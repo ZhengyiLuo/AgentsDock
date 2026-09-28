@@ -94,7 +94,7 @@ export function ProviderConnectionSettings({ backend, ...props }: Props & { back
   const verified = props.connected && !busy && !open && !error && saved?.configured === true && saved?.last_result === 'verified'
   useEffect(() => { props.onStatus?.(verified) }, [verified, props.onStatus])
   const unavailable = !props.connected || !saved || Boolean(error)
-  return <section className={`codex-auth-settings provider-connection ${verified ? 'connection-connected' : 'connection-unconfirmed'}`} aria-label={backend === 'cursor' ? 'Cursor API key' : `${name} custom endpoint`}>
+  return <section className={`codex-auth-settings provider-connection ${verified ? 'connection-connected' : 'connection-unconfirmed'}`} aria-label={backend === 'cursor' ? t('connections.cursorKey') : t('connections.title', { provider: name })}>
     <div className="codex-auth-settings-icon">{verified ? <CheckCircle2 size={18} /> : <KeyRound size={16} />}</div>
     <div className="codex-auth-settings-copy">
       <div className="codex-auth-settings-heading">
