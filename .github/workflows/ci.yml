@@ -26,7 +26,7 @@ jobs:
           node-version: 24
           package-manager-cache: false
       - name: Verify public CLI and existing signed-update entry point
-        run: node --test server/npm/cli.test.cjs server/npm/agentsdock/cli.test.cjs
+        run: node --test server/npm/cli.test.cjs server/npm/agentsdock/cli.test.cjs server/npm/agentsdock/postinstall.test.cjs
       - name: Pack and install exact CLI/runtime in disposable npm prefixes
         env:
           PYTHONDONTWRITEBYTECODE: "1"

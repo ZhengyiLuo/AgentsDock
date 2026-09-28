@@ -26,12 +26,13 @@ update uses the signed managed updater; npm installation alone never upgrades a 
 start/stop/restart/remove also accept --all [--exclude NAME]; an omitted target never selects all.
 new --name NAME, token/status --instance NAME, and servers/instances ACTION remain supported.
 Install this command globally with npm install -g agentsdock, or use npx agentsdock.
+The first global installation automatically sets up the server; existing installations are left unchanged.
 `
 const ROOT_SELECTORS = ['AGENTS_SERVER_INSTALL_DIR', 'AGENTS_SERVER_CONFIG_DIR',
   'AGENTS_SERVER_STATE_DIR', 'AGENTSDOCK_STATE_DIR', 'ZENITHBOT_AGENT_DIR',
   'XDG_CONFIG_HOME', 'XDG_DATA_HOME', 'AGENTS_SERVER_INSTANCE']
 const ENV_KEYS = ['PATH', 'USER', 'LOGNAME', 'SHELL', 'TMPDIR', 'LANG', 'LC_ALL',
-  'TERM', 'TERMINFO', 'SSL_CERT_FILE', 'SSL_CERT_DIR']
+  'TERM', 'TERMINFO', 'SSL_CERT_FILE', 'SSL_CERT_DIR', 'XDG_RUNTIME_DIR', 'DBUS_SESSION_BUS_ADDRESS']
 
 function selector(args, fallback) {
   if (!args.length) return fallback
@@ -104,7 +105,8 @@ function loadRuntime(packageRoot = __dirname, resolve = require.resolve) {
   if (!info.isFile() || info.size > 200 || fs.readFileSync(versionFile, 'utf8').trim() !== own.version) {
     throw new Error('CLI and server payload versions differ. Reinstall the matching agentsdock package.')
   }
-  return { version: own.version, payload, run: require(path.join(coreRoot, 'npm/cli.cjs')).run }
+  const coreCli = require(path.join(coreRoot, 'npm/cli.cjs'))
+  return { version: own.version, payload, coreRoot, run: coreCli.run, preflight: coreCli.ensureFreshInstall }
 }
 
 function localEnvironment(context) {

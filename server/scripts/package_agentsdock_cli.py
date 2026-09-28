@@ -23,8 +23,9 @@ def stage_package(root: Path, destination: Path) -> tuple[str, set[str]]:
     if (metadata.get("name") != "agentsdock" or metadata.get("private") is not True
             or metadata.get("bin") != {"agentsdock": "cli.cjs"}
             or metadata.get("dependencies") != {"@agentsdock/server": "0.0.0-development"}
-            or metadata.get("scripts") or metadata.get("optionalDependencies")):
-        raise ValueError("Expected private agentsdock CLI source with only its exact runtime dependency and no hooks")
+            or metadata.get("scripts") != {"postinstall": "node postinstall.cjs"}
+            or metadata.get("optionalDependencies")):
+        raise ValueError("Expected private agentsdock CLI source with its exact dependency and reviewed postinstall hook")
     metadata["version"] = version
     metadata["dependencies"] = {"@agentsdock/server": version}
     metadata.pop("private")
@@ -32,10 +33,11 @@ def stage_package(root: Path, destination: Path) -> tuple[str, set[str]]:
     destination.mkdir(parents=True, exist_ok=False)
     (destination / "package.json").write_text(json.dumps(metadata, indent=2) + "\n")
     copy_regular(source / "cli.cjs", destination / "cli.cjs", executable=True)
+    copy_regular(source / "postinstall.cjs", destination / "postinstall.cjs")
     copy_regular(source / "README.md", destination / "README.md")
     for name in ("LICENSE", "NOTICE"):
         copy_regular(legal_root / name, destination / name)
-    return version, {"package.json", "cli.cjs", "README.md", "LICENSE", "NOTICE"}
+    return version, {"package.json", "cli.cjs", "postinstall.cjs", "README.md", "LICENSE", "NOTICE"}
 
 
 def prepare(root: Path, output: Path, *, npm: str = "npm", require_clean_source: bool = False) -> dict:

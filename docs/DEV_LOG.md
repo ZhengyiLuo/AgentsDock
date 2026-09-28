@@ -1,5 +1,35 @@
 # Public development log
 
+## 2026-09-28 — Automatically set up the first server during global npm install
+
+- Change the earlier CLI-only install behavior: a direct global
+  `npm install -g agentsdock` now invokes the bundled fresh installer, waits for
+  its health-checked success receipt, and starts the first default server.
+  Existing default/named installation or state is left unchanged; repeated npm
+  installation never selects an upgrade or restarts an existing server.
+- Keep local/dependency/link/CI installations inert. Respect `--ignore-scripts`
+  and `AGENTSDOCK_SKIP_SETUP=1`; retain `agentsdock setup` for explicit/custom
+  installation. Native prerequisites remain required. A failed automatic setup
+  returns failure, with a recovery command, instead of reporting a ready server.
+- Filter installer output before it reaches npm logs so access tokens and raw
+  diagnostics are not captured there. Accept the installer's validated local,
+  LAN or Tailscale address; use `agentsdock token` for private token retrieval.
+  Preserve Linux per-user service environment for native systemd operations.
+- Validation: 35 JavaScript tests, five facade packaging tests and 11 existing
+  runtime packaging tests passed. Real npm lifecycle tests cover fresh setup,
+  reinstall, skips and failure with a labelled service fixture. A separate
+  disposable Linux account exercised actual global npm installation, starting
+  both managed service processes and passing authenticated health; forced npm
+  reinstallation preserved both process IDs, identity, token and synthetic saved
+  data. The real token was absent from npm logs. The native split-aware
+  uninstaller preserved saved state, and the disposable account was cleaned up.
+- Native testing also found an existing instance-manager gap: its legacy binding
+  validation rejects split-service removal. Split lifecycle controls remain a
+  separate acceptance gap; no validation bypass was added. macOS npm entry/hook
+  tests pass, but macOS first-service creation, provider chats and app workflows
+  were not exercised. No existing user service was changed. This is local source
+  work, not registry publication or integration into the product release pipeline.
+
 ## 2026-09-28 — Flatten public CLI instance commands
 
 - Make `agentsdock list`, `info`, `new`, `start`, `stop`, `restart` and `remove`

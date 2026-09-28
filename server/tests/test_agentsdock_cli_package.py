@@ -24,7 +24,7 @@ class AgentsDockCliPackageTests(unittest.TestCase):
         self.root = self.work / "source/server"
         source = self.root / "npm/agentsdock"
         source.mkdir(parents=True)
-        for name in ("package.json", "cli.cjs", "README.md"):
+        for name in ("package.json", "cli.cjs", "postinstall.cjs", "README.md"):
             shutil.copyfile(ROOT / "npm/agentsdock" / name, source / name)
         (self.root / "VERSION").write_text("1.2.3-beta.4\n")
         for name in ("LICENSE", "NOTICE"):
@@ -34,7 +34,7 @@ class AgentsDockCliPackageTests(unittest.TestCase):
         subprocess.run(["git", "-c", "user.name=CLI Fixture", "-c", "user.email=fixture@example.invalid",
                         "commit", "--quiet", "-m", "fixture"], cwd=self.root.parent, check=True)
 
-    def test_exact_pin_no_hooks_and_no_private_files(self):
+    def test_exact_pin_reviewed_hook_and_no_private_files(self):
         (self.root / "npm/agentsdock/.env").write_text("not packaged")
         destination = self.work / "stage"
         version, expected = cli_package.stage_package(self.root, destination)
@@ -43,16 +43,16 @@ class AgentsDockCliPackageTests(unittest.TestCase):
         self.assertEqual(metadata["bin"], {"agentsdock": "cli.cjs"})
         self.assertEqual(metadata["dependencies"], {"@agentsdock/server": version})
         self.assertNotIn("private", metadata)
-        self.assertNotIn("scripts", metadata)
+        self.assertEqual(metadata["scripts"], {"postinstall": "node postinstall.cjs"})
         self.assertEqual({p.name for p in destination.iterdir()}, expected)
         self.assertEqual((destination / "cli.cjs").stat().st_mode & 0o777, 0o755)
         for name in ("LICENSE", "NOTICE"):
             self.assertEqual((destination / name).read_bytes(), (self.root.parent / name).read_bytes())
 
-    def test_rejects_hooks_extra_dependencies_and_wrong_name(self):
+    def test_rejects_unreviewed_hooks_extra_dependencies_and_wrong_name(self):
         source = self.root / "npm/agentsdock/package.json"
         original = json.loads(source.read_text())
-        for change in ({"scripts": {"postinstall": "bad"}}, {"name": "other"},
+        for change in ({"scripts": {"postinstall": "bad"}}, {"scripts": {}}, {"name": "other"},
                        {"dependencies": {"@agentsdock/server": "latest"}},
                        {"optionalDependencies": {"other": "*"}}):
             source.write_text(json.dumps({**original, **change}))
@@ -67,13 +67,96 @@ class AgentsDockCliPackageTests(unittest.TestCase):
         self.assertEqual(hashlib.sha256(archive.read_bytes()).hexdigest(), one["archive"]["sha256"])
         with tarfile.open(archive) as packed:
             self.assertEqual(set(packed.getnames()), {f"package/{name}" for name in
-                             ("package.json", "cli.cjs", "README.md", "LICENSE", "NOTICE")})
+                             ("package.json", "cli.cjs", "postinstall.cjs", "README.md", "LICENSE", "NOTICE")})
         with self.assertRaises(FileExistsError):
             cli_package.prepare(self.root, self.work / "one")
         self.assertEqual(hashlib.sha256(archive.read_bytes()).hexdigest(), one["archive"]["sha256"])
         (self.root / "VERSION").write_text("1.2.3-beta.5")
         with self.assertRaisesRegex(ValueError, "clean committed"):
             cli_package.prepare(self.root, self.work / "dirty", require_clean_source=True)
+
+    @unittest.skipUnless(shutil.which("npm") and shutil.which("node") and os.getuid() != 0,
+                         "real npm CLI smoke needs npm/node and a non-root user")
+    def test_real_npm_lifecycle_auto_setup_reinstall_skip_and_private_output(self):
+        """Actual npm hook; service creation is a labelled synthetic core fixture."""
+        cli = cli_package.prepare(self.root, self.work / "cli")
+        core = self.work / "synthetic-core"
+        (core / "server").mkdir(parents=True)
+        (core / "npm").mkdir()
+        version = cli["version"]
+        (core / "package.json").write_text(json.dumps({"name": "@agentsdock/server", "version": version}))
+        (core / "server/VERSION").write_text(version)
+        (core / "npm/cli.cjs").write_text(r'''
+const fs = require('node:fs'), path = require('node:path'), assert = require('node:assert/strict');
+const marker = path.join(process.env.HOME, 'synthetic-service-started');
+function ensureFreshInstall() {
+  if (fs.existsSync(marker)) throw Object.assign(new Error('fixture existing state'), {code: 'AGENTSDOCK_EXISTING_INSTALLATION'});
+}
+module.exports = {ensureFreshInstall, run: () => 0};
+if (require.main === module) {
+  assert.deepEqual(process.argv.slice(2), ['install', '--non-interactive']);
+  console.log('private installer output secret-lifecycle-sentinel');
+  console.error('private installer diagnostic secret-lifecycle-sentinel');
+  if (fs.existsSync(path.join(process.env.HOME, 'synthetic-failure'))) process.exit(7);
+  fs.writeFileSync(marker, 'one synthetic service start');
+  console.log('AGENTSDOCK_SETUP_RESULT=' + JSON.stringify({server_url:'http://127.0.0.1:7850',
+    server_version:require('../package.json').version, access_token:'secret-lifecycle-sentinel'}));
+}
+''')
+        home = self.work / "hook-home"
+        home.mkdir(mode=0o700)
+        for name in ("user.npmrc", "global.npmrc"):
+            (self.work / name).touch()
+        env = {"HOME": str(home), "PATH": os.environ["PATH"], "LANG": "C.UTF-8",
+               "NPM_CONFIG_CACHE": str(self.work / "hook-cache"),
+               "NPM_CONFIG_USERCONFIG": str(self.work / "user.npmrc"),
+               "NPM_CONFIG_GLOBALCONFIG": str(self.work / "global.npmrc"),
+               "NPM_CONFIG_UPDATE_NOTIFIER": "false"}
+        packed = subprocess.run(["npm", "pack", "--ignore-scripts", "--offline", "--json"],
+                                cwd=core, env=env, text=True, capture_output=True, check=True, timeout=30)
+        archives = [str(core / json.loads(packed.stdout)[0]["filename"]),
+                    str(self.work / "cli" / cli["archive"]["name"])]
+        prefix = self.work / "hook-global"
+        command = ["npm", "install", "--global", "--prefix", str(prefix),
+                   "--no-audit", "--no-fund", "--offline", *archives]
+        result = subprocess.run(command, cwd=self.work, env=env, text=True, capture_output=True, timeout=45)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        marker = home / "synthetic-service-started"
+        self.assertEqual(marker.read_text(), "one synthetic service start")
+        before = marker.stat().st_mtime_ns
+        repeated = subprocess.run([*command, "--force"], cwd=self.work, env=env, text=True, capture_output=True, timeout=45)
+        self.assertEqual(repeated.returncode, 0, repeated.stderr)
+        self.assertEqual(marker.stat().st_mtime_ns, before)
+
+        # Local/CI/explicit opt-out must not run even the synthetic installer.
+        for mode in ("local", "ci", "skip"):
+            target_home = self.work / ("hook-" + mode)
+            target_home.mkdir(mode=0o700)
+            mode_env = {**env, "HOME": str(target_home)}
+            if mode == "ci":
+                mode_env["CI"] = "true"
+            if mode == "skip":
+                mode_env["AGENTSDOCK_SKIP_SETUP"] = "1"
+            args = ["npm", "install", "--prefix", str(self.work / ("prefix-" + mode)),
+                    "--no-audit", "--no-fund", "--offline", *archives]
+            if mode != "local":
+                args.append("--global")
+            skipped = subprocess.run(args, cwd=self.work, env=mode_env, text=True, capture_output=True, timeout=45)
+            self.assertEqual(skipped.returncode, 0, skipped.stderr)
+            self.assertFalse((target_home / "synthetic-service-started").exists())
+
+        failed_home = self.work / "failed-home"
+        failed_home.mkdir(mode=0o700)
+        (failed_home / "synthetic-failure").touch()
+        failed = subprocess.run([*command, "--force"], cwd=self.work,
+                                env={**env, "HOME": str(failed_home)}, text=True, capture_output=True, timeout=45)
+        self.assertNotEqual(failed.returncode, 0)
+        self.assertIn("Automatic setup did not complete", failed.stderr)
+        self.assertFalse((failed_home / "synthetic-service-started").exists())
+        for output in (result.stdout, result.stderr, repeated.stdout, repeated.stderr, failed.stdout, failed.stderr):
+            self.assertNotIn("secret-lifecycle-sentinel", output)
+        for log in (self.work / "hook-cache/_logs").glob("*.log"):
+            self.assertNotIn("secret-lifecycle-sentinel", log.read_text())
 
     @unittest.skipUnless(shutil.which("npm") and shutil.which("node") and os.getuid() != 0,
                          "real npm CLI smoke needs npm/node and a non-root user")

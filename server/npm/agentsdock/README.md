@@ -10,9 +10,15 @@ supported.
 
 ```sh
 npm install -g agentsdock
-agentsdock --help
-agentsdock setup --port 7850
+agentsdock list
 ```
+
+On a fresh machine, the global install automatically sets up and starts the
+default server using the existing installer and its defaults. There is no
+mandatory second `setup` command. It first checks for existing installation or
+state, including named instances; repeat installs leave these unchanged and do
+not restart, overwrite or upgrade a running service. The runtime lives in its
+managed installation directory, independently of the npm package/cache.
 
 For a beta, select `npm install -g agentsdock@beta`. This documentation describes
 the package being prepared; commands are available from the registry only after
@@ -21,13 +27,32 @@ that package/channel has been published. Do not infer name ownership from an npm
 
 `-g` makes the command available outside the current project when npm's global
 bin directory is on your PATH. A local `npm install agentsdock` is also supported;
-invoke it using `npx agentsdock`, not a bare shell command. No npm install hook
-starts or updates a server, changes shell configuration, or logs into a provider.
+invoke it using `npx agentsdock`, not a bare shell command. Local/dependency
+installs, linked source checkouts, CI installs and npx do not automatically start
+a service. Use `npx agentsdock setup` when you deliberately want a server from a
+local install. No installation changes shell configuration or logs into a provider.
 
 Use Node >=22.14, `uv`, and Apple silicon macOS with a desktop login or Linux with
 a working user systemd session. Run as the server owner without `sudo`. Install
 and authenticate your preferred provider CLI separately. `setup` (also `install`)
-refuses to overwrite an existing default installation or history.
+refuses to overwrite an existing default installation or history. Global auto
+setup uses the same `uv` and native service prerequisites; it does not install
+Homebrew, provider CLIs or Tailscale without a separate user action.
+
+The npm lifecycle may hide successful script output. Add `--foreground-scripts`
+to the npm command if you want to see its status messages. Automatic setup never
+copies raw installer output or access tokens into npm logs. Use `agentsdock list`
+for connection addresses and `agentsdock token` to view/copy the token afterward.
+A failed auto setup makes npm report failure instead of claiming the server is
+ready. To obtain interactive diagnostics or choose a custom port/bind:
+
+```sh
+AGENTSDOCK_SKIP_SETUP=1 npm install -g agentsdock
+agentsdock setup --port 7854 --bind 127.0.0.1
+```
+
+`--ignore-scripts` also disables auto setup, as required by npm; this package does
+not bypass that setting. `setup` remains the explicit retry/custom-install path.
 
 ## Manage servers
 
@@ -51,6 +76,15 @@ existing confirmation and history-preservation behavior. Tokens are private;
 Omitting its selector reads the default instance. Loopback binding is local-only;
 choose a reachable bind explicitly if another device needs access.
 
+Current acceptance gap: the native instance manager still validates the older
+single-service layout. `remove default --yes` was observed refusing a current
+split gateway/execution installation before making changes. Start/stop/restart
+and removal for split layouts need guarded lifecycle integration and native
+acceptance before this CLI can be advertised as complete instance management.
+Do not bypass the binding check or stop only one process. Fresh auto setup and
+safe repeated npm installation have been verified independently on Linux;
+macOS first-service creation still needs disposable native acceptance.
+
 ## Complete public command comparison
 
 `work` is an example instance name; `default` selects the original instance.
@@ -59,8 +93,8 @@ mailbox/jobs/team tools supplied to agents inside an authorized chat.
 
 | Purpose | Previous entry point | Short entry point |
 | --- | --- | --- |
-| Install the npm command | `npm install -g @agentsdock/server` | `npm install -g agentsdock` |
-| Fresh default server | `agentsdock-server install` / first `./install.sh` | `agentsdock setup` or `agentsdock install` |
+| Install the command and create a fresh default server | `npm install -g @agentsdock/server` then `agentsdock-server install` | `npm install -g agentsdock` (automatic first setup) |
+| Explicit retry/custom default setup | `agentsdock-server install` / first `./install.sh` | `agentsdock setup` or `agentsdock install` |
 | All instances and connection addresses | `./instances.sh list` | `agentsdock list` |
 | All instance statuses | `./instances.sh list` | `agentsdock status` (same listing) |
 | One instance's details | `./instances.sh info work` | `agentsdock info work` or `agentsdock status work` |
