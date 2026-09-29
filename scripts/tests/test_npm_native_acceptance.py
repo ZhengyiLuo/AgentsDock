@@ -8,6 +8,7 @@ from pathlib import Path
 import plistlib
 import subprocess
 import sys
+import tarfile
 import tempfile
 from types import SimpleNamespace
 import unittest
@@ -25,6 +26,24 @@ finally:
 
 
 class NpmNativeAcceptanceTests(unittest.TestCase):
+    def test_installed_instance_entrypoint_requires_exact_signed_chmod_rule(self):
+        member = tarfile.TarInfo("package/server/instances.sh")
+        member.mode = 0o644
+        rule = b'chmod 755 "$STAGE_DIR/instances.sh"\n'
+        self.assertEqual(MOD.native.installed_runtime_mode(member, rule), 0o755)
+        for installer in [b"", b'chmod 777 "$STAGE_DIR/instances.sh"\n',
+                          b'chmod 755 "$STAGE_DIR/other.sh"\n', rule + rule]:
+            with self.subTest(installer=installer), self.assertRaises(RuntimeError):
+                MOD.native.installed_runtime_mode(member, installer)
+        member.mode = 0o755
+        self.assertEqual(MOD.native.installed_runtime_mode(member, b""), 0o755)
+        member.mode = 0o777
+        with self.assertRaises(RuntimeError):
+            MOD.native.installed_runtime_mode(member, rule)
+        member.name = "package/server/unrelated.py"
+        member.mode = 0o644
+        self.assertEqual(MOD.native.installed_runtime_mode(member, rule), 0o644)
+
     def setUp(self):
         # Every service/installer boundary in this suite must be an explicit fake.
         blocking = patch.object(MOD.native, "bounded_run", side_effect=AssertionError("Unexpected real native command"))

@@ -40,6 +40,23 @@ COMMAND_STAGES = frozenset({"npm-stage", "cli-version", "cli-install", "existing
                             "systemd-stop", "systemd-start"})
 COMMAND_OUTCOMES = frozenset({"started", "returned", "verified", "failed", "execution-failed", "timed-out"})
 
+# Main's npm package carries instances.sh as 0644; its signed installer has an
+# explicit 0755 rule. Keep the shared verifier unchanged and extend its mode
+# policy only for this exact npm entrypoint and the independently signed rule.
+_shared_installed_runtime_mode = native.installed_runtime_mode
+
+
+def installed_runtime_mode(member, installer: bytes) -> int:
+    if member.name == "package/server/instances.sh" and member.mode & 0o7777 == 0o644:
+        rule = b'chmod 755 "$STAGE_DIR/instances.sh"'
+        native.need(installer.splitlines().count(rule) == 1,
+                    "Signed npm installer does not establish the instance entrypoint mode.")
+        return 0o755
+    return _shared_installed_runtime_mode(member, installer)
+
+
+native.installed_runtime_mode = installed_runtime_mode
+
 
 def reviewed_ref(value: str) -> bool:
     return (value == "main" or re.fullmatch(r"release/[A-Za-z0-9][A-Za-z0-9._/-]*", value) is not None) \
