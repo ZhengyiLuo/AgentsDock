@@ -24,6 +24,11 @@ STABLE = {"version": "1.0.8", "sourceSha": "8a965007408c6ab9672d746366b9fc0bd58f
           "archiveBytes": 3721335}
 
 
+def assert_same_base_beta_version(version):
+    native.need(isinstance(version, str) and re.fullmatch(r"1\.0\.8-beta\.[1-9]\d*", version) is not None,
+                "Negative journey requires a same-base 1.0.8-beta.N candidate.")
+
+
 @contextmanager
 def stable_installation_policy():
     """Exact official 1.0.8 installer mode rule; shared positive policy stays intact."""
@@ -58,7 +63,7 @@ def inspect_inputs(args):
                 and native.sha(raw) == args.receipt_sha256, "Candidate receipt changed.")
     receipt = json.loads(raw)
     home = native.guard(receipt, args.work, candidate=True)
-    native.need(receipt.get("version") == "1.0.8-beta.1", "Negative journey requires the exact same-base beta.")
+    assert_same_base_beta_version(receipt.get("version"))
     native.validate_candidate_checkout(args, receipt)
     temporary = Path(os.environ["RUNNER_TEMP"])
     for path in (args.receipt, args.server_directory, args.desktop_directory, args.stable_directory):

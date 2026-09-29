@@ -130,6 +130,7 @@ interface RendererProfileScope {
 
 interface PendingNamespaceAdoption extends RendererProfileScope {
   canonicalProfiles: PublicServerProfile[]
+  blockedReason?: string
 }
 
 interface StartupChatCleanup {
@@ -859,26 +860,50 @@ export const useAppStore = create<AppState>((set, get) => ({
       }),
       window.agentsDock.events.on('server:profiles', payload => {
         const current = get()
-        if (current.switchingProfileId || payload.activeProfileId !== current.activeProfileId || payload.profileGeneration < current.profileGeneration) return
-        if (payload.profileGeneration !== current.profileGeneration) {
+        if (payload.activeProfileId !== current.activeProfileId || payload.profileGeneration < current.profileGeneration) return
+        const generationChanged = payload.profileGeneration !== current.profileGeneration
+        const supersedesAdoption = generationChanged && current.activeProfileId
+          && pendingNamespaceAdoptionMatches(current.activeProfileId, current.profileGeneration, captureProfileScope(current))
+        if (current.switchingProfileId && !supersedesAdoption) return
+        const before = current.profiles.find(profile => profile.id === current.activeProfileId)
+        const after = payload.profiles.find(profile => profile.id === current.activeProfileId)
+        if (supersedesAdoption && pendingNamespaceAdoption
+          && pendingNamespaceAdoption.canonicalProfiles.find(profile => profile.id === current.activeProfileId)?.serverIdentity !== after?.serverIdentity) {
+          const detail = 'The server identity changed before this workspace could be saved. Your drafts remain here; reconnect the original server before continuing.'
+          pendingNamespaceAdoption.blockedReason = detail
+          profileRefreshes.delete(`${current.activeProfileId}:${current.profileGeneration}:${profileSwitchEpoch}`)
+          activeWorkspaceTransition?.cancel()
+          // Keep the original ownership and unsaved content. Adopting the new
+          // identity here would either leak drafts into it or silently discard
+          // them. A later original-authority event may resume the migration.
+          set({ error: detail })
+          return
+        }
+        if (!(before?.serverIdentity ?? null) && after?.serverIdentity) {
+          if (generationChanged) clearProfileVolatileState()
+          pendingNamespaceAdoption = { ...captureProfileScope(current), profileGeneration: payload.profileGeneration, canonicalProfiles: payload.profiles }
+          set({
+            switchingProfileId: current.activeProfileId,
+            profileGeneration: payload.profileGeneration,
+            profiles: payload.profiles.map(profile => profile.id === current.activeProfileId
+              ? { ...profile, serverIdentity: before?.serverIdentity ?? null }
+              : profile)
+          })
+          const recovery = refreshProfileAfterBootstrap(current.activeProfileId!, payload.profileGeneration, get, set, true)
+          if (generationChanged) {
+            // The old-generation refresh can no longer finish this workspace.
+            // Retire only its wait barrier; response/scope fences still reject
+            // late results and the replacement canonical migration owns close.
+            const transition = beginWorkspaceTransition()
+            transition.follow(recovery)
+            transition.finish()
+          } else followWorkspaceRecovery(recovery)
+        } else if (generationChanged) {
           clearProfileVolatileState()
           set({ profiles: payload.profiles, profileGeneration: payload.profileGeneration, mailHints: consumeBufferedMailHints({ ...current, profiles: payload.profiles, profileGeneration: payload.profileGeneration }, current.mailHints), forwardedPorts: [], forwardedPortsRevision: 0, loadingSessionIds: new Set(), loadingSessionId: null, syncBySession: {}, turnAdmissionTokens: {}, pendingTurnSubmissions: {}, stoppingSessionIds: new Set() })
           queueMicrotask(() => void hydrateVisibleChatPanes(get))
         } else {
-          const before = current.profiles.find(profile => profile.id === current.activeProfileId)
-          const after = payload.profiles.find(profile => profile.id === current.activeProfileId)
-          if (!(before?.serverIdentity ?? null) && after?.serverIdentity) {
-            pendingNamespaceAdoption = { ...captureProfileScope(current), canonicalProfiles: payload.profiles }
-            set({
-              switchingProfileId: current.activeProfileId,
-              profiles: payload.profiles.map(profile => profile.id === current.activeProfileId
-                ? { ...profile, serverIdentity: before?.serverIdentity ?? null }
-                : profile)
-            })
-            followWorkspaceRecovery(refreshProfileAfterBootstrap(current.activeProfileId!, current.profileGeneration, get, set, true))
-          } else {
-            set({ profiles: payload.profiles, mailHints: consumeBufferedMailHints({ ...current, profiles: payload.profiles }, current.mailHints) })
-          }
+          set({ profiles: payload.profiles, mailHints: consumeBufferedMailHints({ ...current, profiles: payload.profiles }, current.mailHints) })
         }
       }),
       window.agentsDock.events.on('server:files', payload => {
@@ -2552,9 +2577,11 @@ function beginWorkspaceTransition(): WorkspaceTransition {
 
 /** Waits for the current cached switch and canonical-identity refresh to settle. */
 export async function waitForWorkspaceReady(): Promise<void> {
+  if (pendingNamespaceAdoption?.blockedReason) throw new Error(pendingNamespaceAdoption.blockedReason)
   while (activeWorkspaceTransition) {
     const transition = activeWorkspaceTransition
     await transition.promise
+    if (pendingNamespaceAdoption?.blockedReason) throw new Error(pendingNamespaceAdoption.blockedReason)
     if (activeWorkspaceTransition === transition) return
   }
 }
@@ -3164,6 +3191,11 @@ async function runProfileRefresh(
         const selectedSessionId = selectedSessionFromBootstrap(recovered)
         const layout = await restoredChatPaneLayout(recovered, selectedSessionId)
         if (!isLatestRefresh()) return
+        const afterLayout = get()
+        if (requestedScope.switchEpoch !== profileSwitchEpoch
+          || afterLayout.activeProfileId !== profileId || afterLayout.profileGeneration !== profileGeneration
+          || !pendingNamespaceAdoptionMatches(profileId, profileGeneration, requestedScope)
+          || pendingNamespaceAdoption?.canonicalProfiles.find(profile => profile.id === profileId)?.serverIdentity !== recoveredIdentity) return
         clearProfileVolatileState()
         pendingNamespaceAdoption = null
         set(workspaceStateFromBootstrap(recovered, selectedSessionId, true, layout))
@@ -3446,12 +3478,14 @@ function profileEventMatches(
 }
 
 export async function flushActiveWorkspace(): Promise<void> {
+  if (pendingNamespaceAdoption?.blockedReason) throw new Error(pendingNamespaceAdoption.blockedReason)
   const pending: Promise<unknown>[] = []
   const collect = (promise: PromiseLike<unknown> | unknown): void => { pending.push(Promise.resolve(promise)) }
   const detail: DraftFlushDetail = { pending, promises: pending, waitUntil: collect, add: collect }
   window.dispatchEvent(new CustomEvent<DraftFlushDetail>('agentsdock:flush-draft', { detail }))
   window.dispatchEvent(new CustomEvent<DraftFlushDetail>('agentsdock:capture-timeline', { detail }))
   const results = await Promise.allSettled(pending)
+  if (pendingNamespaceAdoption?.blockedReason) throw new Error(pendingNamespaceAdoption.blockedReason)
   const failure = results.find((result): result is PromiseRejectedResult => result.status === 'rejected')
   if (failure) throw failure.reason
 }

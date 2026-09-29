@@ -27,6 +27,31 @@ def health():
 
 
 class NoDowngradeTests(unittest.TestCase):
+    def test_same_base_beta_two_supported_without_changing_independent_stable_pins(self):
+        stable = copy.deepcopy(MOD.STABLE)
+        for version in ("1.0.8-beta.1", "1.0.8-beta.2", "1.0.8-beta.12"):
+            MOD.assert_same_base_beta_version(version)
+        for version in ("1.0.9-beta.2", "1.0.7-beta.2", "1.0.8", "1.0.8-rc.2", "1.0.8-beta.0",
+                        "1.0.8-beta.02", "1.0.8-beta.2.extra", "1.0.8-beta.2+local", "1.0.8-beta.2\n", None, 2):
+            with self.subTest(version=version), self.assertRaises(RuntimeError):
+                MOD.assert_same_base_beta_version(version)
+        self.assertEqual(MOD.STABLE, stable)
+
+    def test_receipt_beta_two_reaches_validation_but_other_base_is_rejected_before_native_operations(self):
+        for version in ("1.0.8-beta.2", "1.0.9-beta.2"):
+            raw = json.dumps({"version": version, "sourceSha": "b" * 40}).encode()
+            args = argparse.Namespace(receipt=Path("/candidate.json"), receipt_sha256=MOD.native.sha(raw),
+                                      work=Path("/owned/work"))
+            with patch.object(MOD.native, "read_regular", return_value=raw), \
+                    patch.object(MOD.native, "guard", return_value=Path("/owned")), \
+                    patch.object(MOD.native, "validate_candidate_checkout", side_effect=RuntimeError("checkout boundary")) as checkout, \
+                    patch.object(MOD.native, "command") as command, patch.object(MOD, "verify_stable") as stable:
+                with self.assertRaises(RuntimeError):
+                    MOD.inspect_inputs(args)
+                self.assertEqual(checkout.call_count, int(version == "1.0.8-beta.2"))
+                command.assert_not_called()
+                stable.assert_not_called()
+
     def test_exact_components_not_health_version_alone(self):
         expected = MOD.component_identity(health())
         self.assertEqual(expected["gateway"]["pid"], 1234)

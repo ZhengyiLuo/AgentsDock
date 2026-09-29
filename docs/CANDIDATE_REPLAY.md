@@ -61,7 +61,7 @@ Dispatch `ci.yml` on the receipt's reviewed `release/*` branch with:
 
 ```text
 candidate_replay=true
-candidate_tag=candidate-replay-v1.0.8-beta.1
+candidate_tag=candidate-replay-v1.0.8-beta.2
 candidate_receipt_sha256=<independently reviewed candidate.json SHA-256>
 candidate_bundle_sha256=<independently reviewed candidate-bundle.zip SHA-256>
 npm_native_validation=false
@@ -75,7 +75,11 @@ an existing local guest, and never remove an app's `disable-auto-update` marker.
 
 ## Separate stable-server no-downgrade case
 
-Stable server `1.0.8` must not be downgraded to `1.0.8-beta.1`. That requires a
+Stable server `1.0.8` must not be downgraded to the receipt's `1.0.8-beta.N`
+candidate (currently `1.0.8-beta.2`). The fixture accepts only that same-base
+numbered Beta line and binds every observation to the exact signed candidate
+receipt; it rejects other bases, Stable, RC and locally relabeled versions.
+That requires a
 distinct native fixture and observation, not weakening the positive migration's
 strictly-older-baseline assertion. The separate `candidate-no-downgrade` job
 installs genuine stable server `1.0.8` on its own disposable hosted macOS runner,

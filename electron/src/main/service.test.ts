@@ -35,6 +35,8 @@ import type {
 } from '../shared/types'
 
 const electronHarness = vi.hoisted(() => ({
+  userDataPath: '/tmp',
+  localServerDiscovery: vi.fn(async () => []),
   notificationSupported: false,
   showOpenDialog: vi.fn(),
   showSaveDialog: vi.fn(),
@@ -48,7 +50,7 @@ const electronHarness = vi.hoisted(() => ({
 }))
 
 vi.mock('electron', () => ({
-  app: { getPath: () => '/tmp' },
+  app: { getPath: () => electronHarness.userDataPath },
   BrowserWindow: class {},
   dialog: {
     showOpenDialog: (...args: unknown[]) => electronHarness.showOpenDialog(...args),
@@ -74,6 +76,8 @@ vi.mock('electron', () => ({
     openPath: (...args: unknown[]) => electronHarness.shellOpenPath(...args)
   }
 }))
+
+vi.mock('./local-server-discovery', () => ({ discoverLocalServers: electronHarness.localServerDiscovery }))
 
 import { LocalCache, TIMELINE_PAGING_SCHEMA_VERSION } from './persistence'
 import {
@@ -257,6 +261,7 @@ afterEach(() => {
   electronHarness.showSaveDialog.mockReset()
   electronHarness.shellOpenExternal.mockReset()
   electronHarness.shellOpenPath.mockReset()
+  electronHarness.localServerDiscovery.mockClear()
 })
 
 describe('concurrent artifact downloads', () => {
@@ -7976,6 +7981,137 @@ describe('credential-free profile metadata and asynchronous authentication', () 
     expect(settings.serverUrl('a')).toBe('https://a.test')
     expect(settings.serverIdentity('a')).toBe('old-server')
     expect(clientFactory).not.toHaveBeenCalled()
+  })
+})
+
+describe('managed local discovery profile adoption', () => {
+  it.each([undefined, '0', '1'])('disables only default discovery for the explicit isolation flag %s', async value => {
+    const directory = mkdtempSync(join(tmpdir(), 'agentsdock-discovery-default-'))
+    const previousPath = electronHarness.userDataPath
+    const previousFlag = process.env.AGENTSDOCK_DISABLE_LOCAL_SERVER_DISCOVERY
+    electronHarness.userDataPath = directory
+    if (value === undefined) delete process.env.AGENTSDOCK_DISABLE_LOCAL_SERVER_DISCOVERY
+    else process.env.AGENTSDOCK_DISABLE_LOCAL_SERVER_DISCOVERY = value
+    const cache = new LocalCache(':memory:')
+    let service: AppService | undefined
+    try {
+      service = new AppService({ cache })
+      const internal = service as unknown as { localServerDiscovery(): Promise<unknown[]> }
+      await expect(internal.localServerDiscovery()).resolves.toEqual([])
+      expect(electronHarness.localServerDiscovery).toHaveBeenCalledTimes(value === '1' ? 0 : 1)
+    } finally {
+      service?.stop()
+      cache.close()
+      electronHarness.userDataPath = previousPath
+      if (previousFlag === undefined) delete process.env.AGENTSDOCK_DISABLE_LOCAL_SERVER_DISCOVERY
+      else process.env.AGENTSDOCK_DISABLE_LOCAL_SERVER_DISCOVERY = previousFlag
+      rmSync(directory, { recursive: true, force: true })
+    }
+  })
+
+  function prepare() {
+    const directory = mkdtempSync(join(tmpdir(), 'agentsdock-discovery-adoption-'))
+    const values = new Map<string, string>()
+    const readAsync = vi.fn(() => new Promise<string>(() => undefined))
+    const settings = new SettingsStore({ path: join(directory, 'settings.json'), createProfileId: () => 'local',
+      isMacAppStoreBuild: () => false,
+      keychain: { read: account => values.get(account) ?? '', readAsync,
+        write: (account, token) => { values.set(account, token); return true }, delete: account => { values.delete(account) } },
+      safeStorage: { isEncryptionAvailable: () => false, encryptString: value => Buffer.from(value), decryptString: value => value.toString() }
+    })
+    settings.updateProfile('local', { serverUrl: 'http://127.0.0.1:7850' })
+    const cache = new LocalCache(':memory:')
+    const found = deferred<Array<{ name: string; serverUrl: string; serverIdentity: string; accessToken: string }>>()
+    const clientFactory = vi.fn(() => fakeClient() as unknown as AgentServerClient)
+    const service = new AppService({ settings, cache, clientFactory, localServerDiscovery: () => found.promise })
+    const internal = service as unknown as {
+      running: boolean; profileSelectionIntent: number; shutdownEpoch: number
+      profileRemovals: Map<string, Promise<boolean>>; profileAuthorityOperations: Map<string, Promise<void>>
+      discoverManagedLocalServers(): Promise<void>; refreshInactiveProfileHealth(): Promise<void>
+    }
+    internal.running = true
+    vi.spyOn(internal, 'refreshInactiveProfileHealth').mockResolvedValue(undefined)
+    const send = vi.fn()
+    service.addWindow({ isDestroyed: () => false, on: vi.fn(), webContents: { id: 91, on: vi.fn(), send } } as never)
+    cleanup.push(() => { service.stop(); cache.close(); rmSync(directory, { recursive: true, force: true }) })
+    const discover = () => {
+      const task = internal.discoverManagedLocalServers()
+      found.resolve([{ name: 'Local test', serverUrl: 'http://127.0.0.1:7850', serverIdentity: 'local-server', accessToken: 'fixture-token' }])
+      return task
+    }
+    return { service, settings, cache, internal, clientFactory, readAsync, send, discover, found }
+  }
+
+  it('publishes identity and replacement generation together without rereading the discovered credential', async () => {
+    const { service, settings, cache, readAsync, send, discover } = prepare()
+    const pending = discover()
+    await settleBackgroundWork()
+    const snapshot = await service.bootstrap()
+    expect(snapshot.profileGeneration).toBe(2)
+    expect(snapshot.profiles?.[0].serverIdentity).toBe('local-server')
+    expect(readAsync).not.toHaveBeenCalled()
+    await pending
+    const publications = send.mock.calls.filter(([name]) => name === 'server:profiles').map(([, body]) => body)
+    expect(publications.some(body => body.profileGeneration === 2 && body.profiles[0].serverIdentity === 'local-server')).toBe(true)
+    expect(publications.some(body => body.profileGeneration === 1 && body.profiles[0].serverIdentity)).toBe(false)
+    expect(settings.serverIdentity('local')).toBe('local-server')
+    service.putScopedPreference({ profileId: 'local', profileGeneration: 2, serverIdentity: 'local-server' }, 'draft:test', 'kept')
+    expect(cache.preference('local-server', 'draft:test', '')).toBe('kept')
+    expect(() => service.putScopedPreference({ profileId: 'local', profileGeneration: 1, serverIdentity: null }, 'draft:test', 'stale')).toThrow()
+  })
+
+  it('retains an explicitly injected discovery dependency with isolation enabled', async () => {
+    const previousFlag = process.env.AGENTSDOCK_DISABLE_LOCAL_SERVER_DISCOVERY
+    process.env.AGENTSDOCK_DISABLE_LOCAL_SERVER_DISCOVERY = '1'
+    try {
+      const { service, discover } = prepare()
+      await discover()
+      expect((await service.bootstrap()).profileGeneration).toBe(2)
+    } finally {
+      if (previousFlag === undefined) delete process.env.AGENTSDOCK_DISABLE_LOCAL_SERVER_DISCOVERY
+      else process.env.AGENTSDOCK_DISABLE_LOCAL_SERVER_DISCOVERY = previousFlag
+    }
+  })
+
+  it.each(['new selection', 'removal', 'shutdown', 'credential edit'] as const)('does not overwrite an adoption superseded by %s', async reason => {
+    const { service, settings, internal, discover } = prepare()
+    const pending = discover()
+    if (reason === 'new selection') internal.profileSelectionIntent += 1
+    if (reason === 'removal') internal.profileRemovals.set('local', Promise.resolve(true))
+    if (reason === 'shutdown') internal.shutdownEpoch += 1
+    if (reason === 'credential edit') settings.updateProfile('local', { accessToken: 'user-token' })
+    await pending
+    expect(settings.serverIdentity('local')).toBeNull()
+    expect((await service.bootstrap()).profileGeneration).toBe(1)
+  })
+
+  it('rechecks authority and selection after a queued profile operation', async () => {
+    const { settings, internal, discover } = prepare()
+    const gate = deferred<void>()
+    internal.profileAuthorityOperations.set('local', gate.promise)
+    const pending = discover()
+    await settleBackgroundWork()
+    expect(settings.serverIdentity('local')).toBeNull()
+    internal.profileSelectionIntent += 1
+    gate.resolve()
+    await pending
+    expect(settings.serverIdentity('local')).toBeNull()
+  })
+
+  it.each([false, true])('retains the original scope if persistence fails even when prospective disposal throws: %s', async disposalThrows => {
+    const { service, settings, clientFactory, discover } = prepare()
+    if (disposalThrows) {
+      const next = fakeClient()
+      next.dispose.mockImplementation(() => { throw new Error('fixture disposal failure') })
+      clientFactory.mockReturnValueOnce(next as unknown as AgentServerClient)
+    }
+    vi.spyOn(settings, 'updateProfile').mockImplementation(() => { throw new Error('fixture storage failure') })
+    await discover()
+    expect(settings.serverIdentity('local')).toBeNull()
+    expect((await service.bootstrap()).profileGeneration).toBe(1)
+    expect(clientFactory).toHaveBeenCalledTimes(2)
+    expect(clientFactory.mock.results[1].value.dispose).toHaveBeenCalledOnce()
+    expect(clientFactory.mock.results[0].value.dispose).not.toHaveBeenCalled()
   })
 })
 

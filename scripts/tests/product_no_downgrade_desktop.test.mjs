@@ -3,7 +3,7 @@ import { mkdtemp, writeFile, symlink, link, chmod, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import test from 'node:test'
-import { assertCurrentWithoutOperation, assertNoUpdateRequests, assertStableHealth, assertStableIdentity,
+import { assertCurrentWithoutOperation, assertNoUpdateRequests, assertSameBaseBetaVersion, assertStableHealth, assertStableIdentity,
   parseArguments, readRegular, STABLE_IDENTITY, validateFixture, verifyStableDirectory } from '../product_no_downgrade_desktop.mjs'
 
 const clone = value => structuredClone(value)
@@ -42,6 +42,22 @@ test('same-base stable server is current only with both native components and no
   }
   assert.throws(() => assertCurrentWithoutOperation({ ...status, serverUpdates: [...status.serverUpdates, ...status.serverUpdates] }, health, fixture, receipt.version))
   assert.throws(() => assertCurrentWithoutOperation(status, health, fixture, '1.0.8-beta.2'))
+})
+
+test('same-base beta.2 uses its own receipt-bound fixture without broadening the stable target', () => {
+  for (const version of ['1.0.8-beta.1', '1.0.8-beta.2', '1.0.8-beta.12']) {
+    assertSameBaseBetaVersion(version)
+    const candidateStatus = clone(status)
+    candidateStatus.currentVersion = version
+    candidateStatus.serverUpdates[0].targetVersion = version
+    const candidateFixture = { ...fixture, candidateVersion: version }
+    assert.equal(assertCurrentWithoutOperation(candidateStatus, health, candidateFixture, version).visibleVersion, version)
+    if (version !== receipt.version) assert.throws(() => assertCurrentWithoutOperation(candidateStatus, health, fixture, version))
+  }
+  for (const version of ['1.0.9-beta.2', '1.0.7-beta.2', '1.0.8', '1.0.8-rc.2', '1.0.8-beta.0',
+    '1.0.8-beta.02', '1.0.8-beta.2.extra', '1.0.8-beta.2+local', '1.0.8-beta.2\n', undefined, 2]) {
+    assert.throws(() => assertSameBaseBetaVersion(version))
+  }
 })
 
 test('mixed versions, replaced PIDs/instances and maintenance fail exact incumbent equality', () => {

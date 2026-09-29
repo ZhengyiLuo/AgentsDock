@@ -8,7 +8,7 @@ import { RUNNING_FORK_UNAVAILABLE } from '@shared/session-fork'
 import { isImportedProviderInterruption } from '@shared/provider-origin'
 import { CHAT_FONT_SIZES } from '../lib/chat-font'
 import { cancelPendingSteering, isSteeringPending, steerQueuedTurn, type SteeringScope } from '../lib/queue-actions'
-import { boundedDeferredTimelineEvents, cacheSnapshot, compactSnapshotEvents, crossChatQueueRefreshSessionId, handleMenuCommand, interactiveClientCapabilities, mergeEvents, mergeSnapshots, reconcileSessions, replaceSnapshot, snapshotNeedsAuthoritativeTail, syncSnapshotSessions, timelineReplacementIsDiscontinuous, updateActiveSessions, updateQueuedTurns, useAppStore } from './app-store'
+import { boundedDeferredTimelineEvents, cacheSnapshot, compactSnapshotEvents, crossChatQueueRefreshSessionId, flushActiveWorkspace, handleMenuCommand, interactiveClientCapabilities, mergeEvents, mergeSnapshots, reconcileSessions, replaceSnapshot, snapshotNeedsAuthoritativeTail, syncSnapshotSessions, timelineReplacementIsDiscontinuous, updateActiveSessions, updateQueuedTurns, useAppStore, waitForWorkspaceReady } from './app-store'
 
 const analytics = vi.hoisted(() => ({ trackEvent: vi.fn() }))
 vi.mock('../lib/analytics', () => analytics)
@@ -5522,9 +5522,12 @@ describe('server profile switching', () => {
     useAppStore.setState({ selectSession: originalSelectSession })
   })
 
-  it('actively refreshes an unsolicited canonical identity adoption and unlocks cached chat selection', async () => {
+  it.each(['same generation', 'new generation', 'superseded adoption', 'superseded recovery', 'replacement authority'] as const)('refreshes unsolicited canonical identity adoption (%s) and unlocks cached chat selection', async transition => {
+    const targetGeneration = transition === 'same generation' ? 4 : 5
     const fallback = profileFor('profile-a')
     const canonical = { ...fallback, serverIdentity: 'server-a' }
+    const replacementAuthority = transition === 'replacement authority'
+    const target = replacementAuthority ? { ...canonical, serverIdentity: 'server-b' } : canonical
     const chatA = { ...sessionFor('chat-a'), title: 'Alpha chat' }
     const chatB = { ...sessionFor('chat-b'), title: 'Beta chat' }
     const fallbackPayload: ProfileBootstrapPayload = {
@@ -5533,19 +5536,26 @@ describe('server profile switching', () => {
       selectedSessionId: chatA.id
     }
     const canonicalPayload: ProfileBootstrapPayload = {
-      ...profileBootstrap(canonical, [canonical], 4),
+      ...profileBootstrap(target, [target], targetGeneration),
       sessions: [chatA, chatB],
       selectedSessionId: chatA.id
     }
     const adoptionRefresh = deferred<ProfileBootstrapPayload>()
+    const retiredRefresh = deferred<ProfileBootstrapPayload>()
+    const retiredLayout = deferred<unknown>()
+    const pendingFlush = deferred<void>()
+    let pendingFlushAssertion: Promise<unknown> | undefined
     const handlers = new Map<string, (payload: any) => void>()
     const refresh = vi.fn()
       .mockResolvedValueOnce(fallbackPayload)
-      .mockReturnValueOnce(adoptionRefresh.promise)
+      .mockReturnValueOnce(transition === 'superseded adoption' || replacementAuthority ? retiredRefresh.promise : adoptionRefresh.promise)
+    if (transition === 'superseded recovery') {
+      refresh.mockReset().mockResolvedValueOnce(fallbackPayload).mockRejectedValueOnce(new Error('old refresh failed'))
+    }
     Object.defineProperty(window, 'agentsDock', {
       configurable: true,
       value: {
-        bootstrap: vi.fn().mockResolvedValue(fallbackPayload),
+        bootstrap: vi.fn().mockResolvedValueOnce(fallbackPayload).mockResolvedValue({ ...canonicalPayload, profileGeneration: 4 }),
         servers: { refresh },
         timeline: {
           cached: vi.fn((sessionId: string) => Promise.resolve(snapshot(sessionId, [eventFor(sessionId, 1)]))),
@@ -5554,7 +5564,9 @@ describe('server profile switching', () => {
         preferences: {
           get: vi.fn().mockImplementation((_key: string, fallbackValue: unknown) => Promise.resolve(fallbackValue)),
           set: vi.fn().mockResolvedValue(undefined),
-          getScoped: vi.fn().mockImplementation((_scope: unknown, _key: string, fallbackValue: unknown) => Promise.resolve(fallbackValue)),
+          getScoped: vi.fn().mockImplementation((scope: { profileGeneration: number; serverIdentity: string | null }, key: string, fallbackValue: unknown) =>
+            transition === 'superseded recovery' && scope.profileGeneration === 4 && scope.serverIdentity === 'server-a' && key === 'chatPaneLayout'
+              ? retiredLayout.promise : Promise.resolve(fallbackValue)),
           setScoped: vi.fn().mockResolvedValue(undefined)
         },
         native: { log: vi.fn().mockResolvedValue(undefined), setBadge: vi.fn().mockResolvedValue(undefined) },
@@ -5577,18 +5589,96 @@ describe('server profile switching', () => {
     await settleMicrotasks()
     expect(refresh).toHaveBeenCalledTimes(1)
 
-    handlers.get('server:profiles')?.({ activeProfileId: fallback.id, profiles: [canonical], profileGeneration: 4 })
+    const draftReferences = [{ sessionId: 'private-a', title: 'A reference' }] as never[]
+    useAppStore.setState({ drafts: { [chatA.id]: 'Unsaved local draft' }, chatReferencesBySession: { [chatA.id]: draftReferences } })
+    if (transition === 'superseded adoption' || transition === 'superseded recovery' || replacementAuthority) {
+      refresh.mockReturnValueOnce(adoptionRefresh.promise)
+      handlers.get('server:profiles')?.({ activeProfileId: fallback.id, profiles: [canonical], profileGeneration: 4 })
+      await settleMicrotasks()
+      expect(useAppStore.getState().switchingProfileId).toBe(fallback.id)
+      if (transition === 'superseded recovery') {
+        await vi.waitFor(() => expect(window.agentsDock.preferences.getScoped).toHaveBeenCalledWith(
+          { profileId: fallback.id, profileGeneration: 4, serverIdentity: 'server-a' }, 'chatPaneLayout', null
+        ))
+      }
+    }
+    if (replacementAuthority) {
+      window.addEventListener('agentsdock:flush-draft', event => {
+        (event as CustomEvent<{ waitUntil(promise: Promise<void>): void }>).detail.waitUntil(pendingFlush.promise)
+      }, { once: true })
+      pendingFlushAssertion = expect(flushActiveWorkspace()).rejects.toThrow('server identity changed')
+    }
+    handlers.get('server:profiles')?.({ activeProfileId: fallback.id, profiles: [target], profileGeneration: targetGeneration })
     expect(useAppStore.getState().switchingProfileId).toBe(fallback.id)
     await settleMicrotasks()
-    expect(refresh).toHaveBeenCalledTimes(2)
-    expect(refresh).toHaveBeenLastCalledWith(fallback.id, 4)
+    if (replacementAuthority) {
+      expect(refresh).toHaveBeenCalledTimes(2)
+      expect(useAppStore.getState().profileGeneration).toBe(4)
+      expect(useAppStore.getState().profiles[0]?.serverIdentity).toBeNull()
+      expect(useAppStore.getState().drafts[chatA.id]).toBe('Unsaved local draft')
+      expect(useAppStore.getState().chatReferencesBySession[chatA.id]).toEqual(draftReferences)
+      expect(useAppStore.getState().error).toContain('drafts remain here')
+      await expect(waitForWorkspaceReady()).rejects.toThrow('server identity changed')
+      await expect(flushActiveWorkspace()).rejects.toThrow('server identity changed')
+      pendingFlush.resolve()
+      await pendingFlushAssertion
+      await expect(useAppStore.getState().sendPromptForSession(chatA.id, 'must not send to B')).resolves.toBe(false)
+      handlers.get('server:profiles')?.({ activeProfileId: fallback.id, profiles: [target], profileGeneration: targetGeneration })
+      await settleMicrotasks()
+      expect(refresh).toHaveBeenCalledTimes(2)
+      expect(useAppStore.getState().profileGeneration).toBe(4)
+      expect(useAppStore.getState().drafts[chatA.id]).toBe('Unsaved local draft')
+      expect(useAppStore.getState().chatReferencesBySession[chatA.id]).toEqual(draftReferences)
+      expect(window.agentsDock.preferences.setScoped).not.toHaveBeenCalledWith(
+        expect.objectContaining({ serverIdentity: 'server-b' }), expect.anything(), expect.anything()
+      )
+      // Obsolete A completion must neither release the blocked workspace nor
+      // drop its draft. Reconnecting A at a new generation can recover safely.
+      retiredRefresh.resolve({ ...canonicalPayload, profiles: [canonical], profileGeneration: 4 })
+      await settleMicrotasks()
+      expect(useAppStore.getState().switchingProfileId).toBe(fallback.id)
+      expect(useAppStore.getState().drafts[chatA.id]).toBe('Unsaved local draft')
+      handlers.get('server:profiles')?.({ activeProfileId: fallback.id, profiles: [canonical], profileGeneration: 6 })
+      await settleMicrotasks()
+      adoptionRefresh.resolve({ ...canonicalPayload, profiles: [canonical], profileGeneration: 6 })
+      await vi.waitFor(() => expect(useAppStore.getState().switchingProfileId).toBeNull())
+      expect(useAppStore.getState().profiles[0]?.serverIdentity).toBe('server-a')
+      expect(useAppStore.getState().profileGeneration).toBe(6)
+      expect(useAppStore.getState().drafts[chatA.id]).toBe('Unsaved local draft')
+      expect(window.agentsDock.preferences.setScoped).not.toHaveBeenCalledWith(
+        expect.objectContaining({ serverIdentity: 'server-b' }), expect.anything(), expect.anything()
+      )
+      await expect(flushActiveWorkspace()).resolves.toBeUndefined()
+      return
+    }
+    expect(refresh).toHaveBeenCalledTimes(transition.startsWith('superseded') || replacementAuthority ? 3 : 2)
+    expect(refresh).toHaveBeenLastCalledWith(fallback.id, targetGeneration)
 
     await useAppStore.getState().selectSession(chatB.id)
     expect(useAppStore.getState().selectedSessionId).toBe(chatA.id)
 
     adoptionRefresh.resolve(canonicalPayload)
     await vi.waitFor(() => expect(useAppStore.getState().switchingProfileId).toBeNull())
-    expect(useAppStore.getState().profiles[0]?.serverIdentity).toBe('server-a')
+    expect(useAppStore.getState().profiles[0]?.serverIdentity).toBe(target.serverIdentity)
+    expect(useAppStore.getState().profileGeneration).toBe(targetGeneration)
+    expect(useAppStore.getState().drafts[chatA.id]).toBe('Unsaved local draft')
+    expect(window.agentsDock.preferences.setScoped).toHaveBeenCalledWith(
+      { profileId: fallback.id, profileGeneration: targetGeneration, serverIdentity: 'server-a' },
+      `draft:${chatA.id}`, 'Unsaved local draft'
+    )
+    let ready = false
+    void waitForWorkspaceReady().then(() => { ready = true })
+    await settleMicrotasks()
+    expect(ready).toBe(true)
+    // A late obsolete refresh must neither keep close waiting nor restore the
+    // old generation after the replacement workspace became writable.
+    retiredRefresh.resolve({ ...canonicalPayload, profileGeneration: 4 })
+    retiredLayout.resolve(null)
+    await settleMicrotasks()
+    expect(useAppStore.getState().profileGeneration).toBe(targetGeneration)
+    handlers.get('server:profiles')?.({ activeProfileId: 'other-profile', profiles: [canonical], profileGeneration: 99 })
+    handlers.get('server:profiles')?.({ activeProfileId: fallback.id, profiles: [fallback], profileGeneration: targetGeneration - 1 })
+    expect(useAppStore.getState().profileGeneration).toBe(targetGeneration)
 
     await useAppStore.getState().selectSession(chatB.id)
     expect(useAppStore.getState().selectedSessionId).toBe(chatB.id)

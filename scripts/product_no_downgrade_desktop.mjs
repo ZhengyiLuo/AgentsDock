@@ -21,6 +21,10 @@ export const STABLE_IDENTITY = Object.freeze({ version: '1.0.8',
   manifestSha256: '64881777ab0ebf8ad029ec1f4f1212e1699f9ee7a1d62420ae32e5f3dcfe7198',
   signatureSha256: 'e224f89215b2b0d047a49aa0264ff803ef96c3ea71a6a39985b68eef67b6f18d',
   archiveSha256: 'c9846ca863312478f64979cc579feea521902dc23c15f0f30ca5eebdb544808f', archiveBytes: 3721335 })
+export function assertSameBaseBetaVersion(version) {
+  assert(typeof version === 'string' && /^1\.0\.8-beta\.[1-9]\d*$/.test(version),
+    'This negative journey requires a same-base 1.0.8-beta.N candidate')
+}
 const digest = bytes => createHash('sha256').update(bytes).digest('hex')
 const PROFILE = 'candidate-no-downgrade', NAME = 'Acceptance stable server'
 const ACCOUNT = `agent-access-token:${PROFILE}`, KEYCHAIN = 'com.zhengyiluo.AgentsDock'
@@ -81,7 +85,8 @@ export function assertStableHealth(health, fixture) {
 }
 
 export function assertCurrentWithoutOperation(status, health, fixture, candidateVersion) {
-  assert.equal(candidateVersion, '1.0.8-beta.1', 'This negative journey is pinned to the same-base beta')
+  assertSameBaseBetaVersion(candidateVersion)
+  assert.equal(candidateVersion, fixture.candidateVersion, 'Candidate must match the receipt-bound native fixture')
   assertStableHealth(health, fixture)
   assert.equal(status?.currentVersion, candidateVersion)
   const records = status.serverUpdates?.filter(record => record.profileId === PROFILE)
@@ -149,7 +154,7 @@ export async function main(argv = process.argv.slice(2)) {
   const receipt = await inspectCandidate({ receiptPath: options.receipt, receiptSha256: options['receipt-sha256'],
     serverDirectory: options['server-directory'], desktopDirectory: options['desktop-directory'] })
   const harness = assertCandidateCheckout(receipt)
-  assert.equal(receipt.version, '1.0.8-beta.1')
+  assertSameBaseBetaVersion(receipt.version)
   await verifyStableDirectory(options['stable-directory'])
   const fixture = validateFixture(JSON.parse(await readRegular(options.fixture, 1024 * 1024, true)), receipt, options['receipt-sha256'])
   assert(!run('/bin/ps', ['-axo', 'command=']).includes('/AgentsDock.app/Contents/MacOS/AgentsDock'), 'An AgentsDock app is already running')

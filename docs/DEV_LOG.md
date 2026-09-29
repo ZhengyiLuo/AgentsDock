@@ -1,5 +1,39 @@
 # Public development log
 
+## 2026-09-29 — Correct discovery shutdown and prepare beta.2
+
+- Advance the coordinated candidate to `1.0.8-beta.2`; retain beta.1's signed
+  bytes and the published stable server `1.0.8` unchanged.
+- Adopt an authenticated local discovery result with its replacement client and
+  profile generation together. Preserve selection, removal, credential and
+  persistence-failure fences. Renderer namespace adoption retains drafts and
+  rejects late recovery results rather than reverting to an obsolete scope.
+- If a different server identity interrupts that adoption, retain the original
+  drafts and references, reject sends and save acknowledgements, and wait for
+  the original verified authority. Repeated replacement events and late
+  responses cannot silently discard or transfer the retained workspace.
+- Keep failed-save close protection intact. Bound release-smoke launch and
+  shutdown, isolate automatic discovery explicitly, and report a timeout or
+  forced cleanup as failure. Do not print private smoke logs or infer interactive
+  quit acceptance from process termination alone.
+- Preserve Windows' unsupported local-discovery behavior while correcting its
+  platform-specific test expectations. Extend the negative native fixture to
+  same-base `1.0.8-beta.N` candidates without changing the pinned stable package.
+- Validation: reproduce the discovery/adoption failures and late-generation
+  rollback before their regressions pass. An isolated offscreen native app used
+  the compiled production renderer/preload, real managed-file discovery,
+  listener ownership and authenticated HTTP into owned production server routes.
+  Settings opened/reopened through native input and native close completed its
+  renderer flush without timeout fallback. Discovery exposed no identified old
+  generation and required no second asynchronous credential read.
+- Final desktop source validation: 5,045 tests pass with six expected skips;
+  typecheck and production compilation pass. The smoke supervisor's own native
+  compiled-app run exits cleanly without forced cleanup or imported profiles.
+- That fixture used synthetic installation records and a private keychain
+  adapter; server lifespan and native subprocesses were disabled. It is not
+  signed-package migration, provider-chat or live-service acceptance. Native
+  release builds, exact-artifact upgrade tests and publication remain pending.
+
 ## 2026-09-29 — Hold beta.1 after packaged acceptance failures
 
 - Preserve the signed `1.0.8-beta.1` candidate at source

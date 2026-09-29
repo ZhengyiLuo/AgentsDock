@@ -477,7 +477,9 @@ export class AppService {
   } | null = null
 
   constructor(options: AppServiceOptions = {}) {
-    this.localServerDiscovery = options.localServerDiscovery ?? (options.settings || options.clientFactory ? async () => [] : discoverLocalServers)
+    this.localServerDiscovery = options.localServerDiscovery ?? (options.settings || options.clientFactory
+      ? async () => []
+      : () => process.env.AGENTSDOCK_DISABLE_LOCAL_SERVER_DISCOVERY === '1' ? Promise.resolve([]) : discoverLocalServers())
     appLog('startup', 'loading settings')
     this.settings = options.settings ?? new SettingsStore()
     appLog('startup', 'settings loaded')
@@ -1525,10 +1527,30 @@ export class AppService {
         if (existing) {
           // Only fill an unconfigured bootstrap profile. Never overwrite saved
           // remote credentials, a trusted identity, or a user's selection.
-          if (!existing.hasAccessToken && !existing.serverIdentity && existing.serverUrl.replace(/\/$/, '') === server.serverUrl) {
-            this.settings.updateProfile(existing.id, { accessToken: server.accessToken, serverIdentity: server.serverIdentity, serverSetupComplete: true }, process.platform === 'darwin')
-            if (existing.id === this.activeProfileId && intent === this.profileSelectionIntent) await this.switchServer(existing.id, true)
-          }
+          await this.withProfileAuthorityOperation(existing.id, async () => {
+            if (!this.running || this.shutdownEpoch !== epoch || this.profileSelectionIntent !== intent) return
+            this.requireProfileNotRemoving(existing.id)
+            const current = this.settings.getProfile(existing.id)
+            if (!current || current.hasAccessToken || current.serverIdentity || current.serverUrl.replace(/\/$/, '') !== server.serverUrl) return
+            const active = existing.id === this.activeProfileId
+            // Discovery already authenticated this exact credential. Prepare its
+            // client before persistence and do not yield between committing the
+            // identity and retiring the old generation. An async credential read
+            // here exposed a canonical identity on the old renderer scope.
+            const nextClient = active ? this.clientFactory(server.serverUrl, server.accessToken) : undefined
+            try {
+              this.settings.updateProfile(existing.id, { accessToken: server.accessToken, serverIdentity: server.serverIdentity, serverSetupComplete: true }, process.platform === 'darwin')
+            } catch (error) {
+              try { nextClient?.dispose() } catch { /* prospective cleanup must not mask the storage failure */ }
+              throw error
+            }
+            this.profileHealthAccessTokens.delete(existing.id)
+            if (active) this.activateProfile(existing.id, false, true, nextClient)
+            else {
+              this.invalidateProfileHealthProbe(existing.id)
+              this.emitProfiles()
+            }
+          })
           continue
         }
         const profile = this.settings.addProfile({ ...server, serverSetupComplete: true }, process.platform === 'darwin')

@@ -4,6 +4,7 @@ import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { discoverLocalServers } from './local-server-discovery'
 
+const supportsManagedDiscovery = ['darwin', 'linux'].includes(process.platform)
 const roots: string[] = []
 afterEach(async () => { for (const path of roots.splice(0)) await rm(path, { recursive: true, force: true }) })
 async function install(name = 'test') {
@@ -15,7 +16,7 @@ async function install(name = 'test') {
   await writeFile(join(state, 'server-identity'), 'synthetic-server-identity', { mode: 0o600 })
   return { home, config, state }
 }
-it('authenticates only managed loopback ports and verifies durable identity', async () => {
+it.skipIf(!supportsManagedDiscovery)('authenticates only managed loopback ports and verifies durable identity', async () => {
   const { home } = await install()
   const probe = vi.fn().mockResolvedValue({ ok: true, server_identity: 'synthetic-server-identity' })
   expect(await discoverLocalServers(home, probe, async () => true)).toEqual([{ name: 'test · 7859', serverUrl: 'http://127.0.0.1:7859', accessToken: 'synthetic-local-token', serverIdentity: 'synthetic-server-identity' }])
@@ -25,11 +26,13 @@ it('authenticates only managed loopback ports and verifies durable identity', as
   expect(probe).not.toHaveBeenCalled()
   probe.mockResolvedValue({ ok: true, server_identity: 'another-server-identity' })
   expect(await discoverLocalServers(home, probe, async () => true)).toEqual([])
+  expect(probe).toHaveBeenCalledExactlyOnceWith('http://127.0.0.1:7859', 'synthetic-local-token')
 })
-it('rejects nonprivate credentials, links, shell expressions and stopped services', async () => {
+it.skipIf(!supportsManagedDiscovery)('rejects nonprivate credentials, links, shell expressions and stopped services', async () => {
   const { home, config } = await install()
   const probe = vi.fn().mockRejectedValue(new Error('offline'))
   expect(await discoverLocalServers(home, probe, async () => true)).toEqual([])
+  expect(probe).toHaveBeenCalledExactlyOnceWith('http://127.0.0.1:7859', 'synthetic-local-token')
   probe.mockClear()
   await chmod(join(config, 'env'), 0o644)
   expect(await discoverLocalServers(home, probe, async () => true)).toEqual([]); expect(probe).not.toHaveBeenCalled()
@@ -37,4 +40,13 @@ it('rejects nonprivate credentials, links, shell expressions and stopped service
   expect(await discoverLocalServers(home, probe, async () => true)).toEqual([]); expect(probe).not.toHaveBeenCalled()
   await rm(join(config, 'env')); await writeFile(join(config, 'env'), 'AGENTSDOCK_AGENT_PORT=$(id)\nAGENTSDOCK_AGENT_TOKEN=synthetic-local-token', { mode: 0o600 })
   expect(await discoverLocalServers(home, probe, async () => true)).toEqual([]); expect(probe).not.toHaveBeenCalled()
+})
+it.skipIf(process.platform !== 'win32')('keeps managed local discovery unsupported on Windows without inspecting or probing', async () => {
+  const home = await mkdtemp(join(tmpdir(), 'local-discovery-unsupported-')); roots.push(home)
+  const probe = vi.fn().mockResolvedValue({ ok: true, server_identity: 'synthetic-server-identity' })
+  const listenerOwned = vi.fn().mockResolvedValue(true)
+  // The missing child proves the unsupported-platform return precedes even realpath.
+  expect(await discoverLocalServers(join(home, 'not-created'), probe, listenerOwned)).toEqual([])
+  expect(listenerOwned).not.toHaveBeenCalled()
+  expect(probe).not.toHaveBeenCalled()
 })
