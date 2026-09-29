@@ -22,13 +22,29 @@ on:
         description: Exact signed npm candidate source SHA; required for npm-only validation and distinct from the harness commit
         type: string
         default: ''
+      candidate_replay:
+        description: Rehearse pinned macOS beta and signed legacy server on disposable hosts; not production acceptance
+        type: boolean
+        default: false
+      candidate_tag:
+        description: Exact unpublished candidate-replay-vX.Y.Z-beta.N tag
+        type: string
+        default: ''
+      candidate_receipt_sha256:
+        description: Independently reviewed candidate.json SHA-256
+        type: string
+        default: ''
+      candidate_bundle_sha256:
+        description: Independently reviewed candidate-bundle.zip SHA-256
+        type: string
+        default: ''
 
 permissions:
   contents: read
 
 concurrency:
-  group: verify-source-${{ github.ref }}${{ github.event_name == 'workflow_dispatch' && inputs.npm_native_validation && '-npm-native' || '' }}
-  cancel-in-progress: ${{ !(github.event_name == 'workflow_dispatch' && inputs.npm_native_validation) }}
+  group: verify-source-${{ github.ref }}${{ github.event_name == 'workflow_dispatch' && inputs.npm_native_validation && '-npm-native' || '' }}${{ github.event_name == 'workflow_dispatch' && inputs.candidate_replay && '-candidate' || '' }}
+  cancel-in-progress: ${{ !(github.event_name == 'workflow_dispatch' && (inputs.npm_native_validation || inputs.candidate_replay)) }}
 
 jobs:
 
@@ -38,22 +54,36 @@ jobs:
     env:
       PYTHONDONTWRITEBYTECODE: '1'
     steps:
-      - name: Validate manual npm-native inputs before any installation
+      - name: Validate mutually exclusive native inputs before any installation
         if: github.event_name == 'workflow_dispatch'
         env:
           NPM_NATIVE_VALIDATION: ${{ inputs.npm_native_validation }}
-          CANDIDATE_REPLAY: 'false'
+          CANDIDATE_REPLAY: ${{ inputs.candidate_replay }}
           NPM_CANDIDATE_TAG: ${{ inputs.npm_candidate_tag }}
           NPM_MANIFEST_SHA256: ${{ inputs.npm_manifest_sha256 }}
           NPM_SOURCE_SHA: ${{ inputs.npm_source_sha }}
-          CANDIDATE_TAG: ''
-          CANDIDATE_RECEIPT_SHA256: ''
-          CANDIDATE_BUNDLE_SHA256: ''
+          CANDIDATE_TAG: ${{ inputs.candidate_tag }}
+          CANDIDATE_RECEIPT_SHA256: ${{ inputs.candidate_receipt_sha256 }}
+          CANDIDATE_BUNDLE_SHA256: ${{ inputs.candidate_bundle_sha256 }}
         shell: bash
         run: |
           [[ "$NPM_NATIVE_VALIDATION" == true || "$NPM_NATIVE_VALIDATION" == false ]] || exit 1
           [[ "$CANDIDATE_REPLAY" == true || "$CANDIDATE_REPLAY" == false ]] || exit 1
-          test "$CANDIDATE_REPLAY" = false
+          if [[ "$CANDIDATE_REPLAY" == true ]]; then
+            test "$NPM_NATIVE_VALIDATION" = false
+            test -z "$NPM_CANDIDATE_TAG"
+            test -z "$NPM_MANIFEST_SHA256"
+            test -z "$NPM_SOURCE_SHA"
+            test "$GITHUB_EVENT_NAME" = workflow_dispatch
+            test "$GITHUB_REPOSITORY" = ZhengyiLuo/AgentsDock
+            [[ "$GITHUB_REF" =~ ^refs/heads/release/[A-Za-z0-9][A-Za-z0-9._/-]*$ ]] || exit 1
+            git check-ref-format "$GITHUB_REF"
+            test "$GITHUB_WORKFLOW_REF" = "$GITHUB_REPOSITORY/.github/workflows/ci.yml@$GITHUB_REF"
+            [[ "$GITHUB_SHA" =~ ^[0-9a-f]{40}$ ]] || exit 1
+            [[ "$CANDIDATE_TAG" =~ ^candidate-replay-v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)-beta\.[1-9][0-9]*$ ]] || exit 1
+            [[ "$CANDIDATE_RECEIPT_SHA256" =~ ^[0-9a-f]{64}$ && "$CANDIDATE_BUNDLE_SHA256" =~ ^[0-9a-f]{64}$ ]] || exit 1
+            exit 0
+          fi
           test -z "$CANDIDATE_TAG"
           test -z "$CANDIDATE_RECEIPT_SHA256"
           test -z "$CANDIDATE_BUNDLE_SHA256"
@@ -111,6 +141,9 @@ jobs:
           cache: pnpm
           cache-dependency-path: electron/pnpm-lock.yaml
       - run: pnpm install --frozen-lockfile
+        working-directory: electron
+      - name: Materialize Electron runtime before parallel test imports
+        run: node node_modules/electron/install.js
         working-directory: electron
       - run: pnpm typecheck
         working-directory: electron
@@ -171,7 +204,7 @@ jobs:
 
   npm-native:
     # Scoped npm validation is not desktop/mobile or legacy product acceptance.
-    if: github.event_name == 'workflow_dispatch' && inputs.npm_native_validation && github.repository == 'ZhengyiLuo/AgentsDock' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/release/'))
+    if: github.event_name == 'workflow_dispatch' && inputs.npm_native_validation && !inputs.candidate_replay && github.repository == 'ZhengyiLuo/AgentsDock' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/release/'))
     needs: [release-tooling]
     strategy:
       fail-fast: false
@@ -254,3 +287,323 @@ jobs:
           retention-days: 14
 
 # Npm native validation installs only on disposable hosted runners.
+
+  candidate-native:
+    # This existing registered workflow may be explicitly dispatched on a reviewed
+    # release branch before the separate production acceptance workflow is merged.
+    # Its observations are deliberately ineligible for production publication.
+    if: github.event_name == 'workflow_dispatch' && inputs.candidate_replay && !inputs.npm_native_validation && github.repository == 'ZhengyiLuo/AgentsDock' && startsWith(github.ref, 'refs/heads/release/')
+    needs: [release-tooling, electron, mobile-source]
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - kind: fresh
+            legacy_mode: '0755'
+          - kind: legacy
+            legacy_mode: '0755'
+          - kind: legacy
+            legacy_mode: '0750'
+          - kind: recovery
+            legacy_mode: '0755'
+          - kind: recovery
+            legacy_mode: '0750'
+    runs-on: macos-15
+    timeout-minutes: 75
+    permissions:
+      contents: write # GitHub requires push access to read an unpublished draft.
+      actions: read
+    defaults:
+      run:
+        shell: bash
+    env:
+      RECEIPT_SHA256: ${{ inputs.candidate_receipt_sha256 }}
+      LEGACY_MODE: ${{ matrix.legacy_mode }}
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+        with:
+          persist-credentials: false
+          fetch-depth: 0 # Prove any test-harness retry descends from the immutable packaged source.
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        with:
+          node-version: 24
+          package-manager-cache: false
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: false
+      - name: Prepare disposable native prerequisites
+        run: |
+          uv python install 3.13
+          command -v tmux || brew install tmux
+          /bin/launchctl print "gui/$(id -u)" > /dev/null
+      - uses: ./.github/actions/product-candidate-inputs
+        id: candidate
+        with:
+          candidate_tag: ${{ inputs.candidate_tag }}
+          receipt_sha256: ${{ inputs.candidate_receipt_sha256 }}
+          bundle_sha256: ${{ inputs.candidate_bundle_sha256 }}
+          github_token: ${{ github.token }}
+      - uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v6
+        if: matrix.kind == 'legacy'
+        with:
+          version: 11.9.0
+          run_install: false
+      - name: Verify signed universal app, DMG, notarization, updater metadata and native launch
+        if: matrix.kind == 'legacy'
+        env:
+          PRODUCT_VERSION: ${{ steps.candidate.outputs.version }}
+        run: |
+          pnpm --dir electron install --frozen-lockfile --ignore-scripts
+          export AGENTSDOCK_EXPECTED_BUILD_NUMBER="$(node -p 'JSON.parse(require("fs").readFileSync(process.argv[1])).buildNumber' "$RUNNER_TEMP/candidate-inputs/candidate.json")"
+          export AGENTSDOCK_COORDINATED_MANIFEST="$RUNNER_TEMP/candidate-inputs/payload/server/npm/agents-server-npm-manifest.json"
+          export AGENTSDOCK_COORDINATED_SIGNATURE="$RUNNER_TEMP/candidate-inputs/payload/server/npm/agents-server-npm-manifest.sig"
+          scripts/verify_electron_release.sh "$RUNNER_TEMP/candidate-inputs/payload/desktop" "$PRODUCT_VERSION" beta
+      - name: Install the exact npm candidate or signed legacy baseline
+        env:
+          CANDIDATE_KIND: ${{ matrix.kind }}
+        run: |
+          umask 022
+          extra=()
+          INSTALL_KIND="$CANDIDATE_KIND"
+          if [[ "$CANDIDATE_KIND" == recovery ]]; then INSTALL_KIND=legacy; fi
+          if [[ "$INSTALL_KIND" == legacy ]]; then
+            extra=(--baseline-archive "$RUNNER_TEMP/candidate-inputs/baseline-server/agents-server-1.0.7-beta.21.tar.gz"
+              --baseline-manifest "$RUNNER_TEMP/candidate-inputs/baseline-server/agents-server-manifest.json"
+              --baseline-signature "$RUNNER_TEMP/candidate-inputs/baseline-server/agents-server-manifest.sig" --legacy-root-mode "$LEGACY_MODE")
+          fi
+          python3 scripts/product_server_acceptance.py bootstrap --candidate --kind "$INSTALL_KIND" \
+            --receipt "$RUNNER_TEMP/candidate-inputs/candidate.json" --receipt-sha256 "$RECEIPT_SHA256" \
+            --bundle "$RUNNER_TEMP/candidate-inputs/payload/server" --work "$RUNNER_TEMP/agentsdock-acceptance-candidate" \
+            --fixture "$RUNNER_TEMP/agentsdock-acceptance-candidate/server.json" \
+            --evidence "$RUNNER_TEMP/agentsdock-acceptance-candidate/bootstrap.json" "${extra[@]}"
+      - name: Configure exact-origin replay only after all signatures and provenance pass
+        if: matrix.kind != 'fresh'
+        env:
+          CANDIDATE_KIND: ${{ matrix.kind }}
+        run: |
+          python3 scripts/product_acceptance_network.py setup --candidate \
+            --receipt "$RUNNER_TEMP/candidate-inputs/candidate.json" --receipt-sha256 "$RECEIPT_SHA256" \
+            --work "$RUNNER_TEMP/agentsdock-acceptance-network"
+          set -a
+          source "$RUNNER_TEMP/agentsdock-acceptance-network/trust.env"
+          set +a
+          /bin/launchctl setenv SSL_CERT_FILE "$SSL_CERT_FILE"
+          /bin/launchctl setenv NODE_EXTRA_CA_CERTS "$NODE_EXTRA_CA_CERTS"
+          # The signed legacy server strips CA hints when starting a new tmux
+          # daemon. Keep this disposable runner's default daemon alive BEFORE
+          # injecting replay trust. This owned sleeper is only TLS plumbing;
+          # it is never evidence of a running provider job or busy-update drain.
+          REPLAY_TMUX_SESSION="agentsdock-replay-trust-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
+          env -i HOME="$HOME" USER="$USER" LOGNAME="$LOGNAME" PATH="$PATH" TMPDIR="$TMPDIR" SHELL=/bin/bash \
+            tmux new-session -d -s "$REPLAY_TMUX_SESSION" -P -F '#{session_id}' 'exec /bin/sleep 5400' \
+            > "$RUNNER_TEMP/agentsdock-acceptance-network/tmux-session-id"
+          tmux set-environment -g SSL_CERT_FILE "$SSL_CERT_FILE"
+          tmux set-environment -g NODE_EXTRA_CA_CERTS "$NODE_EXTRA_CA_CERTS"
+          [[ "$(tmux show-environment -g SSL_CERT_FILE)" == "SSL_CERT_FILE=$SSL_CERT_FILE" ]]
+          [[ "$(tmux show-environment -g NODE_EXTRA_CA_CERTS)" == "NODE_EXTRA_CA_CERTS=$NODE_EXTRA_CA_CERTS" ]]
+          python3 scripts/product_server_acceptance.py service --candidate --action restart \
+            --receipt "$RUNNER_TEMP/candidate-inputs/candidate.json" --receipt-sha256 "$RECEIPT_SHA256" \
+            --bundle "$RUNNER_TEMP/candidate-inputs/payload/server" --work "$RUNNER_TEMP/agentsdock-acceptance-candidate" \
+            --fixture "$RUNNER_TEMP/agentsdock-acceptance-candidate/server.json" \
+            --evidence "$RUNNER_TEMP/agentsdock-acceptance-candidate/restarted.json"
+          fault_args=()
+          if [[ "$CANDIDATE_KIND" == recovery ]]; then
+            fault_args=(--fault-control "$RUNNER_TEMP/agentsdock-acceptance-candidate/fault.json"
+              --fault-observed "$RUNNER_TEMP/agentsdock-acceptance-candidate/fault-observed.json")
+          fi
+          sudo env GITHUB_ACTIONS="$GITHUB_ACTIONS" RUNNER_ENVIRONMENT="$RUNNER_ENVIRONMENT" RUNNER_OS="$RUNNER_OS" \
+            GITHUB_REPOSITORY="$GITHUB_REPOSITORY" GITHUB_WORKFLOW_REF="$GITHUB_WORKFLOW_REF" \
+            GITHUB_EVENT_NAME="$GITHUB_EVENT_NAME" GITHUB_RUN_ID="$GITHUB_RUN_ID" GITHUB_RUN_ATTEMPT="$GITHUB_RUN_ATTEMPT" \
+            GITHUB_SHA="$GITHUB_SHA" RUNNER_TEMP="$RUNNER_TEMP" \
+            "$(command -v node)" scripts/product-release-replay.mjs serve --scope candidate \
+            --receipt "$RUNNER_TEMP/candidate-inputs/candidate.json" --receipt-sha256 "$RECEIPT_SHA256" \
+            --server-assets "$RUNNER_TEMP/candidate-inputs/payload/server" --desktop-assets "$RUNNER_TEMP/candidate-inputs/payload/desktop" \
+            --baseline-desktop "$RUNNER_TEMP/candidate-inputs/baseline-desktop" --baseline-version 1.0.6 \
+            --certificate "$RUNNER_TEMP/agentsdock-acceptance-network/leaf.pem" \
+            --private-key "$RUNNER_TEMP/agentsdock-acceptance-network/leaf.key" \
+            --pid-file "$RUNNER_TEMP/agentsdock-acceptance-network/replay.pid" "${fault_args[@]}" \
+            > "$RUNNER_TEMP/agentsdock-acceptance-network/replay.log" 2>&1 &
+          REPLAY_LAUNCHER_PID=$!
+          for attempt in {1..20}; do
+            if node --input-type=module - "$RUNNER_TEMP/agentsdock-acceptance-network/replay.log" \
+              "$RUNNER_TEMP/agentsdock-acceptance-network/replay.pid" \
+              "$RUNNER_TEMP/agentsdock-acceptance-network/ca.pem" \
+              "$RUNNER_TEMP/agentsdock-acceptance-network/leaf.pem" \
+              "$RUNNER_TEMP/agentsdock-acceptance-network/origin-probe.json" <<'NODE'
+          import { writeFile } from 'node:fs/promises'
+          import { assertReplayReadiness, probeReplayOrigin } from './scripts/product-release-replay.mjs'
+          try {
+            const nodeProbe = await probeReplayOrigin({caPath: process.argv[4], expectedLeafPath: process.argv[5]})
+            await writeFile(process.argv[6], JSON.stringify(nodeProbe), {mode: 0o600})
+            await assertReplayReadiness({logPath: process.argv[2], pidPath: process.argv[3], nodeProbe})
+          }
+          catch { process.exitCode = 1 }
+          NODE
+            then exit 0; fi
+            sleep 1
+          done
+          # Curl is an independent diagnostic, not a substitute for the verified
+          # Node HTTPS probe or the real Electron updater's unchanged TLS checks.
+          READINESS_CURL_STATUS=0
+          if curl --fail --silent --max-time 5 --cacert "$RUNNER_TEMP/agentsdock-acceptance-network/ca.pem" \
+            --dump-header "$RUNNER_TEMP/agentsdock-acceptance-network/readiness.headers" --output /dev/null \
+            --write-out '%{remote_ip}|%{ssl_verify_result}|%{http_code}\n' \
+            https://github.com/ZhengyiLuo/AgentsDock/releases.atom \
+            > "$RUNNER_TEMP/agentsdock-acceptance-network/readiness.metadata"; then
+            READINESS_CURL_STATUS=0
+          else READINESS_CURL_STATUS=$?; fi
+          curl --version
+          openssl version
+          REPLAY_LAUNCHER_PRESENT=false
+          if /bin/ps -p "$REPLAY_LAUNCHER_PID" -o pid= > /dev/null; then REPLAY_LAUNCHER_PRESENT=true; fi
+          node --input-type=module - "$RUNNER_TEMP/agentsdock-acceptance-network/replay.log" \
+            "$READINESS_CURL_STATUS" "$REPLAY_LAUNCHER_PRESENT" \
+            "$RUNNER_TEMP/agentsdock-acceptance-network/readiness.metadata" \
+            "$RUNNER_TEMP/agentsdock-acceptance-network/readiness.headers" \
+            "$RUNNER_TEMP/agentsdock-acceptance-network/origin-probe.json" <<'NODE'
+          import { constants, openSync, fstatSync, readSync, closeSync } from 'node:fs'
+          import { parseReplayStartupDiagnostics, parseReplayProbeDiagnostics, parseReplayOriginProbe } from './scripts/product-release-replay.mjs'
+          const status = Number(process.argv[3])
+          const summary = { kind: 'replay-readiness', curlExitCode: Number.isInteger(status) && status >= 0 && status <= 255 ? status : null,
+            launcherPresent: process.argv[4] === 'true' }
+          function bounded(path) {
+            const fd = openSync(path, constants.O_RDONLY | constants.O_NOFOLLOW)
+            try {
+              const stat = fstatSync(fd)
+              if (!stat.isFile() || stat.size > 32768) throw new Error('Unbounded diagnostic input')
+              const buffer = Buffer.alloc(32769)
+              const count = readSync(fd, buffer, 0, buffer.length, 0)
+              return buffer.subarray(0, count)
+            } finally { closeSync(fd) }
+          }
+          try { summary.startup = parseReplayStartupDiagnostics(bounded(process.argv[2])) }
+          catch { summary.diagnosticsUnavailable = true }
+          try { summary.probe = parseReplayProbeDiagnostics(bounded(process.argv[5]), bounded(process.argv[6])) }
+          catch { summary.probeDiagnosticsUnavailable = true }
+          try { summary.nodeProbe = parseReplayOriginProbe(bounded(process.argv[7])) }
+          catch { summary.nodeProbeDiagnosticsUnavailable = true }
+          console.log(JSON.stringify(summary))
+          NODE
+          echo 'Candidate replay did not become ready.' >&2
+          exit 1
+      - name: Real update click, native replacement, and saved-server reconciliation
+        if: matrix.kind == 'legacy'
+        run: |
+          set -a
+          source "$RUNNER_TEMP/agentsdock-acceptance-network/trust.env"
+          set +a
+          node scripts/product_desktop_acceptance.mjs --scope candidate \
+            --receipt "$RUNNER_TEMP/candidate-inputs/candidate.json" --receipt-sha256 "$RECEIPT_SHA256" \
+            --server-directory "$RUNNER_TEMP/candidate-inputs/payload/server" --desktop-directory "$RUNNER_TEMP/candidate-inputs/payload/desktop" \
+            --baseline-directory "$RUNNER_TEMP/candidate-inputs/baseline-desktop" --baseline-version 1.0.6 \
+            --server-fixture "$RUNNER_TEMP/agentsdock-acceptance-candidate/server.json" \
+            --output "$RUNNER_TEMP/agentsdock-acceptance-candidate/desktop"
+      - name: Interrupt the exact signed legacy transfer, preserve incumbent state, and retry
+        if: matrix.kind == 'recovery'
+        run: |
+          set -a
+          source "$RUNNER_TEMP/agentsdock-acceptance-network/trust.env"
+          set +a
+          python3 scripts/product_server_acceptance.py failure-retry --candidate --kind legacy \
+            --receipt "$RUNNER_TEMP/candidate-inputs/candidate.json" --receipt-sha256 "$RECEIPT_SHA256" \
+            --bundle "$RUNNER_TEMP/candidate-inputs/payload/server" --work "$RUNNER_TEMP/agentsdock-acceptance-candidate" \
+            --fixture "$RUNNER_TEMP/agentsdock-acceptance-candidate/server.json" \
+            --evidence "$RUNNER_TEMP/agentsdock-acceptance-candidate/recovery.json" \
+            --fault-control "$RUNNER_TEMP/agentsdock-acceptance-candidate/fault.json" \
+            --fault-observed "$RUNNER_TEMP/agentsdock-acceptance-candidate/fault-observed.json"
+      - name: Inspect failed owned recovery service without exposing private logs
+        if: failure() && matrix.kind == 'recovery'
+        timeout-minutes: 3
+        run: |
+          if [[ -f "$RUNNER_TEMP/agentsdock-acceptance-candidate/server.json" ]]; then
+            if ! python3 scripts/product_server_acceptance.py diagnose --candidate --kind legacy \
+              --receipt "$RUNNER_TEMP/candidate-inputs/candidate.json" --receipt-sha256 "$RECEIPT_SHA256" \
+              --bundle "$RUNNER_TEMP/candidate-inputs/payload/server" --work "$RUNNER_TEMP/agentsdock-acceptance-candidate" \
+              --fixture "$RUNNER_TEMP/agentsdock-acceptance-candidate/server.json" \
+              --evidence "$RUNNER_TEMP/agentsdock-acceptance-candidate/recovery-diagnostics.json" \
+              > "$RUNNER_TEMP/agentsdock-acceptance-candidate/diagnostics-private.log" 2>&1; then
+              echo 'Bounded recovery diagnostics unavailable.'
+            fi
+          fi
+      - name: Restore disposable routing and trust before artifact upload
+        if: always() && matrix.kind != 'fresh'
+        run: |
+          /bin/launchctl unsetenv SSL_CERT_FILE
+          /bin/launchctl unsetenv NODE_EXTRA_CA_CERTS
+          if tmux show-environment -g > /dev/null 2>&1; then
+            tmux set-environment -gu SSL_CERT_FILE
+            tmux set-environment -gu NODE_EXTRA_CA_CERTS
+          fi
+          REPLAY_TMUX_CLEANUP_OK=true
+          if [[ -s "$RUNNER_TEMP/agentsdock-acceptance-network/tmux-session-id" ]]; then
+            # Check both native session ID and exact run-owned name. Never kill
+            # the default daemon, another session, or the chat's live terminal.
+            (
+              REPLAY_TMUX_ID="$(cat "$RUNNER_TEMP/agentsdock-acceptance-network/tmux-session-id")"
+              [[ "$REPLAY_TMUX_ID" =~ ^\$[0-9]+$ ]] || exit 1
+              if tmux has-session -t "$REPLAY_TMUX_ID" 2>/dev/null; then
+                [[ "$(tmux display-message -p -t "$REPLAY_TMUX_ID" '#{session_name}')" == "agentsdock-replay-trust-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT" ]] || exit 1
+                tmux kill-session -t "$REPLAY_TMUX_ID" || exit 1
+              fi
+            ) || REPLAY_TMUX_CLEANUP_OK=false
+          fi
+          if [[ -f "$RUNNER_TEMP/agentsdock-acceptance-network/replay.pid" ]]; then
+            REPLAY_PID="$(cat "$RUNNER_TEMP/agentsdock-acceptance-network/replay.pid")"
+            [[ "$REPLAY_PID" =~ ^[1-9][0-9]*$ ]]
+            if ps -p "$REPLAY_PID" -o command= | grep -F 'scripts/product-release-replay.mjs serve' | grep -F "$RUNNER_TEMP/agentsdock-acceptance-network/leaf.key" > /dev/null; then
+              kill -TERM "$REPLAY_PID"
+            fi
+          fi
+          if [[ -f "$RUNNER_TEMP/agentsdock-acceptance-network/owner.json" ]]; then
+            python3 scripts/product_acceptance_network.py teardown --candidate --work "$RUNNER_TEMP/agentsdock-acceptance-network"
+          fi
+          [[ "$REPLAY_TMUX_CLEANUP_OK" == true ]]
+      - name: Collect bounded public observations, never credentials or private fixture logs
+        if: always()
+        run: |
+          node --input-type=module - "$RUNNER_TEMP/agentsdock-acceptance-candidate" "$RUNNER_TEMP/candidate-public-evidence" <<'NODE'
+          import { constants, openSync, fstatSync, readSync, closeSync, mkdirSync, writeFileSync } from 'node:fs'
+          import { join } from 'node:path'
+          const [source, destination] = process.argv.slice(2)
+          mkdirSync(destination, { mode: 0o700 })
+          const pairs = [['bootstrap.json', 'server.json'], ['recovery.json', 'recovery.json'],
+            ['recovery-diagnostics.json', 'recovery-diagnostics.json'], ['desktop/desktop-evidence.json', 'desktop.json'],
+            ['desktop/server-preservation.json', 'server-preservation.json'], ['desktop/failure-observations.json', 'failure.json'],
+            ['desktop/server-diagnostics.json', 'server-diagnostics.json']]
+          let copied = 0
+          try {
+            for (const [input, output] of pairs) {
+              let fd
+              try { fd = openSync(join(source, input), constants.O_RDONLY | constants.O_NOFOLLOW) }
+              catch (error) { if (error.code === 'ENOENT') continue; throw error }
+              let bytes
+              try {
+                const stat = fstatSync(fd)
+                if (!stat.isFile() || stat.uid !== process.getuid() || stat.size > 512 * 1024) throw new Error('Invalid public evidence file')
+                const buffer = Buffer.alloc(512 * 1024 + 1)
+                const count = readSync(fd, buffer, 0, buffer.length, 0)
+                if (count > 512 * 1024 || count !== stat.size) throw new Error('Unbounded public evidence')
+                bytes = buffer.subarray(0, count)
+                const report = JSON.parse(bytes)
+                if (/"(?:token|password|authorization|privateKey|cookie)"\s*:/i.test(bytes.toString('utf8'))) throw new Error('Private fields in public evidence')
+                if ((input === 'recovery.json' || input === 'recovery-diagnostics.json')
+                  && (report.kind !== 'candidate-server-observations' || report.publicationEligible !== false || report.releaseAcceptance !== false)) {
+                  throw new Error('Recovery rehearsal cannot emit production acceptance')
+                }
+              } finally { closeSync(fd) }
+              writeFileSync(join(destination, output), bytes, { flag: 'wx', mode: 0o600 })
+              copied++
+            }
+            console.log(JSON.stringify({ publicEvidenceFiles: copied }))
+          } catch { console.error('Candidate evidence collection failed safely.'); process.exitCode = 1 }
+          NODE
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        if: always()
+        with:
+          name: candidate-replay-${{ github.run_id }}-${{ github.run_attempt }}-${{ matrix.kind }}-${{ matrix.legacy_mode }}
+          path: ${{ runner.temp }}/candidate-public-evidence/*.json
+          if-no-files-found: warn
+          retention-days: 14
+
+# The optional rehearsal contains no signing credentials or publishing commands.
+# Only product-release-acceptance.yml can supply production acceptance evidence.

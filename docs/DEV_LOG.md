@@ -1,5 +1,32 @@
 # Public development log
 
+## 2026-09-29 — Add isolated signed-candidate upgrade rehearsal
+
+- Restore exact-artifact macOS rehearsal in the registered source-CI workflow,
+  separate from npm-only validation. Use the published update-enabled desktop
+  `1.0.6` selected onto Beta and the signed legacy server `1.0.7-beta.21`.
+  Exercise fresh npm installation, legacy root modes `0755` and `0750`, and
+  interrupted-download recovery on disposable hosted runners only.
+- Bind candidate inputs to the original successful server-signing run, archive
+  digest, both signed server formats, runtime parity and the exact desktop
+  assets. Candidate receipts remain explicitly non-publishing observations;
+  they cannot be converted into production acceptance receipts.
+- Permit narrowly allowlisted test-harness retries while preserving separate,
+  truthful packaged-source and harness-source identities. Runtime, build and
+  production authorization changes remain outside that allowance.
+- Validate app ZIP paths and symlinks before either native release verification
+  or candidate extraction; the archive guard is immutable with the build pin.
+- Validation: 239 release-tooling/CLI tests, 124 Python harness tests, syntax
+  and workflow checks passed. The preceding update fix passed full source CI
+  and all eight server shards; locally 5,029 desktop tests passed (five skipped).
+  A scoped offscreen UI check reproduced the pending-409 bug before the fix and
+  verified the corrected waiting state, retained reservation and Settings
+  reopening through real HTTP routes. Its controlled server state is not native
+  package installation or genuine stable-server no-downgrade acceptance.
+- Availability: preparation and test infrastructure only. Signed candidate
+  builds and native execution remain pending; no `1.0.8-beta.1` release is
+  published. Stable npm `1.0.8` and its `latest` tag remain unchanged.
+
 ## 2026-09-29 — Correct beta update waiting and native build reservations
 
 - Recognize the server's structured `code: server_update_pending` HTTP 409

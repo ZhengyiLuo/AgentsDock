@@ -124,8 +124,11 @@ def command(args: list[str], *, timeout: int = 60, env: dict | None = None,
     # Installer output and launchctl output can include tokens. Never echo them,
     # including on failure. Public evidence contains only measured properties.
     result = bounded_run(args, timeout=timeout, env=env)
+    label = Path(args[0]).name
+    if label == "launchctl" and len(args) > 1 and args[1] in {"print", "bootout", "bootstrap"}:
+        label += " " + args[1]
     need(result.returncode in allowed,
-         f"Native command failed ({Path(args[0]).name}, exit {result.returncode}); private output was withheld.")
+         f"Native command failed ({label}, exit {result.returncode}); private output was withheld.")
     return result
 
 
@@ -178,7 +181,8 @@ def guard(receipt: dict, work: Path, *, environment: dict | None = None,
     need(env.get("GITHUB_ACTIONS") == "true" and env.get("RUNNER_ENVIRONMENT") == "github-hosted"
          and env.get("GITHUB_REPOSITORY") == "ZhengyiLuo/AgentsDock"
          and env.get("GITHUB_EVENT_NAME") in {"workflow_dispatch", "workflow_call"}
-         and env.get("GITHUB_SHA") == receipt.get("sourceSha")
+         and (re.fullmatch(r"[a-f0-9]{40}", str(env.get("GITHUB_SHA", ""))) is not None if candidate
+              else env.get("GITHUB_SHA") == receipt.get("sourceSha"))
          and re.fullmatch(r"[1-9]\d*", env.get("GITHUB_RUN_ID", "")) is not None
          and re.fullmatch(r"[1-9]\d*", env.get("GITHUB_RUN_ATTEMPT", "")) is not None,
          "Native acceptance is restricted to the exact-source canonical workflow on a disposable hosted runner.")
@@ -224,8 +228,7 @@ def ensure_empty(home: Path) -> None:
     if platform.system() == "Darwin":
         command(["/bin/launchctl", "print", f"gui/{os.getuid()}"])
         for label in ("com.agentsdock.server", "com.agentsdock.gateway"):
-            result = command(["/bin/launchctl", "print", f"gui/{os.getuid()}/{label}"], allowed=(0, 113))
-            need(result.returncode != 0 and b"Could not find service" in result.stderr,
+            need(launchd_query_state(f"gui/{os.getuid()}/{label}") == "absent",
                  "An existing or unverifiable native service prevents fresh acceptance.")
     else:
         command(["systemctl", "--user", "show-environment"])
@@ -290,11 +293,14 @@ def registered_services(fixture: dict) -> list[Path]:
     files = [item for item in service_files(home) if item.exists()]
     need(files and files[0] == service_files(home)[0], "Installed worker service is missing.")
     for item in files:
+        info = item.lstat()
+        need(info.st_uid == os.getuid() and not info.st_mode & 0o022,
+             "Native service registration is not safely owned by the disposable account.")
         raw = read_regular(item)
         if platform.system() == "Darwin":
             value = plistlib.loads(raw)
             args = value.get("ProgramArguments")
-            need(isinstance(args, list) and args and str(args[0]).startswith(str(root) + "/"),
+            need(value.get("Label") == item.stem and isinstance(args, list) and args and str(args[0]).startswith(str(root) + "/"),
                  "Installed service does not run from its permanent owned runtime.")
         else:
             entries = [line[10:] for line in raw.decode().splitlines() if line.startswith("ExecStart=")]
@@ -314,18 +320,87 @@ def registered_services(fixture: dict) -> list[Path]:
     return files
 
 
+def launchd_registration(item: Path, expected_sha: str) -> None:
+    info = item.lstat()
+    need(info.st_uid == os.getuid() and not info.st_mode & 0o022 and sha(read_regular(item)) == expected_sha,
+         "Owned launchd registration changed during the native service operation.")
+
+
+def launchd_query_state(target: str, *, timeout: float = 10) -> str:
+    need(target in {f"gui/{os.getuid()}/com.agentsdock.server", f"gui/{os.getuid()}/com.agentsdock.gateway"},
+         "Launchd observation must target an exact disposable AgentsDock service.")
+    result = command(["/bin/launchctl", "print", target],
+                     timeout=timeout, allowed=(0, 3, 5, 113))
+    if result.returncode == 0:
+        return "loaded"
+    output = result.stdout + result.stderr
+    need(any(label in output.lower() for label in (b"could not find service", b"service not found", b"no such process")),
+         f"Native command failed (launchctl print, exit {result.returncode}); service absence was not proven and private output was withheld.")
+    return "absent"
+
+
+def launchd_state(item: Path, expected_sha: str, *, timeout: float = 10) -> str:
+    launchd_registration(item, expected_sha)
+    return launchd_query_state(f"gui/{os.getuid()}/{item.stem}", timeout=timeout)
+
+
+def wait_launchd_absent(item: Path, expected_sha: str, *, timeout: float = 185) -> None:
+    deadline = time.monotonic() + timeout
+    while True:
+        remaining = deadline - time.monotonic()
+        need(remaining > 0, "Native launchctl removal timed out; no bootstrap was attempted.")
+        if launchd_state(item, expected_sha, timeout=min(10, remaining)) == "absent":
+            return
+        time.sleep(min(0.1, remaining))
+
+
+def stop_launchd(item: Path, expected_sha: str) -> None:
+    if launchd_state(item, expected_sha) == "absent":
+        return
+    launchd_registration(item, expected_sha)
+    result = command(["/bin/launchctl", "bootout", f"gui/{os.getuid()}/{item.stem}"],
+                     timeout=240, allowed=(0, 5, 113))
+    if result.returncode != 0:
+        need(launchd_state(item, expected_sha) == "absent",
+             f"Native command failed (launchctl bootout, exit {result.returncode}); owned service remained loaded and private output was withheld.")
+    # bootout only acknowledges teardown; it does not prove removal completed.
+    wait_launchd_absent(item, expected_sha)
+
+
+def start_launchd(item: Path, expected_sha: str) -> None:
+    wait_launchd_absent(item, expected_sha)
+    for attempt in range(3):
+        launchd_registration(item, expected_sha)
+        result = command(["/bin/launchctl", "bootstrap", f"gui/{os.getuid()}", str(item)],
+                         timeout=60, allowed=(0, 5, 37))
+        if result.returncode == 0:
+            need(launchd_state(item, expected_sha) == "loaded",
+                 "Native launchctl bootstrap succeeded but did not register the owned service.")
+            return
+        output = result.stdout + result.stderr
+        transient = (b"Operation already in progress" in output or
+                     (result.returncode == 5 and b"Bootstrap failed: 5: Input/output error" in output))
+        need(transient and attempt < 2,
+             f"Native command failed (launchctl bootstrap, exit {result.returncode}); retry unavailable or exhausted and private output was withheld.")
+        # Retry only the exact registered fixture after proving it absent again.
+        # Never turn a loaded job or an unknown status-5 error into success.
+        wait_launchd_absent(item, expected_sha)
+        time.sleep(0.1)
+
+
 def service(fixture: dict, action: str) -> None:
     files = registered_services(fixture)
+    bindings = {item: sha(read_regular(item)) for item in files}
     # Offline is a public-gateway outage for split services, preserving work.
     selected = files if action == "restart" else files[-1:]
     for item in reversed(selected) if action in {"stop", "restart"} else []:
         if platform.system() == "Darwin":
-            command(["/bin/launchctl", "bootout", f"gui/{os.getuid()}/{item.stem}"], timeout=240)
+            stop_launchd(item, bindings[item])
         else:
             command(["systemctl", "--user", "stop", item.name], timeout=240)
     for item in selected if action in {"start", "restart"} else []:
         if platform.system() == "Darwin":
-            command(["/bin/launchctl", "bootstrap", f"gui/{os.getuid()}", str(item)], timeout=60)
+            start_launchd(item, bindings[item])
         else:
             command(["systemctl", "--user", "start", item.name], timeout=60)
     if action == "stop":
@@ -339,6 +414,254 @@ def service(fixture: dict, action: str) -> None:
                 break
             need(time.monotonic() < deadline, "Owned public service did not stop.")
             time.sleep(0.2)
+
+
+DIAGNOSTIC_PHASES = frozenset({"idle", "available", "current", "pending", "starting", "checking", "downloading",
+    "verifying", "installing", "restarting", "complete", "failed", "prepared", "guarded", "quiescing", "quiesced",
+    "linking", "linked", "stopping", "stopped", "fencing", "fenced", "authorizing", "authority", "candidate-starting",
+    "candidate-healthy", "committing", "committed", "rolling-back", "rolled-back", "rollback-healthy"})
+
+
+def diagnostic_version(value: object, fixture: dict) -> str:
+    return "candidate" if value == fixture["targetVersion"] else "baseline" if value == fixture["baselineVersion"] else "other-or-unknown"
+
+
+def diagnostic_legacy_failure(message: object) -> dict:
+    """Classify legacy str(exc), never publish it or infer a previous phase.
+
+    The 1.0.3 runner stores exceptions only as `message`, not error/error_code.
+    In particular, an empty cryptography InvalidSignature string has no unique
+    identifier here and must remain unclassified rather than becoming proof.
+    """
+    if message is None:
+        return {"messageState": "missing", "categories": [], "knownError": None}
+    if not isinstance(message, str):
+        return {"messageState": "invalid-type", "categories": [], "knownError": None}
+    if len(message) > 8192:
+        return {"messageState": "oversized", "categories": [], "knownError": None}
+    if not message.strip():
+        return {"messageState": "empty", "categories": [], "knownError": None}
+    # These exact fixed errors are from the signed legacy updater's validation
+    # paths. Dynamic values are matched below but never copied into evidence.
+    exact = {
+        "release public key is not an Ed25519 key": ("manifest-verification", "release-key-type"),
+        "release manifest must be a JSON object": ("manifest-verification", "manifest-not-object"),
+        "release manifest contains an invalid version": ("manifest-verification", "manifest-version-invalid"),
+        "release manifest version does not match its immutable release tag": ("manifest-verification", "manifest-tag-mismatch"),
+        "release manifest prerelease metadata is inconsistent": ("manifest-verification", "manifest-prerelease-mismatch"),
+        "release manifest track metadata is inconsistent": ("manifest-verification", "manifest-track-mismatch"),
+        "release manifest is missing archive metadata": ("manifest-verification", "manifest-archive-missing"),
+        "release archive location is not trusted": ("manifest-verification", "archive-location-untrusted"),
+        "release archive checksum is invalid": ("manifest-verification", "archive-checksum-invalid"),
+        "release archive checksum does not match the signed manifest": ("archive-verification", "archive-checksum-mismatch"),
+        "release archive contains an unsafe path": ("archive-extraction", "archive-unsafe-path"),
+        "release archive must not contain links": ("archive-extraction", "archive-links-forbidden"),
+        "release archive has an invalid layout": ("archive-extraction", "archive-layout-invalid"),
+        "GitHub releases response must be a JSON array": ("release-discovery", "release-list-not-array"),
+        "GitHub releases response is invalid JSON": ("release-discovery", "release-list-invalid-json"),
+        "No signed AgentsServer release has been published yet.": ("release-discovery", "release-list-not-found"),
+        "expected release version is invalid": ("release-selection", "requested-version-invalid"),
+        "server update health credential is empty": ("health-authorization", "health-credential-empty"),
+        "managed update is missing the stable server identity": ("identity-admission", "stable-identity-missing"),
+        "managed update is missing a valid update ID": ("identity-admission", "update-identity-invalid"),
+        "AgentsServer stable identity changed before restart": ("identity-admission", "incumbent-identity-mismatch"),
+        "updated AgentsServer stable identity does not match": ("post-install-health", "candidate-identity-mismatch"),
+        "updated AgentsServer secure-peer state is unavailable": ("post-install-health", "candidate-peer-unavailable"),
+        "updated AgentsServer lost or changed its Team Hub identity": ("post-install-health", "candidate-hub-identity-mismatch"),
+        "updated AgentsServer changed its Team Hub transport": ("post-install-health", "candidate-hub-transport-mismatch"),
+        "updated AgentsServer changed its legacy Team Hub transport": ("post-install-health", "candidate-legacy-hub-transport-mismatch"),
+        "updated AgentsServer changed its Team Hub routes": ("post-install-health", "candidate-hub-routes-mismatch"),
+        "updated AgentsServer did not repair its Team Hub host": ("post-install-health", "candidate-hub-repair-failed"),
+    }
+    categories: set[str] = set()
+    known = None
+    if message in exact:
+        category, known = exact[message]
+        categories.add(category)
+    variable = (
+        (r"Signed (?:stable|beta) AgentsServer release [^\r\n ]+ is unavailable\.", "descriptor-fetch", "signed-descriptor-not-found"),
+        (r"No signed (?:stable|beta) AgentsServer release is available\.", "release-discovery", "release-track-empty"),
+        (r"release manifest is not on the requested (?:stable|beta) track", "manifest-verification", "manifest-wrong-track"),
+        (r"expected release [^\r\n ]+ is not on the requested (?:stable|beta) track", "release-selection", "requested-track-mismatch"),
+        (r"requested (?:stable|beta) release [^\r\n ]+ is no longer the latest signed (?:stable|beta) release [^\r\n ]+", "release-selection", "requested-not-latest"),
+        (r"resolved signed release is [^\r\n ]+, not [^\r\n ]+", "release-selection", "resolved-version-mismatch"),
+        (r"resolved release [^\r\n ]+ is not newer than installed version [^\r\n;]+; managed updates only permit forward updates or an explicit beta-to-stable channel switch", "release-selection", "forward-update-required"),
+        (r"download exceeds the [0-9]+-byte safety limit", "download", "download-size-limit"),
+        (r"AgentsServer startup readiness timed out after [0-9.]+ seconds", "health-readiness", "startup-readiness-timeout"),
+    )
+    for pattern, category, identifier in variable:
+        if re.fullmatch(pattern, message):
+            categories.add(category)
+            known = identifier
+            break
+    lowered = message.lower()
+    signatures = {
+        "tls-verification": ("certificate_verify_failed", "certificate verify failed", "unable to get local issuer"),
+        "network-refused": ("connection refused",), "network-timeout": ("timed out", "timeout"),
+        "dns-resolution": ("name or service not known", "nodename nor servname provided", "temporary failure in name resolution"),
+        "download-truncated": ("incompleteread", "unexpected end of data", "unexpected end of file", "compressed file ended before"),
+        "signature-verification": ("invalidsignature", "invalid signature", "signature verification failed"),
+        "archive-extraction": ("not a gzip file", "invalid header",),
+        "dependency-prerequisite": ("missing required prerequisites", "trusted uv executable", "no solution found", "failed to download"),
+        "missing-python-module": ("modulenotfounderror",), "permission-denied": ("permission denied",),
+        "missing-file-or-executable": ("no such file or directory", "no module named"),
+        "health-readiness": ("could not verify that agentsserver is idle before restart:", "server became busy before restart:", "server health response"),
+        "hub-continuity": ("managed team hub", "expected team hub", "repaired team hub",),
+    }
+    categories.update(category for category, needles in signatures.items() if any(needle in lowered for needle in needles))
+    result = {"messageState": "present", "categories": [], "knownError": known}
+    http = re.search(r"\bHTTP Error ([1-5][0-9]{2}):", message)
+    if http:
+        result["httpStatus"] = int(http[1])
+        categories.add("http-response")
+    installer = re.match(r"installer failed \((-?[0-9]{1,5})\):", message)
+    if installer and -32768 <= int(installer[1]) <= 32767:
+        result["installerExitCode"] = int(installer[1])
+        result["knownError"] = "installer-exit-failure"
+        categories.add("installer")
+    elif re.match(r"installer timed out after [0-9.]+ seconds", message):
+        result["knownError"] = "installer-timeout"
+        categories.add("installer")
+    result["categories"] = sorted(categories) if categories else ["unclassified"]
+    return result
+
+
+def diagnostic_status(value: object, fixture: dict) -> dict:
+    if not isinstance(value, dict):
+        return {"readable": False}
+    phase = value.get("phase")
+    return {"readable": True, "phase": phase if isinstance(phase, str) and phase in DIAGNOSTIC_PHASES else "other-or-unknown",
+            "target": diagnostic_version(value.get("target_version", value.get("release_version")), fixture),
+            "retryable": value.get("retryable") is True,
+            "errorPresent": bool(value.get("error") or value.get("error_code")),
+            **({"failure": diagnostic_legacy_failure(value.get("message"))} if phase == "failed" else {})}
+
+
+def diagnostic_service_output(result: subprocess.CompletedProcess, system: str) -> dict:
+    """Project only known native fields; never return environment or argv."""
+    text = result.stdout.decode("utf-8", errors="replace")
+    if result.returncode != 0:
+        absent = any(marker in (result.stdout + result.stderr).lower()
+                     for marker in (b"could not find service", b"service not found", b"no such process", b"not-found"))
+        return {"registered": False if absent else None, "querySucceeded": False}
+    if system == "Darwin":
+        state = re.search(r"^\s+state = ([a-z ]+)\s*$", text, re.MULTILINE)
+        pid = re.search(r"^\s+pid = ([0-9]{1,10})\s*$", text, re.MULTILINE)
+        status = re.search(r"^\s+last exit code = (-?[0-9]{1,5})\s*$", text, re.MULTILINE)
+        state_value = state[1] if state else None
+    else:
+        state = re.search(r"^ActiveState=([a-z-]+)$", text, re.MULTILINE)
+        pid = re.search(r"^MainPID=([0-9]{1,10})$", text, re.MULTILINE)
+        status = re.search(r"^ExecMainStatus=(-?[0-9]{1,5})$", text, re.MULTILINE)
+        state_value = state[1] if state else None
+    return {"registered": True, "querySucceeded": True,
+            "state": state_value if state_value in {"running", "waiting", "spawn scheduled", "active", "inactive", "failed", "activating", "deactivating"} else "other-or-unknown",
+            "pid": int(pid[1]) if pid and 0 < int(pid[1]) < 2 ** 31 else None,
+            "lastExitCode": int(status[1]) if status and -32768 <= int(status[1]) <= 32767 else None}
+
+
+def diagnostic_log_categories(path: Path, owner_root: Path) -> dict:
+    """Read at most the owned log's last 64 KiB, emitting finite labels only."""
+    try:
+        contained(path, owner_root)
+        fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+        with os.fdopen(fd, "rb") as stream:
+            info = os.fstat(stream.fileno())
+            need(stat.S_ISREG(info.st_mode) and info.st_uid == os.getuid() and info.st_nlink == 1,
+                 "Diagnostic log ownership is unproven.")
+            stream.seek(max(0, info.st_size - 65536))
+            data = stream.read(65536).lower()
+        patterns = {"tls-verification": (b"certificate_verify_failed", b"certificate verify failed", b"unable to get local issuer"),
+                    "port-in-use": (b"address already in use",), "missing-python-module": (b"modulenotfounderror",),
+                    "permission-denied": (b"permission denied",), "connection-refused": (b"connection refused",),
+                    "dependency-resolution": (b"no solution found", b"failed to download"),
+                    "native-health-failure": (b"health check failed", b"did not become healthy", b"rollback is incomplete"),
+                    "signature-rejected": (b"invalid signature", b"signature verification failed",)}
+        return {"readable": True, "categories": sorted(name for name, needles in patterns.items() if any(needle in data for needle in needles))}
+    except (OSError, RuntimeError):
+        return {"readable": False, "categories": []}
+
+
+def diagnostic_tmux_trust(fixture: dict) -> dict:
+    """Inspect one daemon variable only; never start/set a tmux server."""
+    result = {"daemonAvailable": None, "ownedTrustBundleAvailable": False, "trustBundleMatches": False}
+    try:
+        work = Path(fixture["workDirectory"])
+        bundle = work.parent / "agentsdock-acceptance-network/trust-bundle.pem"
+        contained(bundle, work.parent)
+        read_regular(bundle, private=True)
+        result["ownedTrustBundleAvailable"] = True
+        observed = command(["tmux", "show-environment", "-g", "SSL_CERT_FILE"], timeout=5, allowed=(0, 1))
+        if observed.returncode == 0:
+            result["daemonAvailable"] = True
+            result["trustBundleMatches"] = observed.stdout.rstrip(b"\r\n") == f"SSL_CERT_FILE={bundle}".encode()
+        elif b"unknown variable" in observed.stderr.lower():
+            result["daemonAvailable"] = True
+        elif any(marker in observed.stderr.lower() for marker in (b"no server running", b"no such file or directory")):
+            result["daemonAvailable"] = False
+    except (OSError, RuntimeError, KeyError):
+        pass
+    return result
+
+
+def diagnose(fixture: dict) -> dict:
+    """Read-only failure observations; not an acceptance test or recovery tool."""
+    root, state, home = (Path(fixture[key]) for key in ("installRoot", "stateRoot", "home"))
+    current = root / "current"
+    target = current.resolve() if current.is_symlink() else None
+    version = next((value for value in (fixture["baselineVersion"], fixture["targetVersion"])
+                    if target == root / "releases" / value), None)
+    result = {"diagnosticOnly": True, "currentRuntime": diagnostic_version(version, fixture), "services": {}, "journals": {}}
+    try:
+        files = registered_services(fixture)
+        result["registrationsVerified"] = True
+    except (OSError, RuntimeError, ValueError):
+        files = []
+        result["registrationsVerified"] = False
+    for item in files:
+        role = "gateway" if "gateway" in item.name else "worker"
+        try:
+            system = platform.system()
+            if system == "Darwin":
+                config = plistlib.loads(read_regular(item))
+                environment = config.get("EnvironmentVariables", {})
+                if not isinstance(environment, dict):
+                    environment = {}
+                observed = command(["/bin/launchctl", "print", f"gui/{os.getuid()}/{item.stem}"], timeout=10, allowed=(0, 3, 5, 113))
+            else:
+                environment = {}
+                observed = command(["systemctl", "--user", "show", item.name, "--property=ActiveState,MainPID,ExecMainStatus"], timeout=10, allowed=(0, 1, 3, 4))
+            result["services"][role] = diagnostic_service_output(observed, system)
+            if system == "Darwin":
+                result["services"][role]["configuredPortMatches"] = str(environment.get("AGENTSDOCK_AGENT_PORT", "")) == str(urlsplit(fixture["serverUrl"]).port)
+        except (OSError, RuntimeError, ValueError):
+            result["services"][role] = {"querySucceeded": False}
+    try:
+        live = request(fixture, "/api/health")
+        result["health"] = {"reachable": True, "ok": live.get("ok") is True,
+                            "identityMatches": live.get("server_identity") == fixture["serverIdentity"],
+                            "version": diagnostic_version(live.get("server_version"), fixture)}
+    except (OSError, RuntimeError, ValueError, http.client.HTTPException):
+        result["health"] = {"reachable": False}
+    records = [("activation", root / ".activation-transaction/manifest.json", root),
+               ("execution", root / ".execution-transaction/manifest.json", root),
+               ("update", state / "admin/server-update.json", state)]
+    for label, path, owner in records:
+        try:
+            contained(path, owner)
+            result["journals"][label] = diagnostic_status(json.loads(read_regular(path, 256 * 1024, private=True)), fixture)
+        except (OSError, RuntimeError, ValueError):
+            result["journals"][label] = {"readable": False}
+    result["logs"] = {"updater": diagnostic_log_categories(state / "admin/server-update.log", state),
+                       "legacyStderr": diagnostic_log_categories(home / "Library/Logs/AgentsServer/server-error.log", home),
+                       "workerStderr": diagnostic_log_categories(state / "execution/logs/worker.stderr.log", state),
+                       "gatewayStderr": diagnostic_log_categories(state / "execution/logs/gateway.stderr.log", state)}
+    result["tmuxTrust"] = diagnostic_tmux_trust(fixture)
+    try:
+        result["preservation"] = snapshot_differences(fixture["snapshot"], state_snapshot(fixture))
+    except (OSError, RuntimeError, ValueError, KeyError, TypeError, http.client.HTTPException):
+        result["preservation"] = {"readable": False}
+    return result
 
 
 def safe_extract(archive: Path, destination: Path) -> Path:
@@ -407,23 +730,97 @@ def state_snapshot(fixture: dict) -> dict:
         events = detail.get("events")
         need(isinstance(events, list), "Session timeline was omitted.")
         sessions[identifier] = {"identity": {key: session.get(key) for key in SESSION_KEYS},
+                                "presentFields": [key for key in SESSION_KEYS if key in session],
                                 "eventHashes": [sha(canonical(event)) for event in events],
                                 "queued": detail.get("queued_turns", [])}
     return {"serverIdentitySha256": sha(identity.encode()), "tokenSha256": sha(fixture["token"].encode()),
             "sessions": sessions}
 
 
-def compare_snapshot(before: dict, after: dict) -> None:
+def snapshot_differences(before: dict, after: dict) -> dict:
+    """Expose only fixed field names, booleans and bounded session counts."""
+    need(isinstance(before, dict) and isinstance(after, dict), "Invalid preservation snapshot.")
+    saved_sessions, actual_sessions = before.get("sessions"), after.get("sessions")
+    need(isinstance(saved_sessions, dict) and isinstance(actual_sessions, dict)
+         and 0 < len(saved_sessions) <= 30 and len(actual_sessions) <= 30,
+         "Preservation diagnostics require bounded session snapshots.")
+    result = {"readable": True,
+              "serverIdentityChanged": before.get("serverIdentitySha256") != after.get("serverIdentitySha256"),
+              "tokenChanged": before.get("tokenSha256") != after.get("tokenSha256"),
+              "missingSessionCount": 0, "changedSessionCount": 0,
+              "changedSessionFields": [], "unrecognizedSessionFieldChanged": False,
+              "historyChanged": False, "queuedMessagesChanged": False}
+    changed_fields: set[str] = set()
+    for identifier, saved in saved_sessions.items():
+        actual = actual_sessions.get(identifier)
+        if actual is None:
+            result["missingSessionCount"] += 1
+            continue
+        need(isinstance(saved, dict) and isinstance(actual, dict)
+             and isinstance(saved.get("identity"), dict) and isinstance(actual.get("identity"), dict)
+             and isinstance(saved.get("eventHashes"), list) and isinstance(actual.get("eventHashes"), list),
+             "Invalid session preservation snapshot.")
+        old, new = saved["identity"], actual["identity"]
+        if old != new:
+            result["changedSessionCount"] += 1
+            changed_fields.update(key for key in SESSION_KEYS if old.get(key) != new.get(key)
+                                  or (key in old) != (key in new))
+            result["unrecognizedSessionFieldChanged"] |= any(
+                key not in SESSION_KEYS and (old.get(key) != new.get(key) or (key in old) != (key in new))
+                for key in old.keys() | new.keys())
+        result["historyChanged"] |= actual["eventHashes"][:len(saved["eventHashes"])] != saved["eventHashes"]
+        result["queuedMessagesChanged"] |= bool(saved.get("queued")) and actual.get("queued") != saved["queued"]
+    result["changedSessionFields"] = sorted(changed_fields)
+    return result
+
+
+def schema_defaults_added(saved: dict, actual: dict, baseline_version: str | None,
+                          candidate_version: str | None) -> set[str]:
+    """Recognize only proven absent 1.0.3 fields gaining their exact defaults.
+
+    Signed 1.0.3 public_session omitted both fields. The candidate projects the
+    implicit Codex provider as 'default' and persists the new OpenCode default
+    on every loaded session. Existing fields, including explicit null, are not
+    migration defaults. Callers supply versions only after exact receipt-bound
+    candidate health; same-version and pre-update checks remain strict.
+    """
+    if (baseline_version != "1.0.3" or not isinstance(candidate_version, str)
+            or VERSION.fullmatch(candidate_version) is None
+            or version_order(candidate_version) <= version_order(baseline_version)):
+        return set()
+    old, new = saved.get("identity", {}), actual.get("identity", {})
+    if old.get("backend") not in {"codex", "claude", "cursor"} or old.get("backend") != new.get("backend"):
+        return set()
+    present_before, present_after = saved.get("presentFields"), actual.get("presentFields")
+    if not all(isinstance(value, list) and len(value) <= len(SESSION_KEYS)
+               and all(isinstance(key, str) and key in SESSION_KEYS for key in value)
+               and len(set(value)) == len(value) for value in (present_before, present_after)):
+        return set()
+    return {key for key in ("codex_provider", "opencode_permission_mode")
+            if key not in present_before and old.get(key) is None
+            and key in present_after and new.get(key) == "default"}
+
+
+def compare_snapshot(before: dict, after: dict, *, baseline_version: str | None = None,
+                     candidate_version: str | None = None) -> dict:
     need(before["serverIdentitySha256"] == after["serverIdentitySha256"] and before["tokenSha256"] == after["tokenSha256"],
          "Migration changed server identity or token.")
+    defaults_added: set[str] = set()
     for identifier, saved in before["sessions"].items():
         actual = after["sessions"].get(identifier)
-        need(actual is not None and actual["identity"] == saved["identity"],
-             "Migration changed chat identity, native session ID, configuration or custom working directory.")
+        need(actual is not None, "Migration removed a saved chat.")
+        defaults = schema_defaults_added(saved, actual, baseline_version, candidate_version)
+        expected = {**saved["identity"], **{key: "default" for key in defaults}}
+        changes = [key for key in SESSION_KEYS if actual["identity"].get(key) != expected.get(key)
+                   or (key in actual["identity"]) != (key in expected)]
+        need(actual["identity"] == expected,
+             "Migration changed preserved session fields: " + ", ".join(changes or ["unrecognized-field"]) + ".")
+        defaults_added.update(defaults)
         need(actual["eventHashes"][:len(saved["eventHashes"])] == saved["eventHashes"],
              "Migration removed or changed previously saved history.")
         if saved.get("queued"):
             need(actual.get("queued") == saved["queued"], "Migration changed the pending queued messages.")
+    return {"schemaDefaultsAdded": sorted(defaults_added)}
 
 
 def rejection_checks(fixture: dict, bundle: Path, version: str) -> dict:
@@ -679,13 +1076,14 @@ def rollback_retry(args: argparse.Namespace, fixture: dict, receipt: dict) -> di
         **body, "expected_server_instance_id": recovered["server_instance_id"]})
     health(fixture, receipt["version"], timeout=1500)
     wait_update_complete(fixture, receipt["version"])
-    compare_snapshot(fixture["snapshot"], state_snapshot(fixture))
+    preservation = compare_snapshot(fixture["snapshot"], state_snapshot(fixture),
+                                    baseline_version=fixture["baselineVersion"], candidate_version=receipt["version"])
     count = verify_installed_runtime(fixture, args.bundle, receipt["version"])
     return {"fault": "pidfd-exact-candidate-worker-health-failure", "candidateProcessesFaulted": len(observed["killed"]),
             "incumbentNeverSignaled": True, "realRollbackPhases": sorted(observed["rollbackPhases"]),
             "baselineAuthenticatedHealthRestored": True, "serverIdentityTokenAndSnapshotPreserved": True,
             "faultDisabledBeforeRetry": True, "candidateActivationCompletedAfterRetry": True,
-            "exactRuntimeFilesCompared": count,
+            "exactRuntimeFilesCompared": count, **preservation,
             "nonemptyProviderHistoryObserved": False}
 
 
@@ -744,13 +1142,14 @@ def failure_retry(args: argparse.Namespace, fixture: dict, receipt: dict) -> dic
     need(accepted["server_instance_id"] != before["server_instance_id"],
          "Exact update did not replace the baseline runtime process.")
     wait_update_complete(fixture, receipt["version"])
-    compare_snapshot(fixture["snapshot"], state_snapshot(fixture))
+    preservation = compare_snapshot(fixture["snapshot"], state_snapshot(fixture),
+                                    baseline_version=fixture["baselineVersion"], candidate_version=receipt["version"])
     count = verify_installed_runtime(fixture, args.bundle, receipt["version"])
     registered_services(fixture)
     return {"fault": "truncated-exact-legacy-download", "failedDownloadObserved": True,
             "incumbentProcessIdentityAndDataPreserved": True, "sameAcceptedVersionRetried": True,
             "candidateAuthenticatedHealthObserved": True, "nativeActivationCompleted": True,
-            "exactRuntimeFilesCompared": count,
+            "exactRuntimeFilesCompared": count, **preservation,
             "activationInterruptionObserved": False, "rollbackObserved": False,
             "nonemptyProviderHistoryObserved": False}
 
@@ -771,6 +1170,8 @@ def checks_for(operation: str, kind: str, observations: dict, *, migrated: bool 
         return [{"name": "interrupted-update-recovery", "status": "passed", "observations": observations}]
     if operation == "rollback-retry":
         return [{"name": "rollback-data-preservation", "status": "passed", "observations": observations}]
+    if operation == "diagnose":
+        return [{"name": "server-failure-diagnostics", "status": "blocked", "observations": observations}]
     return [{"name": f"server-{operation}", "status": "passed", "observations": observations}]
 
 
@@ -779,6 +1180,7 @@ def load_fixture(args: argparse.Namespace, receipt: dict, home: Path) -> dict:
     need(value.get("schema") == 1 and value.get("runId") == os.environ["GITHUB_RUN_ID"]
          and value.get("runAttempt") == os.environ["GITHUB_RUN_ATTEMPT"]
          and value.get("candidate", False) == getattr(args, "candidate", False)
+         and value.get("harnessSourceSha", value.get("sourceSha")) == os.environ.get("GITHUB_SHA")
          and value.get("sourceSha") == receipt["sourceSha"] and value.get("releaseReceiptSha256") == args.receipt_sha256
          and value.get("home") == str(home) and value.get("workDirectory") == str(args.work)
          and value.get("targetVersion") == receipt["version"], "Fixture belongs to another account, run or candidate.")
@@ -797,7 +1199,8 @@ def bootstrap(args: argparse.Namespace, receipt: dict, home: Path) -> tuple[dict
         listener.bind(("127.0.0.1", 0))
         port = listener.getsockname()[1]
     fixture = {"schema": 1, "runId": os.environ["GITHUB_RUN_ID"], "runAttempt": os.environ["GITHUB_RUN_ATTEMPT"],
-               "sourceSha": receipt["sourceSha"], "candidate": getattr(args, "candidate", False),
+               "sourceSha": receipt["sourceSha"], "harnessSourceSha": os.environ["GITHUB_SHA"],
+               "candidate": getattr(args, "candidate", False),
                "releaseReceiptSha256": args.receipt_sha256, "home": str(home), "workDirectory": str(args.work),
                "serverUrl": f"http://127.0.0.1:{port}", "targetVersion": receipt["version"],
                **{key: str(value) for key, value in paths(home).items()}}
@@ -870,7 +1273,7 @@ def bootstrap(args: argparse.Namespace, receipt: dict, home: Path) -> tuple[dict
 
 def parser() -> argparse.ArgumentParser:
     result = argparse.ArgumentParser(description=__doc__)
-    result.add_argument("operation", choices=("bootstrap", "snapshot", "verify", "service", "failure-retry", "rollback-retry"))
+    result.add_argument("operation", choices=("bootstrap", "snapshot", "verify", "service", "failure-retry", "rollback-retry", "diagnose"))
     for name in ("receipt", "bundle", "work", "fixture", "evidence"):
         result.add_argument(f"--{name}", type=Path, required=True)
     result.add_argument("--prepare-run", type=Path)
@@ -897,6 +1300,16 @@ def inspect_receipt(args: argparse.Namespace) -> None:
                  args.receipt_sha256, str(args.prepare_run), str(args.bundle)], timeout=90)
 
 
+def validate_candidate_checkout(args: argparse.Namespace, receipt: dict) -> str:
+    result = command(["node", str(ROOT / "scripts/product-candidate-receipt.mjs"), "validate-runner",
+                      str(args.receipt), args.receipt_sha256], timeout=90)
+    value = json.loads(result.stdout)
+    need(value.get("sourceSha") == receipt["sourceSha"] and value.get("sourceRef") == receipt["sourceRef"]
+         and value.get("harnessSourceSha") == os.environ.get("GITHUB_SHA") and value.get("publicationEligible") is False,
+         "Candidate harness validation returned a different source, branch or eligibility.")
+    return value["harnessSourceSha"]
+
+
 def main() -> None:
     args = parser().parse_args()
     raw = read_regular(args.receipt, 32768)
@@ -904,13 +1317,14 @@ def main() -> None:
          "Prepared receipt differs from the independently accepted digest.")
     receipt = json.loads(raw)
     home = guard(receipt, args.work, candidate=args.candidate)
+    harness_sha = validate_candidate_checkout(args, receipt) if args.candidate else receipt["sourceSha"]
     for path in (args.fixture, args.evidence):
         contained(path, args.work)
     # Reuse production signature, runtime parity and successful preparation-run
     # verification rather than trusting a caller-created success flag.
     inspect_receipt(args)
     head = command(["git", "-C", str(ROOT), "rev-parse", "HEAD"]).stdout.decode().strip()
-    need(head == receipt["sourceSha"], "Acceptance harness checkout differs from the packaged source.")
+    need(head == harness_sha, "Acceptance harness checkout differs from its reviewed validation.")
     if args.operation == "bootstrap":
         fixture, observations = bootstrap(args, receipt, home)
         observed_version = fixture["baselineVersion"]
@@ -928,11 +1342,13 @@ def main() -> None:
             need(args.expect_version in {fixture["baselineVersion"], receipt["version"]}, "Expected version must be the exact baseline or candidate.")
             health(fixture, args.expect_version)
             need(isinstance(fixture.get("snapshot"), dict), "A populated pre-upgrade snapshot is required.")
-            compare_snapshot(fixture["snapshot"], state_snapshot(fixture))
+            preservation = compare_snapshot(fixture["snapshot"], state_snapshot(fixture),
+                baseline_version=fixture["baselineVersion"],
+                candidate_version=receipt["version"] if args.expect_version == receipt["version"] else None)
             registered_services(fixture)
             observations = {"authenticatedExactVersion": True, "serverIdentityAndTokenPreserved": True,
                             "sessionsNativeIdsSettingsAndHistoryPreserved": True,
-                            "snapshotSha256": fixture["baselineStateSha256"]}
+                            "snapshotSha256": fixture["baselineStateSha256"], **preservation}
             if args.expect_version == receipt["version"]:
                 observations["exactRuntimeFilesCompared"] = verify_installed_runtime(fixture, args.bundle, args.expect_version)
             observed_version = args.expect_version
@@ -942,6 +1358,9 @@ def main() -> None:
         elif args.operation == "rollback-retry":
             observations = rollback_retry(args, fixture, receipt)
             observed_version = receipt["version"]
+        elif args.operation == "diagnose":
+            observations = diagnose(fixture)
+            observed_version = None
         else:
             need(args.action is not None, "A scoped native service action is required.")
             service(fixture, args.action)
@@ -950,6 +1369,7 @@ def main() -> None:
     evidence = {"schema": 1, "kind": "candidate-server-observations" if args.candidate else "native-server-observations",
                 "operation": args.operation,
                 "runId": os.environ["GITHUB_RUN_ID"], "sourceSha": receipt["sourceSha"],
+                "harnessSourceSha": harness_sha,
                 "runAttempt": os.environ["GITHUB_RUN_ATTEMPT"],
                 "version": receipt["version"], "observedVersion": observed_version,
                 "releaseReceiptSha256": args.receipt_sha256, "platform": sys.platform,
