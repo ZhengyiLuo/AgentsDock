@@ -1,5 +1,38 @@
 # Public development log
 
+## 2026-09-29 — Verify scoped native beta.2 journeys and stage sealed drafts
+
+- Run `36617217705`, attempt 1, passes real candidate-worker failure, installer
+  rollback and same-byte retry for legacy Linux root modes `0755` and `0750`.
+  The reviewed reports bind the exact beta.2 source and candidate receipt, retain
+  incumbent identity/token/snapshot, verify both healthy final components and
+  118 runtime files, and prove journal cleanup. The fault injector never signals
+  the incumbent; it targets only the bound candidate worker.
+- Stage the exact 16-file desktop asset set as unpublished drafts in AgentsDock
+  and AgentsDock-Releases. Both retain source `7b01c458`, build 1234, the signed
+  server descriptor and checksum-manifest identity
+  `d03ec3381cd0966cee5180a45b6cc6324411736fc9e5ce7d707836d1a676a8da`.
+  Windows remains explicitly unsigned. No package is rebuilt or re-signed.
+- Mac run `36617827033` attempt 1 stops before native jobs at an unchanged
+  SecurePeerPanel observer assertion. Its DOM observation precedes a passive
+  effect, so source inspection supports a test timing race. All 70 tests in
+  that file pass locally. Attempt 2 passes the full Electron suite/build, all
+  seven scoped installation/recovery cases and the no-downgrade case on unchanged
+  harness source `ca611a8`. The original failed attempt remains recorded.
+- The reviewed no-downgrade report verifies stable `1.0.8` remains current and
+  unchanged through Settings/app reopening: both native components, persistent
+  state, registrations and 118 runtime files retain their accepted identities.
+  The valid observer sees eight health requests, five WebSocket upgrades and
+  zero update requests. This is separate from the old-to-new app replacement
+  observed in the legacy migration jobs.
+- Add exact-package fresh-account macOS commands and hashes to the candidate
+  rehearsal guide. Manual ZIP installation is explicitly not updater acceptance;
+  no provider credentials or working installation are used by these CI fixtures.
+- Authenticated provider-history preservation, active/queued work and remaining
+  scoped migration boundaries are still pending. The native reports explicitly
+  do not authorize publication. Stable npm `1.0.8` and `latest` are unchanged;
+  beta.2 remains unpublished.
+
 ## 2026-09-29 — Observe native persistent HTTP-to-WebSocket connections
 
 - Reproduce the no-downgrade observer failure with a real native fetch followed

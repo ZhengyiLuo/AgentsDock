@@ -122,6 +122,15 @@ source, truthful harness source, and stable fixture source remain distinct. A
 passing unit suite only validates the harness contract; this native case is not
 accepted until the exact signed-package job runs and its observations are reviewed.
 
+Run `36617827033`, attempt 2, passes this scoped case for signed beta.2 build
+1234 using artifact source `7b01c458` and harness source `ca611a8`. Reviewed
+observations confirm both stable components and process identity remain unchanged
+through Settings reopening and app reopening. The valid transparent observer
+records eight health requests, five WebSocket upgrades and zero update-endpoint
+requests. Signed stable/candidate pins and the installed app hash match their
+sealed inputs. This proves no downgrade for that fixture, not provider-history
+migration, app self-replacement or public-feed delivery.
+
 ## Separate Linux server rollback rehearsal
 
 `candidate_server_rollback=true`, with `candidate_replay=false` and
@@ -150,8 +159,16 @@ it retry the same accepted version and verify both installed components plus
 runtime byte/mode parity. If the health-fault window is missed, the job fails
 without claiming rollback.
 
-This harness has unit validation but **no native Linux execution result yet**.
-Its reports retain `publicationEligible: false`, `releaseAcceptance: false` and
+Run `36617217705`, attempt 1, passes both native Linux permission cases for
+`1.0.8-beta.2`. Its reports bind artifact source
+`7b01c4586e2c2cbe45bcd8b871e54b92a8aa7e37`, harness source
+`ed24d709513b878c9e46296cf4971e43eb76ad24` and candidate receipt SHA-256
+`67d3492468e7af635a8b116777a7d530110dfb3d9dd4bac4bfe4c928bbd5b80d`.
+Both observe actual rollback, the restored authenticated incumbent, preserved
+identity/token/snapshot, cleared installer journals, and successful same-byte
+retry with both components healthy and all 118 runtime files verified. These are
+scoped server observations, not desktop or populated-provider acceptance.
+The reports retain `publicationEligible: false`, `releaseAcceptance: false` and
 `desktopAcceptance: false`. Team Hub fence consumption, authenticated provider
 history, power-loss/reboot recovery and macOS rollback are not established by
 this server-only journey.
@@ -165,6 +182,65 @@ reports for blocked checks; scoped observations cannot authorize publication.
 The macOS matrix does not establish Linux candidate-health rollback; only an
 actual successful separately reviewed Linux rollback run can provide that
 scoped evidence.
+
+## Manual fresh-account checks for this candidate
+
+Use a separate new Apple Silicon macOS account with a normal logged-in desktop
+session, Node 22.14 or newer, trusted `uv`, and the provider CLIs you intend to
+test. Authenticate those providers normally in that test account. No npm account
+or publishing/signing credential is needed. Do not copy another account's private
+credentials, change `HOME`, use `sudo`, or remove existing history to make an
+installation proceed.
+
+The supplied `1.0.8-beta.2` files must have these SHA-256 hashes:
+
+```text
+bc00e50d84743b60c63e335ccc1ccf812b50d5595fec29a0f4674543bec963a3  AgentsDock-1.0.8-beta.2-mac-universal.zip
+44b3ee3d2f263cba3779df33d8b7a648625ed4877a7bfaa55f677eabb4f8baa5  server-1.0.8-beta.2.tgz
+```
+
+After comparing `shasum -a 256` output for both Downloads files, install the
+exact supplied npm archive, not the still-older floating `beta` registry tag:
+
+```sh
+cd "$HOME/Downloads"
+AGENTSDOCK_QA_CLI="$(mktemp -d "${TMPDIR:-/tmp}/agentsdock-beta2-cli.XXXXXX")"
+npm install --offline --ignore-scripts --no-audit --no-fund \
+  --package-lock=false --prefix "$AGENTSDOCK_QA_CLI" \
+  "$PWD/server-1.0.8-beta.2.tgz"
+node "$AGENTSDOCK_QA_CLI/node_modules/@agentsdock/server/npm/cli.cjs" --version
+```
+
+Stop unless the CLI version prints exactly `1.0.8-beta.2`. Then run:
+
+```sh
+node "$AGENTSDOCK_QA_CLI/node_modules/@agentsdock/server/npm/cli.cjs" \
+  install --port 17850 --bind 127.0.0.1
+```
+
+The runtime installer still needs network access. If it refuses an existing
+installation or custom root, stop; do not bypass the refusal. Extract the supplied
+Mac ZIP and launch that exact app from the test account. Connect to
+`http://127.0.0.1:17850` using the installer's token privately. Expect app build
+1234 and both app/server version `1.0.8-beta.2`.
+
+- Complete a real chat and harmless file action in a disposable folder with
+  each provider being accepted.
+- Quit/reopen the app, reopen the same chat and continue it. Check saved server
+  settings, history and attachments.
+- Log out/in or reboot, reconnect and continue that same chat. This checks
+  service persistence, not cache independence; the separate native npm jobs
+  test independence from the temporary npm installation.
+- Report exact app/server versions, macOS/architecture, providers and pass/fail
+  results. Redact tokens, private paths and identifiers from shared evidence.
+
+These checks do not establish an old-to-new one-click update, populated-history
+migration, or active/queued-work preservation. Those require an older same-Beta
+server containing genuine provider sessions and queued work, followed through the
+exact signed updater/relaunch/coordinator journey in an authorized isolated
+replay. Do not install the hosted-runner origin/trust fixture on a working Mac or
+spoof its safeguards. Public feeds cannot deliver this candidate before it is
+published; manually copying the ZIP is not updater acceptance.
 
 Both preparation-failure and rollback observations bind the installation root
 to its original device/inode/owner. The audited signed installer intentionally
