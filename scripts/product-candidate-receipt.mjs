@@ -95,18 +95,38 @@ export function validateCandidateReceipt(value) {
   return value
 }
 
-export function assertCandidateRunner(env = process.env, platform = process.platform) {
+function assertCandidateRunnerContext(env, platform, expectedPlatform, expectedOs) {
   assert(env.GITHUB_ACTIONS === 'true' && env.RUNNER_ENVIRONMENT === 'github-hosted'
     && env.GITHUB_REPOSITORY === 'ZhengyiLuo/AgentsDock' && env.GITHUB_EVENT_NAME === 'workflow_dispatch'
     && /^ZhengyiLuo\/AgentsDock\/\.github\/workflows\/ci\.yml@refs\/heads\/release\/[A-Za-z0-9][A-Za-z0-9._/-]*$/.test(env.GITHUB_WORKFLOW_REF ?? '')
     && SHA.test(env.GITHUB_SHA ?? '') && /^[1-9]\d*$/.test(env.GITHUB_RUN_ID ?? '')
-    && /^[1-9]\d*$/.test(env.GITHUB_RUN_ATTEMPT ?? '') && platform === 'darwin' && env.RUNNER_OS === 'macOS',
-  'Candidate replay requires an explicit canonical ci.yml dispatch on a disposable macOS release-branch runner')
+    && /^[1-9]\d*$/.test(env.GITHUB_RUN_ATTEMPT ?? '') && platform === expectedPlatform && env.RUNNER_OS === expectedOs,
+  `Candidate replay requires an explicit canonical ci.yml dispatch on a disposable ${expectedOs} release-branch runner`)
 }
 
-export function assertCandidateCheckout(identity, { env = process.env, execute = execFileSync,
-  repositoryDirectory = ROOT, platform = process.platform } = {}) {
-  assertCandidateRunner(env, platform)
+export function assertCandidateRunner(env = process.env, platform = process.platform) {
+  assertCandidateRunnerContext(env, platform, 'darwin', 'macOS')
+}
+
+// Separate server-only execution scope. The sealed macOS candidate is used as
+// exact server provenance, never relabelled as a Linux desktop/production seal.
+export function assertCandidateServerRunner(env = process.env, platform = process.platform) {
+  assertCandidateRunnerContext(env, platform, 'linux', 'Linux')
+  assert(env.GITHUB_JOB === 'candidate-server-rollback-linux', 'Linux replay requires its explicit server-only rollback job')
+}
+
+export function assertCandidateCheckout(identity, options = {}) {
+  return assertCandidateCheckoutWithRunner(identity, options, assertCandidateRunner)
+}
+
+export function assertCandidateServerCheckout(identity, options = {}) {
+  return { ...assertCandidateCheckoutWithRunner(identity, options, assertCandidateServerRunner),
+    executionScope: 'candidate-server-linux', desktopAcceptance: false }
+}
+
+function assertCandidateCheckoutWithRunner(identity, { env = process.env, execute = execFileSync,
+  repositoryDirectory = ROOT, platform = process.platform } = {}, runnerGuard) {
+  runnerGuard(env, platform)
   assertCandidateSource(identity)
   assert(env.GITHUB_WORKFLOW_REF === `ZhengyiLuo/AgentsDock/.github/workflows/ci.yml@refs/heads/${identity.sourceRef}`,
     'Candidate harness must run on the receipt\'s reviewed release branch')
@@ -189,11 +209,12 @@ export async function sealCandidate({ serverDirectory, desktopDirectory, destina
 
 async function main() {
   const [operation, ...args] = process.argv.slice(2)
-  if (operation === 'validate-runner') {
+  if (operation === 'validate-runner' || operation === 'validate-server-runner') {
     assert(args.length === 2, 'Usage: product-candidate-receipt.mjs validate-runner RECEIPT SHA256')
     const bytes = await regular(args[0])
     assert(HASH.test(args[1]) && digest(bytes) === args[1], 'Candidate receipt differs from independently accepted bytes')
-    console.log(JSON.stringify(assertCandidateCheckout(validateCandidateReceipt(JSON.parse(bytes)))))
+    const validate = operation === 'validate-server-runner' ? assertCandidateServerCheckout : assertCandidateCheckout
+    console.log(JSON.stringify(validate(validateCandidateReceipt(JSON.parse(bytes)))))
   } else if (operation === 'inspect') {
     assert(args.length === 3 || args.length === 4, 'Usage: product-candidate-receipt.mjs inspect RECEIPT SHA256 SERVER_DIR [DESKTOP_DIR]')
     const receipt = await inspectCandidate({ receiptPath: args[0], receiptSha256: args[1], serverDirectory: args[2], desktopDirectory: args[3] })

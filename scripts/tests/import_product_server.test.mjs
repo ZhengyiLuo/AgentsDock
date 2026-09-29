@@ -146,8 +146,9 @@ test('import rejects wrong export tree before inspecting downloaded artifacts', 
 
 test('candidate import opt-in cannot bypass the disposable canonical runner guard', async t => {
   const f = fixture(t)
-  await assert.rejects(f.inspect({ candidateRehearsal: 'false' }), /explicit true opt-in/)
+  await assert.rejects(f.inspect({ candidateRehearsal: 'false' }), /explicitly select/)
   await assert.rejects(f.inspect({ candidateRehearsal: 'true' }), /Candidate replay requires/)
+  await assert.rejects(f.inspect({ candidateRehearsal: 'server-linux' }), /Candidate replay requires.*Linux/)
   f.setCheckout('e'.repeat(40))
   await assert.rejects(f.inspect(), /checkout differs/)
 })

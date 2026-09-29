@@ -67,14 +67,18 @@ def write_private(path, data):
         os.fsync(stream.fileno())
 
 
-def guard(work, env=None, candidate=False):
+def guard(work, env=None, candidate=False, candidate_server_linux=False):
     env = os.environ if env is None else env
+    need(not (candidate and candidate_server_linux), "Candidate execution scopes are mutually exclusive")
+    if candidate_server_linux:
+        need(env.get("GITHUB_JOB") == "candidate-server-rollback-linux", "Linux replay requires its explicit server-only job")
+    rehearsal = candidate or candidate_server_linux
     need(env.get("CI") == "true" and env.get("GITHUB_ACTIONS") == "true"
          and env.get("RUNNER_ENVIRONMENT") == "github-hosted",
          "Network replay is restricted to disposable GitHub-hosted CI")
     need(env.get("GITHUB_REPOSITORY") == "ZhengyiLuo/AgentsDock",
          "Unexpected acceptance repository")
-    expected_workflow = (r"ZhengyiLuo/AgentsDock/\.github/workflows/ci\.yml@refs/heads/release/[A-Za-z0-9][A-Za-z0-9._/-]*" if candidate else
+    expected_workflow = (r"ZhengyiLuo/AgentsDock/\.github/workflows/ci\.yml@refs/heads/release/[A-Za-z0-9][A-Za-z0-9._/-]*" if rehearsal else
                          r"ZhengyiLuo/AgentsDock/\.github/workflows/product-release-acceptance\.yml@refs/heads/(?:main|release/[A-Za-z0-9][A-Za-z0-9._/-]*)")
     need(re.fullmatch(expected_workflow,
                       env.get("GITHUB_WORKFLOW_REF", "")), "Unexpected acceptance workflow")
@@ -87,10 +91,13 @@ def guard(work, env=None, candidate=False):
     path = Path(work).absolute()
     need(root.is_dir() and path == path.resolve() and path.is_relative_to(root)
          and path != root, "Replay work directory must be a non-symlink child of RUNNER_TEMP")
-    if candidate:
-        need(sys.platform == "darwin" and env["RUNNER_OS"] == "macOS", "Candidate replay is scoped to disposable macOS")
+    if rehearsal:
+        need((candidate and sys.platform == "darwin" and env["RUNNER_OS"] == "macOS")
+             or (candidate_server_linux and sys.platform == "linux" and env["RUNNER_OS"] == "Linux"),
+             "Candidate replay platform must match its explicit execution scope")
         need(re.fullmatch(r"[a-f0-9]{40}", env.get("GITHUB_SHA", "")), "Candidate harness commit is missing")
-    return path, {**({"scope": "candidate", "publicationEligible": False, "harnessSourceSha": env["GITHUB_SHA"]} if candidate else {}),
+    return path, {**({"scope": "candidate-server-linux" if candidate_server_linux else "candidate",
+                    "publicationEligible": False, "harnessSourceSha": env["GITHUB_SHA"]} if rehearsal else {}),
                   "runId": env["GITHUB_RUN_ID"], "runAttempt": env["GITHUB_RUN_ATTEMPT"],
                   "platform": env["RUNNER_OS"]}
 
@@ -160,32 +167,37 @@ def generate_certificates(work, name, *, openssl="openssl"):
         os.umask(old_umask)
 
 
-def setup(receipt, receipt_hash, work, candidate=False):
-    work, identity = guard(work, candidate=candidate)
+def setup(receipt, receipt_hash, work, candidate=False, candidate_server_linux=False):
+    work, identity = guard(work, candidate=candidate, candidate_server_linux=candidate_server_linux)
+    rehearsal = candidate or candidate_server_linux
     need(re.fullmatch(r"[a-f0-9]{64}", receipt_hash), "Invalid receipt hash")
     content = regular(receipt)
     need(digest(content) == receipt_hash, "Receipt bytes differ from the accepted seal")
     parsed_receipt = json.loads(content)
-    if candidate:
+    if rehearsal:
         need(parsed_receipt.get("kind") == "agentsdock-macos-candidate" and parsed_receipt.get("schema") == 1
              and parsed_receipt.get("scope") == "darwin-app-server" and parsed_receipt.get("publicationEligible") is False,
              "Candidate network setup requires an explicitly non-publishing scoped receipt")
     source = parsed_receipt.get("sourceSha", "")
     need(re.fullmatch(r"[a-f0-9]{40}", source), "Receipt source pin is missing")
-    if candidate:
+    if rehearsal:
         # Preserve real runner metadata for the shared git/provenance guard,
         # but do not inherit publishing/provider credentials into this child.
         env = {key: value for key, value in os.environ.items() if key in {
             "PATH", "HOME", "LANG", "LC_ALL", "TMPDIR", "GITHUB_ACTIONS", "GITHUB_REPOSITORY",
-            "GITHUB_EVENT_NAME", "GITHUB_WORKFLOW_REF", "GITHUB_SHA", "GITHUB_RUN_ID", "GITHUB_RUN_ATTEMPT",
+            "GITHUB_EVENT_NAME", "GITHUB_WORKFLOW_REF", "GITHUB_SHA", "GITHUB_RUN_ID", "GITHUB_RUN_ATTEMPT", "GITHUB_JOB",
             "RUNNER_ENVIRONMENT", "RUNNER_OS", "RUNNER_TEMP"}}
+        operation = "validate-server-runner" if candidate_server_linux else "validate-runner"
         validated = subprocess.run(["node", str(Path(__file__).with_name("product-candidate-receipt.mjs")),
-            "validate-runner", str(receipt), receipt_hash], capture_output=True, env=env, timeout=60)
+            operation, str(receipt), receipt_hash], capture_output=True, env=env, timeout=60)
         need(validated.returncode == 0 and len(validated.stdout) <= 32768,
              "Candidate harness ancestry, checkout or allowed-path verification failed")
         harness = json.loads(validated.stdout)
         need(harness.get("sourceSha") == source and harness.get("harnessSourceSha") == identity["harnessSourceSha"]
              and harness.get("publicationEligible") is False, "Candidate harness identity differs")
+        if candidate_server_linux:
+            need(harness.get("executionScope") == "candidate-server-linux" and harness.get("desktopAcceptance") is False,
+                 "Server-only replay cannot claim desktop acceptance")
     else:
         need(command("git", "rev-parse", "HEAD").decode().strip() == source,
              "Checkout differs from the exact candidate source")
@@ -245,8 +257,8 @@ def setup(receipt, receipt_hash, work, candidate=False):
     return public
 
 
-def teardown(work, candidate=False):
-    work, run = guard(work, candidate=candidate)
+def teardown(work, candidate=False, candidate_server_linux=False):
+    work, run = guard(work, candidate=candidate, candidate_server_linux=candidate_server_linux)
     if not work.exists():
         need(not LOCK.exists(), "Replay lock exists without the requested work directory")
         return {"restored": True, "setupStarted": False}
@@ -303,11 +315,13 @@ def main():
     start.add_argument("--receipt-sha256", required=True)
     start.add_argument("--work", type=Path, required=True)
     start.add_argument("--candidate", action="store_true")
+    start.add_argument("--candidate-server-linux", action="store_true")
     stop = sub.add_parser("teardown")
     stop.add_argument("--work", type=Path, required=True)
     stop.add_argument("--candidate", action="store_true")
+    stop.add_argument("--candidate-server-linux", action="store_true")
     args = parser.parse_args()
-    result = setup(args.receipt, args.receipt_sha256, args.work, args.candidate) if args.operation == "setup" else teardown(args.work, args.candidate)
+    result = setup(args.receipt, args.receipt_sha256, args.work, args.candidate, args.candidate_server_linux) if args.operation == "setup" else teardown(args.work, args.candidate, args.candidate_server_linux)
     print(json.dumps(result, indent=2))
 
 

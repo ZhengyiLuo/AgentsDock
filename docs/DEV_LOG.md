@@ -1,5 +1,32 @@
 # Public development log
 
+## 2026-09-29 — Verify beta.2 packages and isolate Linux rollback rehearsal
+
+- Keep signed runtime/build source `7b01c4586e2c2cbe45bcd8b871e54b92a8aa7e37`
+  and native build 1234 unchanged. Direct preparation run `36609217424` passes
+  Linux x64/arm64 and the explicitly unsigned Windows build. The universal Mac
+  ZIP and DMG pass Developer ID, notarization, Gatekeeper, payload parity,
+  updater metadata and bounded packaged launch/close verification.
+- Mac verification initially failed to mount its DMG under an external-volume
+  temporary directory. The unchanged verifier passes with an OS-default
+  temporary directory and the exact signed descriptor; no artifact was rebuilt
+  or re-signed. Seal and independently re-extract the exact matched candidate.
+- Add a separate opt-in hosted Linux server-only rollback/retry rehearsal for
+  legacy root modes `0755` and `0750`. Preserve the original candidate seal,
+  signer provenance, source ancestry and package hashes. A kernel-bound fault
+  targets only the exact newly started candidate worker; require actual
+  installer rollback, released maintenance, preserved state and same-byte retry.
+  This harness change does not broaden desktop or publication acceptance.
+- Mac replay run `36610907757` observes native app replacement/relaunch,
+  automatic saved-server reconciliation after offline recovery, and two clients
+  sharing one completed update. Interrupted-download recovery passes for both
+  legacy root modes. No-downgrade and preparation-failure cases currently fail
+  and remain under investigation; green job status alone is not acceptance.
+- Populated provider history, active work/queued messages and the remaining
+  exact-package failure boundaries are still pending. No beta is published;
+  stable npm `1.0.8` and `latest` remain unchanged. Linux rollback execution is
+  pending, and its reports explicitly cannot authorize publication.
+
 ## 2026-09-29 — Sign beta.2 and extend isolated recovery observations
 
 - Freeze runtime/build source at

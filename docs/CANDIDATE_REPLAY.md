@@ -75,9 +75,10 @@ candidate_tag=candidate-replay-v1.0.8-beta.2
 candidate_receipt_sha256=<independently reviewed candidate.json SHA-256>
 candidate_bundle_sha256=<independently reviewed candidate-bundle.zip SHA-256>
 npm_native_validation=false
+candidate_server_rollback=false
 ```
 
-Leave all npm-only artifact inputs empty. The two native modes are mutually
+Leave all npm-only artifact inputs empty. The three native modes are mutually
 exclusive; ordinary source CI does neither installation journey. Existing npm-only
 validation remains available separately and does not establish desktop acceptance.
 Do not invoke the hosted-runner trust/process helpers on a developer machine or
@@ -116,9 +117,46 @@ source, truthful harness source, and stable fixture source remain distinct. A
 passing unit suite only validates the harness contract; this native case is not
 accepted until the exact signed-package job runs and its observations are reviewed.
 
+## Separate Linux server rollback rehearsal
+
+`candidate_server_rollback=true`, with `candidate_replay=false` and
+`npm_native_validation=false`, selects only the server rollback jobs (root modes
+`0755` and `0750`) plus source checks. Supply the same independently reviewed
+`candidate_tag`, `candidate_receipt_sha256` and `candidate_bundle_sha256` above.
+This default-off mode has its own concurrency group; it does not rerun the macOS
+desktop matrix.
+
+The `candidate-server-linux` execution scope requires the real hosted Linux
+`candidate-server-rollback-linux` job. It uses the existing matched macOS
+candidate seal as immutable **server** provenance, without relabeling that seal
+or accepting a Linux desktop. Original signer artifact, signatures, source tree,
+package bytes and harness ancestry are checked unchanged. No new harness paths
+are allowlisted. The listener exposes only signed-server discovery and archive
+routes; desktop assets are hash-verified as sealed inputs but never served or run.
+
+After installing the genuine older signed Beta, the existing kernel-pidfd
+watcher targets only a newly started exact candidate worker under its verified
+`candidate-starting` transaction. It never selects the incumbent or another
+service by process name. The real installer must roll back; the harness then
+requires restored authenticated component versions, native service PIDs, unit
+files, runtime link, identity/token/session snapshot, released execution
+maintenance and cleared activation journals. Only after the watcher stops does
+it retry the same accepted version and verify both installed components plus
+runtime byte/mode parity. If the health-fault window is missed, the job fails
+without claiming rollback.
+
+This harness has unit validation but **no native Linux execution result yet**.
+Its reports retain `publicationEligible: false`, `releaseAcceptance: false` and
+`desktopAcceptance: false`. Team Hub fence consumption, authenticated provider
+history, power-loss/reboot recovery and macOS rollback are not established by
+this server-only journey.
+
 ## Deliberately uncovered
 
 This rehearsal does not establish authenticated provider-history preservation, busy or
-queued real work, logout/reboot, Linux candidate-health rollback, Windows native
+queued real work, logout/reboot, Windows native
 update acceptance, or real public-feed/registry delivery. Inspect the structured
 reports for blocked checks; scoped observations cannot authorize publication.
+The macOS matrix does not establish Linux candidate-health rollback; only an
+actual successful separately reviewed Linux rollback run can provide that
+scoped evidence.

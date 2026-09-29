@@ -26,6 +26,10 @@ on:
         description: Rehearse pinned macOS beta and signed legacy server on disposable hosts; not production acceptance
         type: boolean
         default: false
+      candidate_server_rollback:
+        description: Rehearse only exact signed-server rollback/retry on disposable Linux; no desktop or production acceptance
+        type: boolean
+        default: false
       candidate_tag:
         description: Exact unpublished candidate-replay-vX.Y.Z-beta.N tag
         type: string
@@ -43,8 +47,8 @@ permissions:
   contents: read
 
 concurrency:
-  group: verify-source-${{ github.ref }}${{ github.event_name == 'workflow_dispatch' && inputs.npm_native_validation && '-npm-native' || '' }}${{ github.event_name == 'workflow_dispatch' && inputs.candidate_replay && '-candidate' || '' }}
-  cancel-in-progress: ${{ !(github.event_name == 'workflow_dispatch' && (inputs.npm_native_validation || inputs.candidate_replay)) }}
+  group: verify-source-${{ github.ref }}${{ github.event_name == 'workflow_dispatch' && inputs.npm_native_validation && '-npm-native' || '' }}${{ github.event_name == 'workflow_dispatch' && inputs.candidate_replay && '-candidate' || '' }}${{ github.event_name == 'workflow_dispatch' && inputs.candidate_server_rollback && '-server-rollback-linux' || '' }}
+  cancel-in-progress: ${{ !(github.event_name == 'workflow_dispatch' && (inputs.npm_native_validation || inputs.candidate_replay || inputs.candidate_server_rollback)) }}
 
 jobs:
 
@@ -59,6 +63,7 @@ jobs:
         env:
           NPM_NATIVE_VALIDATION: ${{ inputs.npm_native_validation }}
           CANDIDATE_REPLAY: ${{ inputs.candidate_replay }}
+          CANDIDATE_SERVER_ROLLBACK: ${{ inputs.candidate_server_rollback }}
           NPM_CANDIDATE_TAG: ${{ inputs.npm_candidate_tag }}
           NPM_MANIFEST_SHA256: ${{ inputs.npm_manifest_sha256 }}
           NPM_SOURCE_SHA: ${{ inputs.npm_source_sha }}
@@ -69,7 +74,9 @@ jobs:
         run: |
           [[ "$NPM_NATIVE_VALIDATION" == true || "$NPM_NATIVE_VALIDATION" == false ]] || exit 1
           [[ "$CANDIDATE_REPLAY" == true || "$CANDIDATE_REPLAY" == false ]] || exit 1
-          if [[ "$CANDIDATE_REPLAY" == true ]]; then
+          [[ "$CANDIDATE_SERVER_ROLLBACK" == true || "$CANDIDATE_SERVER_ROLLBACK" == false ]] || exit 1
+          [[ "$CANDIDATE_REPLAY" != true || "$CANDIDATE_SERVER_ROLLBACK" != true ]] || exit 1
+          if [[ "$CANDIDATE_REPLAY" == true || "$CANDIDATE_SERVER_ROLLBACK" == true ]]; then
             test "$NPM_NATIVE_VALIDATION" = false
             test -z "$NPM_CANDIDATE_TAG"
             test -z "$NPM_MANIFEST_SHA256"
@@ -95,6 +102,7 @@ jobs:
           fi
           test "$NPM_NATIVE_VALIDATION" = true
           test "$CANDIDATE_REPLAY" = false
+          test "$CANDIDATE_SERVER_ROLLBACK" = false
           test -z "$CANDIDATE_TAG"
           test -z "$CANDIDATE_RECEIPT_SHA256"
           test -z "$CANDIDATE_BUNDLE_SHA256"
@@ -287,6 +295,186 @@ jobs:
           retention-days: 14
 
 # Npm native validation installs only on disposable hosted runners.
+
+  candidate-server-rollback-linux:
+    # Server-only exact-package rehearsal. It cannot validate a desktop app or
+    # authorize publication, and does not broaden the macOS candidate guard.
+    if: github.event_name == 'workflow_dispatch' && inputs.candidate_server_rollback && !inputs.candidate_replay && !inputs.npm_native_validation && github.repository == 'ZhengyiLuo/AgentsDock' && startsWith(github.ref, 'refs/heads/release/')
+    needs: [release-tooling, electron, mobile-source]
+    strategy:
+      fail-fast: false
+      matrix:
+        legacy_mode: ['0755', '0750']
+    runs-on: ubuntu-24.04
+    timeout-minutes: 65
+    permissions:
+      contents: write # Required only to read the unpublished pinned draft.
+      actions: read
+    defaults:
+      run:
+        shell: bash
+    env:
+      RECEIPT_SHA256: ${{ inputs.candidate_receipt_sha256 }}
+      LEGACY_MODE: ${{ matrix.legacy_mode }}
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        with:
+          node-version: 24
+          package-manager-cache: false
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: false
+      - name: Check real disposable Linux service and kernel prerequisites
+        run: |
+          uv python install 3.13
+          sudo apt-get update
+          sudo apt-get install -y tmux
+          sudo loginctl enable-linger "$(id -un)"
+          systemctl --user show-environment > /dev/null
+          python3 -c 'import os, signal, sys; assert sys.platform == "linux" and os.getuid() != 0 and hasattr(os, "pidfd_open") and hasattr(signal, "pidfd_send_signal")'
+      - uses: ./.github/actions/product-candidate-inputs
+        with:
+          execution_scope: candidate-server-linux
+          candidate_tag: ${{ inputs.candidate_tag }}
+          receipt_sha256: ${{ inputs.candidate_receipt_sha256 }}
+          bundle_sha256: ${{ inputs.candidate_bundle_sha256 }}
+          github_token: ${{ github.token }}
+      - name: Install genuine signed older Beta on the real disposable account
+        run: |
+          umask 022
+          python3 scripts/product_server_acceptance.py bootstrap --candidate-server-linux --kind legacy \
+            --receipt "$RUNNER_TEMP/candidate-inputs/candidate.json" --receipt-sha256 "$RECEIPT_SHA256" \
+            --bundle "$RUNNER_TEMP/candidate-inputs/payload/server" --work "$RUNNER_TEMP/agentsdock-acceptance-linux-rollback" \
+            --fixture "$RUNNER_TEMP/agentsdock-acceptance-linux-rollback/server.json" \
+            --evidence "$RUNNER_TEMP/agentsdock-acceptance-linux-rollback/bootstrap.json" \
+            --baseline-archive "$RUNNER_TEMP/candidate-inputs/baseline-server/agents-server-1.0.7-beta.21.tar.gz" \
+            --baseline-manifest "$RUNNER_TEMP/candidate-inputs/baseline-server/agents-server-manifest.json" \
+            --baseline-signature "$RUNNER_TEMP/candidate-inputs/baseline-server/agents-server-manifest.sig" --legacy-root-mode "$LEGACY_MODE"
+      - name: Route only exact verified server artifacts on the disposable VM
+        run: |
+          python3 scripts/product_acceptance_network.py setup --candidate-server-linux \
+            --receipt "$RUNNER_TEMP/candidate-inputs/candidate.json" --receipt-sha256 "$RECEIPT_SHA256" \
+            --work "$RUNNER_TEMP/agentsdock-acceptance-network"
+          set -a
+          source "$RUNNER_TEMP/agentsdock-acceptance-network/trust.env"
+          set +a
+          systemctl --user set-environment SSL_CERT_FILE="$SSL_CERT_FILE" NODE_EXTRA_CA_CERTS="$NODE_EXTRA_CA_CERTS"
+          REPLAY_TMUX_SESSION="agentsdock-replay-trust-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
+          env -i HOME="$HOME" USER="$USER" LOGNAME="$LOGNAME" PATH="$PATH" SHELL=/bin/bash \
+            tmux new-session -d -s "$REPLAY_TMUX_SESSION" -P -F '#{session_id}' 'exec /bin/sleep 5400' \
+            > "$RUNNER_TEMP/agentsdock-acceptance-network/tmux-session-id"
+          tmux set-environment -g SSL_CERT_FILE "$SSL_CERT_FILE"
+          tmux set-environment -g NODE_EXTRA_CA_CERTS "$NODE_EXTRA_CA_CERTS"
+          python3 scripts/product_server_acceptance.py service --candidate-server-linux --kind legacy --action restart \
+            --receipt "$RUNNER_TEMP/candidate-inputs/candidate.json" --receipt-sha256 "$RECEIPT_SHA256" \
+            --bundle "$RUNNER_TEMP/candidate-inputs/payload/server" --work "$RUNNER_TEMP/agentsdock-acceptance-linux-rollback" \
+            --fixture "$RUNNER_TEMP/agentsdock-acceptance-linux-rollback/server.json" \
+            --evidence "$RUNNER_TEMP/agentsdock-acceptance-linux-rollback/restarted.json"
+          sudo env GITHUB_ACTIONS="$GITHUB_ACTIONS" RUNNER_ENVIRONMENT="$RUNNER_ENVIRONMENT" RUNNER_OS="$RUNNER_OS" \
+            GITHUB_REPOSITORY="$GITHUB_REPOSITORY" GITHUB_WORKFLOW_REF="$GITHUB_WORKFLOW_REF" \
+            GITHUB_EVENT_NAME="$GITHUB_EVENT_NAME" GITHUB_RUN_ID="$GITHUB_RUN_ID" GITHUB_RUN_ATTEMPT="$GITHUB_RUN_ATTEMPT" \
+            GITHUB_SHA="$GITHUB_SHA" GITHUB_JOB="$GITHUB_JOB" RUNNER_TEMP="$RUNNER_TEMP" \
+            "$(command -v node)" scripts/product-release-replay.mjs serve --scope candidate-server-linux \
+            --receipt "$RUNNER_TEMP/candidate-inputs/candidate.json" --receipt-sha256 "$RECEIPT_SHA256" \
+            --server-assets "$RUNNER_TEMP/candidate-inputs/payload/server" --desktop-assets "$RUNNER_TEMP/candidate-inputs/payload/desktop" \
+            --certificate "$RUNNER_TEMP/agentsdock-acceptance-network/leaf.pem" \
+            --private-key "$RUNNER_TEMP/agentsdock-acceptance-network/leaf.key" \
+            --pid-file "$RUNNER_TEMP/agentsdock-acceptance-network/replay.pid" \
+            > "$RUNNER_TEMP/agentsdock-acceptance-network/replay.log" 2>&1 &
+          for attempt in {1..20}; do
+            if node --input-type=module - "$RUNNER_TEMP/agentsdock-acceptance-network" <<'NODE'
+          import { join } from 'node:path'
+          import { assertReplayReadiness, probeReplayOrigin } from './scripts/product-release-replay.mjs'
+          const work = process.argv[2]
+          try {
+            const nodeProbe = await probeReplayOrigin({caPath: join(work, 'ca.pem'), expectedLeafPath: join(work, 'leaf.pem'), serverOnly: true})
+            await assertReplayReadiness({logPath: join(work, 'replay.log'), pidPath: join(work, 'replay.pid'), nodeProbe})
+          } catch { process.exitCode = 1 }
+          NODE
+            then exit 0; fi
+            sleep 1
+          done
+          echo 'Server-only replay failed readiness; no candidate fault was armed.' >&2
+          exit 1
+      - name: Fault only the exact candidate worker, observe real rollback, retry the same bytes
+        run: |
+          set -a
+          source "$RUNNER_TEMP/agentsdock-acceptance-network/trust.env"
+          set +a
+          python3 scripts/product_server_acceptance.py rollback-retry --candidate-server-linux --kind legacy \
+            --receipt "$RUNNER_TEMP/candidate-inputs/candidate.json" --receipt-sha256 "$RECEIPT_SHA256" \
+            --bundle "$RUNNER_TEMP/candidate-inputs/payload/server" --work "$RUNNER_TEMP/agentsdock-acceptance-linux-rollback" \
+            --fixture "$RUNNER_TEMP/agentsdock-acceptance-linux-rollback/server.json" \
+            --evidence "$RUNNER_TEMP/agentsdock-acceptance-linux-rollback/rollback.json"
+      - name: Restore owned replay routing and trust
+        if: always()
+        run: |
+          REPLAY_CLEANUP_OK=true
+          systemctl --user unset-environment SSL_CERT_FILE NODE_EXTRA_CA_CERTS || REPLAY_CLEANUP_OK=false
+          if tmux show-environment -g > /dev/null 2>&1; then
+            tmux set-environment -gu SSL_CERT_FILE || REPLAY_CLEANUP_OK=false
+            tmux set-environment -gu NODE_EXTRA_CA_CERTS || REPLAY_CLEANUP_OK=false
+          fi
+          if [[ -s "$RUNNER_TEMP/agentsdock-acceptance-network/tmux-session-id" ]]; then
+            (
+              REPLAY_TMUX_ID="$(cat "$RUNNER_TEMP/agentsdock-acceptance-network/tmux-session-id")" || exit 1
+              [[ "$REPLAY_TMUX_ID" =~ ^\$[0-9]+$ ]] || exit 1
+              if tmux has-session -t "$REPLAY_TMUX_ID" 2>/dev/null; then
+                [[ "$(tmux display-message -p -t "$REPLAY_TMUX_ID" '#{session_name}')" == "agentsdock-replay-trust-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT" ]] || exit 1
+                tmux kill-session -t "$REPLAY_TMUX_ID" || exit 1
+              fi
+            ) || REPLAY_CLEANUP_OK=false
+          fi
+          if [[ -f "$RUNNER_TEMP/agentsdock-acceptance-network/replay.pid" ]]; then
+            (
+              REPLAY_PID="$(cat "$RUNNER_TEMP/agentsdock-acceptance-network/replay.pid")" || exit 1
+              [[ "$REPLAY_PID" =~ ^[1-9][0-9]*$ ]] || exit 1
+              if ps -p "$REPLAY_PID" -o pid= > /dev/null; then
+                ps -p "$REPLAY_PID" -o command= | grep -F 'scripts/product-release-replay.mjs serve' | grep -F "$RUNNER_TEMP/agentsdock-acceptance-network/leaf.key" > /dev/null || exit 1
+                kill -TERM "$REPLAY_PID" || exit 1
+              fi
+            ) || REPLAY_CLEANUP_OK=false
+          fi
+          if [[ -f "$RUNNER_TEMP/agentsdock-acceptance-network/owner.json" ]]; then
+            python3 scripts/product_acceptance_network.py teardown --candidate-server-linux --work "$RUNNER_TEMP/agentsdock-acceptance-network" || REPLAY_CLEANUP_OK=false
+          fi
+          test "$REPLAY_CLEANUP_OK" = true
+      - name: Collect bounded non-publishing server-only observations
+        if: always()
+        run: |
+          node --input-type=module - "$RUNNER_TEMP/agentsdock-acceptance-linux-rollback" "$RUNNER_TEMP/linux-rollback-public" <<'NODE'
+          import { constants, openSync, fstatSync, readSync, closeSync, mkdirSync, writeFileSync } from 'node:fs'
+          import { join } from 'node:path'
+          const [source, destination] = process.argv.slice(2)
+          mkdirSync(destination, {mode: 0o700})
+          for (const name of ['bootstrap.json', 'rollback.json']) {
+            let fd
+            try { fd = openSync(join(source, name), constants.O_RDONLY | constants.O_NOFOLLOW) }
+            catch (error) { if (error.code === 'ENOENT') continue; throw error }
+            try {
+              const stat = fstatSync(fd)
+              if (!stat.isFile() || stat.uid !== process.getuid() || stat.size > 512 * 1024) throw new Error('Invalid evidence')
+              const buffer = Buffer.alloc(512 * 1024 + 1), count = readSync(fd, buffer, 0, buffer.length, 0)
+              if (count > 512 * 1024 || count !== stat.size) throw new Error('Unbounded observations')
+              const bytes = buffer.subarray(0, count), report = JSON.parse(bytes)
+              if (/"(?:token|password|authorization|privateKey|cookie)"\s*:/i.test(bytes.toString())) throw new Error('Private evidence')
+              if (report.kind !== 'candidate-server-observations' || report.executionScope !== 'candidate-server-linux'
+                || report.publicationEligible !== false || report.releaseAcceptance !== false || report.desktopAcceptance !== false) throw new Error('Incorrect scope')
+              writeFileSync(join(destination, name), bytes, {flag: 'wx', mode: 0o600})
+            } finally { closeSync(fd) }
+          }
+          NODE
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        if: always()
+        with:
+          name: candidate-server-linux-rollback-${{ matrix.legacy_mode }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/linux-rollback-public/*.json
+          if-no-files-found: warn
+          retention-days: 7
 
   candidate-native:
     # This existing registered workflow may be explicitly dispatched on a reviewed

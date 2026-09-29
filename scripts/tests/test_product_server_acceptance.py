@@ -102,6 +102,91 @@ class NativeServerAcceptanceUnitTests(unittest.TestCase):
             MOD.inspect_receipt(args)
         command.assert_not_called()
 
+    def test_linux_server_scope_is_explicit_truthful_and_does_not_admit_mac_desktop_scope(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary).resolve()
+            env = {**self.environment(root), "RUNNER_OS": "Linux", "GITHUB_JOB": "candidate-server-rollback-linux",
+                   "GITHUB_WORKFLOW_REF": "ZhengyiLuo/AgentsDock/.github/workflows/ci.yml@refs/heads/release/native-test"}
+            receipt = {"schema": 1, "kind": "agentsdock-macos-candidate", "scope": "darwin-app-server",
+                       "publicationEligible": False, "sourceSha": "a" * 40, "sourceRef": "release/native-test"}
+            work = root / "agentsdock-acceptance-linux"
+            check = lambda **kwargs: MOD.guard(receipt, work, environment=env, uid=501, **kwargs)
+            self.assertEqual(check(system="Linux", candidate_server_linux=True), root / "account")
+            for options in ({"system": "Linux", "candidate": True}, {"system": "Darwin", "candidate_server_linux": True},
+                            {"system": "Linux", "candidate": True, "candidate_server_linux": True}, {"system": "Linux"}):
+                with self.subTest(options=options), self.assertRaises(RuntimeError):
+                    check(**options)
+            for change in ({"GITHUB_JOB": "release-tooling"}, {"RUNNER_OS": "macOS"}, {"RUNNER_ENVIRONMENT": "self-hosted"},
+                           {"GITHUB_EVENT_NAME": "pull_request"}, {"AGENTS_SERVER_STATE_DIR": "/unrelated"}):
+                with self.subTest(change=change), self.assertRaises(RuntimeError):
+                    MOD.guard(receipt, work, environment={**env, **change}, uid=501, system="Linux", candidate_server_linux=True)
+
+    def test_linux_server_checkout_proof_must_explicitly_exclude_desktop_acceptance(self):
+        args = argparse.Namespace(receipt=Path("/fixture/candidate.json"), receipt_sha256="c" * 64,
+                                  candidate=False, candidate_server_linux=True, bundle=Path("/fixture/server"))
+        receipt = {"sourceSha": "a" * 40, "sourceRef": "release/native-test"}
+        proof = {**receipt, "harnessSourceSha": "b" * 40, "publicationEligible": False,
+                 "executionScope": "candidate-server-linux", "desktopAcceptance": False}
+        result = subprocess.CompletedProcess([], 0, json.dumps(proof).encode(), b"")
+        with patch.dict(os.environ, {"GITHUB_SHA": "b" * 40}), patch.object(MOD, "command", return_value=result) as command:
+            self.assertEqual(MOD.validate_candidate_checkout(args, receipt), "b" * 40)
+            self.assertEqual(command.call_args.args[0][2], "validate-server-runner")
+            MOD.inspect_receipt(args)
+            self.assertEqual(command.call_args.args[0][2], "inspect")
+        for change in ({"desktopAcceptance": True}, {"executionScope": "candidate"}, {"publicationEligible": True}):
+            result.stdout = json.dumps({**proof, **change}).encode()
+            with patch.dict(os.environ, {"GITHUB_SHA": "b" * 40}), patch.object(MOD, "command", return_value=result), self.assertRaises(RuntimeError):
+                MOD.validate_candidate_checkout(args, receipt)
+
+    def test_linux_server_scope_refuses_unrelated_operations_before_installer_or_service(self):
+        raw = json.dumps({"sourceSha": "a" * 40, "sourceRef": "release/native-test"}).encode()
+        for operation, kind, staging in (("bootstrap", "fresh", False), ("verify", "legacy", False),
+                                         ("staging-failure-retry", "legacy", True), ("failure-retry", "legacy", False)):
+            args = argparse.Namespace(receipt=Path("/fixture/candidate.json"), receipt_sha256=MOD.sha(raw),
+                work=Path("/runner/agentsdock-acceptance-linux"), candidate=False, candidate_server_linux=True,
+                operation=operation, kind=kind, staging_failure_fixture=staging)
+            with patch.object(MOD, "parser") as parser, patch.object(MOD, "read_regular", return_value=raw), \
+                    patch.object(MOD, "guard", return_value=Path("/runner/account")), \
+                    patch.object(MOD, "validate_candidate_checkout") as checkout, patch.object(MOD, "bootstrap") as bootstrap, \
+                    patch.object(MOD, "service") as service, self.assertRaises(RuntimeError):
+                parser.return_value.parse_args.return_value = args
+                MOD.main()
+            checkout.assert_not_called()
+            bootstrap.assert_not_called()
+            service.assert_not_called()
+
+    def test_rollback_native_state_requires_both_components_journal_cleanup_and_unheld_execution(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary).resolve()
+            install = root / "install"
+            release = install / "releases/1.0.7-beta.21"
+            release.mkdir(parents=True)
+            (install / "current").symlink_to(release)
+            files = [root / "agents-server.service", root / "agents-server-gateway.service"]
+            for item in files:
+                item.write_text("native unit fixture")
+            fixture = {"installRoot": str(install)}
+            version = "1.0.7-beta.21"
+            health = {"server_instance_id": "worker-instance", "gateway": {"protocol": 1, "version": version, "pid": 123, "instance_id": "gateway"},
+                      "execution_service": {"protocol": 1, "version": version, "pid": 456, "instance_id": "worker", "maintenance_held": False}}
+            def query(args):
+                return subprocess.CompletedProcess(args, 0, b"123\n" if "agents-server-gateway.service" in args else b"456\n", b"")
+            with patch.object(MOD, "health", return_value=health), patch.object(MOD, "registered_services", return_value=files), \
+                    patch.object(MOD, "command", side_effect=query):
+                observed = MOD.rollback_native_state(fixture, version)
+                self.assertEqual(observed["current"], str(release))
+                health["execution_service"]["maintenance_held"] = True
+                with self.assertRaisesRegex(RuntimeError, "maintenance"):
+                    MOD.rollback_native_state(fixture, version)
+                health["execution_service"]["maintenance_held"] = False
+                health["gateway"]["version"] = "1.0.3"
+                with self.assertRaisesRegex(RuntimeError, "Both exact-version"):
+                    MOD.rollback_native_state(fixture, version)
+                health["gateway"]["version"] = version
+                (install / ".activation-transaction").mkdir()
+                with self.assertRaisesRegex(RuntimeError, "existing activation"):
+                    MOD.rollback_native_state(fixture, version)
+
     def test_candidate_checkout_proof_preserves_runtime_source_and_truthful_harness_pin(self):
         args = argparse.Namespace(receipt=Path("/fixture/candidate.json"), receipt_sha256="c" * 64)
         receipt = {"sourceSha": "a" * 40, "sourceRef": "release/native-test"}

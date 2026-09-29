@@ -14,7 +14,8 @@ import { fileURLToPath, pathToFileURL } from 'node:url'
 import { pipeline } from 'node:stream/promises'
 import { expectedAssets, verifyAssets } from './direct-release-mirror.mjs'
 import { validatePreparationRun, verifyReceiptBundle } from './product-release.mjs'
-import { assertCandidateCheckout, assertCandidateRunner, candidateAssets, inspectCandidate } from './product-candidate-receipt.mjs'
+import { assertCandidateCheckout, assertCandidateRunner, assertCandidateServerCheckout, assertCandidateServerRunner,
+  candidateAssets, inspectCandidate } from './product-candidate-receipt.mjs'
 
 const HOSTS = ['github.com', 'api.github.com', 'registry.npmjs.org']
 const DESKTOP_REPOSITORIES = ['ZhengyiLuo/AgentsDock', 'ZhengyiLuo/AgentsDock-Releases']
@@ -147,11 +148,12 @@ async function ownedProbeFile(path) {
 // origin: real DNS must yield loopback first, TLS must authorize the fixed public
 // hostname using the exact private test CA, and the served leaf is pinned too.
 // Tests inject inert DNS/transport observations, not native runtime/CI hooks.
-export async function probeReplayOrigin({ caPath, expectedLeafPath }, { lookup = dnsLookup, request = httpsRequest } = {}) {
+export async function probeReplayOrigin({ caPath, expectedLeafPath, serverOnly = false }, { lookup = dnsLookup, request = httpsRequest } = {}) {
   const failure = code => ({ kind: 'replay-origin-probe', verified: false,
     code: ORIGIN_PROBE_CODES.has(code) && code !== 'VERIFIED' ? code : 'PROBE_FAILED' })
   let caBytes, leaf, address
   try {
+    need(typeof serverOnly === 'boolean', 'Probe scope must be explicit.')
     need([caPath, expectedLeafPath].every(path => typeof path === 'string' && isAbsolute(path)
       && !/[\r\n\0]/.test(path)) && dirname(caPath) === dirname(expectedLeafPath), 'Invalid probe input paths.')
     const work = await lstat(dirname(caPath))
@@ -185,7 +187,7 @@ export async function probeReplayOrigin({ caPath, expectedLeafPath }, { lookup =
     }
     const timer = setTimeout(() => finish(failure('TIMEOUT')), Math.max(1, deadline - Date.now()))
     try {
-      req = request('https://github.com/ZhengyiLuo/AgentsDock/releases.atom', {
+      req = request(`https://github.com/ZhengyiLuo/${serverOnly ? 'AgentsServer' : 'AgentsDock'}/releases.atom`, {
         ca: caBytes, rejectUnauthorized: true, checkServerIdentity, servername: 'github.com', family: 4,
         autoSelectFamily: false, agent: false, headers: { Accept: 'application/atom+xml' },
         lookup: (host, _options, done) => host === 'github.com'
@@ -369,9 +371,11 @@ export async function createProductReplay({ receiptPath, acceptedReceiptSha256, 
 }
 
 export async function createCandidateReplay(options) { return createReplay(options, true) }
+export async function createCandidateServerReplay(options) { return createReplay(options, true, true) }
 
 async function createReplay({ receiptPath, acceptedReceiptSha256, preparationRunPath,
-  serverDirectory, desktopDirectory, baselineDesktopDirectory, baselineVersion, publicKey }, candidate) {
+  serverDirectory, desktopDirectory, baselineDesktopDirectory, baselineVersion, publicKey }, candidate, serverOnly = false) {
+  need(!serverOnly || (!baselineDesktopDirectory && !baselineVersion), 'Server-only replay cannot select or serve a desktop baseline.')
   const bytes = await regular(receiptPath)
   need(/^[a-f0-9]{64}$/.test(acceptedReceiptSha256) && digest(bytes) === acceptedReceiptSha256,
     'Replay receipt differs from the independently accepted SHA-256.')
@@ -434,7 +438,7 @@ async function createReplay({ receiptPath, acceptedReceiptSha256, preparationRun
     draft: false, prerelease: receipt.track === 'beta', html_url: `https://github.com/${repository}/releases/tag/v${receipt.version}`,
     // Discovery is explicitly synthetic. It is not evidence of public delivery.
     body: 'Disposable exact-artifact replay; not a published release.' })
-  for (const repository of [...DESKTOP_REPOSITORIES, SERVER_REPOSITORY]) {
+  for (const repository of [...(serverOnly ? [] : DESKTOP_REPOSITORIES), SERVER_REPOSITORY]) {
     const release = releaseDocument(repository)
     const root = `https://github.com/${repository}/releases`
     const baseline = baselineSums && DESKTOP_REPOSITORIES.includes(repository)
@@ -456,7 +460,7 @@ async function createReplay({ receiptPath, acceptedReceiptSha256, preparationRun
     }
     if (baseline) generated(`https://api.github.com/repos/${repository}/releases/tags/v${baselineVersion}`, JSON.stringify(baseline), 'application/json')
   }
-  for (const repository of DESKTOP_REPOSITORIES) {
+  for (const repository of serverOnly ? [] : DESKTOP_REPOSITORIES) {
     for (const name of candidate ? candidateAssets(receipt.version, receipt.track) : expectedAssets(receipt.version, receipt.track, true)) {
       const path = join(desktopDirectory, name), sha256 = name === 'SHA256SUMS' ? receipt.desktopManifestSha256 : sums.get(name)
       await asset(`https://github.com/${repository}/releases/download/v${receipt.version}/${name}`, path, sha256)
@@ -481,7 +485,8 @@ async function createReplay({ receiptPath, acceptedReceiptSha256, preparationRun
 
   return Object.freeze({
     identity: Object.freeze({ version: receipt.version, track: receipt.track, sourceSha: receipt.sourceSha,
-      ...(candidate ? { kind: 'candidate', publicationEligible: false, sourceRef: receipt.sourceRef } : { prepareRunId: receipt.prepareRunId }),
+      ...(candidate ? { kind: serverOnly ? 'candidate-server-linux' : 'candidate', publicationEligible: false, sourceRef: receipt.sourceRef,
+        ...(serverOnly ? { desktopAcceptance: false } : {}) } : { prepareRunId: receipt.prepareRunId }),
       releaseReceiptSha256: acceptedReceiptSha256, discovery: 'synthetic-replay-not-publication' }),
     inventory: () => [...routes].map(([url, entry]) => ({ url, size: entry.size, sha256: entry.sha256, generated: entry.generated })),
     async respond({ method, host, path, headers = {} }) {
@@ -536,7 +541,8 @@ async function insideRunner(path) {
 export async function serveProductReplay(replay, { certificatePath, privateKeyPath, port = 443,
   faultControlPath, faultObservedPath, pidPath, diagnostics }) {
   diagnostics?.stage('checkout-verification')
-  if (replay.identity.kind === 'candidate') assertCandidateCheckout(replay.identity)
+  if (replay.identity.kind === 'candidate-server-linux') assertCandidateServerCheckout(replay.identity)
+  else if (replay.identity.kind === 'candidate') assertCandidateCheckout(replay.identity)
   else {
     assertReplayRunner()
     need(replay.identity.sourceSha === process.env.GITHUB_SHA, 'Replay must run at the exact accepted product source.')
@@ -646,8 +652,10 @@ export function parseReplayArguments(argv) {
     need(allowed.includes(args[i]) && args[i + 1] && options[args[i]] === undefined, 'Unknown, incomplete or duplicate replay argument.')
     options[args[i]] = args[i + 1]
   }
-  need(required.filter(name => !(options['--scope'] === 'candidate' && name === '--prepare-run')).every(name => options[name]), 'Missing replay artifact inputs.')
-  need(options['--scope'] === undefined || options['--scope'] === 'candidate', 'Unknown replay scope.')
+  need(required.filter(name => !(['candidate', 'candidate-server-linux'].includes(options['--scope']) && name === '--prepare-run')).every(name => options[name]), 'Missing replay artifact inputs.')
+  need(options['--scope'] === undefined || ['candidate', 'candidate-server-linux'].includes(options['--scope']), 'Unknown replay scope.')
+  need(options['--scope'] !== 'candidate-server-linux' || (!options['--baseline-desktop'] && !options['--baseline-version']
+    && !options['--fault-control'] && !options['--fault-observed']), 'Server-only replay excludes desktop baseline and transfer faults.')
   need(Boolean(options['--baseline-desktop']) === Boolean(options['--baseline-version']), 'Baseline directory and version must be supplied together.')
   need(Boolean(options['--fault-control']) === Boolean(options['--fault-observed']), 'Both one-shot fault paths are required.')
   if (operation === 'serve') need(options['--certificate'] && options['--private-key'], 'Ephemeral replay certificate and private key are required.')
@@ -658,14 +666,17 @@ async function main(diagnostics) {
   const { operation, options } = parseReplayArguments(process.argv.slice(2))
   if (operation === 'serve') {
     diagnostics?.stage('runner-guard')
-    if (options['--scope'] === 'candidate') assertCandidateRunner()
+    if (options['--scope'] === 'candidate-server-linux') assertCandidateServerRunner()
+    else if (options['--scope'] === 'candidate') assertCandidateRunner()
     else assertReplayRunner()
     diagnostics?.stage('input-containment')
     for (const name of ['--receipt', '--prepare-run', '--server-assets', '--desktop-assets']) if (options[name]) await insideRunner(options[name])
     if (options['--baseline-desktop']) await insideRunner(options['--baseline-desktop'])
   }
   diagnostics?.stage('artifact-verification')
-  const replay = await (options['--scope'] === 'candidate' ? createCandidateReplay : createProductReplay)({ receiptPath: options['--receipt'], acceptedReceiptSha256: options['--receipt-sha256'],
+  const factory = options['--scope'] === 'candidate-server-linux' ? createCandidateServerReplay
+    : options['--scope'] === 'candidate' ? createCandidateReplay : createProductReplay
+  const replay = await factory({ receiptPath: options['--receipt'], acceptedReceiptSha256: options['--receipt-sha256'],
     preparationRunPath: options['--prepare-run'], serverDirectory: options['--server-assets'], desktopDirectory: options['--desktop-assets'],
     baselineDesktopDirectory: options['--baseline-desktop'], baselineVersion: options['--baseline-version'] })
   if (operation === 'inspect') process.stdout.write(`${JSON.stringify({ ...replay.identity, routes: replay.inventory() }, null, 2)}\n`)

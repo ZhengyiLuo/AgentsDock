@@ -9,7 +9,7 @@ import { tmpdir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 import { test } from 'node:test'
 import { expectedAssets } from '../direct-release-mirror.mjs'
-import { assertReplayReadiness, assertReplayRunner, consumeReplayFault, createCandidateReplay, createProductReplay, createReplayStartupDiagnostics,
+import { assertReplayReadiness, assertReplayRunner, consumeReplayFault, createCandidateReplay, createCandidateServerReplay, createProductReplay, createReplayStartupDiagnostics,
   finalizeReplayListener, parseReplayArguments, parseReplayOriginProbe, parseReplayProbeDiagnostics, parseReplayRange,
   parseReplayStartupDiagnostics, probeReplayOrigin, readReplayMetadata, serveProductReplay } from '../product-release-replay.mjs'
 import { assertCandidateRunner, candidateAssets, inspectCandidate, validateCandidateReceipt } from '../product-candidate-receipt.mjs'
@@ -137,6 +137,29 @@ test('candidate verifies original signer transport and every macOS artifact hash
   await inspect()
   writeFileSync(join(f.root, 'signer-artifact.zip'), 'different')
   await assert.rejects(inspect, /signing artifact/)
+})
+
+test('server-only Linux replay binds original matched artifact bytes but cannot serve any desktop route', async t => {
+  const f = scopedFixture(t), replay = await createCandidateServerReplay(f.options)
+  assert.equal(replay.identity.kind, 'candidate-server-linux')
+  assert.equal(replay.identity.publicationEligible, false)
+  assert.equal(replay.identity.desktopAcceptance, false)
+  assert(replay.inventory().some(item => item.url.endsWith('.tar.gz')))
+  assert(replay.inventory().some(item => item.url.endsWith('.tgz')))
+  assert(replay.inventory().every(item => !item.url.includes('ZhengyiLuo/AgentsDock')))
+  assert.equal((await replay.respond({method: 'GET', host: 'github.com', path: '/ZhengyiLuo/AgentsDock/releases.atom'})).status, 404)
+  await assert.rejects(() => createCandidateServerReplay({...f.options, baselineVersion: '1.0.6', baselineDesktopDirectory: '/fixture'}), /cannot select/)
+  writeFileSync(join(f.root, 'server-import.json'), 'changed')
+  await assert.rejects(() => createCandidateServerReplay(f.options), /import report/)
+})
+
+test('server-only replay parser refuses desktop baseline and unrelated transfer fault scopes', () => {
+  const args = ['inspect', '--scope', 'candidate-server-linux', '--receipt', '/receipt', '--receipt-sha256', 'a'.repeat(64),
+    '--server-assets', '/server', '--desktop-assets', '/desktop']
+  assert.equal(parseReplayArguments(args).options['--scope'], 'candidate-server-linux')
+  assert.throws(() => parseReplayArguments([...args, '--baseline-desktop', '/old', '--baseline-version', '1.0.6']), /Server-only/)
+  assert.throws(() => parseReplayArguments(['serve', ...args.slice(1), '--certificate', '/cert', '--private-key', '/key',
+    '--fault-control', '/fault', '--fault-observed', '/observed']), /Server-only/)
 })
 
 test('candidate replay requires explicit real hosted ci dispatch and has no production preparation run', () => {

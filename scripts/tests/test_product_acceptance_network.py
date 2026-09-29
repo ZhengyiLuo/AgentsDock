@@ -69,6 +69,23 @@ class NetworkTests(unittest.TestCase):
         self.assertEqual(active.count(b"127.0.0.1 github.com"), 1)
         self.assertNotIn(b"*.github.com", active)
 
+    def test_linux_server_scope_cannot_broaden_default_mac_scope_or_other_workflow_jobs(self):
+        env = {**self.env, "RUNNER_OS": "Linux", "GITHUB_SHA": "a" * 40,
+               "GITHUB_JOB": "candidate-server-rollback-linux", "GITHUB_WORKFLOW_REF":
+               "ZhengyiLuo/AgentsDock/.github/workflows/ci.yml@refs/heads/release/test"}
+        with mock.patch.object(network.sys, "platform", "linux"):
+            proof = network.guard(self.work, env, candidate_server_linux=True)[1]
+            self.assertEqual(proof["scope"], "candidate-server-linux")
+            self.assertIs(proof["publicationEligible"], False)
+            for options in ({"candidate": True}, {"candidate": True, "candidate_server_linux": True}, {}):
+                with self.assertRaises(ValueError):
+                    network.guard(self.work, env, **options)
+            for change in ({"RUNNER_OS": "macOS"}, {"GITHUB_JOB": "candidate-native"}, {"RUNNER_ENVIRONMENT": "self-hosted"}):
+                with self.assertRaises(ValueError):
+                    network.guard(self.work, {**env, **change}, candidate_server_linux=True)
+        with mock.patch.object(network.sys, "platform", "darwin"), self.assertRaises(ValueError):
+            network.guard(self.work, {**env, "RUNNER_OS": "macOS"}, candidate_server_linux=True)
+
     def test_existing_host_rules_and_other_instances_are_refused(self):
         for baseline in (b"127.0.0.1 github.com\n", b"::1 API.GITHUB.COM. other\n",
                          b"192.0.2.1 alias registry.npmjs.org # custom\n", network.MARKER.encode()):

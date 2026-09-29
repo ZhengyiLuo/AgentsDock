@@ -4,7 +4,8 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, s
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { test } from 'node:test'
-import { assertCandidateCheckout, CANDIDATE_HARNESS_PATHS } from '../product-candidate-receipt.mjs'
+import { assertCandidateCheckout, assertCandidateServerCheckout, assertCandidateRunner, assertCandidateServerRunner,
+  CANDIDATE_HARNESS_PATHS } from '../product-candidate-receipt.mjs'
 
 // Pure guard tests with disposable Git repositories. The injected CI metadata
 // is synthetic; no native app/service/network/trust helper is ever invoked.
@@ -43,6 +44,25 @@ test('exact source and allowlisted descendant harness preserve separate truthful
   assert.notEqual(observed.harnessSourceSha, observed.sourceSha)
   assert.deepEqual(observed.changedPaths, ['scripts/product_server_acceptance.py'])
   assert.equal(observed.publicationEligible, false)
+})
+
+test('Linux server-only runner is separate from unchanged Darwin desktop scope and retains every checkout fence', t => {
+  const f = fixture(t), env = {...f.environment(), RUNNER_OS: 'Linux', GITHUB_JOB: 'candidate-server-rollback-linux'}
+  const check = (environment = env, platform = 'linux') => assertCandidateServerCheckout(f.identity,
+    {env: environment, platform, repositoryDirectory: f.root})
+  const result = check()
+  assert.equal(result.executionScope, 'candidate-server-linux')
+  assert.equal(result.desktopAcceptance, false)
+  assert.equal(result.publicationEligible, false)
+  assert.throws(() => assertCandidateRunner(env, 'linux'), /macOS/)
+  assert.throws(() => assertCandidateServerRunner(f.environment(), 'darwin'), /Linux/)
+  for (const change of [{RUNNER_OS: 'macOS'}, {GITHUB_JOB: 'release-tooling'}, {RUNNER_ENVIRONMENT: 'self-hosted'}, {GITHUB_EVENT_NAME: 'pull_request'},
+    {GITHUB_REPOSITORY: 'fork/AgentsDock'}, {GITHUB_SHA: 'b'.repeat(40)},
+    {GITHUB_WORKFLOW_REF: env.GITHUB_WORKFLOW_REF.replace('/release/', '/main/')}]) assert.throws(() => check({...env, ...change}))
+  f.put('scripts/product_server_acceptance.py', 'scoped server harness\n'); f.git('add', '.'); f.git('commit', '-qm', 'reviewed QA')
+  assert.equal(check({...env, GITHUB_SHA: f.git('rev-parse', 'HEAD')}).sourceSha, f.identity.sourceSha)
+  f.put('server/runtime.py', 'changed runtime\n'); f.git('add', '.'); f.git('commit', '-qm', 'forbidden runtime')
+  assert.throws(() => check({...env, GITHUB_SHA: f.git('rev-parse', 'HEAD')}), /non-allowlisted/)
 })
 
 test('runtime, build payload and production authorization changes cannot be a harness-only retry', t => {
@@ -105,14 +125,62 @@ test('candidate workflow retains sealed artifact pins and supplies exact expecte
   assert.match(candidateJob, /export AGENTSDOCK_COORDINATED_SIGNATURE="\$RUNNER_TEMP\/candidate-inputs\/payload\/server\/npm\/agents-server-npm-manifest\.sig"/)
   assert.match(inputs, /draft\.targetCommitish === receipt\.sourceSha/)
   assert.match(inputs, /validate-runner/)
-  assert.match(inputs, /--source-sha "\$ARTIFACT_SOURCE_SHA" --candidate-rehearsal true/)
+  assert.match(inputs, /--source-sha "\$ARTIFACT_SOURCE_SHA" --candidate-rehearsal "\$IMPORT_SCOPE"/)
+  assert.match(inputs, /candidate\)\n\s+RUNNER_OPERATION=validate-runner\n\s+IMPORT_SCOPE=true/)
   assert.doesNotMatch(inputs, /export GITHUB_SHA=|GITHUB_SHA:|--source-sha "\$GITHUB_SHA"/)
-  assert.match(inputs, /for pair in AgentsDock-Releases:1\.0\.6 AgentsServer:1\.0\.7-beta\.21/)
+  assert.match(inputs, /BASELINE_PAIRS=\(AgentsServer:1\.0\.7-beta\.21\)/)
+  assert.match(inputs, /if \[\[ "\$EXECUTION_SCOPE" == candidate \]\]; then BASELINE_PAIRS\+=\(AgentsDock-Releases:1\.0\.6\); fi/)
   assert.match(inputs, /baseline\.isPrerelease === process\.argv\[3\]\.includes\('-beta\.'\)/)
   assert.match(inputs, /gh release download v1\.0\.7-beta\.21 --repo ZhengyiLuo\/AgentsServer/)
   assert.match(inputs, /gh release download v1\.0\.6 --repo ZhengyiLuo\/AgentsDock-Releases/)
   assert.doesNotMatch(inputs, /AgentsDock-Releases:1\.0\.7-beta|AgentsServer:1\.0\.3/)
   assert.match(candidateJob, /\$\{\{ matrix\.kind \}\}-\$\{\{ matrix\.legacy_mode \}\}/)
+})
+
+test('Linux rollback job has only explicit server scope, exact signed input pins and non-publishing bounded reports', () => {
+  const workflow = readFileSync(new URL('../../.github/workflows/ci.yml', import.meta.url), 'utf8')
+  const job = workflow.slice(workflow.indexOf('  candidate-server-rollback-linux:'), workflow.indexOf('  candidate-native:'))
+  assert.match(job, /runs-on: ubuntu-24\.04/)
+  assert.match(job, /legacy_mode: \['0755', '0750'\]/)
+  assert.match(job, /execution_scope: candidate-server-linux/)
+  assert.match(job, /rollback-retry --candidate-server-linux --kind legacy/)
+  assert.match(job, /service --candidate-server-linux --kind legacy --action restart/)
+  assert.match(job, /setup --candidate-server-linux/)
+  assert.match(job, /teardown --candidate-server-linux/)
+  assert.match(job, /serverOnly: true/)
+  assert.match(job, /report\.executionScope !== 'candidate-server-linux'/)
+  assert.match(job, /report\.publicationEligible !== false \|\| report\.releaseAcceptance !== false \|\| report\.desktopAcceptance !== false/)
+  assert.match(job, /GITHUB_SHA="\$GITHUB_SHA" GITHUB_JOB="\$GITHUB_JOB"/)
+  assert.doesNotMatch(job, /product_desktop_acceptance|verify_electron_release|--candidate(?:\s|$)|npm publish|gh release (?:edit|create)|export GITHUB_SHA=/m)
+})
+
+test('Linux evidence collector refuses cross-scope, publishing, desktop, secret and unbounded reports', t => {
+  const workflow = readFileSync(new URL('../../.github/workflows/ci.yml', import.meta.url), 'utf8')
+  const section = workflow.slice(workflow.indexOf('      - name: Collect bounded non-publishing server-only observations'))
+  const script = section.match(/<<'NODE'\n([\s\S]*?)\n          NODE/)[1].replace(/^          /gm, '')
+  for (const kind of ['valid', 'private', 'eligible', 'acceptance', 'desktop', 'wrong-scope', 'oversized', 'symlink']) {
+    const root = mkdtempSync(join(tmpdir(), 'linux-server-evidence-unit-'))
+    t.after(() => rmSync(root, {recursive: true, force: true}))
+    const source = join(root, 'source'), destination = join(root, 'public')
+    mkdirSync(source)
+    const report = {kind: 'candidate-server-observations', executionScope: 'candidate-server-linux',
+      publicationEligible: false, releaseAcceptance: false, desktopAcceptance: false}
+    if (kind === 'private') report.token = 'fixture-secret-never-published'
+    if (kind === 'eligible') report.publicationEligible = true
+    if (kind === 'acceptance') report.releaseAcceptance = true
+    if (kind === 'desktop') report.desktopAcceptance = true
+    if (kind === 'wrong-scope') report.executionScope = 'candidate'
+    if (kind === 'oversized') report.extra = 'x'.repeat(512 * 1024)
+    const bytes = JSON.stringify(report), target = join(source, 'rollback.json')
+    if (kind === 'symlink') {writeFileSync(join(root, 'other'), bytes); symlinkSync(join(root, 'other'), target)}
+    else writeFileSync(target, bytes)
+    writeFileSync(join(source, 'server.json'), '{"token":"fixture-secret"}')
+    const run = () => execFileSync(process.execPath, ['--input-type=module', '-', source, destination],
+      {input: script, encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe']})
+    if (kind === 'valid') {run(); assert.equal(readFileSync(join(destination, 'rollback.json'), 'utf8'), bytes)}
+    else {assert.throws(run, error => error.status === 1 && !error.stderr.toString().includes('fixture-secret')); assert(!existsSync(join(destination, 'rollback.json')))}
+    assert(!existsSync(join(destination, 'server.json')))
+  }
 })
 
 test('the real manual input gate keeps npm-only validation and candidate replay mutually exclusive', () => {
@@ -123,21 +191,24 @@ test('the real manual input gate keeps npm-only validation and candidate replay 
   const common = { PATH: process.env.PATH, GITHUB_EVENT_NAME: 'workflow_dispatch', GITHUB_REPOSITORY: 'ZhengyiLuo/AgentsDock',
     GITHUB_REF: 'refs/heads/release/1.0.8-beta.1', GITHUB_SHA: 'a'.repeat(40),
     GITHUB_WORKFLOW_REF: 'ZhengyiLuo/AgentsDock/.github/workflows/ci.yml@refs/heads/release/1.0.8-beta.1',
-    NPM_NATIVE_VALIDATION: 'false', CANDIDATE_REPLAY: 'false', NPM_CANDIDATE_TAG: '', NPM_MANIFEST_SHA256: '', NPM_SOURCE_SHA: '',
+    NPM_NATIVE_VALIDATION: 'false', CANDIDATE_REPLAY: 'false', CANDIDATE_SERVER_ROLLBACK: 'false', NPM_CANDIDATE_TAG: '', NPM_MANIFEST_SHA256: '', NPM_SOURCE_SHA: '',
     CANDIDATE_TAG: '', CANDIDATE_RECEIPT_SHA256: '', CANDIDATE_BUNDLE_SHA256: '' }
   const candidate = { ...common, CANDIDATE_REPLAY: 'true', CANDIDATE_TAG: 'candidate-replay-v1.0.8-beta.1',
     CANDIDATE_RECEIPT_SHA256: 'b'.repeat(64), CANDIDATE_BUNDLE_SHA256: 'c'.repeat(64) }
   const npm = { ...common, NPM_NATIVE_VALIDATION: 'true', NPM_CANDIDATE_TAG: 'npm-candidate-v1.0.8-beta.1',
     NPM_MANIFEST_SHA256: 'd'.repeat(64), NPM_SOURCE_SHA: 'a'.repeat(40) }
+  const serverLinux = {...candidate, CANDIDATE_REPLAY: 'false', CANDIDATE_SERVER_ROLLBACK: 'true'}
   const run = env => spawnSync('/bin/bash', ['-e', '-c', script], { env, encoding: 'utf8' })
-  for (const env of [common, candidate, npm]) assert.equal(run(env).status, 0)
+  for (const env of [common, candidate, npm, serverLinux]) assert.equal(run(env).status, 0)
   for (const env of [{ ...candidate, NPM_NATIVE_VALIDATION: 'true' }, { ...npm, CANDIDATE_REPLAY: 'true' },
     { ...common, CANDIDATE_TAG: candidate.CANDIDATE_TAG }, { ...common, NPM_SOURCE_SHA: npm.NPM_SOURCE_SHA },
     { ...candidate, NPM_SOURCE_SHA: npm.NPM_SOURCE_SHA }, { ...candidate, CANDIDATE_RECEIPT_SHA256: '' },
     { ...candidate, CANDIDATE_TAG: 'candidate-replay-v1.0.8' }, { ...candidate, GITHUB_EVENT_NAME: 'pull_request' },
     { ...candidate, GITHUB_REPOSITORY: 'fork/AgentsDock' }, { ...candidate, GITHUB_REF: 'refs/heads/main' },
     { ...candidate, GITHUB_WORKFLOW_REF: `${candidate.GITHUB_WORKFLOW_REF}-other` },
-    { ...candidate, GITHUB_SHA: 'main' }, { ...common, CANDIDATE_REPLAY: 'yes' }]) assert.notEqual(run(env).status, 0)
+    { ...candidate, GITHUB_SHA: 'main' }, { ...common, CANDIDATE_REPLAY: 'yes' },
+    {...serverLinux, CANDIDATE_REPLAY: 'true'}, {...serverLinux, NPM_NATIVE_VALIDATION: 'true'},
+    {...serverLinux, CANDIDATE_SERVER_ROLLBACK: 'yes'}, {...serverLinux, CANDIDATE_RECEIPT_SHA256: ''}]) assert.notEqual(run(env).status, 0)
 })
 
 test('source CI materializes the pinned Electron runtime before concurrent test imports', () => {

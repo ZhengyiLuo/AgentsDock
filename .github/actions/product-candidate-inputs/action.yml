@@ -13,6 +13,9 @@ inputs:
   github_token:
     required: true
     description: Built-in job token for reading the unpublished draft; never inherited by installed apps
+  execution_scope:
+    default: candidate
+    description: candidate (macOS app/server) or candidate-server-linux (server rollback only)
 outputs:
   version:
     value: ${{ steps.inputs.outputs.version }}
@@ -27,12 +30,25 @@ runs:
         CANDIDATE_TAG: ${{ inputs.candidate_tag }}
         RECEIPT_SHA256: ${{ inputs.receipt_sha256 }}
         BUNDLE_SHA256: ${{ inputs.bundle_sha256 }}
+        EXECUTION_SCOPE: ${{ inputs.execution_scope }}
       run: |
         set -euo pipefail
         umask 077
         [[ "$CANDIDATE_TAG" =~ ^candidate-replay-v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)-beta\.[1-9][0-9]*$ ]]
         [[ "$RECEIPT_SHA256" =~ ^[a-f0-9]{64}$ && "$BUNDLE_SHA256" =~ ^[a-f0-9]{64}$ ]]
-        node --input-type=module -e 'import {assertCandidateRunner} from "./scripts/product-candidate-receipt.mjs"; assertCandidateRunner()'
+        case "$EXECUTION_SCOPE" in
+          candidate)
+            RUNNER_OPERATION=validate-runner
+            IMPORT_SCOPE=true
+            node --input-type=module -e 'import {assertCandidateRunner} from "./scripts/product-candidate-receipt.mjs"; assertCandidateRunner()'
+            ;;
+          candidate-server-linux)
+            RUNNER_OPERATION=validate-server-runner
+            IMPORT_SCOPE=server-linux
+            node --input-type=module -e 'import {assertCandidateServerRunner} from "./scripts/product-candidate-receipt.mjs"; assertCandidateServerRunner()'
+            ;;
+          *) echo 'Unknown candidate execution scope.' >&2; exit 1 ;;
+        esac
         mkdir "$RUNNER_TEMP/candidate-inputs"
         gh release view "$CANDIDATE_TAG" --repo "$GITHUB_REPOSITORY" \
           --json tagName,isDraft,isPrerelease,targetCommitish,assets > "$RUNNER_TEMP/candidate-inputs/draft.json"
@@ -49,7 +65,7 @@ runs:
           "$RUNNER_TEMP/candidate-inputs/candidate-bundle.zip" "$BUNDLE_SHA256" "$RUNNER_TEMP/candidate-inputs/payload"
         node scripts/product-candidate-receipt.mjs inspect "$RUNNER_TEMP/candidate-inputs/candidate.json" "$RECEIPT_SHA256" \
           "$RUNNER_TEMP/candidate-inputs/payload/server" "$RUNNER_TEMP/candidate-inputs/payload/desktop" > /dev/null
-        node scripts/product-candidate-receipt.mjs validate-runner "$RUNNER_TEMP/candidate-inputs/candidate.json" "$RECEIPT_SHA256" \
+        node scripts/product-candidate-receipt.mjs "$RUNNER_OPERATION" "$RUNNER_TEMP/candidate-inputs/candidate.json" "$RECEIPT_SHA256" \
           > "$RUNNER_TEMP/candidate-inputs/harness-identity.json"
         node --input-type=module - "$RUNNER_TEMP/candidate-inputs/candidate.json" "$RUNNER_TEMP/candidate-inputs/draft.json" <<'NODE' >> "$GITHUB_OUTPUT"
         import assert from 'node:assert/strict'
@@ -65,13 +81,15 @@ runs:
         ARTIFACT_SOURCE_SHA="$(node -p 'JSON.parse(require("fs").readFileSync(process.argv[1])).sourceSha' "$RUNNER_TEMP/candidate-inputs/candidate.json")"
         SIGNER_RUN="$(node -p 'JSON.parse(require("fs").readFileSync(process.argv[1])).signerRunId' "$RUNNER_TEMP/candidate-inputs/candidate.json")"
         node scripts/import_product_server.mjs inspect --assets "$RUNNER_TEMP/candidate-inputs/payload/server" \
-          --archive "$RUNNER_TEMP/candidate-inputs/payload/signer-artifact.zip" --source-sha "$ARTIFACT_SOURCE_SHA" --candidate-rehearsal true \
+          --archive "$RUNNER_TEMP/candidate-inputs/payload/signer-artifact.zip" --source-sha "$ARTIFACT_SOURCE_SHA" --candidate-rehearsal "$IMPORT_SCOPE" \
           --source-ref "$GITHUB_REF_NAME" --version "$PRODUCT_VERSION" --signer-run-id "$SIGNER_RUN" \
           --report "$RUNNER_TEMP/candidate-inputs/server-import-live.json" > /dev/null
         cmp "$RUNNER_TEMP/candidate-inputs/server-import-live.json" "$RUNNER_TEMP/candidate-inputs/payload/server-import.json"
         # The desktop is the published stable package; the real signed server
         # baseline is already on Beta. The app selects Beta before installation.
-        for pair in AgentsDock-Releases:1.0.6 AgentsServer:1.0.7-beta.21; do
+        BASELINE_PAIRS=(AgentsServer:1.0.7-beta.21)
+        if [[ "$EXECUTION_SCOPE" == candidate ]]; then BASELINE_PAIRS+=(AgentsDock-Releases:1.0.6); fi
+        for pair in "${BASELINE_PAIRS[@]}"; do
           BASELINE_REPO="${pair%%:*}"
           BASELINE_VERSION="${pair#*:}"
           gh release view "v$BASELINE_VERSION" --repo "ZhengyiLuo/$BASELINE_REPO" \
@@ -84,14 +102,18 @@ runs:
           && baseline.isPrerelease === process.argv[3].includes('-beta.'))
         NODE
         done
-        gh release download v1.0.6 --repo ZhengyiLuo/AgentsDock-Releases \
-          --pattern AgentsDock-1.0.6-mac-universal.zip --pattern SHA256SUMS --pattern latest-mac.yml \
-          --dir "$RUNNER_TEMP/candidate-inputs/baseline-desktop"
+        replay_baseline=()
+        if [[ "$EXECUTION_SCOPE" == candidate ]]; then
+          gh release download v1.0.6 --repo ZhengyiLuo/AgentsDock-Releases \
+            --pattern AgentsDock-1.0.6-mac-universal.zip --pattern SHA256SUMS --pattern latest-mac.yml \
+            --dir "$RUNNER_TEMP/candidate-inputs/baseline-desktop"
+          replay_baseline=(--baseline-desktop "$RUNNER_TEMP/candidate-inputs/baseline-desktop" --baseline-version 1.0.6)
+        fi
         gh release download v1.0.7-beta.21 --repo ZhengyiLuo/AgentsServer \
           --pattern agents-server-1.0.7-beta.21.tar.gz --pattern agents-server-manifest.json --pattern agents-server-manifest.sig \
           --dir "$RUNNER_TEMP/candidate-inputs/baseline-server"
-        node scripts/product-release-replay.mjs inspect --scope candidate \
+        node scripts/product-release-replay.mjs inspect --scope "$EXECUTION_SCOPE" \
           --receipt "$RUNNER_TEMP/candidate-inputs/candidate.json" --receipt-sha256 "$RECEIPT_SHA256" \
           --server-assets "$RUNNER_TEMP/candidate-inputs/payload/server" --desktop-assets "$RUNNER_TEMP/candidate-inputs/payload/desktop" \
-          --baseline-desktop "$RUNNER_TEMP/candidate-inputs/baseline-desktop" --baseline-version 1.0.6 \
+          "${replay_baseline[@]}" \
           > "$RUNNER_TEMP/candidate-inputs/replay-inventory.json"

@@ -274,16 +274,21 @@ def contained(path: Path, parent: Path) -> None:
 
 
 def guard(receipt: dict, work: Path, *, environment: dict | None = None,
-          uid: int | None = None, system: str | None = None, candidate: bool = False) -> Path:
+          uid: int | None = None, system: str | None = None, candidate: bool = False,
+          candidate_server_linux: bool = False) -> Path:
     env = os.environ if environment is None else environment
     user = os.getuid() if uid is None else uid
     host = platform.system() if system is None else system
     workflow_ref = str(env.get("GITHUB_WORKFLOW_REF", ""))
-    if candidate:
+    need(not (candidate and candidate_server_linux), "Candidate execution scopes are mutually exclusive.")
+    if candidate_server_linux:
+        need(env.get("GITHUB_JOB") == "candidate-server-rollback-linux", "Linux replay requires its explicit server-only job.")
+    if candidate or candidate_server_linux:
         source_ref = receipt.get("sourceRef", "")
         need(receipt.get("schema") == 1 and receipt.get("kind") == "agentsdock-macos-candidate"
              and receipt.get("scope") == "darwin-app-server" and receipt.get("publicationEligible") is False
-             and host == "Darwin" and env.get("RUNNER_OS") == "macOS"
+             and ((host == "Darwin" and env.get("RUNNER_OS") == "macOS" and candidate)
+                  or (host == "Linux" and env.get("RUNNER_OS") == "Linux" and candidate_server_linux))
              and isinstance(source_ref, str) and re.fullmatch(r"release/[A-Za-z0-9][A-Za-z0-9._/-]*", source_ref) is not None
              and env.get("GITHUB_EVENT_NAME") == "workflow_dispatch"
              and workflow_ref == f"ZhengyiLuo/AgentsDock/.github/workflows/ci.yml@refs/heads/{source_ref}",
@@ -295,7 +300,7 @@ def guard(receipt: dict, work: Path, *, environment: dict | None = None,
     need(env.get("GITHUB_ACTIONS") == "true" and env.get("RUNNER_ENVIRONMENT") == "github-hosted"
          and env.get("GITHUB_REPOSITORY") == "ZhengyiLuo/AgentsDock"
          and env.get("GITHUB_EVENT_NAME") in {"workflow_dispatch", "workflow_call"}
-         and (re.fullmatch(r"[a-f0-9]{40}", str(env.get("GITHUB_SHA", ""))) is not None if candidate
+         and (re.fullmatch(r"[a-f0-9]{40}", str(env.get("GITHUB_SHA", ""))) is not None if candidate or candidate_server_linux
               else env.get("GITHUB_SHA") == receipt.get("sourceSha"))
          and re.fullmatch(r"[1-9]\d*", env.get("GITHUB_RUN_ID", "")) is not None
          and re.fullmatch(r"[1-9]\d*", env.get("GITHUB_RUN_ATTEMPT", "")) is not None,
@@ -1086,6 +1091,41 @@ def candidate_activation_journal(root: Path, version: str, transaction_id: str |
     return value
 
 
+def rollback_native_state(fixture: dict, version: str) -> dict:
+    """Observe exact split runtime, native registrations and released maintenance.
+
+    No Team Hub fixture is manufactured here. This proves component maintenance
+    is released and installer journals are gone, not Team Hub fence consumption.
+    """
+    root = Path(fixture["installRoot"])
+    require_no_pending_journals(root)
+    current = root / "current"
+    need(current.is_symlink() and current.resolve() == root / "releases" / version,
+         "Native rollback did not restore the exact current runtime link.")
+    value = health(fixture, version)
+    components = {}
+    for name in ("gateway", "execution_service"):
+        item = value.get(name)
+        need(isinstance(item, dict) and item.get("protocol") == 1 and item.get("version") == version
+             and type(item.get("pid")) is int and item["pid"] > 1 and bool(item.get("instance_id")),
+             "Both exact-version native components must be healthy after rollback/retry.")
+        components[name] = item
+    need(components["gateway"]["pid"] != components["execution_service"]["pid"]
+         and components["execution_service"].get("maintenance_held") is False,
+         "Execution maintenance must be explicitly released after rollback/retry.")
+    registrations = registered_services(fixture)
+    need({item.name for item in registrations} == {"agents-server.service", "agents-server-gateway.service"},
+         "Both real native Linux registrations are required.")
+    for item in registrations:
+        role = "gateway" if item.name == "agents-server-gateway.service" else "execution_service"
+        raw_pid = command(["systemctl", "--user", "show", item.name, "--property=MainPID", "--value"]).stdout.strip()
+        need(raw_pid.isdigit() and int(raw_pid) == components[role]["pid"],
+             "Authenticated runtime and real native service manager disagree.")
+    return {"registrations": {item.name: sha(read_regular(item)) for item in registrations},
+            "rootMode": stat.S_IMODE(owned_directory(root).st_mode), "current": str(current.resolve()),
+            "serverInstanceId": value["server_instance_id"]}
+
+
 def rollback_retry(args: argparse.Namespace, fixture: dict, receipt: dict) -> dict:
     """Force an exact candidate worker unhealthy without modifying artifacts.
 
@@ -1100,6 +1140,7 @@ def rollback_retry(args: argparse.Namespace, fixture: dict, receipt: dict) -> di
     root = Path(fixture["installRoot"])
     require_no_pending_journals(root)
     before = health(fixture, fixture["baselineVersion"])
+    native_before = rollback_native_state(fixture, fixture["baselineVersion"])
     compare_snapshot(fixture["snapshot"], state_snapshot(fixture))
     incumbent = worker_pid()
     need(incumbent > 1, "Incumbent worker is not registered with the native service manager.")
@@ -1183,6 +1224,9 @@ def rollback_retry(args: argparse.Namespace, fixture: dict, receipt: dict) -> di
     need(observed["error"] is None and observed["killed"] and observed["rollbackPhases"],
          "A candidate process fault and actual rollback journal phase were not both observed.")
     recovered = health(fixture, fixture["baselineVersion"])
+    native_recovered = rollback_native_state(fixture, fixture["baselineVersion"])
+    need(all(native_recovered[key] == native_before[key] for key in ("registrations", "rootMode", "current")),
+         "Rollback changed incumbent native registration, runtime link or root mode.")
     compare_snapshot(fixture["snapshot"], state_snapshot(fixture))
     # The watcher is fully stopped before retry. Retained journals and fences
     # are not edited: production recovery owns them.
@@ -1190,6 +1234,7 @@ def rollback_retry(args: argparse.Namespace, fixture: dict, receipt: dict) -> di
         **body, "expected_server_instance_id": recovered["server_instance_id"]})
     health(fixture, receipt["version"], timeout=1500)
     wait_update_complete(fixture, receipt["version"])
+    rollback_native_state(fixture, receipt["version"])
     preservation = compare_snapshot(fixture["snapshot"], state_snapshot(fixture),
                                     baseline_version=fixture["baselineVersion"], candidate_version=receipt["version"])
     count = verify_installed_runtime(fixture, args.bundle, receipt["version"])
@@ -1197,6 +1242,9 @@ def rollback_retry(args: argparse.Namespace, fixture: dict, receipt: dict) -> di
             "incumbentNeverSignaled": True, "realRollbackPhases": sorted(observed["rollbackPhases"]),
             "baselineAuthenticatedHealthRestored": True, "serverIdentityTokenAndSnapshotPreserved": True,
             "faultDisabledBeforeRetry": True, "candidateActivationCompletedAfterRetry": True,
+            "bothComponentsHealthyAfterRollbackAndRetry": True, "maintenanceReleasedAfterRollbackAndRetry": True,
+            "activationJournalsClearedByInstaller": True, "sameAcceptedVersionRetried": True,
+            "teamHubFenceCleanupObserved": False, "desktopUpdateObserved": False,
             "exactRuntimeFilesCompared": count, **preservation,
             "nonemptyProviderHistoryObserved": False}
 
@@ -1440,6 +1488,7 @@ def load_fixture(args: argparse.Namespace, receipt: dict, home: Path) -> dict:
     need(value.get("schema") == 1 and value.get("runId") == os.environ["GITHUB_RUN_ID"]
          and value.get("runAttempt") == os.environ["GITHUB_RUN_ATTEMPT"]
          and value.get("candidate", False) == getattr(args, "candidate", False)
+         and value.get("candidateServerLinux", False) == getattr(args, "candidate_server_linux", False)
          and value.get("harnessSourceSha", value.get("sourceSha")) == os.environ.get("GITHUB_SHA")
          and value.get("sourceSha") == receipt["sourceSha"] and value.get("releaseReceiptSha256") == args.receipt_sha256
          and value.get("home") == str(home) and value.get("workDirectory") == str(args.work)
@@ -1463,6 +1512,7 @@ def bootstrap(args: argparse.Namespace, receipt: dict, home: Path) -> tuple[dict
     fixture = {"schema": 1, "runId": os.environ["GITHUB_RUN_ID"], "runAttempt": os.environ["GITHUB_RUN_ATTEMPT"],
                "sourceSha": receipt["sourceSha"], "harnessSourceSha": os.environ["GITHUB_SHA"],
                "candidate": getattr(args, "candidate", False),
+               "candidateServerLinux": getattr(args, "candidate_server_linux", False),
                "releaseReceiptSha256": args.receipt_sha256, "home": str(home), "workDirectory": str(args.work),
                "serverUrl": f"http://127.0.0.1:{port}", "targetVersion": receipt["version"],
                **{key: str(value) for key, value in paths(home).items()}}
@@ -1543,6 +1593,8 @@ def parser() -> argparse.ArgumentParser:
         result.add_argument(f"--{name}", type=Path, required=True)
     result.add_argument("--prepare-run", type=Path)
     result.add_argument("--candidate", action="store_true", help="Deliberate test-only macOS candidate CI; never production acceptance.")
+    result.add_argument("--candidate-server-linux", action="store_true",
+                        help="Exact server-only Linux rollback rehearsal; no desktop or production acceptance.")
     result.add_argument("--receipt-sha256", required=True)
     result.add_argument("--kind", choices=("fresh", "legacy"), default="fresh")
     result.add_argument("--legacy-root-mode", choices=("0755", "0750"), default="0755")
@@ -1558,7 +1610,7 @@ def parser() -> argparse.ArgumentParser:
 
 
 def inspect_receipt(args: argparse.Namespace) -> None:
-    if args.candidate:
+    if args.candidate or getattr(args, "candidate_server_linux", False):
         command(["node", str(ROOT / "scripts/product-candidate-receipt.mjs"), "inspect", str(args.receipt),
                  args.receipt_sha256, str(args.bundle)], timeout=90)
     else:
@@ -1568,12 +1620,17 @@ def inspect_receipt(args: argparse.Namespace) -> None:
 
 
 def validate_candidate_checkout(args: argparse.Namespace, receipt: dict) -> str:
-    result = command(["node", str(ROOT / "scripts/product-candidate-receipt.mjs"), "validate-runner",
+    server_linux = getattr(args, "candidate_server_linux", False)
+    operation = "validate-server-runner" if server_linux else "validate-runner"
+    result = command(["node", str(ROOT / "scripts/product-candidate-receipt.mjs"), operation,
                       str(args.receipt), args.receipt_sha256], timeout=90)
     value = json.loads(result.stdout)
     need(value.get("sourceSha") == receipt["sourceSha"] and value.get("sourceRef") == receipt["sourceRef"]
          and value.get("harnessSourceSha") == os.environ.get("GITHUB_SHA") and value.get("publicationEligible") is False,
          "Candidate harness validation returned a different source, branch or eligibility.")
+    if server_linux:
+        need(value.get("executionScope") == "candidate-server-linux" and value.get("desktopAcceptance") is False,
+             "Linux server replay cannot claim desktop acceptance.")
     return value["harnessSourceSha"]
 
 
@@ -1583,8 +1640,14 @@ def main() -> None:
     need(re.fullmatch(r"[a-f0-9]{64}", args.receipt_sha256) is not None and sha(raw) == args.receipt_sha256,
          "Prepared receipt differs from the independently accepted digest.")
     receipt = json.loads(raw)
-    home = guard(receipt, args.work, candidate=args.candidate)
-    harness_sha = validate_candidate_checkout(args, receipt) if args.candidate else receipt["sourceSha"]
+    server_linux = getattr(args, "candidate_server_linux", False)
+    home = guard(receipt, args.work, candidate=args.candidate, candidate_server_linux=server_linux)
+    if server_linux:
+        need(args.kind == "legacy" and args.operation in {"bootstrap", "snapshot", "rollback-retry", "diagnose", "service"}
+             and not getattr(args, "staging_failure_fixture", False),
+             "Linux candidate scope is restricted to the signed legacy baseline and real rollback journey.")
+    rehearsal = args.candidate or server_linux
+    harness_sha = validate_candidate_checkout(args, receipt) if rehearsal else receipt["sourceSha"]
     for path in (args.fixture, args.evidence):
         contained(path, args.work)
     # Reuse production signature, runtime parity and successful preparation-run
@@ -1636,7 +1699,7 @@ def main() -> None:
             service(fixture, args.action)
             observations = {"nativeServiceAction": args.action, "scope": "owned-disposable-installation"}
             observed_version = None
-    evidence = {"schema": 1, "kind": "candidate-server-observations" if args.candidate else "native-server-observations",
+    evidence = {"schema": 1, "kind": "candidate-server-observations" if rehearsal else "native-server-observations",
                 "operation": args.operation,
                 "runId": os.environ["GITHUB_RUN_ID"], "sourceSha": receipt["sourceSha"],
                 "harnessSourceSha": harness_sha,
@@ -1647,7 +1710,8 @@ def main() -> None:
                                      migrated=args.operation == "verify" and args.expect_version == receipt["version"]
                                      and fixture["baselineVersion"] != receipt["version"]),
                 "releaseAcceptance": False,
-                **({"publicationEligible": False} if args.candidate else {})}
+                **({"publicationEligible": False} if rehearsal else {}),
+                **({"executionScope": "candidate-server-linux", "desktopAcceptance": False} if server_linux else {})}
     write_private(args.evidence, evidence)
     print(json.dumps({"operation": args.operation, "observed": True, "version": observed_version,
                       "evidenceSha256": sha(read_regular(args.evidence))}))

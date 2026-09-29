@@ -9,7 +9,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url'
 import { GitHubClient } from './direct-release-mirror.mjs'
 import { verifyExportSource } from './legacy-server-release.mjs'
 import { releaseIdentity, verifyServerBundleIdentity } from './product-release.mjs'
-import { assertCandidateCheckout } from './product-candidate-receipt.mjs'
+import { assertCandidateCheckout, assertCandidateServerCheckout } from './product-candidate-receipt.mjs'
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 const SIGNER = 'ZhengyiLuo/AgentsServer'
@@ -34,8 +34,8 @@ function identity(options) {
   // production receipt or treating a test-only candidate as publication-ready.
   const value = releaseIdentity(options.version, options.sourceSha, options.sourceRef, options.sourceSha)
   need(positive(options.signerRunId), 'An explicit positive signer run ID is required.')
-  need(options.candidateRehearsal === undefined || options.candidateRehearsal === 'true',
-    'Candidate rehearsal must be an explicit true opt-in.')
+  need(options.candidateRehearsal === undefined || ['true', 'server-linux'].includes(options.candidateRehearsal),
+    'Candidate rehearsal must explicitly select macOS or server-only Linux.')
   return value
 }
 
@@ -141,12 +141,13 @@ async function verifyImportContext(options, { client, execute, repositoryDirecto
     checkout = execute('git', ['-C', repositoryDirectory, 'rev-parse', 'HEAD'],
       { encoding: 'utf8', timeout: 30000, maxBuffer: 16384, stdio: ['ignore', 'pipe', 'pipe'] }).trim()
   } catch { throw new Error('Signer import requires the exact pinned canonical checkout.') }
-  if (options.candidateRehearsal === 'true') {
-    // Only the separate non-publishing macOS rehearsal may evolve its test
-    // harness. The shared guard rejects any changed app/server/build payload,
+  if (options.candidateRehearsal !== undefined) {
+    // Only explicit non-publishing macOS or Linux-server rehearsals may evolve
+    // their test harness. Shared guards reject changed app/server/build payload,
     // proves source ancestry and binds the actual clean CI checkout separately.
     // The original signer artifact and every signed source/hash remain fixed.
-    assertCandidateCheckout({ sourceSha: options.sourceSha, sourceRef: options.sourceRef },
+    const verifyCheckout = options.candidateRehearsal === 'server-linux' ? assertCandidateServerCheckout : assertCandidateCheckout
+    verifyCheckout({ sourceSha: options.sourceSha, sourceRef: options.sourceRef },
       { execute, repositoryDirectory })
   } else {
     need(checkout === options.sourceSha, 'Signer import checkout differs from the exact canonical source.')
