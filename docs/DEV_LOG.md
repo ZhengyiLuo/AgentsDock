@@ -1,17 +1,28 @@
 # Public development log
 
-## 2026-09-28 — Prepare npm server 1.0.8 from main
+## 2026-09-28 — Publish npm server 1.0.8 from main
 
-- Prepare `@agentsdock/server@1.0.8` from main commit `9f969109`, retaining
-  its server runtime and advancing only the release version.
+- Publish `@agentsdock/server@1.0.8` from main commit `9f969109`, with exact
+  signed release source `8a965007408c6ab9672d746366b9fc0bd58feff6`.
+  The server runtime matches main apart from its release version. npm `latest`
+  now selects `1.0.8`; `beta` remains `1.0.7-beta.5`.
 - Include main's provider connection settings and API routing improvements,
   mailbox continuation fixes, and bounded workspace discovery behavior.
-- Reuse the established isolated npm validation helpers from the 1.0.7 release
-  branch to check the exact signed candidate on disposable macOS and Linux
-  hosts. Product, desktop, managed-update and legacy-migration acceptance are
-  separate from this npm fresh-install release.
-- Release validation and publication are pending. The independent short
-  `agentsdock` CLI is not included in this main-based scoped package.
+- All eight server test shards pass. Native macOS and Linux validation of the
+  exact signed package passes fresh installation, authenticated health,
+  non-destructive refusal of repeated installation, native restart after
+  retiring the npm prefix/cache, and retained server identity and access token.
+  All 118 runtime files match the package after installation and restart.
+- Verify the public registry archive against the accepted signature, size,
+  SHA-256 and SHA-512. Accepted manifest SHA-256:
+  `64881777ab0ebf8ad029ec1f4f1212e1699f9ee7a1d62420ae32e5f3dcfe7198`.
+- Evidence: [server tests](https://github.com/ZhengyiLuo/AgentsDock/actions/runs/36532534740),
+  [native npm validation](https://github.com/ZhengyiLuo/AgentsDock/actions/runs/36533124072),
+  [trusted npm publication](https://github.com/ZhengyiLuo/AgentsDock/actions/runs/36533324346).
+- Scope is npm server publication. Desktop, short CLI, legacy bridge and installed
+  services are unchanged. Provider chats, reboot/logout, managed updates, legacy
+  migration, busy-work safety, rollback and multi-client acceptance were not
+  exercised by this npm fresh-install validation.
 
 ## 2026-09-28 — Combine editor line endings with desktop/server fixes
 
