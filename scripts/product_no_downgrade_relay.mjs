@@ -9,6 +9,7 @@ const BODY_LIMIT = 8 * 1024 * 1024
 const METHODS = new Set(['GET', 'HEAD', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'])
 const PATHS = new Set(['/api/health', '/api/admin/update', '/api/admin/update/ensure',
   '/api/admin/update/start', '/api/admin/update/cancel', '/api/admin/update/check'])
+const OBSERVER_STATES = new Set(['headers', 'body', 'chunk-size', 'chunk-body', 'chunk-end', 'trailers', 'upgrade-wait', 'tunnel'])
 const need = condition => assert(condition, 'Unsupported or incomplete native HTTP traffic')
 
 export function ownedLoopbackURL(value) {
@@ -95,16 +96,30 @@ export class NativeRequestObserver {
   finish() { need(this.state === 'tunnel' || this.state === 'headers' && this.buffer.length === 0) }
 }
 
+export function completeOwnedClientReset(observer, error) {
+  if (error?.code !== 'ECONNRESET') return false
+  // The app's own TCP reset after a complete request/tunnel is a disconnect,
+  // not missing HTTP evidence. An incomplete request/upgrade still throws.
+  observer.finish()
+  return true
+}
+
 export async function createNativeObservationRelay({ targetURL, assertOwnedTarget }) {
   const target = ownedLoopbackURL(targetURL)
   assert(typeof assertOwnedTarget === 'function', 'Native target ownership check is required')
   await assertOwnedTarget()
   const sockets = new Set(), counts = new Map(), observers = new Set()
-  let failure = null, connections = 0, upgrades = 0, closed = false, closing
-  const reject = () => { failure = 'HTTP_OBSERVATION_INVALID'; for (const socket of sockets) socket.destroy() }
+  let failure = null, failureKind = null, failureState = null, connections = 0, upgrades = 0, clientResets = 0, closed = false, closing
+  const reject = (kind, observer) => {
+    if (failure === null) {
+      failure = 'HTTP_OBSERVATION_INVALID'; failureKind = kind
+      failureState = OBSERVER_STATES.has(observer?.state) ? observer.state : null
+    }
+    for (const socket of sockets) socket.destroy()
+  }
   const listener = createServer(client => {
     connections++
-    if (client.remoteAddress !== '127.0.0.1' || closed) { reject(); client.destroy(); return }
+    if (client.remoteAddress !== '127.0.0.1' || closed) { reject('client-origin'); client.destroy(); return }
     const remote = createConnection({ host: '127.0.0.1', port: Number(target.port) })
     sockets.add(client); sockets.add(remote)
     const observer = new NativeRequestObserver(({ method, path, upgrade }) => {
@@ -113,7 +128,7 @@ export async function createNativeObservationRelay({ targetURL, assertOwnedTarge
     observers.add(observer)
     let responseHeader = Buffer.alloc(0)
     client.on('data', bytes => {
-      try { observer.feed(bytes); if (!remote.write(bytes)) client.pause() } catch { reject() }
+      try { observer.feed(bytes); if (!remote.write(bytes)) client.pause() } catch { reject('request-framing', observer) }
     })
     remote.on('drain', () => client.resume())
     remote.on('data', bytes => {
@@ -124,26 +139,36 @@ export async function createNativeObservationRelay({ targetURL, assertOwnedTarge
           else { observer.acceptUpgrade(responseHeader.subarray(0, end + 4)); responseHeader = Buffer.alloc(0) }
         }
         if (!client.write(bytes)) remote.pause()
-      } catch { reject() }
+      } catch { reject('response-upgrade', observer) }
     })
     client.on('drain', () => remote.resume())
-    client.on('end', () => { try { observer.finish(); remote.end() } catch { reject() } })
+    client.on('end', () => { try { observer.finish(); remote.end() } catch { reject('client-end-incomplete', observer) } })
     remote.on('end', () => client.end())
-    client.on('error', () => { if (!closed) reject() })
-    remote.on('error', () => { if (!closed) reject() })
-    client.on('close', () => { sockets.delete(client); observers.delete(observer); remote.destroy(); try { observer.finish() } catch { reject() } })
+    client.on('error', error => {
+      if (closed) return
+      try {
+        if (completeOwnedClientReset(observer, error)) {
+          clientResets++
+          client.destroy(); remote.destroy()
+        } else reject('client-socket', observer)
+      } catch { reject('client-reset-incomplete', observer) }
+    })
+    // An upstream reset is not evidence of a normal app disconnect.
+    remote.on('error', () => { if (!closed) reject('upstream-socket', observer) })
+    client.on('close', () => { sockets.delete(client); observers.delete(observer); remote.destroy(); try { observer.finish() } catch { reject('client-close-incomplete', observer) } })
     remote.on('close', () => { sockets.delete(remote); client.destroy() })
   })
   await new Promise((resolve, reject) => { listener.once('error', reject); listener.listen(0, '127.0.0.1', resolve) })
   const snapshot = () => ({ schema: 1, kind: 'transparent-loopback-http-observation', valid: failure === null,
-    failure, connections, upgrades, requests: Object.fromEntries([...counts].sort(([a], [b]) => a.localeCompare(b))) })
+    failure, failureKind, failureState, connections, upgrades, clientResets,
+    requests: Object.fromEntries([...counts].sort(([a], [b]) => a.localeCompare(b))) })
   return {
     url: `http://127.0.0.1:${listener.address().port}`,
     snapshot,
     assertValid() { assert.equal(failure, null, 'Native HTTP observation is incomplete or unsupported') },
     async close() {
       if (!closing) {
-        for (const observer of observers) { try { observer.finish() } catch { reject() } }
+        for (const observer of observers) { try { observer.finish() } catch { reject('shutdown-incomplete', observer) } }
         closed = true
         for (const socket of sockets) socket.destroy()
         closing = new Promise(resolve => listener.close(resolve))

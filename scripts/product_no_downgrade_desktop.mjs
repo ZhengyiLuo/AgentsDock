@@ -32,6 +32,9 @@ const SERVER_HELPER = join(ROOT, 'scripts/product_no_downgrade_server.py')
 const NATIVE_STAGES = new Set(['fixture-profile', 'renderer-connect', 'settings-navigation', 'coordinator-status',
   'visible-current-row', 'wire-verification', 'settings-reopen', 'app-close', 'service-preservation', 'final-verification'])
 const COORDINATOR_PHASES = new Set(['checking', 'current', 'pending', 'updating', 'offline', 'blocked', 'failed'])
+const RELAY_FAILURES = new Set(['client-origin', 'request-framing', 'response-upgrade', 'client-end-incomplete',
+  'client-socket', 'client-reset-incomplete', 'upstream-socket', 'client-close-incomplete', 'shutdown-incomplete'])
+const RELAY_STATES = new Set(['headers', 'body', 'chunk-size', 'chunk-body', 'chunk-end', 'trailers', 'upgrade-wait', 'tunnel'])
 
 // Failure receipts must remain useful without publishing errors, settings,
 // native logs, credentials, endpoints, profile names or server identities.
@@ -51,6 +54,9 @@ export function noDowngradeDiagnostic({ stage, attempt, status, fixture, candida
     operationPresent: Boolean(record?.operationId || record?.scheduleId || record?.operationOwned),
     paused: record?.paused === true,
     wireObserved: Boolean(wire), wireValid: wire?.valid === true, connections: count(wire?.connections),
+    wireFailureKind: RELAY_FAILURES.has(wire?.failureKind) ? wire.failureKind : null,
+    wireFailureState: RELAY_STATES.has(wire?.failureState) ? wire.failureState : null,
+    completeClientResets: count(wire?.clientResets),
     healthRequests: count(wire?.requests?.['GET /api/health'] ?? 0),
     updateRequests: count(Object.entries(wire?.requests ?? {}).reduce((total, [request, value]) =>
       /^\w+ \/api\/admin\/update(?:\/|$)/.test(request) && Number.isSafeInteger(value) && value > 0 ? total + value : total, 0)),

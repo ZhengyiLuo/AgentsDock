@@ -1,5 +1,21 @@
 # Public development log
 
+## 2026-09-29 — Correct complete-client disconnect observation
+
+- Reproduce the native no-downgrade relay's false failure with a real TCP client
+  reset after a complete request. Treat only that `ECONNRESET` as a disconnect
+  after the request observer verifies complete framing or an established
+  WebSocket tunnel. Partial requests, incomplete upgrades, upstream errors and
+  other socket errors still invalidate the entire observation.
+- Preserve every observed update request and the original failure. Add bounded
+  fixed-enum failure categories and complete-reset counts to sanitized native
+  diagnostics. All 24 focused observer/no-downgrade tests pass, including real
+  reset/reconnect and incomplete-request rejection; signed-app rerun is pending.
+- Both clients in the failed `0750` migration reach the exact paired version
+  and final service instance. Their scheduling/execution identifiers require
+  explicit common-operation verification; final health alone is not acceptance.
+  No signed artifact, production gate, npm tag or release was changed.
+
 ## 2026-09-29 — Preserve native recovery evidence and scope Linux runner defaults
 
 - Native macOS run `36613732503` passes fresh npm installation and both legacy

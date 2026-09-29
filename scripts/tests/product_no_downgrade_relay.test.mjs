@@ -1,8 +1,10 @@
 import assert from 'node:assert/strict'
 import { once } from 'node:events'
 import { createConnection, createServer } from 'node:net'
+import { setTimeout as delay } from 'node:timers/promises'
 import test from 'node:test'
-import { createNativeObservationRelay, NativeRequestObserver, ownedLoopbackURL } from '../product_no_downgrade_relay.mjs'
+import { completeOwnedClientReset, createNativeObservationRelay, NativeRequestObserver, ownedLoopbackURL } from '../product_no_downgrade_relay.mjs'
+import { assertNoUpdateRequests } from '../product_no_downgrade_desktop.mjs'
 
 const request = 'GET /api/health?private=value HTTP/1.1\r\nHost: 127.0.0.1\r\nX-AgentsDock-Token: never-record-me\r\n\r\n'
 function observe(bytes, fragments = false) {
@@ -79,6 +81,89 @@ async function socketFixture(t, onData) {
   assert.equal(ownershipChecks, 1)
   return { client, relay }
 }
+
+async function waitFor(condition) {
+  for (let attempt = 0; attempt < 100; attempt++) {
+    if (condition()) return
+    await delay(10)
+  }
+  assert.fail('Owned TCP observation did not settle')
+}
+
+test('only an exact client ECONNRESET after complete framing is accepted', () => {
+  const observer = new NativeRequestObserver(() => {})
+  observer.feed(Buffer.from(request))
+  for (const code of ['EPIPE', 'ECONNABORTED', 'ECONNREFUSED', 'UNKNOWN', undefined]) {
+    assert.equal(completeOwnedClientReset(observer, { code, message: 'private error value' }), false)
+  }
+  assert.equal(completeOwnedClientReset(observer, { code: 'ECONNRESET' }), true)
+  for (const bytes of [
+    'POST /api/admin/up',
+    'POST /api/admin/update/ensure HTTP/1.1\r\nContent-Length: 2\r\n\r\n{',
+    'POST /api/admin/update/ensure HTTP/1.1\r\nTransfer-Encoding: chunked\r\n\r\n2\r\n{',
+    'GET /events HTTP/1.1\r\nConnection: Upgrade\r\nUpgrade: websocket\r\n\r\n',
+  ]) {
+    const incomplete = new NativeRequestObserver(() => {})
+    incomplete.feed(Buffer.from(bytes))
+    assert.throws(() => completeOwnedClientReset(incomplete, { code: 'ECONNRESET' }))
+  }
+})
+
+test('real client reset after complete HTTP remains valid across reconnection', { timeout: 5000 }, async t => {
+  const response = Buffer.from('HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\n{}')
+  const { client, relay } = await socketFixture(t, socket => socket.write(response))
+  let incoming = once(client, 'data'); client.write(request); assert.deepEqual((await incoming)[0], response)
+  client.resetAndDestroy(); await once(client, 'close')
+  await waitFor(() => relay.snapshot().clientResets === 1)
+  relay.assertValid(); assertNoUpdateRequests(relay.snapshot())
+  const next = createConnection({ host: '127.0.0.1', port: Number(new URL(relay.url).port) })
+  t.after(() => next.destroy()); await once(next, 'connect')
+  incoming = once(next, 'data'); next.write(request); assert.deepEqual((await incoming)[0], response)
+  next.end(); await once(next, 'close')
+  relay.assertValid(); assertNoUpdateRequests(relay.snapshot())
+  assert.equal(relay.snapshot().requests['GET /api/health'], 2)
+  assert.equal(relay.snapshot().connections, 2)
+})
+
+test('real client reset after established WebSocket tunnel preserves completed observation', { timeout: 5000 }, async t => {
+  const upgrade = Buffer.from('GET /events HTTP/1.1\r\nConnection: Upgrade\r\nUpgrade: websocket\r\n\r\n')
+  const response = Buffer.from('HTTP/1.1 101 Switching Protocols\r\nConnection: Upgrade\r\nUpgrade: websocket\r\n\r\n')
+  const { client, relay } = await socketFixture(t, socket => socket.write(response))
+  const incoming = once(client, 'data'); client.write(upgrade); assert.deepEqual((await incoming)[0], response)
+  client.resetAndDestroy(); await once(client, 'close')
+  await waitFor(() => relay.snapshot().clientResets === 1)
+  relay.assertValid(); assert.equal(relay.snapshot().upgrades, 1)
+  assert.equal((await relay.close()).valid, true)
+})
+
+test('real reset with incomplete framing permanently invalidates observation', { timeout: 5000 }, async t => {
+  let arrived
+  const delivered = new Promise(resolve => { arrived = resolve })
+  const { client, relay } = await socketFixture(t, () => arrived())
+  client.write(request + 'POST /api/admin/update/ensure HTTP/1.1\r\nContent-Length: 2\r\n\r\n{')
+  await delivered
+  client.resetAndDestroy(); await once(client, 'close')
+  await waitFor(() => !relay.snapshot().valid)
+  assert.equal(relay.snapshot().failureKind, 'client-reset-incomplete')
+  assert.equal(relay.snapshot().failureState, 'body')
+  assert.equal(relay.snapshot().clientResets, 0)
+  assert.throws(() => assertNoUpdateRequests(relay.snapshot()))
+  const before = relay.snapshot()
+  const next = createConnection({ host: '127.0.0.1', port: Number(new URL(relay.url).port) })
+  t.after(() => next.destroy()); await once(next, 'connect')
+  next.end(request); await once(next, 'close')
+  assert.equal(relay.snapshot().valid, false)
+  assert.equal(relay.snapshot().failureKind, before.failureKind)
+  assert.equal((await relay.close()).failure, 'HTTP_OBSERVATION_INVALID')
+})
+
+test('real upstream reset remains a failure even after a complete request', { timeout: 5000 }, async t => {
+  const { client, relay } = await socketFixture(t, socket => socket.resetAndDestroy())
+  client.write(request); await once(client, 'close')
+  assert.equal(relay.snapshot().valid, false)
+  assert.equal(relay.snapshot().failureKind, 'upstream-socket')
+  assert.equal(relay.snapshot().clientResets, 0)
+})
 
 test('actual TCP relay preserves request and response bytes on persistent fixed/chunked HTTP', { timeout: 5000 }, async t => {
   const wire = Buffer.from(request + 'POST /api/admin/update/ensure HTTP/1.1\r\nTransfer-Encoding: chunked\r\n\r\n2\r\n{}\r\n0\r\n\r\n')

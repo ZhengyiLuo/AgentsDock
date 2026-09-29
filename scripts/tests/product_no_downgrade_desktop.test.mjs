@@ -26,7 +26,8 @@ test('native failure diagnostics distinguish the failing boundary without exposi
   const observed = noDowngradeDiagnostic({ stage: 'coordinator-status', attempt: 0,
     status: { ...status, token: privateMarker, serverUpdates: [{ ...status.serverUpdates[0], phase: 'blocked',
       message: privateMarker, name: privateMarker }] }, fixture, candidateVersion: receipt.version,
-    wire: { valid: true, connections: 3, requests: { 'GET /api/health': 2, 'POST /api/admin/update/ensure': 1,
+    wire: { valid: true, connections: 3, clientResets: 2, failureKind: 'client-reset-incomplete', failureState: 'body',
+      requests: { 'GET /api/health': 2, 'POST /api/admin/update/ensure': 1,
       [`GET /${privateMarker}`]: 7 }, privateData: privateMarker },
     child: { exitCode: null, signalCode: null } })
   assert.equal(observed.stage, 'coordinator-status')
@@ -34,16 +35,23 @@ test('native failure diagnostics distinguish the failing boundary without exposi
   assert.equal(observed.matchingProfileRecords, 1)
   assert.equal(observed.healthRequests, 2)
   assert.equal(observed.updateRequests, 1)
+  assert.equal(observed.wireFailureKind, 'client-reset-incomplete')
+  assert.equal(observed.wireFailureState, 'body')
+  assert.equal(observed.completeClientResets, 2)
   assert.equal(observed.expectedServerIdentity, true)
   assert.equal(observed.appExited, false)
   assert(!JSON.stringify(observed).includes(privateMarker))
   assert(!JSON.stringify(observed).includes(fixture.serverIdentity))
   const unknown = noDowngradeDiagnostic({ stage: 'renderer-connect', attempt: 1, fixture,
     candidateVersion: receipt.version, status: { serverUpdates: [{ ...status.serverUpdates[0], phase: privateMarker }] },
+    wire: { failureKind: privateMarker, failureState: privateMarker, clientResets: privateMarker },
     child: { exitCode: 1, signalCode: privateMarker } })
   assert.equal(unknown.phase, null)
   assert.equal(unknown.appExitSignal, null)
   assert.equal(unknown.appExitCode, 1)
+  assert.equal(unknown.wireFailureKind, null)
+  assert.equal(unknown.wireFailureState, null)
+  assert.equal(unknown.completeClientResets, null)
   assert(!JSON.stringify(unknown).includes(privateMarker))
   for (const changes of [{ stage: privateMarker }, { attempt: 2 }]) {
     assert.throws(() => noDowngradeDiagnostic({ stage: 'renderer-connect', attempt: 0, fixture,
