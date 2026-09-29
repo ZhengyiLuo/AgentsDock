@@ -165,7 +165,8 @@ class NativeServerAcceptanceUnitTests(unittest.TestCase):
             files = [root / "agents-server.service", root / "agents-server-gateway.service"]
             for item in files:
                 item.write_text("native unit fixture")
-            fixture = {"installRoot": str(install)}
+            fixture = {"installRoot": str(install), "rootBindings": {
+                "installRoot": [install.stat().st_dev, install.stat().st_ino]}}
             version = "1.0.7-beta.21"
             health = {"server_instance_id": "worker-instance", "gateway": {"protocol": 1, "version": version, "pid": 123, "instance_id": "gateway"},
                       "execution_service": {"protocol": 1, "version": version, "pid": 456, "instance_id": "worker", "maintenance_held": False}}
@@ -688,16 +689,24 @@ class NativeServerAcceptanceUnitTests(unittest.TestCase):
         home, work, bundle = root / "account", root / "agentsdock-acceptance-fixture", root / "bundle"
         home.mkdir(mode=0o700)
         work.mkdir(mode=0o700)
-        (bundle / "npm").mkdir(parents=True)
-        installer = b"#!/bin/bash\n# Exact fixture installer bytes; no host installation.\n"
+        installer = (Path(MOD.__file__).resolve().parents[1] / "server/install.sh").read_bytes()
         receipt = {"sourceSha": "a" * 40, "version": "1.0.8-beta.2", "track": "beta"}
-        archive = bundle / "npm/fixture.tgz"
-        with tarfile.open(archive, "w:gz") as package:
-            member = tarfile.TarInfo("package/server/install.sh")
-            member.size, member.mode = len(installer), 0o755
-            package.addfile(member, io.BytesIO(installer))
-        (bundle / "npm/agents-server-npm-manifest.json").write_text(json.dumps({
-            "version": receipt["version"], "archive": {"name": archive.name}}))
+        # Package real audited installer bytes but NEVER execute the installer.
+        for distribution, manifest, archive_name, member_name in (
+            ("npm", "agents-server-npm-manifest.json", "server-1.0.8-beta.2.tgz", "package/server/install.sh"),
+            ("legacy", "agents-server-manifest.json", "agents-server-1.0.8-beta.2.tar.gz", "agents-server-1.0.8-beta.2/install.sh"),
+        ):
+            (bundle / distribution).mkdir(parents=True)
+            archive = bundle / distribution / archive_name
+            with tarfile.open(archive, "w:gz") as package:
+                member = tarfile.TarInfo(member_name)
+                member.size, member.mode = len(installer), 0o755
+                package.addfile(member, io.BytesIO(installer))
+            manifest_path = bundle / distribution / manifest
+            manifest_path.write_text(json.dumps({
+                "version": receipt["version"], "commit": receipt["sourceSha"],
+                "archive": {"name": archive.name, "size": archive.stat().st_size, "sha256": MOD.sha(archive.read_bytes())}}))
+            receipt[f"{distribution}ManifestSha256"] = MOD.sha(manifest_path.read_bytes())
         uv = root / "real-uv"
         uv.write_text("#!/bin/sh\nprintf 'owned-real-uv\\n'\n")
         uv.chmod(0o755)
@@ -795,11 +804,18 @@ class NativeServerAcceptanceUnitTests(unittest.TestCase):
                 MOD.prepare_stage_fault_delegate(args, receipt, Path(fixture["home"]), env)
             which.assert_not_called()
 
-    def run_staging_recovery_case(self, root, *, retain_stage=False, bad_marker=False):
+    def run_staging_recovery_case(self, root, *, retain_stage=False, bad_marker=False, root_mode=0o755,
+                                 changed_field=None):
         args, fixture, receipt, config_path, stage, uv, env = self.staging_case(root)
         calls = []
-        before = {"serverInstanceId": "old", "components": {"gateway": "old-gateway", "execution": "old-worker"}}
-        accepted = {**before, "serverInstanceId": "new"}
+        before = {"serverInstanceId": "old", "components": {"gateway": "old-gateway", "execution": "old-worker"},
+                  "registrations": {"gateway": "old-plist", "execution": "old-worker-plist"},
+                  "currentLink": "owned-baseline", "rootMode": root_mode,
+                  "rootIdentity": [*fixture["rootBindings"]["installRoot"], os.getuid()]}
+        recovered = {**before, "rootMode": 0o700}
+        if changed_field:
+            recovered[changed_field] = "private-changed-value"
+        accepted = {**before, "serverInstanceId": "new", "rootMode": 0o700}
         def request(_fixture, route, body=None):
             calls.append((route, body))
             if route.endswith("/start") and len(calls) == 1:
@@ -815,13 +831,13 @@ class NativeServerAcceptanceUnitTests(unittest.TestCase):
             return {"phase": "failed"} if route == "/api/admin/update" else {"phase": "starting"}
         with patch.object(MOD.sys, "platform", "darwin"), \
                 patch.dict(os.environ, {"GITHUB_RUN_ID": "123", "GITHUB_RUN_ATTEMPT": "1"}), \
-                patch.object(MOD, "staging_native_identity", side_effect=[before, before, accepted]), \
+                patch.object(MOD, "staging_native_identity", side_effect=[before, recovered, accepted]), \
                 patch.object(MOD, "request", side_effect=request), \
                 patch.object(MOD, "state_snapshot", return_value=self.snapshot()), \
                 patch.object(MOD, "health"), patch.object(MOD, "wait_update_complete"), \
                 patch.object(MOD, "verify_installed_runtime", return_value=117), \
                 patch.object(MOD, "command") as command:
-            if retain_stage or bad_marker:
+            if retain_stage or bad_marker or changed_field:
                 with self.assertRaises(RuntimeError):
                     MOD.staging_failure_retry(args, fixture, receipt)
                 self.assertEqual(len([call for call in calls if call[0].endswith("/start")]), 1)
@@ -829,6 +845,9 @@ class NativeServerAcceptanceUnitTests(unittest.TestCase):
                 value = MOD.staging_failure_retry(args, fixture, receipt)
                 self.assertEqual(calls[0], calls[2], "Retry must use the same public target and process identity")
                 self.assertEqual(value["exactRuntimeFilesCompared"], 117)
+                self.assertEqual(value["installRootModeBefore"], f"{root_mode:04o}")
+                self.assertEqual(value["installRootModeAfter"], "0700")
+                self.assertTrue(value["installRootIdentityPreserved"])
                 for key in ("failedStageRemovedByInstaller", "installLockReleasedByInstaller",
                             "incumbentComponentsIdentityAndDataPreserved", "sameAcceptedVersionRetried"):
                     self.assertTrue(value[key])
@@ -841,8 +860,93 @@ class NativeServerAcceptanceUnitTests(unittest.TestCase):
             command.assert_not_called()
 
     def test_native_stage_recovery_uses_same_api_without_repair_and_keeps_claims_scoped(self):
+        for mode in (0o755, 0o750, 0o700):
+            with self.subTest(mode=oct(mode)), tempfile.TemporaryDirectory() as temporary:
+                self.run_staging_recovery_case(Path(temporary).resolve(), root_mode=mode)
+
+    def test_native_stage_retry_still_rejects_every_incumbent_identity_change(self):
+        for field in ("serverInstanceId", "components", "registrations", "currentLink", "rootIdentity", "rootMode"):
+            with self.subTest(field=field), tempfile.TemporaryDirectory() as temporary:
+                self.run_staging_recovery_case(Path(temporary).resolve(), changed_field=field)
+
+    def test_root_normalization_contract_binds_both_exact_archives_and_source(self):
+        for change in (None, "source", "version", "name", "archive", "hash", "coupled-archive-descriptor", "reviewed-policy", "canonical-source"):
+            with self.subTest(change=change), tempfile.TemporaryDirectory() as temporary:
+                args, fixture, receipt, config, stage, uv, env = self.staging_case(Path(temporary).resolve())
+                manifest = args.bundle / "legacy/agents-server-manifest.json"
+                descriptor = json.loads(manifest.read_text())
+                if change == "source": descriptor["commit"] = "b" * 40
+                if change == "version": descriptor["version"] = "1.0.8"
+                if change == "name": descriptor["archive"]["name"] = "../outside.tar.gz"
+                if change == "hash": descriptor["archive"]["sha256"] = "0" * 64
+                if change == "coupled-archive-descriptor":
+                    archive = args.bundle / "legacy" / descriptor["archive"]["name"]
+                    # Keep the reviewed installer but alter other package bytes
+                    # and recompute the descriptor. The accepted receipt still
+                    # must reject this coupled replacement.
+                    installer = (stage / "install.sh").read_bytes()
+                    with tarfile.open(archive, "w:gz") as package:
+                        member = tarfile.TarInfo("agents-server-1.0.8-beta.2/install.sh")
+                        member.size, member.mode = len(installer), 0o755
+                        package.addfile(member, io.BytesIO(installer))
+                        changed = tarfile.TarInfo("agents-server-1.0.8-beta.2/changed")
+                        changed.size = 8
+                        package.addfile(changed, io.BytesIO(b"modified"))
+                    descriptor["archive"].update(size=archive.stat().st_size, sha256=MOD.sha(archive.read_bytes()))
+                manifest.write_text(json.dumps(descriptor))
+                if change in {"source", "version", "name", "hash"}:
+                    # Independently exercise each inner binding after the raw
+                    # descriptor-digest guard has accepted these fixture bytes.
+                    receipt["legacyManifestSha256"] = MOD.sha(manifest.read_bytes())
+                if change == "archive": (args.bundle / "legacy" / descriptor["archive"]["name"]).write_bytes(b"different")
+                if change == "reviewed-policy":
+                    with patch.object(MOD, "ROOT_NORMALIZING_INSTALLER_SHA256", "0" * 64), self.assertRaises(RuntimeError):
+                        MOD.root_normalization_contract(args.bundle, receipt)
+                elif change == "canonical-source":
+                    with patch.object(MOD, "ROOT", args.work), self.assertRaises(OSError):
+                        MOD.root_normalization_contract(args.bundle, receipt)
+                elif change:
+                    with self.assertRaises(RuntimeError): MOD.root_normalization_contract(args.bundle, receipt)
+                else:
+                    self.assertEqual(MOD.root_normalization_contract(args.bundle, receipt), MOD.ROOT_NORMALIZING_INSTALLER_SHA256)
+
+    def test_root_normalization_never_relaxes_mode_inode_owner_or_contract(self):
+        before = {"rootMode": 0o755, "rootIdentity": [1, 2, os.getuid()]}
+        after = {**before, "rootMode": 0o700}
+        pin = MOD.ROOT_NORMALIZING_INSTALLER_SHA256
+        for mode in (0o755, 0o750, 0o700):
+            self.assertTrue(MOD.verify_root_normalization({**before, "rootMode": mode}, after, pin)["installRootIdentityPreserved"])
+        for change in ({"rootMode": 0o755}, {"rootMode": 0o750}, {"rootMode": 0o777}, {"rootMode": "0700"},
+                       {"rootIdentity": [1, 3, os.getuid()]}, {"rootIdentity": [2, 2, os.getuid()]},
+                       {"rootIdentity": [1, 2, os.getuid() + 1]}):
+            with self.subTest(change=change), self.assertRaises(RuntimeError):
+                MOD.verify_root_normalization(before, {**after, **change}, pin)
+        for mode in (0o775, 0o777, 0o600, None, True):
+            with self.assertRaises(RuntimeError): MOD.verify_root_normalization({**before, "rootMode": mode}, after, pin)
+        with self.assertRaises(RuntimeError): MOD.verify_root_normalization(before, after, "f" * 64)
+
+    def test_native_root_observation_refuses_replacement_inode_and_symlink(self):
         with tempfile.TemporaryDirectory() as temporary:
-            self.run_staging_recovery_case(Path(temporary).resolve())
+            root = Path(temporary).resolve() / "install"
+            root.mkdir(mode=0o750)
+            root.chmod(0o750)
+            fixture = {"installRoot": str(root), "rootBindings": {"installRoot": [root.stat().st_dev, root.stat().st_ino]}}
+            self.assertEqual(MOD.native_root_state(fixture)["rootMode"], 0o750)
+            root.rename(root.with_name("incumbent"))
+            root.mkdir(mode=0o700)
+            with self.assertRaises(RuntimeError): MOD.native_root_state(fixture)
+            root.rmdir()
+            root.symlink_to(root.with_name("incumbent"))
+            with self.assertRaises(RuntimeError): MOD.native_root_state(fixture)
+
+    def test_native_field_failure_diagnostic_exposes_only_fixed_field_names(self):
+        before = {"serverInstanceId": "old-private", "components": {"gateway": "private-value"},
+                  "registrations": {"token": "private-token"}, "currentLink": "/private/path"}
+        after = {**before, "components": {}, "registrations": {}}
+        with self.assertRaisesRegex(RuntimeError, "components, registrations") as error:
+            MOD.require_preserved_native_fields(before, after, tuple(before))
+        self.assertNotIn("private", str(error.exception))
+        with self.assertRaises(RuntimeError): MOD.require_preserved_native_fields(before, after, ("arbitrary-secret",))
 
     def test_retained_stage_or_wrong_fault_receipt_refuses_retry(self):
         for change in ("retained", "wrong-marker"):

@@ -29,6 +29,35 @@ const digest = bytes => createHash('sha256').update(bytes).digest('hex')
 const PROFILE = 'candidate-no-downgrade', NAME = 'Acceptance stable server'
 const ACCOUNT = `agent-access-token:${PROFILE}`, KEYCHAIN = 'com.zhengyiluo.AgentsDock'
 const SERVER_HELPER = join(ROOT, 'scripts/product_no_downgrade_server.py')
+const NATIVE_STAGES = new Set(['fixture-profile', 'renderer-connect', 'settings-navigation', 'coordinator-status',
+  'visible-current-row', 'wire-verification', 'settings-reopen', 'app-close', 'service-preservation', 'final-verification'])
+const COORDINATOR_PHASES = new Set(['checking', 'current', 'pending', 'updating', 'offline', 'blocked', 'failed'])
+
+// Failure receipts must remain useful without publishing errors, settings,
+// native logs, credentials, endpoints, profile names or server identities.
+export function noDowngradeDiagnostic({ stage, attempt, status, fixture, candidateVersion, wire, child }) {
+  assert(NATIVE_STAGES.has(stage) && (attempt === 0 || attempt === 1), 'Unknown native diagnostic stage')
+  const records = Array.isArray(status?.serverUpdates) ? status.serverUpdates : []
+  const matches = records.filter(record => record?.profileId === PROFILE)
+  const record = matches.length === 1 ? matches[0] : null
+  const count = value => Number.isSafeInteger(value) && value >= 0 && value <= 1000000 ? value : null
+  return { stage, attempt, statusObserved: status !== undefined,
+    candidateVersionMatches: status?.currentVersion === candidateVersion,
+    coordinatorRecords: count(records.length), matchingProfileRecords: count(matches.length),
+    phase: COORDINATOR_PHASES.has(record?.phase) ? record.phase : null,
+    expectedServerIdentity: record?.serverIdentity === fixture.serverIdentity,
+    expectedServerInstance: record?.serverInstanceId === fixture.componentIdentity.serverInstanceId,
+    expectedTargetVersion: record?.targetVersion === candidateVersion,
+    operationPresent: Boolean(record?.operationId || record?.scheduleId || record?.operationOwned),
+    paused: record?.paused === true,
+    wireObserved: Boolean(wire), wireValid: wire?.valid === true, connections: count(wire?.connections),
+    healthRequests: count(wire?.requests?.['GET /api/health'] ?? 0),
+    updateRequests: count(Object.entries(wire?.requests ?? {}).reduce((total, [request, value]) =>
+      /^\w+ \/api\/admin\/update(?:\/|$)/.test(request) && Number.isSafeInteger(value) && value > 0 ? total + value : total, 0)),
+    appExited: child ? child.exitCode !== null || child.signalCode !== null : null,
+    appExitCode: Number.isSafeInteger(child?.exitCode) ? child.exitCode : null,
+    appExitSignal: ['SIGTERM', 'SIGKILL', 'SIGABRT', 'SIGSEGV', 'SIGBUS', 'SIGILL', 'SIGTRAP'].includes(child?.signalCode) ? child.signalCode : null }
+}
 
 export async function readRegular(path, maximum = 32768, privateFile = false) {
   const file = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW)
@@ -172,7 +201,12 @@ export async function main(argv = process.argv.slice(2)) {
   const asar = join(app, 'Contents/Resources/app.asar'), asarSha256 = await hashFile(asar)
   const profile = join(options.output, 'profile'); await mkdir(profile, { mode: 0o700 })
   const relay = await createNativeObservationRelay({ targetURL: fixture.serverUrl, assertOwnedTarget: () => health(fixture) })
-  let keychainCreated = false, client, child, completed = false
+  let keychainCreated = false, client, child, completed = false, stage = 'fixture-profile', attempt = 0, lastStatus
+  const enter = next => {
+    assert(NATIVE_STAGES.has(next), 'Unknown native diagnostic stage')
+    stage = next
+    process.stdout.write(`${JSON.stringify({ kind: 'candidate-no-downgrade-progress', stage, attempt })}\n`)
+  }
   const logs = boundedNativeLog(createWriteStream(join(options.output, 'native-private.log'), { flags: 'wx', mode: 0o600 }))
   const observations = []
   try {
@@ -189,34 +223,46 @@ export async function main(argv = process.argv.slice(2)) {
     keychainCreated = true
     const port = await freePort()
     const observeCurrent = async name => {
+      enter('coordinator-status')
       const result = await until('Native beta app accepts the unchanged stable server', async () => {
         relay.assertValid()
         const status = await client.evaluate('window.agentsDock?.updates.status()')
+        lastStatus = status
         const current = await health(fixture)
         try { return assertCurrentWithoutOperation(status, current, fixture, receipt.version) } catch { return null }
       }, 60000)
+      enter('visible-current-row')
       await until('Visible unchanged stable server row', async () => client.evaluate(`(() => {const rows=[...document.querySelectorAll('.coordinated-server-update-row')].filter(e=>e.getClientRects().length && e.querySelector('strong')?.textContent?.trim()===${JSON.stringify(NAME)});return rows.length===1 && /up to date|current/i.test(rows[0].querySelector('.app-settings-value')?.textContent||'')})()`))
+      enter('wire-verification')
       relay.assertValid(); assertNoUpdateRequests(relay.snapshot())
       await client.screenshot(join(options.output, `${name}.png`))
       observations.push({ name, ...result })
     }
-    for (let attempt = 0; attempt < 2; attempt++) {
+    for (attempt = 0; attempt < 2; attempt++) {
+      lastStatus = undefined
       child = spawn(join(app, 'Contents/MacOS/AgentsDock'), [`--remote-debugging-port=${port}`], {
         env: { ...process.env, AGENTSDOCK_USER_DATA: profile, AGENTSDOCK_DISABLE_ANALYTICS: '1' }, stdio: ['ignore', 'pipe', 'pipe'] })
       child.stdout.on('data', bytes => logs.write(bytes)); child.stderr.on('data', bytes => logs.write(bytes))
       child.once('error', () => logs.write('Owned native app launch failed.\n'))
+      enter('renderer-connect')
       client = await until('Signed native candidate renderer', () => connect(port)); await client.call('Page.bringToFront')
+      enter('settings-navigation')
       await openMigrationUpdateSettings(client)
       await observeCurrent(attempt ? '02-app-reopened-current' : '00-stable-current')
       if (!attempt) {
+        enter('settings-reopen')
         await client.clickButton(['Close Settings'])
         await openMigrationUpdateSettings(client)
         await observeCurrent('01-settings-reopened-current')
       }
+      enter('app-close')
       client.close(); client = null; await stopOwned(app)
       assertStableHealth(await health(fixture), fixture)
     }
+    attempt = 1
+    enter('service-preservation')
     const preservationEvidenceSha256 = verifyService(options, join(options.output, 'service-verification.json'))
+    enter('final-verification')
     verifyApp(app, receipt.version); assert.equal(await hashFile(asar), asarSha256)
     const saved = JSON.parse(await readRegular(join(profile, 'settings.json'), 1024 * 1024))
     assert.equal(saved.activeProfileId, PROFILE)
@@ -233,6 +279,19 @@ export async function main(argv = process.argv.slice(2)) {
         desktopSelfReplacementObserved: false, liveProviderWorkObserved: false, publicFeedDeliveryObserved: false } }
     await writeFile(join(options.output, 'no-downgrade.json'), `${JSON.stringify(report, null, 2)}\n`, { flag: 'wx', mode: 0o600 })
     completed = true
+  } catch (error) {
+    const diagnostic = noDowngradeDiagnostic({ stage, attempt, status: lastStatus, fixture,
+      candidateVersion: receipt.version, wire: relay.snapshot(), child })
+    // The existing public-evidence collector uploads this same allowlisted
+    // report path. A failed observation can never stand in for acceptance.
+    const failure = { schema: 1, kind: 'candidate-no-downgrade-observations', publicationEligible: false,
+      releaseAcceptance: false, observed: false, native: true, platform: 'darwin',
+      sourceSha: receipt.sourceSha, harnessSourceSha: harness.harnessSourceSha,
+      releaseReceiptSha256: options['receipt-sha256'], version: receipt.version,
+      runId: process.env.GITHUB_RUN_ID, runAttempt: process.env.GITHUB_RUN_ATTEMPT, diagnostic }
+    await writeFile(join(options.output, 'no-downgrade.json'), `${JSON.stringify(failure, null, 2)}\n`, { flag: 'wx', mode: 0o600 })
+    process.stderr.write(`${JSON.stringify({ kind: 'candidate-no-downgrade-failure', ...diagnostic })}\n`)
+    throw error
   } finally {
     try { client?.close(); await stopOwned(app) }
     finally {

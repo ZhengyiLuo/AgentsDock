@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import test from 'node:test'
 import { assertCurrentWithoutOperation, assertNoUpdateRequests, assertSameBaseBetaVersion, assertStableHealth, assertStableIdentity,
-  parseArguments, readRegular, STABLE_IDENTITY, validateFixture, verifyStableDirectory } from '../product_no_downgrade_desktop.mjs'
+  noDowngradeDiagnostic, parseArguments, readRegular, STABLE_IDENTITY, validateFixture, verifyStableDirectory } from '../product_no_downgrade_desktop.mjs'
 
 const clone = value => structuredClone(value)
 const receipt = { sourceSha: 'b'.repeat(40), version: '1.0.8-beta.1' }, receiptHash = 'c'.repeat(64)
@@ -20,6 +20,36 @@ const health = { ok: true, server_version: '1.0.8', server_identity: fixture.ser
   execution_service: { protocol: 1, version: '1.0.8', pid: 1235, instance_id: 'execution-instance', maintenance_held: false } }
 const status = { currentVersion: receipt.version, serverUpdates: [{ profileId: 'candidate-no-downgrade', phase: 'current',
   serverIdentity: fixture.serverIdentity, targetVersion: receipt.version, serverInstanceId: 'server-instance' }] }
+
+test('native failure diagnostics distinguish the failing boundary without exposing native data', () => {
+  const privateMarker = 'private-test-value-do-not-emit'
+  const observed = noDowngradeDiagnostic({ stage: 'coordinator-status', attempt: 0,
+    status: { ...status, token: privateMarker, serverUpdates: [{ ...status.serverUpdates[0], phase: 'blocked',
+      message: privateMarker, name: privateMarker }] }, fixture, candidateVersion: receipt.version,
+    wire: { valid: true, connections: 3, requests: { 'GET /api/health': 2, 'POST /api/admin/update/ensure': 1,
+      [`GET /${privateMarker}`]: 7 }, privateData: privateMarker },
+    child: { exitCode: null, signalCode: null } })
+  assert.equal(observed.stage, 'coordinator-status')
+  assert.equal(observed.phase, 'blocked')
+  assert.equal(observed.matchingProfileRecords, 1)
+  assert.equal(observed.healthRequests, 2)
+  assert.equal(observed.updateRequests, 1)
+  assert.equal(observed.expectedServerIdentity, true)
+  assert.equal(observed.appExited, false)
+  assert(!JSON.stringify(observed).includes(privateMarker))
+  assert(!JSON.stringify(observed).includes(fixture.serverIdentity))
+  const unknown = noDowngradeDiagnostic({ stage: 'renderer-connect', attempt: 1, fixture,
+    candidateVersion: receipt.version, status: { serverUpdates: [{ ...status.serverUpdates[0], phase: privateMarker }] },
+    child: { exitCode: 1, signalCode: privateMarker } })
+  assert.equal(unknown.phase, null)
+  assert.equal(unknown.appExitSignal, null)
+  assert.equal(unknown.appExitCode, 1)
+  assert(!JSON.stringify(unknown).includes(privateMarker))
+  for (const changes of [{ stage: privateMarker }, { attempt: 2 }]) {
+    assert.throws(() => noDowngradeDiagnostic({ stage: 'renderer-connect', attempt: 0, fixture,
+      candidateVersion: receipt.version, ...changes }))
+  }
+})
 
 test('separate immutable official stable identity is not the beta artifact identity', () => {
   assert.notEqual(STABLE_IDENTITY.sourceSha, receipt.sourceSha)

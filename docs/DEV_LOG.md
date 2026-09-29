@@ -1,5 +1,19 @@
 # Public development log
 
+## 2026-09-29 — Correct recovery assertions and expose native failure boundaries
+
+- Bind the test harness's expected `0755`/`0750` to `0700` directory hardening
+  to the exact audited signed installer. Preserve the root's device, inode and
+  owner plus incumbent component, registration and runtime-link checks. The
+  earlier preparation-failure assertion incorrectly required broader legacy
+  permissions to remain; native retry with the corrected assertion is pending.
+- Add bounded, allowlisted native failure observations for the no-downgrade
+  check. Do not upload private app logs or change the signed
+  runtime, test outcomes or publication gates. The first failed run is retained;
+  neither UI timeout has yet established a runtime cause.
+- Continue using the same signed `1.0.8-beta.2` build 1234 artifacts. No beta
+  publication or stable tag change is made by these QA-only corrections.
+
 ## 2026-09-29 — Verify beta.2 packages and isolate Linux rollback rehearsal
 
 - Keep signed runtime/build source `7b01c4586e2c2cbe45bcd8b871e54b92a8aa7e37`
@@ -19,9 +33,10 @@
   This harness change does not broaden desktop or publication acceptance.
 - Mac replay run `36610907757` observes native app replacement/relaunch,
   automatic saved-server reconciliation after offline recovery, and two clients
-  sharing one completed update. Interrupted-download recovery passes for both
-  legacy root modes. No-downgrade and preparation-failure cases currently fail
-  and remain under investigation; green job status alone is not acceptance.
+  sharing one completed update for the `0755` fixture. Interrupted-download
+  recovery passes for both legacy root modes. No-downgrade, preparation-failure
+  and the `0750` second-client observation currently fail and remain under
+  investigation; green job status alone is not acceptance.
 - Populated provider history, active work/queued messages and the remaining
   exact-package failure boundaries are still pending. No beta is published;
   stable npm `1.0.8` and `latest` remain unchanged. Linux rollback execution is

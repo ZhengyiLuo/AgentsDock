@@ -12,6 +12,7 @@ import argparse
 import base64
 import hashlib
 import http.client
+import io
 import json
 import os
 from pathlib import Path
@@ -43,6 +44,12 @@ SESSION_KEYS = ("id", "title", "folder", "cwd", "backend", "model", "effort",
                 "cursor_session_id", "opencode_session_id", "claude_permission_mode",
                 "cursor_permission_mode", "opencode_permission_mode", "codex_approval_policy",
                 "codex_sandbox_mode", "codex_permission_profile", "provider_jobs_access")
+# Audited install.sh: acquire the exact install lock, normalize the validated
+# install-root inode to 0700, then prepare dependencies. Failed preparation and
+# rollback deliberately do not restore broader legacy directory permissions.
+# Keep this whole-file pin: changed installer logic requires another review,
+# not a looser source-pattern match or a changed signed candidate.
+ROOT_NORMALIZING_INSTALLER_SHA256 = "df21400431ea5f79a78d4f6cede5cfae4f7584166798565c38f5dffff70f38e3"
 
 
 def need(condition: bool, message: str) -> None:
@@ -1091,6 +1098,77 @@ def candidate_activation_journal(root: Path, version: str, transaction_id: str |
     return value
 
 
+def root_normalization_contract(bundle: Path, receipt: dict) -> str:
+    """Rebind the reviewed permission policy to the already verified packages.
+
+    main() first verifies both signatures, source provenance and runtime parity.
+    Rechecking archive bytes here prevents a later replacement from authorizing
+    this one expected difference in before/after native observations.
+    """
+    version, source = receipt.get("version"), receipt.get("sourceSha")
+    need(isinstance(version, str) and VERSION.fullmatch(version)
+         and isinstance(source, str) and re.fullmatch(r"[a-f0-9]{40}", source),
+         "Root-normalization policy requires the exact accepted source/version.")
+    installers = []
+    for distribution, manifest, archive_name, member_name in (
+        ("npm", "agents-server-npm-manifest.json", f"server-{version}.tgz", "package/server/install.sh"),
+        ("legacy", "agents-server-manifest.json", f"agents-server-{version}.tar.gz", f"agents-server-{version}/install.sh"),
+    ):
+        descriptor_bytes = read_regular(bundle / distribution / manifest, 8192)
+        manifest_hash = receipt.get(f"{distribution}ManifestSha256")
+        need(isinstance(manifest_hash, str) and re.fullmatch(r"[a-f0-9]{64}", manifest_hash)
+             and sha(descriptor_bytes) == manifest_hash,
+             "Root-normalization descriptor differs from the accepted receipt.")
+        descriptor = json.loads(descriptor_bytes)
+        archive = descriptor.get("archive", {})
+        need(descriptor.get("version") == version and descriptor.get("commit") == source
+             and archive.get("name") == archive_name,
+             "Root-normalization package differs from the accepted source/version.")
+        payload = read_regular(bundle / distribution / archive_name, 200 * 1024 * 1024)
+        need(len(payload) == archive.get("size") and sha(payload) == archive.get("sha256"),
+             "Root-normalization package bytes differ from their signed descriptor.")
+        with tarfile.open(fileobj=io.BytesIO(payload), mode="r:gz") as package:
+            members = [item for item in package.getmembers() if item.name == member_name]
+            need(len(members) == 1 and members[0].isfile() and members[0].size <= 2 * 1024 * 1024,
+                 "Root-normalization package must contain one bounded installer.")
+            with package.extractfile(members[0]) as stream:
+                installers.append(stream.read(2 * 1024 * 1024 + 1))
+    need(installers[0] == installers[1] == read_regular(ROOT / "server/install.sh", 2 * 1024 * 1024)
+         and sha(installers[0]) == ROOT_NORMALIZING_INSTALLER_SHA256,
+         "Signed installer root-normalization behavior is not the reviewed exact implementation.")
+    return ROOT_NORMALIZING_INSTALLER_SHA256
+
+
+def native_root_state(fixture: dict) -> dict:
+    info = owned_directory(Path(fixture["installRoot"]))
+    need(fixture.get("rootBindings", {}).get("installRoot") == [info.st_dev, info.st_ino],
+         "Native install root no longer has its exact fixture inode.")
+    return {"rootIdentity": [info.st_dev, info.st_ino, info.st_uid], "rootMode": stat.S_IMODE(info.st_mode)}
+
+
+def verify_root_normalization(before: dict, after: dict, installer_hash: str) -> dict:
+    need(installer_hash == ROOT_NORMALIZING_INSTALLER_SHA256,
+         "Root normalization requires the reviewed signed installer contract.")
+    identity = before.get("rootIdentity")
+    need(isinstance(identity, list) and len(identity) == 3
+         and all(type(value) is int for value in identity) and identity[0] > 0 and identity[1] > 0
+         and identity[2] == os.getuid() and after.get("rootIdentity") == identity,
+         "Native install root identity changed across installer recovery.")
+    need(type(before.get("rootMode")) is int and before["rootMode"] in {0o700, 0o750, 0o755}
+         and type(after.get("rootMode")) is int and after["rootMode"] == 0o700,
+         "Native root permissions did not match exact legacy-to-private normalization.")
+    return {"installRootIdentityPreserved": True, "installRootModeBefore": f"{before['rootMode']:04o}",
+            "installRootModeAfter": "0700", "signedInstallerRootNormalizationObserved": True}
+
+
+def require_preserved_native_fields(before: dict, after: dict, fields: tuple[str, ...]) -> None:
+    # Fixed field labels only; never expose process argv, tokens, paths or values.
+    permitted = {"serverInstanceId", "components", "registrations", "currentLink", "current"}
+    need(set(fields) <= permitted, "Unrecognized native preservation fields.")
+    changed = [name for name in fields if name not in before or name not in after or before[name] != after[name]]
+    need(not changed, "Installer recovery changed preserved native fields: " + ", ".join(changed) + ".")
+
+
 def rollback_native_state(fixture: dict, version: str) -> dict:
     """Observe exact split runtime, native registrations and released maintenance.
 
@@ -1122,7 +1200,7 @@ def rollback_native_state(fixture: dict, version: str) -> dict:
         need(raw_pid.isdigit() and int(raw_pid) == components[role]["pid"],
              "Authenticated runtime and real native service manager disagree.")
     return {"registrations": {item.name: sha(read_regular(item)) for item in registrations},
-            "rootMode": stat.S_IMODE(owned_directory(root).st_mode), "current": str(current.resolve()),
+            **native_root_state(fixture), "current": str(current.resolve()),
             "serverInstanceId": value["server_instance_id"]}
 
 
@@ -1141,6 +1219,7 @@ def rollback_retry(args: argparse.Namespace, fixture: dict, receipt: dict) -> di
     require_no_pending_journals(root)
     before = health(fixture, fixture["baselineVersion"])
     native_before = rollback_native_state(fixture, fixture["baselineVersion"])
+    installer_hash = root_normalization_contract(args.bundle, receipt)
     compare_snapshot(fixture["snapshot"], state_snapshot(fixture))
     incumbent = worker_pid()
     need(incumbent > 1, "Incumbent worker is not registered with the native service manager.")
@@ -1225,8 +1304,8 @@ def rollback_retry(args: argparse.Namespace, fixture: dict, receipt: dict) -> di
          "A candidate process fault and actual rollback journal phase were not both observed.")
     recovered = health(fixture, fixture["baselineVersion"])
     native_recovered = rollback_native_state(fixture, fixture["baselineVersion"])
-    need(all(native_recovered[key] == native_before[key] for key in ("registrations", "rootMode", "current")),
-         "Rollback changed incumbent native registration, runtime link or root mode.")
+    root_observations = verify_root_normalization(native_before, native_recovered, installer_hash)
+    require_preserved_native_fields(native_before, native_recovered, ("registrations", "current"))
     compare_snapshot(fixture["snapshot"], state_snapshot(fixture))
     # The watcher is fully stopped before retry. Retained journals and fences
     # are not edited: production recovery owns them.
@@ -1234,7 +1313,8 @@ def rollback_retry(args: argparse.Namespace, fixture: dict, receipt: dict) -> di
         **body, "expected_server_instance_id": recovered["server_instance_id"]})
     health(fixture, receipt["version"], timeout=1500)
     wait_update_complete(fixture, receipt["version"])
-    rollback_native_state(fixture, receipt["version"])
+    native_accepted = rollback_native_state(fixture, receipt["version"])
+    verify_root_normalization(native_recovered, native_accepted, installer_hash)
     preservation = compare_snapshot(fixture["snapshot"], state_snapshot(fixture),
                                     baseline_version=fixture["baselineVersion"], candidate_version=receipt["version"])
     count = verify_installed_runtime(fixture, args.bundle, receipt["version"])
@@ -1245,7 +1325,7 @@ def rollback_retry(args: argparse.Namespace, fixture: dict, receipt: dict) -> di
             "bothComponentsHealthyAfterRollbackAndRetry": True, "maintenanceReleasedAfterRollbackAndRetry": True,
             "activationJournalsClearedByInstaller": True, "sameAcceptedVersionRetried": True,
             "teamHubFenceCleanupObserved": False, "desktopUpdateObserved": False,
-            "exactRuntimeFilesCompared": count, **preservation,
+            "exactRuntimeFilesCompared": count, **preservation, **root_observations,
             "nonemptyProviderHistoryObserved": False}
 
 
@@ -1362,7 +1442,7 @@ def staging_native_identity(fixture: dict, version: str) -> dict:
         hashes[item.stem] = sha(raw)
     return {"serverInstanceId": value["server_instance_id"], "components": components,
             "registrations": hashes, "currentLink": str(release),
-            "installRootMode": stat.S_IMODE(owned_directory(root).st_mode)}
+            **native_root_state(fixture)}
 
 
 def staging_failure_retry(args: argparse.Namespace, fixture: dict, receipt: dict) -> dict:
@@ -1391,6 +1471,8 @@ def staging_failure_retry(args: argparse.Namespace, fixture: dict, receipt: dict
          and config["delegate"] == str(delegate_directory / "uv"),
          "Dependency fault does not bind this exact fixture and accepted candidate.")
     before = staging_native_identity(fixture, fixture["baselineVersion"])
+    installer_hash = root_normalization_contract(args.bundle, receipt)
+    need(installer_hash == config["installerSha256"], "Dependency fault installer differs from its signed permission contract.")
     compare_snapshot(fixture["snapshot"], state_snapshot(fixture))
     require_no_pending_journals(root)
     candidate = root / "releases" / receipt["version"]
@@ -1437,8 +1519,10 @@ def staging_failure_retry(args: argparse.Namespace, fixture: dict, receipt: dict
     install_lock = root / ".install-lock"
     need(not install_lock.exists() and not install_lock.is_symlink(), "The native installer retained its install lock.")
     require_no_pending_journals(root)
-    need(staging_native_identity(fixture, fixture["baselineVersion"]) == before,
-         "Failed preparation changed incumbent components, registration, link or root mode.")
+    recovered = staging_native_identity(fixture, fixture["baselineVersion"])
+    root_observations = verify_root_normalization(before, recovered, installer_hash)
+    require_preserved_native_fields(before, recovered,
+        ("serverInstanceId", "components", "registrations", "currentLink"))
     compare_snapshot(fixture["snapshot"], state_snapshot(fixture))
     # Same accepted version and incumbent identity. No install.sh invocation,
     # state deletion, journal rewriting or forced maintenance-fence removal.
@@ -1446,6 +1530,7 @@ def staging_failure_retry(args: argparse.Namespace, fixture: dict, receipt: dict
     health(fixture, receipt["version"], timeout=1500)
     wait_update_complete(fixture, receipt["version"])
     accepted = staging_native_identity(fixture, receipt["version"])
+    verify_root_normalization(recovered, accepted, installer_hash)
     need(accepted["serverInstanceId"] != before["serverInstanceId"], "Retry did not replace the incumbent runtime.")
     preservation = compare_snapshot(fixture["snapshot"], state_snapshot(fixture),
         baseline_version=fixture["baselineVersion"], candidate_version=receipt["version"])
@@ -1455,7 +1540,7 @@ def staging_failure_retry(args: argparse.Namespace, fixture: dict, receipt: dict
             "exactSignedCandidateStageObserved": True, "failedStageRemovedByInstaller": True,
             "installLockReleasedByInstaller": True, "incumbentComponentsIdentityAndDataPreserved": True,
             "sameAcceptedVersionRetried": True, "bothCandidateComponentsHealthy": True,
-            "nativeActivationCompleted": True, "exactRuntimeFilesCompared": count, **preservation,
+            "nativeActivationCompleted": True, "exactRuntimeFilesCompared": count, **preservation, **root_observations,
             "fenceCleanupObserved": False, "rollbackObserved": False,
             "activationInterruptionObserved": False, "nonemptyProviderHistoryObserved": False}
 

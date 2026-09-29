@@ -160,3 +160,10 @@ reports for blocked checks; scoped observations cannot authorize publication.
 The macOS matrix does not establish Linux candidate-health rollback; only an
 actual successful separately reviewed Linux rollback run can provide that
 scoped evidence.
+
+Both preparation-failure and rollback observations bind the installation root
+to its original device/inode/owner. The audited signed installer intentionally
+tightens legacy `0755`/`0750` permissions to `0700` under its installation lock;
+it does not restore broader permissions after failure. The harness permits
+only that exact transition (or retained `0700`), bound to the verified installer
+bytes, while keeping the other native preservation checks exact.
