@@ -148,7 +148,11 @@ test('candidate import opt-in cannot bypass the disposable canonical runner guar
   const f = fixture(t)
   await assert.rejects(f.inspect({ candidateRehearsal: 'false' }), /explicitly select/)
   await assert.rejects(f.inspect({ candidateRehearsal: 'true' }), /Candidate replay requires/)
-  await assert.rejects(f.inspect({ candidateRehearsal: 'server-linux' }), /Candidate replay requires.*Linux/)
+  // A real Linux release-tooling dispatch satisfies the outer host guard, but
+  // must still fail the separate server-only job guard. Local macOS fails the
+  // outer guard first; neither environment may import through this opt-in.
+  await assert.rejects(f.inspect({ candidateRehearsal: 'server-linux' }),
+    /Candidate replay requires.*Linux|Linux replay requires its explicit server-only rollback job/)
   f.setCheckout('e'.repeat(40))
   await assert.rejects(f.inspect(), /checkout differs/)
 })
