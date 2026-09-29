@@ -50,6 +50,17 @@ SESSION_KEYS = ("id", "title", "folder", "cwd", "backend", "model", "effort",
 # Keep this whole-file pin: changed installer logic requires another review,
 # not a looser source-pattern match or a changed signed candidate.
 ROOT_NORMALIZING_INSTALLER_SHA256 = "df21400431ea5f79a78d4f6cede5cfae4f7584166798565c38f5dffff70f38e3"
+ROLLBACK_STAGES = {"preflight", "start-request", "observe-rollback", "rollback-proof", "preservation",
+                   "retry-request", "retry-health", "retry-verification"}
+
+
+class NativeTransientHTTPError(RuntimeError):
+    """An explicitly expected unavailable gateway GET, never healthy evidence."""
+    def __init__(self, status: int):
+        if status not in (502, 503):
+            raise ValueError("Invalid transient native HTTP status.")
+        self.status = status
+        super().__init__(f"Native gateway temporarily unavailable (HTTP {status}); body withheld.")
 
 
 def need(condition: bool, message: str) -> None:
@@ -410,6 +421,11 @@ def request(fixture: dict, path: str, body: object | None = None, *, expected: t
         payload = response.read(8 * 1024 * 1024 + 1)
         need(response.status in expected and len(payload) <= 8 * 1024 * 1024,
              f"Native acceptance API request failed (HTTP {response.status}); body withheld.")
+        if body is None and path in {"/api/health", "/api/admin/update"} and response.status in (502, 503):
+            # During a real takeover/rollback the gateway may return plain text.
+            # Only callers explicitly expecting this status may observe it as
+            # transient; never parse or turn it into authenticated health.
+            raise NativeTransientHTTPError(response.status)
         value = json.loads(payload)
         need(isinstance(value, dict), "API response must be an object.")
         return value
@@ -1226,13 +1242,16 @@ def rollback_native_state(fixture: dict, version: str) -> dict:
             "serverInstanceId": value["server_instance_id"]}
 
 
-def rollback_retry(args: argparse.Namespace, fixture: dict, receipt: dict) -> dict:
+def rollback_retry(args: argparse.Namespace, fixture: dict, receipt: dict, *, diagnostic: dict | None = None) -> dict:
     """Force an exact candidate worker unhealthy without modifying artifacts.
 
     Signals are bound to a kernel pidfd and repeated ownership checks. The
     incumbent, unrelated processes and processes running outside the candidate
     release root are never signaled. The real installer owns all rollback.
     """
+    diagnostic = diagnostic if diagnostic is not None else {}
+    diagnostic.update(stage="preflight", transient502=0, transient503=0, candidateProcessesFaulted=0,
+                      rollbackPhasesObserved=0, watcherStopped=False)
     need(sys.platform == "linux" and hasattr(os, "pidfd_open") and hasattr(signal, "pidfd_send_signal"),
          "Rollback fault acceptance requires native Linux kernel pidfd support.")
     need(fixture["baselineVersion"] != receipt["version"] and isinstance(fixture.get("snapshot"), dict),
@@ -1257,6 +1276,7 @@ def rollback_retry(args: argparse.Namespace, fixture: dict, receipt: dict) -> di
                         phase = candidate_activation_journal(root, receipt["version"], observed["transactionId"]).get("phase")
                         if phase in {"rolling-back", "rolled-back", "rollback-healthy"}:
                             observed["rollbackPhases"].add(phase)
+                            diagnostic["rollbackPhasesObserved"] = len(observed["rollbackPhases"])
                     except FileNotFoundError:
                         pass
                 pid = worker_pid()
@@ -1289,6 +1309,7 @@ def rollback_retry(args: argparse.Namespace, fixture: dict, receipt: dict) -> di
                     except ProcessLookupError:
                         continue
                     observed["killed"].append(identity)
+                    diagnostic["candidateProcessesFaulted"] = len(observed["killed"])
                 finally:
                     os.close(fd)
         except Exception:
@@ -1301,8 +1322,10 @@ def rollback_retry(args: argparse.Namespace, fixture: dict, receipt: dict) -> di
             "expected_server_identity": fixture["serverIdentity"],
             "expected_server_instance_id": before["server_instance_id"]}
     try:
+        diagnostic["stage"] = "start-request"
         request(fixture, "/api/admin/update/start", body)
         deadline = time.monotonic() + 600
+        diagnostic["stage"] = "observe-rollback"
         while time.monotonic() < deadline:
             need(observed["error"] is None, "Owned candidate watcher lost its required safety proof.")
             try:
@@ -1313,6 +1336,8 @@ def rollback_retry(args: argparse.Namespace, fixture: dict, receipt: dict) -> di
                     break
                 need(not (status.get("phase") == "complete" and current.get("server_version") == receipt["version"]),
                      "Candidate completed before the bounded health fault; rollback was not exercised.")
+            except NativeTransientHTTPError as error:
+                diagnostic[f"transient{error.status}"] += 1
             except (OSError, http.client.HTTPException):
                 pass
             time.sleep(0.25)
@@ -1321,20 +1346,26 @@ def rollback_retry(args: argparse.Namespace, fixture: dict, receipt: dict) -> di
     finally:
         stop.set()
         watcher.join(timeout=15)
+        diagnostic["watcherStopped"] = not watcher.is_alive()
         need(not watcher.is_alive(), "Owned candidate watcher failed to stop; no retry was attempted.")
+    diagnostic["stage"] = "rollback-proof"
     need(observed["error"] is None and observed["killed"] and observed["rollbackPhases"],
          "A candidate process fault and actual rollback journal phase were not both observed.")
     recovered = health(fixture, fixture["baselineVersion"])
     native_recovered = rollback_native_state(fixture, fixture["baselineVersion"])
     root_observations = verify_root_normalization(native_before, native_recovered, installer_hash)
     require_preserved_native_fields(native_before, native_recovered, ("registrations", "current"))
+    diagnostic["stage"] = "preservation"
     compare_snapshot(fixture["snapshot"], state_snapshot(fixture))
     # The watcher is fully stopped before retry. Retained journals and fences
     # are not edited: production recovery owns them.
+    diagnostic["stage"] = "retry-request"
     request(fixture, "/api/admin/update/start", {
         **body, "expected_server_instance_id": recovered["server_instance_id"]})
+    diagnostic["stage"] = "retry-health"
     health(fixture, receipt["version"], timeout=1500)
     wait_update_complete(fixture, receipt["version"])
+    diagnostic["stage"] = "retry-verification"
     native_accepted = rollback_native_state(fixture, receipt["version"])
     verify_root_normalization(native_recovered, native_accepted, installer_hash)
     preservation = compare_snapshot(fixture["snapshot"], state_snapshot(fixture),
@@ -1349,6 +1380,28 @@ def rollback_retry(args: argparse.Namespace, fixture: dict, receipt: dict) -> di
             "teamHubFenceCleanupObserved": False, "desktopUpdateObserved": False,
             "exactRuntimeFilesCompared": count, **preservation, **root_observations,
             "nonemptyProviderHistoryObserved": False}
+
+
+def rollback_failure_report(args: argparse.Namespace, receipt: dict, diagnostic: dict,
+                            error: Exception, harness_sha: str) -> dict:
+    """A bounded failed observation, never a rollback/retry acceptance receipt."""
+    need(diagnostic.get("stage") in ROLLBACK_STAGES, "Invalid rollback diagnostic stage.")
+    counters = {}
+    for key in ("transient502", "transient503", "candidateProcessesFaulted", "rollbackPhasesObserved"):
+        value = diagnostic.get(key)
+        need(type(value) is int and 0 <= value <= 1000000, "Invalid rollback diagnostic counter.")
+        counters[key] = value
+    category = ("invalid-json" if isinstance(error, json.JSONDecodeError) else
+                "transport" if isinstance(error, (OSError, http.client.HTTPException)) else
+                "assertion" if isinstance(error, RuntimeError) else "other")
+    return {"schema": 1, "kind": "candidate-server-observations", "executionScope": "candidate-server-linux",
+            "operation": "rollback-retry", "status": "failed", "observed": False,
+            "publicationEligible": False, "releaseAcceptance": False, "desktopAcceptance": False,
+            "runId": os.environ["GITHUB_RUN_ID"], "runAttempt": os.environ["GITHUB_RUN_ATTEMPT"],
+            "sourceSha": receipt["sourceSha"], "harnessSourceSha": harness_sha,
+            "releaseReceiptSha256": args.receipt_sha256, "version": receipt["version"], "platform": "linux",
+            "diagnostic": {"stage": diagnostic["stage"], "failureCategory": category, **counters,
+                           "watcherStopped": diagnostic.get("watcherStopped") is True}}
 
 
 def failure_retry(args: argparse.Namespace, fixture: dict, receipt: dict) -> dict:
@@ -1796,7 +1849,15 @@ def main() -> None:
             observations = staging_failure_retry(args, fixture, receipt)
             observed_version = receipt["version"]
         elif args.operation == "rollback-retry":
-            observations = rollback_retry(args, fixture, receipt)
+            diagnostic = {}
+            try:
+                observations = rollback_retry(args, fixture, receipt, diagnostic=diagnostic)
+            except Exception as error:
+                if server_linux:
+                    failure = rollback_failure_report(args, receipt, diagnostic, error, harness_sha)
+                    write_private(args.work / "rollback-failure.json", failure)
+                    print(json.dumps({"kind": "native-rollback-failure", **failure["diagnostic"]}), file=sys.stderr)
+                raise
             observed_version = receipt["version"]
         elif args.operation == "diagnose":
             observations = diagnose(fixture)

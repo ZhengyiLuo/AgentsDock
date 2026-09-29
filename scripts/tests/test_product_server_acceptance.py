@@ -4,6 +4,7 @@ import argparse
 import ast
 import importlib.util
 import io
+import http.server
 import json
 import os
 from pathlib import Path
@@ -13,6 +14,8 @@ import subprocess
 import sys
 import tarfile
 import tempfile
+import textwrap
+import threading
 from types import SimpleNamespace
 import unittest
 from unittest.mock import patch
@@ -24,6 +27,115 @@ SPEC.loader.exec_module(MOD)
 
 
 class NativeServerAcceptanceUnitTests(unittest.TestCase):
+    def test_real_http_gateway_transients_are_narrow_and_never_healthy_json(self):
+        response = {"status": 503, "payload": b"temporary unavailable gateway text"}
+        class Handler(http.server.BaseHTTPRequestHandler):
+            def send_fixture(self):
+                self.send_response(response["status"])
+                self.send_header("Content-Length", str(len(response["payload"])))
+                self.end_headers()
+                try:
+                    self.wfile.write(response["payload"])
+                except (BrokenPipeError, ConnectionResetError):
+                    pass
+            do_GET = send_fixture
+            do_POST = send_fixture
+            def log_message(self, *unused):
+                pass
+        server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+        worker = threading.Thread(target=lambda: server.serve_forever(poll_interval=0.01))
+        worker.start()
+        fixture = {"serverUrl": f"http://127.0.0.1:{server.server_port}", "token": "fixture-only-private"}
+        try:
+            for status in (502, 503):
+                response.update(status=status, payload=b"private gateway error text")
+                for route in ("/api/health", "/api/admin/update"):
+                    with self.subTest(status=status, route=route), self.assertRaises(MOD.NativeTransientHTTPError) as error:
+                        MOD.request(fixture, route, expected=(200, 502, 503))
+                    self.assertEqual(error.exception.status, status)
+                    self.assertNotIn("private", str(error.exception))
+                    with self.assertRaises(RuntimeError) as unexpected:
+                        MOD.request(fixture, route)
+                    self.assertNotIsInstance(unexpected.exception, MOD.NativeTransientHTTPError)
+                for route, body in (("/api/admin/update/start", None), ("/api/sessions", None),
+                                    ("/api/health", {}), ("/api/admin/update", {})):
+                    with self.assertRaises(json.JSONDecodeError):
+                        MOD.request(fixture, route, body, expected=(200, 502, 503))
+            response.update(status=200, payload=b"malformed successful response")
+            with self.assertRaises(json.JSONDecodeError):
+                MOD.request(fixture, "/api/health", expected=(200, 502, 503))
+            response.update(status=200, payload=b'{"ok":true}')
+            self.assertEqual(MOD.request(fixture, "/api/health", expected=(200, 502, 503)), {"ok": True})
+            response.update(status=503, payload=b"x" * (8 * 1024 * 1024 + 1))
+            with self.assertRaises(RuntimeError) as oversized:
+                MOD.request(fixture, "/api/health", expected=(200, 502, 503))
+            self.assertNotIsInstance(oversized.exception, MOD.NativeTransientHTTPError)
+        finally:
+            server.shutdown()
+            server.server_close()
+            worker.join(timeout=2)
+            self.assertFalse(worker.is_alive())
+
+    def test_rollback_failure_receipt_is_bound_bounded_and_never_acceptance(self):
+        diagnostic = {"stage": "observe-rollback", "transient502": 1, "transient503": 2,
+                      "candidateProcessesFaulted": 1, "rollbackPhasesObserved": 1, "watcherStopped": True,
+                      "privateValue": "do-not-publish"}
+        args = SimpleNamespace(receipt_sha256="c" * 64)
+        receipt = {"sourceSha": "a" * 40, "version": "1.0.8-beta.2"}
+        with patch.dict(os.environ, {"GITHUB_RUN_ID": "123", "GITHUB_RUN_ATTEMPT": "2"}):
+            report = MOD.rollback_failure_report(args, receipt, diagnostic,
+                json.JSONDecodeError("private-error", "private-body", 0), "b" * 40)
+            self.assertEqual(report["sourceSha"], receipt["sourceSha"])
+            self.assertEqual(report["harnessSourceSha"], "b" * 40)
+            self.assertEqual(report["releaseReceiptSha256"], args.receipt_sha256)
+            self.assertEqual((report["runId"], report["runAttempt"]), ("123", "2"))
+            self.assertEqual(report["diagnostic"]["failureCategory"], "invalid-json")
+            self.assertEqual(report["diagnostic"]["transient503"], 2)
+            for key in ("observed", "publicationEligible", "releaseAcceptance", "desktopAcceptance"):
+                self.assertIs(report[key], False)
+            self.assertEqual(report["status"], "failed")
+            self.assertNotIn("private", json.dumps(report))
+            self.assertNotIn("do-not-publish", json.dumps(report))
+            for patch_value in ({"stage": "secret-stage"}, {"transient502": -1}, {"transient503": "secret"},
+                                {"candidateProcessesFaulted": True}, {"rollbackPhasesObserved": 1000001}):
+                with self.assertRaises(RuntimeError):
+                    MOD.rollback_failure_report(args, receipt, {**diagnostic, **patch_value}, RuntimeError("secret"), "b" * 40)
+
+    def test_actual_linux_failure_collector_rejects_unbound_or_unfiltered_reports(self):
+        workflow = (MOD.ROOT / ".github/workflows/ci.yml").read_text()
+        section = workflow.split("- name: Collect bounded non-publishing server-only observations", 1)[1]
+        program = textwrap.dedent(section.split("<<'NODE'\n", 1)[1].split("\n          NODE", 1)[0])
+        for change in (None, "source", "run", "accepted", "unknown-field", "unknown-detail", "counter", "receipt"):
+            with self.subTest(change=change), tempfile.TemporaryDirectory() as temporary:
+                root = Path(temporary)
+                source, destination = root / "source", root / "public"
+                source.mkdir()
+                receipt = {"sourceSha": "a" * 40, "version": "1.0.8-beta.2"}
+                receipt_path = root / "receipt.json"
+                receipt_path.write_bytes(MOD.canonical(receipt))
+                args = SimpleNamespace(receipt_sha256=MOD.sha(receipt_path.read_bytes()))
+                environment = {**os.environ, "GITHUB_RUN_ID": "123", "GITHUB_RUN_ATTEMPT": "2",
+                               "GITHUB_SHA": "b" * 40, "RECEIPT_SHA256": args.receipt_sha256}
+                diagnostic = {"stage": "observe-rollback", "transient502": 1, "transient503": 2,
+                              "candidateProcessesFaulted": 1, "rollbackPhasesObserved": 1, "watcherStopped": True}
+                with patch.dict(os.environ, environment):
+                    report = MOD.rollback_failure_report(args, receipt, diagnostic, RuntimeError("secret"), "b" * 40)
+                if change == "source": report["sourceSha"] = "d" * 40
+                if change == "run": report["runId"] = "124"
+                if change == "accepted": report["observed"] = True
+                if change == "unknown-field": report["privateExplanation"] = "private-marker"
+                if change == "unknown-detail": report["diagnostic"]["privateExplanation"] = "private-marker"
+                if change == "counter": report["diagnostic"]["transient503"] = -1
+                if change == "receipt": receipt_path.write_bytes(b"{}")
+                (source / "rollback-failure.json").write_bytes(MOD.canonical(report))
+                result = subprocess.run(["node", "--input-type=module", "-", str(source), str(destination), str(receipt_path)],
+                                        input=program, text=True, capture_output=True, timeout=10, env=environment)
+                self.assertEqual(result.returncode == 0, change is None)
+                self.assertEqual((destination / "rollback-failure.json").exists(), change is None)
+                if change is None:
+                    self.assertEqual(json.loads((destination / "rollback-failure.json").read_text()), report)
+                self.assertNotIn("private-marker", result.stdout + result.stderr)
+
     def environment(self, root):
         return {"GITHUB_ACTIONS": "true", "RUNNER_ENVIRONMENT": "github-hosted",
                 "GITHUB_REPOSITORY": "ZhengyiLuo/AgentsDock", "GITHUB_EVENT_NAME": "workflow_dispatch",

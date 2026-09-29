@@ -1,5 +1,18 @@
 # Public development log
 
+## 2026-09-29 — Keep transient rollback transport separate from healthy evidence
+
+- Linux run `36615424703` passes baseline installation and exact-origin setup,
+  then stops with a JSON parse error during rollback polling. Reproduce the
+  helper defect using a real loopback HTTP `503` text response.
+- Treat only explicitly expected bodyless health/update-status GET `502/503`
+  responses as transient, after response status and size checks. Successful
+  malformed JSON, other routes and POST responses still fail. Preserve exact
+  candidate process ownership, rollback, identity and retry requirements.
+- Retain bounded failed-stage/status-count diagnostics bound to the exact
+  candidate and CI attempt. They explicitly report failure and cannot become
+  acceptance. Local regressions pass; native Linux rerun is still required.
+
 ## 2026-09-29 — Compare native shared-update identifiers within their namespace
 
 - The failed native two-client replay observed a common pending schedule before

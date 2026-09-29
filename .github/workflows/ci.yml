@@ -446,12 +446,13 @@ jobs:
       - name: Collect bounded non-publishing server-only observations
         if: always()
         run: |
-          node --input-type=module - "$RUNNER_TEMP/agentsdock-acceptance-linux-rollback" "$RUNNER_TEMP/linux-rollback-public" <<'NODE'
+          node --input-type=module - "$RUNNER_TEMP/agentsdock-acceptance-linux-rollback" "$RUNNER_TEMP/linux-rollback-public" "$RUNNER_TEMP/candidate-inputs/candidate.json" <<'NODE'
           import { constants, openSync, fstatSync, readSync, closeSync, mkdirSync, writeFileSync } from 'node:fs'
+          import { createHash } from 'node:crypto'
           import { join } from 'node:path'
-          const [source, destination] = process.argv.slice(2)
+          const [source, destination, receiptPath] = process.argv.slice(2)
           mkdirSync(destination, {mode: 0o700})
-          for (const name of ['bootstrap.json', 'rollback.json']) {
+          for (const name of ['bootstrap.json', 'rollback.json', 'rollback-failure.json']) {
             let fd
             try { fd = openSync(join(source, name), constants.O_RDONLY | constants.O_NOFOLLOW) }
             catch (error) { if (error.code === 'ENOENT') continue; throw error }
@@ -464,6 +465,32 @@ jobs:
               if (/"(?:token|password|authorization|privateKey|cookie)"\s*:/i.test(bytes.toString())) throw new Error('Private evidence')
               if (report.kind !== 'candidate-server-observations' || report.executionScope !== 'candidate-server-linux'
                 || report.publicationEligible !== false || report.releaseAcceptance !== false || report.desktopAcceptance !== false) throw new Error('Incorrect scope')
+              if (name === 'rollback-failure.json') {
+                const receiptFd = openSync(receiptPath, constants.O_RDONLY | constants.O_NOFOLLOW)
+                let receipt
+                try {
+                  const info = fstatSync(receiptFd)
+                  if (!info.isFile() || info.uid !== process.getuid() || info.size > 32768) throw new Error('Invalid candidate receipt')
+                  const raw = Buffer.alloc(32769), length = readSync(receiptFd, raw, 0, raw.length, 0), bytes = raw.subarray(0, length)
+                  if (length !== info.size || createHash('sha256').update(bytes).digest('hex') !== process.env.RECEIPT_SHA256) throw new Error('Candidate receipt changed')
+                  receipt = JSON.parse(bytes)
+                } finally { closeSync(receiptFd) }
+                const detail = report.diagnostic
+                const stages = ['preflight', 'start-request', 'observe-rollback', 'rollback-proof', 'preservation', 'retry-request', 'retry-health', 'retry-verification']
+                const counters = ['transient502', 'transient503', 'candidateProcessesFaulted', 'rollbackPhasesObserved']
+                const fields = ['schema', 'kind', 'executionScope', 'operation', 'status', 'observed', 'publicationEligible',
+                  'releaseAcceptance', 'desktopAcceptance', 'runId', 'runAttempt', 'sourceSha', 'harnessSourceSha',
+                  'releaseReceiptSha256', 'version', 'platform', 'diagnostic']
+                if (report.schema !== 1 || report.operation !== 'rollback-retry' || report.status !== 'failed' || report.observed !== false
+                  || report.platform !== 'linux' || report.sourceSha !== receipt.sourceSha || report.version !== receipt.version
+                  || report.harnessSourceSha !== process.env.GITHUB_SHA || report.runId !== process.env.GITHUB_RUN_ID
+                  || report.runAttempt !== process.env.GITHUB_RUN_ATTEMPT || report.releaseReceiptSha256 !== process.env.RECEIPT_SHA256
+                  || !detail || !stages.includes(detail.stage) || !['invalid-json', 'transport', 'assertion', 'other'].includes(detail.failureCategory)
+                  || typeof detail.watcherStopped !== 'boolean'
+                  || Object.keys(report).sort().join() !== fields.sort().join()
+                  || counters.some(key => !Number.isSafeInteger(detail[key]) || detail[key] < 0 || detail[key] > 1000000)
+                  || Object.keys(detail).sort().join() !== [...counters, 'stage', 'failureCategory', 'watcherStopped'].sort().join()) throw new Error('Invalid rollback failure diagnostic')
+              }
               writeFileSync(join(destination, name), bytes, {flag: 'wx', mode: 0o600})
             } finally { closeSync(fd) }
           }
