@@ -1,5 +1,18 @@
 # Public development log
 
+## 2026-09-28 — Prepare npm server 1.0.8 from main
+
+- Prepare `@agentsdock/server@1.0.8` from main commit `9f969109`, retaining
+  its server runtime and advancing only the release version.
+- Include main's provider connection settings and API routing improvements,
+  mailbox continuation fixes, and bounded workspace discovery behavior.
+- Reuse the established isolated npm validation helpers from the 1.0.7 release
+  branch to check the exact signed candidate on disposable macOS and Linux
+  hosts. Product, desktop, managed-update and legacy-migration acceptance are
+  separate from this npm fresh-install release.
+- Release validation and publication are pending. The independent short
+  `agentsdock` CLI is not included in this main-based scoped package.
+
 ## 2026-09-28 — Combine editor line endings with desktop/server fixes
 
 - Bring contributor PR #24 into the tested desktop/server follow-up branch,
