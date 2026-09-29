@@ -39,6 +39,11 @@
 .side-chat-composer textarea::placeholder { color: var(--muted); }
 .side-chat-composer textarea:disabled { opacity: .65; }
 .side-chat-composer-actions { display: flex; flex-shrink: 0; }
+.side-chat-composer-with-runtime { flex-wrap: wrap; }
+.side-chat-composer-with-runtime textarea { flex-basis: 100%; }
+.side-chat-composer-with-runtime .side-chat-composer-actions { width: 100%; min-width: 0; align-items: center; justify-content: space-between; gap: var(--space-4); }
+.side-chat-runtime-chip { max-width: calc(100% - var(--control-height-sm) - var(--space-4)); }
+.side-chat-runtime-menu { max-width: calc(100vw - 24px); }
 .side-chat-send { display: flex; align-items: center; justify-content: center; flex-shrink: 0; width: var(--control-height-sm); height: var(--control-height-sm); padding: 0; color: var(--surface); background: var(--text); border-radius: var(--radius-circle); }
 .side-chat-send:hover:not(:disabled) { background: color-mix(in srgb, var(--text) 90%, var(--surface)); }
 .side-chat-send:disabled { opacity: .4; }

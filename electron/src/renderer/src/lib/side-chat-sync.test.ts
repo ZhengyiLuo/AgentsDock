@@ -31,6 +31,56 @@ beforeEach(() => useAppStore.setState({ activeProfileId: 'a', profileGeneration:
   health: { ok: true, capabilities: { side_questions: { available: true, version: 2, native_context: true, sync: true, backends: ['codex'], max_question_chars: 8000 } } } }))
 
 describe('server-owned side chat', () => {
+  it('keeps side settings through admission, newer local choices, reconnect and parent changes', async () => {
+    const { api, controller } = fixture()
+    useAppStore.setState(state => ({ health: { ...state.health!, capabilities: { ...state.health!.capabilities,
+      side_questions: { ...state.health!.capabilities!.side_questions!, runtime_settings: true } } } }))
+    api.read.mockResolvedValue({ ...chat(2, {}), model: 'side-model', effort: 'low' })
+    await controller.refresh(scope, session.id)
+    const initialId = controller.snapshot(scope, session.id).sideChatId
+    controller.setRuntimeSettings(scope, session, { model: 'side-model', effort: 'high' })
+    controller.setDraft(scope, session.id, 'Reason carefully')
+    const accepted = deferred<SyncedSideChat>()
+    api.submit.mockReturnValue(accepted.promise)
+    const sending = controller.send(scope, { ...session, model: 'changed-parent-model', effort: 'max' })
+    const request = api.submit.mock.calls[0][2]
+    expect(request).toMatchObject({ model: 'side-model', effort: 'high', side_chat_id: initialId, after_request_id: 'request-a' })
+    accepted.resolve({ ...chat(3, { request_id: request.request_id, status: 'running', answer: undefined }), model: 'side-model', effort: 'low' })
+    await sending
+    expect(controller.snapshot(scope, session.id).runtimeSettings).toEqual({ model: 'side-model', effort: 'high' })
+    controller.setRuntimeSettings(scope, session, { model: 'side-model', effort: 'low' })
+    api.read.mockResolvedValue({ ...chat(4, { request_id: request.request_id }), model: 'side-model', effort: 'high' })
+    await controller.refresh(scope, session.id)
+    expect(controller.snapshot(scope, session.id)).toMatchObject({ model: 'side-model', effort: 'high', runtimeSettings: { model: 'side-model', effort: 'low' } })
+    controller.setDraft(scope, session.id, 'Brief followup')
+    api.submit.mockImplementation((_scope, _session, input) => Promise.resolve({ ...chat(5, { request_id: input.request_id }),
+      last_request_id: input.request_id, model: input.model, effort: input.effort }))
+    await controller.send(scope, { ...session, model: 'changed-parent-model', effort: 'max' })
+    expect(api.submit.mock.calls[1][2]).toMatchObject({ model: 'side-model', effort: 'low', side_chat_id: initialId })
+    expect(controller.snapshot(scope, session.id)).toMatchObject({ model: 'side-model', effort: 'low', runtimeSettings: undefined })
+    const restored = { ...chat(5, {}), model: 'side-model', effort: 'low' }
+    api.read.mockResolvedValue(restored)
+    useAppStore.setState({ profileGeneration: 9 })
+    const returned = { ...scope, profileGeneration: 9 }
+    await controller.refresh(returned, session.id)
+    expect(controller.snapshot(returned, session.id)).toMatchObject({ model: 'side-model', effort: 'low', exchanges: [{ answer: 'First answer' }] })
+    expect(controller.snapshot(returned, 'other-chat').model).toBeUndefined()
+    expect(api.clear).not.toHaveBeenCalled()
+    expect(api.close).not.toHaveBeenCalled()
+    expect(api.stop).not.toHaveBeenCalled()
+  })
+
+  it('adopts the completed effective settings when no newer local choice exists', async () => {
+    const { api, controller } = fixture()
+    useAppStore.setState(state => ({ health: { ...state.health!, capabilities: { ...state.health!.capabilities,
+      side_questions: { ...state.health!.capabilities!.side_questions!, runtime_settings: true } } } }))
+    await controller.refresh(scope, session.id)
+    controller.setRuntimeSettings(scope, session, { model: 'next-model', effort: '' })
+    controller.setDraft(scope, session.id, 'First')
+    api.submit.mockImplementation((_scope, _session, input) => Promise.resolve({ ...chat(1, { request_id: input.request_id }), model: 'next-model', effort: '' }))
+    await controller.send(scope, session)
+    expect(controller.snapshot(scope, session.id)).toMatchObject({ model: 'next-model', effort: '', runtimeSettings: undefined })
+  })
   it('restores completed history on a fresh client and only refreshes from notices or reconnect', async () => {
     const { api, emit, controller } = fixture()
     api.read.mockResolvedValue(chat(2, {}))
@@ -121,6 +171,23 @@ describe('server-owned side chat', () => {
     cleared.resolve(chat(3, undefined, 'side-b'))
     await vi.waitFor(() => expect(controller.snapshot(scope, session.id).sideChatId).toBe('side-b'))
     expect(controller.snapshot(scope, session.id)).toMatchObject({ draft: 'New question after Clear', exchanges: [], pending: null })
+  })
+
+  it('resets old settings on Clear but keeps a choice made for the next conversation', async () => {
+    const { api, controller } = fixture()
+    useAppStore.setState(state => ({ health: { ...state.health!, capabilities: { ...state.health!.capabilities,
+      side_questions: { ...state.health!.capabilities!.side_questions!, runtime_settings: true } } } }))
+    api.read.mockResolvedValue({ ...chat(2, {}), model: 'old-model', effort: 'high' })
+    await controller.refresh(scope, session.id)
+    controller.setRuntimeSettings(scope, session, { model: 'old-model', effort: 'low' })
+    const cleared = deferred<SyncedSideChat>()
+    api.clear.mockReturnValue(cleared.promise)
+    controller.clear(scope, session.id)
+    expect(controller.snapshot(scope, session.id).runtimeSettings).toBeUndefined()
+    controller.setRuntimeSettings(scope, session, { model: 'next-model', effort: 'high' })
+    cleared.resolve({ ...chat(3, undefined, 'side-b'), model: 'parent-model', effort: 'low' })
+    await vi.waitFor(() => expect(controller.snapshot(scope, session.id).sideChatId).toBe('side-b'))
+    expect(controller.snapshot(scope, session.id).runtimeSettings).toEqual({ model: 'next-model', effort: 'high' })
   })
 
   it('cannot overwrite a new connection after a failed Clear awaits an old-generation read', async () => {

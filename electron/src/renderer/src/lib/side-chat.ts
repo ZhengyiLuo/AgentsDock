@@ -1,4 +1,4 @@
-import { sideChatSyncAvailable, type SyncedSideChat, sideQuestionLimit, sideQuestionsAvailable, sideQuestionOwnerKey,
+import { sideChatSyncAvailable, sideChatRuntimeSettingsAvailable, type SyncedSideChat, sideQuestionLimit, sideQuestionsAvailable, sideQuestionOwnerKey,
   SIDE_QUESTION_MAX_HISTORY_CHARS, SIDE_QUESTION_MAX_HISTORY_ITEMS,
   type SideQuestionHistoryItem, type SideQuestionScope } from '@shared/side-questions'
 import type { PublicServerProfile, Session } from '@shared/types'
@@ -24,6 +24,11 @@ export interface SideChatSnapshot {
   contextNote: string
   historyOmitted: boolean
   error: string | null
+  model?: string
+  effort?: string
+  /** A local choice for the next send; provider replies cannot overwrite it. */
+  runtimeSettings?: { model?: string; effort: string }
+  submittedRuntimeSettings?: { requestId: string; settings: NonNullable<SideChatSnapshot['runtimeSettings']> }
 }
 export interface SideChatScrollPosition {
   scrollTop: number
@@ -85,6 +90,10 @@ export class SideChatController {
     for (const listener of this.listeners.get(key) ?? []) listener()
   }
   setDraft(scope: SideQuestionScope, sessionId: string, draft: string): void { this.update(scope, sessionId, state => ({ ...state, draft })) }
+  setRuntimeSettings(scope: SideQuestionScope, session: Session, settings: { model?: string; effort: string }): void {
+    if (!this.current(scope) || !sideChatRuntimeSettingsAvailable(useAppStore.getState().health, session.backend)) return
+    this.update(scope, session.id, state => ({ ...state, runtimeSettings: settings }))
+  }
   detailsScroll(scope: SideQuestionScope, sessionId: string): number { return this.detailsOffsets.get(this.key(scope, sessionId)) ?? 0 }
   saveDetailsScroll(scope: SideQuestionScope, sessionId: string, offset: number): void { this.detailsOffsets.set(this.key(scope, sessionId), offset) }
   historyScroll(scope: SideQuestionScope, sessionId: string): SideChatScrollPosition | undefined {
@@ -167,9 +176,21 @@ export class SideChatController {
       const pending = before.exchanges.find(item => item.id === optimistic.requestId)
       if (pending) exchanges.push(pending)
     }
-    if (chat.side_chat_id !== before.sideChatId) this.historyPositions.delete(key)
+    const replaced = chat.side_chat_id !== before.sideChatId
+    const submitted = before.submittedRuntimeSettings
+    const submittedExchange = submitted && chat.exchanges.find(item => item.request_id === submitted.requestId)
+    const settingsCompleted = submittedExchange?.status === 'completed'
+    const settingsFinished = submittedExchange && submittedExchange.status !== 'running'
+    if (replaced) this.historyPositions.delete(key)
     this.update(scope, sessionId, state => ({ ...state, synced: true, loading: false, revision: chat.revision,
       sideChatId: chat.side_chat_id, lastRequestId: chat.last_request_id ?? undefined, exchanges,
+      model: chat.model, effort: chat.effort,
+      // POST acknowledges admission before the provider applies its settings.
+      // Keep that choice visible until completion; a newer next-send choice wins.
+      runtimeSettings: replaced && before.revision !== undefined && !this.clearing.has(key)
+        || settingsCompleted && state.runtimeSettings === submitted?.settings
+        ? undefined : state.runtimeSettings,
+      submittedRuntimeSettings: replaced || settingsFinished ? undefined : state.submittedRuntimeSettings,
       pending: exchanges.find(item => item.state === 'pending')?.id ?? null, error: null,
       contextNote: chat.exchanges.findLast(item => item.context_note)?.context_note ?? '' }))
   }
@@ -178,16 +199,18 @@ export class SideChatController {
     const api = window.agentsDock.sideQuestions
     if (!api?.submit) return
     const before = this.snapshot(scope, session.id)
+    const runtimeSettings = sideChatRuntimeSettingsAvailable(useAppStore.getState().health, session.backend) ? before.runtimeSettings : undefined
     const key = this.key(scope, session.id)
     if (before.revision === undefined || this.clearing.has(key)) return
     const epoch = this.epoch
     const requestId = crypto.randomUUID()
     this.optimistic.set(key, { requestId, sideChatId: before.sideChatId })
     this.update(scope, session.id, state => ({ ...state, draft: '', pending: requestId, error: null,
+      submittedRuntimeSettings: runtimeSettings ? { requestId, settings: runtimeSettings } : undefined,
       exchanges: [...state.exchanges, { id: requestId, question, state: 'pending' }] }))
     try {
       const accepted = api.submit(scope, session.id, { request_id: requestId, question, side_chat_id: before.sideChatId,
-        ...(before.lastRequestId ? { after_request_id: before.lastRequestId } : {}) })
+        ...(before.lastRequestId ? { after_request_id: before.lastRequestId } : {}), ...runtimeSettings })
       this.optimistic.get(key)!.accepted = accepted
       const result = await accepted
       if (this.epoch !== epoch || !this.current(scope)) return
@@ -220,18 +243,22 @@ export class SideChatController {
       || !question || Array.from(question).length > sideQuestionLimit(app.health)) return
     if (sideChatSyncAvailable(app.health)) { await this.sendSynced(scope, session, question); return }
     const requestId = crypto.randomUUID()
+    const runtimeSettings = sideChatRuntimeSettingsAvailable(app.health, session.backend) ? snapshot.runtimeSettings : undefined
     const key = this.key(scope, session.id)
     const epoch = this.epoch
     this.requests.set(key, { scope, sessionId: session.id, requestId })
     this.update(scope, session.id, state => ({ ...state, draft: '', pending: requestId, error: null,
+      model: state.model ?? session.model ?? '', effort: state.effort ?? session.effort ?? '',
       historyOmitted: false, exchanges: [...state.exchanges, { id: requestId, question, state: 'pending' }] }))
     const current = () => this.epoch === epoch && this.requests.get(key)?.requestId === requestId
     try {
       const answer = await api.ask(scope, session.id, { request_id: requestId, question, side_chat_id: snapshot.sideChatId,
-        ...(snapshot.lastRequestId ? { after_request_id: snapshot.lastRequestId } : {}) })
+        ...(snapshot.lastRequestId ? { after_request_id: snapshot.lastRequestId } : {}), ...runtimeSettings })
       if (!current()) return
       if (answer.request_id !== requestId || answer.session_id !== session.id || answer.backend !== session.backend) throw new Error('side_question_invalid_response')
       this.update(scope, session.id, state => ({ ...state, pending: null, lastRequestId: requestId, contextNote: answer.context_note ?? state.contextNote,
+        model: answer.model ?? runtimeSettings?.model ?? state.model, effort: answer.effort ?? runtimeSettings?.effort ?? state.effort,
+        runtimeSettings: state.runtimeSettings === runtimeSettings ? undefined : state.runtimeSettings,
         exchanges: state.exchanges.map(item => item.id === requestId ? { ...item, state: 'answered', answer: answer.answer } : item) }))
     } catch (cause) {
       if (!current()) return
@@ -294,7 +321,7 @@ export class SideChatController {
     this.clearing.add(key)
     // Clear the draft at the user's action boundary. Anything typed while the
     // server closes the previous conversation belongs to the next one.
-    this.update(scope, sessionId, state => ({ ...state, draft: '' }))
+    this.update(scope, sessionId, state => ({ ...state, draft: '', runtimeSettings: undefined, submittedRuntimeSettings: undefined }))
     try {
       const result = await api.clear(scope, sessionId, snapshot.sideChatId)
       if (this.epoch !== epoch || !this.current(scope)) return

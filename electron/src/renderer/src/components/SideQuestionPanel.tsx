@@ -1,12 +1,13 @@
 import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState, useSyncExternalStore } from 'react'
 import { ArrowDown, ArrowUp, Info, LoaderCircle, Square } from 'lucide-react'
 import { t } from '@shared/i18n'
-import { sideChatSyncAvailable, sideQuestionLimit, sideQuestionsAvailable, type SideQuestionScope } from '@shared/side-questions'
+import { sideChatSyncAvailable, sideChatRuntimeSettingsAvailable, sideQuestionLimit, sideQuestionsAvailable, type SideQuestionScope } from '@shared/side-questions'
 import type { Session } from '@shared/types'
 import { useLocale } from '../lib/i18n'
 import { SideChatController } from '../lib/side-chat'
 import { useAppStore } from '../store/app-store'
 import { MarkdownContent } from './MarkdownContent'
+import { SideChatRuntimeMenu } from './SideChatRuntimeMenu'
 import './SideQuestionPanel.css'
 
 export function SideQuestionPanel({ session, scope, controller, active = true, focusVersion = 0, autoFocus = true, onFocusHandled }: {
@@ -28,6 +29,9 @@ export function SideQuestionPanel({ session, scope, controller, active = true, f
   const supported = !window.agentsDock.sharedChat && Boolean(window.agentsDock.sideQuestions) && sideQuestionsAvailable(health, session.backend)
   const online = supported && connected && !switchingProfileId && Boolean(scope.profileId)
   const sync = sideChatSyncAvailable(health)
+  const runtimeSettingsAvailable = sideChatRuntimeSettingsAvailable(health, session.backend)
+  const sideModel = snapshot.runtimeSettings?.model ?? snapshot.model ?? (snapshot.exchanges.length ? undefined : session.model ?? undefined)
+  const sideEffort = snapshot.runtimeSettings?.effort ?? snapshot.effort ?? (snapshot.exchanges.length ? undefined : session.effort ?? undefined)
   const ready = online && (!sync || snapshot.revision !== undefined)
   useEffect(() => {
     if (!active || !online) return
@@ -117,7 +121,7 @@ export function SideQuestionPanel({ session, scope, controller, active = true, f
       {snapshot.historyOmitted && <p className="side-chat-note">{t('sideChat.historyOmitted')}</p>}
       {snapshot.error && <p className="side-chat-error" role="alert">{sideQuestionError(snapshot.error)}</p>}
       {length > limit && <p className="side-chat-error" role="status">{t('sideQuestion.limit', { count: length, limit })}</p>}
-      {supported && <form className="side-chat-composer" onSubmit={event => { event.preventDefault(); send() }}>
+      {supported && <form className={`side-chat-composer${runtimeSettingsAvailable ? ' side-chat-composer-with-runtime' : ''}`} onSubmit={event => { event.preventDefault(); send() }}>
         <label className="visually-hidden" htmlFor={inputId}>{t('sideChat.message')}</label>
         <textarea id={inputId} ref={textarea} value={snapshot.draft} rows={1} disabled={!ready}
           placeholder={t('sideChat.placeholder')} onChange={event => controller.setDraft(scope, session.id, event.target.value)}
@@ -127,6 +131,8 @@ export function SideQuestionPanel({ session, scope, controller, active = true, f
             }
           }} />
         <div className="side-chat-composer-actions">
+          {runtimeSettingsAvailable && <SideChatRuntimeMenu session={session} model={sideModel} effort={sideEffort}
+            onChange={settings => controller.setRuntimeSettings(scope, session, settings)} />}
           {snapshot.pending
             ? <button type="button" className="side-chat-send" aria-label={t('sideChat.cancel')} title={t('sideChat.cancel')}
               onClick={() => { void controller.cancel(scope, session.id) }}><Square size={12} fill="currentColor" /></button>

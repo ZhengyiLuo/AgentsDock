@@ -19,7 +19,7 @@ import { TeamMailHintController } from './team-mail-hint-controller'
 import { ActivityHealthProjection, type ActivityHealthRequest } from './activity-health'
 import type { CoordinatedConnection, CoordinatedProfile } from './coordinated-updates'
 import { SideQuestionRequests } from './side-question-requests'
-import { sideChatSyncAvailable, type SyncedSideChat, sideQuestionLimit, sideQuestionsAvailable, validateSideQuestionInput, type SideQuestionAnswer, type SideQuestionCancellation, type SideQuestionInput, type SideQuestionScope } from '../shared/side-questions'
+import { sideChatSyncAvailable, sideChatRuntimeSettingsAvailable, type SyncedSideChat, sideQuestionLimit, sideQuestionsAvailable, validateSideQuestionInput, type SideQuestionAnswer, type SideQuestionCancellation, type SideQuestionInput, type SideQuestionScope } from '../shared/side-questions'
 import { parseBulletinHintRefresh } from '../shared/team-bulletin-hints'
 import {
   cursorLocalSessionImportSupported,
@@ -3566,7 +3566,14 @@ export class AppService {
   submitSyncedSideChat(scope: SideQuestionScope, sessionId: string, input: SideQuestionInput): Promise<SyncedSideChat> {
     const question = validateSideQuestionInput(input, sideQuestionLimit(this.health))
     if (!question.side_chat_id || question.history !== undefined) return Promise.reject(new Error('side_question_invalid_request'))
-    return this.syncedSideChatOperation(scope, sessionId, client => client.submitSyncedSideChat(sessionId, question))
+    return this.syncedSideChatOperation(scope, sessionId, client => {
+      const session = this.sessions.find(candidate => candidate.id === sessionId)
+      if (!sideChatRuntimeSettingsAvailable(this.health, session?.backend)) {
+        delete question.model
+        delete question.effort
+      }
+      return client.submitSyncedSideChat(sessionId, question)
+    })
   }
   stopSyncedSideChat(scope: SideQuestionScope, sessionId: string, requestId: string): Promise<SyncedSideChat> {
     return this.syncedSideChatOperation(scope, sessionId, client => client.stopSyncedSideChat(sessionId, requestId))
@@ -3586,6 +3593,10 @@ export class AppService {
         && expected.serverIdentity !== (this.settings.getProfile(scope.profileId)?.serverIdentity ?? null)) throw staleProfileError()
       const session = this.sessions.find(candidate => candidate.id === sessionId)
       if (!session || !sideQuestionsAvailable(this.health, session.backend)) throw new Error('side_question_unsupported')
+      if (!sideChatRuntimeSettingsAvailable(this.health, session.backend)) {
+        delete question.model
+        delete question.effort
+      }
       validateSideQuestionInput(question, sideQuestionLimit(this.health))
       // A dedicated transport preserves native follow-ups and cancellation
       // ownership even while another server is selected.

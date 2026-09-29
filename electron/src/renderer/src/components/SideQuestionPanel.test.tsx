@@ -2,6 +2,7 @@ import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { AgentsDockAPI } from '@shared/ipc'
 import type { SideQuestionAnswer } from '@shared/side-questions'
+import type { Session } from '@shared/types'
 import { setLocale } from '@shared/i18n'
 import { SideChatController } from '../lib/side-chat'
 import { useAppStore } from '../store/app-store'
@@ -26,7 +27,7 @@ function submit(question = 'What does this step mean?') {
   fireEvent.change(screen.getByLabelText('Side message'), { target: { value: question } })
   fireEvent.click(screen.getByRole('button', { name: 'Send side message' }))
 }
-function panel(target = session) { return <SideQuestionPanel session={target} scope={scope} controller={controller} /> }
+function panel(target: Session = session) { return <SideQuestionPanel session={target} scope={scope} controller={controller} /> }
 
 beforeEach(() => {
   setLocale('en')
@@ -40,11 +41,74 @@ beforeEach(() => {
   } as unknown as AgentsDockAPI })
   useAppStore.setState({ activeProfileId: scope.profileId, profileGeneration: scope.profileGeneration,
     switchingProfileId: null, connected: true, health: { ok: true, capabilities: { side_questions: capability } },
-    sessions: [session], selectedSessionId: session.id })
+    sessions: [session], selectedSessionId: session.id, runtimeCatalog: null })
 })
 afterEach(() => { cleanup(); controller.reset(); setLocale('en'); vi.useRealTimers(); vi.restoreAllMocks() })
 
 describe('Side chat panel', () => {
+  it('uses the compact picker for independent Codex effort/model followups without erasing history', async () => {
+    const parent = { ...session, model: 'gpt-parent', effort: 'high' }
+    useAppStore.setState({ health: { ok: true, capabilities: { side_questions: { ...capability, runtime_settings: true } } },
+      runtimeCatalog: { backends: { codex: {
+        default_model: 'gpt-parent', default_effort: 'high', models: [{ value: 'gpt-parent', label: 'Parent model' }, { value: 'gpt-side', label: 'Side model' }],
+        efforts: [{ value: 'low', label: 'Low' }, { value: 'high', label: 'High' }],
+        model_efforts: { 'gpt-parent': [{ value: 'low', label: 'Low' }, { value: 'high', label: 'High' }], 'gpt-side': [{ value: 'low', label: 'Low' }] }
+      } } }, sessions: [parent] })
+    ask.mockImplementation((_scope, sessionId, input) => Promise.resolve({ request_id: input.request_id, session_id: sessionId,
+      backend: 'codex', answer: input.after_request_id ? 'Second answer' : 'First answer', model: input.model, effort: input.effort }))
+    const view = render(panel(parent))
+    const open = async () => {
+      fireEvent.pointerDown(screen.getByRole('button', { name: 'Side chat model and reasoning' }), { button: 0, ctrlKey: false, pointerType: 'mouse' })
+      await screen.findByRole('menu')
+    }
+    await open()
+    fireEvent.click(screen.getByRole('menuitemcheckbox', { name: 'Low' }))
+    expect(ask).not.toHaveBeenCalled()
+    submit('First')
+    await screen.findByText('First answer')
+    const first = ask.mock.calls[0][2]
+    expect(first).toMatchObject({ model: 'gpt-parent', effort: 'low' })
+    view.rerender(panel({ ...parent, model: 'changed-parent', effort: 'max' }))
+    expect(screen.getByRole('button', { name: 'Side chat model and reasoning' })).toHaveTextContent('Parent model · Low')
+    await open()
+    fireEvent.click(screen.getByRole('menuitemcheckbox', { name: 'Side model' }))
+    expect(screen.getByText('First answer')).toBeVisible()
+    submit('Second')
+    await screen.findByText('Second answer')
+    expect(ask.mock.calls[1][2]).toMatchObject({ model: 'gpt-side', effort: 'low', side_chat_id: first.side_chat_id, after_request_id: first.request_id })
+    expect(screen.getByText('First answer')).toBeVisible()
+    expect(useAppStore.getState().sessions[0]).toEqual(parent)
+    expect(close).not.toHaveBeenCalled()
+    expect(sendTurn).not.toHaveBeenCalled()
+  })
+
+  it.each(['old-server', 'claude'] as const)('keeps %s side questions usable without an effort override', async kind => {
+    useAppStore.setState({ health: { ok: true, capabilities: { side_questions: { ...capability, runtime_settings: kind === 'claude' } } } })
+    const target = { ...session, backend: kind === 'claude' ? 'claude' as const : 'codex' as const }
+    ask.mockImplementation((_scope, sessionId, input) => Promise.resolve({ request_id: input.request_id, session_id: sessionId, backend: target.backend, answer: 'Native answer' }))
+    render(panel(target))
+    expect(screen.queryByRole('button', { name: 'Side chat model and reasoning' })).not.toBeInTheDocument()
+    submit()
+    await screen.findByText('Native answer')
+    expect(ask.mock.calls[0][2]).not.toHaveProperty('model')
+    expect(ask.mock.calls[0][2]).not.toHaveProperty('effort')
+  })
+
+  it('offers only the selected custom endpoint model efforts', async () => {
+    const custom: Session = { ...session, codex_provider: 'custom', model: 'custom-a', effort: 'high', codex_provider_catalog: {
+      configured: true, available: true, model: 'custom-a', base_url: 'https://synthetic.test', default_model: 'custom-a',
+      models: [{ value: 'custom-a', label: 'Custom A' }, { value: 'custom-b', label: 'Custom B' }],
+      model_efforts: { 'custom-a': [{ value: 'high', label: 'High' }], 'custom-b': [{ value: 'low', label: 'Low' }] }
+    } }
+    useAppStore.setState({ health: { ok: true, capabilities: { side_questions: { ...capability, runtime_settings: true } } } })
+    render(panel(custom))
+    fireEvent.pointerDown(screen.getByRole('button', { name: 'Side chat model and reasoning' }), { button: 0, ctrlKey: false, pointerType: 'mouse' })
+    await screen.findByRole('menu')
+    expect(screen.getByRole('menuitemcheckbox', { name: 'High' })).toBeVisible()
+    expect(screen.queryByRole('menuitemcheckbox', { name: 'Low' })).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole('menuitemcheckbox', { name: /Custom B/ }))
+    expect(controller.snapshot(scope, session.id).runtimeSettings).toEqual({ model: 'custom-b', effort: 'low' })
+  })
   it('shows native followups without copying old messages or writing the main conversation store', async () => {
     ask.mockImplementation((_scope, sessionId, input) => Promise.resolve({ request_id: input.request_id,
       session_id: sessionId, backend: 'codex', answer: input.after_request_id ? 'Follow-up answer.' : 'First answer.', context_note: 'Native ephemeral fork.' }))

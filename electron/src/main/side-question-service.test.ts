@@ -30,6 +30,27 @@ function fixture() {
 }
 
 describe('main side-question service scope', () => {
+  it.each([
+    ['codex', true], ['codex', false], ['claude', true]
+  ] as const)('keeps %s runtime overrides compatible when capability=%s', async (backend, runtimeSettings) => {
+    const { service, mainClient, sideClient } = fixture()
+    const internals = service as any
+    internals.sessions[0].backend = backend
+    internals.health.capabilities.side_questions.runtime_settings = runtimeSettings
+    const settings = { model: 'gpt-test', effort: 'high' }
+    const request = { ...input, ...settings }
+    const expectedInput = backend === 'codex' && runtimeSettings ? request : input
+    await service.askSideQuestion(expected, 'chat-a', request)
+    expect(sideClient.askSideQuestion).toHaveBeenCalledWith('chat-a', expectedInput, expect.any(AbortSignal))
+    internals.health.capabilities.side_questions.sync = true
+    const submit = vi.fn().mockResolvedValue({ session_id: 'chat-a', side_chat_id: 'side-a', revision: 1, exchanges: [], last_request_id: null })
+    Object.assign(mainClient, { submitSyncedSideChat: submit })
+    await service.submitSyncedSideChat(expected, 'chat-a', request)
+    expect(submit).toHaveBeenCalledExactlyOnceWith('chat-a', expectedInput)
+    expect(request).toEqual({ ...input, ...settings })
+    expect(mainClient.sendTurn).not.toHaveBeenCalled()
+    expect(mainClient.stopTurn).not.toHaveBeenCalled()
+  })
   it('uses server-owned sync without registering a local answer transport or closing it on shutdown', async () => {
     const { service, mainClient, clientFactory } = fixture()
     const snapshot = { session_id: 'chat-a', side_chat_id: 'side-a', revision: 1, exchanges: [], last_request_id: null }

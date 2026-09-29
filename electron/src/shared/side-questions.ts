@@ -14,6 +14,7 @@ export interface SideQuestionsCapability {
   max_history_chars?: number
   sync?: boolean
   native_context?: boolean
+  runtime_settings?: boolean
 }
 
 export interface SideQuestionScope {
@@ -33,6 +34,8 @@ export interface SideQuestionInput {
   history?: SideQuestionHistoryItem[]
   side_chat_id?: string
   after_request_id?: string
+  model?: string
+  effort?: string
 }
 
 export interface SideQuestionHistoryItem {
@@ -46,6 +49,8 @@ export interface SideQuestionAnswer {
   backend: 'codex' | 'claude'
   answer: string
   context_note?: string
+  model?: string
+  effort?: string
 }
 
 export interface SideQuestionCancellation {
@@ -71,6 +76,11 @@ export function sideQuestionLimit(health: Health | null | undefined): number {
 
 export function sideQuestionHistoryAvailable(health: Health | null | undefined): boolean {
   return health?.capabilities?.side_questions?.history === true
+}
+
+export function sideChatRuntimeSettingsAvailable(health: Health | null | undefined, backend: Backend | undefined): boolean {
+  return backend === 'codex' && sideQuestionsAvailable(health, backend)
+    && health?.capabilities?.side_questions?.runtime_settings === true
 }
 
 function validUnicode(text: string): boolean {
@@ -100,6 +110,15 @@ export function validateSideQuestionInput(input: SideQuestionInput, limit = SIDE
     }
   }
   if (result.after_request_id && !result.side_chat_id) throw new Error('side_question_invalid_request')
+  for (const field of ['model', 'effort'] as const) {
+    const value = input[field]
+    if (value === undefined) continue
+    if (typeof value !== 'string' || !validUnicode(value) || /[\u0000-\u001f\u007f]/.test(value)
+      || (field === 'model' && !value.trim()) || Array.from(value).length > (field === 'model' ? 256 : 64)) {
+      throw new Error('side_question_invalid_request')
+    }
+    result[field] = value.trim()
+  }
   if (input.history !== undefined) {
     if (!Array.isArray(input.history) || input.history.length > SIDE_QUESTION_MAX_HISTORY_ITEMS || input.history.length % 2 !== 0) {
       throw new Error('side_question_invalid_history')
@@ -125,7 +144,8 @@ export function parseSideQuestionAnswer(value: unknown, sessionId: string, reque
   if (!answer || answer.request_id !== requestId || answer.session_id !== sessionId
     || !['codex', 'claude'].includes(answer.backend ?? '')
     || typeof answer.answer !== 'string' || !answer.answer.trim()
-    || (answer.context_note !== undefined && typeof answer.context_note !== 'string')) {
+    || (answer.context_note !== undefined && typeof answer.context_note !== 'string')
+    || [answer.model, answer.effort].some(value => value !== undefined && typeof value !== 'string')) {
     throw new Error('side_question_invalid_response')
   }
   return answer as SideQuestionAnswer
@@ -137,6 +157,8 @@ export interface SyncedSideChat {
   side_chat_id: string
   revision: number
   last_request_id: string | null
+  model?: string
+  effort?: string
   exchanges: Array<{
     request_id: string
     question: string
@@ -159,7 +181,8 @@ export function parseSyncedSideChat(value: unknown, sessionId: string): SyncedSi
   const id = (value: unknown): value is string => typeof value === 'string' && /^[a-zA-Z0-9_-]{1,128}$/.test(value)
   if (!chat || chat.session_id !== sessionId || !id(chat.side_chat_id)
     || !Number.isSafeInteger(chat.revision) || chat.revision! < 0
-    || (chat.last_request_id !== null && !id(chat.last_request_id)) || !Array.isArray(chat.exchanges)) {
+    || (chat.last_request_id !== null && !id(chat.last_request_id)) || !Array.isArray(chat.exchanges)
+    || [chat.model, chat.effort].some(value => value !== undefined && typeof value !== 'string')) {
     throw new Error('side_question_invalid_response')
   }
   const ids = new Set<string>()

@@ -73,6 +73,8 @@
   "ui.sessionSubagents.updateServer": "Update AgentsServer to set a per-chat sub-agent limit.",
   "ui.sessionSubagents.unsupported": "This provider version does not support a per-chat limit.",
   "ui.sessionSubagents.notAcknowledged": "The server did not confirm this limit. Update AgentsServer and try again.",
+  "sideChat.runtimeSettings": "Side chat model and reasoning",
+  "sideChat.reasoning": "Reasoning",
   "sideChat.title": "Side chat",
   "sideChat.details": "Details",
   "sideChat.review": "Review",

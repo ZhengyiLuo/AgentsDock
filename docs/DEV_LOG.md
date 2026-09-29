@@ -1,5 +1,23 @@
 # Public development log
 
+## 2026-09-28 — Independent Codex Side chat model and effort
+
+- Add a compact model and reasoning picker to the Side chat composer, using
+  the main composer's provider model catalog and supported effort choices.
+  Apply choices to the next side turn without clearing its history or changing
+  the main conversation. Keep Claude's native side-question settings unchanged.
+- Carry explicit choices through native desktop transport into the existing
+  server side-chat routes. Preserve the side conversation's effective settings
+  across reconnects and provider transport recreation, including custom Codex
+  collaboration settings. Older servers continue to support their existing
+  side chats without receiving unsupported request fields.
+- Pass 117 focused desktop checks and 106 server checks for transport,
+  persistence, follow-ups, provider isolation and request identity. Exercise the
+  production desktop UI against an isolated authenticated server and real Codex:
+  select High for a side question and recover the parent's inherited tool-result
+  context while the parent keeps Low. Further native acceptance and local
+  packaging are recorded separately. No deployment or publication is included.
+
 ## 2026-10-01 — Publish matched desktop/server beta.5, build 1242
 
 - Publish [AgentsDock `1.0.8-beta.5`](https://github.com/ZhengyiLuo/AgentsDock/releases/tag/v1.0.8-beta.5)

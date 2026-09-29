@@ -1,10 +1,39 @@
 import { describe, expect, it } from 'vitest'
-import { sideQuestionsAvailable, validateSideQuestionInput, type SideQuestionInput } from './side-questions'
+import { parseSideQuestionAnswer, parseSyncedSideChat, sideChatRuntimeSettingsAvailable, sideQuestionsAvailable, validateSideQuestionInput, type SideQuestionInput } from './side-questions'
 
 const input = { request_id: 'side-a', question: 'Why?' }
 const history = [{ role: 'user' as const, text: ' First question\n' }, { role: 'assistant' as const, text: 'First answer.' }]
 
 describe('side chat input validation', () => {
+  it('preserves a next-turn model/effort override, including an explicit default effort', () => {
+    expect(validateSideQuestionInput({ ...input, model: ' gpt-test ', effort: 'high' }))
+      .toEqual({ ...input, model: 'gpt-test', effort: 'high' })
+    expect(validateSideQuestionInput({ ...input, effort: '' })).toEqual({ ...input, effort: '' })
+    expect(validateSideQuestionInput(input)).not.toHaveProperty('effort')
+  })
+
+  it.each([{ model: '' }, { model: 'x'.repeat(257) }, { model: 'bad\nmodel' }, { effort: null }, { effort: 'x'.repeat(65) }])
+    ('rejects malformed runtime settings %j', invalid => {
+      expect(() => validateSideQuestionInput({ ...input, ...invalid } as SideQuestionInput)).toThrow('side_question_invalid_request')
+    })
+
+  it('retains effective settings in both response formats and rejects malformed fields', () => {
+    const answer = { request_id: input.request_id, session_id: 'chat-a', backend: 'codex', answer: 'Answer', model: 'gpt-test', effort: '' }
+    expect(parseSideQuestionAnswer(answer, 'chat-a', input.request_id)).toEqual(answer)
+    expect(() => parseSideQuestionAnswer({ ...answer, effort: 2 }, 'chat-a', input.request_id)).toThrow('side_question_invalid_response')
+    const chat = { session_id: 'chat-a', side_chat_id: 'side-a', revision: 1, last_request_id: null, exchanges: [], model: 'gpt-test', effort: 'high' }
+    expect(parseSyncedSideChat(chat, 'chat-a')).toEqual(chat)
+    expect(() => parseSyncedSideChat({ ...chat, model: {} }, 'chat-a')).toThrow('side_question_invalid_response')
+  })
+
+  it('offers independent runtime settings only for capable Codex servers', () => {
+    const capability = { available: true, version: 2, native_context: true, runtime_settings: true,
+      backends: ['codex' as const, 'claude' as const], max_question_chars: 8000 }
+    const health = { ok: true, capabilities: { side_questions: capability } }
+    expect(sideChatRuntimeSettingsAvailable(health, 'codex')).toBe(true)
+    expect(sideChatRuntimeSettingsAvailable(health, 'claude')).toBe(false)
+    expect(sideChatRuntimeSettingsAvailable({ ...health, capabilities: { side_questions: { ...capability, runtime_settings: undefined } } }, 'codex')).toBe(false)
+  })
   it('preserves the native conversation identity and preceding accepted request', () => {
     const native = { ...input, side_chat_id: 'side-chat-a', after_request_id: 'previous-a' }
     expect(validateSideQuestionInput(native)).toEqual(native)
