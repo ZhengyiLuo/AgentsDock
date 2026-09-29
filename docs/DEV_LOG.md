@@ -1,5 +1,20 @@
 # Public development log
 
+## 2026-09-29 — Compare native shared-update identifiers within their namespace
+
+- The failed native two-client replay observed a common pending schedule before
+  one client retained that schedule and the other also observed its execution
+  ID. Both clients reached the exact paired version and same healthy instance.
+  The earlier assertion incorrectly compared the preferred ID across these two
+  namespaces; neither failed run is retroactively accepted.
+- Require a common same-type scheduling or execution ID, reject conflicting
+  jointly present IDs, and keep exact app/server target, identity, current phase,
+  unpaused state and final-instance checks. Missing, malformed, duplicate-profile
+  or merely equal cross-namespace values fail. Sanitized diagnostics show separate
+  schedule/execution relations without disclosing their values.
+- Focused desktop/candidate tests pass; exact signed-package native rerun remains
+  required. Frozen runtime/build source and beta.2 artifact hashes are unchanged.
+
 ## 2026-09-29 — Correct complete-client disconnect observation
 
 - Reproduce the native no-downgrade relay's false failure with a real TCP client

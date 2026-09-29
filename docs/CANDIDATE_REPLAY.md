@@ -17,7 +17,12 @@ turn blocked or unobserved scenarios into full release acceptance.
 - Target: the one independently pinned unpublished beta app/server candidate.
   The real app updater installs its exact signed macOS ZIP. The production
   coordinator updates the populated server after an offline/reconnect interval;
-  a second native client must observe the same update operation.
+  a second native client must observe the same update operation. Compare IDs
+  within their own namespace: both clients must retain a common scheduling or
+  execution ID, and any jointly present same-type IDs must agree. An execution
+  ID is not the scheduling ID it supersedes. Both exact-version clients must be
+  current and unpaused on the same final server instance; matching health alone
+  cannot satisfy this observation.
 - Separate disposable jobs exercise legacy installation-root modes `0755` and
   `0750`. Each mode also has a separate recovery job that truncates one response
   containing the exact signed legacy archive, observes failed download and the

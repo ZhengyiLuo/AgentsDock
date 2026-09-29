@@ -234,12 +234,59 @@ test('multiple-client pass requires both actual receipts to identify one update 
   assert.throws(() => assertSharedOperation(noReceipt, noReceipt, fixture(), identity.version))
 })
 
+test('shared receipts compare schedule and execution identifiers in their own namespaces', () => {
+  const withReceipt = patch => ({ ...status(), serverUpdates: [{ ...record(), ...patch }] })
+  const scheduleOnly = withReceipt({ operationId: undefined, scheduleId: 'common-reservation' })
+  const both = withReceipt({ operationId: 'execution-operation', scheduleId: 'common-reservation' })
+  for (const pair of [[scheduleOnly, both], [both, scheduleOnly]]) {
+    const observed = assertSharedOperation(...pair, fixture(), identity.version)
+    assert.equal(observed.sharedOperationKind, 'schedule')
+    assert.equal(observed.sharedOperationObserved, true)
+    assert.match(observed.sharedOperationSha256, /^[a-f0-9]{64}$/)
+  }
+  const executionOnly = withReceipt({ operationId: 'execution-operation' })
+  for (const pair of [[executionOnly, both], [both, executionOnly]]) {
+    assert.equal(assertSharedOperation(...pair, fixture(), identity.version).sharedOperationKind, 'update')
+  }
+  const commonTextDifferentTypes = [withReceipt({ operationId: 'same-text' }),
+    withReceipt({ operationId: undefined, scheduleId: 'same-text' })]
+  assert.throws(() => assertSharedOperation(...commonTextDifferentTypes, fixture(), identity.version))
+  // Any contradictory jointly-present identifier rejects even a common ID of
+  // the other type. A healthy/current server is not a substitute for joining.
+  for (const patch of [{ scheduleId: 'different-reservation' }, { operationId: 'different-execution' }]) {
+    assert.throws(() => assertSharedOperation(both, withReceipt({ operationId: 'execution-operation',
+      scheduleId: 'common-reservation', ...patch }), fixture(), identity.version))
+  }
+})
+
+test('shared-operation assertion rejects malformed, absent or ambiguous profile evidence', () => {
+  const good = { ...status(), serverUpdates: [{ ...record(), scheduleId: 'common-reservation' }] }
+  for (const field of ['operationId', 'scheduleId', 'serverInstanceId']) {
+    for (const value of ['', ' ', 'line\nbreak', 'x'.repeat(513), 12, false, {}, []]) {
+      const bad = { ...good, serverUpdates: [{ ...good.serverUpdates[0], [field]: value }] }
+      assert.throws(() => assertSharedOperation(good, bad, fixture(), identity.version), `${field} must be a valid bounded identifier`)
+    }
+  }
+  for (const bad of [null, {}, { serverUpdates: {} }, { serverUpdates: [] },
+    { ...good, currentVersion: '1.0.6' }, { ...good, currentVersion: undefined },
+    { ...good, serverUpdates: [record(), record()] },
+    { ...good, serverUpdates: [{ ...record(), paused: true }] },
+    { ...good, serverUpdates: [{ ...record(), profileId: 'other-profile' }] },
+    { ...good, serverUpdates: [{ ...record(), serverIdentity: 'other-server' }] }]) {
+    assert.throws(() => assertSharedOperation(good, bad, fixture(), identity.version))
+    assert.throws(() => assertSharedOperation(bad, good, fixture(), identity.version))
+  }
+  const missing = { ...status(), serverUpdates: [{ ...record(), operationId: null, scheduleId: null }] }
+  assert.throws(() => assertSharedOperation(missing, missing, fixture(), identity.version))
+})
+
 const sharedSnapshot = (second = status(), first = status(), stage = 'completed-wait') => collectSharedOperationSnapshot(
   () => first, () => second, () => ({ reachable: true, httpStatus: 200, health: health() }), fixture(), identity.version, stage)
 
 test('paired diagnostics distinguish a late current client without a receipt from divergent operations or instances', async () => {
   const accepted = (await sharedSnapshot()).snapshot
-  assert.equal(accepted.operationRelation, 'same')
+  assert.equal(accepted.updateRelation, 'same')
+  assert.equal(accepted.scheduleRelation, 'unavailable')
   assert.equal(accepted.instanceRelation, 'same')
   assert.equal(accepted.secondInstanceMatchesHealth, true)
   const missing = { ...status(), serverUpdates: [{ ...record(), operationId: undefined }] }
@@ -247,19 +294,36 @@ test('paired diagnostics distinguish a late current client without a receipt fro
   assert.equal(late.second.recordPhase, 'current')
   assert.equal(late.second.operationPresent, false)
   assert.equal(late.secondOperationSource, 'missing')
-  assert.equal(late.operationRelation, 'unavailable')
+  assert.equal(late.updateRelation, 'unavailable')
+  assert.equal(late.scheduleRelation, 'unavailable')
   assert.equal(late.instanceRelation, 'same')
   assert.throws(() => assertSharedOperation(status(), missing, fixture(), identity.version),
     'Observing an already-current client without an operation must not become shared-operation acceptance')
   const different = (await sharedSnapshot({ ...status(), serverUpdates: [{ ...record(),
     operationId: 'another-operation', serverInstanceId: 'different-instance' }] })).snapshot
-  assert.equal(different.operationRelation, 'different')
+  assert.equal(different.updateRelation, 'different')
   assert.equal(different.instanceRelation, 'different')
   assert.equal(different.secondInstanceMatchesHealth, false)
   const schedule = (await sharedSnapshot({ ...status(), serverUpdates: [{ ...record(),
     operationId: undefined, scheduleId: record().operationId }] })).snapshot
-  assert.equal(schedule.operationRelation, 'same')
+  assert.equal(schedule.updateRelation, 'unavailable')
+  assert.equal(schedule.scheduleRelation, 'unavailable')
   assert.equal(schedule.secondOperationSource, 'schedule')
+})
+
+test('paired diagnostics report schedule and execution equality separately without cross-type matches', async () => {
+  const first = { ...status(), serverUpdates: [{ ...record(), operationId: undefined, scheduleId: 'PRIVATE-common-schedule' }] }
+  const second = { ...status(), serverUpdates: [{ ...record(), operationId: 'PRIVATE-execution', scheduleId: 'PRIVATE-common-schedule' }] }
+  const { snapshot } = await sharedSnapshot(second, first)
+  assert.equal(snapshot.scheduleRelation, 'same')
+  assert.equal(snapshot.updateRelation, 'unavailable')
+  assert.equal(snapshot.firstOperationSource, 'schedule')
+  assert.equal(snapshot.secondOperationSource, 'operation')
+  assert.doesNotMatch(JSON.stringify(snapshot), /PRIVATE/)
+  const mismatch = (await sharedSnapshot({ ...second, serverUpdates: [{ ...second.serverUpdates[0],
+    scheduleId: 'PRIVATE-different' }] }, first)).snapshot
+  assert.equal(mismatch.scheduleRelation, 'different')
+  assert.equal(mismatch.updateRelation, 'unavailable')
 })
 
 test('paired diagnostics retain each client phase and never expose private identifiers or raw errors', async () => {
@@ -270,11 +334,11 @@ test('paired diagnostics retain each client phase and never expose private ident
   assert.equal(snapshot.first.recordPhase, 'current')
   assert.equal(snapshot.second.recordPhase, 'blocked')
   assert.equal(snapshot.second.recordPaused, true)
-  assert.equal(snapshot.operationRelation, 'different')
+  assert.equal(snapshot.updateRelation, 'different')
   assert.doesNotMatch(JSON.stringify(snapshot), /PRIVATE|private\.example|server-identity-owned|one-production-operation|new-service-instance/)
   const oversized = (await sharedSnapshot({ ...status(), serverUpdates: [{ ...record(), operationId: 'x'.repeat(100_000) }] })).snapshot
   assert.equal(oversized.secondOperationSource, 'invalid')
-  assert.equal(oversized.operationRelation, 'unavailable')
+  assert.equal(oversized.updateRelation, 'unavailable')
   assert(Buffer.byteLength(JSON.stringify(oversized)) < 12 * 1024)
 })
 
@@ -294,7 +358,7 @@ test('stalled or rejected second-client observation preserves independent first-
   const noHealth = await collectSharedOperationSnapshot(() => status(), () => status(), () => new Promise(() => {}),
     fixture(), identity.version, 'failure', 5)
   assert.equal(noHealth.snapshot.healthRead, 'timed-out')
-  assert.equal(noHealth.snapshot.operationRelation, 'same')
+  assert.equal(noHealth.snapshot.updateRelation, 'same')
   assert.equal(noHealth.snapshot.firstInstanceMatchesHealth, null)
 })
 
@@ -302,7 +366,8 @@ test('shared diagnostic parser rejects unknown fields, unbounded data and invali
   const value = (await sharedSnapshot()).snapshot
   assert.deepEqual(parseSharedOperationSnapshot(JSON.stringify(value)), value)
   for (const patch of [{ token: 'secret' }, { schema: 2 }, { stage: 'raw-private-message' }, { firstRead: 'success' },
-    { operationRelation: 'secret-id' }, { secondOperationSource: 'secret-id' }, { firstInstanceMatchesHealth: 'true' },
+    { updateRelation: 'secret-id' }, { scheduleRelation: 'secret-id' }, { operationRelation: 'same' },
+    { secondOperationSource: 'secret-id' }, { firstInstanceMatchesHealth: 'true' },
     { first: { ...value.first, rawStatus: 'private' } }]) {
     assert.throws(() => parseSharedOperationSnapshot(JSON.stringify({ ...value, ...patch })))
   }

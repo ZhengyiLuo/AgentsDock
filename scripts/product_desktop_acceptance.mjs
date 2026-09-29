@@ -267,7 +267,7 @@ export async function collectReconciliationSnapshot(readStatus, readHealth, fixt
 }
 
 const SHARED_SNAPSHOT_KEYS = ['schema', 'kind', 'stage', 'firstRead', 'secondRead', 'healthRead', 'first', 'second',
-  'firstOperationSource', 'secondOperationSource', 'operationRelation', 'instanceRelation',
+  'firstOperationSource', 'secondOperationSource', 'updateRelation', 'scheduleRelation', 'instanceRelation',
   'firstInstanceMatchesHealth', 'secondInstanceMatchesHealth']
 const SHARED_READ_STATES = new Set(['fulfilled', 'rejected', 'timed-out'])
 const SHARED_STAGES = new Set(['offline', 'reconciling', 'completed-wait', 'failure'])
@@ -284,7 +284,7 @@ export function parseSharedOperationSnapshot(bytes) {
   for (const key of ['firstOperationSource', 'secondOperationSource']) {
     assert(['operation', 'schedule', 'missing', 'invalid'].includes(value[key]), 'Invalid shared operation source')
   }
-  for (const key of ['operationRelation', 'instanceRelation']) {
+  for (const key of ['updateRelation', 'scheduleRelation', 'instanceRelation']) {
     assert(['same', 'different', 'unavailable'].includes(value[key]), 'Invalid shared comparison')
   }
   for (const key of ['firstInstanceMatchesHealth', 'secondInstanceMatchesHealth']) {
@@ -305,6 +305,11 @@ async function boundedObservation(read, milliseconds) {
   } finally { clearTimeout(timer) }
 }
 
+function sharedIdentifier(value) {
+  return typeof value === 'string' && value.length > 0 && value.length <= 512
+    && !/[\s\x00-\x1f\x7f]/u.test(value) ? value : null
+}
+
 export async function collectSharedOperationSnapshot(readFirst, readSecond, readHealth, fixture, version, stage, milliseconds = 5000) {
   assert(SHARED_STAGES.has(stage) && Number.isInteger(milliseconds) && milliseconds > 0 && milliseconds <= 5000,
     'Invalid shared-operation observation scope')
@@ -314,20 +319,21 @@ export async function collectSharedOperationSnapshot(readFirst, readSecond, read
   const [a, b, h] = await Promise.all([readFirst, readSecond, readHealth].map(read => boundedObservation(read, milliseconds)))
   const record = status => Array.isArray(status?.serverUpdates) ? status.serverUpdates.find(item => item?.profileId === PROFILE_ID) : null
   const first = record(a.value), second = record(b.value)
-  const identifier = value => typeof value === 'string' && value.length > 0 && value.length <= 512 ? value : null
   const operation = item => {
-    const raw = item?.operationId || item?.scheduleId
-    return { value: identifier(raw), source: !raw ? 'missing' : !identifier(raw) ? 'invalid' : item?.operationId ? 'operation' : 'schedule' }
+    const raw = item?.operationId ?? item?.scheduleId
+    return { source: raw == null ? 'missing' : !sharedIdentifier(raw) ? 'invalid' : item?.operationId != null ? 'operation' : 'schedule' }
   }
   const one = operation(first), two = operation(second)
   const relation = (left, right) => !left || !right ? 'unavailable' : left === right ? 'same' : 'different'
-  const firstInstance = identifier(first?.serverInstanceId), secondInstance = identifier(second?.serverInstanceId)
-  const healthyInstance = identifier(h.value?.health?.server_instance_id)
+  const firstInstance = sharedIdentifier(first?.serverInstanceId), secondInstance = sharedIdentifier(second?.serverInstanceId)
+  const healthyInstance = sharedIdentifier(h.value?.health?.server_instance_id)
   const matches = value => value && healthyInstance ? value === healthyInstance : null
   const snapshot = parseSharedOperationSnapshot(JSON.stringify({ schema: 1, kind: 'native-shared-operation-snapshot', stage,
     firstRead: a.state, secondRead: b.state, healthRead: h.state,
     first: reconciliationSnapshot(a.value, h.value, fixture, version), second: reconciliationSnapshot(b.value, h.value, fixture, version),
-    firstOperationSource: one.source, secondOperationSource: two.source, operationRelation: relation(one.value, two.value),
+    firstOperationSource: one.source, secondOperationSource: two.source,
+    updateRelation: relation(sharedIdentifier(first?.operationId), sharedIdentifier(second?.operationId)),
+    scheduleRelation: relation(sharedIdentifier(first?.scheduleId), sharedIdentifier(second?.scheduleId)),
     instanceRelation: relation(firstInstance, secondInstance), firstInstanceMatchesHealth: matches(firstInstance),
     secondInstanceMatchesHealth: matches(secondInstance) }))
   return { first: a.value, second: b.value, probe: h.value, snapshot }
@@ -417,16 +423,31 @@ export function assertStableDiscovery(status, candidate) {
 }
 
 export function assertSharedOperation(first, second, fixture, version) {
-  const a = first.serverUpdates?.find(item => item.profileId === PROFILE_ID)
-  const b = second.serverUpdates?.find(item => item.profileId === PROFILE_ID)
-  assert(a?.phase === 'current' && b?.phase === 'current' && a.serverIdentity === fixture.serverIdentity
+  const matching = status => Array.isArray(status?.serverUpdates)
+    ? status.serverUpdates.filter(item => item?.profileId === PROFILE_ID) : []
+  const firstRecords = matching(first), secondRecords = matching(second)
+  assert(firstRecords.length === 1 && secondRecords.length === 1, 'Each native client must have one unambiguous saved-server receipt')
+  const [a] = firstRecords, [b] = secondRecords
+  assert(first.currentVersion === version && second.currentVersion === version
+    && a?.phase === 'current' && b?.phase === 'current' && a.paused !== true && b.paused !== true && a.serverIdentity === fixture.serverIdentity
     && b.serverIdentity === fixture.serverIdentity && a.targetVersion === version && b.targetVersion === version,
   'Both real app clients must reconcile the same saved server')
-  const operation = a.operationId || a.scheduleId
-  assert(typeof operation === 'string' && operation.length > 0
-    && operation === (b.operationId || b.scheduleId), 'Both native clients must observe one shared update operation')
-  assert(a.serverInstanceId && a.serverInstanceId === b.serverInstanceId, 'Native clients observed different final service instances')
-  return { nativeClientCount: 2, sharedOperationObserved: true, sharedOperationSha256: digest(operation),
+  let common
+  for (const [field, kind] of [['operationId', 'update'], ['scheduleId', 'schedule']]) {
+    for (const item of [a, b]) assert(item[field] == null || sharedIdentifier(item[field]), 'Malformed native update identifier')
+    if (a[field] != null && b[field] != null) {
+      assert(a[field] === b[field], 'Native clients observed conflicting same-type update identifiers')
+      common ??= { kind, value: a[field] }
+    }
+  }
+  // A reservation ID and its eventual execution ID are different namespaces.
+  // Retaining a common reservation is sufficient even if only one client has
+  // observed the execution ID; equal text across namespaces is never evidence.
+  assert(common, 'Both native clients must observe one shared same-type update identifier')
+  assert(sharedIdentifier(a.serverInstanceId) && sharedIdentifier(b.serverInstanceId)
+    && a.serverInstanceId === b.serverInstanceId, 'Native clients observed different final service instances')
+  return { nativeClientCount: 2, sharedOperationObserved: true, sharedOperationKind: common.kind,
+    sharedOperationSha256: digest(`${common.kind}:${common.value}`),
     finalServiceInstanceShared: true, targetVersion: version }
 }
 
