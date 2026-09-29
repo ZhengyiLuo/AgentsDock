@@ -1,5 +1,23 @@
 # Public development log
 
+## 2026-09-29 — Prepare coordinated 1.0.8-beta.1 release tooling
+
+- Prepare `1.0.8-beta.1` as the shared desktop, npm server and legacy bridge
+  version on the beta channel. The published stable npm `1.0.8` remains unchanged.
+- Bring the signed dual-format candidate helper and native npm validation into
+  the main-based release branch. Make legacy archives reproducible when given
+  `SOURCE_DATE_EPOCH`, and preserve the executable mode of `instances.sh` in
+  both server distributions.
+- Validation: 155 release-tooling/CLI tests, 32 candidate/native-harness tests,
+  3 archive reproducibility tests and 11 npm packaging tests passed. The existing
+  63 desktop coordinator tests, TypeScript checks and production compilation
+  passed. These are source and fixture checks, not native upgrade acceptance.
+- Availability: preparation source only. No beta package, bridge or desktop
+  release has been published. Pending-update HTTP error compatibility still
+  needs correction and real-app verification. Signed desktop packaging and
+  installed-version migration, busy/offline recovery and no-downgrade acceptance
+  remain required before a coordinated release.
+
 ## 2026-09-28 — Combine editor line endings with desktop/server fixes
 
 - Bring contributor PR #24 into the tested desktop/server follow-up branch,
