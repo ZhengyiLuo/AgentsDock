@@ -376,7 +376,9 @@ function legacyUpdateCapabilityVersion(health: Health): number {
 
 function isPendingConflict(error: ServerError): boolean {
   const detail = error.detail
-  return Boolean(detail && typeof detail === 'object' && 'error_code' in detail && detail.error_code === 'server_update_pending')
+  return Boolean(detail && typeof detail === 'object'
+    && (('code' in detail && detail.code === 'server_update_pending')
+      || ('error_code' in detail && detail.error_code === 'server_update_pending')))
     || error.message.includes('server_update_pending')
 }
 

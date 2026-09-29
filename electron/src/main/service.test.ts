@@ -8189,7 +8189,12 @@ describe('server profile lifecycle', () => {
     utimesSync(stale, old, old)
     // Node cannot express or inspect Windows ACLs with POSIX mode bits. Keep
     // this candidate recent there and exercise the private-mode guard on POSIX.
-    if (process.platform !== 'win32') utimesSync(unsafe, old, old)
+    if (process.platform !== 'win32') {
+      // mkdir's requested mode is filtered by the host umask. This fixture
+      // specifically exercises rejection of a non-private directory.
+      chmodSync(unsafe, 0o755)
+      utimesSync(unsafe, old, old)
+    }
     chmodSync(stale, 0o700)
     // chmod changes ctime but not the mtime used by the conservative scavenger.
     const { service } = createProfileService(

@@ -1,5 +1,24 @@
 # Public development log
 
+## 2026-09-29 — Correct beta update waiting and native build reservations
+
+- Recognize the server's structured `code: server_update_pending` HTTP 409
+  while retaining legacy error compatibility. Observe the existing fenced
+  reservation without replacing or canceling it, then reconcile on changed
+  health. Unrelated conflicts and mismatched identities remain blocked.
+- Add exact `1.0.8-beta.1` coverage: compatible stable `1.0.8` components satisfy
+  the app without a downgrade; mixed gateway/execution versions remain pending.
+- Preserve historical desktop run allocations and start the next allocation
+  epoch above already packaged build 1232. Each preparation run and rerun keeps
+  one exact reservation shared by every native platform.
+- Make the clipboard-cleanup test's unsafe-directory fixture independent of
+  the host umask; production cleanup behavior is unchanged.
+- Validation: reproduce four pending-conflict failures before the correction;
+  pass 242 focused desktop tests, 63 build/release guard tests, TypeScript checks
+  and production compilation. Native UI/server and exact packaged migration
+  checks remain separate, pending acceptance. No beta is published by this
+  source change; stable npm `1.0.8` is unchanged.
+
 ## 2026-09-29 — Prepare coordinated 1.0.8-beta.1 release tooling
 
 - Prepare `1.0.8-beta.1` as the shared desktop, npm server and legacy bridge

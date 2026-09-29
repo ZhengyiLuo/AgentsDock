@@ -244,6 +244,39 @@ describe('coordinated app/server reconciliation (mocked server boundary)', () =>
     expect(f.clients.a.ensureServerUpdate).not.toHaveBeenCalled()
     expect(f.clients.a.startServerUpdate).not.toHaveBeenCalled()
   })
+  it('does not downgrade stable 1.0.8 components for the 1.0.8-beta.1 app', async () => {
+    const f = fixture()
+    f.clients.a.health.mockResolvedValue(splitHealth('1.0.8', '1.0.8'))
+    await f.manager.resume(signed('1.0.8-beta.1'), '1.0.8-beta.1')
+    expect(f.manager.status()[0]).toMatchObject({ phase: 'current', gatewayVersion: '1.0.8', executionVersion: '1.0.8' })
+    expect(f.clients.a.ensureServerUpdate).not.toHaveBeenCalled()
+    expect(f.clients.a.startServerUpdate).not.toHaveBeenCalled()
+    expect(f.clients.a.serverUpdateStatus).not.toHaveBeenCalled()
+  })
+  it.each([
+    ['1.0.8', '1.0.7'], ['1.0.8-beta.1', '1.0.7'],
+    ['1.0.7', '1.0.8'], ['1.0.7', '1.0.8-beta.1']
+  ])('waits for both 1.0.8 components (execution %s, gateway %s)', async (execution, gateway) => {
+    const f = fixture()
+    const pending: ServerUpdateStatus = { phase: 'pending', current_version: execution,
+      target_version: '1.0.8-beta.1', schedule_id: 'existing-update', server_identity: 'server-a', server_instance_id: 'boot-a' }
+    f.clients.a.health.mockResolvedValue(splitHealth(execution, gateway))
+    f.clients.a.ensureServerUpdate.mockResolvedValue(pending)
+    f.clients.a.serverUpdateStatus.mockResolvedValue(pending)
+    await f.manager.resume(signed('1.0.8-beta.1'), '1.0.8-beta.1')
+    expect(f.manager.status()[0]).toMatchObject({ phase: 'pending', gatewayVersion: gateway, executionVersion: execution })
+    expect(f.clients.a.ensureServerUpdate).toHaveBeenCalledTimes(execution === '1.0.7' ? 1 : 0)
+    expect(f.clients.a.startServerUpdate).not.toHaveBeenCalled()
+
+    const completed = splitHealth(execution === '1.0.7' ? '1.0.8-beta.1' : execution,
+      gateway === '1.0.7' ? '1.0.8-beta.1' : gateway)
+    f.clients.a.health.mockResolvedValue(completed)
+    f.manager.serverReachable('a', completed)
+    await f.manager.reconcileAll()
+    expect(f.manager.status()[0]).toMatchObject({ phase: 'current' })
+    expect(f.clients.a.ensureServerUpdate).toHaveBeenCalledTimes(execution === '1.0.7' ? 1 : 0)
+    expect(f.clients.a.startServerUpdate).not.toHaveBeenCalled()
+  })
   it.each([7, 29])('reports a newer server outside the supported API range without replacing it (%s)', async api => {
     const f = fixture()
     f.clients.a.health.mockResolvedValue(health('a', { server_version: '1.3.0-beta.1', api_contract_version: api }))
@@ -446,9 +479,9 @@ describe('coordinated app/server reconciliation (mocked server boundary)', () =>
     expect(f.options.connect).toHaveBeenCalledTimes(calls)
     expect(f.clients.a.serverUpdateStatus).not.toHaveBeenCalled()
   })
-  it('joins a retryable older reservation and retries on same-boot operation transitions without polling', async () => {
+  it.each(['code', 'error_code'])('joins a retryable older reservation (%s) and retries on same-boot operation transitions without polling', async field => {
     const f = fixture()
-    f.clients.a.ensureServerUpdate.mockRejectedValueOnce(new ServerError(409, 'Another update must finish.', { error_code: 'server_update_pending' }))
+    f.clients.a.ensureServerUpdate.mockRejectedValueOnce(new ServerError(409, 'Another update must finish.', { [field]: 'server_update_pending' }))
     f.clients.a.serverUpdateStatus.mockResolvedValue({ phase: 'pending', current_version: '1.1.0-beta.1',
       server_identity: 'server-a', server_instance_id: 'boot-a', schedule_id: 'older-schedule', target_version: '1.1.0-beta.3' })
     await f.manager.resume(signed('1.2.0-beta.2'), '1.2.0-beta.2')
@@ -463,6 +496,83 @@ describe('coordinated app/server reconciliation (mocked server boundary)', () =>
     f.manager.serverReachable('a', health('a', { server_update: { phase: 'available', updated_at: 'two' } }))
     await f.manager.reconcileAll()
     expect(f.clients.a.ensureServerUpdate).toHaveBeenCalledTimes(calls + 1)
+  })
+  it.each([
+    { code: 'server_update_pending', statusIdentity: 'server-a', statusPhase: 'pending', expected: 'pending' },
+    { code: 'server_identity_changed', statusIdentity: 'server-a', statusPhase: 'pending', expected: 'blocked' },
+    { code: 'server_update_pending', statusIdentity: 'another-server', statusPhase: 'pending', expected: 'blocked' },
+    { code: 'server_update_pending', statusIdentity: 'server-a', statusPhase: 'failed', expected: 'blocked' }
+  ] as const)('handles native pending-conflict HTTP ($code, $statusIdentity, $statusPhase)', async ({ code, statusIdentity, statusPhase, expected }) => {
+    // Real production client/socket and coordinator; the bounded endpoint is a
+    // fixture, not acceptance of server authorization, admission or installation.
+    const defaultFetchStub = globalThis.fetch
+    vi.unstubAllGlobals()
+    const target = { expected_server_identity: 'server-a', expected_server_instance_id: 'boot-a' }
+    const envelope = signed('1.0.8-beta.1')
+    const calls: { path: string; method: string; query: Record<string, string>; body: unknown; headers: import('node:http').IncomingHttpHeaders }[] = []
+    let reservationFinished = false
+    const server = createServer(async (request, response) => {
+      const chunks: Buffer[] = []
+      for await (const chunk of request) chunks.push(Buffer.from(chunk))
+      const url = new URL(request.url!, 'http://localhost')
+      calls.push({ path: url.pathname, method: request.method!, query: Object.fromEntries(url.searchParams),
+        body: chunks.length ? JSON.parse(Buffer.concat(chunks).toString()) : undefined, headers: request.headers })
+      response.setHeader('Content-Type', 'application/json')
+      if (url.pathname === '/api/health') response.end(JSON.stringify(health('a', { server_version: '1.0.7-beta.1' })))
+      else if (url.pathname === '/api/admin/update/ensure' && !reservationFinished) {
+        response.statusCode = 409
+        response.end(JSON.stringify({ detail: { code, message: 'Another server update must finish before this release can be reconciled.',
+          retryable: true, schedule_id: 'older-schedule', target_version: '1.0.7-beta.3' } }))
+      } else if (url.pathname === '/api/admin/update/ensure') response.end(JSON.stringify({
+        phase: 'pending', current_version: '1.0.7-beta.1', target_version: '1.0.8-beta.1', schedule_id: 'paired-schedule',
+        server_identity: 'server-a', server_instance_id: 'boot-a' }))
+      else if (url.pathname === '/api/admin/update') response.end(JSON.stringify({
+        phase: statusPhase, current_version: '1.0.7-beta.1', target_version: '1.0.7-beta.3', schedule_id: 'older-schedule',
+        server_identity: statusIdentity, server_instance_id: 'boot-a' }))
+      else { response.statusCode = 404; response.end('{}') }
+    })
+    await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve))
+    const address = server.address() as { port: number }
+    const f = fixture()
+    const manager = new CoordinatedUpdateManager({ ...f.options, connect: async () => ({
+      client: new AgentServerClient(`http://127.0.0.1:${address.port}`, 'owned-test-token'),
+      assertCurrent: () => undefined, loopback: true
+    }) })
+    try {
+      await manager.resume(envelope, '1.0.8-beta.1')
+      expect(manager.status()[0]).toMatchObject({ phase: expected })
+      expect(calls.map(call => `${call.method} ${call.path}`)).toEqual([
+        'GET /api/health', 'POST /api/admin/update/ensure', ...(code === 'server_update_pending' ? ['GET /api/admin/update'] : [])
+      ])
+      expect(calls[1].body).toEqual({ ...envelope, ...target })
+      if (code === 'server_update_pending') expect(calls[2].query).toEqual(target)
+      if (expected === 'pending') {
+        expect(manager.status()[0]).toMatchObject({ scheduleId: 'older-schedule', operationTargetVersion: '1.0.7-beta.3', operationOwned: false })
+        const waiting = health('a', { server_version: '1.0.7-beta.1', server_update: { phase: 'pending', schedule_id: 'older-schedule' } })
+        manager.serverReachable('a', waiting)
+        await manager.reconcileAll()
+        const count = calls.length
+        manager.serverReachable('a', waiting)
+        await Promise.resolve()
+        expect(calls).toHaveLength(count)
+        reservationFinished = true
+        manager.serverReachable('a', { ...waiting, server_update: { phase: 'available' } })
+        await manager.reconcileAll()
+        expect(manager.status()[0]).toMatchObject({ phase: 'pending', scheduleId: 'paired-schedule', operationTargetVersion: '1.0.8-beta.1' })
+      }
+      expect(calls.some(call => /\/(start|cancel)$/.test(call.path))).toBe(false)
+      for (const call of calls.filter(call => call.path.startsWith('/api/admin/'))) {
+        expect(call.headers['x-agentsdock-token']).toBe('owned-test-token')
+        expect(call.headers.origin).toBeUndefined()
+        expect(call.headers.cookie).toBeUndefined()
+        expect(call.headers['sec-fetch-mode']).toBeUndefined()
+        expect(call.headers.authorization).toBeUndefined()
+      }
+    } finally {
+      vi.stubGlobal('fetch', defaultFetchStub)
+      server.closeAllConnections()
+      await new Promise<void>(resolve => server.close(() => resolve()))
+    }
   })
   it.each([3, 8])('uses the signed update route for a remote legacy server (capability %s)', async version => {
     const f = fixture()

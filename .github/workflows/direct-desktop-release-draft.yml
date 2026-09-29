@@ -8,7 +8,7 @@ on:
         required: true
         type: string
       build_number:
-        description: "Explicit native build reservation: exactly 1185 + public workflow run number"
+        description: "Exact native reservation: runs 1-20 use 1185 + run; runs 21+ use 1232 + (run - 20)"
         required: true
         type: string
       source_sha:
@@ -86,6 +86,7 @@ jobs:
 
       - id: build-number
         name: Validate the explicit native build reservation
+        # One epoch-aware allocation feeds every platform; reruns retain it.
         env:
           REQUESTED_BUILD: ${{ inputs.build_number }}
           WORKFLOW_RUN: ${{ github.run_number }}

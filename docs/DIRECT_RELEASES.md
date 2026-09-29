@@ -90,10 +90,36 @@ exist on the default branch for manual dispatch, while a dispatch can select the
 reviewed release branch. Registering the workflows does not replace application
 source on a diverged default branch.
 
-The public workflow has a separate run counter from the former private workflow.
-Reserve its native build number explicitly; the first public run starts above
-the last accepted local build, 1185, and every later run increments the number.
-Never reuse the old private counter formula or a previously accepted build.
+The public preparation workflow has a separate run counter from the former
+private workflow. Reserve its native build number explicitly using
+`scripts/validate_desktop_build_number.mjs`. Its audited allocation epochs are:
+
+| Public preparation run | Exact native build reservation |
+| --- | --- |
+| 1–20 | `1185 + run_number` (1186–1205; retained for historical reruns) |
+| 21 onward | `1232 + (run_number - 20)` (1233, 1234, …) |
+
+The September 29 cutover found the public counter at run 20 and local native
+package metadata through `1.0.7-beta.24`, build 1232. Those local build numbers
+are consumed even though they are not public desktop releases. The old next-run
+formula would incorrectly allocate 1206. Do not reuse any accepted, packaged,
+or reserved build; never flatten several runs to one build with `max()`.
+
+Before dispatch, recheck current public runs, published/draft release identities
+and the release owner's local reservations. The recorded high-water mark cannot
+detect another machine's unpublished reservation. Serialize native release work;
+if a later local allocation exists, append a reviewed epoch above that high-water
+mark before a new preparation run. Preserve all previously allocated run/build
+pairs, including failed runs. A rerun retains its original reservation. Do not
+dispatch dummy runs to advance the counter or use the old private counter.
+
+All four platform jobs consume the same validated reservation and verify their
+packaged build against it. The stamping sanity floor remains 1186 to permit
+historical replay; only the epoch validator allocates a new build. Publication
+rechecks the sealed checksum manifest and native assets, without allocating
+another build or applying the publisher's independent run counter. A local
+macOS build paired with artifact-only preparation must use that preparation
+run's exact reservation, not a separately chosen local build number.
 
 When macOS signing is performed locally, dispatch the same preparation workflow
 with `artifacts_only=true`. It retains the source ancestry, release version,

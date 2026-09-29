@@ -1,5 +1,8 @@
 name: Publish direct desktop release
 
+# Replay the sealed prepared assets; publication never allocates a native build
+# or applies its own workflow run counter to the preparation reservation.
+
 on:
   workflow_dispatch:
     inputs:
