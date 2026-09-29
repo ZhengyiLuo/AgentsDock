@@ -1,5 +1,30 @@
 # Public development log
 
+## 2026-09-29 — Hold beta.1 after packaged acceptance failures
+
+- Preserve the signed `1.0.8-beta.1` candidate at source
+  `ff8a707d3130b31cb0456e18f987e0f011340359`, desktop build 1233. Do not
+  replace its signed bytes or publish over a failed check.
+- Both Linux builds completed in direct-build run `36542905085`. Windows
+  stopped before packaging: a discovery test expects a managed POSIX server
+  even though production discovery deliberately returns no servers on Windows.
+  The correction must retain that production platform guard.
+- The universal macOS app and DMG passed Developer ID signature, notarization,
+  Gatekeeper, payload-parity and updater-metadata checks. Its launch/close smoke
+  check did not pass: automatic local discovery advanced the test profile's
+  generation, and native close reported a stale scoped-preference save. The
+  app correctly refused to discard a known failed save, while the verifier
+  waited without a shutdown deadline. Root-cause correction remains pending.
+- Terminate only the owned verifier and temporary smoke app; record the run as
+  failed (exit 143), not successful forced shutdown. This developer-host smoke
+  was not an isolated hosted-native installation/upgrade acceptance. No existing
+  app or server was replaced or restarted.
+- Signed npm and legacy bundles remain unpublished drafts. Fresh npm native
+  checks passed earlier, but packaged desktop replacement, same-Beta legacy
+  migration and genuine stable-server no-downgrade rehearsal remain unexecuted.
+  No beta publication is authorized by these partial results. Stable npm
+  `1.0.8` and its `latest` tag are unchanged.
+
 ## 2026-09-29 — Add genuine stable-server no-downgrade rehearsal
 
 - Add a separate disposable macOS journey that installs independently verified
