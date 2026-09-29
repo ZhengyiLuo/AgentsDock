@@ -3,8 +3,9 @@ import { spawnSync } from 'node:child_process'
 import { resolve } from 'node:path'
 import { test } from 'node:test'
 import { assertCurrentPairedServer, assertDesktopRunner, assertOlderVersion, assertSharedOperation, boundedNativeLog,
-  assertStableDiscovery, assertVisibleCoordinatedRow, checksumForMacArchive, collectReconciliationSnapshot, emitNativeProgress,
-  migrationCoverage, parseDesktopAcceptanceArguments, parseReconciliationSnapshot, reconciliationSnapshot,
+  assertStableDiscovery, assertVisibleCoordinatedRow, checksumForMacArchive, collectReconciliationSnapshot, collectSharedOperationSnapshot, emitNativeProgress,
+  migrationCoverage, parseDesktopAcceptanceArguments, parseReconciliationSnapshot, parseSharedOperationSnapshot, reconciliationSnapshot,
+  retainSharedOperationObservation,
   terminalReconciliationFailure, validateDesktopFixture } from '../product_desktop_acceptance.mjs'
 
 // These are harness contract tests only: no app/service installation, native
@@ -231,6 +232,105 @@ test('multiple-client pass requires both actual receipts to identify one update 
   }
   const noReceipt = { ...status(), serverUpdates: [{ ...record(), operationId: undefined }] }
   assert.throws(() => assertSharedOperation(noReceipt, noReceipt, fixture(), identity.version))
+})
+
+const sharedSnapshot = (second = status(), first = status(), stage = 'completed-wait') => collectSharedOperationSnapshot(
+  () => first, () => second, () => ({ reachable: true, httpStatus: 200, health: health() }), fixture(), identity.version, stage)
+
+test('paired diagnostics distinguish a late current client without a receipt from divergent operations or instances', async () => {
+  const accepted = (await sharedSnapshot()).snapshot
+  assert.equal(accepted.operationRelation, 'same')
+  assert.equal(accepted.instanceRelation, 'same')
+  assert.equal(accepted.secondInstanceMatchesHealth, true)
+  const missing = { ...status(), serverUpdates: [{ ...record(), operationId: undefined }] }
+  const late = (await sharedSnapshot(missing)).snapshot
+  assert.equal(late.second.recordPhase, 'current')
+  assert.equal(late.second.operationPresent, false)
+  assert.equal(late.secondOperationSource, 'missing')
+  assert.equal(late.operationRelation, 'unavailable')
+  assert.equal(late.instanceRelation, 'same')
+  assert.throws(() => assertSharedOperation(status(), missing, fixture(), identity.version),
+    'Observing an already-current client without an operation must not become shared-operation acceptance')
+  const different = (await sharedSnapshot({ ...status(), serverUpdates: [{ ...record(),
+    operationId: 'another-operation', serverInstanceId: 'different-instance' }] })).snapshot
+  assert.equal(different.operationRelation, 'different')
+  assert.equal(different.instanceRelation, 'different')
+  assert.equal(different.secondInstanceMatchesHealth, false)
+  const schedule = (await sharedSnapshot({ ...status(), serverUpdates: [{ ...record(),
+    operationId: undefined, scheduleId: record().operationId }] })).snapshot
+  assert.equal(schedule.operationRelation, 'same')
+  assert.equal(schedule.secondOperationSource, 'schedule')
+})
+
+test('paired diagnostics retain each client phase and never expose private identifiers or raw errors', async () => {
+  const secret = 'PRIVATE-TOKEN-https://private.example/profile'
+  const privateStatus = { ...status(), error: secret, serverUpdates: [{ ...record(), operationId: secret,
+    serverInstanceId: secret, name: secret, message: secret, phase: 'blocked', paused: true }] }
+  const { snapshot } = await sharedSnapshot(privateStatus)
+  assert.equal(snapshot.first.recordPhase, 'current')
+  assert.equal(snapshot.second.recordPhase, 'blocked')
+  assert.equal(snapshot.second.recordPaused, true)
+  assert.equal(snapshot.operationRelation, 'different')
+  assert.doesNotMatch(JSON.stringify(snapshot), /PRIVATE|private\.example|server-identity-owned|one-production-operation|new-service-instance/)
+  const oversized = (await sharedSnapshot({ ...status(), serverUpdates: [{ ...record(), operationId: 'x'.repeat(100_000) }] })).snapshot
+  assert.equal(oversized.secondOperationSource, 'invalid')
+  assert.equal(oversized.operationRelation, 'unavailable')
+  assert(Buffer.byteLength(JSON.stringify(oversized)) < 12 * 1024)
+})
+
+test('stalled or rejected second-client observation preserves independent first-client and health evidence', async () => {
+  const collect = readSecond => collectSharedOperationSnapshot(() => status(), readSecond,
+    () => ({ reachable: true, httpStatus: 200, health: health() }), fixture(), identity.version, 'failure', 5)
+  const stalled = await collect(() => new Promise(() => {}))
+  assert.equal(stalled.snapshot.secondRead, 'timed-out')
+  assert.equal(stalled.snapshot.firstRead, 'fulfilled')
+  assert.equal(stalled.snapshot.healthRead, 'fulfilled')
+  assert.equal(stalled.snapshot.first.recordPhase, 'current')
+  assert.equal(stalled.snapshot.first.healthVersionMatches, true)
+  assert.equal(stalled.snapshot.second.appStatusAvailable, false)
+  const rejected = await collect(() => { throw new Error('PRIVATE renderer error') })
+  assert.equal(rejected.snapshot.secondRead, 'rejected')
+  assert.doesNotMatch(JSON.stringify(rejected.snapshot), /PRIVATE/)
+  const noHealth = await collectSharedOperationSnapshot(() => status(), () => status(), () => new Promise(() => {}),
+    fixture(), identity.version, 'failure', 5)
+  assert.equal(noHealth.snapshot.healthRead, 'timed-out')
+  assert.equal(noHealth.snapshot.operationRelation, 'same')
+  assert.equal(noHealth.snapshot.firstInstanceMatchesHealth, null)
+})
+
+test('shared diagnostic parser rejects unknown fields, unbounded data and invalid nested evidence', async () => {
+  const value = (await sharedSnapshot()).snapshot
+  assert.deepEqual(parseSharedOperationSnapshot(JSON.stringify(value)), value)
+  for (const patch of [{ token: 'secret' }, { schema: 2 }, { stage: 'raw-private-message' }, { firstRead: 'success' },
+    { operationRelation: 'secret-id' }, { secondOperationSource: 'secret-id' }, { firstInstanceMatchesHealth: 'true' },
+    { first: { ...value.first, rawStatus: 'private' } }]) {
+    assert.throws(() => parseSharedOperationSnapshot(JSON.stringify({ ...value, ...patch })))
+  }
+  assert.throws(() => parseSharedOperationSnapshot(' '.repeat(12 * 1024 + 1)))
+  assert.throws(() => parseSharedOperationSnapshot(JSON.stringify(null)))
+  for (const milliseconds of [0, -1, 5001, 1.5]) {
+    await assert.rejects(collectSharedOperationSnapshot(() => status(), () => status(), () => null,
+      fixture(), identity.version, 'failure', milliseconds))
+  }
+})
+
+test('paired diagnostic history is deduplicated, bounded and preserves the initial observation', async () => {
+  const history = []
+  const initial = (await sharedSnapshot(status(), status(), 'offline')).snapshot
+  retainSharedOperationObservation(history, initial)
+  retainSharedOperationObservation(history, initial)
+  assert.equal(history.length, 1)
+  for (let index = 0; index < 30; index += 1) {
+    const snapshot = (await sharedSnapshot({ ...status(), serverUpdates: [{ ...record(),
+      phase: index % 2 ? 'pending' : 'current' }] }, status(), 'reconciling')).snapshot
+    retainSharedOperationObservation(history, snapshot)
+  }
+  assert.equal(history.length, 12)
+  assert.deepEqual(history[0], initial)
+  assert.equal(history.at(-1).second.recordPhase, 'pending')
+  const before = JSON.stringify(history)
+  assert.throws(() => retainSharedOperationObservation(history, { ...initial, secret: 'private' }))
+  assert.equal(JSON.stringify(history), before)
 })
 
 test('empty persisted chat is not full legacy-history/native-ID preservation acceptance', () => {

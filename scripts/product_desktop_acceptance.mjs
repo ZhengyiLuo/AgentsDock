@@ -266,6 +266,81 @@ export async function collectReconciliationSnapshot(readStatus, readHealth, fixt
   return { status, probe, snapshot: reconciliationSnapshot(status, probe, fixture, version) }
 }
 
+const SHARED_SNAPSHOT_KEYS = ['schema', 'kind', 'stage', 'firstRead', 'secondRead', 'healthRead', 'first', 'second',
+  'firstOperationSource', 'secondOperationSource', 'operationRelation', 'instanceRelation',
+  'firstInstanceMatchesHealth', 'secondInstanceMatchesHealth']
+const SHARED_READ_STATES = new Set(['fulfilled', 'rejected', 'timed-out'])
+const SHARED_STAGES = new Set(['offline', 'reconciling', 'completed-wait', 'failure'])
+
+export function parseSharedOperationSnapshot(bytes) {
+  assert(typeof bytes === 'string' || Buffer.isBuffer(bytes), 'Invalid shared-operation diagnostic bytes')
+  assert(Buffer.byteLength(bytes) <= 12 * 1024, 'Shared-operation diagnostic exceeds bound')
+  const value = JSON.parse(String(bytes))
+  assert(value && typeof value === 'object' && !Array.isArray(value)
+    && Object.keys(value).sort().join('\0') === [...SHARED_SNAPSHOT_KEYS].sort().join('\0'), 'Invalid shared-operation fields')
+  assert(value.schema === 1 && value.kind === 'native-shared-operation-snapshot' && SHARED_STAGES.has(value.stage),
+    'Invalid shared-operation diagnostic enum')
+  for (const key of ['firstRead', 'secondRead', 'healthRead']) assert(SHARED_READ_STATES.has(value[key]), 'Invalid shared read state')
+  for (const key of ['firstOperationSource', 'secondOperationSource']) {
+    assert(['operation', 'schedule', 'missing', 'invalid'].includes(value[key]), 'Invalid shared operation source')
+  }
+  for (const key of ['operationRelation', 'instanceRelation']) {
+    assert(['same', 'different', 'unavailable'].includes(value[key]), 'Invalid shared comparison')
+  }
+  for (const key of ['firstInstanceMatchesHealth', 'secondInstanceMatchesHealth']) {
+    assert(value[key] === null || typeof value[key] === 'boolean', 'Invalid shared instance comparison')
+  }
+  parseReconciliationSnapshot(JSON.stringify(value.first))
+  parseReconciliationSnapshot(JSON.stringify(value.second))
+  return value
+}
+
+async function boundedObservation(read, milliseconds) {
+  let timer
+  try {
+    return await Promise.race([
+      Promise.resolve().then(read).then(value => ({ state: 'fulfilled', value }), () => ({ state: 'rejected', value: null })),
+      new Promise(resolve => { timer = setTimeout(() => resolve({ state: 'timed-out', value: null }), milliseconds) })
+    ])
+  } finally { clearTimeout(timer) }
+}
+
+export async function collectSharedOperationSnapshot(readFirst, readSecond, readHealth, fixture, version, stage, milliseconds = 5000) {
+  assert(SHARED_STAGES.has(stage) && Number.isInteger(milliseconds) && milliseconds > 0 && milliseconds <= 5000,
+    'Invalid shared-operation observation scope')
+  // Read-only, independently bounded probes. A stalled/rejected second renderer
+  // must not erase the first client's status or the authenticated health probe.
+  // CDP also expires its underlying requests; this does not retry update IPC.
+  const [a, b, h] = await Promise.all([readFirst, readSecond, readHealth].map(read => boundedObservation(read, milliseconds)))
+  const record = status => Array.isArray(status?.serverUpdates) ? status.serverUpdates.find(item => item?.profileId === PROFILE_ID) : null
+  const first = record(a.value), second = record(b.value)
+  const identifier = value => typeof value === 'string' && value.length > 0 && value.length <= 512 ? value : null
+  const operation = item => {
+    const raw = item?.operationId || item?.scheduleId
+    return { value: identifier(raw), source: !raw ? 'missing' : !identifier(raw) ? 'invalid' : item?.operationId ? 'operation' : 'schedule' }
+  }
+  const one = operation(first), two = operation(second)
+  const relation = (left, right) => !left || !right ? 'unavailable' : left === right ? 'same' : 'different'
+  const firstInstance = identifier(first?.serverInstanceId), secondInstance = identifier(second?.serverInstanceId)
+  const healthyInstance = identifier(h.value?.health?.server_instance_id)
+  const matches = value => value && healthyInstance ? value === healthyInstance : null
+  const snapshot = parseSharedOperationSnapshot(JSON.stringify({ schema: 1, kind: 'native-shared-operation-snapshot', stage,
+    firstRead: a.state, secondRead: b.state, healthRead: h.state,
+    first: reconciliationSnapshot(a.value, h.value, fixture, version), second: reconciliationSnapshot(b.value, h.value, fixture, version),
+    firstOperationSource: one.source, secondOperationSource: two.source, operationRelation: relation(one.value, two.value),
+    instanceRelation: relation(firstInstance, secondInstance), firstInstanceMatchesHealth: matches(firstInstance),
+    secondInstanceMatchesHealth: matches(secondInstance) }))
+  return { first: a.value, second: b.value, probe: h.value, snapshot }
+}
+
+export function retainSharedOperationObservation(history, snapshot) {
+  const safe = parseSharedOperationSnapshot(JSON.stringify(snapshot))
+  if (JSON.stringify(history.at(-1)) !== JSON.stringify(safe)) history.push(safe)
+  // Retain the initial observation and the most recent eleven state changes.
+  // No unbounded timeline, raw operation IDs, errors, URLs or provider data.
+  if (history.length > 12) history.splice(1, history.length - 12)
+}
+
 export function terminalReconciliationFailure(previous, current) {
   if (!previous || !current) return false
   const terminal = snapshot => snapshot.appStatusAvailable && snapshot.appVersionMatches === true
@@ -415,6 +490,15 @@ export async function main(argv = process.argv.slice(2)) {
   }
   const logs = boundedNativeLog(createWriteStream(join(options.output, 'native-private.log'), { flags: 'wx', mode: 0o600 }))
   let ownedApp, secondApp, client, secondClient, lastReconciliation = null, keychainCreated = false
+  const sharedOperationObservations = []
+  const observeShared = async stage => {
+    const result = await collectSharedOperationSnapshot(
+      () => client?.evaluate('window.agentsDock.updates.status()'),
+      () => secondClient?.evaluate('window.agentsDock.updates.status()'),
+      () => reconciliationHealth(fixture), fixture, replay.identity.version, stage)
+    retainSharedOperationObservation(sharedOperationObservations, result.snapshot)
+    return result
+  }
   try {
     observed('baseline-artifact-verification-starting')
     const previous = await extractVerifiedApp(options['baseline-directory'], options['baseline-version'], join(options.output, 'installation'))
@@ -551,13 +635,14 @@ export async function main(argv = process.argv.slice(2)) {
     assert(processesFor(ownedApp).length > 0 && processesFor(secondApp).includes(secondProcess.pid),
       'Two independent native app processes must coexist before service reconnection')
     observed('second-native-client-waiting', { independentProfile: true, nativeClientCount: 2 })
+    await observeShared('offline')
     // No server-update IPC is invoked by this harness: reconnect is the only
     // action, and the installed production coordinator owns admission/retry.
     serviceCommand(options, fixture, 'service', ['--action', 'start'], 'server-reconnected.json')
     observed('owned-legacy-service-start-requested')
     const current = await until('Automatic paired server reconciliation', async () => {
-      const { status, probe, snapshot } = await collectReconciliationSnapshot(
-        () => client.evaluate('window.agentsDock.updates.status()'), () => reconciliationHealth(fixture), fixture, replay.identity.version)
+      const { first: status, probe, snapshot: pairedSnapshot } = await observeShared('reconciling')
+      const snapshot = pairedSnapshot.first
       const failed = terminalReconciliationFailure(lastReconciliation, snapshot)
       lastReconciliation = snapshot
       if (failed) return { terminalFailure: true }
@@ -569,8 +654,7 @@ export async function main(argv = process.argv.slice(2)) {
     const currentRow = await visibleServerRow(client, 'current')
     await client.screenshot(join(options.output, '03-matched-app-and-server.png'))
     const shared = await until('Both real clients joined one server update operation', async () => {
-      const [a, b] = await Promise.all([client.evaluate('window.agentsDock.updates.status()'),
-        secondClient.evaluate('window.agentsDock.updates.status()')])
+      const { first: a, second: b } = await observeShared('completed-wait')
       try { return assertSharedOperation(a, b, fixture, replay.identity.version) } catch { return null }
     })
     observed('two-native-clients-share-one-completed-update', shared)
@@ -620,6 +704,7 @@ export async function main(argv = process.argv.slice(2)) {
     console.log(JSON.stringify({ observed: true, checks: evidence.checks, evidenceSha256: digest(await readFile(join(options.output, 'desktop-evidence.json'))) }))
     return evidence
   } catch (error) {
+    if (secondClient) await observeShared('failure').catch(() => {})
     let serviceDiagnostics = { status: 'unavailable' }
     try {
       const diagnostic = serviceCommand(options, fixture, 'diagnose', [], 'server-diagnostics.json')
@@ -629,7 +714,8 @@ export async function main(argv = process.argv.slice(2)) {
     await writeFile(join(options.output, 'failure-observations.json'), JSON.stringify({ schema: 1, status: 'failed',
       ...(harness ? { kind: 'scoped-macos-candidate-observations', publicationEligible: false, releaseAcceptance: false,
         harnessSourceSha: harness.harnessSourceSha } : {}),
-      releaseReceiptSha256: replay.identity.releaseReceiptSha256, events, lastReconciliation, serviceDiagnostics }), { flag: 'wx', mode: 0o600 }).catch(() => {})
+      releaseReceiptSha256: replay.identity.releaseReceiptSha256, events, lastReconciliation,
+      sharedOperationObservations, serviceDiagnostics }), { flag: 'wx', mode: 0o600 }).catch(() => {})
     throw error
   } finally {
     client?.close()

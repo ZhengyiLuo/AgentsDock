@@ -7,8 +7,8 @@
   owner plus incumbent component, registration and runtime-link checks. The
   earlier preparation-failure assertion incorrectly required broader legacy
   permissions to remain; native retry with the corrected assertion is pending.
-- Add bounded, allowlisted native failure observations for the no-downgrade
-  check. Do not upload private app logs or change the signed
+- Add bounded, allowlisted native failure observations for no-downgrade and
+  both clients' update state. Do not upload private app logs or change the signed
   runtime, test outcomes or publication gates. The first failed run is retained;
   neither UI timeout has yet established a runtime cause.
 - Continue using the same signed `1.0.8-beta.2` build 1234 artifacts. No beta
