@@ -1,5 +1,47 @@
 # Public development log
 
+## 2026-09-29 — Add genuine stable-server no-downgrade rehearsal
+
+- Add a separate disposable macOS journey that installs independently verified
+  official stable npm `1.0.8` and opens the unchanged signed beta app against it.
+  Keep the positive upgrade's strictly-older baseline requirement intact.
+- Observe native app HTTP requests through a disclosed byte-transparent
+  loopback relay; retain only bounded route categories/counts. Require no
+  update-control requests during the app observation window, visible current
+  status after Settings reopening/app relaunch, and unchanged native component
+  PIDs, instances, service registrations, runtime bytes and persisted state.
+- Verify the stable installer's signed `instances.sh` permission transformation
+  without relaxing the shared beta runtime verifier. Candidate source, stable
+  source and truthful test-harness source remain distinct.
+- Validation: full release-tooling/CLI tests and all 132 Python harness tests
+  pass, including real-socket relay framing tests; workflow and diff checks pass.
+  Independent review found no remaining harness blocker. These are test-harness
+  results, not an executed native no-downgrade acceptance receipt. All generated
+  observations remain explicitly non-publishing; runtime/build bytes stay pinned
+  to `ff8a707d3130b31cb0456e18f987e0f011340359`.
+
+## 2026-09-29 — Verify signed beta server candidate on native hosts
+
+- Freeze candidate runtime/build source at
+  `ff8a707d3130b31cb0456e18f987e0f011340359`; the matching standalone export is
+  `9e94a72f68ef9e97c20693a5324080fc34cac7bb`. Source CI and all eight server-test
+  shards pass for this pin.
+- Reuse the established standalone signing workflow and key. Run `36542572822`
+  prepares both formats twice with byte-identical results; independently verify
+  the original artifact digest, signatures, source identities and runtime/mode
+  parity. The npm manifest SHA-256 is
+  `e9f18ee7f3f4c967280d600172de19f96cb2f423870e6e72890947f97d3bd845`.
+- Native npm validation run `36542908521` passes on disposable macOS and Linux:
+  exact installation, 118 runtime files, authenticated health, existing-install
+  refusal, retained identity/token after native restart, and independence from
+  retired npm staging/cache. This does not cover provider chats, logout/reboot,
+  managed upgrades, desktop replacement or rollback.
+- Availability: exact npm and legacy bundles are unpublished drafts only.
+  Desktop preparation run `36542905085` reserves native build 1233; signing and
+  packaged upgrade acceptance are not claimed by this entry. Stable npm `1.0.8`
+  and `latest` are unchanged. Later allowlisted QA commits retain this packaged
+  source pin and do not rebuild or replace the signed server bytes.
+
 ## 2026-09-29 — Add isolated signed-candidate upgrade rehearsal
 
 - Restore exact-artifact macOS rehearsal in the registered source-CI workflow,

@@ -605,5 +605,134 @@ jobs:
           if-no-files-found: warn
           retention-days: 14
 
+  candidate-no-downgrade:
+    # Separate genuine newer-server fixture: never relax positive upgrade guards.
+    if: github.event_name == 'workflow_dispatch' && inputs.candidate_replay && !inputs.npm_native_validation && github.repository == 'ZhengyiLuo/AgentsDock' && startsWith(github.ref, 'refs/heads/release/')
+    needs: [release-tooling, electron, mobile-source]
+    runs-on: macos-15
+    timeout-minutes: 60
+    permissions:
+      contents: write # Required to read the two unpublished, independently pinned drafts.
+      actions: read
+    defaults:
+      run:
+        shell: bash
+    env:
+      RECEIPT_SHA256: ${{ inputs.candidate_receipt_sha256 }}
+      PYTHONDONTWRITEBYTECODE: '1'
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        with:
+          node-version: 24
+          package-manager-cache: false
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: false
+      - name: Prepare disposable no-downgrade prerequisites
+        run: |
+          uv python install 3.13
+          command -v tmux || brew install tmux
+          /bin/launchctl print "gui/$(id -u)" > /dev/null
+      - uses: ./.github/actions/product-candidate-inputs
+        id: candidate
+        with:
+          candidate_tag: ${{ inputs.candidate_tag }}
+          receipt_sha256: ${{ inputs.candidate_receipt_sha256 }}
+          bundle_sha256: ${{ inputs.candidate_bundle_sha256 }}
+          github_token: ${{ github.token }}
+      - name: Download the genuine separately signed stable server and compare published registry bytes
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          umask 077
+          mkdir "$RUNNER_TEMP/no-downgrade-stable"
+          gh release download npm-candidate-v1.0.8 --repo ZhengyiLuo/AgentsDock \
+            --pattern server-1.0.8.tgz --pattern agents-server-npm-manifest.json --pattern agents-server-npm-manifest.sig \
+            --dir "$RUNNER_TEMP/no-downgrade-stable"
+          STATUS="$(curl --disable --fail --silent --show-error --proto '=https' --tlsv1.2 --max-time 300 \
+            --output "$RUNNER_TEMP/no-downgrade-registry-server-1.0.8.tgz" --write-out '%{http_code}' \
+            https://registry.npmjs.org/@agentsdock/server/-/server-1.0.8.tgz)"
+          test "$STATUS" = 200
+          cmp "$RUNNER_TEMP/no-downgrade-stable/server-1.0.8.tgz" "$RUNNER_TEMP/no-downgrade-registry-server-1.0.8.tgz"
+      - uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v6
+        with:
+          version: 11.9.0
+          run_install: false
+      - name: Verify the unmodified signed beta app before isolated native use
+        env:
+          PRODUCT_VERSION: ${{ steps.candidate.outputs.version }}
+        run: |
+          pnpm --dir electron install --frozen-lockfile --ignore-scripts
+          export AGENTSDOCK_EXPECTED_BUILD_NUMBER="$(node -p 'JSON.parse(require("fs").readFileSync(process.argv[1])).buildNumber' "$RUNNER_TEMP/candidate-inputs/candidate.json")"
+          export AGENTSDOCK_COORDINATED_MANIFEST="$RUNNER_TEMP/candidate-inputs/payload/server/npm/agents-server-npm-manifest.json"
+          export AGENTSDOCK_COORDINATED_SIGNATURE="$RUNNER_TEMP/candidate-inputs/payload/server/npm/agents-server-npm-manifest.sig"
+          scripts/verify_electron_release.sh "$RUNNER_TEMP/candidate-inputs/payload/desktop" "$PRODUCT_VERSION" beta
+      - name: Verify independent stable pins and install the real stable fixture
+        run: |
+          python3 scripts/product_no_downgrade_server.py bootstrap \
+            --receipt "$RUNNER_TEMP/candidate-inputs/candidate.json" --receipt-sha256 "$RECEIPT_SHA256" \
+            --server-directory "$RUNNER_TEMP/candidate-inputs/payload/server" \
+            --desktop-directory "$RUNNER_TEMP/candidate-inputs/payload/desktop" \
+            --stable-directory "$RUNNER_TEMP/no-downgrade-stable" \
+            --work "$RUNNER_TEMP/agentsdock-acceptance-no-downgrade" \
+            --fixture "$RUNNER_TEMP/agentsdock-acceptance-no-downgrade/server.json" \
+            --evidence "$RUNNER_TEMP/agentsdock-acceptance-no-downgrade/bootstrap.json"
+      - name: Observe the actual beta app without downgrading the newer stable server
+        run: |
+          node scripts/product_no_downgrade_desktop.mjs \
+            --receipt "$RUNNER_TEMP/candidate-inputs/candidate.json" --receipt-sha256 "$RECEIPT_SHA256" \
+            --server-directory "$RUNNER_TEMP/candidate-inputs/payload/server" \
+            --desktop-directory "$RUNNER_TEMP/candidate-inputs/payload/desktop" \
+            --stable-directory "$RUNNER_TEMP/no-downgrade-stable" \
+            --work "$RUNNER_TEMP/agentsdock-acceptance-no-downgrade" \
+            --fixture "$RUNNER_TEMP/agentsdock-acceptance-no-downgrade/server.json" \
+            --output "$RUNNER_TEMP/agentsdock-acceptance-no-downgrade/desktop"
+      - name: Collect only bounded non-publishing no-downgrade observations
+        if: always()
+        run: |
+          node --input-type=module - "$RUNNER_TEMP/agentsdock-acceptance-no-downgrade" "$RUNNER_TEMP/no-downgrade-public" <<'NODE'
+          import { constants, openSync, fstatSync, readSync, closeSync, mkdirSync, writeFileSync } from 'node:fs'
+          import { join } from 'node:path'
+          const [source, destination] = process.argv.slice(2)
+          mkdirSync(destination, { mode: 0o700 })
+          const pairs = [['bootstrap.json', 'stable-bootstrap.json'], ['desktop/no-downgrade.json', 'no-downgrade.json'],
+            ['desktop/service-verification.json', 'stable-verification.json']]
+          let copied = 0
+          try {
+            for (const [input, output] of pairs) {
+              let fd
+              try { fd = openSync(join(source, input), constants.O_RDONLY | constants.O_NOFOLLOW) }
+              catch (error) { if (error.code === 'ENOENT') continue; throw error }
+              let bytes
+              try {
+                const stat = fstatSync(fd)
+                if (!stat.isFile() || stat.uid !== process.getuid() || stat.size > 512 * 1024) throw new Error('Invalid observation file')
+                const buffer = Buffer.alloc(512 * 1024 + 1)
+                const count = readSync(fd, buffer, 0, buffer.length, 0)
+                if (count > 512 * 1024 || count !== stat.size) throw new Error('Unbounded observations')
+                bytes = buffer.subarray(0, count)
+                const report = JSON.parse(bytes)
+                if (/"(?:token|password|authorization|privateKey|cookie)"\s*:/i.test(bytes.toString('utf8'))) throw new Error('Private observation fields')
+                if (report.kind !== 'candidate-no-downgrade-observations' || report.publicationEligible !== false
+                  || report.releaseAcceptance !== false) throw new Error('Not scoped no-downgrade observations')
+              } finally { closeSync(fd) }
+              writeFileSync(join(destination, output), bytes, { flag: 'wx', mode: 0o600 })
+              copied++
+            }
+            console.log(JSON.stringify({ publicEvidenceFiles: copied }))
+          } catch { console.error('No-downgrade evidence collection failed safely.'); process.exitCode = 1 }
+          NODE
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        if: always()
+        with:
+          name: candidate-no-downgrade-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/no-downgrade-public/*.json
+          if-no-files-found: warn
+          retention-days: 14
+
 # The optional rehearsal contains no signing credentials or publishing commands.
 # Only product-release-acceptance.yml can supply production acceptance evidence.

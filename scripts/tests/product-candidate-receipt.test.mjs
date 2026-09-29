@@ -217,3 +217,75 @@ test('candidate evidence collector only copies bounded sanitized non-publishing 
     assert(!existsSync(join(output, 'diagnostics-private.log')))
   }
 })
+
+test('stable no-downgrade is an isolated pinned fixture, not a weakened positive migration', () => {
+  const workflow = readFileSync(new URL('../../.github/workflows/ci.yml', import.meta.url), 'utf8')
+  const positive = workflow.slice(workflow.indexOf('  candidate-native:'), workflow.indexOf('  candidate-no-downgrade:'))
+  const negative = workflow.slice(workflow.indexOf('  candidate-no-downgrade:'))
+  assert.match(negative, /github\.event_name == 'workflow_dispatch' && inputs\.candidate_replay && !inputs\.npm_native_validation/)
+  assert.match(negative, /github\.repository == 'ZhengyiLuo\/AgentsDock' && startsWith\(github\.ref, 'refs\/heads\/release\/'\)/)
+  assert.match(negative, /needs: \[release-tooling, electron, mobile-source\]/)
+  assert.match(negative, /runs-on: macos-15/)
+  assert.match(negative, /fetch-depth: 0/)
+  assert.match(negative, /uses: \.\/\.github\/actions\/product-candidate-inputs/)
+  assert.match(negative, /gh release download npm-candidate-v1\.0\.8 --repo ZhengyiLuo\/AgentsDock/)
+  assert.match(negative, /--pattern server-1\.0\.8\.tgz --pattern agents-server-npm-manifest\.json --pattern agents-server-npm-manifest\.sig/)
+  assert.match(negative, /https:\/\/registry\.npmjs\.org\/@agentsdock\/server\/-\/server-1\.0\.8\.tgz/)
+  assert.match(negative, /test "\$STATUS" = 200/)
+  assert.match(negative, /cmp "\$RUNNER_TEMP\/no-downgrade-stable\/server-1\.0\.8\.tgz" "\$RUNNER_TEMP\/no-downgrade-registry-server-1\.0\.8\.tgz"/)
+  assert.match(negative, /python3 scripts\/product_no_downgrade_server\.py bootstrap/)
+  assert.match(negative, /node scripts\/product_no_downgrade_desktop\.mjs/)
+  assert.equal(negative.split('--stable-directory "$RUNNER_TEMP/no-downgrade-stable"').length - 1, 2)
+  assert.equal(negative.split('--receipt-sha256 "$RECEIPT_SHA256"').length - 1, 2)
+  assert.match(negative, /scripts\/verify_electron_release\.sh "\$RUNNER_TEMP\/candidate-inputs\/payload\/desktop" "\$PRODUCT_VERSION" beta/)
+  assert(negative.indexOf('gh release download npm-candidate-v1.0.8') < negative.indexOf('product_no_downgrade_server.py bootstrap'))
+  assert(negative.indexOf('product_no_downgrade_server.py bootstrap') < negative.indexOf('node scripts/product_no_downgrade_desktop.mjs'))
+  assert.doesNotMatch(negative, /product_acceptance_network|--legacy|product-release-replay|failure-retry|NODE_TLS_REJECT_UNAUTHORIZED|security add-trusted-cert|npm publish|release create|--clobber|secrets\./)
+  assert.doesNotMatch(positive, /product_no_downgrade|no-downgrade-stable/)
+  assert.match(positive, /bootstrap --candidate --kind "\$INSTALL_KIND"/)
+})
+
+test('no-downgrade collector admits only its separate bounded non-publishing observations', t => {
+  const workflow = readFileSync(new URL('../../.github/workflows/ci.yml', import.meta.url), 'utf8')
+  const section = workflow.slice(workflow.indexOf('      - name: Collect only bounded non-publishing no-downgrade observations'))
+  const script = section.match(/<<'NODE'\n([\s\S]*?)\n          NODE/)[1].replace(/^          /gm, '')
+  for (const kind of ['valid', 'private', 'eligible', 'acceptance', 'wrong-kind', 'oversized', 'symlink']) {
+    const root = mkdtempSync(join(tmpdir(), 'no-downgrade-evidence-unit-'))
+    t.after(() => rmSync(root, { recursive: true, force: true }))
+    const source = join(root, 'source'), output = join(root, 'public')
+    mkdirSync(join(source, 'desktop'), { recursive: true })
+    const report = { kind: 'candidate-no-downgrade-observations', publicationEligible: false, releaseAcceptance: false }
+    if (kind === 'private') report.authorization = 'fixture-secret-never-published'
+    if (kind === 'eligible') report.publicationEligible = true
+    if (kind === 'acceptance') report.releaseAcceptance = true
+    if (kind === 'wrong-kind') report.kind = 'candidate-server-observations'
+    if (kind === 'oversized') report.extra = 'x'.repeat(512 * 1024)
+    const bytes = `${JSON.stringify(report)}\n`
+    const target = join(source, 'bootstrap.json')
+    if (kind === 'symlink') {
+      writeFileSync(join(root, 'other.json'), bytes)
+      symlinkSync(join(root, 'other.json'), target)
+    } else writeFileSync(target, bytes)
+    if (kind === 'valid') {
+      writeFileSync(join(source, 'desktop/no-downgrade.json'), bytes)
+      writeFileSync(join(source, 'desktop/service-verification.json'), bytes)
+    }
+    writeFileSync(join(source, 'server.json'), '{"token":"private-fixture"}\n')
+    writeFileSync(join(source, 'desktop/native.log'), 'private native log\n')
+    const run = () => execFileSync(process.execPath, ['--input-type=module', '-', source, output], {
+      input: script, encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe']
+    })
+    if (kind === 'valid') {
+      assert.equal(JSON.parse(run()).publicEvidenceFiles, 3)
+      for (const file of ['stable-bootstrap.json', 'no-downgrade.json', 'stable-verification.json']) {
+        assert.equal(readFileSync(join(output, file), 'utf8'), bytes)
+        assert.equal(statSync(join(output, file)).mode & 0o777, 0o600)
+      }
+    } else {
+      assert.throws(run, error => error.status === 1 && !error.stderr.toString().includes('fixture-secret'))
+      assert(!existsSync(join(output, 'stable-bootstrap.json')))
+    }
+    assert(!existsSync(join(output, 'server.json')))
+    assert(!existsSync(join(output, 'native.log')))
+  }
+})

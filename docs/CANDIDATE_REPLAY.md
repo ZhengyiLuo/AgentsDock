@@ -52,9 +52,10 @@ and remain an unpublished prerelease. Review their SHA-256 hashes independently.
 The candidate input action verifies everything before installation or trust
 changes. GitHub requires `contents: write` on the job token to read an unpublished
 draft; this is not a technically read-only credential. Only the input action
-receives it as `GH_TOKEN` and uses read operations. It is not exported to the
+and the separate stable-fixture download step receive it as `GH_TOKEN` and use
+read operations. It is not exported to the
 installed software. No production signing secrets or publication commands are in
-this job.
+these jobs.
 
 Dispatch `ci.yml` on the receipt's reviewed `release/*` branch with:
 
@@ -72,12 +73,38 @@ validation remains available separately and does not establish desktop acceptanc
 Do not invoke the hosted-runner trust/process helpers on a developer machine or
 an existing local guest, and never remove an app's `disable-auto-update` marker.
 
-## Deliberately uncovered
+## Separate stable-server no-downgrade case
 
 Stable server `1.0.8` must not be downgraded to `1.0.8-beta.1`. That requires a
 distinct native fixture and observation, not weakening the positive migration's
-strictly-older-baseline assertion. This replay does not yet exercise that case.
-It also does not establish authenticated provider-history preservation, busy or
+strictly-older-baseline assertion. The separate `candidate-no-downgrade` job
+installs genuine stable server `1.0.8` on its own disposable hosted macOS runner,
+then launches the exact signed beta app directly. It does not replace an older
+desktop, install origin routing, or alter TLS trust.
+
+The stable archive and signed descriptor are independent inputs, never rewritten
+candidate receipt fields. The helper pins stable source
+`8a965007408c6ab9672d746366b9fc0bd58feff6`, descriptor SHA-256
+`64881777ab0ebf8ad029ec1f4f1212e1699f9ee7a1d62420ae32e5f3dcfe7198`,
+and archive SHA-256
+`c9846ca863312478f64979cc579feea521902dc23c15f0f30ca5eebdb544808f`.
+CI downloads the official `npm-candidate-v1.0.8` draft's three files and compares
+its archive byte-for-byte with anonymous official npm registry delivery before
+the helper verifies the committed release-key signature and exact stable pins.
+Neither the stable release nor its registry tags are changed.
+
+The native helper observes the app's coordination requests through a transparent
+loopback relay, checks its real settings UI, and verifies that the healthy stable
+service identity and process remain unchanged. Its separate bounded reports have
+kind `candidate-no-downgrade-observations` and retain both
+`publicationEligible: false` and `releaseAcceptance: false`. Candidate artifact
+source, truthful harness source, and stable fixture source remain distinct. A
+passing unit suite only validates the harness contract; this native case is not
+accepted until the exact signed-package job runs and its observations are reviewed.
+
+## Deliberately uncovered
+
+This rehearsal does not establish authenticated provider-history preservation, busy or
 queued real work, logout/reboot, Linux candidate-health rollback, Windows native
 update acceptance, or real public-feed/registry delivery. Inspect the structured
 reports for blocked checks; scoped observations cannot authorize publication.
