@@ -1,5 +1,7 @@
 import assert from 'node:assert/strict'
+import { createHash } from 'node:crypto'
 import { once } from 'node:events'
+import { createServer as createHTTPServer } from 'node:http'
 import { createConnection, createServer } from 'node:net'
 import { setTimeout as delay } from 'node:timers/promises'
 import test from 'node:test'
@@ -67,6 +69,92 @@ test('websocket frames become opaque only after actual upstream 101, never on re
   observer.feed(Buffer.from(upgrade))
   observer.acceptUpgrade(Buffer.from('HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n\r\n'))
   observer.feed(Buffer.from([0x81, 0x02, 0x00, 0xff])); observer.finish()
+})
+
+test('persistent HTTP can upgrade only after complete prior request framing and real upstream 101', () => {
+  const upgrade = 'GET /events HTTP/1.1\r\nConnection: keep-alive, Upgrade\r\nUpgrade: websocket\r\n\r\n'
+  const response = Buffer.from('HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n\r\n')
+  for (const preceding of [request, 'POST /api/sessions HTTP/1.1\r\nContent-Length: 2\r\n\r\n{}',
+    'POST /api/sessions HTTP/1.1\r\nTransfer-Encoding: chunked\r\n\r\n2\r\n{}\r\n0\r\n\r\n']) {
+    const records = [], observer = new NativeRequestObserver(record => records.push(record))
+    observer.feed(Buffer.from(preceding)); observer.finish()
+    for (const byte of Buffer.from(upgrade)) observer.feed(Buffer.from([byte]))
+    assert.equal(observer.state, 'upgrade-wait')
+    assert.throws(() => observer.finish())
+    observer.acceptUpgrade(response)
+    observer.feed(Buffer.from([0x81, 0x00])); observer.finish()
+    assert.equal(records.length, 2)
+    assert.equal(records[1].upgrade, true)
+  }
+})
+
+test('reused connection still rejects unsupported upgrades, incomplete bodies and pre-101 pipelining', () => {
+  const upgrade = 'GET /events HTTP/1.1\r\nConnection: Upgrade\r\nUpgrade: websocket\r\n\r\n'
+  for (const invalid of [upgrade.replace('GET ', 'POST '), upgrade.replace('websocket', 'h2c'),
+    upgrade.replace('Connection: Upgrade\r\n', ''), upgrade.replace('\r\n\r\n', '\r\nContent-Length: 0\r\n\r\n'),
+    upgrade.replace('\r\n\r\n', '\r\nTransfer-Encoding: chunked\r\n\r\n'), upgrade + 'GET /api/health HTTP/1.1\r\n\r\n']) {
+    const observer = new NativeRequestObserver(() => {})
+    observer.feed(Buffer.from(request))
+    assert.throws(() => observer.feed(Buffer.from(invalid)))
+  }
+  for (const together of [true, false]) {
+    const observer = new NativeRequestObserver(() => {})
+    observer.feed(Buffer.from(request))
+    if (!together) observer.feed(Buffer.from(upgrade))
+    assert.throws(() => observer.feed(Buffer.concat([...(together ? [Buffer.from(upgrade)] : []), Buffer.from([0x81, 0x00])])))
+  }
+  const partial = new NativeRequestObserver(() => {})
+  partial.feed(Buffer.from('POST /api/sessions HTTP/1.1\r\nContent-Length: 8192\r\n\r\n{'))
+  partial.feed(Buffer.from(upgrade))
+  assert.equal(partial.state, 'body')
+  assert.throws(() => partial.acceptUpgrade(Buffer.from('HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n\r\n')))
+  assert.throws(() => partial.finish())
+  for (const invalid of ['HTTP/1.1 200 OK\r\n\r\n', 'HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\n\r\n']) {
+    const observer = new NativeRequestObserver(() => {})
+    observer.feed(Buffer.from(request)); observer.feed(Buffer.from(upgrade))
+    assert.throws(() => observer.acceptUpgrade(Buffer.from(invalid)))
+    assert.throws(() => observer.finish())
+  }
+})
+
+test('real global fetch then WebSocket reuses one TCP connection through actual upstream 101', { timeout: 5000 }, async t => {
+  const sockets = new Set()
+  let httpSocket, upgradeSocket, upstreamConnections = 0, websocket
+  const upstream = createHTTPServer((req, res) => {
+    assert.equal(req.url, '/api/health')
+    httpSocket = req.socket
+    res.writeHead(200, { 'Content-Length': '2' }); res.end('{}')
+  })
+  upstream.on('connection', socket => {
+    upstreamConnections++; sockets.add(socket); socket.on('close', () => sockets.delete(socket))
+  })
+  upstream.on('upgrade', (req, socket, head) => {
+    assert.equal(req.url, '/events'); assert.equal(head.length, 0)
+    upgradeSocket = socket
+    const accept = createHash('sha1').update(req.headers['sec-websocket-key'] + '258EAFA5-E914-47DA-95CA-C5AB0DC85B11').digest('base64')
+    socket.end('HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n'
+      + `Sec-WebSocket-Accept: ${accept}\r\n\r\n`)
+  })
+  upstream.listen(0, '127.0.0.1'); await once(upstream, 'listening')
+  const relay = await createNativeObservationRelay({ targetURL: `http://127.0.0.1:${upstream.address().port}`,
+    assertOwnedTarget: () => assert.equal(upstream.listening, true) })
+  t.after(async () => {
+    if (websocket?.readyState === WebSocket.OPEN) websocket.close()
+    await relay.close()
+    for (const socket of sockets) socket.destroy()
+    await new Promise(resolve => upstream.close(resolve))
+  })
+  assert.equal(await (await fetch(relay.url + '/api/health')).text(), '{}')
+  await delay(100) // Allow native undici to return the consumed connection to its pool.
+  websocket = new WebSocket(relay.url.replace('http:', 'ws:') + '/events')
+  const closed = once(websocket, 'close')
+  await once(websocket, 'open'); await closed
+  assert.equal(upgradeSocket, httpSocket, 'The native clients must actually reuse the same upstream TCP connection')
+  assert.equal(upstreamConnections, 1)
+  assert.equal(relay.snapshot().connections, 1)
+  assert.equal(relay.snapshot().upgrades, 1)
+  assert.deepEqual(relay.snapshot().requests, { 'GET /api/health': 1, 'GET other': 1 })
+  relay.assertValid(); assertNoUpdateRequests(relay.snapshot())
 })
 
 async function socketFixture(t, onData) {

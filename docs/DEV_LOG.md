@@ -1,5 +1,21 @@
 # Public development log
 
+## 2026-09-29 — Observe native persistent HTTP-to-WebSocket connections
+
+- Reproduce the no-downgrade observer failure with a real native fetch followed
+  by a WebSocket upgrade on the same persistent TCP connection. Accept this
+  valid sequence only after all preceding request bodies/trailers are complete;
+  retain bounded upgrade validation, rejection of pre-upgrade client frames,
+  and the requirement for a real upstream `101` response.
+- All 43 focused relay, desktop and candidate-contract tests pass. The native
+  signed-app no-downgrade rerun remains required; no frozen runtime/build bytes
+  or release artifacts changed.
+- Run `36616053418` passes all seven scoped macOS installation/recovery jobs.
+  Both legacy permission cases verify native app replacement, automatic paired
+  server reconciliation, offline recovery and shared scheduling. Their reports
+  remain explicitly blocked for populated provider history and do not authorize
+  publication. Linux rollback and authenticated manual acceptance are pending.
+
 ## 2026-09-29 — Keep transient rollback transport separate from healthy evidence
 
 - Linux run `36615424703` passes baseline installation and exact-origin setup,

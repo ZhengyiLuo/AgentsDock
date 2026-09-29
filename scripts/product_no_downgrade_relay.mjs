@@ -50,7 +50,10 @@ export class NativeRequestObserver {
         need(length === undefined || /^(0|[1-9]\d*)$/.test(length) && Number.isSafeInteger(Number(length)) && Number(length) <= BODY_LIMIT)
         need(transfer === undefined || transfer.toLowerCase() === 'chunked')
         const upgrade = headers.get('upgrade')
-        if (upgrade !== undefined) need(this.requests === 0 && match[1] === 'GET' && upgrade.toLowerCase() === 'websocket'
+        // Native fetch/WebSocket may reuse a persistent connection. Reaching
+        // headers proves every preceding request body/trailer was fully parsed;
+        // upgrade-wait still rejects any client bytes before the real 101.
+        if (upgrade !== undefined) need(match[1] === 'GET' && upgrade.toLowerCase() === 'websocket'
           && headers.get('connection')?.toLowerCase().split(/\s*,\s*/).includes('upgrade') && length === undefined && transfer === undefined)
         const path = decodeURIComponent(match[2].split('?')[0])
         const category = PATHS.has(path) ? path : path.startsWith('/api/admin/update/') ? '/api/admin/update/other' : 'other'
