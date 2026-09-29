@@ -308,6 +308,10 @@ jobs:
             legacy_mode: '0755'
           - kind: recovery
             legacy_mode: '0750'
+          - kind: stage-recovery
+            legacy_mode: '0755'
+          - kind: stage-recovery
+            legacy_mode: '0750'
     runs-on: macos-15
     timeout-minutes: 75
     permissions:
@@ -366,11 +370,13 @@ jobs:
           extra=()
           INSTALL_KIND="$CANDIDATE_KIND"
           if [[ "$CANDIDATE_KIND" == recovery ]]; then INSTALL_KIND=legacy; fi
+          if [[ "$CANDIDATE_KIND" == stage-recovery ]]; then INSTALL_KIND=legacy; fi
           if [[ "$INSTALL_KIND" == legacy ]]; then
             extra=(--baseline-archive "$RUNNER_TEMP/candidate-inputs/baseline-server/agents-server-1.0.7-beta.21.tar.gz"
               --baseline-manifest "$RUNNER_TEMP/candidate-inputs/baseline-server/agents-server-manifest.json"
               --baseline-signature "$RUNNER_TEMP/candidate-inputs/baseline-server/agents-server-manifest.sig" --legacy-root-mode "$LEGACY_MODE")
           fi
+          if [[ "$CANDIDATE_KIND" == stage-recovery ]]; then extra+=(--staging-failure-fixture); fi
           python3 scripts/product_server_acceptance.py bootstrap --candidate --kind "$INSTALL_KIND" \
             --receipt "$RUNNER_TEMP/candidate-inputs/candidate.json" --receipt-sha256 "$RECEIPT_SHA256" \
             --bundle "$RUNNER_TEMP/candidate-inputs/payload/server" --work "$RUNNER_TEMP/agentsdock-acceptance-candidate" \
@@ -511,8 +517,19 @@ jobs:
             --evidence "$RUNNER_TEMP/agentsdock-acceptance-candidate/recovery.json" \
             --fault-control "$RUNNER_TEMP/agentsdock-acceptance-candidate/fault.json" \
             --fault-observed "$RUNNER_TEMP/agentsdock-acceptance-candidate/fault-observed.json"
+      - name: Fail exact candidate preparation, observe natural stage cleanup, and retry
+        if: matrix.kind == 'stage-recovery'
+        run: |
+          set -a
+          source "$RUNNER_TEMP/agentsdock-acceptance-network/trust.env"
+          set +a
+          python3 scripts/product_server_acceptance.py staging-failure-retry --candidate --kind legacy \
+            --receipt "$RUNNER_TEMP/candidate-inputs/candidate.json" --receipt-sha256 "$RECEIPT_SHA256" \
+            --bundle "$RUNNER_TEMP/candidate-inputs/payload/server" --work "$RUNNER_TEMP/agentsdock-acceptance-candidate" \
+            --fixture "$RUNNER_TEMP/agentsdock-acceptance-candidate/server.json" \
+            --evidence "$RUNNER_TEMP/agentsdock-acceptance-candidate/stage-recovery.json"
       - name: Inspect failed owned recovery service without exposing private logs
-        if: failure() && matrix.kind == 'recovery'
+        if: failure() && (matrix.kind == 'recovery' || matrix.kind == 'stage-recovery')
         timeout-minutes: 3
         run: |
           if [[ -f "$RUNNER_TEMP/agentsdock-acceptance-candidate/server.json" ]]; then
@@ -566,7 +583,7 @@ jobs:
           import { join } from 'node:path'
           const [source, destination] = process.argv.slice(2)
           mkdirSync(destination, { mode: 0o700 })
-          const pairs = [['bootstrap.json', 'server.json'], ['recovery.json', 'recovery.json'],
+          const pairs = [['bootstrap.json', 'server.json'], ['recovery.json', 'recovery.json'], ['stage-recovery.json', 'stage-recovery.json'],
             ['recovery-diagnostics.json', 'recovery-diagnostics.json'], ['desktop/desktop-evidence.json', 'desktop.json'],
             ['desktop/server-preservation.json', 'server-preservation.json'], ['desktop/failure-observations.json', 'failure.json'],
             ['desktop/server-diagnostics.json', 'server-diagnostics.json']]
@@ -586,7 +603,7 @@ jobs:
                 bytes = buffer.subarray(0, count)
                 const report = JSON.parse(bytes)
                 if (/"(?:token|password|authorization|privateKey|cookie)"\s*:/i.test(bytes.toString('utf8'))) throw new Error('Private fields in public evidence')
-                if ((input === 'recovery.json' || input === 'recovery-diagnostics.json')
+                if ((input === 'recovery.json' || input === 'stage-recovery.json' || input === 'recovery-diagnostics.json')
                   && (report.kind !== 'candidate-server-observations' || report.publicationEligible !== false || report.releaseAcceptance !== false)) {
                   throw new Error('Recovery rehearsal cannot emit production acceptance')
                 }

@@ -23,12 +23,22 @@ turn blocked or unobserved scenarios into full release acceptance.
   containing the exact signed legacy archive, observes failed download and the
   unchanged healthy incumbent, then retries the same version normally.
 - A fresh-install job exercises the exact npm archive and native service manager.
+- Separate `stage-recovery` jobs cover both legacy root modes. A private,
+  run-owned dependency delegate fails one exact signed candidate's preparation.
+  The real installer must remove its stage and release its lock, while both
+  incumbent components, service registrations and data remain unchanged. Retry
+  uses the same public update API and accepted bytes. The delegate remains an
+  explicitly disclosed QA dependency until the disposable VM ends.
 
 The recovery fault does not modify signed bytes, patch the updater, remove update
 fences, signal the incumbent, or establish post-takeover rollback. Installer state,
 private fixture tokens, TLS keys, native logs and screenshots are not uploaded.
 Only bounded sanitized observation JSON is retained; trust/routing cleanup runs
 before artifact upload even after failure.
+
+The stage-recovery check does not remove staging files itself or repair journals.
+It reports maintenance-fence cleanup and post-takeover rollback as unobserved;
+passing this earlier preparation failure is not evidence of either later phase.
 
 ## Source and artifact contract
 

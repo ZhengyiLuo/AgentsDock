@@ -1,5 +1,28 @@
 # Public development log
 
+## 2026-09-29 — Sign beta.2 and extend isolated recovery observations
+
+- Freeze runtime/build source at
+  `7b01c4586e2c2cbe45bcd8b871e54b92a8aa7e37`; the matching standalone export is
+  `06f4e1c610bf476c5de86d357c90802985f6d061`. Source CI and all eight server shards
+  pass. Existing signing run `36608893713` prepares both server formats with
+  identical repeated bytes; verify the original Actions digest, signatures and
+  runtime/mode parity. Npm descriptor SHA-256:
+  `d5ffca31a80df2312515421920c7390b4385a8167bc4bb25d6d4e6c99353c62a`.
+- Npm native validation `36609270425` passes on disposable macOS and Linux:
+  fresh installation, 118 runtime files, authenticated health, existing-install
+  refusal, retained identity/token after restart and npm-cache independence.
+  Provider chats, desktop replacement, migration and rollback remain separate.
+- Add test-only preparation-failure/retry jobs for legacy root modes `0755` and
+  `0750`. An exact owned dependency fault leaves signed runtime and system tools
+  intact. Observe installer-owned stage/lock cleanup and unchanged incumbent
+  components before retry. Do not claim maintenance-fence cleanup, post-takeover
+  rollback or independence from every QA dependency from this scenario.
+- Server bundles remain unpublished drafts; stable npm `1.0.8` and `latest`
+  remain unchanged. Desktop build 1234 and exact-package native acceptance are
+  still in progress. This harness-only continuation does not change frozen
+  runtime/build bytes or authorize publication.
+
 ## 2026-09-29 — Correct discovery shutdown and prepare beta.2
 
 - Advance the coordinated candidate to `1.0.8-beta.2`; retain beta.1's signed

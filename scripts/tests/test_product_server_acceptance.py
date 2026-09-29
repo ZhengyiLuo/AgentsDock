@@ -8,6 +8,7 @@ import json
 import os
 from pathlib import Path
 import plistlib
+import shutil
 import subprocess
 import sys
 import tarfile
@@ -597,6 +598,181 @@ class NativeServerAcceptanceUnitTests(unittest.TestCase):
                 installed_executables.update(MOD.re.findall(r'"\$STAGE_DIR/([A-Za-z0-9_.-]+)"', line))
         installed_executables.discard("agentsdock_team_hub")  # directory, not runtime file
         self.assertEqual(installed_executables, package_executables | {"agent_server.py"})
+
+    def staging_case(self, root):
+        home, work, bundle = root / "account", root / "agentsdock-acceptance-fixture", root / "bundle"
+        home.mkdir(mode=0o700)
+        work.mkdir(mode=0o700)
+        (bundle / "npm").mkdir(parents=True)
+        installer = b"#!/bin/bash\n# Exact fixture installer bytes; no host installation.\n"
+        receipt = {"sourceSha": "a" * 40, "version": "1.0.8-beta.2", "track": "beta"}
+        archive = bundle / "npm/fixture.tgz"
+        with tarfile.open(archive, "w:gz") as package:
+            member = tarfile.TarInfo("package/server/install.sh")
+            member.size, member.mode = len(installer), 0o755
+            package.addfile(member, io.BytesIO(installer))
+        (bundle / "npm/agents-server-npm-manifest.json").write_text(json.dumps({
+            "version": receipt["version"], "archive": {"name": archive.name}}))
+        uv = root / "real-uv"
+        uv.write_text("#!/bin/sh\nprintf 'owned-real-uv\\n'\n")
+        uv.chmod(0o755)
+        args = argparse.Namespace(candidate=True, kind="legacy", work=work, bundle=bundle, receipt_sha256="c" * 64)
+        env = {"PATH": str(root)}
+        with patch.object(MOD.sys, "platform", "darwin"), patch.object(MOD.shutil, "which", return_value=str(uv)), \
+                patch.dict(os.environ, {"GITHUB_RUN_ID": "123", "GITHUB_RUN_ATTEMPT": "1"}):
+            MOD.prepare_stage_fault_delegate(args, receipt, home, env)
+        install = MOD.paths(home)["installRoot"]
+        (install / "releases").mkdir(parents=True, mode=0o700)
+        fixture = {"home": str(home), "installRoot": str(install), "baselineVersion": "1.0.7-beta.21",
+                   "serverIdentity": "owned-server", "snapshot": self.snapshot(),
+                   "rootBindings": {"installRoot": [install.stat().st_dev, install.stat().st_ino]}}
+        MOD.bind_stage_fault_delegate(args, fixture)
+        stage = install / "releases" / f".staging-{receipt['version']}-431"
+        stage.mkdir(mode=0o700)
+        (stage / "VERSION").write_text(receipt["version"] + "\n")
+        (stage / "install.sh").write_bytes(installer)
+        config = work / "dependency-delegate/config.json"
+        return args, fixture, receipt, config, stage, uv, env
+
+    def test_dependency_delegate_is_durable_private_and_unarmed_calls_real_executable(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            args, fixture, receipt, config_path, stage, uv, env = self.staging_case(Path(temporary).resolve())
+            config = json.loads(MOD.read_regular(config_path, private=True))
+            delegate = Path(config["delegate"])
+            self.assertNotIn(str(args.work), env["PATH"])
+            self.assertTrue(delegate.is_relative_to(Path(fixture["home"]) / ".local/libexec"))
+            self.assertEqual(delegate.stat().st_mode & 0o777, 0o700)
+            self.assertEqual(delegate.parent.stat().st_mode & 0o777, 0o700)
+            self.assertEqual(config_path.stat().st_mode & 0o777, 0o600)
+            result = subprocess.run([str(delegate), "--version"], capture_output=True, timeout=10)
+            self.assertEqual(result.returncode, 0)
+            self.assertEqual(result.stdout.strip(), b"owned-real-uv")
+            self.assertFalse((config_path.parent / "consumed.json").exists())
+            self.assertTrue(stage.exists())
+            self.assertEqual(uv.read_text(), "#!/bin/sh\nprintf 'owned-real-uv\\n'\n")
+
+    def test_exact_stage_delegate_faults_once_and_does_not_remove_stage_or_touch_runtime(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            args, fixture, receipt, config_path, stage, uv, env = self.staging_case(Path(temporary).resolve())
+            marker = {"sourceSha": receipt["sourceSha"], "receiptSha256": args.receipt_sha256}
+            MOD.write_private(config_path.parent / "armed.json", marker)
+            self.assertEqual(MOD.stage_fault_delegate(["sync", "--project", str(stage), "--frozen"], config_path), 73)
+            observed = json.loads(MOD.read_regular(config_path.parent / "observed.json", private=True))
+            self.assertEqual(observed["stage"], str(stage))
+            self.assertEqual(observed["stageInode"], stage.stat().st_ino)
+            self.assertTrue(stage.exists(), "Only the actual installer may clean up its stage")
+            self.assertFalse((config_path.parent / "armed.json").exists())
+            self.assertEqual(json.loads(MOD.read_regular(config_path.parent / "consumed.json", private=True)), marker)
+            with patch.object(MOD.os, "execv", side_effect=RuntimeError("delegated")) as execute, self.assertRaisesRegex(RuntimeError, "delegated"):
+                MOD.stage_fault_delegate(["sync", "--project", str(stage), "--frozen"], config_path)
+            execute.assert_called_once_with(str(uv), [str(uv), "sync", "--project", str(stage), "--frozen"])
+
+    def test_stage_fault_refuses_replaced_uv_delegate_root_wrong_version_bytes_and_authority(self):
+        for change in ("uv", "delegate", "root", "version", "bytes", "marker", "linked-version", "wrong-stage"):
+            with self.subTest(change=change), tempfile.TemporaryDirectory() as temporary:
+                args, fixture, receipt, config_path, stage, uv, env = self.staging_case(Path(temporary).resolve())
+                marker = {"sourceSha": receipt["sourceSha"], "receiptSha256": args.receipt_sha256}
+                if change == "marker":
+                    marker["sourceSha"] = "b" * 40
+                MOD.write_private(config_path.parent / "armed.json", marker)
+                config = json.loads(MOD.read_regular(config_path, private=True))
+                if change == "uv":
+                    uv.write_text("#!/bin/sh\nexit 0\n")
+                elif change == "delegate":
+                    Path(config["delegate"]).write_text("#!/bin/sh\nexit 0\n")
+                elif change == "root":
+                    config["rootBinding"][1] += 1
+                    MOD.write_private(config_path, config, replace=True)
+                elif change == "version":
+                    (stage / "VERSION").write_text("1.0.8\n")
+                elif change == "bytes":
+                    (stage / "install.sh").write_text("different runtime")
+                elif change == "linked-version":
+                    (stage / "VERSION").rename(stage / "saved-version")
+                    (stage / "VERSION").symlink_to(stage / "saved-version")
+                elif change == "wrong-stage":
+                    stage = stage.parent / ".staging-1.0.8-beta.1-432"
+                with patch.object(MOD.os, "execv") as execute, self.assertRaises((RuntimeError, OSError)):
+                    MOD.stage_fault_delegate(["sync", "--project", str(stage)], config_path)
+                execute.assert_not_called()
+                self.assertTrue((config_path.parent / "armed.json").exists())
+                self.assertFalse((config_path.parent / "consumed.json").exists())
+
+    def test_stage_fixture_refuses_existing_delegate_and_non_candidate_before_installation(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            args, fixture, receipt, config_path, stage, uv, env = self.staging_case(Path(temporary).resolve())
+            with patch.object(MOD.sys, "platform", "darwin"), patch.object(MOD.shutil, "which", return_value=str(uv)), \
+                    patch.dict(os.environ, {"GITHUB_RUN_ID": "123", "GITHUB_RUN_ATTEMPT": "1"}), \
+                    self.assertRaises(FileExistsError):
+                MOD.prepare_stage_fault_delegate(args, receipt, Path(fixture["home"]), env)
+            args.candidate = False
+            with patch.object(MOD.shutil, "which") as which, self.assertRaises(RuntimeError):
+                MOD.prepare_stage_fault_delegate(args, receipt, Path(fixture["home"]), env)
+            which.assert_not_called()
+
+    def run_staging_recovery_case(self, root, *, retain_stage=False, bad_marker=False):
+        args, fixture, receipt, config_path, stage, uv, env = self.staging_case(root)
+        calls = []
+        before = {"serverInstanceId": "old", "components": {"gateway": "old-gateway", "execution": "old-worker"}}
+        accepted = {**before, "serverInstanceId": "new"}
+        def request(_fixture, route, body=None):
+            calls.append((route, body))
+            if route.endswith("/start") and len(calls) == 1:
+                self.assertEqual(MOD.stage_fault_delegate(["sync", "--project", str(stage)], config_path), 73)
+                if bad_marker:
+                    observed_path = config_path.parent / "observed.json"
+                    observed = json.loads(MOD.read_regular(observed_path, private=True))
+                    MOD.write_private(observed_path, {**observed, "installerSha256": "d" * 64}, replace=True)
+                if not retain_stage:
+                    # Unit fixture simulates installer EXIT. The real native
+                    # harness contains no deletion or journal repair operation.
+                    shutil.rmtree(stage)
+            return {"phase": "failed"} if route == "/api/admin/update" else {"phase": "starting"}
+        with patch.object(MOD.sys, "platform", "darwin"), \
+                patch.dict(os.environ, {"GITHUB_RUN_ID": "123", "GITHUB_RUN_ATTEMPT": "1"}), \
+                patch.object(MOD, "staging_native_identity", side_effect=[before, before, accepted]), \
+                patch.object(MOD, "request", side_effect=request), \
+                patch.object(MOD, "state_snapshot", return_value=self.snapshot()), \
+                patch.object(MOD, "health"), patch.object(MOD, "wait_update_complete"), \
+                patch.object(MOD, "verify_installed_runtime", return_value=117), \
+                patch.object(MOD, "command") as command:
+            if retain_stage or bad_marker:
+                with self.assertRaises(RuntimeError):
+                    MOD.staging_failure_retry(args, fixture, receipt)
+                self.assertEqual(len([call for call in calls if call[0].endswith("/start")]), 1)
+            else:
+                value = MOD.staging_failure_retry(args, fixture, receipt)
+                self.assertEqual(calls[0], calls[2], "Retry must use the same public target and process identity")
+                self.assertEqual(value["exactRuntimeFilesCompared"], 117)
+                for key in ("failedStageRemovedByInstaller", "installLockReleasedByInstaller",
+                            "incumbentComponentsIdentityAndDataPreserved", "sameAcceptedVersionRetried"):
+                    self.assertTrue(value[key])
+                for key in ("fenceCleanupObserved", "rollbackObserved", "activationInterruptionObserved",
+                            "allQaDependenciesIndependent", "nonemptyProviderHistoryObserved"):
+                    self.assertFalse(value[key])
+                checks = MOD.checks_for("staging-failure-retry", "legacy", value)
+                self.assertEqual(checks[0]["name"], "failed-candidate-stage-removal-and-retry")
+                self.assertEqual(checks[0]["status"], "passed")
+            command.assert_not_called()
+
+    def test_native_stage_recovery_uses_same_api_without_repair_and_keeps_claims_scoped(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            self.run_staging_recovery_case(Path(temporary).resolve())
+
+    def test_retained_stage_or_wrong_fault_receipt_refuses_retry(self):
+        for change in ("retained", "wrong-marker"):
+            with self.subTest(change=change), tempfile.TemporaryDirectory() as temporary:
+                self.run_staging_recovery_case(Path(temporary).resolve(),
+                    retain_stage=change == "retained", bad_marker=change == "wrong-marker")
+
+    def test_native_staging_identity_rejects_missing_or_mixed_components_before_process_access(self):
+        value = {"ok": True, "server_version": "1.0.8-beta.2", "server_instance_id": "owned-instance",
+                 "gateway": {"protocol": 1, "version": "1.0.8-beta.2", "pid": 41, "instance_id": "gateway-instance"},
+                 "execution_service": {"protocol": 1, "version": "1.0.7-beta.21", "pid": 42, "instance_id": "worker-instance"}}
+        with patch.object(MOD.sys, "platform", "darwin"), patch.object(MOD, "health", return_value=value), \
+                patch.object(MOD, "registered_services") as registrations, self.assertRaises(RuntimeError):
+            MOD.staging_native_identity({}, "1.0.8-beta.2")
+        registrations.assert_not_called()
 
     def failure_case(self, root, *, bad_marker=False):
         bundle = root / "bundle"

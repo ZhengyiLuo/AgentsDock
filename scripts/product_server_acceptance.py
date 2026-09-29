@@ -21,6 +21,7 @@ import pwd
 import re
 import selectors
 import shlex
+import shutil
 import signal
 import socket
 import stat
@@ -140,6 +141,119 @@ def child_environment(work: Path) -> dict[str, str]:
     result.update(UV_CACHE_DIR=str(work / "uv-cache"), npm_config_cache=str(work / "npm-cache"),
                   npm_config_update_notifier="false", NO_COLOR="1")
     return result
+
+
+def stage_fault_delegate(argv: list[str], config_path: Path) -> int:
+    """Fail one exact owned dependency stage; never edit uv, runtime or fences."""
+    config = json.loads(read_regular(config_path, 8192, private=True))
+    control_directory = config_path.parent
+    owned_directory(control_directory)
+    delegate = Path(config["delegate"])
+    directory = owned_directory(delegate.parent)
+    need([directory.st_dev, directory.st_ino] == config["delegateDirectoryBinding"]
+         and sha(read_regular(delegate, 8192)) == config["delegateSha256"],
+         "Owned dependency delegate changed.")
+    real_uv = Path(config["realUv"])
+    info = real_uv.lstat()
+    need(stat.S_ISREG(info.st_mode) and not info.st_mode & 0o022
+         and os.access(real_uv, os.X_OK)
+         and [info.st_dev, info.st_ino, info.st_size, info.st_mtime_ns] == config["realUvIdentity"],
+         "Trusted dependency executable changed.")
+    control = control_directory / "armed.json"
+    # Normal version/prerequisite calls and all unarmed calls are real uv.
+    # install.sh invokes this absolute executable in its sanitized environment.
+    if argv and argv[0] == "sync" and argv.count("--project") == 1 and control.exists():
+        index = argv.index("--project")
+        need(index + 1 < len(argv), "Dependency project is missing.")
+        stage = Path(argv[index + 1])
+        root = Path(config["installRoot"])
+        contained(stage, root)
+        need(stage.parent == root / "releases"
+             and re.fullmatch(r"\.staging-" + re.escape(config["version"]) + r"-[1-9]\d*", stage.name),
+             "Fault may only target the exact new candidate stage.")
+        root_info = owned_directory(root)
+        need([root_info.st_dev, root_info.st_ino] == config["rootBinding"], "Owned installation root changed.")
+        stage_info = owned_directory(stage)
+        need(read_regular(stage / "VERSION", 200).decode().strip() == config["version"]
+             and sha(read_regular(stage / "install.sh", 2 * 1024 * 1024)) == config["installerSha256"],
+             "Fault stage differs from the signed candidate runtime.")
+        marker = {"sourceSha": config["sourceSha"], "receiptSha256": config["receiptSha256"]}
+        need(json.loads(read_regular(control, 8192, private=True)) == marker,
+             "Dependency fault belongs to a different candidate.")
+        consumed = control_directory / "consumed.json"
+        need(not consumed.exists() and not consumed.is_symlink(), "Dependency fault was already consumed.")
+        # The native installer owns the install lock; this one-shot marker does
+        # not alter its stage, lock, update journal, maintenance hold or fence.
+        control.rename(consumed)
+        write_private(control_directory / "observed.json", {
+            **marker, "version": config["version"], "stage": str(stage),
+            "stageDevice": stage_info.st_dev, "stageInode": stage_info.st_ino,
+            "installerSha256": config["installerSha256"], "dependencyExitCode": 73})
+        return 73
+    os.execv(str(real_uv), [str(real_uv), *argv])
+    raise AssertionError("execv unexpectedly returned")
+
+
+def prepare_stage_fault_delegate(args: argparse.Namespace, receipt: dict, home: Path, env: dict) -> None:
+    need(args.candidate and args.kind == "legacy" and sys.platform == "darwin",
+         "Staging-failure fixture requires a disposable candidate macOS legacy job.")
+    actual = shutil.which("uv", path=env.get("PATH"))
+    need(actual is not None, "Trusted uv is required before creating a dependency delegate.")
+    real_uv = Path(actual).resolve(strict=True)
+    info = real_uv.lstat()
+    need(stat.S_ISREG(info.st_mode) and not info.st_mode & 0o022 and os.access(real_uv, os.X_OK),
+         "Trusted uv must be a safe executable.")
+    descriptor = json.loads(read_regular(args.bundle / "npm/agents-server-npm-manifest.json", 8192))
+    need(descriptor.get("version") == receipt["version"], "Dependency fault candidate differs from its descriptor.")
+    with tarfile.open(args.bundle / "npm" / descriptor["archive"]["name"], "r:gz") as archive:
+        member = archive.getmember("package/server/install.sh")
+        need(member.isfile() and member.size <= 2 * 1024 * 1024, "Candidate installer is not a bounded regular member.")
+        with archive.extractfile(member) as stream:
+            installer_hash = sha(stream.read())
+    # Do not put a QA work/cache directory in native service registration.
+    # This is an explicitly labelled external dependency fixture, not proof of
+    # independence from every QA dependency. It persists until the CI VM ends;
+    # it must never be removed while these owned services can still call it.
+    run = os.environ["GITHUB_RUN_ID"]
+    attempt = os.environ["GITHUB_RUN_ATTEMPT"]
+    need(re.fullmatch(r"[1-9]\d*", run) and re.fullmatch(r"[1-9]\d*", attempt), "Invalid disposable run binding.")
+    directory = home / ".local/libexec" / f"agentsdock-acceptance-{run}-{attempt}"
+    contained(directory, home)
+    for parent in (home / ".local", home / ".local/libexec"):
+        if not parent.exists() and not parent.is_symlink():
+            parent.mkdir(mode=0o700)
+        owned_directory(parent)
+    directory.mkdir(mode=0o700)  # Refuse existing directories, including symlinks.
+    directory_info = owned_directory(directory)
+    controls = args.work / "dependency-delegate"
+    controls.mkdir(mode=0o700)
+    delegate = directory / "uv"
+    payload = (f"#!{sys.executable}\nimport runpy, sys\nfrom pathlib import Path\n"
+               "try:\n"
+               f"    module = runpy.run_path({str(ROOT / 'scripts/product_server_acceptance.py')!r})\n"
+               f"    result = module['stage_fault_delegate'](sys.argv[1:], Path({str(controls / 'config.json')!r}))\n"
+               "except Exception:\n"
+               "    print('Owned dependency fixture failed safely.', file=sys.stderr)\n"
+               "    raise SystemExit(74)\n"
+               "raise SystemExit(result)\n").encode()
+    fd = os.open(delegate, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o700)
+    with os.fdopen(fd, "wb") as stream:
+        stream.write(payload)
+    write_private(controls / "config.json", {
+        "realUv": str(real_uv), "realUvIdentity": [info.st_dev, info.st_ino, info.st_size, info.st_mtime_ns],
+        "delegate": str(delegate), "delegateDirectoryBinding": [directory_info.st_dev, directory_info.st_ino],
+        "delegateSha256": sha(payload), "installRoot": str(paths(home)["installRoot"]),
+        "version": receipt["version"], "sourceSha": receipt["sourceSha"],
+        "receiptSha256": args.receipt_sha256, "installerSha256": installer_hash})
+    env["PATH"] = str(directory) + os.pathsep + env.get("PATH", "")
+
+
+def bind_stage_fault_delegate(args: argparse.Namespace, fixture: dict) -> None:
+    path = args.work / "dependency-delegate/config.json"
+    config = json.loads(read_regular(path, 8192, private=True))
+    config["rootBinding"] = fixture["rootBindings"]["installRoot"]
+    write_private(path, config, replace=True)
+    fixture["dependencyFaultFixture"] = {"configurationSha256": sha(read_regular(path, private=True))}
 
 
 def owned_directory(path: Path) -> os.stat_result:
@@ -1154,6 +1268,150 @@ def failure_retry(args: argparse.Namespace, fixture: dict, receipt: dict) -> dic
             "nonemptyProviderHistoryObserved": False}
 
 
+def staging_native_identity(fixture: dict, version: str) -> dict:
+    """Read-only proof of both owned launchd components and immutable runtime."""
+    need(sys.platform == "darwin", "Staging recovery requires its disposable native macOS fixture.")
+    value = health(fixture, version)
+    components = {}
+    for name in ("gateway", "execution_service"):
+        component = value.get(name)
+        need(isinstance(component, dict) and component.get("protocol") == 1
+             and component.get("version") == version and type(component.get("pid")) is int
+             and component["pid"] > 1 and isinstance(component.get("instance_id"), str)
+             and len(component["instance_id"]) >= 8 and component.get("maintenance_held") is not True,
+             "Both exact-version native components must be healthy and not held.")
+        components[name] = {"pid": component["pid"], "instanceId": component["instance_id"]}
+    need(components["gateway"]["pid"] != components["execution_service"]["pid"],
+         "Native components must be distinct processes.")
+    registrations = registered_services(fixture)
+    need(len(registrations) == 2
+         and {item.stem for item in registrations} == {"com.agentsdock.server", "com.agentsdock.gateway"},
+         "Both native registrations are required for the staging recovery fixture.")
+    root = Path(fixture["installRoot"])
+    release = root / "releases" / version
+    need((root / "current").is_symlink() and (root / "current").resolve() == release,
+         "Owned native runtime link changed.")
+    hashes = {}
+    for item in registrations:
+        name = "gateway" if item.stem == "com.agentsdock.gateway" else "execution_service"
+        raw = read_regular(item)
+        result = command(["/bin/launchctl", "print", f"gui/{os.getuid()}/{item.stem}"])
+        pids = re.findall(rb"^\s*pid = ([0-9]+)\s*$", result.stdout, re.MULTILINE)
+        need(len(pids) == 1 and int(pids[0]) == components[name]["pid"],
+             "Native registration and authenticated component identities differ.")
+        observed = command(["/bin/ps", "-p", str(components[name]["pid"]), "-o", "uid=", "-o", "command="]).stdout.decode().strip()
+        owner, process_command = observed.split(None, 1)
+        arguments = plistlib.loads(raw)["ProgramArguments"]
+        process_arguments = shlex.split(process_command)
+        role = "gateway" if name == "gateway" else "worker"
+        need(len(arguments) >= 3 and arguments[2] == role and owner == str(os.getuid())
+             and Path(arguments[1]).resolve() == release / "execution_service.py"
+             and len(process_arguments) == len(arguments)
+             and Path(process_arguments[0]).is_absolute()
+             and Path(process_arguments[0]).resolve() == Path(arguments[0]).resolve()
+             and process_arguments[1:] == arguments[1:],
+             "Native component is not the exact owned installed runtime.")
+        hashes[item.stem] = sha(raw)
+    return {"serverInstanceId": value["server_instance_id"], "components": components,
+            "registrations": hashes, "currentLink": str(release),
+            "installRootMode": stat.S_IMODE(owned_directory(root).st_mode)}
+
+
+def staging_failure_retry(args: argparse.Namespace, fixture: dict, receipt: dict) -> dict:
+    """Observe installer-owned failed-stage deletion, then use the same API retry.
+
+    This pre-takeover dependency fault is deliberately distinct from truncated
+    downloads, post-takeover rollback, busy-drain or maintenance-fence cleanup.
+    """
+    need(args.candidate and sys.platform == "darwin" and args.kind == "legacy"
+         and fixture["baselineVersion"] != receipt["version"] and isinstance(fixture.get("snapshot"), dict),
+         "Staging recovery requires a real older candidate macOS legacy fixture.")
+    directory = args.work / "dependency-delegate"
+    owned_directory(directory)
+    config_path = directory / "config.json"
+    raw = read_regular(config_path, 8192, private=True)
+    need(fixture.get("dependencyFaultFixture", {}).get("configurationSha256") == sha(raw),
+         "Fixture does not bind this dependency fault configuration.")
+    config = json.loads(raw)
+    root = Path(fixture["installRoot"])
+    delegate_directory = Path(fixture["home"]) / ".local/libexec" / (
+        f"agentsdock-acceptance-{os.environ['GITHUB_RUN_ID']}-{os.environ['GITHUB_RUN_ATTEMPT']}")
+    contained(delegate_directory, Path(fixture["home"]))
+    need(config["version"] == receipt["version"] and config["sourceSha"] == receipt["sourceSha"]
+         and config["receiptSha256"] == args.receipt_sha256 and config["installRoot"] == str(root)
+         and config["rootBinding"] == fixture["rootBindings"]["installRoot"]
+         and config["delegate"] == str(delegate_directory / "uv"),
+         "Dependency fault does not bind this exact fixture and accepted candidate.")
+    before = staging_native_identity(fixture, fixture["baselineVersion"])
+    compare_snapshot(fixture["snapshot"], state_snapshot(fixture))
+    require_no_pending_journals(root)
+    candidate = root / "releases" / receipt["version"]
+    need(not candidate.exists() and not candidate.is_symlink(), "Candidate already exists; no dependency fault was armed.")
+    control, consumed, observed_path = (directory / name for name in ("armed.json", "consumed.json", "observed.json"))
+    for item in (control, consumed, observed_path):
+        need(not item.exists() and not item.is_symlink(), "Dependency fault controls must be unused for this exact run.")
+    marker = {"sourceSha": receipt["sourceSha"], "receiptSha256": args.receipt_sha256}
+    write_private(control, marker)
+    body = {"version": receipt["version"], "track": receipt["track"], "when_idle": True,
+            "expected_server_identity": fixture["serverIdentity"],
+            "expected_server_instance_id": before["serverInstanceId"]}
+    request(fixture, "/api/admin/update/start", body)
+    deadline = time.monotonic() + 600
+    observed = None
+    while time.monotonic() < deadline:
+        if observed_path.exists():
+            observed = json.loads(read_regular(observed_path, 8192, private=True))
+        status = request(fixture, "/api/admin/update")
+        if observed is not None and status.get("phase") == "failed":
+            break
+        need(status.get("phase") != "complete", "Candidate completed without the requested staging fault.")
+        time.sleep(1)
+    else:
+        raise RuntimeError("The owned updater did not fail after the exact candidate dependency stage fault.")
+    need(all(observed.get(key) == value for key, value in marker.items())
+         and observed.get("version") == receipt["version"]
+         and observed.get("installerSha256") == config["installerSha256"]
+         and observed.get("dependencyExitCode") == 73
+         and type(observed.get("stageDevice")) is int and observed["stageDevice"] > 0
+         and type(observed.get("stageInode")) is int and observed["stageInode"] > 0,
+         "Observed dependency fault does not identify the exact signed candidate stage.")
+    stage = Path(observed.get("stage", ""))
+    contained(stage, root)
+    need(stage.parent == root / "releases"
+         and re.fullmatch(r"\.staging-" + re.escape(receipt["version"]) + r"-[1-9]\d*", stage.name),
+         "Observed stage is not the exact candidate staging path.")
+    need(not control.exists() and not control.is_symlink()
+         and json.loads(read_regular(consumed, 8192, private=True)) == marker,
+         "Dependency fault was not consumed exactly once.")
+    # Observe native cleanup; never perform it or repair transaction state.
+    need(not stage.exists() and not stage.is_symlink(), "The native installer retained its failed stage.")
+    need(not candidate.exists() and not candidate.is_symlink(), "Failed preparation activated a candidate runtime.")
+    install_lock = root / ".install-lock"
+    need(not install_lock.exists() and not install_lock.is_symlink(), "The native installer retained its install lock.")
+    require_no_pending_journals(root)
+    need(staging_native_identity(fixture, fixture["baselineVersion"]) == before,
+         "Failed preparation changed incumbent components, registration, link or root mode.")
+    compare_snapshot(fixture["snapshot"], state_snapshot(fixture))
+    # Same accepted version and incumbent identity. No install.sh invocation,
+    # state deletion, journal rewriting or forced maintenance-fence removal.
+    request(fixture, "/api/admin/update/start", body)
+    health(fixture, receipt["version"], timeout=1500)
+    wait_update_complete(fixture, receipt["version"])
+    accepted = staging_native_identity(fixture, receipt["version"])
+    need(accepted["serverInstanceId"] != before["serverInstanceId"], "Retry did not replace the incumbent runtime.")
+    preservation = compare_snapshot(fixture["snapshot"], state_snapshot(fixture),
+        baseline_version=fixture["baselineVersion"], candidate_version=receipt["version"])
+    count = verify_installed_runtime(fixture, args.bundle, receipt["version"])
+    return {"fault": "owned-one-shot-candidate-dependency-failure", "ownedDependencyFaultFixture": True,
+            "allQaDependenciesIndependent": False, "dependencyExitCode": 73,
+            "exactSignedCandidateStageObserved": True, "failedStageRemovedByInstaller": True,
+            "installLockReleasedByInstaller": True, "incumbentComponentsIdentityAndDataPreserved": True,
+            "sameAcceptedVersionRetried": True, "bothCandidateComponentsHealthy": True,
+            "nativeActivationCompleted": True, "exactRuntimeFilesCompared": count, **preservation,
+            "fenceCleanupObserved": False, "rollbackObserved": False,
+            "activationInterruptionObserved": False, "nonemptyProviderHistoryObserved": False}
+
+
 def checks_for(operation: str, kind: str, observations: dict, *, migrated: bool = False) -> list[dict]:
     """Never turn package/service observations into unobserved native passes."""
     if operation == "bootstrap" and kind == "fresh":
@@ -1168,6 +1426,8 @@ def checks_for(operation: str, kind: str, observations: dict, *, migrated: bool 
         return [{"name": "legacy-server-state-preservation", "status": "passed", "observations": observations}]
     if operation == "failure-retry":
         return [{"name": "interrupted-update-recovery", "status": "passed", "observations": observations}]
+    if operation == "staging-failure-retry":
+        return [{"name": "failed-candidate-stage-removal-and-retry", "status": "passed", "observations": observations}]
     if operation == "rollback-retry":
         return [{"name": "rollback-data-preservation", "status": "passed", "observations": observations}]
     if operation == "diagnose":
@@ -1195,6 +1455,8 @@ def bootstrap(args: argparse.Namespace, receipt: dict, home: Path) -> tuple[dict
     ensure_empty(home)
     args.work.mkdir(mode=0o700)
     env = child_environment(args.work)
+    if getattr(args, "staging_failure_fixture", False):
+        prepare_stage_fault_delegate(args, receipt, home, env)
     with socket.socket() as listener:
         listener.bind(("127.0.0.1", 0))
         port = listener.getsockname()[1]
@@ -1226,6 +1488,8 @@ def bootstrap(args: argparse.Namespace, receipt: dict, home: Path) -> tuple[dict
     fixture.update(serverIdentity=first["server_identity"], serverInstanceId=first["server_instance_id"])
     fixture["rootBindings"] = {key: [info.st_dev, info.st_ino] for key, info in
                                ((key, owned_directory(path)) for key, path in paths(home).items())}
+    if getattr(args, "staging_failure_fixture", False):
+        bind_stage_fault_delegate(args, fixture)
     registered_services(fixture)
     expected_root = Path(fixture["installRoot"]) / "releases" / baseline
     need((Path(fixture["installRoot"]) / "current").resolve() == expected_root,
@@ -1268,12 +1532,13 @@ def bootstrap(args: argparse.Namespace, receipt: dict, home: Path) -> tuple[dict
                      "persistedSessionCreatedThroughAPI": True,
                      "logoutOrRebootObserved": False, "providerChatObserved": False,
                      "nonemptyProviderHistoryObserved": False, "queuedUserMessageObserved": False,
+                     "ownedDependencyFaultFixture": bool(fixture.get("dependencyFaultFixture")),
                      **rejections}
 
 
 def parser() -> argparse.ArgumentParser:
     result = argparse.ArgumentParser(description=__doc__)
-    result.add_argument("operation", choices=("bootstrap", "snapshot", "verify", "service", "failure-retry", "rollback-retry", "diagnose"))
+    result.add_argument("operation", choices=("bootstrap", "snapshot", "verify", "service", "failure-retry", "staging-failure-retry", "rollback-retry", "diagnose"))
     for name in ("receipt", "bundle", "work", "fixture", "evidence"):
         result.add_argument(f"--{name}", type=Path, required=True)
     result.add_argument("--prepare-run", type=Path)
@@ -1281,6 +1546,8 @@ def parser() -> argparse.ArgumentParser:
     result.add_argument("--receipt-sha256", required=True)
     result.add_argument("--kind", choices=("fresh", "legacy"), default="fresh")
     result.add_argument("--legacy-root-mode", choices=("0755", "0750"), default="0755")
+    result.add_argument("--staging-failure-fixture", action="store_true",
+                        help="Install a run-owned external dependency delegate for isolated stage-removal/retry observations.")
     for name in ("baseline-archive", "baseline-manifest", "baseline-signature"):
         result.add_argument(f"--{name}", type=Path)
     result.add_argument("--fault-control", type=Path)
@@ -1354,6 +1621,9 @@ def main() -> None:
             observed_version = args.expect_version
         elif args.operation == "failure-retry":
             observations = failure_retry(args, fixture, receipt)
+            observed_version = receipt["version"]
+        elif args.operation == "staging-failure-retry":
+            observations = staging_failure_retry(args, fixture, receipt)
             observed_version = receipt["version"]
         elif args.operation == "rollback-retry":
             observations = rollback_retry(args, fixture, receipt)
