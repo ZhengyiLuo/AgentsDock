@@ -1,5 +1,21 @@
 # Public development log
 
+## 2026-09-28 — Publish and verify npm-only stable 1.0.7
+
+- Publish `@agentsdock/server@1.0.7` through npm trusted publishing with
+  provenance. Run `36394626496`, attempt 2, completes successfully; its public
+  registry readback verifies the exact accepted signed archive after publication.
+- Preserve source `e883d6fc047d2ba2749c30976750193d91aa067a`, the existing
+  server signing key, and the package accepted by native run `36394271455`.
+  No candidate rebuild or runtime substitution occurs.
+- Independently download the public 3,705,033-byte tarball and verify SHA-256
+  `aafd1af203086921b21b6396e1e57aa6ee92207ab254e28ad827ae327ce9483e` and its
+  signed SHA-512 integrity. Confirm `latest` selects `1.0.7` and `beta` remains
+  `1.0.7-beta.5`; a repeat read-only preflight correctly requires no publication.
+- This is the authorized npm-only release. No desktop/mobile release, product
+  feed, installed service or main-branch merge changes. Full coordinated-product
+  and one-click upgrade acceptance remain separate from these native npm checks.
+
 ## 2026-09-28 — Accept the npm-only native candidate; publication awaits npm authorization
 
 - Native CI run `36394271455`, attempt 1, passes on hosted Apple-silicon macOS
