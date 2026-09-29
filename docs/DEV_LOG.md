@@ -1,5 +1,22 @@
 # Public development log
 
+## 2026-09-29 — Preserve native recovery evidence and scope Linux runner defaults
+
+- Native macOS run `36613732503` passes fresh npm installation and both legacy
+  `0755`/`0750` interrupted-download and preparation-failure retries. The latter
+  now verifies the signed installer's intentional root hardening while retaining
+  incumbent health, identity, runtime and stage-cleanup assertions.
+- Linux run `36613504021` stops at the inherited-selector guard before any
+  baseline installation. Permit only the verified real hosted Linux account's
+  exact default `XDG_CONFIG_HOME` in the explicit server-only rehearsal, after
+  all runner and path guards pass. Custom roots, other selectors and macOS keep
+  their existing refusal. Rejected diagnostics expose selector names only.
+- The no-downgrade journey observes the stable service as current with no update
+  requests, but its complete close/reopen observation still fails. Shared-client
+  migration and Linux rollback also remain unaccepted. These are scoped test
+  corrections, not a release receipt or a change to signed runtime/build bytes.
+- Stable npm `1.0.8` and `latest` remain unchanged; beta.2 is not published.
+
 ## 2026-09-29 — Correct recovery assertions and expose native failure boundaries
 
 - Bind the test harness's expected `0755`/`0750` to `0700` directory hardening

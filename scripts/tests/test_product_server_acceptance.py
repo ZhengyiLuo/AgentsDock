@@ -13,6 +13,7 @@ import subprocess
 import sys
 import tarfile
 import tempfile
+from types import SimpleNamespace
 import unittest
 from unittest.mock import patch
 
@@ -120,6 +121,128 @@ class NativeServerAcceptanceUnitTests(unittest.TestCase):
                            {"GITHUB_EVENT_NAME": "pull_request"}, {"AGENTS_SERVER_STATE_DIR": "/unrelated"}):
                 with self.subTest(change=change), self.assertRaises(RuntimeError):
                     MOD.guard(receipt, work, environment={**env, **change}, uid=501, system="Linux", candidate_server_linux=True)
+
+    def linux_selector_fixture(self, root):
+        account = root / "account"
+        account.mkdir(mode=0o700)
+        receipt = {"schema": 1, "kind": "agentsdock-macos-candidate", "scope": "darwin-app-server",
+                   "publicationEligible": False, "sourceSha": "a" * 40, "sourceRef": "release/native-test"}
+        env = {**self.environment(root), "RUNNER_OS": "Linux", "GITHUB_JOB": "candidate-server-rollback-linux",
+               "GITHUB_WORKFLOW_REF": "ZhengyiLuo/AgentsDock/.github/workflows/ci.yml@refs/heads/release/native-test",
+               "XDG_CONFIG_HOME": str(account / ".config"), "UNRELATED_VALUE": "must-stay-private-and-unchanged"}
+        return receipt, env, root / "agentsdock-acceptance-linux"
+
+    def test_linux_candidate_normalizes_only_verified_account_default_after_guards(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary).resolve()
+            receipt, env, work = self.linux_selector_fixture(root)
+            before = dict(env)
+            with patch.object(MOD.pwd, "getpwuid", return_value=SimpleNamespace(pw_dir=env["HOME"])):
+                self.assertEqual(MOD.guard(receipt, work, environment=env, uid=501, system="Linux",
+                                           candidate_server_linux=True), root / "account")
+            self.assertEqual(env, {key: value for key, value in before.items() if key != "XDG_CONFIG_HOME"})
+            # Existing safe .config and an unset selector both remain valid.
+            (root / "account/.config").mkdir(mode=0o700)
+            env = dict(before)
+            with patch.object(MOD.pwd, "getpwuid", return_value=SimpleNamespace(pw_dir=env["HOME"])):
+                MOD.guard(receipt, work, environment=env, uid=501, system="Linux", candidate_server_linux=True)
+            unchanged = dict(env)
+            MOD.guard(receipt, work, environment=env, uid=501, system="Linux", candidate_server_linux=True)
+            self.assertEqual(env, unchanged)
+
+    def test_custom_selectors_expose_only_bounded_key_names_and_do_not_normalize_any_environment(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary).resolve()
+            receipt, base, work = self.linux_selector_fixture(root)
+            changes = [{"XDG_CONFIG_HOME": value} for value in (
+                "/PRIVATE-custom-config", "$HOME/.config", base["XDG_CONFIG_HOME"] + "/", "PRIVATE" * 100_000)]
+            changes += [{key: "/PRIVATE-other-selector"} for key in MOD.SELECTORS if key != "XDG_CONFIG_HOME"]
+            changes.append({key: "PRIVATE-value" for key in MOD.SELECTORS})
+            for change in changes:
+                env = {**base, **change}
+                before = dict(env)
+                with self.subTest(keys=list(change)), \
+                        patch.object(MOD.pwd, "getpwuid", return_value=SimpleNamespace(pw_dir=env["HOME"])), \
+                        self.assertRaisesRegex(RuntimeError, "Offending selector keys:") as caught:
+                    MOD.guard(receipt, work, environment=env, uid=501, system="Linux", candidate_server_linux=True)
+                self.assertEqual(env, before)
+                self.assertLess(len(str(caught.exception)), 512)
+                self.assertNotIn("PRIVATE", str(caught.exception))
+                self.assertNotIn(str(root), str(caught.exception))
+                for key in change:
+                    self.assertIn(key, str(caught.exception))
+
+    def test_default_selector_normalization_is_not_available_to_mac_or_production_scope(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary).resolve()
+            receipt, base, work = self.linux_selector_fixture(root)
+            cases = [(receipt, {**base, "RUNNER_OS": "macOS"}, "Darwin", {"candidate": True}),
+                     ({"sourceSha": "a" * 40}, {**base, "GITHUB_WORKFLOW_REF":
+                      "ZhengyiLuo/AgentsDock/.github/workflows/product-release-acceptance.yml@refs/heads/main"}, "Linux", {})]
+            for source, env, host, options in cases:
+                before = dict(env)
+                with self.subTest(host=host, options=options), \
+                        patch.object(MOD.pwd, "getpwuid", return_value=SimpleNamespace(pw_dir=env["HOME"])), \
+                        self.assertRaisesRegex(RuntimeError, "XDG_CONFIG_HOME"):
+                    MOD.guard(source, work, environment=env, uid=501, system=host, **options)
+                self.assertEqual(env, before)
+
+    def test_real_account_mismatch_and_symlinked_default_home_or_config_are_not_normalized(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary).resolve()
+            receipt, base, work = self.linux_selector_fixture(root)
+            (root / "other-account").mkdir(mode=0o700)
+            (root / "linked-home").symlink_to(root / "account", target_is_directory=True)
+            cases = [(base, root / "other-account"),
+                     ({**base, "HOME": str(root / "linked-home"), "XDG_CONFIG_HOME": str(root / "linked-home/.config")}, root / "account")]
+            for original, account in cases:
+                env, before = dict(original), dict(original)
+                with patch.object(MOD.pwd, "getpwuid", return_value=SimpleNamespace(pw_dir=str(account))), \
+                        self.assertRaisesRegex(RuntimeError, "XDG_CONFIG_HOME"):
+                    MOD.guard(receipt, work, environment=env, uid=501, system="Linux", candidate_server_linux=True)
+                self.assertEqual(env, before)
+            # A lexically default path must not alias even another owned directory.
+            config = root / "account/.config"
+            config.symlink_to(root / "other-account", target_is_directory=True)
+            env, before = dict(base), dict(base)
+            with patch.object(MOD.pwd, "getpwuid", return_value=SimpleNamespace(pw_dir=env["HOME"])), \
+                    self.assertRaisesRegex(RuntimeError, "XDG_CONFIG_HOME"):
+                MOD.guard(receipt, work, environment=env, uid=501, system="Linux", candidate_server_linux=True)
+            self.assertEqual(env, before)
+
+    def test_valid_default_is_not_removed_before_workflow_account_and_work_path_guards_pass(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary).resolve()
+            receipt, base, work = self.linux_selector_fixture(root)
+            linked = root / "agentsdock-acceptance-linked"
+            linked.symlink_to(root, target_is_directory=True)
+            cases = [(base, root, 501), (base, root / "wrong-prefix", 501), (base, linked, 501),
+                     ({**base, "RUNNER_ENVIRONMENT": "self-hosted"}, work, 501),
+                     ({**base, "GITHUB_JOB": "unrelated-job"}, work, 501),
+                     ({**base, "RUNNER_TEMP": "."}, work, 501), (base, work, 0)]
+            for original, target, uid in cases:
+                env, before = dict(original), dict(original)
+                with self.subTest(target=target, uid=uid, job=env["GITHUB_JOB"]), \
+                        patch.object(MOD.pwd, "getpwuid", return_value=SimpleNamespace(pw_dir=env["HOME"])), \
+                        patch.object(MOD, "command") as command, patch.object(MOD, "write_private") as write, \
+                        self.assertRaises(RuntimeError):
+                    MOD.guard(receipt, target, environment=env, uid=uid, system="Linux", candidate_server_linux=True)
+                self.assertEqual(env, before)
+                command.assert_not_called()
+                write.assert_not_called()
+
+    def test_default_selector_real_environment_refuses_redirected_home_without_mutation(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary).resolve()
+            receipt, env, work = self.linux_selector_fixture(root)
+            with patch.dict(MOD.os.environ, env, clear=True), \
+                    patch.object(MOD.pwd, "getpwuid", return_value=SimpleNamespace(pw_dir=str(root / "other-account"))), \
+                    patch.object(MOD, "command") as command:
+                before = dict(MOD.os.environ)
+                with self.assertRaisesRegex(RuntimeError, "Do not redirect HOME"):
+                    MOD.guard(receipt, work, uid=501, system="Linux", candidate_server_linux=True)
+                self.assertEqual(dict(MOD.os.environ), before)
+            command.assert_not_called()
 
     def test_linux_server_checkout_proof_must_explicitly_exclude_desktop_acceptance(self):
         args = argparse.Namespace(receipt=Path("/fixture/candidate.json"), receipt_sha256="c" * 64,

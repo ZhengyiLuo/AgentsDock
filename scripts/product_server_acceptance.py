@@ -313,17 +313,39 @@ def guard(receipt: dict, work: Path, *, environment: dict | None = None,
          and re.fullmatch(r"[1-9]\d*", env.get("GITHUB_RUN_ATTEMPT", "")) is not None,
          "Native acceptance is restricted to the exact-source canonical workflow on a disposable hosted runner.")
     need(user != 0 and host in {"Linux", "Darwin"}, "A non-root native Linux/macOS runner is required.")
-    need(all(not env.get(key) for key in SELECTORS), "Custom or inherited server roots are not allowed.")
     home = Path(env.get("HOME", ""))
     need(home.is_absolute(), "The actual runner account home is required.")
     if environment is None:
         need(home.resolve() == Path(pwd.getpwuid(user).pw_dir).resolve(),
              "Do not redirect HOME: acceptance requires the disposable account's real service session.")
         owned_directory(home)
+    # Hosted Ubuntu exports this account-default selector. Match the existing
+    # npm-native guard, but only for the explicit Linux server-only rehearsal.
+    # A custom/literal/symlinked root, another account or macOS remains refused.
+    xdg = env.get("XDG_CONFIG_HOME")
+    default_xdg = False
+    if candidate_server_linux and host == "Linux" and xdg and xdg == str(home / ".config"):
+        try:
+            if home.resolve() == Path(pwd.getpwuid(user).pw_dir).resolve():
+                owned_directory(home)
+                contained(home / ".config", home)
+                if (home / ".config").exists():
+                    owned_directory(home / ".config")
+                default_xdg = True
+        except (OSError, RuntimeError, KeyError, ValueError):
+            pass
+    offending = [key for key in SELECTORS if env.get(key)
+                 and not (key == "XDG_CONFIG_HOME" and default_xdg)]
+    need(not offending, "Custom or inherited server roots are not allowed. Offending selector keys: "
+         + ", ".join(offending))
     temporary = Path(env.get("RUNNER_TEMP", ""))
     need(temporary.is_absolute(), "RUNNER_TEMP must identify the disposable runner.")
     contained(work, temporary)
     need(work.name.startswith("agentsdock-acceptance-"), "Use a dedicated agentsdock-acceptance-* directory.")
+    # Only normalize this process's one verified default after every host/path
+    # guard passes. Never rewrite HOME, unset other selectors or change settings.
+    if default_xdg:
+        env.pop("XDG_CONFIG_HOME")
     return home
 
 
