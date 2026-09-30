@@ -1,5 +1,54 @@
 # Public development log
 
+## 2026-09-29 — Verify the private beta.3 Mac candidate, build 1240
+
+- Freeze runtime/build source at `09e573cc10330bbe60ffef544ba67ac9a71e69e4`
+  on `release/1.0.8-beta.3`. The complete
+  [source checks](https://github.com/ZhengyiLuo/AgentsDock/actions/runs/36670957749)
+  and all eight [server shards](https://github.com/ZhengyiLuo/AgentsDock/actions/runs/36670958113)
+  pass. Documentation receipts after this pin do not change packaged source.
+- Reuse the existing server signer in
+  [run 36670998585](https://github.com/ZhengyiLuo/AgentsServer/actions/runs/36670998585).
+  Its exact export is `7d7a26b547dcfa87302f3ba651ee5a3d1ae945d4`.
+  Independently verify the original Actions archive, both signatures, immutable
+  URLs, and all 118 runtime files/modes against source. The npm descriptor hash
+  is `2e0e024480322c0d798f06d2b2ff1fc398604f326e43078a9d2876aad75d6b7b`.
+- Stage only the unpublished `npm-candidate-v1.0.8-beta.3` draft. Disposable
+  macOS and Linux [native checks](https://github.com/ZhengyiLuo/AgentsDock/actions/runs/36671245609)
+  pass exact fresh installation, authenticated health, existing-install refusal,
+  service restart, identity/token retention and cache independence. They exclude
+  provider chat, reboot/logout, managed upgrades and legacy migration.
+- Build universal macOS beta.3/build 1240 locally using the existing Developer
+  ID and notarization credentials. Typecheck, all 5,080 tests (six skipped),
+  compilation, app/outer-DMG notarization, stapling, Gatekeeper, universal
+  Mach-O checks, fuses, exact coordinated resources, ZIP/DMG payload parity and
+  isolated normal startup/termination pass. ZIP SHA-256:
+  `b9f4cd09f3f8279df9b1b8d1a4622fe7ed42c5e5bb7db6fe407d35021e947f95`;
+  DMG SHA-256:
+  `4717eca136da59779907115227ab44e3ba43a5b42564b941feec662d3050aade`.
+- Repeat the blocked-goal and subagent/fork fixtures against the exact packaged
+  renderer/preload with production source-main modules. Late reports, reopening,
+  stale-report rejection, provisional retirement and scoped Stop pass. Native
+  Codex uses synthetic local inference, not real hosted-provider authentication.
+  The packaged ASAR remains unchanged; owned processes and synthetic credentials
+  are cleaned up. This is not production-updater acceptance.
+- Direct preparation [run 36671146624](https://github.com/ZhengyiLuo/AgentsDock/actions/runs/36671146624)
+  reserves run 23/build 1240. Attempt 1 verifies Linux x64/ARM64 packages but
+  Windows stops before packaging at a five-second timeout in the unchanged
+  attachment-cache test. Preserve that failed attempt and the independently
+  verified Linux artifacts. One unchanged failed-jobs-only retry is pending;
+  Windows is not accepted by this receipt.
+- Seal the non-publishing Mac/server candidate and verify its strict transport
+  extraction roundtrip. Receipt SHA-256:
+  `de1d488c3bcacf183b7a3688f310f3e3a1f841d2585bf8b54d0420bf2c249b7e`;
+  transport SHA-256:
+  `680029725e593dc6e4a0b068bfbb2e1360c33524666ca8d6d88fe3ae3f47ecd6`.
+  Exact beta.3 one-click upgrade/legacy migration replay remains pending, as do
+  genuine authenticated provider-history and active/queued-work acceptance.
+- Nothing is installed on a working account and no saved server is restarted.
+  No beta.3 npm, legacy bridge or desktop release is public. npm `beta` remains
+  `1.0.8-beta.2`, `latest` remains `1.0.8`, and beta.2 desktop drafts are unchanged.
+
 ## 2026-09-29 — Prepare beta.3 blocked-goal details and Codex child ownership
 
 - Integrate the blocked-goal report feature from `b0b6fb3` and unfinished-spawn

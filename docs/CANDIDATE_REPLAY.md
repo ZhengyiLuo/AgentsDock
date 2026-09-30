@@ -9,6 +9,15 @@ turn blocked or unobserved scenarios into full release acceptance.
 
 ## Current delivery status
 
+The newest **prepared** candidate is `1.0.8-beta.3`, build 1240, from source
+`09e573cc10330bbe60ffef544ba67ac9a71e69e4`. Its universal Mac app is signed,
+notarized and checked; its matched npm/legacy archives retain the existing
+server trust key. Exact fresh npm installation passes on macOS and Linux.
+The local sealed Mac/server transport is ready, but beta.3's one-click upgrade
+and legacy migration replay have not run. The only staged beta.3 GitHub draft
+is the npm candidate; there is no public beta.3 package or desktop feed entry.
+Do not use the floating npm `beta` tag expecting this private candidate.
+
 The exact `1.0.8-beta.2` npm server and signed legacy bridge are now public.
 npm `beta` selects `1.0.8-beta.2`; `latest` remains stable `1.0.8`. Their exact
 registry/download bytes and signatures are verified in the publication receipt
