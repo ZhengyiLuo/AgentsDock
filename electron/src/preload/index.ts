@@ -258,6 +258,7 @@ const api: AgentsDockAPI = {
     ),
     permissionProfiles: sessionId => ipcRenderer.invoke('codex:permission-profiles', sessionId),
     goal: sessionId => ipcRenderer.invoke('codex:goal:get', sessionId),
+    blockedGoalReport: sessionId => ipcRenderer.invoke('codex:goal:blocked-report', sessionId),
     setGoal: (sessionId, input) => ipcRenderer.invoke('codex:goal:set', sessionId, input),
     clearGoal: sessionId => ipcRenderer.invoke('codex:goal:clear', sessionId),
     compact: sessionId => ipcRenderer.invoke('codex:compact', sessionId),

@@ -1030,6 +1030,8 @@ export interface Event extends SharedChatAttribution {
   provider_message_id?: string | null
   /** True only for transcript records recovered by AgentsServer history import. */
   imported?: boolean | null
+  /** Copied source-chat history; does not transfer ownership of running work. */
+  forked?: boolean | null
   /** Provider control metadata; meaningful only with the exact provider import contract. */
   metadata_only?: boolean | null
   /** Server-verified Codex runtime context recovered from imported history. */
@@ -1146,6 +1148,8 @@ export interface Event extends SharedChatAttribution {
   subagent_activity?: string | null
   subagent_summary?: string | null
   subagent_started_at?: string | null
+  subagent_root_thread_id?: string | null
+  subagent_parent_thread_id?: string | null
   subagent_provider_ref?: string | null
   subagent_log?: Array<{ ts: string; text: string }> | null
   file?: AgentFile | null

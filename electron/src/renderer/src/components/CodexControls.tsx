@@ -44,6 +44,7 @@ import {
   type CodexBackgroundTerminal,
   useCodexRuntime
 } from './CodexRuntimeContext'
+import { blockedGoalReport } from '@shared/blocked-goal'
 import { useTransientClose } from '../lib/transient-close'
 import { CodexInteractionCard } from './CodexInteractionShelf'
 import { GoalConditionField, GoalDialogContent, GoalProgress, GoalSummaryBar } from './GoalDialog'
@@ -315,6 +316,7 @@ export function CodexGoalBar() {
         </button>}
         {goalsEnabled && <button type="button" className="quiet-button" disabled={mutating} onClick={clear}>{t('ui.CodexControls.CodexGoalBar.clear_goal_0d7c342')}</button>}
       </>} />
+    <CodexBlockedGoalDetails />
     {displayedError && <p className="goal-feedback error" role="alert">{displayedError}</p>}
     <CodexControlsDialog focusGoal={focusGoal} onOpenGoal={() => setFocusGoal(true)} />
   </Dialog.Root>
@@ -606,6 +608,7 @@ function GoalSettings({ onNotice, notice }: { onNotice(value: string): void; not
       {goal && <GoalProgress label={t('codexGoal.current')} status={goalStatusLabel(goal.status)} condition={goal.objective}
         metrics={[{ label: t('ui.CodexControls.CodexGoalBar.tokens_a039dfb'), value: formatGoalBudget(goal.tokensUsed, goal.tokenBudget) },
           { label: t('ui.CodexControls.CodexGoalBar.time_33b9347'), value: formatGoalBudget(goal.timeUsedSeconds, runtime?.time_budget_seconds, true) }]} />}
+      <CodexBlockedGoalDetails />
       <GoalConditionField label={t('codexGoal.condition')} placeholder={t('ui.CodexControls.GoalSettings.what_should_codex_keep_working_toward_da42c7b')}
         value={objective} disabled={blocked} onChange={value => { markDraftDirty(); setObjective(value) }} />
       <div className="codex-control-fields three-column">
@@ -1011,3 +1014,54 @@ function formatContextIndicatorPercent(percent: number | null): string {
 }
 
 const EMPTY_EVENTS = [] as const
+
+function CodexBlockedGoalDetails() {
+  useLocale()
+  const { runtime, session } = useCodexRuntime()
+  const goal = runtime ? runtime.goal : session?.codex_goal
+  const events = useAppStore(state => session ? state.snapshots[session.id]?.events ?? EMPTY_EVENTS : EMPTY_EVENTS)
+  const profileId = useAppStore(state => state.activeProfileId)
+  const generation = useAppStore(state => state.profileGeneration)
+  const scope = `${profileId}:${generation}:${session?.id}:${goal?.threadId}:${goal?.createdAt}:${goal?.updatedAt}:${goal?.status}`
+  const scopeRef = useRef(scope)
+  scopeRef.current = scope
+  const detailsScope = `${profileId}:${generation}:${session?.id}:${goal?.createdAt}:${goal?.status}`
+  const [expandedScope, setExpandedScope] = useState<string | null>(null)
+  const opened = expandedScope === detailsScope
+  useEffect(() => { setExpandedScope(null) }, [detailsScope])
+  const [loaded, setLoaded] = useState<{ scope: string; report: string | null; error?: string } | null>(null)
+  const [loading, setLoading] = useState(false)
+  const localReport = useMemo(() => blockedGoalReport(goal, events, session?.id ?? ''), [goal, events, session?.id])
+  const reportRevision = useMemo(() => {
+    for (let index = events.length - 1; index >= 0; index--) {
+      const event = events[index]
+      if (event.session_id === session?.id && !event.imported && !event.forked && !event.metadata_only
+        && (event.type === 'turn_finished' || event.type === 'assistant_text' && event.phase === 'final_answer')) return event.id
+    }
+    return null
+  }, [events, session?.id])
+  useEffect(() => {
+    if (!opened || goal?.status !== 'blocked' || !session || localReport || !window.agentsDock.codex.blockedGoalReport) return
+    let cancelled = false
+    setLoading(true)
+    void window.agentsDock.codex.blockedGoalReport(session.id).then(result => {
+      if (cancelled || scopeRef.current !== scope) return
+      const current = result.goal
+      const matches = current?.status === 'blocked' && current.threadId === goal.threadId
+        && current.createdAt === goal.createdAt && current.objective === goal.objective && current.updatedAt === goal.updatedAt
+      setLoaded({ scope, report: matches ? result.report : null })
+    }).catch(error => {
+      if (!cancelled && scopeRef.current === scope) setLoaded({ scope, report: null, error: controlErrorMessage(error) })
+    }).finally(() => { if (!cancelled) setLoading(false) })
+    return () => { cancelled = true }
+  }, [opened, scope, localReport, reportRevision])
+  if (goal?.status !== 'blocked') return null
+  const report = localReport || (loaded?.scope === scope ? loaded.report : null)
+  const loadError = loaded?.scope === scope ? loaded.error : null
+  return <details className="goal-blocked-details" key={detailsScope} open={opened}
+    onToggle={event => setExpandedScope(event.currentTarget.open ? detailsScope : null)}>
+    <summary>{t('codexGoal.whyBlocked')}</summary>
+    {report ? <><strong>{t('codexGoal.blockedReport')}</strong><p>{report}</p></>
+      : <p role="status">{loading ? t('codexGoal.loadingReport') : loadError || t('codexGoal.blockedReasonUnavailable')}</p>}
+  </details>
+}

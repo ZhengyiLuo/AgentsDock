@@ -8,7 +8,7 @@ on:
         required: true
         type: string
       build_number:
-        description: "Exact native reservation: runs 1-20 use 1185 + run; runs 21+ use 1232 + (run - 20)"
+        description: "Exact native reservation: runs 1-20 use 1185 + run; 21-22 use 1232 + (run - 20); 23+ use 1239 + (run - 22)"
         required: true
         type: string
       source_sha:

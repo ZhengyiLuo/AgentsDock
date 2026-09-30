@@ -1,5 +1,45 @@
 # Public development log
 
+## 2026-09-29 — Prepare beta.3 blocked-goal details and Codex child ownership
+
+- Integrate the blocked-goal report feature from `b0b6fb3` and unfinished-spawn
+  retirement from `bd05ce3`, with only the necessary earlier Electron ownership
+  and provisional-spawn matching changes. Do not merge the broader development
+  branch or its unrelated server changes.
+- A blocked goal offers an explicit details control in the goal bar/dialog.
+  Read existing authenticated history only on expansion and show the owning
+  blocked turn's final report, not an unrelated later reply. Retain profile,
+  session and goal-episode ownership checks, late arrival, reopening and an
+  explicit unavailable state. English and Chinese strings are included.
+- An unfinished native spawn becomes `tracking_lost` when its parent finishes
+  or stops; identified children remain independently active. Idle-parent Stop
+  controls use known current-thread ownership and exclude copied fork history.
+  Missing ancestry on older bounded snapshots is not treated as ownership.
+  Archived-child server reconciliation is unchanged and is not claimed fixed.
+- The isolated beta.2 baseline reproduces missing blocked-goal details and an
+  unfinished child remaining active in the Inspector. It does not reproduce the
+  separate false-Stop symptom on that older desktop, which lacks the new
+  idle-parent child Stop control. Keep those observations distinct.
+- Prepare version `1.0.8-beta.3`; preserve all frozen beta.2 artifacts and public
+  server feeds. The server runtime is unchanged except for its matching version
+  stamp. Append a native build epoch above local diagnostic build 1239, preserving
+  public runs 1–22; the next public preparation run 23 reserves build 1240.
+- Focused desktop regressions (124), release-tooling tests (293), and Python
+  preparation/export/packaging checks (31) pass. Typecheck and production
+  compilation pass. The first full suite hits an unchanged JobDialog timeout
+  and SecurePeerPanel passive-effect assertion race; one unchanged rerun passes
+  all 5,080 tests (six skipped), plus eight compile/license checks. Preserve the
+  failed first attempt rather than calling it accepted.
+- Isolated native Codex fixtures pass late report arrival, explanation reopening,
+  rejection of a prior blocked episode's report, unfinished-spawn retirement,
+  renderer reload, genuine fork Stop isolation, and an idle original parent's
+  child Stop. They use production source-main modules and compiled renderer/
+  preload over authenticated server HTTP, with native Codex and synthetic local
+  inference. They do not establish hosted-provider login, normal packaged-main
+  startup or update acceptance. Owned fixture state/processes are cleaned up.
+- Exact signed-package checks remain a preparation gate. No beta.3 publication,
+  installation or working-server restart is performed by these source changes.
+
 ## 2026-09-29 — Publish the exact beta.2 npm server and signed legacy bridge
 
 - Publish `@agentsdock/server@1.0.8-beta.2` through the existing npm trusted

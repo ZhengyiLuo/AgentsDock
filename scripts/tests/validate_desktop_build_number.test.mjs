@@ -21,13 +21,26 @@ test('the new epoch starts above audited local packages without reusing a native
   assert.equal(validateDesktopBuildNumber('1233', '21'), '1233')
   assert.equal(validateDesktopBuildNumber('1233', '21'), '1233', 'a rerun retains its new-epoch reservation')
   assert.equal(validateDesktopBuildNumber('1234', '22'), '1234')
-  assert.equal(validateDesktopBuildNumber('1391', '179'), '1391')
-  assert.equal(validateDesktopBuildNumber('1392', '180'), '1392')
   for (let build = 1205; build <= 1232; build++) assert.throws(() => validateDesktopBuildNumber(String(build), '21'), /exactly 1233/)
   assert.throws(() => validateDesktopBuildNumber('1234', '21'), /exactly 1233/)
   assert.throws(() => validateDesktopBuildNumber('1233', '22'), /exactly 1234/)
-  for (let run = 21; run <= 120; run++) {
+  for (let run = 21; run <= 22; run++) {
     const build = String(1232 + run - 20)
+    assert.equal(validateDesktopBuildNumber(build, String(run)), build)
+    assert.throws(() => validateDesktopBuildNumber(build, String(run + 1)), /exactly/)
+  }
+})
+
+test('the next epoch clears local diagnostic build 1239 without remapping runs 21 and 22', () => {
+  assert.equal(validateDesktopBuildNumber('1233', '21'), '1233')
+  assert.equal(validateDesktopBuildNumber('1234', '22'), '1234')
+  assert.equal(validateDesktopBuildNumber('1240', '23'), '1240')
+  assert.equal(validateDesktopBuildNumber('1240', '23'), '1240', 'reruns retain their reservation')
+  assert.equal(validateDesktopBuildNumber('1396', '179'), '1396')
+  assert.equal(validateDesktopBuildNumber('1397', '180'), '1397')
+  for (let build = 1233; build <= 1239; build++) assert.throws(() => validateDesktopBuildNumber(String(build), '23'), /exactly 1240/)
+  for (let run = 23; run <= 120; run++) {
+    const build = String(1239 + run - 22)
     assert.equal(validateDesktopBuildNumber(build, String(run)), build)
     assert.throws(() => validateDesktopBuildNumber(build, String(run + 1)), /exactly/)
   }
@@ -36,7 +49,7 @@ test('the new epoch starts above audited local packages without reusing a native
 test('refuses omitted, ambiguous, unsafe or overflowing build reservations', () => {
   for (const build of ['', '001186', '-1', '0', '1.5', '1186\n', '1e4', '9007199254740992']) assert.throws(() => validateDesktopBuildNumber(build, '1'))
   for (const run of ['', '0', '-1', '1.5', '9007199254740991']) assert.throws(() => validateDesktopBuildNumber('1186', run))
-  const lastSafeRun = Number.MAX_SAFE_INTEGER - (1232 - 20)
+  const lastSafeRun = Number.MAX_SAFE_INTEGER - (1239 - 22)
   assert.equal(validateDesktopBuildNumber(String(Number.MAX_SAFE_INTEGER), String(lastSafeRun)), String(Number.MAX_SAFE_INTEGER))
   assert.throws(() => validateDesktopBuildNumber(String(Number.MAX_SAFE_INTEGER), String(lastSafeRun + 1)), /supported range/)
 })
@@ -53,7 +66,10 @@ test('the workflow CLI emits only an exact reservation and rejects reuse on the 
   const cutover = spawnSync(process.execPath, [script, '1233', '21'], { encoding: 'utf8' })
   assert.equal(cutover.status, 0, cutover.stderr)
   assert.equal(cutover.stdout, 'build_number=1233\n')
-  for (const [build, run, expected] of [['1206', '21', '1233'], ['1232', '21', '1233'], ['1233', '22', '1234']]) {
+  const secondCutover = spawnSync(process.execPath, [script, '1240', '23'], { encoding: 'utf8' })
+  assert.equal(secondCutover.status, 0, secondCutover.stderr)
+  assert.equal(secondCutover.stdout, 'build_number=1240\n')
+  for (const [build, run, expected] of [['1206', '21', '1233'], ['1232', '21', '1233'], ['1233', '22', '1234'], ['1235', '23', '1240'], ['1239', '23', '1240'], ['1240', '24', '1241']]) {
     const invalid = spawnSync(process.execPath, [script, build, run], { encoding: 'utf8' })
     assert.equal(invalid.status, 1)
     assert.equal(invalid.stdout, '')

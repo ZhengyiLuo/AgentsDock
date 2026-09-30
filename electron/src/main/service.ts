@@ -1,3 +1,4 @@
+import { blockedGoalReport } from '../shared/blocked-goal'
 import type { ProviderUsageScope, ProviderUsageSnapshot, UsageBackend } from '../shared/provider-usage'
 import { customModelBackend, customModelInput, type CustomModelBackend, type CustomModelInput } from '../shared/custom-models'
 import { cliAccountBackend, type CLIAccountBackend, connectionRequest, type ConnectionBackend, type ConnectionAction, type ProviderConnectionRequest, type ProviderConnectionReply } from '../shared/provider-connections'
@@ -3738,6 +3739,16 @@ export class AppService {
 
   async codexPermissionProfiles(sessionId: string): Promise<CodexPermissionProfile[]> {
     return this.codexRequest(scope => scope.client.codexPermissionProfiles(sessionId))
+  }
+
+  async codexBlockedGoalReport(sessionId: string): Promise<{ goal: CodexGoalSnapshot['goal']; report: string | null }> {
+    return this.codexRequest(async scope => {
+      // Read control records only on explicit expansion, without changing the
+      // semantic timeline, its cache, or the native provider's goal state.
+      const page = await scope.client.sessionPage(sessionId, { limit: 500, tail: true, visible: false, compact: false })
+      const goal = page.session.codex_goal ?? null
+      return { goal, report: blockedGoalReport(goal, page.events, sessionId) }
+    })
   }
 
   async codexGoal(sessionId: string): Promise<CodexGoalSnapshot> {

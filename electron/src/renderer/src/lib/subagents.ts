@@ -25,6 +25,8 @@ export interface SubagentActivity {
   updatedAt: string
   latestActivity?: string
   summary?: string
+  rootThreadId?: string
+  parentThreadId?: string
   providerRef?: string
   log: SubagentLogEntry[]
 }
@@ -42,6 +44,40 @@ const CODEX_COORDINATION_OPERATIONS = new Set([
   'closeagent'
 ])
 const LOG_LIMIT = 80
+
+const liveCodexChildren = new WeakMap<Event[], Map<string, boolean>>()
+
+/** Historical children from another thread or a fork source must not keep Stop alive. */
+export function hasLiveCodexSubagents(events: Event[] | undefined, rootThreadId?: string | null): boolean {
+  if (!events?.length) return false
+  const root = rootThreadId || ''
+  const cached = liveCodexChildren.get(events)
+  if (cached?.has(root)) return cached.get(root)!
+  // Forks copy history, not ownership of the source's running agents.
+  const agents = subagentsFromEvents(events.filter(event => event.forked !== true), 'codex')
+  const descendants = new Set([root])
+  if (root) {
+    let changed = true
+    while (changed) {
+      changed = false
+      for (const agent of agents) {
+        if (agent.parentThreadId && descendants.has(agent.parentThreadId) && !descendants.has(agent.id)) {
+          descendants.add(agent.id)
+          changed = true
+        }
+      }
+    }
+  }
+  const live = agents.some(agent => agent.backend === 'codex' && isSubagentActive(agent)
+    && (!root || (agent.rootThreadId ? agent.rootThreadId === root
+      : descendants.has(agent.id) || !agent.parentThreadId && !agent.key.startsWith('codex:subagent:'))))
+  // Older servers can omit root metadata. Use their proven parent chain, not
+  // an assumed owner when the bounded history omits an identified ancestor.
+  const values = cached ?? new Map<string, boolean>()
+  values.set(root, live)
+  liveCodexChildren.set(events, values)
+  return live
+}
 
 export function subagentsFromEvents(events: Event[], ownerBackend?: 'claude' | 'codex'): SubagentActivity[] {
   const agents = new Map<string, SubagentActivity>()
@@ -131,6 +167,15 @@ export function subagentsFromEvents(events: Event[], ownerBackend?: 'claude' | '
         taskKeys.get(taskAlias(backend, childId, runId))
         || (projectedToolId ? toolKeys.get(toolAlias(backend, runId, projectedToolId)) : undefined)
       )
+      // A reconciled state may carry a later server run for the same native
+      // spawn. Join only one exact provisional call, never an identified child.
+      const nativeSpawnMatches = backend === 'codex' && projectedToolId
+        ? [...agents.values()].filter(candidate => candidate.backend === 'codex'
+          && candidate.id === projectedToolId && !authoritativeKeys.has(candidate.key))
+        : []
+      const aliased = existingKey ? agents.get(existingKey)
+        : nativeSpawnMatches.length === 1 ? nativeSpawnMatches[0] : undefined
+      const provisional = aliased && !authoritativeKeys.has(aliased.key) ? aliased : undefined
       const fallback = [...agents.values()]
         .filter(candidate => (
           candidate.backend === backend
@@ -141,7 +186,7 @@ export function subagentsFromEvents(events: Event[], ownerBackend?: 'claude' | '
           && (agentStartSeqs.get(candidate.key) ?? Number.MAX_SAFE_INTEGER) <= event.seq
         ))
         .sort((a, b) => (agentStartSeqs.get(b.key) ?? 0) - (agentStartSeqs.get(a.key) ?? 0))[0]
-      const existing = agents.get(key) || (existingKey ? agents.get(existingKey) : undefined) || fallback
+      const existing = agents.get(key) || provisional || fallback
       // A retired Claude execution cannot become live again from a delayed
       // snapshot. A new owner has its own key, even if a task ID is reused.
       if (backend === 'claude' && existing && !ACTIVE_STATUSES.has(existing.status)
@@ -166,6 +211,8 @@ export function subagentsFromEvents(events: Event[], ownerBackend?: 'claude' | '
       agent.startedAt = event.subagent_started_at || agent.startedAt
       agent.updatedAt = event.ts
       agent.summary = event.subagent_summary || agent.summary
+      agent.rootThreadId = typeof event.subagent_root_thread_id === 'string' ? event.subagent_root_thread_id : agent.rootThreadId
+      agent.parentThreadId = typeof event.subagent_parent_thread_id === 'string' ? event.subagent_parent_thread_id : agent.parentThreadId
       agent.providerRef = event.subagent_provider_ref || agent.providerRef
       if (event.subagent_log?.length) agent.log = event.subagent_log.slice(-LOG_LIMIT)
       authoritativeKeys.add(key)
@@ -294,6 +341,15 @@ export function subagentsFromEvents(events: Event[], ownerBackend?: 'claude' | '
 
     if (event.type === 'turn_finished' || event.type === 'turn_stopped' || event.type === 'error') {
       for (const agent of agents.values()) {
+        // A spawn request alone is not proof that a child was created. Missing
+        // completion records must not keep an idle chat's Stop control alive.
+        // Identified children and successful spawns may outlive their parent.
+        if (agent.backend === 'codex' && agent.status === 'starting'
+          && !authoritativeKeys.has(agent.key) && runId && agent.runId === runId
+          && (event.type === 'turn_finished' || event.type === 'turn_stopped')) {
+          agent.status = 'tracking_lost'
+          note(agent, event.ts, timelineStatusLabel('tracking_lost'))
+        }
         if (
           agent.backend !== 'claude'
           || authoritativeKeys.has(agent.key)

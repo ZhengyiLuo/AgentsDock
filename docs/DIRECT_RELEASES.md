@@ -97,13 +97,20 @@ private workflow. Reserve its native build number explicitly using
 | Public preparation run | Exact native build reservation |
 | --- | --- |
 | 1–20 | `1185 + run_number` (1186–1205; retained for historical reruns) |
-| 21 onward | `1232 + (run_number - 20)` (1233, 1234, …) |
+| 21–22 | `1232 + (run_number - 20)` (1233–1234; retained for reruns) |
+| 23 onward | `1239 + (run_number - 22)` (1240, 1241, …) |
 
 The September 29 cutover found the public counter at run 20 and local native
 package metadata through `1.0.7-beta.24`, build 1232. Those local build numbers
 are consumed even though they are not public desktop releases. The old next-run
 formula would incorrectly allocate 1206. Do not reuse any accepted, packaged,
 or reserved build; never flatten several runs to one build with `max()`.
+
+A subsequent audit found public preparation still at run 22 while local
+diagnostic `1.0.7-beta.30` had consumed build 1239. The appended run-23 epoch
+starts at 1240, retaining all previously allocated public run/build pairs.
+Local diagnostics are not public release receipts and do not authorize reusing
+their native build numbers for a different package.
 
 Before dispatch, recheck current public runs, published/draft release identities
 and the release owner's local reservations. The recorded high-water mark cannot

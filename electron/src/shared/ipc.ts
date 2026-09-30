@@ -449,6 +449,7 @@ export interface AgentsDockAPI {
     ): Promise<CodexPendingInteraction>
     permissionProfiles(sessionId: string): Promise<CodexPermissionProfile[]>
     goal(sessionId: string): Promise<CodexGoalSnapshot>
+    blockedGoalReport?(sessionId: string): Promise<{ goal: CodexGoalSnapshot['goal']; report: string | null }>
     setGoal(sessionId: string, input: CodexGoalInput): Promise<CodexGoalSnapshot>
     clearGoal(sessionId: string): Promise<CodexGoalSnapshot>
     compact(sessionId: string): Promise<CodexOperationAccepted>

@@ -304,6 +304,7 @@ export function registerIpc(
   ))
   handle('codex:permission-profiles', sessionId => service.codexPermissionProfiles(sessionId))
   handle('codex:goal:get', sessionId => service.codexGoal(sessionId))
+  handle('codex:goal:blocked-report', sessionId => service.codexBlockedGoalReport(sessionId))
   handle('codex:goal:set', (sessionId, input) => service.setCodexGoal(sessionId, input))
   handle('codex:goal:clear', sessionId => service.clearCodexGoal(sessionId))
   handle('codex:compact', sessionId => service.compactCodexThread(sessionId))

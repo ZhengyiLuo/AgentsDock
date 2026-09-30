@@ -10,6 +10,8 @@ import { pathToFileURL } from 'node:url'
 const BUILD_EPOCHS = [
   { afterRun: 0, highestBuild: 1185 },
   { afterRun: 20, highestBuild: 1232 },
+  // Public runs 21/22 are retained; local diagnostic beta.30 consumed 1239.
+  { afterRun: 22, highestBuild: 1239 },
 ]
 export function validateDesktopBuildNumber(requested, runNumber) {
   if (!/^[1-9]\d*$/.test(String(requested)) || !/^[1-9]\d*$/.test(String(runNumber))) throw new Error('An explicit positive native build number and workflow run number are required.')

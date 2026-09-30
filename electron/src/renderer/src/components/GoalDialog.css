@@ -80,3 +80,10 @@
   .goal-summary-meta { margin-left: 21px; }
   .goal-summary-actions { margin-left: auto; }
 }
+
+.goal-blocked-details { width: calc(100% - 34px); max-width: 1120px; box-sizing: border-box; margin: 0 auto var(--space-3); color: var(--muted); font-size: var(--text-size-meta); }
+.goal-blocked-details summary { cursor: pointer; color: var(--text); padding: var(--space-2); }
+.goal-blocked-details summary:focus-visible { outline: 2px solid var(--accent); border-radius: var(--radius-control); }
+.goal-blocked-details strong { display: block; margin-top: var(--space-3); }
+.goal-blocked-details p { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 12rem; overflow-y: auto; margin: var(--space-3) 0; }
+.goal-dialog .goal-blocked-details { width: 100%; margin: 0; }

@@ -3170,5 +3170,9 @@
   "claudeControls.nativeStatus": "Live state from Claude",
   "claudeControls.loaded": "Loaded",
   "claudeControls.notLoaded": "Not loaded",
-  "claudeControls.disconnected": "Connect to the server to use Claude controls."
+  "claudeControls.disconnected": "Connect to the server to use Claude controls.",
+  "codexGoal.whyBlocked": "Why is this goal blocked?",
+  "codexGoal.blockedReport": "Agent report from the blocked turn",
+  "codexGoal.blockedReasonUnavailable": "Codex does not provide a separate blocked reason, and no response from the blocked turn is available here. Check the conversation for the agent’s explanation before resuming.",
+  "codexGoal.loadingReport": "Loading the blocked turn’s report…"
 }

@@ -25,6 +25,7 @@ import { awaitAllCursorPermissionUpdates, awaitCursorPermissionUpdates } from '.
 import { nativeFileRefsFromFiles } from '../lib/native-files'
 import { profileSessionKey } from '../lib/profile-scope'
 import { orderedActiveSessions, rankSessionsForSearch } from '../lib/sessions'
+import { hasLiveCodexSubagents } from '../lib/subagents'
 import {
   assertTeamNetworkExpectedIdentity,
   loadTeamNetworkServers as loadCachedTeamNetworkServers,
@@ -507,6 +508,11 @@ export const Composer = memo(function Composer({ dropActive = false, sessionId, 
   const uploads = useAppStore(state => selectedId ? state.uploadsBySession[selectedId] ?? EMPTY_UPLOADS : EMPTY_UPLOADS)
   const uploadPaths = useAppStore(state => selectedId ? state.uploadPathsBySession[selectedId] ?? EMPTY_UPLOAD_PATHS : EMPTY_UPLOAD_PATHS)
   const running = useAppStore(state => selectedId ? state.activeSessionIds.has(selectedId) : false)
+  const liveCodexChildren = useAppStore(state => Boolean(selectedId
+    && state.sessions.find(candidate => candidate.id === selectedId)?.backend === 'codex'
+    && hasLiveCodexSubagents(state.snapshots[selectedId]?.events,
+      state.snapshots[selectedId]?.session.codex_thread_id || state.sessions.find(candidate => candidate.id === selectedId)?.codex_thread_id)))
+  const canStop = running || liveCodexChildren
   const admitting = useAppStore(state => selectedId ? Boolean(state.turnAdmissionTokens[selectedId]) : false)
   const pendingSubmission = useAppStore(state => selectedId ? state.pendingTurnSubmissions[selectedId] : undefined)
   const pendingSubmissionMode = pendingSubmission?.mode
@@ -2241,7 +2247,7 @@ export const Composer = memo(function Composer({ dropActive = false, sessionId, 
                   ? t('timeline.status.running')
                 : t("ui.Composer.Composer.starting_bbe5fc3")
           }</span></span>}
-          {running && <button
+          {canStop && <button
             type="button"
             className="stop-button"
             aria-label={stopping ? t("ui.Composer.Composer.stopping_bbe8574") : t("ui.Composer.Composer.stop_cae7d57")}

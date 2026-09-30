@@ -3170,5 +3170,9 @@
   "claudeControls.nativeStatus": "Claude 实时状态",
   "claudeControls.loaded": "已加载",
   "claudeControls.notLoaded": "未加载",
-  "claudeControls.disconnected": "连接服务器后即可使用 Claude 控制面板。"
+  "claudeControls.disconnected": "连接服务器后即可使用 Claude 控制面板。",
+  "codexGoal.whyBlocked": "为什么此目标被阻塞？",
+  "codexGoal.blockedReport": "目标被阻塞时的代理回复",
+  "codexGoal.blockedReasonUnavailable": "Codex 不提供单独的阻塞原因，此处也没有该轮对话的回复。恢复目标前，请在对话中查看代理的说明。",
+  "codexGoal.loadingReport": "正在加载目标被阻塞时的回复…"
 }
