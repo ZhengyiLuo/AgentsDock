@@ -195,6 +195,20 @@ describe('Composer', () => {
     })
   })
 
+  it('identifies Stop as child-only while the parent is idle and clears it on completion', () => {
+    const session: Session = { id: 'chat-1', title: 'Chat', backend: 'codex', codex_thread_id: 'root' }
+    const child = { id: 'child-event', seq: 1, type: 'subagent_state', ts: '2026-09-30T12:00:00Z',
+      session_id: session.id, backend: 'codex' as const, subagent_id: 'child', subagent_parent_thread_id: 'root', subagent_status: 'running' }
+    useAppStore.setState({ sessions: [session], snapshots: { 'chat-1': { session, queuedTurns: [], files: [], hasMoreEvents: false, filesTotal: 0, cachedAt: 0, events: [child] } } })
+    render(<Composer />)
+    expect(screen.getByRole('button', { name: 'Stop subagents' })).toHaveAttribute('title', '1 subagent running · Stop the running subagents. The main chat is idle.')
+    act(() => useAppStore.setState({ activeSessionIds: new Set(['chat-1']) }))
+    expect(screen.getByRole('button', { name: 'Stop' })).toHaveAttribute('title', '1 subagent running · Stop the main chat and its running subagents.')
+    act(() => useAppStore.setState({ activeSessionIds: new Set(), snapshots: { 'chat-1': { session, queuedTurns: [], files: [], hasMoreEvents: false, filesTotal: 0, cachedAt: 0, events: [child, { ...child, id: 'done', seq: 2, subagent_status: 'completed' }] } } }))
+    expect(screen.queryByRole('button', { name: 'Stop subagents' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Stop' })).not.toBeInTheDocument()
+  })
+
   it('mounts with empty per-chat upload state without an external-store render loop', () => {
     render(<Composer />)
     expect(screen.getByPlaceholderText('Message')).toBeInTheDocument()

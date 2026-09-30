@@ -45,11 +45,11 @@ const CODEX_COORDINATION_OPERATIONS = new Set([
 ])
 const LOG_LIMIT = 80
 
-const liveCodexChildren = new WeakMap<Event[], Map<string, boolean>>()
+const liveCodexChildren = new WeakMap<Event[], Map<string, number>>()
 
 /** Historical children from another thread or a fork source must not keep Stop alive. */
-export function hasLiveCodexSubagents(events: Event[] | undefined, rootThreadId?: string | null): boolean {
-  if (!events?.length) return false
+export function liveCodexSubagentCount(events: Event[] | undefined, rootThreadId?: string | null): number {
+  if (!events?.length) return 0
   const root = rootThreadId || ''
   const cached = liveCodexChildren.get(events)
   if (cached?.has(root)) return cached.get(root)!
@@ -68,15 +68,23 @@ export function hasLiveCodexSubagents(events: Event[] | undefined, rootThreadId?
       }
     }
   }
-  const live = agents.some(agent => agent.backend === 'codex' && isSubagentActive(agent)
+  const live = agents.filter(agent => agent.backend === 'codex' && isSubagentActive(agent)
     && (!root || (agent.rootThreadId ? agent.rootThreadId === root
-      : descendants.has(agent.id) || !agent.parentThreadId && !agent.key.startsWith('codex:subagent:'))))
+      : descendants.has(agent.id) || !agent.parentThreadId && !agent.key.startsWith('codex:subagent:')))).length
   // Older servers can omit root metadata. Use their proven parent chain, not
   // an assumed owner when the bounded history omits an identified ancestor.
-  const values = cached ?? new Map<string, boolean>()
+  const values = cached ?? new Map<string, number>()
   values.set(root, live)
   liveCodexChildren.set(events, values)
   return live
+}
+
+export function hasLiveCodexSubagents(events: Event[] | undefined, rootThreadId?: string | null): boolean {
+  return liveCodexSubagentCount(events, rootThreadId) > 0
+}
+
+export function liveCodexSubagentLabel(count: number): string {
+  return t(count === 1 ? 'subagents.runningOne' : 'subagents.runningMany', { count })
 }
 
 export function subagentsFromEvents(events: Event[], ownerBackend?: 'claude' | 'codex'): SubagentActivity[] {

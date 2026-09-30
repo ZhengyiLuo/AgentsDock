@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it } from 'vitest'
 import { setLocale } from '@shared/i18n'
 import type { Event } from '@shared/types'
-import { hasLiveCodexSubagents, isSubagentActive, subagentDetailText, subagentDisplayName, subagentLogText, subagentStatusLabel, subagentsFromEvents } from './subagents'
+import { liveCodexSubagentCount, liveCodexSubagentLabel, hasLiveCodexSubagents, isSubagentActive, subagentDetailText, subagentDisplayName, subagentLogText, subagentStatusLabel, subagentsFromEvents } from './subagents'
 afterEach(() => setLocale('en'))
 
 const event = (seq: number, type: string, patch: Partial<Event> = {}): Event => ({
@@ -21,6 +21,8 @@ describe('subagentsFromEvents', () => {
     expect(hasLiveCodexSubagents([unknown], 'current-root')).toBe(false)
     expect(hasLiveCodexSubagents([nested], 'current-root')).toBe(false)
     expect(hasLiveCodexSubagents([{ ...nested, subagent_root_thread_id: 'current-root' }], 'current-root')).toBe(true)
+    expect(liveCodexSubagentCount([unknown, nested], 'current-root')).toBe(0)
+    expect(liveCodexSubagentCount([{ ...nested, subagent_root_thread_id: 'current-root' }], 'current-root')).toBe(1)
   })
 
   it('keeps separately identified children separate when their snapshots share a wait call', () => {
@@ -84,6 +86,27 @@ describe('subagentsFromEvents', () => {
       subagent_tool_id: 'unconfirmed-call', subagent_status: 'running', subagent_parent_thread_id: 'root' })]
     expect(hasLiveCodexSubagents(confirmed, 'root')).toBe(true)
     expect(subagentsFromEvents(confirmed, 'codex')).toHaveLength(1)
+  })
+
+  it('counts only live owned children, including descendants, without counting fork history', () => {
+    const events = [
+      event(1, 'subagent_state', { subagent_id: 'a', subagent_parent_thread_id: 'root', subagent_status: 'running' }),
+      event(2, 'subagent_state', { subagent_id: 'b', subagent_parent_thread_id: 'a', subagent_status: 'running' }),
+      event(3, 'subagent_state', { subagent_id: 'foreign', subagent_parent_thread_id: 'other', subagent_status: 'running' }),
+      event(4, 'subagent_state', { subagent_id: 'copied', subagent_parent_thread_id: 'root', subagent_status: 'running', forked: true })
+    ]
+    expect(liveCodexSubagentCount(events, 'root')).toBe(2)
+    expect(liveCodexSubagentCount(events, 'root')).toBe(2)
+    expect(liveCodexSubagentCount(events, 'other')).toBe(1)
+    expect(liveCodexSubagentCount([...events, event(5, 'subagent_state', { subagent_id: 'b', subagent_parent_thread_id: 'a', subagent_status: 'completed' })], 'root')).toBe(1)
+  })
+
+  it('localizes singular and plural child activity labels', () => {
+    expect(liveCodexSubagentLabel(1)).toBe('1 subagent running')
+    expect(liveCodexSubagentLabel(2)).toBe('2 subagents running')
+    setLocale('zh-CN')
+    expect(liveCodexSubagentLabel(1)).toBe('1 个子代理正在运行')
+    expect(liveCodexSubagentLabel(2)).toBe('2 个子代理正在运行')
   })
 
   it('keeps confirmed children and other active runs stoppable after the parent ends', () => {

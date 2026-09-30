@@ -36,7 +36,9 @@ describe('composer queue layout', () => {
 
   it('keeps the Stop/send rail fixed while narrow panes discard secondary labels first', () => {
     expect(composer).toMatch(/<div className="composer-secondary-controls">[\s\S]*<div className="composer-actions">/)
-    expect(composer).toMatch(/className="stop-button"[\s\S]*aria-label=\{stopping \? t\("ui\.Composer\.Composer\.stopping_[a-z0-9]+"\) : t\("ui\.Composer\.Composer\.stop_[a-z0-9]+"\)\}/)
+    expect(composer).toMatch(/const stopLabel = !running && liveCodexChildren > 0 \? t\('subagents\.stop'\) : t\("ui\.Composer\.Composer\.stop_[a-z0-9]+"\)/)
+    expect(composer).toMatch(/className="stop-button"[\s\S]*aria-label=\{stopping \? t\("ui\.Composer\.Composer\.stopping_[a-z0-9]+"\) : stopLabel\}/)
+    expect(composer).toMatch(/className="stop-button-label">\{stopping \? t\("ui\.Composer\.Composer\.stopping_[a-z0-9]+"\) : stopLabel\}/)
     expect(styles).toMatch(/\.composer-actions \{[^}]*flex: none;[^}]*display: flex;[^}]*margin-left: auto;/s)
     expect(styles).toMatch(/@container composer \(max-width: 360px\) \{[^}]*\.composer-secondary-controls > :not\(\.composer-add-button\) \{ display: none; \}/s)
     expect(styles).toMatch(/@container composer \(max-width: 160px\) \{[^}]*\.composer-secondary-controls \{ display: none; \}[^}]*\.steering-pending \{[^}]*position: absolute;[^}]*clip-path: inset\(50%\);/s)

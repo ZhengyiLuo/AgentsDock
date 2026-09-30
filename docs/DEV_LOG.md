@@ -1,5 +1,37 @@
 # Public development log
 
+## 2026-09-30 — Prepare beta.4 with live Codex child activity
+
+- Integrate the scoped desktop delta from `eae4c5ca3c6305c6ee7196696bb2f78b2ada531e`
+  onto the beta.3 release line, without merging the wider development branch.
+  Sidebar rows show the current thread's live child count before long model
+  labels. Idle parents offer **Stop subagents** with an explicit scope tooltip;
+  active parents retain **Stop** for the parent and its running children.
+- Preserve beta.3's fail-closed ancestry and fork-ownership checks. Counts use
+  the existing cached event projection, with no additional polling or changes
+  to server cancellation, wake-up or provider behavior. Include English and
+  Chinese labels using the existing approved terminology.
+- Prepare matching `1.0.8-beta.4` app/npm/legacy identities. The only server
+  runtime-tree change from beta.3 is its version stamp. Existing stable releases,
+  npm `latest`, frozen beta.3 artifacts and working installations are untouched.
+- Correct a test-origin fault-injection race: a concurrent request that loses
+  the one-shot control rename serves normally instead of injecting a second
+  HTTP failure. Rearming beside a consumed marker still rejects; source,
+  ownership and signed-byte checks remain enforced. Deterministic contention
+  and error-propagation regressions pass. This is a replay-harness correction,
+  not evidence of production update acceptance.
+- Initial full checks exposed stale Stop-label assertions and a Chinese
+  terminology mismatch. An early-exit smoke fixture also rejected with a
+  different error under load; its unchanged focused rerun passed. Retain these
+  observations rather than treating them as completed packaged acceptance.
+  Release-tooling checks pass all 295 tests after the replay correction;
+  packaging/preparation Python checks pass all 58 tests. The corrected full
+  Electron suite passes 5,085 tests with six existing skips; typecheck and
+  production compilation also pass.
+- This entry records preparation only. A new committed source pin, signed
+  packages, exact native update/migration acceptance and a publication receipt
+  are still required before calling beta.4 released.
+
 ## 2026-09-29 — Windows beta.3 preparation passes the user-requested retry
 
 - The user-requested failed-jobs-only retry of direct preparation

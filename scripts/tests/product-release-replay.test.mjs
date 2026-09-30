@@ -5,6 +5,7 @@ import { EventEmitter } from 'node:events'
 import { Readable } from 'node:stream'
 import { checkServerIdentity } from 'node:tls'
 import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
+import { lstat, readFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 import { test } from 'node:test'
@@ -245,6 +246,62 @@ test('fault control admits one exact legacy download only and never mutates pack
   assert.equal(await consumeReplayFault(replay, control, url.host, url.pathname), null)
   const bytes = await consume(await replay.respond({ method: 'GET', host: url.host, path: url.pathname }))
   assert.equal(hash(bytes), request.sha256)
+})
+
+test('fault contender losing after its validated read serves normally; rearming remains rejected', async t => {
+  const f = fixture(t), replay = await createProductReplay(f.options)
+  const control = join(f.root, 'fault.json'), consumed = `${control}.consumed`
+  const request = replay.inventory().find(item => item.url.endsWith('.tar.gz') && item.url.includes('/AgentsServer/'))
+  const url = new URL(request.url)
+  const bytes = Buffer.from(JSON.stringify({ schema: 1, kind: 'truncate-legacy-once', sourceSha,
+    releaseReceiptSha256: replay.identity.releaseReceiptSha256 }))
+  writeFileSync(control, bytes, { mode: 0o600 })
+  let contenderReady, resumeContender
+  const ready = new Promise(resolve => { contenderReady = resolve })
+  const resume = new Promise(resolve => { resumeContender = resolve })
+  const contender = consumeReplayFault(replay, control, url.host, url.pathname, {
+    statControl: async path => {
+      if (path === consumed) { contenderReady(); await resume }
+      return lstat(path)
+    }
+  })
+  await ready
+  let winner
+  try { winner = await consumeReplayFault(replay, control, url.host, url.pathname) }
+  finally { resumeContender() }
+  assert.equal(winner.sha256, request.sha256)
+  assert.equal(await contender, null)
+  assert.deepEqual(readFileSync(consumed), bytes)
+  await assert.rejects(lstat(control), { code: 'ENOENT' })
+
+  writeFileSync(control, bytes, { mode: 0o600 })
+  await assert.rejects(consumeReplayFault(replay, control, url.host, url.pathname), /already consumed/)
+  assert.deepEqual(readFileSync(consumed), bytes)
+  assert.deepEqual(readFileSync(control), bytes)
+  assert.equal(hash(await consume(await replay.respond({ method: 'GET', host: url.host, path: url.pathname }))), request.sha256)
+})
+
+test('fault contender losing before its read returns null without swallowing other read errors', async t => {
+  const f = fixture(t), replay = await createProductReplay(f.options)
+  const control = join(f.root, 'fault.json')
+  const request = replay.inventory().find(item => item.url.endsWith('.tar.gz') && item.url.includes('/AgentsServer/'))
+  const url = new URL(request.url)
+  writeFileSync(control, JSON.stringify({ schema: 1, kind: 'truncate-legacy-once', sourceSha,
+    releaseReceiptSha256: replay.identity.releaseReceiptSha256 }), { mode: 0o600 })
+  const denied = Object.assign(new Error('fixture read denial'), { code: 'EACCES' })
+  await assert.rejects(consumeReplayFault(replay, control, url.host, url.pathname, {
+    readControl: async () => { throw denied }
+  }), error => error === denied)
+  let winner
+  const loser = await consumeReplayFault(replay, control, url.host, url.pathname, {
+    readControl: async path => {
+      winner = await consumeReplayFault(replay, control, url.host, url.pathname)
+      return readFile(path)
+    }
+  })
+  assert.equal(winner.sha256, request.sha256)
+  assert.equal(loser, null)
+  assert.equal(hash(await consume(await replay.respond({ method: 'GET', host: url.host, path: url.pathname }))), request.sha256)
 })
 
 test('GET, HEAD and valid single ranges preserve exact bytes; unsafe ranges fail', async t => {

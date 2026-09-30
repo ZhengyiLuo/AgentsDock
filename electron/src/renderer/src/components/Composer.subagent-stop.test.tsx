@@ -17,6 +17,11 @@ function snapshot(events: Event[], owner = session) {
   return { session: owner, events, queuedTurns: [], files: [], hasMoreEvents: false, filesTotal: 0, cachedAt: 0 }
 }
 
+function expectNoStopControl() {
+  expect(screen.queryByRole('button', { name: 'Stop' })).toBeNull()
+  expect(screen.queryByRole('button', { name: 'Stop subagents' })).toBeNull()
+}
+
 describe('Composer Stop with native Codex subagents', () => {
   beforeEach(() => {
     Object.defineProperty(window, 'agentsDock', { configurable: true, value: {
@@ -50,23 +55,37 @@ describe('Composer Stop with native Codex subagents', () => {
     expect(screen.getByRole('button', { name: 'Send message' })).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: 'Queue message' })).toBeNull()
     expect(useAppStore.getState().activeSessionIds.has(session.id)).toBe(false)
-    await user.click(screen.getByRole('button', { name: 'Stop' }))
+    expect(screen.queryByRole('button', { name: 'Stop' })).toBeNull()
+    expect(screen.getByRole('button', { name: 'Stop subagents' })).toHaveAttribute('title', '1 subagent running · Stop the running subagents. The main chat is idle.')
+    await user.click(screen.getByRole('button', { name: 'Stop subagents' }))
     expect(stop).toHaveBeenCalledExactlyOnceWith(session.id)
     expect(screen.getByRole('button', { name: 'Stopping…' })).toBeDisabled()
     expect(window.agentsDock.sessions.reloadProvider).not.toHaveBeenCalled()
     expect(window.agentsDock.sessions.update).not.toHaveBeenCalled()
 
     finish({ stopped: false, pending: true, message: 'Still stopping the child. Retry Stop.' })
-    await waitFor(() => expect(screen.getByRole('button', { name: 'Stop' })).toBeEnabled())
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Stop subagents' })).toBeEnabled())
     expect(useAppStore.getState().error).toBe('Still stopping the child. Retry Stop.')
     act(() => useAppStore.setState({ snapshots: { [session.id]: snapshot([live, childEvent(2, 'stopped')]) } }))
-    expect(screen.queryByRole('button', { name: 'Stop' })).toBeNull()
+    expectNoStopControl()
+  })
+
+  it('keeps Stop scoped to the active main turn and its live children', async () => {
+    useAppStore.setState({ activeSessionIds: new Set([session.id]), snapshots: {
+      [session.id]: snapshot([childEvent(1, 'running')])
+    } })
+    render(<Composer />)
+    expect(screen.queryByRole('button', { name: 'Stop subagents' })).toBeNull()
+    const stop = screen.getByRole('button', { name: 'Stop' })
+    expect(stop).toHaveAttribute('title', '1 subagent running · Stop the main chat and its running subagents.')
+    await userEvent.click(stop)
+    expect(window.agentsDock.turns.stop).toHaveBeenCalledExactlyOnceWith(session.id)
   })
 
   it.each(['completed', 'failed', 'stopped', 'tracking_lost'])('does not treat historical %s children as live work', status => {
     useAppStore.setState({ snapshots: { [session.id]: snapshot([childEvent(1, 'running'), childEvent(2, status)]) } })
     render(<Composer />)
-    expect(screen.queryByRole('button', { name: 'Stop' })).toBeNull()
+    expectNoStopControl()
   })
 
   it.each(['turn_finished', 'turn_stopped'])('removes stale Stop when an unfinished spawn owner emits %s', terminal => {
@@ -76,16 +95,16 @@ describe('Composer Stop with native Codex subagents', () => {
       tool: { id: 'unfinished-call', name: 'spawn_agent', input: {} } }
     useAppStore.setState({ sessions: [owner], snapshots: { [session.id]: snapshot([spawn], owner) } })
     render(<Composer />)
-    expect(screen.getByRole('button', { name: 'Stop' })).toBeEnabled()
+    expect(screen.getByRole('button', { name: 'Stop subagents' })).toBeEnabled()
     const finished: Event = { ...spawn, id: 'parent-ended', seq: 2, type: terminal, tool: undefined }
     act(() => useAppStore.setState({ snapshots: { [session.id]: snapshot([spawn, finished], owner) } }))
-    expect(screen.queryByRole('button', { name: 'Stop' })).toBeNull()
+    expectNoStopControl()
     expect(screen.getByRole('button', { name: 'Send message' })).toBeInTheDocument()
     expect(window.agentsDock.turns.stop).not.toHaveBeenCalled()
     const confirmed = childEvent(3, 'running', { subagent_id: 'late-child',
       subagent_tool_id: 'unfinished-call', subagent_parent_thread_id: 'current-root' })
     act(() => useAppStore.setState({ snapshots: { [session.id]: snapshot([spawn, finished, confirmed], owner) } }))
-    expect(screen.getByRole('button', { name: 'Stop' })).toBeEnabled()
+    expect(screen.getByRole('button', { name: 'Stop subagents' })).toBeEnabled()
   })
 
   it('does not infer ownership when an older server omits a nested ancestor and root metadata', () => {
@@ -94,7 +113,7 @@ describe('Composer Stop with native Codex subagents', () => {
       childEvent(1, 'running', { subagent_parent_thread_id: 'omitted-parent' })
     ], owner) } })
     render(<Composer />)
-    expect(screen.queryByRole('button', { name: 'Stop' })).toBeNull()
+    expectNoStopControl()
   })
 
   it('does not show Stop for inherited spawn records in an idle fork, but allows stopping new work', () => {
@@ -106,14 +125,14 @@ describe('Composer Stop with native Codex subagents', () => {
     }
     useAppStore.setState({ sessions: [owner], snapshots: { [session.id]: snapshot([copied], owner) } })
     render(<Composer />)
-    expect(screen.queryByRole('button', { name: 'Stop' })).toBeNull()
+    expectNoStopControl()
     expect(screen.getByRole('button', { name: 'Send message' })).toBeInTheDocument()
     const live = childEvent(2, 'running', { subagent_parent_thread_id: 'fork-root' })
     act(() => useAppStore.setState({ snapshots: { [session.id]: snapshot([copied, live], owner) } }))
-    expect(screen.getByRole('button', { name: 'Stop' })).toBeEnabled()
+    expect(screen.getByRole('button', { name: 'Stop subagents' })).toBeEnabled()
     act(() => useAppStore.setState({ snapshots: { [session.id]: snapshot([copied, live,
       childEvent(3, 'stopped', { subagent_parent_thread_id: 'fork-root' })], owner) } }))
-    expect(screen.queryByRole('button', { name: 'Stop' })).toBeNull()
+    expectNoStopControl()
   })
 
   it('ignores running children from an earlier native thread but keeps nested current children stoppable', () => {
@@ -121,14 +140,14 @@ describe('Composer Stop with native Codex subagents', () => {
     const old = childEvent(1, 'running', { subagent_parent_thread_id: 'old-root' })
     useAppStore.setState({ sessions: [owner], snapshots: { [session.id]: snapshot([old], owner) } })
     render(<Composer />)
-    expect(screen.queryByRole('button', { name: 'Stop' })).toBeNull()
+    expectNoStopControl()
     const parent = childEvent(2, 'completed', { subagent_id: 'current-child', subagent_parent_thread_id: 'current-root' })
     const nested = childEvent(3, 'running', { subagent_id: 'nested-child', subagent_parent_thread_id: 'current-child' })
     act(() => useAppStore.setState({ snapshots: { [session.id]: snapshot([old, parent, nested], owner) } }))
-    expect(screen.getByRole('button', { name: 'Stop' })).toBeEnabled()
+    expect(screen.getByRole('button', { name: 'Stop subagents' })).toBeEnabled()
     act(() => useAppStore.setState({ snapshots: { [session.id]: snapshot([old, parent, nested,
       childEvent(4, 'stopped', { subagent_id: 'nested-child', subagent_parent_thread_id: 'current-child' })], owner) } }))
-    expect(screen.queryByRole('button', { name: 'Stop' })).toBeNull()
+    expectNoStopControl()
   })
 
   it('keeps a current nested child stoppable when its completed parent is outside the history page', () => {
@@ -137,7 +156,7 @@ describe('Composer Stop with native Codex subagents', () => {
       childEvent(4, 'running', { subagent_parent_thread_id: 'omitted-parent', subagent_root_thread_id: 'current-root' })
     ], owner) } })
     render(<Composer />)
-    expect(screen.getByRole('button', { name: 'Stop' })).toBeEnabled()
+    expect(screen.getByRole('button', { name: 'Stop subagents' })).toBeEnabled()
   })
 
   it('keeps the Stop action scoped to the visible composer and does not infer Claude behavior', async () => {
@@ -147,15 +166,15 @@ describe('Composer Stop with native Codex subagents', () => {
       [other.id]: snapshot([childEvent(1, 'running', { session_id: other.id })], other)
     } })
     const rendered = render(<Composer />)
-    expect(screen.queryByRole('button', { name: 'Stop' })).toBeNull()
+    expectNoStopControl()
     rendered.rerender(<Composer sessionId={other.id} />)
-    await userEvent.click(screen.getByRole('button', { name: 'Stop' }))
+    await userEvent.click(screen.getByRole('button', { name: 'Stop subagents' }))
     expect(window.agentsDock.turns.stop).toHaveBeenCalledExactlyOnceWith(other.id)
     const claude: Session = { ...session, backend: 'claude' }
     act(() => useAppStore.setState({ sessions: [claude], snapshots: {
       [session.id]: snapshot([childEvent(1, 'running', { backend: 'claude' })], claude)
     } }))
     rendered.rerender(<Composer sessionId={session.id} />)
-    expect(screen.queryByRole('button', { name: 'Stop' })).toBeNull()
+    expectNoStopControl()
   })
 })

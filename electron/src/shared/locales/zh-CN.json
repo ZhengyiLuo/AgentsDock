@@ -1,4 +1,9 @@
 {
+  "subagents.runningOne": "1 个子代理正在运行",
+  "subagents.runningMany": "{count} 个子代理正在运行",
+  "subagents.stop": "停止子代理",
+  "subagents.stopDescription": "停止正在运行的子代理。主对话当前空闲。",
+  "subagents.stopAllDescription": "停止主对话及其正在运行的子代理。",
   "opencode.crossChatUnavailable": "此服务器尚不支持 OpenCode 跨会话工具。请更新服务器或移除会话引用。",
   "opencode.permissions.waitUntilIdle": "请停止或等待当前轮次完成后再更改 OpenCode 权限。",
   "opencode.permissions.contextReset": "更改权限会重置 OpenCode 原生上下文，界面中的会话记录会保留。",

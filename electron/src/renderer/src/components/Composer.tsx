@@ -25,7 +25,7 @@ import { awaitAllCursorPermissionUpdates, awaitCursorPermissionUpdates } from '.
 import { nativeFileRefsFromFiles } from '../lib/native-files'
 import { profileSessionKey } from '../lib/profile-scope'
 import { orderedActiveSessions, rankSessionsForSearch } from '../lib/sessions'
-import { hasLiveCodexSubagents } from '../lib/subagents'
+import { liveCodexSubagentCount, liveCodexSubagentLabel } from '../lib/subagents'
 import {
   assertTeamNetworkExpectedIdentity,
   loadTeamNetworkServers as loadCachedTeamNetworkServers,
@@ -508,11 +508,12 @@ export const Composer = memo(function Composer({ dropActive = false, sessionId, 
   const uploads = useAppStore(state => selectedId ? state.uploadsBySession[selectedId] ?? EMPTY_UPLOADS : EMPTY_UPLOADS)
   const uploadPaths = useAppStore(state => selectedId ? state.uploadPathsBySession[selectedId] ?? EMPTY_UPLOAD_PATHS : EMPTY_UPLOAD_PATHS)
   const running = useAppStore(state => selectedId ? state.activeSessionIds.has(selectedId) : false)
-  const liveCodexChildren = useAppStore(state => Boolean(selectedId
-    && state.sessions.find(candidate => candidate.id === selectedId)?.backend === 'codex'
-    && hasLiveCodexSubagents(state.snapshots[selectedId]?.events,
-      state.snapshots[selectedId]?.session.codex_thread_id || state.sessions.find(candidate => candidate.id === selectedId)?.codex_thread_id)))
-  const canStop = running || liveCodexChildren
+  const liveCodexChildren = useAppStore(state => selectedId && session?.backend === 'codex'
+    ? liveCodexSubagentCount(state.snapshots[selectedId]?.events,
+      state.snapshots[selectedId]?.session.codex_thread_id || session.codex_thread_id)
+    : 0)
+  const canStop = running || liveCodexChildren > 0
+  const stopLabel = !running && liveCodexChildren > 0 ? t('subagents.stop') : t("ui.Composer.Composer.stop_cae7d57")
   const admitting = useAppStore(state => selectedId ? Boolean(state.turnAdmissionTokens[selectedId]) : false)
   const pendingSubmission = useAppStore(state => selectedId ? state.pendingTurnSubmissions[selectedId] : undefined)
   const pendingSubmissionMode = pendingSubmission?.mode
@@ -2250,14 +2251,14 @@ export const Composer = memo(function Composer({ dropActive = false, sessionId, 
           {canStop && <button
             type="button"
             className="stop-button"
-            aria-label={stopping ? t("ui.Composer.Composer.stopping_bbe8574") : t("ui.Composer.Composer.stop_cae7d57")}
+            aria-label={stopping ? t("ui.Composer.Composer.stopping_bbe8574") : stopLabel}
             disabled={writeDisabled || stopping}
             onClick={() => {
               if (!confirmInboundDeliveryInterruption(session.id, 'stop')) return
               void useAppStore.getState().stopTurnForSession(session.id)
             }}
-            title={stopping ? t("ui.Composer.Composer.stopping_agent_ec42789") : t("ui.Composer.Composer.stop_f9da57a", { "provider": String(session.title) })}
-          ><span className="activity-ring" /><Square size={12} fill="currentColor" /><span className="stop-button-label">{stopping ? t("ui.Composer.Composer.stopping_bbe8574") : t("ui.Composer.Composer.stop_cae7d57")}</span></button>}
+            title={stopping ? t("ui.Composer.Composer.stopping_agent_ec42789") : liveCodexChildren > 0 ? `${liveCodexSubagentLabel(liveCodexChildren)} · ${t(running ? 'subagents.stopAllDescription' : 'subagents.stopDescription')}` : t("ui.Composer.Composer.stop_f9da57a", { "provider": String(session.title) })}
+          ><span className="activity-ring" /><Square size={12} fill="currentColor" /><span className="stop-button-label">{stopping ? t("ui.Composer.Composer.stopping_bbe8574") : stopLabel}</span></button>}
           <ShortcutTooltip shortcut={running && session.backend !== 'opencode' ? ['sendMessage', 'steerMessage'] : 'sendMessage'} label={running ? session.backend === 'opencode' ? t("ui.Composer.Composer.queue_message_891d4ef") : activeCodexGoal ? t('composer.queueMessageDuringGoal') : t("ui.Composer.Composer.queue_message_steer_now_eea53cb") : t("ui.Composer.Composer.send_message_93a26b1")}><button className="send-button" aria-label={sessionId === undefined ? (running ? t("ui.Composer.Composer.queue_message_891d4ef") : t("ui.Composer.Composer.send_message_93a26b1")) : t(running ? 'ui.composer.queueFor' : 'ui.composer.sendTo', { title: session.title })} disabled={!canSend} onClick={() => void send()}><Send size={17} /></button></ShortcutTooltip>
         </div>
       </fieldset>

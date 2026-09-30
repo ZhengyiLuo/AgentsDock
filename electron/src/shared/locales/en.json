@@ -1,4 +1,9 @@
 {
+  "subagents.runningOne": "1 subagent running",
+  "subagents.runningMany": "{count} subagents running",
+  "subagents.stop": "Stop subagents",
+  "subagents.stopDescription": "Stop the running subagents. The main chat is idle.",
+  "subagents.stopAllDescription": "Stop the main chat and its running subagents.",
   "opencode.crossChatUnavailable": "This server does not support OpenCode cross-chat tools yet. Update the server or remove the chat reference.",
   "opencode.permissions.waitUntilIdle": "Stop or wait for this turn to finish before changing OpenCode permissions.",
   "opencode.permissions.contextReset": "Changing permissions starts a fresh native OpenCode context. Visible chat history is kept.",

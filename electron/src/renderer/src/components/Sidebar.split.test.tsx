@@ -48,6 +48,7 @@ describe('sidebar split pane context', () => {
       collapsedFolders: new Set(),
       archivedCollapsed: false,
       activeSessionIds: new Set(),
+      snapshots: {},
       runtimeCatalog: null,
       creatingChat: false,
       modals: { settings: false, newChat: false, resume: false, folder: false, digest: false, job: false, search: false, review: false, importChats: false }
@@ -58,6 +59,20 @@ describe('sidebar split pane context', () => {
     cleanup()
     vi.restoreAllMocks()
     useAppStore.setState({ requestNewChat: realRequestNewChat, creatingChat: false })
+  })
+
+  it('shows child activity for an idle parent and removes it when the child completes', () => {
+    const session = { ...sessions[0], codex_thread_id: 'root' }
+    const child = { id: 'child-event', seq: 1, type: 'subagent_state', ts: '2026-09-30T12:00:00Z',
+      session_id: session.id, backend: 'codex' as const, subagent_id: 'child', subagent_parent_thread_id: 'root', subagent_status: 'running' }
+    useAppStore.setState({ sessions: [session], snapshots: { [session.id]: { session, queuedTurns: [], files: [], hasMoreEvents: false, filesTotal: 0, cachedAt: 0, events: [child] } } })
+    render(<Sidebar />)
+    const row = screen.getByText('Primary chat').closest<HTMLElement>('.session-row')!
+    expect(row).toHaveTextContent('1 subagent running')
+    expect(row.querySelector('.status-dot.running')).toBeInTheDocument()
+    act(() => useAppStore.setState({ snapshots: { [session.id]: { session, queuedTurns: [], files: [], hasMoreEvents: false, filesTotal: 0, cachedAt: 0, events: [child, { ...child, id: 'done', seq: 2, subagent_status: 'completed' }] } } }))
+    expect(row).not.toHaveTextContent('subagent running')
+    expect(row.querySelector('.status-dot.running')).not.toBeInTheDocument()
   })
 
   it('does not render a pane marker or pane label for a single chat', () => {

@@ -620,22 +620,35 @@ export async function serveProductReplay(replay, { certificatePath, privateKeyPa
   })
 }
 
-export async function consumeReplayFault(replay, controlPath, host, path) {
+export async function consumeReplayFault(replay, controlPath, host, path,
+  { statControl = lstat, readControl = regular } = {}) {
   if (host !== 'github.com') return null
   const entry = replay.inventory().find(item => item.url === `https://${host}${path}` && !item.generated
     && item.url.startsWith(`https://github.com/${SERVER_REPOSITORY}/releases/download/v${replay.identity.version}/`)
     && item.url.endsWith('.tar.gz'))
   if (!entry) return null
   let stat
-  try { stat = await lstat(controlPath) } catch (error) { if (error.code === 'ENOENT') return null; throw error }
+  try { stat = await statControl(controlPath) } catch (error) { if (error.code === 'ENOENT') return null; throw error }
   need(stat.isFile() && !(stat.mode & 0o077) && stat.uid === process.getuid(), 'Fault control must be a private owned regular file.')
-  const control = JSON.parse(await regular(controlPath))
+  let controlBytes
+  try { controlBytes = await readControl(controlPath) }
+  catch (error) { if (error.code === 'ENOENT') return null; throw error }
+  const control = JSON.parse(controlBytes)
   need(control.schema === 1 && control.kind === 'truncate-legacy-once' && control.sourceSha === replay.identity.sourceSha
     && control.releaseReceiptSha256 === replay.identity.releaseReceiptSha256, 'Fault control belongs to another prepared product.')
   // Rename is the one-shot admission lock. Concurrent downloads cannot both
   // consume the same control file. It never modifies signed package bytes.
-  try { await lstat(`${controlPath}.consumed`); throw new Error('One-shot fault was already consumed.') }
+  let alreadyConsumed = false
+  try { await statControl(`${controlPath}.consumed`); alreadyConsumed = true }
   catch (error) { if (error.code !== 'ENOENT') throw error }
+  if (alreadyConsumed) {
+    // Another admitted request can rename the control after this request read
+    // it. That loser must serve normally, not inject a second HTTP failure.
+    // A newly rearmed control beside the marker still fails closed.
+    try { await statControl(controlPath) }
+    catch (error) { if (error.code === 'ENOENT') return null; throw error }
+    throw new Error('One-shot fault was already consumed.')
+  }
   try { await rename(controlPath, `${controlPath}.consumed`) }
   catch (error) { if (error.code === 'ENOENT') return null; throw error }
   return entry
