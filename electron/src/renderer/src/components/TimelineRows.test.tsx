@@ -2495,6 +2495,37 @@ describe('timeline pin state', () => {
     expect(within(rendered.container).getByTitle('Copy full message')).toBeInTheDocument()
   })
 
+  it('keeps the compact Claude trace entry point when its only anchor duplicates the final answer', async () => {
+    const event = (seq: number, type: string, fields: Partial<Event> = {}): Event => ({
+      id: `compact-claude-${seq}`, session_id: 'chat-1', run_id: 'compact-claude', backend: 'claude',
+      seq, type, ts: `2026-07-10T14:29:0${seq}Z`, ...fields
+    })
+    const finalText = 'The report has been saved.'
+    const anchor = event(5, 'reasoning_summary', { phase: 'commentary', text: finalText })
+    const compact = [event(1, 'turn_started', { prompt: 'Prepare a report.' }), anchor,
+      event(6, 'turn_finished', { result_text: finalText })]
+    loadTrace.mockResolvedValueOnce({ events: [
+      event(2, 'reasoning_summary', { phase: 'reasoning', text: 'Checking the available data.' }),
+      event(3, 'tool_started', { tool: { id: 'read-data', name: 'Read', input: { file_path: 'data.json' } } }),
+      event(4, 'tool_finished', { tool_id: 'read-data', output: 'Data loaded.' }), anchor
+    ], has_more: false, next_after: 5 })
+    const rows = renderTimelineItems(projectTimeline(compact, []))
+    const { container } = render(<>{rows.map(item =>
+      <TimelineRowView key={item.key} item={item} sessionId="chat-1" onFindFile={() => {}} pinnedItemIds={new Set()} />
+    )}</>)
+
+    const toggle = within(container).getByRole('button', { name: 'Worked for 5s' })
+    fireEvent.click(toggle)
+    await within(container).findByRole('button', { name: 'Use compact trace' })
+    expect(loadTrace).toHaveBeenCalledWith('chat-1', 'compact-claude', 5, 0)
+    expect(container.querySelector('.run-activity')).toHaveTextContent('1 tool call')
+    expect(within(container).getAllByText(finalText)).toHaveLength(1)
+    fireEvent.click(toggle)
+    expect(toggle).toHaveAttribute('aria-expanded', 'false')
+    fireEvent.click(toggle)
+    expect(toggle).toHaveAttribute('aria-expanded', 'true')
+  })
+
   it.each(['reasoning_summary', 'assistant_text'])('keeps one Claude final answer after loading phased %s activity', async commentaryType => {
     const event = (seq: number, type: string, fields: Partial<Event> = {}): Event => ({
       id: `claude-full-${seq}`, session_id: 'chat-1', run_id: 'claude-full', backend: 'claude',

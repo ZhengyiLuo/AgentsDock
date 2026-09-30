@@ -1,5 +1,24 @@
 # Public development log
 
+## 2026-09-29 — Preserve Claude history activity access
+
+- Keep the activity disclosure when a compact Claude history page uses the
+  final commentary as its only trace anchor. Deduplicate the visible reply
+  while retaining the run and sequence needed to load its activity on demand.
+- Claude text blocks are projected as assistant output in the server source;
+  the desktop also surfaces legacy report-shaped commentary when those events
+  are present, after ownership filtering and final-answer deduplication. These
+  source changes do not imply a server deployment.
+- Verified in the actual local macOS package against the connected server:
+  reopened an affected historical chat, expanded the restored activity control,
+  loaded its report and tool details, then collapsed it. Focused timeline/UI
+  regressions (324), 88 Claude SDK/print-runner tests, TypeScript and production
+  compilation passed.
+- Acceptance remains partial: the running server's compact history can omit
+  legacy report text until expansion. Default-visible recovery through that
+  paging boundary and a new native Claude turn remain unverified. No claim of
+  full native-provider parity or release readiness is made.
+
 ## 2026-09-28 — Combine editor line endings with desktop/server fixes
 
 - Bring contributor PR #24 into the tested desktop/server follow-up branch,

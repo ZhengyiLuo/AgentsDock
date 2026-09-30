@@ -41,6 +41,8 @@ export interface ProgressItem {
   seq: number
   /** All user-visible run activity, including commentary, reasoning, and tools. */
   events: Event[]
+  /** Commentary that is also surfaced as assistant output; hide it from expanded details to avoid duplication. */
+  promotedCommentaryIds?: string[]
   /** Unfiltered compact activity retained for merging full trace pages before normalization. */
   sourceEvents?: Event[]
   /** Live commentary stays visible; terminal tool details can collapse. */
@@ -1932,13 +1934,22 @@ function renderTimelineItem(item: TimelineItem): RenderTimelineItem[] {
     const suffix = segment.after ? `:after:${segment.after.id}` : ''
     const active = last && !item.finishedAt && segment.finals.length === 0
     const activityEvents = omitTerminalClaudeFinalCommentary(segment.events, segment.finals)
-    if ((last && item.stoppedAt) || traceHasVisibleContent(activityEvents)) {
+    // Apply legacy report recovery after ownership filtering and final-answer
+    // deduplication, so repaired imports and repeated final text stay omitted.
+    const promotedAssistantEvents = activityEvents
+      .filter(isLegacyClaudeCommentaryReport)
+      .map(promotedClaudeCommentaryAssistantEvent)
+    // A compact history page can retain only the terminal commentary as its
+    // trace anchor. Deduplicating its text must not remove the entry point for
+    // fetching the rest of that run's activity.
+    if ((last && item.stoppedAt) || traceHasVisibleContent(segment.events)) {
       rows.push({
         kind: 'progress',
         id: `${item.id}:activity${suffix}`,
         key: `${item.key}:activity${suffix}`,
         seq: activityEvents[0] ? activityEventSequence(activityEvents[0], orderingFinalEvents) : item.user?.seq ?? item.seq,
         events: activityEvents,
+        promotedCommentaryIds: promotedAssistantEvents.map(event => event.id),
         sourceEvents: segment.events,
         active,
         hasFinalResponse: segment.finals.length > 0,
@@ -1950,6 +1961,18 @@ function renderTimelineItem(item: TimelineItem): RenderTimelineItem[] {
         finishedAt: last ? item.finishedAt : segment.finals.at(-1)?.ts,
         stoppedAt: last ? item.stoppedAt : undefined,
         terminalSeq: last && item.finishedAt ? item.terminalSeq : undefined
+      })
+    }
+    for (const event of promotedAssistantEvents) {
+      rows.push({
+        kind: 'message',
+        id: `${item.id}:assistant:promoted:${event.id}${suffix}`,
+        key: `${item.key}:assistant:promoted:${event.id}${suffix}`,
+        seq: event.seq,
+        event,
+        events: [event],
+        role: 'assistant',
+        files: item.files,
       })
     }
     if (segment.finals.length) {
@@ -2127,6 +2150,24 @@ export function isPublicCommentary(event: Event): boolean {
   return (event.type === 'reasoning_summary' || event.type === 'assistant_text')
     && event.phase === 'commentary'
     && Boolean(event.text?.trim())
+}
+
+function isLegacyClaudeCommentaryReport(event: Event): boolean {
+  const text = event.text?.trim() || ''
+  return event.backend === 'claude'
+    && event.phase === 'commentary'
+    && event.type === 'reasoning_summary'
+    && Boolean(text)
+    && (
+      text.length >= 1200
+      || /^#{1,6}\s+\S/m.test(text)
+      || /\n\s*\|[^|\n]+\|[^|\n]+\|/.test(text)
+    )
+}
+
+function promotedClaudeCommentaryAssistantEvent(event: Event): Event {
+  const { phase: _phase, ...publicText } = event
+  return { ...publicText, type: 'assistant_text' }
 }
 
 const claudeTerminalBookkeepingTypes = new Set([
