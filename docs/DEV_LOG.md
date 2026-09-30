@@ -1,5 +1,25 @@
 # Public development log
 
+## 2026-09-29 — Windows beta.3 preparation passes the user-requested retry
+
+- The user-requested failed-jobs-only retry of direct preparation
+  [run 36671146624, attempt 3](https://github.com/ZhengyiLuo/AgentsDock/actions/runs/36671146624/attempts/3)
+  passes on unchanged source `09e573cc10330bbe60ffef544ba67ac9a71e69e4`,
+  version `1.0.8-beta.3`, build 1240. All 5,040 portable tests pass, with the
+  existing 14 skips; no assertion, timeout or runtime source is changed.
+- Native Windows verification passes installer/metadata/blockmap identity,
+  SHA-512, PE architecture, app identity, updater feed, Electron fuses, clean
+  launch and uninstall. The installer is explicitly an **unsigned beta preview**.
+  Actions artifact `11081696137` is 101,950,667 bytes with archive SHA-256
+  `f56481a7b2dca9fe0793386f91c381b6f37e5565230f9eda9a76868088209756`.
+- Retain both earlier failures. Passing unchanged establishes that the timeout
+  is intermittent, not its cause or a demonstrated fix. File-handle contention
+  remains unproven; a targeted Windows trace is needed if it recurs.
+- The original Mac, Linux and signed server artifacts are unchanged. No release
+  draft is created by this artifacts-only retry and nothing is published.
+  Exact beta.3 one-click upgrade and legacy migration replay remain pending;
+  this platform-build result does not establish coordinated release acceptance.
+
 ## 2026-09-29 — Windows beta.3 preparation remains blocked after one retry
 
 - Direct preparation run `36671146624`, attempt 2, fails again before Windows
