@@ -7,6 +7,25 @@ All candidate receipts and observations remain `publicationEligible: false`;
 observations also remain `releaseAcceptance: false`. A successful job does not
 turn blocked or unobserved scenarios into full release acceptance.
 
+## Current delivery status
+
+The exact `1.0.8-beta.2` npm server and signed legacy bridge are now public.
+npm `beta` selects `1.0.8-beta.2`; `latest` remains stable `1.0.8`. Their exact
+registry/download bytes and signatures are verified in the publication receipt
+in [DEV_LOG.md](DEV_LOG.md). The matched desktop build 1234 and its legacy mirror
+remain drafts; the existing private test download is unchanged.
+
+This is an explicitly authorized Beta testing release, not complete coordinated
+release acceptance. Genuine authenticated provider-history preservation and
+active/queued provider work during migration remain unverified. The observations
+below keep their original scope and `releaseAcceptance: false` values.
+
+For an existing server saved in the private beta.2 app, let its work finish, then
+use **Settings → Updates → Retry server update** on one server first. Verify the
+reported version and reopen/continue an existing chat before retrying others.
+Compatible stable `1.0.8` servers must remain unchanged. Do not run a fresh npm
+installation over an existing managed server.
+
 ## Exact journey
 
 - Desktop baseline: published, update-enabled, signed/notarized AgentsDock
@@ -200,7 +219,8 @@ bc00e50d84743b60c63e335ccc1ccf812b50d5595fec29a0f4674543bec963a3  AgentsDock-1.0
 ```
 
 After comparing `shasum -a 256` output for both Downloads files, install the
-exact supplied npm archive, not the still-older floating `beta` registry tag:
+exact supplied npm archive. Keep this reproducible check pinned to its exact
+bytes rather than relying on a floating registry tag:
 
 ```sh
 cd "$HOME/Downloads"
@@ -239,8 +259,8 @@ migration, or active/queued-work preservation. Those require an older same-Beta
 server containing genuine provider sessions and queued work, followed through the
 exact signed updater/relaunch/coordinator journey in an authorized isolated
 replay. Do not install the hosted-runner origin/trust fixture on a working Mac or
-spoof its safeguards. Public feeds cannot deliver this candidate before it is
-published; manually copying the ZIP is not updater acceptance.
+spoof its safeguards. The server distributions are public, but the desktop
+candidate remains unpublished; manually copying its ZIP is not updater acceptance.
 
 Both preparation-failure and rollback observations bind the installation root
 to its original device/inode/owner. The audited signed installer intentionally

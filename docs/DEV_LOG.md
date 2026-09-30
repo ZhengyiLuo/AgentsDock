@@ -1,5 +1,32 @@
 # Public development log
 
+## 2026-09-29 — Publish the exact beta.2 npm server and signed legacy bridge
+
+- Publish `@agentsdock/server@1.0.8-beta.2` through the existing npm trusted
+  publisher in [run 36667259455](https://github.com/ZhengyiLuo/AgentsDock/actions/runs/36667259455).
+  The workflow and an independent registry download verify the original signed
+  archive, without rebuilding or re-signing. npm `beta` now selects this version;
+  `latest` remains `1.0.8`, with its original archive integrity unchanged.
+- Publish the matching [signed legacy Beta bridge](https://github.com/ZhengyiLuo/AgentsServer/releases/tag/v1.0.8-beta.2)
+  only after exact npm readback. Verify both public signatures, all three legacy
+  assets, source/export identity and parity across 118 runtime files and modes.
+  The legacy stable/latest release remains `v1.0.3`.
+- Both distributions retain canonical source
+  `7b01c4586e2c2cbe45bcd8b871e54b92a8aa7e37`; the standalone tag points to export
+  `06f4e1c610bf476c5de86d357c90802985f6d061`. The npm descriptor SHA-256 is
+  `d5ffca31a80df2312515421920c7390b4385a8167bc4bb25d6d4e6c99353c62a`;
+  the legacy descriptor SHA-256 is
+  `4d0fd35071f46d153235543864c042d0c74aef75c471640c7f5d28bbcc13284b`.
+- This explicitly authorized Beta publication proceeds with genuine authenticated
+  provider-history preservation and active/queued provider work still unverified.
+  Prior scoped native results retain their original limits and do not become full
+  release acceptance. The public bridge notes disclose these remaining checks.
+- The matched desktop beta.2 build 1234 remains a private test download; its
+  canonical and legacy-mirror releases remain drafts. No working installation
+  was restarted or changed. Existing testers can use **Retry server update** on
+  an idle server from Settings → Updates; do not run the fresh npm installer
+  over an existing managed installation.
+
 ## 2026-09-29 — Verify scoped native beta.2 journeys and stage sealed drafts
 
 - Run `36617217705`, attempt 1, passes real candidate-worker failure, installer
