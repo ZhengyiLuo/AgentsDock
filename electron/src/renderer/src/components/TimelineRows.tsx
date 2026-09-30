@@ -363,6 +363,7 @@ function RunActivity({ item, sessionId, profileScope }: { item: ProgressItem; se
   return <TraceDisclosure
     events={item.events}
     sessionId={sessionId}
+    promotedCommentaryIds={item.promotedCommentaryIds}
     includeCommentary
     runActivity={item}
     profileScope={profileScope}
@@ -423,9 +424,10 @@ function TraceDisclosure({
   const loadGeneration = useRef(0)
   const loadInFlight = useRef(false)
   const detailsId = useId()
+  const anchorEvents = runActivity?.sourceEvents ?? events
   const runId = useMemo(
-    () => events.find(event => event.run_id?.trim())?.run_id?.trim() || null,
-    [events]
+    () => anchorEvents.find(event => event.run_id?.trim())?.run_id?.trim() || null,
+    [anchorEvents]
   )
   const diffScope = JSON.stringify([sessionId, runId, resetKey, runActivity?.key])
   useEffect(() => setReasoningHistoryOpen(false), [diffScope])
@@ -443,8 +445,8 @@ function TraceDisclosure({
     // Callers that synthesize a run_id onto a runless status summary must pass
     // the newest real run-scoped sequence instead; the synthetic summary does
     // not belong to the server's indexed run bounds.
-    () => anchorSeq ?? (events.length ? Math.floor(Math.max(...events.map(event => event.seq))) : 0),
-    [anchorSeq, events]
+    () => anchorSeq ?? (anchorEvents.length ? Math.floor(Math.max(...anchorEvents.map(event => event.seq))) : 0),
+    [anchorSeq, anchorEvents]
   )
   useEffect(() => {
     loadGeneration.current++
