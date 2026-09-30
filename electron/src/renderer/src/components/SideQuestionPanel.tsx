@@ -1,12 +1,12 @@
 import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState, useSyncExternalStore } from 'react'
-import { ArrowDown, ArrowUp, Info, LoaderCircle, Square } from 'lucide-react'
+import { ArrowDown, ArrowUp, Info, Square } from 'lucide-react'
 import { t } from '@shared/i18n'
 import { sideChatSyncAvailable, sideChatRuntimeSettingsAvailable, sideQuestionLimit, sideQuestionsAvailable, type SideQuestionScope } from '@shared/side-questions'
 import type { Session } from '@shared/types'
 import { useLocale } from '../lib/i18n'
 import { SideChatController } from '../lib/side-chat'
 import { useAppStore } from '../store/app-store'
-import { MarkdownContent } from './MarkdownContent'
+import { SideChatResponse } from './SideChatResponse'
 import { SideChatRuntimeMenu } from './SideChatRuntimeMenu'
 import './SideQuestionPanel.css'
 
@@ -104,8 +104,7 @@ export function SideQuestionPanel({ session, scope, controller, active = true, f
       }}>
       {snapshot.exchanges.map(exchange => <div className="side-chat-exchange" key={exchange.id}>
         <div className="side-chat-user">{exchange.question}</div>
-        {exchange.answer && <div className="side-chat-assistant"><MarkdownContent text={exchange.answer} fold={false} /></div>}
-        {exchange.state === 'pending' && <p className="side-chat-status" role="status"><LoaderCircle className="spin" size={13} />{t('sideChat.answering')}</p>}
+        <SideChatResponse exchange={exchange} />
         {exchange.state === 'cancelled' && <p className="side-chat-status">{t('sideChat.cancelled')}</p>}
         {exchange.state === 'error' && <p className="side-chat-error" role="alert">{sideQuestionError(exchange.error)}</p>}
       </div>)}

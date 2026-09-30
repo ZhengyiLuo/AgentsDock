@@ -59,3 +59,21 @@
 .side-chat-popover { z-index: 80; display: flex; flex-direction: column; width: min(400px, calc(100vw - 24px)); max-height: min(520px, var(--radix-popover-content-available-height), calc(100dvh - 24px)); min-height: 0; overflow: hidden; color: var(--text); background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-dialog); box-shadow: var(--shadow-popover); }
 .side-chat-heading { display: flex; align-items: center; flex-shrink: 0; gap: var(--space-2); padding: var(--space-4) var(--space-5) var(--space-2) var(--space-7); }
 .side-chat-heading h3 { display: flex; align-items: center; flex: 1; min-width: 0; gap: var(--space-3); margin: 0; font-size: var(--text-size-label); font-weight: var(--text-weight-label); }
+.side-chat-assistant + .side-chat-assistant { margin-top: var(--space-5); }
+.side-chat-activity { margin: var(--space-4) 0; min-width: 0; }
+.side-chat-activity-toggle { display: flex; align-items: center; gap: var(--space-3); max-width: 100%; padding: var(--space-2) 0; background: transparent; color: var(--muted); font-size: var(--text-size-meta); text-align: left; }
+.side-chat-activity-toggle svg { flex-shrink: 0; }
+.side-chat-activity-toggle .is-open { transform: rotate(90deg); }
+.side-chat-activity-toggle span { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.side-chat-activity-toggle.is-active { animation: codex-activity-pulse 1.8s ease-in-out infinite; }
+.side-chat-activity-toggle:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.side-chat-activity-details { padding-left: var(--space-5); border-left: 1px solid var(--border); }
+.side-chat-reasoning { color: var(--muted); margin: var(--space-4) 0; overflow-wrap: anywhere; }
+.side-chat-reasoning small { font-size: var(--text-size-meta); }
+.side-chat-reasoning .markdown { color: inherit; font-size: var(--text-size-ui); }
+.side-chat-tool-detail { white-space: pre-wrap; overflow-wrap: anywhere; color: var(--muted); font-size: var(--text-size-meta); margin: var(--space-3) 0; }
+.side-chat-activity-toggle.is-expanded { float: right; margin-left: var(--space-3); }
+.side-chat-activity-toggle.is-expanded span { display: none; }
+.side-chat-reasoning .markdown strong { font-weight: 400; }
+.side-chat-activity.has-live-reasoning .side-chat-reasoning .markdown > :first-child { animation: codex-activity-pulse 1.8s ease-in-out infinite; }
+@media (prefers-reduced-motion: reduce) { .side-chat-activity-toggle.is-active, .side-chat-activity.has-live-reasoning .side-chat-reasoning .markdown > :first-child { animation: none; } }

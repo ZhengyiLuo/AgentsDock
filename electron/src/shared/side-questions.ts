@@ -151,6 +151,14 @@ export function parseSideQuestionAnswer(value: unknown, sessionId: string, reque
   return answer as SideQuestionAnswer
 }
 
+export interface SideChatActivityItem {
+  id: string
+  kind: 'reasoning_summary' | 'reasoning' | 'commentary' | 'answer' | 'tool'
+  text: string
+  status: 'running' | 'completed'
+  tool?: string
+}
+
 /** Server-owned side chat. Revisions survive clear and process restarts. */
 export interface SyncedSideChat {
   session_id: string
@@ -164,6 +172,7 @@ export interface SyncedSideChat {
     question: string
     status: 'running' | 'completed' | 'cancelled' | 'failed' | 'interrupted'
     answer?: string
+    activity?: SideChatActivityItem[]
     context_note?: string
     backend?: 'codex' | 'claude'
     error?: string
@@ -195,6 +204,17 @@ export function parseSyncedSideChat(value: unknown, sessionId: string): SyncedSi
       || [exchange.answer, exchange.context_note, exchange.error].some(value => value !== undefined && typeof value !== 'string')
       || typeof exchange.created_at !== 'string' || typeof exchange.updated_at !== 'string') {
       throw new Error('side_question_invalid_response')
+    }
+    if (exchange.activity !== undefined) {
+      const activityIds = new Set<string>()
+      if (!Array.isArray(exchange.activity) || exchange.activity.some(item => {
+        if (!item || typeof item.id !== 'string' || !item.id || activityIds.has(item.id)
+          || !['reasoning_summary', 'reasoning', 'commentary', 'answer', 'tool'].includes(item.kind)
+          || typeof item.text !== 'string' || !['running', 'completed'].includes(item.status)
+          || (item.tool !== undefined && typeof item.tool !== 'string')) return true
+        activityIds.add(item.id)
+        return false
+      })) throw new Error('side_question_invalid_response')
     }
     ids.add(exchange.request_id)
   }

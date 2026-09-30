@@ -1,4 +1,4 @@
-import { sideChatSyncAvailable, sideChatRuntimeSettingsAvailable, type SyncedSideChat, sideQuestionLimit, sideQuestionsAvailable, sideQuestionOwnerKey,
+import { sideChatSyncAvailable, sideChatRuntimeSettingsAvailable, type SyncedSideChat, type SideChatActivityItem, sideQuestionLimit, sideQuestionsAvailable, sideQuestionOwnerKey,
   SIDE_QUESTION_MAX_HISTORY_CHARS, SIDE_QUESTION_MAX_HISTORY_ITEMS,
   type SideQuestionHistoryItem, type SideQuestionScope } from '@shared/side-questions'
 import type { PublicServerProfile, Session } from '@shared/types'
@@ -8,6 +8,7 @@ export interface SideChatExchange {
   id: string
   question: string
   answer?: string
+  activity?: SideChatActivityItem[]
   state: 'pending' | 'answered' | 'cancelled' | 'error'
   error?: string
 }
@@ -167,7 +168,7 @@ export class SideChatController {
     if (chat.session_id !== sessionId || chat.revision < (before.revision ?? -1)) return
     const optimistic = this.optimistic.get(key)
     const exchanges: SideChatExchange[] = chat.exchanges.map(item => ({ id: item.request_id, question: item.question,
-      answer: item.answer, state: item.status === 'running' ? 'pending' : item.status === 'completed' ? 'answered'
+      answer: item.answer, activity: item.activity, state: item.status === 'running' ? 'pending' : item.status === 'completed' ? 'answered'
         : item.status === 'cancelled' ? 'cancelled' : 'error',
       error: item.status === 'interrupted' ? 'side_question_interrupted' : item.error }))
     // A read dispatched before POST acceptance may not contain our optimistic

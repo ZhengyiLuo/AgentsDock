@@ -5118,3 +5118,36 @@ Forget is in the API card's three-dot menu and requires confirmation.
 
 Future entries should describe public-facing changes and validation without
 including credentials, user data, private infrastructure, or internal history.
+
+
+### Native Codex Side chat live activity
+
+Synchronized Codex Side chat now forwards the provider's exposed reasoning
+summaries and reasoning text, commentary, compact tool activity and streamed
+answer text. Stable native item identities preserve order and replace deltas
+with completed aggregates without duplicate answers. Parent/child-thread
+messages, user input, control records and encrypted payloads are excluded.
+Progress is coalesced and persisted through the existing authenticated side
+conversation store and revision notifications. Partial activity survives
+cancellation, failures and reopening. Late updates cannot revive a cleared or
+cancelled exchange. Transient progress write failures retain the final answer
+for storage recovery without re-running the provider.
+
+The desktop shows a compact pulsing current-activity line and uses the existing
+Show reasoning traces setting during live reasoning. Completed and stopped
+activity collapses under either preference and remains expandable. Tool output
+is not substituted for reasoning. The final answer remains authoritative if
+a streamed item was partial. Claude's native /btw behavior is unchanged.
+
+Focused validation passed 132 server and 58 desktop tests, plus TypeScript
+and production compilation. Isolated offscreen desktop checks exercised real
+Settings clicks, native Codex, production IPC and authenticated HTTP with both
+normal and custom endpoint selection: live summaries, expanded text, reopening
+while running, commentary/tool/answer ordering, completion without duplication,
+cancellation with retained traces and another successful follow-up. The main
+turn and provider process remained active throughout. Model inference used
+synthetic loopback endpoints. These checks establish the streaming behavior,
+not a pixel-for-pixel comparison against an installed Codex desktop app.
+Server package/install/deploy manifests include the new progress module.
+Availability: local source; paired server deployment is required and awaits
+fresh approval. No production restart or deployment performed.
