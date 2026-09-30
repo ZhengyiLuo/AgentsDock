@@ -1,5 +1,22 @@
 # Public development log
 
+## 2026-09-29 — Windows beta.3 preparation remains blocked after one retry
+
+- Direct preparation run `36671146624`, attempt 2, fails again before Windows
+  packaging at the unchanged `team-attachment-cache.test.ts` restart/profile
+  purge test's five-second limit: 5,039 tests pass, one fails and 14 are skipped.
+  Native Windows verification is skipped and no Windows artifact is produced.
+  Do not classify the repeated failure as a cleared flaky run or retry again.
+- Source inspection identifies unconsumed test response bodies and asynchronous
+  close-versus-purge ordering as plausible Windows file-handle contention, not
+  an established cause. A focused Windows investigation is still required; no
+  test timeout, assertion, runtime source or frozen signed artifact is changed.
+- Preserve the successful original Linux x64/ARM64 artifacts and their exact
+  native-job provenance separately from the failed overall workflow. The private
+  notarized Mac build 1240, matching server archives and npm-native results remain
+  valid within their recorded scope. No public feed or working installation is
+  changed, and no complete cross-platform release acceptance is claimed.
+
 ## 2026-09-29 — Verify the private beta.3 Mac candidate, build 1240
 
 - Freeze runtime/build source at `09e573cc10330bbe60ffef544ba67ac9a71e69e4`

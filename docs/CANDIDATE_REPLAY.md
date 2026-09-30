@@ -17,6 +17,9 @@ The local sealed Mac/server transport is ready, but beta.3's one-click upgrade
 and legacy migration replay have not run. The only staged beta.3 GitHub draft
 is the npm candidate; there is no public beta.3 package or desktop feed entry.
 Do not use the floating npm `beta` tag expecting this private candidate.
+Linux x64/ARM64 packaging checks pass. Windows preparation fails the same
+attachment-cache test timeout on both attempts and has produced no package;
+the beta.3 candidate is not an accepted complete cross-platform release.
 
 The exact `1.0.8-beta.2` npm server and signed legacy bridge are now public.
 npm `beta` selects `1.0.8-beta.2`; `latest` remains stable `1.0.8`. Their exact
