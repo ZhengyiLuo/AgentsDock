@@ -1,3 +1,4 @@
+import { trackOperation } from './analytics'
 import { sideChatSyncAvailable, type SyncedSideChat, sideQuestionLimit, sideQuestionsAvailable, sideQuestionOwnerKey,
   SIDE_QUESTION_MAX_HISTORY_CHARS, SIDE_QUESTION_MAX_HISTORY_ITEMS,
   type SideQuestionHistoryItem, type SideQuestionScope } from '@shared/side-questions'
@@ -186,8 +187,8 @@ export class SideChatController {
     this.update(scope, session.id, state => ({ ...state, draft: '', pending: requestId, error: null,
       exchanges: [...state.exchanges, { id: requestId, question, state: 'pending' }] }))
     try {
-      const accepted = api.submit(scope, session.id, { request_id: requestId, question, side_chat_id: before.sideChatId,
-        ...(before.lastRequestId ? { after_request_id: before.lastRequestId } : {}) })
+      const accepted = trackOperation('side_chat_message_submitted', () => api.submit!(scope, session.id, { request_id: requestId, question, side_chat_id: before.sideChatId,
+        ...(before.lastRequestId ? { after_request_id: before.lastRequestId } : {}) }))
       this.optimistic.get(key)!.accepted = accepted
       const result = await accepted
       if (this.epoch !== epoch || !this.current(scope)) return
@@ -227,8 +228,9 @@ export class SideChatController {
       historyOmitted: false, exchanges: [...state.exchanges, { id: requestId, question, state: 'pending' }] }))
     const current = () => this.epoch === epoch && this.requests.get(key)?.requestId === requestId
     try {
-      const answer = await api.ask(scope, session.id, { request_id: requestId, question, side_chat_id: snapshot.sideChatId,
-        ...(snapshot.lastRequestId ? { after_request_id: snapshot.lastRequestId } : {}) })
+      const answer = await trackOperation('side_chat_message_submitted', () => api.ask(scope, session.id, { request_id: requestId, question, side_chat_id: snapshot.sideChatId,
+        ...(snapshot.lastRequestId ? { after_request_id: snapshot.lastRequestId } : {}) }),
+      value => value.request_id === requestId && value.session_id === session.id && value.backend === session.backend)
       if (!current()) return
       if (answer.request_id !== requestId || answer.session_id !== session.id || answer.backend !== session.backend) throw new Error('side_question_invalid_response')
       this.update(scope, session.id, state => ({ ...state, pending: null, lastRequestId: requestId, contextNote: answer.context_note ?? state.contextNote,
@@ -243,7 +245,7 @@ export class SideChatController {
     }
   }
 
-  async cancel(scope: SideQuestionScope, sessionId: string): Promise<void> {
+  async cancel(scope: SideQuestionScope, sessionId: string, userRequested = false): Promise<void> {
     const key = this.key(scope, sessionId)
     if (this.snapshot(scope, sessionId).synced) {
       const requestId = this.snapshot(scope, sessionId).pending
@@ -254,7 +256,8 @@ export class SideChatController {
         // otherwise DELETE could arrive before the request exists remotely.
         await this.optimistic.get(key)?.accepted?.catch(() => undefined)
         if (this.epoch !== epoch || !this.current(scope)) return
-        const result = await window.agentsDock.sideQuestions?.stop?.(scope, sessionId, requestId)
+        const stop = () => Promise.resolve(window.agentsDock.sideQuestions?.stop?.(scope, sessionId, requestId))
+        const result = await (userRequested ? trackOperation('side_chat_stop_requested', stop, value => Boolean(value)) : stop())
         if (result && this.epoch === epoch && this.current(scope)) this.applySynced(scope, sessionId, result)
       } catch {
         if (this.epoch === epoch && this.current(scope)) this.update(scope, sessionId, state => ({ ...state, error: 'side_question_cancel_failed' }))
@@ -267,7 +270,10 @@ export class SideChatController {
     this.update(scope, sessionId, state => ({ ...state, pending: null,
       exchanges: state.exchanges.map(item => item.id === request.requestId ? { ...item, state: 'cancelled' } : item) }))
     const epoch = this.epoch
-    try { await window.agentsDock.sideQuestions?.cancel(request.scope, sessionId, request.requestId) }
+    try {
+      const stop = () => window.agentsDock.sideQuestions!.cancel(request.scope, sessionId, request.requestId)
+      await (userRequested ? trackOperation('side_chat_stop_requested', stop) : stop())
+    }
     catch {
       if (this.epoch !== epoch || !this.snapshots.has(key)) return
       this.update(scope, sessionId, state => ({ ...state,

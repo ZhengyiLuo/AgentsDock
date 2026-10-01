@@ -3,6 +3,7 @@ import { LoaderCircle } from 'lucide-react'
 import { t } from '@shared/i18n'
 import type { CustomModelBackend, CustomModels } from '@shared/custom-models'
 import { useAppStore } from '../store/app-store'
+import { trackOperation } from '../lib/analytics'
 
 /** Read-only discovery on opening; choosing a default never runs inference. */
 export function CustomModelSettings({ backend, active, onSaved }: { backend: CustomModelBackend; active: boolean; onSaved: () => void }) {
@@ -36,8 +37,8 @@ export function CustomModelSettings({ backend, active, onSaved }: { backend: Cus
     const request = ++serial.current
     setSelected(model); setSaving(true); setFailed(false)
     try {
-      const result = await window.agentsDock.customModels.save({ profileId, profileGeneration }, backend,
-        { model: model || null, expected_revision: catalog.revision })
+      const result = await trackOperation('provider_default_model_saved', () => window.agentsDock.customModels!.save({ profileId, profileGeneration }, backend,
+        { model: model || null, expected_revision: catalog.revision }))
       if (serial.current !== request) return
       setCatalog({ ...catalog, ...result }); onSaved()
     } catch { if (serial.current === request) { setSelected(catalog.default_model ?? ''); setFailed(true) } }

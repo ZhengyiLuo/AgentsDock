@@ -1,6 +1,7 @@
 // Localized display strings use semantic catalog keys.
 import { t } from '@shared/i18n'
 import { useLocale } from '../lib/i18n'
+import { trackOperation } from '../lib/analytics'
 import { useEffect, useId, useMemo, useRef, useState, type FormEvent } from 'react'
 import * as Dialog from '@radix-ui/react-dialog'
 import * as Tooltip from '@radix-ui/react-tooltip'
@@ -256,7 +257,7 @@ export function CodexGoalBar() {
       statusActionInFlight.current = true
       setStatusAction({ status, pending: true, error: null })
       void run(async () => {
-        const snapshot = await requiredBridge().setGoal(session.id, { status })
+        const snapshot = await trackOperation(status === 'paused' ? 'goal_paused' : 'goal_resumed', () => requiredBridge().setGoal(session.id, { status }))
         if (epoch === statusActionEpoch.current) applyGoalSnapshot(snapshot)
       }).then(() => {
         if (epoch === statusActionEpoch.current) setStatusAction(null)
@@ -275,7 +276,7 @@ export function CodexGoalBar() {
   const clear = () => {
     setStatusAction(null)
     runSilently(run(async () => {
-      const snapshot = await requiredBridge().clearGoal(session.id)
+      const snapshot = await trackOperation('goal_cleared', () => requiredBridge().clearGoal(session.id))
       applyGoalSnapshot(snapshot)
     }))
   }
@@ -554,12 +555,12 @@ function GoalSettings({ onNotice, notice }: { onNotice(value: string): void; not
     setGoalAction('saving')
     setGoalActionError(null)
     void run(async () => {
-      const snapshot = await requiredBridge().setGoal(session.id, {
+      const snapshot = await trackOperation('goal_saved', () => requiredBridge().setGoal(session.id, {
         objective: trimmedObjective,
         status,
         token_budget: tokenBudgetResult.value,
         time_budget_seconds: timeBudgetResult.value
-      })
+      }))
       if (epoch !== actionEpoch.current) return
       const appliedToForm = applyGoalFormSnapshot(snapshot, submittedRevision)
       setGoalAction(appliedToForm ? 'saved' : 'idle')
@@ -583,7 +584,7 @@ function GoalSettings({ onNotice, notice }: { onNotice(value: string): void; not
     setGoalAction('clearing')
     setGoalActionError(null)
     void run(async () => {
-      const snapshot = await requiredBridge().clearGoal(session.id)
+      const snapshot = await trackOperation('goal_cleared', () => requiredBridge().clearGoal(session.id))
       if (epoch !== actionEpoch.current) return
       const appliedToForm = applyGoalFormSnapshot(snapshot, submittedRevision)
       setGoalAction('idle')

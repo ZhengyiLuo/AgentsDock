@@ -29,6 +29,7 @@ function submit(question = 'What does this step mean?') {
 function panel(target = session) { return <SideQuestionPanel session={target} scope={scope} controller={controller} /> }
 
 beforeEach(() => {
+  vi.mocked(fetch).mockClear()
   setLocale('en')
   controller = new SideChatController()
   ask = vi.fn()
