@@ -9,7 +9,7 @@ turn blocked or unobserved scenarios into full release acceptance.
 
 ## Current delivery status
 
-The newest prepared candidate is `1.0.8-beta.5`, build 1242, from source
+The newest published Beta is `1.0.8-beta.5`, build 1242, from source
 `85327b94a378c441949da5e775e265626743b6c6`. It adds bounded contention handling
 to the pinned installer preparation/activation path and retains the beta.4
 desktop contribution and admission/identity safeguards. Signed server bundles,
@@ -20,11 +20,14 @@ signed/notarized and independently verified. Exact-package Mac replay
 match their GitHub provenance and exact candidate pins. The signed app really
 replaces/relaunches, then automatically reconciles the reconnected server;
 the stable `1.0.8` no-downgrade case and scoped recovery checks also pass.
-Publication is recorded separately in [DEV_LOG.md](DEV_LOG.md). Receipt SHA-256:
+The exact npm, signed legacy bridge, desktop and mirror packages are public;
+publication is recorded separately in [DEV_LOG.md](DEV_LOG.md). This does not
+promote these scoped observations to full production acceptance. Receipt SHA-256:
 `fdcf48e5f256a21856a1b3e0475b467ebd903bb9c12ce8a466d57c7a07e4ee5f`;
 transport ZIP SHA-256:
 `4d479f1c9ee64f4784da2cdb52cda345c80187565a105cc5a324d8267b312b8e`.
-Stable npm `1.0.8` remains unchanged. Beta.4's frozen evidence below is retained;
+Npm `beta` selects `1.0.8-beta.5`; stable npm `1.0.8` remains unchanged.
+Beta.4's frozen evidence below is retained;
 none may be relabeled as beta.5 acceptance.
 
 The preceding candidate is `1.0.8-beta.4`, build 1241, from source

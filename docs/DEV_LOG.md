@@ -1,5 +1,46 @@
 # Public development log
 
+## 2026-10-01 — Publish matched desktop/server beta.5, build 1242
+
+- Publish [AgentsDock `1.0.8-beta.5`](https://github.com/ZhengyiLuo/AgentsDock/releases/tag/v1.0.8-beta.5)
+  and its [legacy desktop mirror](https://github.com/ZhengyiLuo/AgentsDock-Releases/releases/tag/v1.0.8-beta.5)
+  as Beta prereleases, never latest/stable. Both contain the same 16 verified
+  assets: signed/notarized universal macOS, Linux x64/ARM64, explicitly unsigned
+  Windows x64 preview, updater metadata and the pinned signed server descriptor.
+  Source remains `85327b94a378c441949da5e775e265626743b6c6`; later receipt-only
+  commits do not change the accepted payload. The scoped latest desktop
+  contribution is retained alongside the bounded server installer-lock fix.
+- Publish exact `@agentsdock/server@1.0.8-beta.5` first through
+  [36802430956](https://github.com/ZhengyiLuo/AgentsDock/actions/runs/36802430956),
+  then the [signed legacy bridge](https://github.com/ZhengyiLuo/AgentsServer/releases/tag/v1.0.8-beta.5),
+  then desktop and mirror. Npm's metadata became visible before its tarball;
+  publication waited for the exact public archive verification to pass. No
+  republish, rebuild, tag repair or approval bypass was used. Legacy export is
+  `86fec97aa7bc48fb22d505d49761c5d3e142a617`, preserving the existing trust key.
+- Public npm archive SHA-256:
+  `406a69593c78b8fc76d3fccf489c177c69316ef8e48c694f8a7263acc873a87d`.
+  Both desktop checksum-manifest SHA-256 values:
+  `07460d66d1f97713b83a8a0542c8e5f5e481ed8724fc9ef77b2a036690e366ae`.
+  Public delivery reuses the exact native-replay inputs recorded below.
+- Independently re-download the npm and legacy archives and verify signatures,
+  source, sizes and hashes against the accepted originals. Npm `beta` now
+  selects beta.5 while `latest` remains `1.0.8`. Compare the pre-publication
+  baseline after release: both stable desktop feeds remain `v1.0.6`, legacy
+  stable remains `v1.0.3`, and their release/asset identities and downloaded
+  metadata/archive bytes are unchanged. The stable npm tarball is unchanged.
+  The anonymously downloaded public Mac ZIP is byte-identical to the signed,
+  native-tested ZIP; both desktop repositories' feeds and signed descriptors
+  also match the sealed originals.
+- This is an authorized Beta testing release, not complete production
+  acceptance. Actual app replacement/relaunch, automatic server reconciliation,
+  offline/shared-client behavior, interrupted preparation/download retries,
+  Linux rollback/retry and stable-server no-downgrade were observed on isolated
+  native hosts. Real provider/native-history and busy/queued-work migration,
+  interactive installer choices, logout/reboot and Windows update journeys
+  remain unvalidated. Test an idle server first; do not treat this receipt as
+  validation of those remaining scenarios. No live installation or mobile
+  release was changed by publication.
+
 ## 2026-10-01 — Prepare beta.5 with bounded installer-lock contention
 
 - Retain the latest reviewed desktop contribution from beta.4 and prepare
