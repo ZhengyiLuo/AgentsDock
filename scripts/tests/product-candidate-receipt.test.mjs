@@ -5,7 +5,44 @@ import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { test } from 'node:test'
 import { assertCandidateCheckout, assertCandidateServerCheckout, assertCandidateRunner, assertCandidateServerRunner,
-  CANDIDATE_HARNESS_PATHS } from '../product-candidate-receipt.mjs'
+  CANDIDATE_HARNESS_PATHS, candidateAssets, candidateTrack, stableBaselineProfile, STABLE_BASELINES,
+  verifyBaselineDesktop, verifyBaselineServer } from '../product-candidate-receipt.mjs'
+import {STABLE_IDENTITY} from '../product_no_downgrade_desktop.mjs'
+
+test('only reviewed stable 1.0.9 extends the nonpublishing beta candidate contract', () => {
+  assert.equal(candidateTrack('1.0.9'), 'stable')
+  assert.equal(candidateTrack('1.0.8-beta.5'), 'beta')
+  for (const version of ['1.0.8', '1.0.10', '1.0.9-rc.1', '1.0.9+local', '1.0.9-beta.0']) assert.throws(() => candidateTrack(version))
+  assert(candidateAssets('1.0.9', 'stable').includes('latest-mac.yml'))
+  assert(!candidateAssets('1.0.9', 'stable').includes('beta-mac.yml'))
+})
+
+test('stable baseline profiles retain independent immutable source/archive identities', () => {
+  const stable = stableBaselineProfile('stable108', '1.0.9')
+  const {track, ...identity} = stable.server
+  assert.deepEqual(identity, STABLE_IDENTITY)
+  assert.equal(track, 'stable')
+  assert.equal(stable.desktop.version, '1.0.6')
+  assert.equal(stable.subscription, 'stable')
+  const beta = stableBaselineProfile('beta1085', '1.0.9')
+  assert.equal(beta.server.version, '1.0.8-beta.5')
+  assert.equal(beta.desktop.sourceSha, beta.server.sourceSha)
+  assert.equal(beta.subscription, 'beta')
+  assert(Object.isFrozen(STABLE_BASELINES) && Object.isFrozen(beta.server) && Object.isFrozen(beta.desktop))
+  for (const [name, version] of [['unknown', '1.0.9'], ['stable108', '1.0.8-beta.5'], ['beta1085', '1.0.10']]) assert.throws(() => stableBaselineProfile(name, version))
+})
+
+test('independent baseline verification rejects substituted bytes before trusting metadata', async t => {
+  const directory = mkdtempSync(join(tmpdir(), 'baseline-pins-unit-'))
+  t.after(() => rmSync(directory, {recursive: true, force: true}))
+  writeFileSync(join(directory, 'agents-server-npm-manifest.json'), '{}')
+  writeFileSync(join(directory, 'agents-server-npm-manifest.sig'), Buffer.alloc(64))
+  writeFileSync(join(directory, 'SHA256SUMS'), 'synthetic untrusted manifest')
+  for (const profile of ['stable108', 'beta1085']) {
+    await assert.rejects(() => verifyBaselineServer(profile, directory, '1.0.9'), /independently pinned/)
+    await assert.rejects(() => verifyBaselineDesktop(profile, directory, '1.0.9'), /independently pinned/)
+  }
+})
 
 // Pure guard tests with disposable Git repositories. The injected CI metadata
 // is synthetic; no native app/service/network/trust helper is ever invoked.
@@ -137,6 +174,40 @@ test('candidate workflow retains sealed artifact pins and supplies exact expecte
   assert.match(candidateJob, /\$\{\{ matrix\.kind \}\}-\$\{\{ matrix\.legacy_mode \}\}/)
 })
 
+test('stable-only matrix selects independent npm baselines without changing beta or publication guards', () => {
+  const workflow = readFileSync(new URL('../../.github/workflows/ci.yml', import.meta.url), 'utf8')
+  const inputs = readFileSync(new URL('../../.github/actions/product-candidate-inputs/action.yml', import.meta.url), 'utf8')
+  const job = workflow.slice(workflow.indexOf('  candidate-native:'), workflow.indexOf('  candidate-no-downgrade:'))
+  assert.match(job, /baseline_profile: \$\{\{ fromJSON\(inputs\.candidate_tag == 'candidate-replay-v1\.0\.9' && '\["legacy","stable108","beta1085"\]' \|\| '\["legacy"\]'\) \}\}/)
+  assert.match(job, /INSTALL_KIND=npm-baseline/)
+  assert.match(job, /--baseline-profile "\$BASELINE_PROFILE" --baseline-npm-directory/)
+  assert.match(job, /--baseline-version "\$BASELINE_DESKTOP_VERSION"/)
+  assert.match(job, /steps\.candidate\.outputs\.track/)
+  assert.match(inputs, /verify-baseline-server "\$BASELINE_PROFILE"/)
+  assert.match(inputs, /verify-baseline-desktop "\$BASELINE_PROFILE"/)
+  assert.match(inputs, /cmp "\$RUNNER_TEMP\/candidate-inputs\/baseline-registry\.tgz"/)
+  assert.match(inputs, /if \(expected\.sourceSha\) assert\.equal\(release\.targetCommitish, expected\.sourceSha\)/)
+  assert.match(inputs, /draft\.isDraft === true && draft\.isPrerelease === true/)
+  assert.doesNotMatch(job, /product-acceptance\.mjs|product-release-acceptance\.yml|releaseAcceptance: true|publicationEligible: true/)
+})
+
+test('candidate composite shell parses and profile gates reject out-of-scope selections before tools run', () => {
+  const inputs = readFileSync(new URL('../../.github/actions/product-candidate-inputs/action.yml', import.meta.url), 'utf8')
+  const script = inputs.split('      run: |\n')[1].replace(/^        /gm, '')
+  assert.equal(spawnSync('/bin/bash', ['-n'], {input: script}).status, 0)
+  const gate = script.slice(0, script.indexOf('case "$EXECUTION_SCOPE"'))
+  const env = {PATH: process.env.PATH, CANDIDATE_TAG: 'candidate-replay-v1.0.9', BASELINE_PROFILE: 'stable108',
+    EXECUTION_SCOPE: 'candidate', RECEIPT_SHA256: 'a'.repeat(64), BUNDLE_SHA256: 'b'.repeat(64)}
+  for (const change of [{}, {BASELINE_PROFILE: 'beta1085'}, {BASELINE_PROFILE: 'legacy'},
+    {BASELINE_PROFILE: 'legacy', CANDIDATE_TAG: 'candidate-replay-v1.0.8-beta.5'}]) {
+    assert.equal(spawnSync('/bin/bash', ['-c', gate], {env: {...env, ...change}}).status, 0)
+  }
+  for (const change of [{BASELINE_PROFILE: 'unknown'}, {CANDIDATE_TAG: 'candidate-replay-v1.0.8-beta.5'},
+    {CANDIDATE_TAG: 'candidate-replay-v1.0.10'}, {EXECUTION_SCOPE: 'candidate-server-linux'}, {RECEIPT_SHA256: 'wrong'}]) {
+    assert.notEqual(spawnSync('/bin/bash', ['-c', gate], {env: {...env, ...change}}).status, 0)
+  }
+})
+
 test('Linux rollback job has only explicit server scope, exact signed input pins and non-publishing bounded reports', () => {
   const workflow = readFileSync(new URL('../../.github/workflows/ci.yml', import.meta.url), 'utf8')
   const job = workflow.slice(workflow.indexOf('  candidate-server-rollback-linux:'), workflow.indexOf('  candidate-native:'))
@@ -199,11 +270,12 @@ test('the real manual input gate keeps npm-only validation and candidate replay 
     NPM_MANIFEST_SHA256: 'd'.repeat(64), NPM_SOURCE_SHA: 'a'.repeat(40) }
   const serverLinux = {...candidate, CANDIDATE_REPLAY: 'false', CANDIDATE_SERVER_ROLLBACK: 'true'}
   const run = env => spawnSync('/bin/bash', ['-e', '-c', script], { env, encoding: 'utf8' })
-  for (const env of [common, candidate, npm, serverLinux]) assert.equal(run(env).status, 0)
+  for (const env of [common, candidate, npm, serverLinux, {...candidate, CANDIDATE_TAG: 'candidate-replay-v1.0.9'}]) assert.equal(run(env).status, 0)
   for (const env of [{ ...candidate, NPM_NATIVE_VALIDATION: 'true' }, { ...npm, CANDIDATE_REPLAY: 'true' },
     { ...common, CANDIDATE_TAG: candidate.CANDIDATE_TAG }, { ...common, NPM_SOURCE_SHA: npm.NPM_SOURCE_SHA },
     { ...candidate, NPM_SOURCE_SHA: npm.NPM_SOURCE_SHA }, { ...candidate, CANDIDATE_RECEIPT_SHA256: '' },
-    { ...candidate, CANDIDATE_TAG: 'candidate-replay-v1.0.8' }, { ...candidate, GITHUB_EVENT_NAME: 'pull_request' },
+    { ...candidate, CANDIDATE_TAG: 'candidate-replay-v1.0.8' }, { ...candidate, CANDIDATE_TAG: 'candidate-replay-v1.0.10' },
+    { ...candidate, GITHUB_EVENT_NAME: 'pull_request' },
     { ...candidate, GITHUB_REPOSITORY: 'fork/AgentsDock' }, { ...candidate, GITHUB_REF: 'refs/heads/main' },
     { ...candidate, GITHUB_WORKFLOW_REF: `${candidate.GITHUB_WORKFLOW_REF}-other` },
     { ...candidate, GITHUB_SHA: 'main' }, { ...common, CANDIDATE_REPLAY: 'yes' },
@@ -225,7 +297,8 @@ test('candidate recovery rehearses one exact download failure and retry without 
   const workflow = readFileSync(new URL('../../.github/workflows/ci.yml', import.meta.url), 'utf8')
   const candidateJob = workflow.slice(workflow.indexOf('  candidate-native:'))
   assert.equal((candidateJob.match(/- kind: fresh/g) ?? []).length, 1)
-  for (const kind of ['legacy', 'recovery']) for (const mode of ['0755', '0750']) {
+  assert.match(candidateJob, /kind: \[legacy\]\n        legacy_mode: \['0755', '0750'\]/)
+  for (const kind of ['recovery', 'stage-recovery']) for (const mode of ['0755', '0750']) {
     assert(candidateJob.includes(`- kind: ${kind}\n            legacy_mode: '${mode}'`))
   }
   assert.match(candidateJob, /--legacy-root-mode "\$LEGACY_MODE"/)
@@ -293,7 +366,7 @@ test('stable no-downgrade is an isolated pinned fixture, not a weakened positive
   const workflow = readFileSync(new URL('../../.github/workflows/ci.yml', import.meta.url), 'utf8')
   const positive = workflow.slice(workflow.indexOf('  candidate-native:'), workflow.indexOf('  candidate-no-downgrade:'))
   const negative = workflow.slice(workflow.indexOf('  candidate-no-downgrade:'))
-  assert.match(negative, /github\.event_name == 'workflow_dispatch' && inputs\.candidate_replay && !inputs\.npm_native_validation/)
+  assert.match(negative, /github\.event_name == 'workflow_dispatch' && inputs\.candidate_replay && inputs\.candidate_tag != 'candidate-replay-v1\.0\.9' && !inputs\.npm_native_validation/)
   assert.match(negative, /github\.repository == 'ZhengyiLuo\/AgentsDock' && startsWith\(github\.ref, 'refs\/heads\/release\/'\)/)
   assert.match(negative, /needs: \[release-tooling, electron, mobile-source\]/)
   assert.match(negative, /runs-on: macos-15/)

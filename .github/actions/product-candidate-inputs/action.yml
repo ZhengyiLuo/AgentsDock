@@ -3,7 +3,7 @@ description: Read and verify one pinned test-only draft before any installation 
 inputs:
   candidate_tag:
     required: true
-    description: Exact unpublished candidate-replay-vX.Y.Z-beta.N tag
+    description: Exact unpublished numbered-beta or reviewed candidate-replay-v1.0.9 tag
   receipt_sha256:
     required: true
     description: Independently accepted candidate.json SHA-256
@@ -16,10 +16,19 @@ inputs:
   execution_scope:
     default: candidate
     description: candidate (macOS app/server) or candidate-server-linux (server rollback only)
+  baseline_profile:
+    default: legacy
+    description: legacy, or stable1.0.9-only stable108 or beta1085
 outputs:
   version:
     value: ${{ steps.inputs.outputs.version }}
-    description: Verified beta version
+    description: Verified candidate version
+  track:
+    value: ${{ steps.inputs.outputs.track }}
+    description: Verified candidate payload track
+  baseline_version:
+    value: ${{ steps.inputs.outputs.baseline_version }}
+    description: Independently verified desktop baseline version
 runs:
   using: composite
   steps:
@@ -31,11 +40,13 @@ runs:
         RECEIPT_SHA256: ${{ inputs.receipt_sha256 }}
         BUNDLE_SHA256: ${{ inputs.bundle_sha256 }}
         EXECUTION_SCOPE: ${{ inputs.execution_scope }}
+        BASELINE_PROFILE: ${{ inputs.baseline_profile }}
       run: |
         set -euo pipefail
         umask 077
-        [[ "$CANDIDATE_TAG" =~ ^candidate-replay-v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)-beta\.[1-9][0-9]*$ ]]
-        [[ "$RECEIPT_SHA256" =~ ^[a-f0-9]{64}$ && "$BUNDLE_SHA256" =~ ^[a-f0-9]{64}$ ]]
+        [[ "$CANDIDATE_TAG" == candidate-replay-v1.0.9 || "$CANDIDATE_TAG" =~ ^candidate-replay-v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)-beta\.[1-9][0-9]*$ ]] || exit 1
+        [[ "$BASELINE_PROFILE" == legacy || ( "$CANDIDATE_TAG" == candidate-replay-v1.0.9 && "$EXECUTION_SCOPE" == candidate && ( "$BASELINE_PROFILE" == stable108 || "$BASELINE_PROFILE" == beta1085 ) ) ]] || exit 1
+        [[ "$RECEIPT_SHA256" =~ ^[a-f0-9]{64}$ && "$BUNDLE_SHA256" =~ ^[a-f0-9]{64}$ ]] || exit 1
         case "$EXECUTION_SCOPE" in
           candidate)
             RUNNER_OPERATION=validate-runner
@@ -76,6 +87,7 @@ runs:
         assert(receipt.sourceRef === process.env.GITHUB_REF_NAME)
         assert(process.env.CANDIDATE_TAG === `candidate-replay-v${receipt.version}`)
         console.log(`version=${receipt.version}`)
+        console.log(`track=${receipt.track}`)
         NODE
         PRODUCT_VERSION="$(node -p 'JSON.parse(require("fs").readFileSync(process.argv[1])).version' "$RUNNER_TEMP/candidate-inputs/candidate.json")"
         ARTIFACT_SOURCE_SHA="$(node -p 'JSON.parse(require("fs").readFileSync(process.argv[1])).sourceSha' "$RUNNER_TEMP/candidate-inputs/candidate.json")"
@@ -85,8 +97,9 @@ runs:
           --source-ref "$GITHUB_REF_NAME" --version "$PRODUCT_VERSION" --signer-run-id "$SIGNER_RUN" \
           --report "$RUNNER_TEMP/candidate-inputs/server-import-live.json" > /dev/null
         cmp "$RUNNER_TEMP/candidate-inputs/server-import-live.json" "$RUNNER_TEMP/candidate-inputs/payload/server-import.json"
-        # The desktop is the published stable package; the real signed server
-        # baseline is already on Beta. The app selects Beta before installation.
+        # Retain the original signed legacy archive path. Beta candidates select
+        # Beta in the app; the reviewed stable candidate keeps Stable selected.
+        if [[ "$BASELINE_PROFILE" == legacy ]]; then
         BASELINE_PAIRS=(AgentsServer:1.0.7-beta.21)
         if [[ "$EXECUTION_SCOPE" == candidate ]]; then BASELINE_PAIRS+=(AgentsDock-Releases:1.0.6); fi
         for pair in "${BASELINE_PAIRS[@]}"; do
@@ -112,6 +125,45 @@ runs:
         gh release download v1.0.7-beta.21 --repo ZhengyiLuo/AgentsServer \
           --pattern agents-server-1.0.7-beta.21.tar.gz --pattern agents-server-manifest.json --pattern agents-server-manifest.sig \
           --dir "$RUNNER_TEMP/candidate-inputs/baseline-server"
+        echo 'baseline_version=1.0.6' >> "$GITHUB_OUTPUT"
+        else
+          # Independent incumbent identities, never substituted into candidate receipts.
+          read -r BASELINE_REPO BASELINE_VERSION BASELINE_TRACK BASELINE_SERVER_VERSION < <(
+            node --input-type=module - "$BASELINE_PROFILE" "$PRODUCT_VERSION" <<'NODE'
+        import {stableBaselineProfile} from './scripts/product-candidate-receipt.mjs'
+        const profile = stableBaselineProfile(process.argv[2], process.argv[3])
+        console.log([profile.desktop.repository, profile.desktop.version, profile.desktop.track, profile.server.version].join(' '))
+        NODE
+          )
+          gh release view "v$BASELINE_VERSION" --repo "ZhengyiLuo/$BASELINE_REPO" \
+            --json tagName,isDraft,isPrerelease,targetCommitish > "$RUNNER_TEMP/candidate-inputs/baseline-release.json"
+          node --input-type=module - "$RUNNER_TEMP/candidate-inputs/baseline-release.json" "$BASELINE_PROFILE" "$PRODUCT_VERSION" <<'NODE'
+        import assert from 'node:assert/strict'
+        import {readFileSync} from 'node:fs'
+        import {stableBaselineProfile} from './scripts/product-candidate-receipt.mjs'
+        const release = JSON.parse(readFileSync(process.argv[2]))
+        const expected = stableBaselineProfile(process.argv[3], process.argv[4]).desktop
+        assert(release.tagName === `v${expected.version}` && release.isDraft === false && release.isPrerelease === (expected.track === 'beta'))
+        if (expected.sourceSha) assert.equal(release.targetCommitish, expected.sourceSha)
+        NODE
+          BASELINE_METADATA=latest-mac.yml
+          if [[ "$BASELINE_TRACK" == beta ]]; then BASELINE_METADATA=beta-mac.yml; fi
+          gh release download "v$BASELINE_VERSION" --repo "ZhengyiLuo/$BASELINE_REPO" \
+            --pattern "AgentsDock-$BASELINE_VERSION-mac-universal.zip" --pattern SHA256SUMS --pattern "$BASELINE_METADATA" \
+            --dir "$RUNNER_TEMP/candidate-inputs/baseline-desktop"
+          gh release download "npm-candidate-v$BASELINE_SERVER_VERSION" --repo ZhengyiLuo/AgentsDock \
+            --pattern "server-$BASELINE_SERVER_VERSION.tgz" --pattern agents-server-npm-manifest.json --pattern agents-server-npm-manifest.sig \
+            --dir "$RUNNER_TEMP/candidate-inputs/baseline-server"
+          BASELINE_REGISTRY_STATUS="$(curl --disable --fail --silent --show-error --proto '=https' --tlsv1.2 --max-time 120 \
+            "https://registry.npmjs.org/@agentsdock/server/-/server-$BASELINE_SERVER_VERSION.tgz" \
+            --output "$RUNNER_TEMP/candidate-inputs/baseline-registry.tgz" --write-out '%{http_code}')"
+          test "$BASELINE_REGISTRY_STATUS" = 200
+          cmp "$RUNNER_TEMP/candidate-inputs/baseline-registry.tgz" "$RUNNER_TEMP/candidate-inputs/baseline-server/server-$BASELINE_SERVER_VERSION.tgz"
+          node scripts/product-candidate-receipt.mjs verify-baseline-server "$BASELINE_PROFILE" "$RUNNER_TEMP/candidate-inputs/baseline-server" "$PRODUCT_VERSION" > /dev/null
+          node scripts/product-candidate-receipt.mjs verify-baseline-desktop "$BASELINE_PROFILE" "$RUNNER_TEMP/candidate-inputs/baseline-desktop" "$PRODUCT_VERSION" > /dev/null
+          replay_baseline=(--baseline-desktop "$RUNNER_TEMP/candidate-inputs/baseline-desktop" --baseline-version "$BASELINE_VERSION")
+          echo "baseline_version=$BASELINE_VERSION" >> "$GITHUB_OUTPUT"
+        fi
         node scripts/product-release-replay.mjs inspect --scope "$EXECUTION_SCOPE" \
           --receipt "$RUNNER_TEMP/candidate-inputs/candidate.json" --receipt-sha256 "$RECEIPT_SHA256" \
           --server-assets "$RUNNER_TEMP/candidate-inputs/payload/server" --desktop-assets "$RUNNER_TEMP/candidate-inputs/payload/desktop" \

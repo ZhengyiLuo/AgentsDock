@@ -12,7 +12,7 @@ import { test } from 'node:test'
 import { expectedAssets } from '../direct-release-mirror.mjs'
 import { assertReplayReadiness, assertReplayRunner, consumeReplayFault, createCandidateReplay, createCandidateServerReplay, createProductReplay, createReplayStartupDiagnostics,
   finalizeReplayListener, parseReplayArguments, parseReplayOriginProbe, parseReplayProbeDiagnostics, parseReplayRange,
-  parseReplayStartupDiagnostics, probeReplayOrigin, readReplayMetadata, serveProductReplay } from '../product-release-replay.mjs'
+  parseReplayStartupDiagnostics, probeReplayOrigin, readReplayMetadata, replayBaselineMetadata, serveProductReplay } from '../product-release-replay.mjs'
 import { assertCandidateRunner, candidateAssets, inspectCandidate, validateCandidateReceipt } from '../product-candidate-receipt.mjs'
 import { newestCompatibleReleaseFromAtom } from '../../electron/src/main/updater-feed.mjs'
 
@@ -91,9 +91,9 @@ async function consume(response) {
   } finally { await response.dispose() }
 }
 
-function scopedFixture(t) {
-  const f = fixture(t), names = candidateAssets(f.value.version, 'beta'), desktopAssets = {}
-  for (const name of expectedAssets(f.value.version, 'beta', true)) {
+function scopedFixture(t, version) {
+  const f = fixture(t, version), names = candidateAssets(f.value.version, f.value.track), desktopAssets = {}
+  for (const name of expectedAssets(f.value.version, f.value.track, true)) {
     if (!names.includes(name)) rmSync(join(f.options.desktopDirectory, name))
   }
   const sums = names.filter(name => name !== 'SHA256SUMS').map(name => `${hash(readFileSync(join(f.options.desktopDirectory, name)))}  ${name}`).join('\n') + '\n'
@@ -130,6 +130,31 @@ test('test-only macOS scope verifies exact signed bytes but cannot enter product
   assert.throws(() => validateCandidateReceipt({ ...f.value, sourceRef: 'release/bad.lock' }))
   writeFileSync(join(f.root, 'server-import.json'), 'changed')
   await assert.rejects(() => createCandidateReplay(f.options), /import report/)
+})
+
+test('reviewed stable candidate exposes exact stable routes but stays publication-ineligible', async t => {
+  const f = scopedFixture(t, '1.0.9'), replay = await createCandidateReplay(f.options)
+  assert.equal(replay.identity.kind, 'candidate')
+  assert.equal(replay.identity.track, 'stable')
+  assert.equal(replay.identity.publicationEligible, false)
+  assert(replay.inventory().some(item => item.url.endsWith('/latest/download/latest-mac.yml')))
+  assert(!replay.inventory().some(item => item.url.endsWith('/beta-mac.yml')))
+  const latest = await replay.respond({method: 'GET', host: 'api.github.com', path: '/repos/ZhengyiLuo/AgentsDock/releases/latest'})
+  assert.equal(JSON.parse(await consume(latest)).prerelease, false)
+  await assert.rejects(() => createProductReplay(f.options), /candidate/)
+  assert.throws(() => validateCandidateReceipt({...f.value, track: 'beta'}))
+  assert.throws(() => validateCandidateReceipt({...f.value, version: '1.0.10'}))
+})
+
+test('baseline routing keeps beta metadata and strict version order confined to stable 1.0.9', () => {
+  assert.deepEqual(replayBaselineMetadata('1.0.8-beta.5', '1.0.9', true),
+    {track: 'beta', metadata: 'beta-mac.yml', prerelease: true})
+  assert.deepEqual(replayBaselineMetadata('1.0.6', '1.0.9', true),
+    {track: 'stable', metadata: 'latest-mac.yml', prerelease: false})
+  assert.equal(replayBaselineMetadata('1.0.6', '1.0.8-beta.5', true).track, 'stable')
+  for (const args of [['1.0.8-beta.5', '1.0.9', false], ['1.0.8-beta.4', '1.0.9', true],
+    ['1.0.8-beta.5', '1.0.9-beta.1', true], ['1.0.9', '1.0.9', true], ['1.0.10', '1.0.9', true],
+    ['1.0.8', '1.0.9', true], ['1.0.6+local', '1.0.9', true]]) assert.throws(() => replayBaselineMetadata(...args))
 })
 
 test('candidate verifies original signer transport and every macOS artifact hash', async t => {

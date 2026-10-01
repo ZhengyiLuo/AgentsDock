@@ -5,7 +5,7 @@ import { test } from 'node:test'
 import { assertCurrentPairedServer, assertDesktopRunner, assertOlderVersion, assertSharedOperation, boundedNativeLog,
   assertStableDiscovery, assertVisibleCoordinatedRow, checksumForMacArchive, collectReconciliationSnapshot, collectSharedOperationSnapshot, emitNativeProgress,
   migrationCoverage, parseDesktopAcceptanceArguments, parseReconciliationSnapshot, parseSharedOperationSnapshot, reconciliationSnapshot,
-  retainSharedOperationObservation,
+  retainSharedOperationObservation, desktopJourney,
   terminalReconciliationFailure, validateDesktopFixture } from '../product_desktop_acceptance.mjs'
 
 // These are harness contract tests only: no app/service installation, native
@@ -29,6 +29,27 @@ const status = () => ({ currentVersion: identity.version, serverUpdates: [record
 const health = () => ({ ok: true, server_identity: fixture().serverIdentity,
   server_instance_id: 'new-service-instance', server_version: identity.version,
   gateway: { version: identity.version }, execution_service: { version: identity.version, maintenance_held: false } })
+
+test('stable baseline subscriptions are preserved instead of forced through Beta', () => {
+  assert.deepEqual(desktopJourney('1.0.9', '1.0.6', 'stable108'),
+    {initialTrack: 'stable', installedTrack: 'stable', switchToBeta: false})
+  assert.deepEqual(desktopJourney('1.0.9', '1.0.8-beta.5', 'beta1085'),
+    {initialTrack: 'beta', installedTrack: 'beta', switchToBeta: false})
+  assert.deepEqual(desktopJourney('1.0.9', '1.0.6'),
+    {initialTrack: 'stable', installedTrack: 'stable', switchToBeta: false})
+  assert.deepEqual(desktopJourney('1.0.8-beta.5', '1.0.6'),
+    {initialTrack: 'stable', installedTrack: 'beta', switchToBeta: true})
+  for (const args of [['1.0.8-beta.5', '1.0.6', 'stable108'], ['1.0.9', '1.0.8-beta.4', 'beta1085'],
+    ['1.0.9', '1.0.6', 'unknown'], ['1.0.9', '1.0.8-beta.5', 'legacy']]) assert.throws(() => desktopJourney(...args))
+})
+
+test('stable candidate discovery requires exact downloaded stable version', () => {
+  const status = {track: 'stable', state: 'downloaded', availableVersion: '1.0.9', checkedAt: '2026-09-30T00:00:00Z'}
+  assert.equal(assertStableDiscovery(status, '1.0.9').availableVersion, '1.0.9')
+  for (const change of [{track: 'beta'}, {state: 'not-available'}, {availableVersion: '1.0.8'}, {checkedAt: undefined}]) {
+    assert.throws(() => assertStableDiscovery({...status, ...change}, '1.0.9'))
+  }
+})
 
 test('native progress prints only a fixed phase and canonical timestamp', () => {
   const lines = [], write = line => lines.push(line)

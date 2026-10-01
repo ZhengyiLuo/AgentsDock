@@ -8,12 +8,73 @@ import { dirname, join, resolve } from 'node:path'
 import { execFileSync } from 'node:child_process'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { verifyServerBundleIdentity } from './product-release.mjs'
+import { validateDescriptor } from './stage_coordinated_release.mjs'
+import { verifyArchiveBytes } from './verify_npm_publication.mjs'
 
 const HASH = /^[a-f0-9]{64}$/
 const SHA = /^[a-f0-9]{40}$/
 const digest = bytes => createHash('sha256').update(bytes).digest('hex')
 export const CANDIDATE_KIND = 'agentsdock-macos-candidate'
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..')
+// Stable support is deliberately scoped to this reviewed release, not an
+// authorization to turn arbitrary stable packages into production acceptance.
+export function candidateTrack(version) {
+  if (version === '1.0.9') return 'stable'
+  assert(typeof version === 'string' && /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)-beta\.[1-9]\d*$/.test(version),
+    'Candidate rehearsal requires a numbered beta or the reviewed stable 1.0.9')
+  return 'beta'
+}
+
+const DESKTOP_106 = Object.freeze({ version: '1.0.6', track: 'stable', repository: 'AgentsDock-Releases',
+  checksumSha256: '4bbe9fb4db61234542116f5de518872ebd4f2aa0805b1c06afd2032282eed828',
+  zipSha256: '1ca6530cf72818d26e68af571f77d2eb0473e0e7b07923358f696b4a1673b7ee',
+  metadataSha256: '88dfc858c4390eb1544603bb37c07cc43f4b1bf4e12ef1efd3567fa58008268e' })
+export const STABLE_BASELINES = Object.freeze({
+  stable108: Object.freeze({ desktop: DESKTOP_106, subscription: 'stable', server: Object.freeze({ version: '1.0.8', track: 'stable',
+    sourceSha: '8a965007408c6ab9672d746366b9fc0bd58feff6',
+    manifestSha256: '64881777ab0ebf8ad029ec1f4f1212e1699f9ee7a1d62420ae32e5f3dcfe7198',
+    signatureSha256: 'e224f89215b2b0d047a49aa0264ff803ef96c3ea71a6a39985b68eef67b6f18d',
+    archiveSha256: 'c9846ca863312478f64979cc579feea521902dc23c15f0f30ca5eebdb544808f', archiveBytes: 3721335 }) }),
+  beta1085: Object.freeze({ desktop: Object.freeze({ version: '1.0.8-beta.5', track: 'beta', repository: 'AgentsDock',
+    sourceSha: '85327b94a378c441949da5e775e265626743b6c6',
+    checksumSha256: '07460d66d1f97713b83a8a0542c8e5f5e481ed8724fc9ef77b2a036690e366ae',
+    zipSha256: 'dc481f894ef6fe4607f8d439722b7c526f1e795f8e0ac6ce13e7af070ef29299',
+    metadataSha256: '767711f1a1cf8049f73feaa2a095f4d3905e1dc10ee54ff8d70b8d45d8961f6f' }), subscription: 'beta',
+    server: Object.freeze({ version: '1.0.8-beta.5', track: 'beta', sourceSha: '85327b94a378c441949da5e775e265626743b6c6',
+      manifestSha256: '43fc9b2ebbdca7df6040dcc0536adf96a8cdd408a4e88cf9e3e7809e8886d858',
+      signatureSha256: '615187db81d9d56e6d3ae962d164087f1905cb95582207ae4e11562433eaf019',
+      archiveSha256: '406a69593c78b8fc76d3fccf489c177c69316ef8e48c694f8a7263acc873a87d', archiveBytes: 3722548 }) })
+})
+
+export function stableBaselineProfile(name, candidateVersion) {
+  assert(candidateVersion === '1.0.9' && Object.hasOwn(STABLE_BASELINES, name), 'Unknown stable 1.0.9 baseline profile')
+  return STABLE_BASELINES[name]
+}
+
+export async function verifyBaselineServer(name, directory, candidateVersion) {
+  const expected = stableBaselineProfile(name, candidateVersion).server
+  const manifest = await regular(join(directory, 'agents-server-npm-manifest.json'), 8192)
+  const signature = await regular(join(directory, 'agents-server-npm-manifest.sig'), 64)
+  assert.equal(digest(manifest), expected.manifestSha256, 'Baseline descriptor differs from independently pinned bytes')
+  assert.equal(digest(signature), expected.signatureSha256, 'Baseline signature differs from independently pinned bytes')
+  const descriptor = validateDescriptor(manifest, signature, await regular(join(ROOT, 'server/release-public-key.pem'), 4096), expected.version)
+  assert(descriptor.commit === expected.sourceSha && descriptor.track === expected.track
+    && descriptor.prerelease === (expected.track === 'beta') && descriptor.archive.sha256 === expected.archiveSha256
+    && descriptor.archive.size === expected.archiveBytes, 'Baseline server identity differs')
+  verifyArchiveBytes(await regular(join(directory, `server-${expected.version}.tgz`), expected.archiveBytes), descriptor)
+  return { ...expected }
+}
+
+export async function verifyBaselineDesktop(name, directory, candidateVersion) {
+  const expected = stableBaselineProfile(name, candidateVersion).desktop
+  assert.equal(digest(await regular(join(directory, 'SHA256SUMS'), 65536)), expected.checksumSha256,
+    'Baseline public checksum manifest differs from independently pinned bytes')
+  assert.equal((await fileIdentity(join(directory, `AgentsDock-${expected.version}-mac-universal.zip`))).sha256,
+    expected.zipSha256, 'Baseline desktop ZIP differs from independently pinned bytes')
+  assert.equal(digest(await regular(join(directory, `${expected.track === 'beta' ? 'beta' : 'latest'}-mac.yml`))),
+    expected.metadataSha256, 'Baseline channel metadata differs from independently pinned bytes')
+  return { ...expected }
+}
 // This narrow list is for retrying test infrastructure against unchanged sealed
 // artifacts. Runtime sources, build scripts/configuration and production gates
 // are deliberately absent. Renames are enumerated as delete+add by the guard.
@@ -78,8 +139,7 @@ export function candidateAssets(version, track) {
 export function validateCandidateReceipt(value) {
   assert(value?.schema === 1 && value.kind === CANDIDATE_KIND && value.scope === 'darwin-app-server'
     && value.publicationEligible === false, 'Not an explicitly non-publishing macOS candidate receipt')
-  assert(/^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)-beta\.[1-9]\d*$/.test(value.version)
-    && value.track === 'beta', 'Candidate rehearsal is restricted to an opt-in beta')
+  assert(value.track === candidateTrack(value.version), 'Candidate version and track differ')
   assert(SHA.test(value.sourceSha) && SHA.test(value.exportSha), 'Candidate source/export pins must be full commit SHAs')
   assertCandidateSource(value)
   assert(/^[1-9]\d{0,3}$/.test(value.buildNumber), 'Candidate needs its explicit native build reservation')
@@ -188,12 +248,13 @@ export async function inspectCandidate({ receiptPath, receiptSha256, serverDirec
 export async function sealCandidate({ serverDirectory, desktopDirectory, destination, sourceSha, sourceRef,
   version, buildNumber, exportSha, signerRunId, signerRunAttempt }) {
   const desktopAssets = {}
-  assert.deepEqual((await readdir(desktopDirectory)).sort(), candidateAssets(version, 'beta'))
-  for (const name of candidateAssets(version, 'beta')) desktopAssets[name] = await fileIdentity(join(desktopDirectory, name))
+  const track = candidateTrack(version)
+  assert.deepEqual((await readdir(desktopDirectory)).sort(), candidateAssets(version, track))
+  for (const name of candidateAssets(version, track)) desktopAssets[name] = await fileIdentity(join(desktopDirectory, name))
   const importBytes = await regular(join(dirname(serverDirectory), 'server-import.json'))
   const imported = JSON.parse(importBytes)
   const receipt = { schema: 1, kind: CANDIDATE_KIND, scope: 'darwin-app-server', publicationEligible: false,
-    version, track: 'beta', sourceSha, sourceRef, buildNumber, exportSha, signerRunId, signerRunAttempt,
+    version, track, sourceSha, sourceRef, buildNumber, exportSha, signerRunId, signerRunAttempt,
     serverImportSha256: digest(importBytes), signerArtifactDigest: imported.signerArtifactDigest,
     npmManifestSha256: digest(await regular(join(serverDirectory, 'npm/agents-server-npm-manifest.json'))),
     legacyManifestSha256: digest(await regular(join(serverDirectory, 'legacy/agents-server-manifest.json'))),
@@ -209,7 +270,10 @@ export async function sealCandidate({ serverDirectory, desktopDirectory, destina
 
 async function main() {
   const [operation, ...args] = process.argv.slice(2)
-  if (operation === 'validate-runner' || operation === 'validate-server-runner') {
+  if (operation === 'verify-baseline-server' || operation === 'verify-baseline-desktop') {
+    assert(args.length === 3, 'Usage: verify-baseline-{server|desktop} PROFILE DIRECTORY CANDIDATE_VERSION')
+    console.log(JSON.stringify(await (operation === 'verify-baseline-server' ? verifyBaselineServer : verifyBaselineDesktop)(...args)))
+  } else if (operation === 'validate-runner' || operation === 'validate-server-runner') {
     assert(args.length === 2, 'Usage: product-candidate-receipt.mjs validate-runner RECEIPT SHA256')
     const bytes = await regular(args[0])
     assert(HASH.test(args[1]) && digest(bytes) === args[1], 'Candidate receipt differs from independently accepted bytes')

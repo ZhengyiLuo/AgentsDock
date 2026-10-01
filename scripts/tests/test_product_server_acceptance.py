@@ -2,6 +2,7 @@
 import copy
 import argparse
 import ast
+from contextlib import ExitStack
 import importlib.util
 import io
 import http.server
@@ -27,6 +28,167 @@ SPEC.loader.exec_module(MOD)
 
 
 class NativeServerAcceptanceUnitTests(unittest.TestCase):
+    @staticmethod
+    def npm_baseline_identity(profile):
+        return {"version": MOD.NPM_BASELINE_VERSIONS[profile], "track": "stable" if profile == "stable108" else "beta",
+                "sourceSha": "b" * 40, "manifestSha256": "c" * 64, "signatureSha256": "d" * 64,
+                "archiveSha256": "e" * 64, "archiveBytes": 123}
+
+    def test_npm_baseline_cli_arguments_and_scope_fail_before_installation(self):
+        common = ["bootstrap", "--receipt", "/receipt", "--bundle", "/bundle", "--work", "/work",
+                  "--fixture", "/fixture", "--evidence", "/evidence", "--receipt-sha256", "f" * 64]
+        args = MOD.parser().parse_args([*common, "--candidate", "--kind", "npm-baseline",
+                                       "--baseline-profile", "stable108", "--baseline-npm-directory", "/runner/baseline"])
+        receipt = {"version": "1.0.9"}
+        with patch.object(MOD.sys, "platform", "darwin"), patch.dict(os.environ, {"RUNNER_TEMP": "/runner"}):
+            MOD.validate_baseline_arguments(args, receipt)
+            cases = [{"candidate": False}, {"candidate_server_linux": True}, {"kind": "fresh"}, {"kind": "legacy"},
+                     {"baseline_profile": None}, {"baseline_profile": "beta"}, {"baseline_npm_directory": None},
+                     {"baseline_npm_directory": Path("/outside")}, {"baseline_archive": Path("/legacy.tgz")},
+                     {"staging_failure_fixture": True}, {"legacy_root_mode": "0777"}, {"operation": "verify"}]
+            for change in cases:
+                with self.subTest(change=change), patch.object(MOD, "ensure_empty") as empty, \
+                        patch.object(MOD, "command") as command, self.assertRaises(RuntimeError):
+                    MOD.bootstrap(argparse.Namespace(**{**vars(args), **change}), receipt, Path("/account"))
+                empty.assert_not_called()
+                command.assert_not_called()
+            for version in ("1.0.8", "1.0.9-beta.1", "1.0.10"):
+                with self.assertRaises(RuntimeError): MOD.validate_baseline_arguments(args, {"version": version})
+            with patch.object(MOD.sys, "platform", "linux"), self.assertRaises(RuntimeError):
+                MOD.validate_baseline_arguments(args, receipt)
+            with patch.object(MOD, "verify_npm_baseline", side_effect=RuntimeError("Unverified baseline")), \
+                    patch.object(MOD, "ensure_empty") as empty, patch.object(MOD, "command") as command, \
+                    self.assertRaisesRegex(RuntimeError, "Unverified baseline"):
+                MOD.bootstrap(args, receipt, Path("/account"))
+            empty.assert_not_called()
+            command.assert_not_called()
+            loaded = argparse.Namespace(**{**vars(args), "operation": "verify", "baseline_profile": None,
+                                           "baseline_npm_directory": None})
+            MOD.validate_baseline_arguments(loaded, receipt)
+
+    def test_npm_baseline_verifier_requires_exact_profile_and_bounded_distinct_identity(self):
+        for profile in MOD.NPM_BASELINE_VERSIONS:
+            expected = self.npm_baseline_identity(profile)
+            result = subprocess.CompletedProcess([], 0, json.dumps(expected).encode(), b"")
+            with patch.object(MOD, "command", return_value=result) as command:
+                self.assertEqual(MOD.verify_npm_baseline(profile, Path("/baseline"), "1.0.9"), expected)
+                self.assertEqual(command.call_args.args[0][2:], ["verify-baseline-server", profile, "/baseline", "1.0.9"])
+            for change in ({"version": "1.0.9"}, {"track": "rc"}, {"sourceSha": "invalid"},
+                           {"manifestSha256": "invalid"}, {"archiveBytes": True}, {"archiveBytes": -1}, {"accepted": True}):
+                result.stdout = json.dumps({**expected, **change}).encode()
+                with patch.object(MOD, "command", return_value=result), self.assertRaises(RuntimeError):
+                    MOD.verify_npm_baseline(profile, Path("/baseline"), "1.0.9")
+        for profile, version in (("unknown", "1.0.9"), ("stable108", "1.0.9-beta.1"), ("beta1085", "1.0.8-beta.5")):
+            with patch.object(MOD, "command") as command, self.assertRaises(RuntimeError):
+                MOD.verify_npm_baseline(profile, Path("/baseline"), version)
+            command.assert_not_called()
+
+    def test_npm_baseline_installation_policy_does_not_relax_candidate_or_other_files(self):
+        original = MOD.installed_runtime_mode
+        member = tarfile.TarInfo("package/server/instances.sh")
+        member.mode = 0o644
+        installer = b'chmod 755 "$STAGE_DIR/instances.sh"\n'
+        self.assertEqual(original(member, installer), 0o644)
+        with MOD.npm_baseline_installation_policy("1.0.8"):
+            self.assertEqual(MOD.installed_runtime_mode(member, installer), 0o755)
+            for invalid in (b"", b"# " + installer, installer + installer):
+                with self.assertRaises(RuntimeError): MOD.installed_runtime_mode(member, invalid)
+            member.name = "package/server/unrelated.sh"
+            self.assertEqual(MOD.installed_runtime_mode(member, installer), 0o644)
+        self.assertIs(MOD.installed_runtime_mode, original)
+        member.name = "package/server/instances.sh"
+        with MOD.npm_baseline_installation_policy("1.0.8-beta.5"):
+            self.assertEqual(MOD.installed_runtime_mode(member, installer), 0o644)
+        with self.assertRaises(RuntimeError), MOD.npm_baseline_installation_policy("1.0.9"):
+            self.fail("Candidate mode policy must not be changed.")
+        with self.assertRaisesRegex(RuntimeError, "fixture error"):
+            with MOD.npm_baseline_installation_policy("1.0.8"):
+                raise RuntimeError("fixture error")
+        self.assertIs(MOD.installed_runtime_mode, original)
+
+    def test_npm_baseline_bootstrap_uses_baseline_cli_and_retires_both_prefixes_before_restart(self):
+        for profile in MOD.NPM_BASELINE_VERSIONS:
+            for root_mode in ("0755", "0750"):
+                with self.subTest(profile=profile, root_mode=root_mode), tempfile.TemporaryDirectory() as temporary, ExitStack() as stack:
+                    root = Path(temporary).resolve()
+                    home, work, bundle, inputs = (root / name for name in ("account", "work", "candidate", "baseline"))
+                    home.mkdir()
+                    (bundle / "npm").mkdir(parents=True)
+                    inputs.mkdir()
+                    identity = self.npm_baseline_identity(profile)
+                    baseline = identity["version"]
+                    for name in ("agents-server-npm-manifest.json", "agents-server-npm-manifest.sig", f"server-{baseline}.tgz"):
+                        (inputs / name).write_bytes(b"independently verified fixture input")
+                    (bundle / "npm/agents-server-npm-manifest.json").write_text(json.dumps({"archive": {"name": "server-1.0.9.tgz"}}))
+                    args = argparse.Namespace(operation="bootstrap", kind="npm-baseline", candidate=True, candidate_server_linux=False,
+                        baseline_profile=profile, baseline_npm_directory=inputs, work=work, bundle=bundle,
+                        fixture=work / "fixture.json", receipt_sha256="f" * 64, legacy_root_mode=root_mode)
+                    receipt = {"version": "1.0.9", "sourceSha": "a" * 40}
+                    events = []
+                    def verified(selected, directory, target):
+                        self.assertEqual((selected, target), (profile, "1.0.9"))
+                        events.append(("verify", directory))
+                        return copy.deepcopy(identity)
+                    def command(argv, **kwargs):
+                        events.append(("command", argv))
+                        if argv[0] == "npm":
+                            self.assertGreaterEqual(sum(event[0] == "verify" for event in events), 2)
+                            Path(argv[argv.index("--prefix") + 1]).mkdir()
+                            Path(kwargs["env"]["npm_config_cache"]).mkdir()
+                            return subprocess.CompletedProcess(argv, 0, b"", b"")
+                        is_baseline = "npm-baseline-prefix" in argv[1]
+                        if argv[-1] == "--version":
+                            return subprocess.CompletedProcess(argv, 0, (baseline if is_baseline else "1.0.9").encode(), b"")
+                        if "--port" in argv:
+                            self.assertTrue(is_baseline, "Candidate CLI must never install over the baseline.")
+                            for path in MOD.paths(home).values(): path.mkdir(parents=True, mode=0o700)
+                            install = MOD.paths(home)["installRoot"]
+                            (install / "releases" / baseline).mkdir(parents=True)
+                            (install / "current").symlink_to(install / "releases" / baseline)
+                            return subprocess.CompletedProcess(argv, 0, b"", b"")
+                        self.assertFalse(is_baseline)
+                        self.assertEqual(kwargs["allowed"], (1,))
+                        return subprocess.CompletedProcess(argv, 1, b"", b"existing installation")
+                    def restart(fixture, action):
+                        self.assertEqual(action, "restart")
+                        for name in ("npm-prefix", "npm-cache", "npm-baseline-prefix", "npm-baseline-cache"):
+                            self.assertFalse((work / name).exists())
+                            self.assertTrue((work / f"{name}-retired").exists())
+                        self.assertEqual(Path(fixture["installRoot"]).stat().st_mode & 0o777, int(root_mode, 8))
+                        events.append(("restart", None))
+                    def runtime(fixture, runtime_bundle, version):
+                        self.assertEqual((runtime_bundle, version), (work / "npm-baseline-bundle", baseline))
+                        self.assertIn(("restart", None), events)
+                        return 118
+                    stack.enter_context(patch.object(MOD.sys, "platform", "darwin"))
+                    stack.enter_context(patch.dict(os.environ, {"RUNNER_TEMP": str(root), "GITHUB_RUN_ID": "123",
+                                                               "GITHUB_RUN_ATTEMPT": "1", "GITHUB_SHA": "a" * 40}))
+                    for name, replacement in (("verify_npm_baseline", verified), ("command", command), ("service", restart),
+                                              ("verify_installed_runtime", runtime)):
+                        stack.enter_context(patch.object(MOD, name, side_effect=replacement))
+                    for name, value in (("ensure_empty", None), ("token_at", "private-token"), ("registered_services", []),
+                                        ("request", {"session": {"id": "fixture"}}), ("state_snapshot", self.snapshot())):
+                        stack.enter_context(patch.object(MOD, name, return_value=value))
+                    health_values = [{"server_identity": "fixture", "server_instance_id": instance} for instance in ("first", "first", "restarted")]
+                    health = stack.enter_context(patch.object(MOD, "health", side_effect=health_values))
+                    fixture, observations = MOD.bootstrap(args, receipt, home)
+                    self.assertEqual(fixture["sourceSha"], receipt["sourceSha"])
+                    self.assertEqual(fixture["targetVersion"], "1.0.9")
+                    self.assertEqual(fixture["baselineVersion"], baseline)
+                    self.assertEqual(fixture["baselineIdentity"], identity)
+                    self.assertEqual(observations["exactBaselineRuntimeFilesCompared"], 118)
+                    for key in ("providerChatObserved", "nonemptyProviderHistoryObserved", "queuedUserMessageObserved",
+                                "busyWorkObserved", "logoutOrRebootObserved"):
+                        self.assertIs(observations[key], False)
+                    self.assertTrue(all(call.args[1] == baseline for call in health.call_args_list))
+                    loaded_args = argparse.Namespace(fixture=args.fixture, receipt_sha256=args.receipt_sha256, work=work,
+                                                     candidate=True, candidate_server_linux=False, kind="fresh")
+                    self.assertEqual(MOD.load_fixture(loaded_args, receipt, home)["baselineIdentity"], identity)
+                    fixture["baselineIdentity"]["sourceSha"] = receipt["sourceSha"]
+                    MOD.write_private(args.fixture, fixture, replace=True)
+                    with self.assertRaisesRegex(RuntimeError, "baseline differs"):
+                        MOD.load_fixture(loaded_args, receipt, home)
+
     def test_real_http_gateway_transients_are_narrow_and_never_healthy_json(self):
         response = {"status": 503, "payload": b"temporary unavailable gateway text"}
         class Handler(http.server.BaseHTTPRequestHandler):
@@ -920,16 +1082,16 @@ class NativeServerAcceptanceUnitTests(unittest.TestCase):
         installed_executables.discard("agentsdock_team_hub")  # directory, not runtime file
         self.assertEqual(installed_executables, package_executables | {"agent_server.py"})
 
-    def staging_case(self, root):
+    def staging_case(self, root, version="1.0.9"):
         home, work, bundle = root / "account", root / "agentsdock-acceptance-fixture", root / "bundle"
         home.mkdir(mode=0o700)
         work.mkdir(mode=0o700)
         installer = (Path(MOD.__file__).resolve().parents[1] / "server/install.sh").read_bytes()
-        receipt = {"sourceSha": "a" * 40, "version": "1.0.8-beta.2", "track": "beta"}
+        receipt = {"sourceSha": "a" * 40, "version": version, "track": "beta" if "-beta." in version else "stable"}
         # Package real audited installer bytes but NEVER execute the installer.
         for distribution, manifest, archive_name, member_name in (
-            ("npm", "agents-server-npm-manifest.json", "server-1.0.8-beta.2.tgz", "package/server/install.sh"),
-            ("legacy", "agents-server-manifest.json", "agents-server-1.0.8-beta.2.tar.gz", "agents-server-1.0.8-beta.2/install.sh"),
+            ("npm", "agents-server-npm-manifest.json", f"server-{version}.tgz", "package/server/install.sh"),
+            ("legacy", "agents-server-manifest.json", f"agents-server-{version}.tar.gz", f"agents-server-{version}/install.sh"),
         ):
             (bundle / distribution).mkdir(parents=True)
             archive = bundle / distribution / archive_name
@@ -1121,10 +1283,10 @@ class NativeServerAcceptanceUnitTests(unittest.TestCase):
                     # must reject this coupled replacement.
                     installer = (stage / "install.sh").read_bytes()
                     with tarfile.open(archive, "w:gz") as package:
-                        member = tarfile.TarInfo("agents-server-1.0.8-beta.2/install.sh")
+                        member = tarfile.TarInfo("agents-server-1.0.9/install.sh")
                         member.size, member.mode = len(installer), 0o755
                         package.addfile(member, io.BytesIO(installer))
-                        changed = tarfile.TarInfo("agents-server-1.0.8-beta.2/changed")
+                        changed = tarfile.TarInfo("agents-server-1.0.9/changed")
                         changed.size = 8
                         package.addfile(changed, io.BytesIO(b"modified"))
                     descriptor["archive"].update(size=archive.stat().st_size, sha256=MOD.sha(archive.read_bytes()))
@@ -1135,7 +1297,7 @@ class NativeServerAcceptanceUnitTests(unittest.TestCase):
                     receipt["legacyManifestSha256"] = MOD.sha(manifest.read_bytes())
                 if change == "archive": (args.bundle / "legacy" / descriptor["archive"]["name"]).write_bytes(b"different")
                 if change == "reviewed-policy":
-                    with patch.object(MOD, "ROOT_NORMALIZING_INSTALLER_SHA256", "0" * 64), self.assertRaises(RuntimeError):
+                    with patch.object(MOD, "STABLE109_ROOT_NORMALIZING_INSTALLER_SHA256", "0" * 64), self.assertRaises(RuntimeError):
                         MOD.root_normalization_contract(args.bundle, receipt)
                 elif change == "canonical-source":
                     with patch.object(MOD, "ROOT", args.work), self.assertRaises(OSError):
@@ -1143,7 +1305,7 @@ class NativeServerAcceptanceUnitTests(unittest.TestCase):
                 elif change:
                     with self.assertRaises(RuntimeError): MOD.root_normalization_contract(args.bundle, receipt)
                 else:
-                    self.assertEqual(MOD.root_normalization_contract(args.bundle, receipt), MOD.ROOT_NORMALIZING_INSTALLER_SHA256)
+                    self.assertEqual(MOD.root_normalization_contract(args.bundle, receipt), MOD.STABLE109_ROOT_NORMALIZING_INSTALLER_SHA256)
 
     def test_root_normalization_never_relaxes_mode_inode_owner_or_contract(self):
         before = {"rootMode": 0o755, "rootIdentity": [1, 2, os.getuid()]}
@@ -1159,6 +1321,19 @@ class NativeServerAcceptanceUnitTests(unittest.TestCase):
         for mode in (0o775, 0o777, 0o600, None, True):
             with self.assertRaises(RuntimeError): MOD.verify_root_normalization({**before, "rootMode": mode}, after, pin)
         with self.assertRaises(RuntimeError): MOD.verify_root_normalization(before, after, "f" * 64)
+
+    def test_stable109_installer_pin_is_version_scoped_and_old_beta_policy_is_retained(self):
+        self.assertEqual(MOD.ROOT_NORMALIZING_INSTALLER_SHA256,
+                         "1ad0dc6fc8255959cbd15da08239331401f44467760490818a5669f6f3f75f15")
+        self.assertEqual(MOD.STABLE109_ROOT_NORMALIZING_INSTALLER_SHA256, MOD.sha((MOD.ROOT / "server/install.sh").read_bytes()))
+        for version in ("1.0.8-beta.5", "1.0.9-beta.1", "1.0.10"):
+            with self.subTest(version=version), tempfile.TemporaryDirectory() as temporary:
+                args, _, receipt, *_ = self.staging_case(Path(temporary).resolve(), version)
+                with self.assertRaisesRegex(RuntimeError, "not the reviewed exact implementation"):
+                    MOD.root_normalization_contract(args.bundle, receipt)
+        before = {"rootMode": 0o750, "rootIdentity": [1, 2, os.getuid()]}
+        self.assertTrue(MOD.verify_root_normalization(before, {**before, "rootMode": 0o700},
+                            MOD.STABLE109_ROOT_NORMALIZING_INSTALLER_SHA256)["signedInstallerRootNormalizationObserved"])
 
     def test_native_root_observation_refuses_replacement_inode_and_symlink(self):
         with tempfile.TemporaryDirectory() as temporary:

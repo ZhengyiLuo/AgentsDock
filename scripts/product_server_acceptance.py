@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import argparse
 import base64
+from contextlib import contextmanager
 import hashlib
 import http.client
 import io
@@ -50,6 +51,10 @@ SESSION_KEYS = ("id", "title", "folder", "cwd", "backend", "model", "effort",
 # Keep this whole-file pin: changed installer logic requires another review,
 # not a looser source-pattern match or a changed signed candidate.
 ROOT_NORMALIZING_INSTALLER_SHA256 = "1ad0dc6fc8255959cbd15da08239331401f44467760490818a5669f6f3f75f15"
+# Reviewed stable 1.0.9 changes add only codex_side_chat_progress.py to the
+# runtime inventory and compile/import checks; lock and permission rules match.
+STABLE109_ROOT_NORMALIZING_INSTALLER_SHA256 = "52b6212d6bd00fdf2b071cbd5ec8f01ea16aa43df58f77352dadca17ee96ffc4"
+NPM_BASELINE_VERSIONS = {"stable108": "1.0.8", "beta1085": "1.0.8-beta.5"}
 ROLLBACK_STAGES = {"preflight", "start-request", "observe-rollback", "rollback-proof", "preservation",
                    "retry-request", "retry-health", "retry-completion", "retry-verification"}
 
@@ -1297,6 +1302,27 @@ def verify_installed_runtime(fixture: dict, bundle: Path, version: str) -> int:
     return count
 
 
+@contextmanager
+def npm_baseline_installation_policy(version: str):
+    """Exact old stable installer rule, never a change to candidate policy."""
+    global installed_runtime_mode
+    need(version in NPM_BASELINE_VERSIONS.values(), "Unsupported npm baseline runtime policy.")
+    original = installed_runtime_mode
+
+    def mode(member, installer):
+        if version == "1.0.8" and member.name == "package/server/instances.sh" and member.mode & 0o7777 == 0o644:
+            need(installer.splitlines().count(b'chmod 755 "$STAGE_DIR/instances.sh"') == 1,
+                 "Signed stable baseline installer does not establish the instance entrypoint mode.")
+            return 0o755
+        return original(member, installer)
+
+    installed_runtime_mode = mode
+    try:
+        yield
+    finally:
+        installed_runtime_mode = original
+
+
 def wait_update_complete(fixture: dict, version: str, *, timeout: int = 180) -> None:
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
@@ -1403,10 +1429,12 @@ def root_normalization_contract(bundle: Path, receipt: dict) -> str:
                  "Root-normalization package must contain one bounded installer.")
             with package.extractfile(members[0]) as stream:
                 installers.append(stream.read(2 * 1024 * 1024 + 1))
+    expected_hash = (STABLE109_ROOT_NORMALIZING_INSTALLER_SHA256 if version == "1.0.9"
+                     else ROOT_NORMALIZING_INSTALLER_SHA256)
     need(installers[0] == installers[1] == read_regular(ROOT / "server/install.sh", 2 * 1024 * 1024)
-         and sha(installers[0]) == ROOT_NORMALIZING_INSTALLER_SHA256,
+         and sha(installers[0]) == expected_hash,
          "Signed installer root-normalization behavior is not the reviewed exact implementation.")
-    return ROOT_NORMALIZING_INSTALLER_SHA256
+    return expected_hash
 
 
 def native_root_state(fixture: dict) -> dict:
@@ -1417,7 +1445,7 @@ def native_root_state(fixture: dict) -> dict:
 
 
 def verify_root_normalization(before: dict, after: dict, installer_hash: str) -> dict:
-    need(installer_hash == ROOT_NORMALIZING_INSTALLER_SHA256,
+    need(installer_hash in {ROOT_NORMALIZING_INSTALLER_SHA256, STABLE109_ROOT_NORMALIZING_INSTALLER_SHA256},
          "Root normalization requires the reviewed signed installer contract.")
     identity = before.get("rootIdentity")
     need(isinstance(identity, list) and len(identity) == 3
@@ -1892,6 +1920,50 @@ def checks_for(operation: str, kind: str, observations: dict, *, migrated: bool 
     return [{"name": f"server-{operation}", "status": "passed", "observations": observations}]
 
 
+def validate_baseline_arguments(args: argparse.Namespace, receipt: dict) -> None:
+    kind = getattr(args, "kind", "fresh")
+    profile = getattr(args, "baseline_profile", None)
+    directory = getattr(args, "baseline_npm_directory", None)
+    operation = getattr(args, "operation", "bootstrap")
+    if kind != "npm-baseline":
+        need(profile is None and directory is None, "Npm baseline arguments require the npm-baseline kind.")
+        return
+    need(getattr(args, "candidate", False) and not getattr(args, "candidate_server_linux", False)
+         and sys.platform == "darwin" and receipt.get("version") == "1.0.9"
+         and not getattr(args, "staging_failure_fixture", False),
+         "Npm baselines require the scoped stable 1.0.9 candidate macOS journey.")
+    need(not any(getattr(args, key, None) is not None for key in
+                 ("baseline_archive", "baseline_manifest", "baseline_signature")),
+         "Npm and legacy baseline inputs cannot be combined.")
+    if operation == "bootstrap":
+        need(isinstance(profile, str) and profile in NPM_BASELINE_VERSIONS and isinstance(directory, Path),
+             "Npm baseline bootstrap requires an exact baseline profile and directory.")
+        need(args.legacy_root_mode in {"0755", "0750"}, "Unsupported baseline installation-root mode.")
+        contained(directory, Path(os.environ.get("RUNNER_TEMP", "")))
+    else:
+        need(profile is None and directory is None, "Loaded fixtures use their already-bound npm baseline inputs.")
+
+
+def verify_npm_baseline(profile: str, directory: Path, candidate_version: str) -> dict:
+    """The shared verifier authenticates independent pins, signature and archive."""
+    need(isinstance(profile, str) and profile in NPM_BASELINE_VERSIONS and candidate_version == "1.0.9",
+         "Unknown stable 1.0.9 npm baseline profile.")
+    checked = command(["node", str(ROOT / "scripts/product-candidate-receipt.mjs"),
+                       "verify-baseline-server", profile, str(directory), candidate_version], timeout=90)
+    identity = json.loads(checked.stdout)
+    expected_keys = {"version", "track", "sourceSha", "manifestSha256", "signatureSha256", "archiveSha256", "archiveBytes"}
+    need(isinstance(identity, dict) and set(identity) == expected_keys
+         and identity.get("version") == NPM_BASELINE_VERSIONS[profile]
+         and identity.get("track") == ("stable" if profile == "stable108" else "beta")
+         and isinstance(identity.get("sourceSha"), str) and re.fullmatch(r"[a-f0-9]{40}", identity["sourceSha"])
+         and all(isinstance(identity.get(key), str) and re.fullmatch(r"[a-f0-9]{64}", identity[key])
+                 for key in ("manifestSha256", "signatureSha256", "archiveSha256"))
+         and type(identity.get("archiveBytes")) is int and 0 < identity["archiveBytes"] <= 200 * 1024 * 1024
+         and version_order(identity["version"]) < version_order(candidate_version),
+         "Independent baseline verification returned an unexpected identity.")
+    return identity
+
+
 def load_fixture(args: argparse.Namespace, receipt: dict, home: Path) -> dict:
     value = json.loads(read_regular(args.fixture, private=True))
     need(value.get("schema") == 1 and value.get("runId") == os.environ["GITHUB_RUN_ID"]
@@ -1902,6 +1974,17 @@ def load_fixture(args: argparse.Namespace, receipt: dict, home: Path) -> dict:
          and value.get("sourceSha") == receipt["sourceSha"] and value.get("releaseReceiptSha256") == args.receipt_sha256
          and value.get("home") == str(home) and value.get("workDirectory") == str(args.work)
          and value.get("targetVersion") == receipt["version"], "Fixture belongs to another account, run or candidate.")
+    if "baselineProfile" in value or "baselineIdentity" in value:
+        need(getattr(args, "candidate", False) and not getattr(args, "candidate_server_linux", False)
+             and sys.platform == "darwin" and receipt.get("version") == "1.0.9",
+             "Npm baseline fixture cannot leave its candidate macOS scope.")
+        directory = args.work / "npm-baseline-bundle/npm"
+        contained(directory, args.work)
+        identity = verify_npm_baseline(value.get("baselineProfile"), directory, receipt["version"])
+        need(value.get("baselineIdentity") == identity and value.get("baselineVersion") == identity["version"],
+             "Fixture baseline differs from its independent signed identity.")
+    else:
+        need(getattr(args, "kind", "fresh") != "npm-baseline", "Fixture has no independently bound npm baseline.")
     for key, expected in paths(home).items():
         need(value.get(key) == str(expected), "Fixture points outside the owned default installation.")
         info = owned_directory(expected)
@@ -1910,9 +1993,24 @@ def load_fixture(args: argparse.Namespace, receipt: dict, home: Path) -> dict:
 
 
 def bootstrap(args: argparse.Namespace, receipt: dict, home: Path) -> tuple[dict, dict]:
+    validate_baseline_arguments(args, receipt)
+    baseline_identity = (verify_npm_baseline(args.baseline_profile, args.baseline_npm_directory, receipt["version"])
+                         if args.kind == "npm-baseline" else None)
     ensure_empty(home)
     args.work.mkdir(mode=0o700)
     env = child_environment(args.work)
+    baseline_bundle = args.work / "npm-baseline-bundle"
+    if baseline_identity is not None:
+        directory = baseline_bundle / "npm"
+        directory.mkdir(parents=True, mode=0o700)
+        for name in ("agents-server-npm-manifest.json", "agents-server-npm-manifest.sig",
+                     f"server-{baseline_identity['version']}.tgz"):
+            target = directory / name
+            with target.open("xb") as stream:
+                stream.write(read_regular(args.baseline_npm_directory / name, 200 * 1024 * 1024))
+            target.chmod(0o600)
+        need(verify_npm_baseline(args.baseline_profile, directory, receipt["version"]) == baseline_identity,
+             "Npm baseline changed while creating its owned fixture copy.")
     if getattr(args, "staging_failure_fixture", False):
         prepare_stage_fault_delegate(args, receipt, home, env)
     with socket.socket() as listener:
@@ -1937,6 +2035,20 @@ def bootstrap(args: argparse.Namespace, receipt: dict, home: Path) -> tuple[dict
         baseline = receipt["version"]
         command(["node", str(cli), "install", "--port", str(port), "--bind", "127.0.0.1", "--non-interactive"],
                 env=env, timeout=1500)
+    elif args.kind == "npm-baseline":
+        baseline = baseline_identity["version"]
+        fixture.update(baselineProfile=args.baseline_profile, baselineIdentity=baseline_identity)
+        baseline_prefix = args.work / "npm-baseline-prefix"
+        baseline_env = {**env, "npm_config_cache": str(args.work / "npm-baseline-cache")}
+        command(["npm", "install", "--ignore-scripts", "--no-audit", "--no-fund", "--package-lock=false",
+                 "--prefix", str(baseline_prefix), str(baseline_bundle / "npm" / f"server-{baseline}.tgz")],
+                env=baseline_env, timeout=180)
+        baseline_cli = baseline_prefix / "node_modules/@agentsdock/server/npm/cli.cjs"
+        need(command(["node", str(baseline_cli), "--version"], env=baseline_env).stdout.decode().strip() == baseline,
+             "Installed exact baseline npm tarball has the wrong CLI version.")
+        command(["node", str(baseline_cli), "install", "--port", str(port), "--bind", "127.0.0.1", "--non-interactive"],
+                env=baseline_env, timeout=1500)
+        Path(fixture["installRoot"]).chmod(int(args.legacy_root_mode, 8))
     else:
         source, baseline = legacy_source(args, args.work, receipt["version"])
         command(["/bin/bash", str(source / "install.sh"), "--release-version", baseline,
@@ -1962,6 +2074,10 @@ def bootstrap(args: argparse.Namespace, receipt: dict, home: Path) -> tuple[dict
     prefix.rename(args.work / "npm-prefix-retired")
     if (args.work / "npm-cache").exists():
         (args.work / "npm-cache").rename(args.work / "npm-cache-retired")
+    if args.kind == "npm-baseline":
+        baseline_prefix.rename(args.work / "npm-baseline-prefix-retired")
+        if (args.work / "npm-baseline-cache").exists():
+            (args.work / "npm-baseline-cache").rename(args.work / "npm-baseline-cache-retired")
     if args.kind == "legacy":
         (args.work / "legacy-source").rename(args.work / "legacy-source-retired")
     service(fixture, "restart")
@@ -1983,14 +2099,23 @@ def bootstrap(args: argparse.Namespace, receipt: dict, home: Path) -> tuple[dict
     rejections = rejection_checks(fixture, args.bundle, baseline) if args.kind == "fresh" else {}
     if args.kind == "fresh":
         rejections["exactRuntimeFilesCompared"] = verify_installed_runtime(fixture, args.bundle, baseline)
+    elif args.kind == "npm-baseline":
+        need(verify_npm_baseline(args.baseline_profile, baseline_bundle / "npm", receipt["version"]) == baseline_identity,
+             "Installed baseline no longer matches its independently verified package.")
+        with npm_baseline_installation_policy(baseline):
+            rejections["exactBaselineRuntimeFilesCompared"] = verify_installed_runtime(fixture, baseline_bundle, baseline)
     write_private(args.fixture, fixture)
     return fixture, {"exactNpmPackageInstalled": True, "nativeServiceInstalled": True,
                      "existingInstallRefusedWithoutRestart": True, "permanentVersionedRuntime": True,
                      "stagingAndNpmCacheIndependentAfterNativeRestart": True,
-                     "legacyBaseline": args.kind == "legacy", "legacyRootMode": args.legacy_root_mode if args.kind == "legacy" else None,
+                     "legacyBaseline": args.kind == "legacy",
+                     "legacyRootMode": args.legacy_root_mode if args.kind in {"legacy", "npm-baseline"} else None,
+                     **({"npmBaseline": True, "baselineProfile": args.baseline_profile,
+                         "baselineIdentity": baseline_identity} if baseline_identity is not None else {}),
                      "persistedSessionCreatedThroughAPI": True,
                      "logoutOrRebootObserved": False, "providerChatObserved": False,
                      "nonemptyProviderHistoryObserved": False, "queuedUserMessageObserved": False,
+                     "busyWorkObserved": False,
                      "ownedDependencyFaultFixture": bool(fixture.get("dependencyFaultFixture")),
                      **rejections}
 
@@ -2005,7 +2130,9 @@ def parser() -> argparse.ArgumentParser:
     result.add_argument("--candidate-server-linux", action="store_true",
                         help="Exact server-only Linux rollback rehearsal; no desktop or production acceptance.")
     result.add_argument("--receipt-sha256", required=True)
-    result.add_argument("--kind", choices=("fresh", "legacy"), default="fresh")
+    result.add_argument("--kind", choices=("fresh", "legacy", "npm-baseline"), default="fresh")
+    result.add_argument("--baseline-profile", choices=tuple(NPM_BASELINE_VERSIONS))
+    result.add_argument("--baseline-npm-directory", type=Path)
     result.add_argument("--legacy-root-mode", choices=("0755", "0750"), default="0755")
     result.add_argument("--staging-failure-fixture", action="store_true",
                         help="Install a run-owned external dependency delegate for isolated stage-removal/retry observations.")
@@ -2051,6 +2178,7 @@ def main() -> None:
     receipt = json.loads(raw)
     server_linux = getattr(args, "candidate_server_linux", False)
     home = guard(receipt, args.work, candidate=args.candidate, candidate_server_linux=server_linux)
+    validate_baseline_arguments(args, receipt)
     if server_linux:
         need(args.kind == "legacy" and args.operation in {"bootstrap", "snapshot", "rollback-retry", "diagnose", "service"}
              and not getattr(args, "staging_failure_fixture", False),

@@ -7,6 +7,70 @@ All candidate receipts and observations remain `publicationEligible: false`;
 observations also remain `releaseAcceptance: false`. A successful job does not
 turn blocked or unobserved scenarios into full release acceptance.
 
+## Reviewed stable 1.0.9 rehearsal extension
+
+The harness now also accepts the exact stable version `1.0.9`, with a stable
+signed descriptor and `latest-mac.yml`. Other stable versions remain rejected.
+This is source-level harness support, **not a completed native run or release
+acceptance**. Its candidate draft remains unpublished and marked prerelease as
+a test transport; the sealed payload itself has the genuine stable identity.
+Every report retains `publicationEligible: false` and `releaseAcceptance: false`.
+The existing production receipt, publication and hosted-runner guards are unchanged.
+
+For `candidate-replay-v1.0.9`, the macOS matrix contains eleven jobs: the existing
+fresh, legacy, interrupted-download and failed-stage cases, plus both `0755` and
+`0750` root modes for each independently pinned profile below. Beta candidates
+retain their original seven positive jobs and separate no-downgrade job. The
+same-base `1.0.8-beta.N` no-downgrade job is skipped for `1.0.9`, never reinterpreted
+as a stable upgrade. The separate two-case Linux rollback dispatch remains
+server-only and starts from the genuine signed legacy `1.0.7-beta.21`.
+
+| Profile | Actual desktop baseline | Actual server baseline | Desktop subscription |
+| --- | --- | --- | --- |
+| `stable108` | Published signed app `1.0.6` | Published signed npm server `1.0.8` | Stable before and after replacement |
+| `beta1085` | Published signed app `1.0.8-beta.5`, build 1242 | Published signed npm server `1.0.8-beta.5` | Beta before and after stable promotion |
+| `legacy` | Published signed app `1.0.6` | Signed legacy server `1.0.7-beta.21` | Stable for the stable candidate; existing Stable → Beta journey for beta candidates |
+
+The independent source, descriptor, signature, archive, public checksum and
+updater-metadata pins are committed in `product-candidate-receipt.mjs`.
+The `1.0.6` ZIP is pinned to
+`1ca6530cf72818d26e68af571f77d2eb0473e0e7b07923358f696b4a1673b7ee`;
+its public `SHA256SUMS` is pinned to
+`4bbe9fb4db61234542116f5de518872ebd4f2aa0805b1c06afd2032282eed828`.
+The beta.5 public checksum manifest is the full release inventory, not the
+smaller checksum manifest in the earlier scoped replay bundle. Baseline npm
+archives must also match anonymous official-registry bytes before installation.
+Neither baseline metadata nor a rewritten candidate receipt can substitute for
+these independently authenticated incumbent identities.
+
+The npm baselines are installed only into an empty disposable runner account.
+Their exact runtime is checked after retiring temporary npm prefixes/caches and
+performing a native service restart. The candidate fresh-install CLI must refuse
+that incumbent without changing its identity or process. This is fixture setup,
+not permission to install fresh npm over an existing user server. The actual
+upgrade still follows the signed desktop updater, native replacement/relaunch,
+offline saved-server reconciliation and two-client operation checks. Stable
+users do not select Beta; beta.5 subscribers do not switch to Stable to obtain
+the stable candidate. A successful beta.5 server upgrade exercises the real
+production channel handling, but reports do not claim an independently observed
+HTTP 409 or legacy-bridge wire count.
+
+Use the existing explicit dispatch inputs with
+`candidate_tag=candidate-replay-v1.0.9` and the independently reviewed receipt
+and bundle hashes. Do not substitute beta.5 hashes or source pins. A later
+harness-only retry must still descend from the exact sealed product source and
+pass the same explicit test/docs allowlist; `GITHUB_SHA` remains the real harness
+commit. The installer permission policy retains whole-file pins: the reviewed
+`1.0.9` installer differs by the Side chat progress module inventory and compile
+registration, not by its lock or root-normalization behavior.
+
+These jobs still seed an empty persisted API session. Genuine authenticated
+provider history, active or queued real work, interactive setup, logout/reboot,
+Windows updater acceptance and public candidate-feed delivery remain unobserved.
+In particular, this journey deliberately stops the owned server before the
+desktop update; it cannot pass a busy-server safety check. Passing source tests
+or these scoped native jobs cannot clear those release blockers.
+
 ## Current delivery status
 
 The newest published Beta is `1.0.8-beta.5`, build 1242, from source

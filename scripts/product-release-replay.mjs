@@ -15,7 +15,7 @@ import { pipeline } from 'node:stream/promises'
 import { expectedAssets, verifyAssets } from './direct-release-mirror.mjs'
 import { validatePreparationRun, verifyReceiptBundle } from './product-release.mjs'
 import { assertCandidateCheckout, assertCandidateRunner, assertCandidateServerCheckout, assertCandidateServerRunner,
-  candidateAssets, inspectCandidate } from './product-candidate-receipt.mjs'
+  candidateAssets, inspectCandidate, verifyBaselineDesktop } from './product-candidate-receipt.mjs'
 
 const HOSTS = ['github.com', 'api.github.com', 'registry.npmjs.org']
 const DESKTOP_REPOSITORIES = ['ZhengyiLuo/AgentsDock', 'ZhengyiLuo/AgentsDock-Releases']
@@ -24,6 +24,23 @@ const MAX_FILE = 2 * 1024 * 1024 * 1024
 const MAX_METADATA = 32768
 const digest = bytes => createHash('sha256').update(bytes).digest('hex')
 const need = (condition, message) => { if (!condition) throw new Error(message) }
+
+export function replayBaselineMetadata(baselineVersion, candidateVersion, candidate = false) {
+  const parse = version => {
+    const match = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-beta\.([1-9]\d*))?$/.exec(version)
+    need(match, 'Invalid replay baseline or candidate version.')
+    return [...match.slice(1, 4).map(Number), match[4] === undefined ? Infinity : Number(match[4])]
+  }
+  const a = parse(baselineVersion), b = parse(candidateVersion)
+  const difference = a.findIndex((value, index) => value !== b[index])
+  need(difference >= 0 && a[difference] < b[difference], 'Replay baseline must be strictly older than the candidate.')
+  const beta = baselineVersion.includes('-beta.')
+  need(!beta || (candidate && candidateVersion === '1.0.9' && baselineVersion === '1.0.8-beta.5'),
+    'Beta desktop baseline requires the reviewed stable 1.0.9 journey.')
+  if (candidate && candidateVersion === '1.0.9') need(['1.0.6', '1.0.8-beta.5'].includes(baselineVersion),
+    'Stable candidate requires an independently pinned desktop baseline.')
+  return { track: beta ? 'beta' : 'stable', metadata: `${beta ? 'beta' : 'latest'}-mac.yml`, prerelease: beta }
+}
 const STARTUP_STAGES = Object.freeze(['arguments', 'runner-guard', 'input-containment', 'artifact-verification',
   'checkout-verification', 'tls-input-validation', 'certificate-validation', 'tls-context', 'listener-bind',
   'drop-privileges', 'pid-write', 'serving'])
@@ -401,27 +418,24 @@ async function createReplay({ receiptPath, acceptedReceiptSha256, preparationRun
   const sums = new Map((await readReplayMetadata(join(desktopDirectory, 'SHA256SUMS'), receipt.desktopManifestSha256)).toString('utf8').trimEnd()
     .split('\n').map(line => [line.slice(66), line.slice(0, 64)]))
   const routes = new Map()
-  let baselineSums
+  let baselineSums, baselineMetadata
   if (baselineDesktopDirectory || baselineVersion) {
-    need(baselineDesktopDirectory && /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/.test(baselineVersion),
-      'Replay baseline must be an explicit stable desktop release.')
-    need(baselineVersion.split('.').some((part, index) => {
-      const previous = baselineVersion.split('.').slice(0, index).join('.')
-      const target = receipt.version.split('-')[0].split('.')
-      return previous === target.slice(0, index).join('.') && Number(part) < Number(target[index])
-    }), 'Replay baseline must be older than the candidate base version.')
+    need(baselineDesktopDirectory && baselineVersion, 'Replay baseline requires its directory and explicit version.')
+    baselineMetadata = replayBaselineMetadata(baselineVersion, receipt.version, candidate)
     await directory(baselineDesktopDirectory)
+    if (candidate && receipt.version === '1.0.9') await verifyBaselineDesktop(
+      baselineVersion === '1.0.6' ? 'stable108' : 'beta1085', baselineDesktopDirectory, receipt.version)
     const bytes = await regular(join(baselineDesktopDirectory, 'SHA256SUMS'))
     const lines = bytes.toString('utf8').trimEnd().split('\n')
     need(lines.every(line => /^[a-f0-9]{64}  [A-Za-z0-9._-]+$/.test(line)), 'Invalid baseline checksum manifest.')
     baselineSums = new Map(lines.map(line => [line.slice(66), line.slice(0, 64)]))
     need(baselineSums.size === lines.length, 'Duplicate baseline asset checksum.')
-    for (const name of [`AgentsDock-${baselineVersion}-mac-universal.zip`, 'latest-mac.yml']) {
+    for (const name of [`AgentsDock-${baselineVersion}-mac-universal.zip`, baselineMetadata.metadata]) {
       need(baselineSums.has(name), 'Baseline updater metadata or ZIP is missing its checksum.')
       const file = await verifiedFile(join(baselineDesktopDirectory, name), { sha256: baselineSums.get(name) })
       await file.file.close()
     }
-    const yaml = (await regular(join(baselineDesktopDirectory, 'latest-mac.yml'))).toString('utf8')
+    const yaml = (await regular(join(baselineDesktopDirectory, baselineMetadata.metadata))).toString('utf8')
     need(yaml.split('\n').includes(`version: ${baselineVersion}`), 'Baseline channel metadata has the wrong version.')
   }
   const add = (url, record) => { need(!routes.has(url), 'Duplicate replay route.'); routes.set(url, Object.freeze(record)) }
@@ -442,7 +456,7 @@ async function createReplay({ receiptPath, acceptedReceiptSha256, preparationRun
     const release = releaseDocument(repository)
     const root = `https://github.com/${repository}/releases`
     const baseline = baselineSums && DESKTOP_REPOSITORIES.includes(repository)
-      ? { tag_name: `v${baselineVersion}`, name: `AgentsDock ${baselineVersion}`, draft: false, prerelease: false,
+      ? { tag_name: `v${baselineVersion}`, name: `AgentsDock ${baselineVersion}`, draft: false, prerelease: baselineMetadata.prerelease,
         html_url: `${root}/tag/v${baselineVersion}`, body: 'Previously published baseline; disposable replay.' } : null
     const releases = [release, ...(baseline ? [baseline] : [])]
     const entries = releases.map(item => `<entry><id>${item.html_url}</id><title>${item.tag_name.slice(1)}</title><updated>2000-01-01T00:00:00Z</updated><link href="${item.html_url}"/><content type="text">Exact-artifact replay</content></entry>`).join('')
@@ -454,7 +468,7 @@ async function createReplay({ receiptPath, acceptedReceiptSha256, preparationRun
       generated(`https://api.github.com/repos/${repository}/releases/latest`, JSON.stringify(release), 'application/json')
       // GitHubProvider requests this web endpoint with Accept: application/json.
       generated(`${root}/latest`, JSON.stringify(release), 'application/json')
-    } else if (baseline) {
+    } else if (baseline && !baseline.prerelease) {
       generated(`https://api.github.com/repos/${repository}/releases/latest`, JSON.stringify(baseline), 'application/json')
       generated(`${root}/latest`, JSON.stringify(baseline), 'application/json')
     }
@@ -467,10 +481,10 @@ async function createReplay({ receiptPath, acceptedReceiptSha256, preparationRun
       if (receipt.track === 'stable') await asset(`https://github.com/${repository}/releases/latest/download/${name}`, path, sha256)
     }
     if (baselineSums) {
-      for (const name of [`AgentsDock-${baselineVersion}-mac-universal.zip`, 'latest-mac.yml']) {
+      for (const name of [`AgentsDock-${baselineVersion}-mac-universal.zip`, baselineMetadata.metadata]) {
         await asset(`https://github.com/${repository}/releases/download/v${baselineVersion}/${name}`,
           join(baselineDesktopDirectory, name), baselineSums.get(name))
-        if (receipt.track === 'beta') await asset(`https://github.com/${repository}/releases/latest/download/${name}`,
+        if (receipt.track === 'beta' && !baselineMetadata.prerelease) await asset(`https://github.com/${repository}/releases/latest/download/${name}`,
           join(baselineDesktopDirectory, name), baselineSums.get(name))
       }
     }

@@ -43,9 +43,11 @@ def extract(receipt, receipt_hash, archive, archive_hash, output):
          and value.get("scope") == "darwin-app-server" and value.get("publicationEligible") is False,
          "Not a non-publishing candidate receipt")
     version = value.get("version", "")
-    need(re.fullmatch(r"(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)-beta\.[1-9]\d*", version), "Invalid beta candidate version")
+    track = "stable" if version == "1.0.9" else "beta"
+    need((version == "1.0.9" or re.fullmatch(r"(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)-beta\.[1-9]\d*", version))
+         and value.get("track") == track, "Invalid reviewed candidate version or track")
     desktop = {f"AgentsDock-{version}-mac-universal.zip", f"AgentsDock-{version}-mac-universal.zip.blockmap",
-               f"AgentsDock-{version}-mac-universal.dmg", "beta-mac.yml", "agents-server-npm-manifest.json",
+               f"AgentsDock-{version}-mac-universal.dmg", f"{'beta' if track == 'beta' else 'latest'}-mac.yml", "agents-server-npm-manifest.json",
                "agents-server-npm-manifest.sig", "SHA256SUMS"}
     need(set(value.get("desktopAssets", {})) == desktop, "Unexpected desktop inventory")
     allowed = {f"desktop/{name}" for name in desktop} | {

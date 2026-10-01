@@ -14,7 +14,7 @@ import { basename, dirname, isAbsolute, join, relative, resolve } from 'node:pat
 import { homedir } from 'node:os'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { assertReplayRunner, createProductReplay, createCandidateReplay } from './product-release-replay.mjs'
-import { assertCandidateCheckout, assertCandidateRunner } from './product-candidate-receipt.mjs'
+import { assertCandidateCheckout, assertCandidateRunner, stableBaselineProfile } from './product-candidate-receipt.mjs'
 import { appVersion, assertMigrationTrack, connect, freePort, hashFile, MIGRATION_INSTALL_BUTTON_NAMES,
   openMigrationUpdateSettings, processesFor, run, stopOwned, until, verifyApp } from './verify_electron_migration.mjs'
 
@@ -74,18 +74,32 @@ export function assertOlderVersion(previous, candidate) {
   assert(firstDifference >= 0 && a[firstDifference] < b[firstDifference], 'Baseline must be strictly older than the candidate')
 }
 
+export function desktopJourney(candidate, baseline, profile = 'legacy') {
+  assertOlderVersion(baseline, candidate)
+  if (profile !== 'legacy') {
+    const expected = stableBaselineProfile(profile, candidate)
+    assert.equal(baseline, expected.desktop.version, 'Desktop baseline differs from its exact profile')
+    return { initialTrack: expected.subscription, installedTrack: expected.subscription, switchToBeta: false }
+  }
+  assert(!baseline.includes('-'), 'Legacy desktop journey requires its stable baseline')
+  return { initialTrack: 'stable', installedTrack: candidate.includes('-beta.') ? 'beta' : 'stable',
+    switchToBeta: candidate.includes('-beta.') }
+}
+
 export function parseDesktopAcceptanceArguments(argv) {
   const required = ['receipt', 'receipt-sha256', 'preparation-run', 'server-directory', 'desktop-directory',
     'baseline-directory', 'baseline-version', 'server-fixture', 'output']
   const options = {}
   for (let i = 0; i < argv.length; i += 2) {
     const key = argv[i].replace(/^--/, '')
-    assert(argv[i] === `--${key}` && [...required, 'scope'].includes(key) && argv[i + 1] && !Object.hasOwn(options, key),
+    assert(argv[i] === `--${key}` && [...required, 'scope', 'baseline-profile'].includes(key) && argv[i + 1] && !Object.hasOwn(options, key),
       `Unknown, incomplete or duplicate argument: ${argv[i]}`)
     options[key] = argv[i + 1]
   }
   for (const key of required) if (!(options.scope === 'candidate' && key === 'preparation-run')) assert(options[key], `Missing --${key}`)
   assert(options.scope === undefined || options.scope === 'candidate', 'Unknown desktop acceptance scope')
+  assert(options['baseline-profile'] === undefined || ['legacy', 'stable108', 'beta1085'].includes(options['baseline-profile']),
+    'Unknown desktop baseline profile')
   assert(HASH.test(options['receipt-sha256']), 'Invalid accepted receipt hash')
   assert(VERSION.test(options['baseline-version']), 'Invalid baseline version')
   for (const key of required.filter(key => !['receipt-sha256', 'baseline-version'].includes(key))) {
@@ -489,6 +503,14 @@ export async function main(argv = process.argv.slice(2)) {
   const fixtureStat = await lstat(options['server-fixture'])
   assert((fixtureStat.mode & 0o077) === 0, 'Server fixture token file must be private')
   const fixture = validateDesktopFixture(await regularJSON(options['server-fixture']), replay.identity)
+  const baselineProfile = options['baseline-profile'] ?? 'legacy'
+  const journey = desktopJourney(replay.identity.version, options['baseline-version'], baselineProfile)
+  if (baselineProfile !== 'legacy') {
+    assert(options.scope === 'candidate', 'Pinned stable profiles are scoped candidate observations only')
+    assert.equal(fixture.baselineProfile, baselineProfile, 'Server and desktop baseline profiles differ')
+    assert.deepEqual(fixture.baselineIdentity, stableBaselineProfile(baselineProfile, replay.identity.version).server)
+    assert.equal(fixture.baselineVersion, fixture.baselineIdentity.version)
+  }
   await assertInsideRunner(fixture.workDirectory)
   const outputPart = relative(fixture.workDirectory, options.output)
   assert(outputPart && !outputPart.startsWith('..') && !isAbsolute(outputPart), 'Desktop output must be inside the owned service fixture work directory')
@@ -546,7 +568,7 @@ export async function main(argv = process.argv.slice(2)) {
       serverUrl: fixture.serverUrl, serverIdentity: fixture.serverIdentity, keychainAccessToken: true, serverSetupComplete: true,
       createdAt: '2026-01-01T00:00:00.000Z', updatedAt: '2026-01-01T00:00:00.000Z' }] }
     await writeFile(join(profileDirectory, 'settings.json'), JSON.stringify(settings), { flag: 'wx', mode: 0o600 })
-    await writeFile(join(profileDirectory, 'update-track'), 'stable\n', { flag: 'wx', mode: 0o600 })
+    await writeFile(join(profileDirectory, 'update-track'), `${journey.initialTrack}\n`, { flag: 'wx', mode: 0o600 })
     await writeFile(join(profileDirectory, 'app-language.json'), '{"preference":"en"}\n', { flag: 'wx', mode: 0o600 })
     // Refuse to replace any pre-existing keychain entry, even on an ephemeral runner.
     let alreadyStored = false
@@ -581,22 +603,22 @@ export async function main(argv = process.argv.slice(2)) {
     const beforeStatus = await client.evaluate('window.agentsDock.updates.status()')
     assert.equal(beforeStatus.currentVersion, options['baseline-version'])
     assert.equal(beforeStatus.channel, 'direct')
-    assertMigrationTrack('stable', beforeStatus, await readFile(join(profileDirectory, 'update-track'), 'utf8'))
+    assertMigrationTrack(journey.initialTrack, beforeStatus, await readFile(join(profileDirectory, 'update-track'), 'utf8'))
     observed('baseline-native-connected', { appVersion: beforeStatus.currentVersion, serverVersion: before.health.server_version })
     await openMigrationUpdateSettings(client)
-    const stableDiscovery = await until('Native Stable channel discovery', async () => {
+    const stableDiscovery = journey.initialTrack === 'stable' ? await until('Native Stable channel discovery', async () => {
       const status = await client.evaluate('window.agentsDock.updates.status()')
       try { return assertStableDiscovery(status, replay.identity.version) } catch { return null }
-    }, 8 * 60_000)
-    observed('stable-subscription-observed', stableDiscovery)
-    await client.screenshot(join(options.output, '00-stable-channel.png'))
-    if (stableDiscovery.state === 'downloaded') {
+    }, 8 * 60_000) : null
+    if (stableDiscovery) observed('stable-subscription-observed', stableDiscovery)
+    await client.screenshot(join(options.output, '00-initial-channel.png'))
+    if (journey.switchToBeta && stableDiscovery?.state === 'downloaded') {
       // The production UI locks subscription changes while a download is ready.
       // Discard through the real control, never by deleting updater cache files.
       await client.clickButton(['Discard update'])
       await until('Stable download discarded', async () => (await client.evaluate('window.agentsDock.updates.status()')).state === 'idle')
     }
-    await client.clickButton(['Beta'])
+    if (journey.switchToBeta) await client.clickButton(['Beta'])
     const downloaded = await until('Exact prepared desktop downloaded', async () => {
       const status = await client.evaluate('window.agentsDock.updates.status()')
       return status.state === 'downloaded' ? status : null
@@ -604,8 +626,8 @@ export async function main(argv = process.argv.slice(2)) {
     assert.equal(downloaded.availableVersion, replay.identity.version)
     // Beta subscribers must also discover a stable product promotion. Track is
     // a subscription preference, not necessarily the candidate's prerelease tag.
-    assertMigrationTrack('beta', downloaded, await readFile(join(profileDirectory, 'update-track'), 'utf8'))
-    observed('beta-subscription-observed', { track: downloaded.track, state: downloaded.state, availableVersion: downloaded.availableVersion })
+    assertMigrationTrack(journey.installedTrack, downloaded, await readFile(join(profileDirectory, 'update-track'), 'utf8'))
+    if (journey.installedTrack === 'beta') observed('beta-subscription-observed', { track: downloaded.track, state: downloaded.state, availableVersion: downloaded.availableVersion })
     serviceCommand(options, fixture, 'service', ['--action', 'stop'], 'server-stopped.json')
     await until('Owned legacy service offline', () => assertOffline(fixture))
     observed('server-offline-before-app-install')
@@ -632,14 +654,14 @@ export async function main(argv = process.argv.slice(2)) {
       return status?.currentVersion === replay.identity.version
         && status.serverUpdates?.some(item => item.profileId === PROFILE_ID && item.phase === 'offline') ? status : null
     })
-    assertMigrationTrack('beta', offline, await readFile(join(profileDirectory, 'update-track'), 'utf8'))
+    assertMigrationTrack(journey.installedTrack, offline, await readFile(join(profileDirectory, 'update-track'), 'utf8'))
     await openMigrationUpdateSettings(client)
     const offlineRow = await visibleServerRow(client, 'offline')
     await client.screenshot(join(options.output, '02-native-app-updated-server-offline.png'))
     observed('offline-pending-visible', { phase: 'offline', phaseLabel: offlineRow.phaseLabel })
     const secondProfile = join(options.output, 'second-profile')
     await mkdir(secondProfile, { mode: 0o700 })
-    for (const [name, data] of [['settings.json', JSON.stringify(settings)], ['update-track', 'beta\n'],
+    for (const [name, data] of [['settings.json', JSON.stringify(settings)], ['update-track', `${journey.installedTrack}\n`],
       ['app-language.json', '{"preference":"en"}\n']]) {
       await writeFile(join(secondProfile, name), data, { flag: 'wx', mode: 0o600 })
     }
@@ -686,7 +708,7 @@ export async function main(argv = process.argv.slice(2)) {
       'App profile identity, URL or name was lost')
     assert.equal(persisted.activeProfileId, PROFILE_ID)
     assert.equal((await regularJSON(join(profileDirectory, 'app-language.json'))).preference, 'en')
-    assertMigrationTrack('beta', current.status, await readFile(join(profileDirectory, 'update-track'), 'utf8'))
+    assertMigrationTrack(journey.installedTrack, current.status, await readFile(join(profileDirectory, 'update-track'), 'utf8'))
     observed('paired-service-current', { ...current.verification, visiblePhaseLabel: currentRow.phaseLabel,
       preservationEvidenceSha256: preservation.evidenceSha256 })
     const coverage = migrationCoverage(fixture.snapshot)
@@ -698,6 +720,7 @@ export async function main(argv = process.argv.slice(2)) {
       version: replay.identity.version, track: replay.identity.track, runId: process.env.GITHUB_RUN_ID,
       runAttempt: process.env.GITHUB_RUN_ATTEMPT, platform: 'darwin', native: true,
       transport: 'exact-artifact-HTTPS-origin-replay-not-publication', baselineVersion: options['baseline-version'],
+      baselineProfile, baselineServerIdentity: fixture.baselineIdentity ?? null,
       baselineZipSha256: previous.zipSha256, targetZipSha256: expected.zipSha256, installedAsarSha256: expected.asarSha256,
       privateDiagnosticLog: { bounded: true, ...logs.counts },
       checks: [
@@ -714,8 +737,10 @@ export async function main(argv = process.argv.slice(2)) {
           offlineVisiblePhase: offlineRow.phaseLabel, reconnectedVisiblePhase: currentRow.phaseLabel,
           reconciledAutomatically: true, manualRetryClicks: 0, originalServerIdentityPreserved: true } },
         { name: 'stable-beta-channels', status: 'passed', observations: { stable: stableDiscovery,
-          beta: { track: downloaded.track, state: downloaded.state, availableVersion: downloaded.availableVersion },
-          betaPreferencePreservedAfterRelaunch: true, discovery: 'synthetic-replay-not-publication' } },
+          selected: { track: downloaded.track, state: downloaded.state, availableVersion: downloaded.availableVersion },
+          initialSubscription: journey.initialTrack, installedSubscription: journey.installedTrack,
+          subscriptionChanges: journey.switchToBeta ? 1 : 0, selectedPreferencePreservedAfterRelaunch: true,
+          discovery: 'synthetic-replay-not-publication' } },
         { name: 'multiple-clients', status: 'passed', observations: shared }
       ],
       events, limitations: ['No live-provider reply or natural OAuth renewal is claimed.',

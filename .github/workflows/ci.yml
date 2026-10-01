@@ -31,7 +31,7 @@ on:
         type: boolean
         default: false
       candidate_tag:
-        description: Exact unpublished candidate-replay-vX.Y.Z-beta.N tag
+        description: Exact unpublished numbered-beta or reviewed candidate-replay-v1.0.9 tag
         type: string
         default: ''
       candidate_receipt_sha256:
@@ -87,7 +87,7 @@ jobs:
             git check-ref-format "$GITHUB_REF"
             test "$GITHUB_WORKFLOW_REF" = "$GITHUB_REPOSITORY/.github/workflows/ci.yml@$GITHUB_REF"
             [[ "$GITHUB_SHA" =~ ^[0-9a-f]{40}$ ]] || exit 1
-            [[ "$CANDIDATE_TAG" =~ ^candidate-replay-v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)-beta\.[1-9][0-9]*$ ]] || exit 1
+            [[ "$CANDIDATE_TAG" == candidate-replay-v1.0.9 || "$CANDIDATE_TAG" =~ ^candidate-replay-v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)-beta\.[1-9][0-9]*$ ]] || exit 1
             [[ "$CANDIDATE_RECEIPT_SHA256" =~ ^[0-9a-f]{64}$ && "$CANDIDATE_BUNDLE_SHA256" =~ ^[0-9a-f]{64}$ ]] || exit 1
             exit 0
           fi
@@ -604,21 +604,25 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
+        kind: [legacy]
+        legacy_mode: ['0755', '0750']
+        baseline_profile: ${{ fromJSON(inputs.candidate_tag == 'candidate-replay-v1.0.9' && '["legacy","stable108","beta1085"]' || '["legacy"]') }}
         include:
           - kind: fresh
             legacy_mode: '0755'
-          - kind: legacy
-            legacy_mode: '0755'
-          - kind: legacy
-            legacy_mode: '0750'
+            baseline_profile: legacy
           - kind: recovery
             legacy_mode: '0755'
+            baseline_profile: legacy
           - kind: recovery
             legacy_mode: '0750'
+            baseline_profile: legacy
           - kind: stage-recovery
             legacy_mode: '0755'
+            baseline_profile: legacy
           - kind: stage-recovery
             legacy_mode: '0750'
+            baseline_profile: legacy
     runs-on: macos-15
     timeout-minutes: 75
     permissions:
@@ -630,6 +634,7 @@ jobs:
     env:
       RECEIPT_SHA256: ${{ inputs.candidate_receipt_sha256 }}
       LEGACY_MODE: ${{ matrix.legacy_mode }}
+      BASELINE_PROFILE: ${{ matrix.baseline_profile }}
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
         with:
@@ -650,6 +655,7 @@ jobs:
       - uses: ./.github/actions/product-candidate-inputs
         id: candidate
         with:
+          baseline_profile: ${{ matrix.baseline_profile }}
           candidate_tag: ${{ inputs.candidate_tag }}
           receipt_sha256: ${{ inputs.candidate_receipt_sha256 }}
           bundle_sha256: ${{ inputs.candidate_bundle_sha256 }}
@@ -668,7 +674,7 @@ jobs:
           export AGENTSDOCK_EXPECTED_BUILD_NUMBER="$(node -p 'JSON.parse(require("fs").readFileSync(process.argv[1])).buildNumber' "$RUNNER_TEMP/candidate-inputs/candidate.json")"
           export AGENTSDOCK_COORDINATED_MANIFEST="$RUNNER_TEMP/candidate-inputs/payload/server/npm/agents-server-npm-manifest.json"
           export AGENTSDOCK_COORDINATED_SIGNATURE="$RUNNER_TEMP/candidate-inputs/payload/server/npm/agents-server-npm-manifest.sig"
-          scripts/verify_electron_release.sh "$RUNNER_TEMP/candidate-inputs/payload/desktop" "$PRODUCT_VERSION" beta
+          scripts/verify_electron_release.sh "$RUNNER_TEMP/candidate-inputs/payload/desktop" "$PRODUCT_VERSION" "${{ steps.candidate.outputs.track }}"
       - name: Install the exact npm candidate or signed legacy baseline
         env:
           CANDIDATE_KIND: ${{ matrix.kind }}
@@ -678,7 +684,12 @@ jobs:
           INSTALL_KIND="$CANDIDATE_KIND"
           if [[ "$CANDIDATE_KIND" == recovery ]]; then INSTALL_KIND=legacy; fi
           if [[ "$CANDIDATE_KIND" == stage-recovery ]]; then INSTALL_KIND=legacy; fi
-          if [[ "$INSTALL_KIND" == legacy ]]; then
+          if [[ "$BASELINE_PROFILE" != legacy ]]; then
+            test "$INSTALL_KIND" = legacy
+            INSTALL_KIND=npm-baseline
+            extra=(--baseline-profile "$BASELINE_PROFILE" --baseline-npm-directory "$RUNNER_TEMP/candidate-inputs/baseline-server"
+              --legacy-root-mode "$LEGACY_MODE")
+          elif [[ "$INSTALL_KIND" == legacy ]]; then
             extra=(--baseline-archive "$RUNNER_TEMP/candidate-inputs/baseline-server/agents-server-1.0.7-beta.21.tar.gz"
               --baseline-manifest "$RUNNER_TEMP/candidate-inputs/baseline-server/agents-server-manifest.json"
               --baseline-signature "$RUNNER_TEMP/candidate-inputs/baseline-server/agents-server-manifest.sig" --legacy-root-mode "$LEGACY_MODE")
@@ -693,6 +704,7 @@ jobs:
         if: matrix.kind != 'fresh'
         env:
           CANDIDATE_KIND: ${{ matrix.kind }}
+          BASELINE_DESKTOP_VERSION: ${{ steps.candidate.outputs.baseline_version }}
         run: |
           python3 scripts/product_acceptance_network.py setup --candidate \
             --receipt "$RUNNER_TEMP/candidate-inputs/candidate.json" --receipt-sha256 "$RECEIPT_SHA256" \
@@ -731,7 +743,7 @@ jobs:
             "$(command -v node)" scripts/product-release-replay.mjs serve --scope candidate \
             --receipt "$RUNNER_TEMP/candidate-inputs/candidate.json" --receipt-sha256 "$RECEIPT_SHA256" \
             --server-assets "$RUNNER_TEMP/candidate-inputs/payload/server" --desktop-assets "$RUNNER_TEMP/candidate-inputs/payload/desktop" \
-            --baseline-desktop "$RUNNER_TEMP/candidate-inputs/baseline-desktop" --baseline-version 1.0.6 \
+            --baseline-desktop "$RUNNER_TEMP/candidate-inputs/baseline-desktop" --baseline-version "$BASELINE_DESKTOP_VERSION" \
             --certificate "$RUNNER_TEMP/agentsdock-acceptance-network/leaf.pem" \
             --private-key "$RUNNER_TEMP/agentsdock-acceptance-network/leaf.key" \
             --pid-file "$RUNNER_TEMP/agentsdock-acceptance-network/replay.pid" "${fault_args[@]}" \
@@ -801,6 +813,8 @@ jobs:
           exit 1
       - name: Real update click, native replacement, and saved-server reconciliation
         if: matrix.kind == 'legacy'
+        env:
+          BASELINE_DESKTOP_VERSION: ${{ steps.candidate.outputs.baseline_version }}
         run: |
           set -a
           source "$RUNNER_TEMP/agentsdock-acceptance-network/trust.env"
@@ -808,7 +822,8 @@ jobs:
           node scripts/product_desktop_acceptance.mjs --scope candidate \
             --receipt "$RUNNER_TEMP/candidate-inputs/candidate.json" --receipt-sha256 "$RECEIPT_SHA256" \
             --server-directory "$RUNNER_TEMP/candidate-inputs/payload/server" --desktop-directory "$RUNNER_TEMP/candidate-inputs/payload/desktop" \
-            --baseline-directory "$RUNNER_TEMP/candidate-inputs/baseline-desktop" --baseline-version 1.0.6 \
+            --baseline-directory "$RUNNER_TEMP/candidate-inputs/baseline-desktop" --baseline-version "$BASELINE_DESKTOP_VERSION" \
+            --baseline-profile "$BASELINE_PROFILE" \
             --server-fixture "$RUNNER_TEMP/agentsdock-acceptance-candidate/server.json" \
             --output "$RUNNER_TEMP/agentsdock-acceptance-candidate/desktop"
       - name: Interrupt the exact signed legacy transfer, preserve incumbent state, and retry
@@ -924,14 +939,14 @@ jobs:
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         if: always()
         with:
-          name: candidate-replay-${{ github.run_id }}-${{ github.run_attempt }}-${{ matrix.kind }}-${{ matrix.legacy_mode }}
+          name: candidate-replay-${{ github.run_id }}-${{ github.run_attempt }}-${{ matrix.kind }}-${{ matrix.legacy_mode }}${{ matrix.baseline_profile != 'legacy' && format('-{0}', matrix.baseline_profile) || '' }}
           path: ${{ runner.temp }}/candidate-public-evidence/*.json
           if-no-files-found: warn
           retention-days: 14
 
   candidate-no-downgrade:
     # Separate genuine newer-server fixture: never relax positive upgrade guards.
-    if: github.event_name == 'workflow_dispatch' && inputs.candidate_replay && !inputs.npm_native_validation && github.repository == 'ZhengyiLuo/AgentsDock' && startsWith(github.ref, 'refs/heads/release/')
+    if: github.event_name == 'workflow_dispatch' && inputs.candidate_replay && inputs.candidate_tag != 'candidate-replay-v1.0.9' && !inputs.npm_native_validation && github.repository == 'ZhengyiLuo/AgentsDock' && startsWith(github.ref, 'refs/heads/release/')
     needs: [release-tooling, electron, mobile-source]
     runs-on: macos-15
     timeout-minutes: 60
