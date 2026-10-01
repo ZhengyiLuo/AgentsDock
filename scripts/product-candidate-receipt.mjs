@@ -106,6 +106,33 @@ export const CANDIDATE_HARNESS_PATHS = Object.freeze([
   'docs/PRODUCT_ACCEPTANCE.md', 'docs/PRODUCT_RELEASES.md', 'docs/CANDIDATE_REPLAY.md', 'docs/DEV_LOG.md'
 ])
 
+// Two reviewed prerequisite-test lifecycle fixes for the already sealed 1.0.9
+// source. These paths are NOT a general test allowlist. Only the exact original
+// and corrected blobs, regular non-executable modes and modified-only deltas
+// below may accompany a descendant harness; signed/runtime bytes stay fixed.
+export const CANDIDATE_PREREQUISITE_TEST_EXCEPTION = Object.freeze({
+  sourceSha: '33c21482170010108830aef8009831d5d1da624c',
+  sourceRef: 'release/1.0.9',
+  changes: Object.freeze({
+    'electron/src/renderer/src/components/ProviderUsageIndicator.test.tsx': Object.freeze({
+      before: '69fab9e26f994a1d50c10797887d3dc16f8492bb', after: 'b054eb3ed2b6bf9b08d8d0fec4c12c71dc9e64f7'
+    }),
+    'electron/src/renderer/src/components/SecurePeerPanel.test.tsx': Object.freeze({
+      before: '9bdd50a7ddc761c843fc7eff36eaed23cf83709f', after: '6be941a7eb733169661685aac581096b576e1770'
+    })
+  })
+})
+
+function reviewedPrerequisiteTestChange(identity, harnessSourceSha, path, git) {
+  const exception = CANDIDATE_PREREQUISITE_TEST_EXCEPTION
+  if (identity.sourceSha !== exception.sourceSha || identity.sourceRef !== exception.sourceRef
+      || !Object.hasOwn(exception.changes, path)) return false
+  const { before, after } = exception.changes[path]
+  const raw = git('diff', '--no-ext-diff', '--no-renames', '--raw', '--full-index', '--abbrev=40', '-z',
+    identity.sourceSha, harnessSourceSha, '--', path)
+  return raw === `:100644 100644 ${before} ${after} M\0${path}\0`
+}
+
 function assertCandidateSource({ sourceSha, sourceRef }) {
   assert(SHA.test(sourceSha ?? ''), 'Candidate source pin must be a full commit SHA')
   assert(typeof sourceRef === 'string' && /^release\/[A-Za-z0-9][A-Za-z0-9._/-]*$/.test(sourceRef)
@@ -205,7 +232,8 @@ function assertCandidateCheckoutWithRunner(identity, { env = process.env, execut
   assert(git('status', '--porcelain', '--untracked-files=all').trim() === '', 'Candidate harness checkout must be clean')
   const changedPaths = git('diff', '--no-ext-diff', '--name-only', '--no-renames', '-z', identity.sourceSha, harnessSourceSha)
     .split('\0').filter(Boolean)
-  assert(changedPaths.every(path => CANDIDATE_HARNESS_PATHS.includes(path)),
+  assert(changedPaths.every(path => CANDIDATE_HARNESS_PATHS.includes(path)
+    || reviewedPrerequisiteTestChange(identity, harnessSourceSha, path, git)),
     'Candidate harness retry changed runtime, build payload or another non-allowlisted path')
   return { sourceSha: identity.sourceSha, harnessSourceSha, sourceRef: identity.sourceRef,
     changedPaths, publicationEligible: false }

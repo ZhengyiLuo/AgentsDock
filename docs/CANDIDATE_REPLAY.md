@@ -71,6 +71,49 @@ In particular, this journey deliberately stops the owned server before the
 desktop update; it cannot pass a busy-server safety check. Passing source tests
 or these scoped native jobs cannot clear those release blockers.
 
+### 1.0.9 prerequisite failures and reviewed test-only correction
+
+The sealed `1.0.9` build 1243 remains pinned to source
+`33c21482170010108830aef8009831d5d1da624c`. Mac replay
+[`36826142416`](https://github.com/ZhengyiLuo/AgentsDock/actions/runs/36826142416)
+and Linux rollback
+[`36826167466`](https://github.com/ZhengyiLuo/AgentsDock/actions/runs/36826167466)
+both failed their repeated Electron source-test prerequisite on attempt 1.
+Neither native matrix started; neither run produced native observations.
+
+- The Mac dispatch reported 5,111 passing tests but caught an uncaught Radix
+  deferred-unmount `dispatchEvent`/jsdom Event-realm error attributed to
+  `ProviderUsageIndicator.test.tsx`. Its cleanup must await the owned next-task
+  unmount work before the test environment restores globals.
+- The Linux dispatch failed the `SecurePeerPanel.test.tsx` late-completion Cancel
+  test: it expected one stopped observer but had not established that the observer
+  had started. The correction waits for that setup precondition, then retains
+  the immediate stop assertion and every late-completion/cancellation check.
+
+Ignored local diagnostics used the actual React/Radix/jsdom renderer and actual
+SecurePeer component to reproduce both orderings. Draining the owned unmount
+callback avoids the realm error; cancel-before-observer has nothing to stop but
+still clears consent and fences adoption, while cancel-after-observer stops it
+immediately. These diagnoses ran on local Node 26.7, not the hosted CI Node 24;
+they do not substitute for the next complete hosted prerequisite/native run.
+No error suppression, assertion removal, timeout increase or runtime correction
+is part of these two test-only changes.
+
+The candidate guard keeps its generic harness allowlist unchanged. A separate
+exception is bound to the exact sealed source above and `release/1.0.9`, and
+admits only these modified regular `100644` files with the exact Git blobs:
+
+| Test | Original blob | Corrected blob |
+| --- | --- | --- |
+| `ProviderUsageIndicator.test.tsx` | `69fab9e26f994a1d50c10797887d3dc16f8492bb` | `b054eb3ed2b6bf9b08d8d0fec4c12c71dc9e64f7` |
+| `SecurePeerPanel.test.tsx` | `9bdd50a7ddc761c843fc7eff36eaed23cf83709f` | `6be941a7eb733169661685aac581096b576e1770` |
+
+Both live under `electron/src/renderer/src/components/`. Other sources/refs,
+blobs, modes, additions, deletions, renames, third test files and runtime/build
+changes remain rejected. A corrected descendant harness must report its own
+truthful commit independently of the unchanged signed artifact source. The
+original failed runs and all non-acceptance flags remain part of the evidence.
+
 ## Current delivery status
 
 The newest published Beta is `1.0.8-beta.5`, build 1242, from source
@@ -324,7 +367,70 @@ The macOS matrix does not establish Linux candidate-health rollback; only an
 actual successful separately reviewed Linux rollback run can provide that
 scoped evidence.
 
-## Manual fresh-account checks for this candidate
+## Current 1.0.9 private candidate: manual fresh-account checks
+
+These instructions apply only to the privately supplied `1.0.9` build 1243
+candidate, not a published release or an updater acceptance result. At this
+checkpoint, the public npm `latest` tag still selects stable server `1.0.8`.
+Do not substitute a floating registry tag for the exact archive below.
+
+Use a separate new Apple Silicon macOS account with a normal logged-in desktop
+session, Node 22.14 or newer, trusted `uv`, and the provider CLIs being tested.
+Authenticate providers normally in that account. No npm/publishing credential is
+needed. Do not copy another account's credentials, redirect `HOME`, use `sudo`,
+or delete existing history to make installation proceed.
+
+Compare `shasum -a 256` for the two supplied Downloads files with these exact hashes:
+
+```text
+4d5125a374a1e20ea15a4aa42d9d5c2eb36a7f8ed46ab694500c0ba5e38eeeb9  AgentsDock-1.0.9-mac-universal.zip
+33ca47b105e8d2e8256df6b5c199e0e95972f9228399d8944e32c2e910de8ab8  server-1.0.9.tgz
+```
+
+Install only the supplied npm archive into a new temporary CLI directory:
+
+```sh
+cd "$HOME/Downloads"
+AGENTSDOCK_QA_CLI="$(mktemp -d "${TMPDIR:-/tmp}/agentsdock109-cli.XXXXXX")"
+npm install --offline --ignore-scripts --no-audit --no-fund \
+  --package-lock=false --prefix "$AGENTSDOCK_QA_CLI" \
+  "$PWD/server-1.0.9.tgz"
+node "$AGENTSDOCK_QA_CLI/node_modules/@agentsdock/server/npm/cli.cjs" --version
+```
+
+Stop unless the version is exactly `1.0.9`. Then run the interactive installer:
+
+```sh
+node "$AGENTSDOCK_QA_CLI/node_modules/@agentsdock/server/npm/cli.cjs" \
+  install --port 17850 --bind 127.0.0.1
+```
+
+The runtime installer needs network access. Stop if it refuses an existing
+installation or custom root; do not bypass the refusal. Extract the exact Mac
+ZIP into a new folder, launch that app and pair privately with
+`http://127.0.0.1:17850` using the installer's token. Verify app build 1243 and
+both app/server version `1.0.9`.
+
+- Complete a real chat and harmless file action in a disposable folder with
+  each provider being accepted. In the packaged app, exercise Side chat tool
+  context, a follow-up, pending Stop and active Clear; the parent must remain
+  unaffected and navigation/reopening must not resurrect or misattribute replies.
+- Record interactive pairing and any optional-dependency-decline branch actually
+  exercised. If no such prompt appears, leave that branch unobserved.
+- Quit/reopen and continue the same chat; check saved server settings, history
+  and attachments. Once work is idle, log out/in or reboot, reconnect and continue
+  it again. This proves only the persistence actually observed, not live-turn
+  survival through worker death or reboot.
+- Report exact versions/build, macOS/architecture, provider CLI versions and
+  pass/fail. Redact tokens, private paths and identifiers from shared evidence.
+
+A fresh account cannot establish populated older-provider-history migration or
+active/queued-work preservation. Those still require genuine older baselines and
+the actual signed one-click update/relaunch/coordinator journey in an authorized
+isolated environment. Copying this ZIP is not updater acceptance. Never install
+hosted-runner origin/trust fixtures on a working Mac or spoof their safeguards.
+
+## Archived 1.0.8-beta.4 manual fresh-account checks
 
 Use a separate new Apple Silicon macOS account with a normal logged-in desktop
 session, Node 22.14 or newer, trusted `uv`, and the provider CLIs you intend to

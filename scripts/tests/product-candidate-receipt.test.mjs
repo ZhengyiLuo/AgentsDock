@@ -1,11 +1,12 @@
 import assert from 'node:assert/strict'
+import { createHash } from 'node:crypto'
 import { execFileSync, spawnSync } from 'node:child_process'
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs'
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { test } from 'node:test'
 import { assertCandidateCheckout, assertCandidateServerCheckout, assertCandidateRunner, assertCandidateServerRunner,
-  CANDIDATE_HARNESS_PATHS, candidateAssets, candidateTrack, stableBaselineProfile, STABLE_BASELINES,
+  CANDIDATE_HARNESS_PATHS, CANDIDATE_PREREQUISITE_TEST_EXCEPTION, candidateAssets, candidateTrack, stableBaselineProfile, STABLE_BASELINES,
   verifyBaselineDesktop, verifyBaselineServer } from '../product-candidate-receipt.mjs'
 import {STABLE_IDENTITY} from '../product_no_downgrade_desktop.mjs'
 
@@ -46,7 +47,7 @@ test('independent baseline verification rejects substituted bytes before trustin
 
 // Pure guard tests with disposable Git repositories. The injected CI metadata
 // is synthetic; no native app/service/network/trust helper is ever invoked.
-function fixture(t) {
+function fixture(t, initialFiles = {}) {
   const root = mkdtempSync(join(tmpdir(), 'candidate-checkout-unit-'))
   t.after(() => rmSync(root, { recursive: true, force: true }))
   const git = (...args) => execFileSync('git', ['-C', root, '-c', 'core.hooksPath=/dev/null',
@@ -59,6 +60,7 @@ function fixture(t) {
   put('scripts/product_server_acceptance.py', 'original harness\n')
   put('docs/PRODUCT_ACCEPTANCE.md', 'original docs\n')
   put('.gitignore', 'node_modules/\n')
+  for (const [path, content] of Object.entries(initialFiles)) put(path, content)
   git('add', '.'); git('commit', '-qm', 'sealed source')
   const sourceSha = git('rev-parse', 'HEAD'), sourceRef = 'release/candidate-fixture'
   const identity = { sourceSha, sourceRef }
@@ -68,6 +70,137 @@ function fixture(t) {
   const check = (env = environment(), value = identity) => assertCandidateCheckout(value, { env, platform: 'darwin', repositoryDirectory: root })
   return { root, git, put, identity, environment, check }
 }
+
+function reviewedTestBytes() {
+  const exception = CANDIDATE_PREREQUISITE_TEST_EXCEPTION
+  const [usage, peer] = Object.keys(exception.changes)
+  const beforeUsage = "afterEach(() => { cleanup(); setLocale('en'); vi.useRealTimers(); Reflect.deleteProperty(window, 'agentsDock') })"
+  const afterUsage = `afterEach(async () => {
+  cleanup()
+  // Radix dispatches its owned unmount-focus event on the next task. Complete
+  // that work before Vitest restores globals/disposes this jsdom realm.
+  await act(async () => { await new Promise(resolve => setTimeout(resolve, 0)) })
+  setLocale('en')
+  vi.useRealTimers()
+  Reflect.deleteProperty(window, 'agentsDock')
+})`
+  const beforePeer = "    await join()\n    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }))\n    expect(teamHub.stopSecurePeerPairingCompletionWait).toHaveBeenCalledTimes(1)"
+  const afterPeer = beforePeer.replace('    fireEvent.click',
+    '    await waitFor(() => expect(teamHub.waitForSecurePeerPairingCompletion).toHaveBeenCalledTimes(1))\n    fireEvent.click')
+  const result = {}
+  for (const [path, previous, next] of [[usage, beforeUsage, afterUsage], [peer, beforePeer, afterPeer]]) {
+    const after = readFileSync(new URL(`../../${path}`, import.meta.url), 'utf8')
+    assert.equal(after.split(next).length, 2, 'Reviewed correction must occur exactly once')
+    const before = after.replace(next, previous)
+    const blob = text => createHash('sha1').update(`blob ${Buffer.byteLength(text)}\0`).update(text).digest('hex')
+    assert.equal(blob(before), exception.changes[path].before, 'Original test bytes differ from the source-specific review')
+    assert.equal(blob(after), exception.changes[path].after, 'Corrected test bytes differ from the source-specific review')
+    result[path] = { before, after }
+  }
+  return result
+}
+
+function prerequisiteFixture(t) {
+  const bytes = reviewedTestBytes(), exception = CANDIDATE_PREREQUISITE_TEST_EXCEPTION
+  const f = fixture(t, Object.fromEntries(Object.entries(bytes).map(([path, value]) => [path, value.before])))
+  // A synthetic source-identity adapter keeps these pure guard tests in owned
+  // disposable repositories; all ancestry, cleanliness and raw tree deltas use
+  // real Git. No hosted runner, native helper, service or trust is invoked.
+  const execute = (command, args, options) => {
+    const pin = `${exception.sourceSha}^{commit}`
+    const mapped = args.map(arg => arg === exception.sourceSha ? f.identity.sourceSha
+      : arg === pin ? `${f.identity.sourceSha}^{commit}` : arg)
+    const output = execFileSync(command, mapped, options)
+    return args.includes(pin) ? `${exception.sourceSha}\n` : output
+  }
+  const check = ({ identity = { sourceSha: exception.sourceSha, sourceRef: exception.sourceRef }, server = false, env = {} } = {}) => {
+    const environment = { ...f.environment(),
+      GITHUB_WORKFLOW_REF: `ZhengyiLuo/AgentsDock/.github/workflows/ci.yml@refs/heads/${identity.sourceRef}`,
+      ...(server ? { RUNNER_OS: 'Linux', GITHUB_JOB: 'candidate-server-rollback-linux' } : {}), ...env }
+    return (server ? assertCandidateServerCheckout : assertCandidateCheckout)(identity,
+      { env: environment, platform: server ? 'linux' : 'darwin', repositoryDirectory: f.root, execute })
+  }
+  const correct = (paths = Object.keys(bytes)) => { for (const path of paths) f.put(path, bytes[path].after) }
+  const commit = () => { f.git('add', '-A'); f.git('commit', '-qm', 'owned prerequisite fixture delta') }
+  const reseal = () => { commit(); f.identity.sourceSha = f.git('rev-parse', 'HEAD') }
+  return { ...f, bytes, check, correct, commit, reseal }
+}
+
+test('only exact source-bound prerequisite blobs extend either candidate guard, never the generic allowlist', t => {
+  const exception = CANDIDATE_PREREQUISITE_TEST_EXCEPTION, paths = Object.keys(exception.changes)
+  assert.equal(exception.sourceSha, '33c21482170010108830aef8009831d5d1da624c')
+  assert.equal(exception.sourceRef, 'release/1.0.9')
+  assert.deepEqual(paths, ['electron/src/renderer/src/components/ProviderUsageIndicator.test.tsx',
+    'electron/src/renderer/src/components/SecurePeerPanel.test.tsx'])
+  assert(Object.isFrozen(exception) && Object.isFrozen(exception.changes))
+  for (const path of paths) {
+    assert(Object.isFrozen(exception.changes[path]))
+    assert(!CANDIDATE_HARNESS_PATHS.includes(path))
+  }
+  for (const selected of [paths, ...paths.map(path => [path])]) {
+    const f = prerequisiteFixture(t)
+    f.correct(selected); f.commit()
+    for (const server of [false, true]) {
+      const result = f.check({ server })
+      assert.deepEqual(result.changedPaths, [...selected].sort())
+      assert.equal(result.sourceSha, exception.sourceSha)
+      assert.equal(result.harnessSourceSha, f.git('rev-parse', 'HEAD'))
+      assert.equal(result.publicationEligible, false)
+      if (server) assert.equal(result.desktopAcceptance, false)
+    }
+  }
+})
+
+test('reviewed prerequisite deltas still reject another source/ref, forged HEAD and dirty checkout', t => {
+  const f = prerequisiteFixture(t), exception = CANDIDATE_PREREQUISITE_TEST_EXCEPTION
+  f.correct(); f.commit()
+  assert.throws(() => f.check({ identity: { sourceSha: f.identity.sourceSha, sourceRef: exception.sourceRef } }), /non-allowlisted/)
+  assert.throws(() => f.check({ identity: { sourceSha: exception.sourceSha, sourceRef: 'release/unreviewed' } }), /non-allowlisted/)
+  assert.throws(() => f.check({ env: { GITHUB_SHA: 'b'.repeat(40) } }), /truthful/)
+  f.put(Object.keys(f.bytes)[0], 'uncommitted test\n')
+  assert.throws(() => f.check(), /clean/)
+})
+
+test('each prerequisite path rejects wrong original/corrected blobs and executable or symlink modes', t => {
+  for (const path of Object.keys(CANDIDATE_PREREQUISITE_TEST_EXCEPTION.changes)) {
+    for (const mutation of ['before-blob', 'after-blob', 'before-executable', 'after-executable', 'after-symlink']) {
+      const f = prerequisiteFixture(t)
+      if (mutation === 'before-blob') { f.put(path, `${f.bytes[path].before}\n`); f.reseal() }
+      if (mutation === 'before-executable') { chmodSync(join(f.root, path), 0o755); f.reseal() }
+      f.correct()
+      if (mutation === 'after-blob') f.put(path, `${f.bytes[path].after}\n`)
+      if (mutation === 'before-executable') chmodSync(join(f.root, path), 0o644)
+      if (mutation === 'after-executable') chmodSync(join(f.root, path), 0o755)
+      if (mutation === 'after-symlink') { rmSync(join(f.root, path)); symlinkSync('owned-fixture-target', join(f.root, path)) }
+      f.commit()
+      assert.throws(() => f.check(), /non-allowlisted/, mutation)
+    }
+  }
+})
+
+test('reviewed prerequisite paths cannot be added, deleted or renamed into allowed documentation', t => {
+  for (const path of Object.keys(CANDIDATE_PREREQUISITE_TEST_EXCEPTION.changes)) {
+    for (const mutation of ['add', 'delete', 'rename']) {
+      const f = prerequisiteFixture(t)
+      if (mutation === 'add') { f.git('rm', '--', path); f.reseal() }
+      f.correct()
+      if (mutation === 'delete') f.git('rm', '-f', '--', path)
+      if (mutation === 'rename') renameSync(join(f.root, path), join(f.root, 'docs/PRODUCT_ACCEPTANCE.md'))
+      f.commit()
+      assert.throws(() => f.check(), /non-allowlisted/, mutation)
+    }
+  }
+})
+
+test('reviewed prerequisite fixes do not admit a third test, runtime, build or production gate change', t => {
+  for (const path of ['electron/src/renderer/src/components/Unreviewed.test.tsx', 'electron/runtime.ts',
+    'server/runtime.py', 'scripts/build_electron_release.sh', '.github/workflows/product-release.yml']) {
+    const f = prerequisiteFixture(t)
+    f.correct(); f.put(path, 'unreviewed bytes\n'); f.commit()
+    assert.throws(() => f.check(), /non-allowlisted/)
+    assert.throws(() => f.check({ server: true }), /non-allowlisted/)
+  }
+})
 
 test('exact source and allowlisted descendant harness preserve separate truthful commit identities', t => {
   const f = fixture(t)

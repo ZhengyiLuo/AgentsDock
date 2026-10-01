@@ -1,5 +1,28 @@
 # Public development log
 
+## 2026-10-01 — Correct two 1.0.9 replay prerequisite tests
+
+- Preserve failed attempt 1 of Mac replay
+  [36826142416](https://github.com/ZhengyiLuo/AgentsDock/actions/runs/36826142416)
+  and Linux rollback
+  [36826167466](https://github.com/ZhengyiLuo/AgentsDock/actions/runs/36826167466).
+  Both stopped in Electron source tests before any native replay or observation.
+- Await Radix's owned deferred unmount work before disposing the usage test's
+  jsdom realm. Establish the secure-pairing observer before testing its immediate
+  cancellation and late-completion fence. Preserve every assertion; do not
+  suppress errors, extend timeouts or change production runtime behavior.
+- Reproduce the ordering mechanisms with actual UI components/dependencies in
+  isolated local fixtures on Node 26.7; hosted Node 24 still needs its own passing
+  run. Pass 77 focused tests, 26 candidate guards, 309 release-tooling tests,
+  Electron typecheck, all 5,111 Electron tests (six skipped), and eight build
+  helper checks. Independent review finds no scope or guard weakening.
+- Bind the two test-only exceptions to exact original/corrected Git blobs,
+  regular `100644` modes and sealed source
+  `33c21482170010108830aef8009831d5d1da624c`; leave the generic harness allowlist
+  unchanged. Signed 1.0.9/build 1243 packages and candidate hashes are unchanged.
+  Corrected hosted/native checks remain pending; no publication, deployment or
+  live service change is included. See [candidate scope](CANDIDATE_REPLAY.md).
+
 ## 2026-09-30 — Keep Side chat Stop safe during progress failures
 
 - Stop and Clear now retire their owned provider work even when an earlier
