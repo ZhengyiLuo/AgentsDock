@@ -169,8 +169,9 @@ renderer reload in the same app/server processes retains side history; this is
 not an app relaunch or service restart. The context check establishes retrieval
 of the prior tool output, not complete native-context parity. The receipt reports
 unchanged original authentication, removal of the owned test credential snapshot
-and stopped test processes. No private test transcripts, authentication or state
-are committed.
+and termination of the foreground test server. It does not independently
+establish termination of every app or provider descendant. No private test
+transcripts, authentication or state are committed.
 
 ```text
 b50630a24781abb704105940fcca0dbbda5140b259eb9273860b05bea054bf9f  packaged live-provider receipt
