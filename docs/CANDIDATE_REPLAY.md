@@ -11,8 +11,8 @@ turn blocked or unobserved scenarios into full release acceptance.
 
 The harness now also accepts the exact stable version `1.0.9`, with a stable
 signed descriptor and `latest-mac.yml`. Other stable versions remain rejected.
-This is source-level harness support, **not a completed native run or release
-acceptance**. Its candidate draft remains unpublished and marked prerelease as
+This harness support does not confer release acceptance; completed scoped runs
+are recorded below. Its candidate draft remains unpublished and marked prerelease as
 a test transport; the sealed payload itself has the genuine stable identity.
 Every report retains `publicationEligible: false` and `releaseAcceptance: false`.
 The existing production receipt, publication and hosted-runner guards are unchanged.
@@ -113,6 +113,45 @@ blobs, modes, additions, deletions, renames, third test files and runtime/build
 changes remain rejected. A corrected descendant harness must report its own
 truthful commit independently of the unchanged signed artifact source. The
 original failed runs and all non-acceptance flags remain part of the evidence.
+
+### Completed 1.0.9 scoped runs; publication still pending
+
+Mac run [36828381882](https://github.com/ZhengyiLuo/AgentsDock/actions/runs/36828381882)
+passes all eleven native jobs on attempt 1. Linux run
+[36828384720](https://github.com/ZhengyiLuo/AgentsDock/actions/runs/36828384720)
+passes both server-only rollback/retry jobs on attempt 1. Their hosted Node 24
+source prerequisites also pass after the reviewed test-lifecycle corrections.
+The truthful harness source is `9cda924f88c795a81c869f02b74994638ff30888`;
+the unchanged signed artifact source remains
+`33c21482170010108830aef8009831d5d1da624c`, version `1.0.9`, build 1243.
+
+Independent hashes for these unchanged inputs are:
+
+```text
+36f46a01cfb1488bcbc4719fbb4a2a01e9989d3bd1ff0de256ad48e0e98718f1  candidate.json
+a7e892779d1e0f4f7b5003c529deab77104910b365f7c8ba5b61d5eb5aaaa20e  candidate-bundle.zip
+58cffd8372f495f18dcf77d1aff0c8240543548e3b1fa984d35c8993e024df1d  npm descriptor
+8b5c44b5872392f89cd43b9996ba658c2d364c541748b0cb05f2801258f2be5c  full desktop SHA256SUMS
+```
+
+All thirteen original observation ZIPs and 31 contained reports match their
+GitHub artifact digests, run/attempt, source identities and candidate pins. The
+six positive Mac journeys observe actual signed app replacement/relaunch,
+automatic saved-server reconciliation, zero manual server-update clicks,
+preserved subscription preferences and two clients sharing a completed operation.
+Both root modes pass for all three baseline profiles above. Interrupted-download
+and preparation-failure recovery pass; Linux observes genuine candidate-worker
+failure, restored healthy incumbent and successful same-byte retry with all 119
+runtime files verified.
+
+The green jobs do not erase blocked report fields: each positive Mac report's
+provider-history migration check remains blocked because the fixture has no
+populated native provider history; fresh interactive setup and busy-work checks
+also remain blocked. No real-provider reply, active/queued-work preservation,
+logout/reboot, native Windows updater journey, complete recovery-service
+retirement or Team Hub fence cleanup is established. Eligibility/acceptance
+flags remain false. No package is public as a result of these tests, and no
+existing user service or installation was changed.
 
 ## Current delivery status
 

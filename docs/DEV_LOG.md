@@ -1,5 +1,44 @@
 # Public development log
 
+## 2026-10-01 — Verify the unchanged private 1.0.9 candidate
+
+- Keep matched app, npm server and signed legacy bridge `1.0.9` at source
+  `33c21482170010108830aef8009831d5d1da624c`, standalone export
+  `77cbd97d55bc6ec4063157f863dec80a06ac9ba8`, and desktop build 1243.
+  Later test/documentation commits do not replace or rebuild these packages.
+- Verify the existing server signer's original artifact from
+  [36824515618](https://github.com/ZhengyiLuo/AgentsServer/actions/runs/36824515618),
+  both signatures and all 119 npm/legacy runtime files and executable modes.
+  Fresh npm installation, native restart and cache independence pass on macOS
+  and Linux in [36824763961](https://github.com/ZhengyiLuo/AgentsDock/actions/runs/36824763961).
+  Linux x64/ARM64 and explicitly unsigned Windows packages pass preparation
+  [36824837985](https://github.com/ZhengyiLuo/AgentsDock/actions/runs/36824837985).
+  The unchanged universal Mac ZIP/DMG pass Developer ID signing, notarization,
+  stapling, Gatekeeper, embedded-descriptor and package-identity verification.
+- All eleven scoped Mac jobs in
+  [36828381882](https://github.com/ZhengyiLuo/AgentsDock/actions/runs/36828381882)
+  and both Linux rollback jobs in
+  [36828384720](https://github.com/ZhengyiLuo/AgentsDock/actions/runs/36828384720)
+  pass on attempt 1 using harness `9cda924f88c795a81c869f02b74994638ff30888`.
+  Preserve the two earlier prerequisite failures and their reproduced causes.
+- Actual signed app replacement/relaunch precedes automatic server reconciliation
+  from legacy `1.0.7-beta.21`, stable npm `1.0.8` and npm `1.0.8-beta.5`, in
+  both legacy root-permission modes. Observe zero manual server-update clicks,
+  retained subscriptions, offline/reconnect recovery, shared-client operation
+  identity and preserved fixture state. Download/staging failures recover;
+  Linux candidate-health failure rolls back before a same-byte retry succeeds.
+- Verify all thirteen original observation archives and their 31 reports against
+  GitHub provenance and the sealed candidate. These remain scoped observations
+  with `publicationEligible: false` and `releaseAcceptance: false`, not a stable
+  release receipt. Empty API-session preservation does not establish populated
+  provider-history or active/queued-work migration. Packaged live-provider UI,
+  interactive setup, logout/reboot and Windows updating remain unvalidated.
+- Availability: private candidate only. No npm, bridge, desktop or mirror
+  publication, live-server deployment or mobile release is included. Keep the
+  prepared payload unchanged; pending video-menu, existing-chat endpoint and
+  mailbox-retirement changes are not part of this candidate. See the exact pins
+  and remaining boundaries in [CANDIDATE_REPLAY.md](CANDIDATE_REPLAY.md).
+
 ## 2026-10-01 — Correct two 1.0.9 replay prerequisite tests
 
 - Preserve failed attempt 1 of Mac replay
