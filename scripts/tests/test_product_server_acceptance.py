@@ -1082,7 +1082,7 @@ class NativeServerAcceptanceUnitTests(unittest.TestCase):
         installed_executables.discard("agentsdock_team_hub")  # directory, not runtime file
         self.assertEqual(installed_executables, package_executables | {"agent_server.py"})
 
-    def staging_case(self, root, version="1.0.9"):
+    def staging_case(self, root, version="1.0.10-beta.1"):
         home, work, bundle = root / "account", root / "agentsdock-acceptance-fixture", root / "bundle"
         home.mkdir(mode=0o700)
         work.mkdir(mode=0o700)
@@ -1283,10 +1283,10 @@ class NativeServerAcceptanceUnitTests(unittest.TestCase):
                     # must reject this coupled replacement.
                     installer = (stage / "install.sh").read_bytes()
                     with tarfile.open(archive, "w:gz") as package:
-                        member = tarfile.TarInfo("agents-server-1.0.9/install.sh")
+                        member = tarfile.TarInfo(f"agents-server-{receipt['version']}/install.sh")
                         member.size, member.mode = len(installer), 0o755
                         package.addfile(member, io.BytesIO(installer))
-                        changed = tarfile.TarInfo("agents-server-1.0.9/changed")
+                        changed = tarfile.TarInfo(f"agents-server-{receipt['version']}/changed")
                         changed.size = 8
                         package.addfile(changed, io.BytesIO(b"modified"))
                     descriptor["archive"].update(size=archive.stat().st_size, sha256=MOD.sha(archive.read_bytes()))
@@ -1297,7 +1297,7 @@ class NativeServerAcceptanceUnitTests(unittest.TestCase):
                     receipt["legacyManifestSha256"] = MOD.sha(manifest.read_bytes())
                 if change == "archive": (args.bundle / "legacy" / descriptor["archive"]["name"]).write_bytes(b"different")
                 if change == "reviewed-policy":
-                    with patch.object(MOD, "STABLE109_ROOT_NORMALIZING_INSTALLER_SHA256", "0" * 64), self.assertRaises(RuntimeError):
+                    with patch.object(MOD, "BETA1101_ROOT_NORMALIZING_INSTALLER_SHA256", "0" * 64), self.assertRaises(RuntimeError):
                         MOD.root_normalization_contract(args.bundle, receipt)
                 elif change == "canonical-source":
                     with patch.object(MOD, "ROOT", args.work), self.assertRaises(OSError):
@@ -1305,7 +1305,7 @@ class NativeServerAcceptanceUnitTests(unittest.TestCase):
                 elif change:
                     with self.assertRaises(RuntimeError): MOD.root_normalization_contract(args.bundle, receipt)
                 else:
-                    self.assertEqual(MOD.root_normalization_contract(args.bundle, receipt), MOD.STABLE109_ROOT_NORMALIZING_INSTALLER_SHA256)
+                    self.assertEqual(MOD.root_normalization_contract(args.bundle, receipt), MOD.BETA1101_ROOT_NORMALIZING_INSTALLER_SHA256)
 
     def test_root_normalization_never_relaxes_mode_inode_owner_or_contract(self):
         before = {"rootMode": 0o755, "rootIdentity": [1, 2, os.getuid()]}
@@ -1325,8 +1325,10 @@ class NativeServerAcceptanceUnitTests(unittest.TestCase):
     def test_stable109_installer_pin_is_version_scoped_and_old_beta_policy_is_retained(self):
         self.assertEqual(MOD.ROOT_NORMALIZING_INSTALLER_SHA256,
                          "1ad0dc6fc8255959cbd15da08239331401f44467760490818a5669f6f3f75f15")
-        self.assertEqual(MOD.STABLE109_ROOT_NORMALIZING_INSTALLER_SHA256, MOD.sha((MOD.ROOT / "server/install.sh").read_bytes()))
-        for version in ("1.0.8-beta.5", "1.0.9-beta.1", "1.0.10"):
+        self.assertEqual(MOD.STABLE109_ROOT_NORMALIZING_INSTALLER_SHA256,
+                         "52b6212d6bd00fdf2b071cbd5ec8f01ea16aa43df58f77352dadca17ee96ffc4")
+        self.assertEqual(MOD.BETA1101_ROOT_NORMALIZING_INSTALLER_SHA256, MOD.sha((MOD.ROOT / "server/install.sh").read_bytes()))
+        for version in ("1.0.8-beta.5", "1.0.9", "1.0.9-beta.1", "1.0.10", "1.0.10-beta.2"):
             with self.subTest(version=version), tempfile.TemporaryDirectory() as temporary:
                 args, _, receipt, *_ = self.staging_case(Path(temporary).resolve(), version)
                 with self.assertRaisesRegex(RuntimeError, "not the reviewed exact implementation"):

@@ -54,6 +54,9 @@ ROOT_NORMALIZING_INSTALLER_SHA256 = "1ad0dc6fc8255959cbd15da08239331401f44467760
 # Reviewed stable 1.0.9 changes add only codex_side_chat_progress.py to the
 # runtime inventory and compile/import checks; lock and permission rules match.
 STABLE109_ROOT_NORMALIZING_INSTALLER_SHA256 = "52b6212d6bd00fdf2b071cbd5ec8f01ea16aa43df58f77352dadca17ee96ffc4"
+# Reviewed 1.0.10-beta.1 adds only codex_response_stream.py to the runtime
+# inventory and compile/import checks; installer permission logic is unchanged.
+BETA1101_ROOT_NORMALIZING_INSTALLER_SHA256 = "51a6ae6f242476ae4f19712b95ecbaba212b2256e3928d389d8f617a6c367ed7"
 NPM_BASELINE_VERSIONS = {"stable108": "1.0.8", "beta1085": "1.0.8-beta.5"}
 ROLLBACK_STAGES = {"preflight", "start-request", "observe-rollback", "rollback-proof", "preservation",
                    "retry-request", "retry-health", "retry-completion", "retry-verification"}
@@ -1429,7 +1432,8 @@ def root_normalization_contract(bundle: Path, receipt: dict) -> str:
                  "Root-normalization package must contain one bounded installer.")
             with package.extractfile(members[0]) as stream:
                 installers.append(stream.read(2 * 1024 * 1024 + 1))
-    expected_hash = (STABLE109_ROOT_NORMALIZING_INSTALLER_SHA256 if version == "1.0.9"
+    expected_hash = (BETA1101_ROOT_NORMALIZING_INSTALLER_SHA256 if version == "1.0.10-beta.1"
+                     else STABLE109_ROOT_NORMALIZING_INSTALLER_SHA256 if version == "1.0.9"
                      else ROOT_NORMALIZING_INSTALLER_SHA256)
     need(installers[0] == installers[1] == read_regular(ROOT / "server/install.sh", 2 * 1024 * 1024)
          and sha(installers[0]) == expected_hash,
@@ -1445,7 +1449,7 @@ def native_root_state(fixture: dict) -> dict:
 
 
 def verify_root_normalization(before: dict, after: dict, installer_hash: str) -> dict:
-    need(installer_hash in {ROOT_NORMALIZING_INSTALLER_SHA256, STABLE109_ROOT_NORMALIZING_INSTALLER_SHA256},
+    need(installer_hash in {ROOT_NORMALIZING_INSTALLER_SHA256, STABLE109_ROOT_NORMALIZING_INSTALLER_SHA256, BETA1101_ROOT_NORMALIZING_INSTALLER_SHA256},
          "Root normalization requires the reviewed signed installer contract.")
     identity = before.get("rootIdentity")
     need(isinstance(identity, list) and len(identity) == 3
