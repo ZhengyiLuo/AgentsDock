@@ -1,5 +1,21 @@
 # Public development log
 
+## 2026-10-01 — Exercise the frozen 1.0.9 package with real Codex
+
+- Review a separate native acceptance receipt for the unchanged signed Mac
+  package `1.0.9`, build 1243, and signed npm runtime from source
+  `33c21482170010108830aef8009831d5d1da624c`. The packaged app uses production
+  IPC and the real Codex provider against an isolated foreground server.
+- Observe a real tool call, inherited Side chat tool context, contextual
+  follow-up and tool activity. Cancelling the side request leaves the parent
+  working; the parent finishes normally and app reload retains side history.
+  The test uses real provider inference, not the earlier synthetic upstream.
+- This does not validate managed installation, populated-history migration,
+  busy/queued-work preservation during an update, interactive fresh setup or
+  logout/reboot survival. Existing hosted reports and their non-acceptance flags
+  remain unchanged. No runtime changes, rebuild, publication or deployment is
+  included. See [candidate evidence](CANDIDATE_REPLAY.md#packaged-real-provider-follow-up).
+
 ## 2026-10-01 — Verify the unchanged private 1.0.9 candidate
 
 - Keep matched app, npm server and signed legacy bridge `1.0.9` at source

@@ -153,6 +153,39 @@ retirement or Team Hub fence cleanup is established. Eligibility/acceptance
 flags remain false. No package is public as a result of these tests, and no
 existing user service or installation was changed.
 
+### Packaged real-provider follow-up
+
+A separate delegated native run exercises the exact signed `1.0.9` Mac package,
+build 1243, through production IPC and the unchanged signed npm runtime from
+source `33c21482170010108830aef8009831d5d1da624c`. It uses a real Codex provider
+with isolated app/server state and a foreground server, not a managed service
+installation. The release review checked the supplied receipt and UI evidence;
+the original hosted observation archives are not rewritten.
+
+The run records a real tool call reading a disposable canary, Side chat inheriting
+that tool context, a contextual follow-up, visible side tool activity and side
+cancellation while the parent continues working. The parent finishes normally;
+renderer reload in the same app/server processes retains side history; this is
+not an app relaunch or service restart. The context check establishes retrieval
+of the prior tool output, not complete native-context parity. The receipt reports
+unchanged original authentication, removal of the owned test credential snapshot
+and stopped test processes. No private test transcripts, authentication or state
+are committed.
+
+```text
+b50630a24781abb704105940fcca0dbbda5140b259eb9273860b05bea054bf9f  packaged live-provider receipt
+197bf67c06558a6dc547e7a328c52e2ed309b698297d5c92a05330dd608a3e02  scoped follow-up audit
+```
+
+This closes the scoped real-Codex packaged UI gap, not the remaining installation
+and migration gates: genuine populated native history across installation,
+active native work plus a durable queue during a managed update, interactive
+pairing and optional-dependency decline, and logout/reboot service survival.
+It does not establish another provider's behavior, natural OAuth renewal or
+public-feed delivery. The audit still records `releaseAcceptance: false` and no
+publication. The missing dedicated publishing credential remains an independent
+release blocker; the accepted source, build and package hashes are unchanged.
+
 ## Current delivery status
 
 The newest published Beta is `1.0.8-beta.5`, build 1242, from source
