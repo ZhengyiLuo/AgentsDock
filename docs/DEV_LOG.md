@@ -5383,3 +5383,42 @@ fresh approval. No production restart or deployment performed.
 - These are source and local acceptance results, not an accepted release. The
   integrated signed package, real upstream accounts, and installation/update paths
   still require release validation. No live service was changed by this work.
+
+
+## 1.0.10-beta.1 candidate preparation
+
+The candidate combines mailbox-only same-server messaging, native Codex Side
+chat reasoning/activity, switching existing chats between ordinary and custom
+Codex, and custom endpoint retry hardening. Native video speed-menu scrolling
+is also restored. The published 1.0.9 artifacts are unchanged.
+
+- Legacy same-server paired callers now create mailbox entries, including saved
+  scheduled references. They do not inject delivery wrappers as user turns or
+  create request/reply exchanges. The compiled desktop displayed the resulting
+  messages in one expandable inbox group through production IPC and server HTTP.
+- Side chat uses the shared reasoning-visibility preference while running and
+  collapses retained activity after completion or cancellation. Offscreen native
+  desktop acceptance covered live traces, reopening, tools, streamed answers,
+  cancellation, follow-up, and keeping the parent active. Synthetic Responses
+  fixtures establish deterministic trace presentation, not model content parity.
+- Same-thread normal/custom Codex switching passed in both directions with
+  retained history and goal state, including delayed handoff while owned work
+  finishes. An unrelated active chat remained running.
+- Custom stream normalization preserves upstream failures and leaves retries
+  with native Codex. Listener teardown now releases the old transport fully;
+  replacing it cannot retain a stale socket reader. A real-loopback regression
+  fails before this correction and passes afterward.
+- Native retry acceptance covers untyped stream errors, premature EOF, HTTP 503,
+  exhausted rate limits, and a failure after a completed tool call. Recovery
+  retained the tool result and executed the tool only once. The reusable check
+  is `server/scripts/verify_custom_endpoint_retry.py`; it needs an explicit native
+  Codex executable and an output directory, and uses synthetic upstreams only.
+- An isolated real ChatGPT-backed Codex run through the compiled app passed
+  main-chat tool execution, inherited Side chat tool context, contextual follow-up,
+  cancellation while the parent continued, and retained history after reopening.
+  The original provider credentials remained unchanged. This is source-build
+  acceptance, not signed-package acceptance.
+- Focused desktop/server tests, desktop type checking, production compilation,
+  and native Codex 0.159.2 acceptance passed. Signed packaging, platform-specific
+  installation/update checks, and acceptance against a real custom service remain
+  separate release checks. This entry does not record publication or deployment.
