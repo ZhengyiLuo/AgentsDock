@@ -102,6 +102,34 @@ describe('MediaPreviewDialog', () => {
     expect(mediaURL).toHaveBeenCalledWith('profile-a', 0, 'chat-1', 'same-file')
     expect(mediaURL).toHaveBeenCalledWith('profile-b', 0, 'chat-1', 'same-file')
   })
+
+  it.each([false, true])('preserves native video menu scrolling while keeping the background locked (shared: %s)', sharedChat => {
+    Object.defineProperty(window, 'agentsDock', {
+      configurable: true,
+      value: {
+        sharedChat,
+        files: { mediaURL: vi.fn(() => '/synthetic-video.mp4'), open: vi.fn(), save: vi.fn() }
+      } as unknown as AgentsDockAPI
+    })
+    const file: AgentFile = { id: 'video-1', filename: 'result.mp4', content_type: 'video/mp4' }
+    const view = render(<MediaPreviewDialog sessionId="chat-1" file={file} onClose={vi.fn()} />)
+    const player = document.querySelector('.media-dialog video')!
+
+    const outsideWheel = new WheelEvent('wheel', { bubbles: true, cancelable: true, deltaY: 40 })
+    fireEvent(document.body, outsideWheel)
+    expect(outsideWheel.defaultPrevented).toBe(true)
+
+    // Chromium retargets wheel events from its built-in playback-speed menu
+    // to the video element. The browser's default action scrolls that menu.
+    const playerWheel = new WheelEvent('wheel', { bubbles: true, cancelable: true, deltaY: 40 })
+    fireEvent(player, playerWheel)
+    expect(playerWheel.defaultPrevented).toBe(false)
+
+    view.unmount()
+    const releasedWheel = new WheelEvent('wheel', { bubbles: true, cancelable: true, deltaY: 40 })
+    fireEvent(document.body, releasedWheel)
+    expect(releasedWheel.defaultPrevented).toBe(false)
+  })
 })
 
 describe('shared browser video controls', () => {
