@@ -1,5 +1,24 @@
 # Public development log
 
+## 2026-09-30 — Keep Side chat Stop safe during progress failures
+
+- Stop and Clear now retire their owned provider work even when an earlier
+  streamed-progress write is still failing. Retain the terminal state or new
+  conversation fence for storage recovery, and do not acknowledge durable
+  success until it can be saved.
+- Stop captures a deep copy of already-received, user-visible Codex activity
+  from the exact active request before marking it cancelled. Preserve partials
+  still inside the coalescing window; reject later callbacks, other owners,
+  previous requests and cleared conversations. Never copy parent/control input
+  or encrypted reasoning into this snapshot.
+- Reproduce both failures in isolated fixtures, then pass 152 focused server
+  tests with locked dependencies, Python 3.13 and a synthetic environment. New
+  adversarial checks cover persistent/recovered storage failure, both Stop/Clear
+  orderings, immediate cancellation, deep-copy and task ownership, and a new
+  request after cancellation or Clear. Provider transport is synthetic; native
+  app/provider and exact packaged acceptance remain separate release gates.
+- Availability: committed source only; no live service restart or publication.
+
 ## 2026-09-30 — Prepare matched stable 1.0.9
 
 - Select `1.0.9` for the next matched direct desktop app, npm server and signed
