@@ -9,33 +9,45 @@ turn blocked or unobserved scenarios into full release acceptance.
 
 ## Current delivery status
 
-The newest **prepared** candidate is `1.0.8-beta.3`, build 1240, from source
-`09e573cc10330bbe60ffef544ba67ac9a71e69e4`. Its universal Mac app is signed,
+The newest prepared candidate is `1.0.8-beta.4`, build 1241, from source
+`1a99b00b6e50271bc97dadd12ec3d701c3168809`. Its universal Mac app is signed,
 notarized and checked; its matched npm/legacy archives retain the existing
-server trust key. Exact fresh npm installation passes on macOS and Linux.
-The local sealed Mac/server transport is ready, but beta.3's one-click upgrade
-and legacy migration replay have not run. The only staged beta.3 GitHub draft
-is the npm candidate; there is no public beta.3 package or desktop feed entry.
-Do not use the floating npm `beta` tag expecting this private candidate.
-Linux x64/ARM64 packaging checks pass. Windows preparation and native package
-verification pass on unchanged source in the user-requested attempt 3 of run
-`36671146624`; its installer is an explicitly unsigned beta preview. Preserve
-the two earlier attachment-cache test timeouts: their cause is not established
-and the passing retry is not a code fix. The beta.3 candidate is still not an
-accepted complete coordinated release; exact upgrade/migration replay is pending.
+server trust key. Exact fresh npm installation passes on macOS and Linux in
+run `36790484232`. Linux x64/ARM64 and Windows x64 package verification pass in
+run `36790520350`; Windows is explicitly an unsigned beta preview.
 
-The exact `1.0.8-beta.2` npm server and signed legacy bridge are now public.
-npm `beta` selects `1.0.8-beta.2`; `latest` remains stable `1.0.8`. Their exact
-registry/download bytes and signatures are verified in the publication receipt
-in [DEV_LOG.md](DEV_LOG.md). The matched desktop build 1234 and its legacy mirror
-remain drafts; the existing private test download is unchanged.
+All eight Mac native replay jobs pass in run `36791634579`, attempt 1, on the
+same source. Both legacy permission cases observe actual signed app replacement
+and relaunch, automatic server reconciliation after reconnect, two native clients
+sharing one operation, and fixture-state preservation. Interrupted-download and
+failed-stage retry pass, and the stable `1.0.8` no-downgrade case passes. The
+sealed candidate receipt SHA-256 is
+`f136eb822b8196a951e09e343ae262744262579ec1fafc7d5209a55dbde8ff0b`;
+transport ZIP SHA-256 is
+`03f24da4ab615c4c6e788af6b8cd8f63d6232e297fd3b01ea4fe9019118d6297`.
+These observations do not fill the real-provider, busy-work or reboot gaps.
+
+The beta.4 npm, bridge and desktop assets are still unpublished drafts. Linux
+rollback run `36791637171`, attempt 1, passes `0750` but fails `0755` while
+waiting for exact candidate health after a verified rollback and retry request.
+The original failure is retained and publication is held for diagnosis; the
+passing sibling does not clear it. npm `beta` still selects
+`1.0.8-beta.2`; `latest` remains stable `1.0.8`. Do not expect a floating tag or
+public feed to deliver this candidate until its publication receipt appears in
+[DEV_LOG.md](DEV_LOG.md). Frozen earlier candidate assets are unchanged.
+
+A diagnostic-only harness descendant adds bounded retry-admission, on-disk
+update status and owned lock/recovery observations for an instrumented Linux
+replay. It does not change the signed packages, waits, retry count, fault scope
+or acceptance assertions. The original failed run remains part of the evidence;
+instrumentation passing its own tests is not recovery acceptance.
 
 This is an explicitly authorized Beta testing release, not complete coordinated
 release acceptance. Genuine authenticated provider-history preservation and
 active/queued provider work during migration remain unverified. The observations
 below keep their original scope and `releaseAcceptance: false` values.
 
-For an existing server saved in the private beta.2 app, let its work finish, then
+For an existing server saved in the beta app, let its work finish, then
 use **Settings → Updates → Retry server update** on one server first. Verify the
 reported version and reopen/continue an existing chat before retrying others.
 Compatible stable `1.0.8` servers must remain unchanged. Do not run a fresh npm
@@ -110,7 +122,7 @@ Dispatch `ci.yml` on the receipt's reviewed `release/*` branch with:
 
 ```text
 candidate_replay=true
-candidate_tag=candidate-replay-v1.0.8-beta.2
+candidate_tag=candidate-replay-v1.0.8-beta.4
 candidate_receipt_sha256=<independently reviewed candidate.json SHA-256>
 candidate_bundle_sha256=<independently reviewed candidate-bundle.zip SHA-256>
 npm_native_validation=false
@@ -126,7 +138,7 @@ an existing local guest, and never remove an app's `disable-auto-update` marker.
 ## Separate stable-server no-downgrade case
 
 Stable server `1.0.8` must not be downgraded to the receipt's `1.0.8-beta.N`
-candidate (currently `1.0.8-beta.2`). The fixture accepts only that same-base
+candidate (currently `1.0.8-beta.4`). The fixture accepts only that same-base
 numbered Beta line and binds every observation to the exact signed candidate
 receipt; it rejects other bases, Stable, RC and locally relabeled versions.
 That requires a
@@ -226,11 +238,11 @@ or publishing/signing credential is needed. Do not copy another account's privat
 credentials, change `HOME`, use `sudo`, or remove existing history to make an
 installation proceed.
 
-The supplied `1.0.8-beta.2` files must have these SHA-256 hashes:
+The supplied `1.0.8-beta.4` files must have these SHA-256 hashes:
 
 ```text
-bc00e50d84743b60c63e335ccc1ccf812b50d5595fec29a0f4674543bec963a3  AgentsDock-1.0.8-beta.2-mac-universal.zip
-44b3ee3d2f263cba3779df33d8b7a648625ed4877a7bfaa55f677eabb4f8baa5  server-1.0.8-beta.2.tgz
+afb66f4a21d0f9bd63297b5b1e39d7084da792b41d244b408ff51c3cfd6c2517  AgentsDock-1.0.8-beta.4-mac-universal.zip
+b4a906bd95b7ae5f59d1f337937715f5dd8fc954d520a1a200015097718e1dba  server-1.0.8-beta.4.tgz
 ```
 
 After comparing `shasum -a 256` output for both Downloads files, install the
@@ -239,14 +251,14 @@ bytes rather than relying on a floating registry tag:
 
 ```sh
 cd "$HOME/Downloads"
-AGENTSDOCK_QA_CLI="$(mktemp -d "${TMPDIR:-/tmp}/agentsdock-beta2-cli.XXXXXX")"
+AGENTSDOCK_QA_CLI="$(mktemp -d "${TMPDIR:-/tmp}/agentsdock-beta4-cli.XXXXXX")"
 npm install --offline --ignore-scripts --no-audit --no-fund \
   --package-lock=false --prefix "$AGENTSDOCK_QA_CLI" \
-  "$PWD/server-1.0.8-beta.2.tgz"
+  "$PWD/server-1.0.8-beta.4.tgz"
 node "$AGENTSDOCK_QA_CLI/node_modules/@agentsdock/server/npm/cli.cjs" --version
 ```
 
-Stop unless the CLI version prints exactly `1.0.8-beta.2`. Then run:
+Stop unless the CLI version prints exactly `1.0.8-beta.4`. Then run:
 
 ```sh
 node "$AGENTSDOCK_QA_CLI/node_modules/@agentsdock/server/npm/cli.cjs" \
@@ -257,7 +269,7 @@ The runtime installer still needs network access. If it refuses an existing
 installation or custom root, stop; do not bypass the refusal. Extract the supplied
 Mac ZIP and launch that exact app from the test account. Connect to
 `http://127.0.0.1:17850` using the installer's token privately. Expect app build
-1234 and both app/server version `1.0.8-beta.2`.
+1241 and both app/server version `1.0.8-beta.4`.
 
 - Complete a real chat and harmless file action in a disposable folder with
   each provider being accepted.
@@ -274,8 +286,8 @@ migration, or active/queued-work preservation. Those require an older same-Beta
 server containing genuine provider sessions and queued work, followed through the
 exact signed updater/relaunch/coordinator journey in an authorized isolated
 replay. Do not install the hosted-runner origin/trust fixture on a working Mac or
-spoof its safeguards. The server distributions are public, but the desktop
-candidate remains unpublished; manually copying its ZIP is not updater acceptance.
+spoof its safeguards. Manually copying the ZIP is not updater acceptance, and
+the preparation receipt does not imply public availability of this candidate.
 
 Both preparation-failure and rollback observations bind the installation root
 to its original device/inode/owner. The audited signed installer intentionally

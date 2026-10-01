@@ -1,5 +1,82 @@
 # Public development log
 
+## 2026-09-30 — Validate the beta.4 desktop and matched server candidate
+
+- Freeze the reviewed desktop changes and all matched server artifacts at
+  `1a99b00b6e50271bc97dadd12ec3d701c3168809`, version `1.0.8-beta.4`, desktop
+  build 1241. The scoped latest desktop contribution is integrated without
+  importing unrelated branch work. Source CI
+  [36790148113](https://github.com/ZhengyiLuo/AgentsDock/actions/runs/36790148113)
+  and all eight server shards in
+  [36790148239](https://github.com/ZhengyiLuo/AgentsDock/actions/runs/36790148239)
+  pass. Later documentation does not change the packaged source pin.
+- Reuse the existing server signer in
+  [36790207916](https://github.com/ZhengyiLuo/AgentsServer/actions/runs/36790207916),
+  export `61d23b3e7a60c3e54a8186b564415b0786b1b01f`. Verify original Actions
+  archive provenance, both signatures, immutable URLs and 118 runtime files
+  and modes. The accepted npm descriptor SHA-256 is
+  `56d1ef23fdfe4f3b726ae851fb37e4e54818eb058b203299faf4f106f641b10c`;
+  legacy descriptor SHA-256 is
+  `383ea94118d6532532d370e535ddaf58c018add93bde5bbbdeff3e90a9278488`.
+- Native npm fresh-install checks pass on macOS and Linux in
+  [36790484232](https://github.com/ZhengyiLuo/AgentsDock/actions/runs/36790484232),
+  including existing-install refusal, native service restart, identity/token
+  retention and independence from the temporary npm installation/cache.
+- The official universal Mac build passes the full 5,085-test suite (six
+  existing skips), typecheck, compilation, Developer ID signing, app/DMG
+  notarization and stapling, Gatekeeper, universal architecture, fuses, exact
+  coordinated resources, ZIP/DMG parity and isolated normal startup/termination.
+  ZIP SHA-256:
+  `afb66f4a21d0f9bd63297b5b1e39d7084da792b41d244b408ff51c3cfd6c2517`.
+  Linux x64/ARM64 and Windows x64 native package verification pass in
+  [36790520350](https://github.com/ZhengyiLuo/AgentsDock/actions/runs/36790520350).
+  Windows is an explicitly **unsigned beta preview**; its installer, clean
+  launch and uninstall pass, not an existing-user Windows update journey.
+- Exercise live child counts, scoped Stop, completion, typing and reopening
+  through the exact packaged renderer/preload, production source-main modules,
+  authenticated server boundary and native Codex using synthetic local inference.
+  The first theme-picker automation timed out; retain that failed fixture.
+  Corrected automation uses the real React change handler as a disclosed
+  fallback, not a verified native popup. Light/dark and narrow/wide presentation
+  checks pass. Owned processes and synthetic credentials are cleaned up; no
+  working app or server is replaced. This fixture is not hosted-provider or
+  packaged-main updater acceptance.
+- All eight scoped Mac native replay jobs pass in
+  [36791634579](https://github.com/ZhengyiLuo/AgentsDock/actions/runs/36791634579).
+  For legacy roots `0750` and `0755`, the real signed app updates from `1.0.6`
+  before the server reconnects, then automatically reconciles both server
+  components from `1.0.7-beta.21` to beta.4 without a manual server-update click.
+  Two native clients share one operation and final service instance. Persisted
+  fixture state, identity and token survive. Interrupted download and failed
+  preparation retry pass. A separate exact-app fixture leaves compatible
+  stable server `1.0.8` untouched across reopening, with no update request.
+- These are scoped observations, not complete production acceptance. Real
+  provider/native-history migration, active and queued provider work,
+  interactive installer choices, logout/reboot and Windows update journeys
+  remain unvalidated. The corresponding checks retain their truthful `blocked`
+  status and rehearsal reports retain `releaseAcceptance: false`.
+- Linux rollback run
+  [36791637171](https://github.com/ZhengyiLuo/AgentsDock/actions/runs/36791637171),
+  attempt 1, passes the `0750` case but fails `0755`. The failed case observes
+  24 exact candidate-worker faults and three real rollback phases; restored
+  baseline health, native registrations, current runtime and state preservation
+  pass before the same-byte retry. The retry does not reach exact authenticated
+  candidate health within 1,500 seconds. The watcher is stopped; the 203 recorded
+  transient HTTP 503 responses belong to rollback observation, not retry.
+  The retained diagnostic does not establish the cause. Do not classify this as
+  a cleared flaky run or infer a successful retry from the passing sibling.
+- Prepare a diagnostic-only harness descendant for one instrumented Linux
+  replay of those same signed bytes. Retain finite retry-admission, update-journal,
+  preparation-log and exact fixture lock/recovery observations without copying
+  private messages or identities. Pre-retry observations do not query native
+  services or wait; terminal diagnostics cannot replace the original failure.
+  No timeout, retry, fault scope, acceptance assertion or packaged runtime is
+  changed. All 89 harness Python tests and 16 candidate-receipt tests pass;
+  these tests do not establish the native failure's cause or recovery.
+- The beta.4 npm, bridge and desktop artifacts remain unpublished drafts.
+  Publication is held for investigation of the failed recovery case. Stable
+  releases, feeds and existing installations remain unchanged.
+
 ## 2026-09-30 — Prepare beta.4 with live Codex child activity
 
 - Integrate the scoped desktop delta from `eae4c5ca3c6305c6ee7196696bb2f78b2ada531e`

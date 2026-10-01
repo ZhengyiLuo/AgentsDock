@@ -452,6 +452,96 @@ jobs:
           import { join } from 'node:path'
           const [source, destination, receiptPath] = process.argv.slice(2)
           mkdirSync(destination, {mode: 0o700})
+          const object = value => value !== null && typeof value === 'object' && !Array.isArray(value)
+          const shape = (value, required, optional = []) => object(value)
+            && required.every(key => Object.hasOwn(value, key))
+            && Object.keys(value).every(key => [...required, ...optional].includes(key))
+          const bool = value => typeof value === 'boolean'
+          const int = (value, low, high) => Number.isSafeInteger(value) && value >= low && value <= high
+          const versions = ['baseline', 'candidate', 'other-or-unknown']
+          const phases = ['idle', 'available', 'current', 'pending', 'starting', 'checking', 'downloading', 'verifying',
+            'installing', 'restarting', 'complete', 'failed', 'prepared', 'guarded', 'quiescing', 'quiesced', 'linking',
+            'linked', 'stopping', 'stopped', 'fencing', 'fenced', 'authorizing', 'authority', 'candidate-starting',
+            'candidate-healthy', 'committing', 'committed', 'rolling-back', 'rolled-back', 'rollback-healthy', 'other-or-unknown']
+          const failureCategories = ['manifest-verification', 'archive-verification', 'archive-extraction', 'release-discovery',
+            'release-selection', 'health-authorization', 'identity-admission', 'post-install-health', 'descriptor-fetch',
+            'download', 'health-readiness', 'tls-verification', 'network-refused', 'network-timeout', 'dns-resolution',
+            'download-truncated', 'signature-verification', 'dependency-prerequisite', 'missing-python-module',
+            'permission-denied', 'missing-file-or-executable', 'hub-continuity', 'http-response', 'installer',
+            'installer-lock', 'service-activation', 'unclassified']
+          const knownErrors = ['release-key-type', 'manifest-not-object', 'manifest-version-invalid', 'manifest-tag-mismatch',
+            'manifest-prerelease-mismatch', 'manifest-track-mismatch', 'manifest-archive-missing', 'archive-location-untrusted',
+            'archive-checksum-invalid', 'archive-checksum-mismatch', 'archive-unsafe-path', 'archive-links-forbidden',
+            'archive-layout-invalid', 'release-list-not-array', 'release-list-invalid-json', 'release-list-not-found',
+            'requested-version-invalid', 'health-credential-empty', 'stable-identity-missing', 'update-identity-invalid',
+            'incumbent-identity-mismatch', 'candidate-identity-mismatch', 'candidate-peer-unavailable',
+            'candidate-hub-identity-mismatch', 'candidate-hub-transport-mismatch', 'candidate-legacy-hub-transport-mismatch',
+            'candidate-hub-routes-mismatch', 'candidate-hub-repair-failed', 'signed-descriptor-not-found', 'release-track-empty',
+            'manifest-wrong-track', 'requested-track-mismatch', 'requested-not-latest', 'resolved-version-mismatch',
+            'forward-update-required', 'download-size-limit', 'startup-readiness-timeout', 'installer-exit-failure', 'installer-timeout']
+          const labels = (values, allowed) => Array.isArray(values) && values.length <= allowed.length
+            && new Set(values).size === values.length && values.every(value => allowed.includes(value))
+          const validFailure = value => shape(value, ['messageState', 'categories', 'knownError'], ['httpStatus', 'installerExitCode'])
+            && ['missing', 'invalid-type', 'oversized', 'empty', 'present'].includes(value.messageState)
+            && labels(value.categories, failureCategories) && (value.knownError === null || knownErrors.includes(value.knownError))
+            && (!Object.hasOwn(value, 'httpStatus') || int(value.httpStatus, 100, 599))
+            && (!Object.hasOwn(value, 'installerExitCode') || int(value.installerExitCode, -32768, 32767))
+          const statusFlags = ['retryable', 'errorPresent', 'scheduleIdPresent', 'updateIdPresent', 'preparationIdPresent']
+          const statusFields = ['phase', 'target', 'preparationPhase', 'errorCode', 'errorHttpStatus', ...statusFlags]
+          const validStatusFields = value => phases.includes(value.phase) && versions.includes(value.target)
+            && ['checking', 'downloading', 'staging', 'ready', 'absent', 'other-or-unknown'].includes(value.preparationPhase)
+            && ['server_update_preparation_failed', 'server_update_preparation_invalid', 'server_update_rolled_back',
+                'server_update_pending', 'server_update_pending_http', 'absent', 'other-or-unknown'].includes(value.errorCode)
+            && (value.errorHttpStatus === null || int(value.errorHttpStatus, 400, 599))
+            && statusFlags.every(key => bool(value[key]))
+          const validStatus = value => value?.readable === false ? shape(value, ['readable'])
+            : shape(value, ['readable', ...statusFields], ['failure'])
+              && value.readable === true && validStatusFields(value)
+              && (!Object.hasOwn(value, 'failure') || (value.phase === 'failed' || value.errorPresent === true) && validFailure(value.failure))
+          const validAdmission = value => value?.observed === false ? shape(value, ['observed'])
+            : shape(value, ['observed', ...statusFields]) && value.observed === true && validStatusFields(value)
+          const validLock = value => value?.observed === false ? shape(value, ['observed'])
+            : shape(value, ['observed', 'lockPresent', 'lockSafe', 'recoveryOwnerVerified', 'ownerAlive', 'retiredPresent',
+                'unitFilePresent', 'nativeRegistered', 'ownerRole', 'nativeState']) && value.observed === true
+              && ['lockPresent', 'lockSafe', 'recoveryOwnerVerified'].every(key => bool(value[key]))
+              && ['ownerAlive', 'retiredPresent', 'unitFilePresent', 'nativeRegistered'].every(key => value[key] === null || bool(value[key]))
+              && ['recovery', 'unknown'].includes(value.ownerRole)
+              && ['active', 'inactive', 'failed', 'activating', 'deactivating', 'not-queried', 'other-or-unknown'].includes(value.nativeState)
+          const validService = value => value?.querySucceeded === false
+            ? shape(value, ['querySucceeded'], ['registered']) && (!Object.hasOwn(value, 'registered') || [false, null].includes(value.registered))
+            : shape(value, ['registered', 'querySucceeded', 'state', 'pid', 'lastExitCode'])
+              && value.registered === true && value.querySucceeded === true
+              && ['running', 'waiting', 'spawn scheduled', 'active', 'inactive', 'failed', 'activating', 'deactivating', 'other-or-unknown'].includes(value.state)
+              && (value.pid === null || int(value.pid, 1, 2147483647))
+              && (value.lastExitCode === null || int(value.lastExitCode, -32768, 32767))
+          const validComponent = value => value?.present === false ? shape(value, ['present'])
+            : shape(value, ['present', 'version', 'protocolMatches', 'pidPresent', 'instancePresent', 'nativePidMatches', 'maintenance'])
+              && value.present === true && versions.includes(value.version) && bool(value.protocolMatches)
+              && bool(value.pidPresent) && bool(value.instancePresent)
+              && (value.nativePidMatches === null || bool(value.nativePidMatches)) && ['held', 'released', 'unknown'].includes(value.maintenance)
+          const validHealth = value => value?.reachable === false
+            ? shape(value, ['reachable', 'failureCategory', 'httpStatus'])
+              && ['gateway-unavailable', 'invalid-json', 'request-failed'].includes(value.failureCategory)
+              && (value.httpStatus === null || [502, 503].includes(value.httpStatus))
+            : shape(value, ['reachable', 'ok', 'identityMatches', 'version', 'components']) && value.reachable === true
+              && bool(value.ok) && bool(value.identityMatches) && versions.includes(value.version)
+              && shape(value.components, ['gateway', 'worker']) && Object.values(value.components).every(validComponent)
+          const validLog = value => shape(value, ['readable', 'categories']) && bool(value.readable)
+            && labels(value.categories, ['tls-verification', 'port-in-use', 'missing-python-module', 'permission-denied',
+              'connection-refused', 'dependency-resolution', 'native-health-failure', 'signature-rejected', 'http-404',
+              'installer-lock', 'service-activation'])
+          const validState = value => value?.collected === false
+            ? shape(value, ['diagnosticOnly', 'collected']) && value.diagnosticOnly === true
+            : shape(value, ['diagnosticOnly', 'collected', 'currentRuntime', 'registrationsVerified', 'services', 'health',
+                'logs', 'tmuxTrust', 'journals']) && value.diagnosticOnly === true && value.collected === true
+              && versions.includes(value.currentRuntime) && bool(value.registrationsVerified)
+              && shape(value.services, [], ['gateway', 'worker']) && Object.values(value.services).every(validService)
+              && validHealth(value.health)
+              && shape(value.journals, ['activation', 'execution', 'update']) && Object.values(value.journals).every(validStatus)
+              && shape(value.logs, ['updater', 'legacyStderr', 'workerStderr', 'gatewayStderr', 'preparation']) && Object.values(value.logs).every(validLog)
+              && shape(value.tmuxTrust, ['daemonAvailable', 'ownedTrustBundleAvailable', 'trustBundleMatches'])
+              && (value.tmuxTrust.daemonAvailable === null || bool(value.tmuxTrust.daemonAvailable))
+              && bool(value.tmuxTrust.ownedTrustBundleAvailable) && bool(value.tmuxTrust.trustBundleMatches)
           for (const name of ['bootstrap.json', 'rollback.json', 'rollback-failure.json']) {
             let fd
             try { fd = openSync(join(source, name), constants.O_RDONLY | constants.O_NOFOLLOW) }
@@ -476,7 +566,7 @@ jobs:
                   receipt = JSON.parse(bytes)
                 } finally { closeSync(receiptFd) }
                 const detail = report.diagnostic
-                const stages = ['preflight', 'start-request', 'observe-rollback', 'rollback-proof', 'preservation', 'retry-request', 'retry-health', 'retry-verification']
+                const stages = ['preflight', 'start-request', 'observe-rollback', 'rollback-proof', 'preservation', 'retry-request', 'retry-health', 'retry-completion', 'retry-verification']
                 const counters = ['transient502', 'transient503', 'candidateProcessesFaulted', 'rollbackPhasesObserved']
                 const fields = ['schema', 'kind', 'executionScope', 'operation', 'status', 'observed', 'publicationEligible',
                   'releaseAcceptance', 'desktopAcceptance', 'runId', 'runAttempt', 'sourceSha', 'harnessSourceSha',
@@ -487,9 +577,11 @@ jobs:
                   || report.runAttempt !== process.env.GITHUB_RUN_ATTEMPT || report.releaseReceiptSha256 !== process.env.RECEIPT_SHA256
                   || !detail || !stages.includes(detail.stage) || !['invalid-json', 'transport', 'assertion', 'other'].includes(detail.failureCategory)
                   || typeof detail.watcherStopped !== 'boolean'
+                  || !validAdmission(detail.retryAdmission) || !validState(detail.state)
+                  || !['beforeRetry', 'afterAdmission', 'failureLock'].every(key => validLock(detail[key]))
                   || Object.keys(report).sort().join() !== fields.sort().join()
                   || counters.some(key => !Number.isSafeInteger(detail[key]) || detail[key] < 0 || detail[key] > 1000000)
-                  || Object.keys(detail).sort().join() !== [...counters, 'stage', 'failureCategory', 'watcherStopped'].sort().join()) throw new Error('Invalid rollback failure diagnostic')
+                  || Object.keys(detail).sort().join() !== [...counters, 'stage', 'failureCategory', 'watcherStopped', 'retryAdmission', 'state', 'beforeRetry', 'afterAdmission', 'failureLock'].sort().join()) throw new Error('Invalid rollback failure diagnostic')
               }
               writeFileSync(join(destination, name), bytes, {flag: 'wx', mode: 0o600})
             } finally { closeSync(fd) }

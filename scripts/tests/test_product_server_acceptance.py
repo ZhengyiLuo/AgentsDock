@@ -1346,11 +1346,343 @@ class NativeServerAcceptanceUnitTests(unittest.TestCase):
         fixture = {"baselineVersion": "1.0.3", "targetVersion": "1.0.7-beta.18"}
         value = MOD.diagnostic_status({"phase": "rolling-back", "release_version": fixture["targetVersion"],
                                        "error": "private-token private-path", "retryable": True}, fixture)
-        self.assertEqual(value, {"readable": True, "phase": "rolling-back", "target": "candidate", "errorPresent": True, "retryable": True})
+        self.assertEqual(value, {"readable": True, "phase": "rolling-back", "target": "candidate", "errorPresent": True, "retryable": True,
+                                 "preparationPhase": "absent", "errorCode": "absent", "scheduleIdPresent": False,
+                                 "updateIdPresent": False, "preparationIdPresent": False, "errorHttpStatus": None,
+                                 "failure": {"messageState": "missing", "categories": [], "knownError": None}})
         for phase in ("private-token", {"token": "private-token"}, ["private-token"]):
             result = MOD.diagnostic_status({"phase": phase, "error_code": "private-token"}, fixture)
             self.assertEqual(result["phase"], "other-or-unknown")
             self.assertNotIn("private-token", json.dumps(result))
+
+    def test_retry_admission_projects_finite_status_and_never_identifiers_or_payload(self):
+        fixture = {"baselineVersion": "1.0.7-beta.21", "targetVersion": "1.0.8-beta.4"}
+        private = "private-canary-path-token-message"
+        raw = {"phase": "pending", "target_version": fixture["targetVersion"], "preparation_phase": "staging",
+               "error_code": "server_update_pending", "retryable": True, "schedule_id": private,
+               "update_id": private, "preparation_id": private, "message": private, "nested": {"token": private}}
+        value = MOD.rollback_retry_admission(raw, fixture)
+        self.assertEqual(value, {"observed": True, "phase": "pending", "target": "candidate", "preparationPhase": "staging",
+                                "errorCode": "server_update_pending", "retryable": True, "errorPresent": True,
+                                "scheduleIdPresent": True, "updateIdPresent": True, "preparationIdPresent": True, "errorHttpStatus": None})
+        self.assertEqual(MOD.bounded_retry_admission(value), value)
+        self.assertNotIn(private, json.dumps(value))
+        for malformed in (private, [private], {"private": private}, True, 1):
+            with self.subTest(malformed=type(malformed).__name__):
+                projected = MOD.rollback_retry_admission({**raw, "phase": malformed, "target_version": malformed,
+                    "preparation_phase": malformed, "error_code": malformed, "retryable": malformed,
+                    "schedule_id": malformed, "update_id": malformed, "preparation_id": malformed}, fixture)
+                self.assertEqual(projected["phase"], "other-or-unknown")
+                self.assertEqual(projected["target"], "other-or-unknown")
+                self.assertEqual(projected["preparationPhase"], "other-or-unknown")
+                self.assertEqual(projected["errorCode"], "other-or-unknown")
+                self.assertIs(projected["retryable"], malformed is True)
+                self.assertIs(projected["scheduleIdPresent"], isinstance(malformed, str))
+                self.assertNotIn(private, json.dumps(projected))
+        self.assertEqual(MOD.rollback_retry_admission(None, fixture), {"observed": False})
+        self.assertEqual(MOD.bounded_retry_admission({"observed": "private"}), {"observed": False})
+
+    def test_available_error_and_pending_http_are_finite_not_raw_error_text(self):
+        fixture = {"baselineVersion": "1.0.7-beta.21", "targetVersion": "1.0.8-beta.4"}
+        raw = {"phase": "available", "error_code": "server_update_pending_http_503", "retryable": True,
+               "message": "installer failed (1): another AgentsServer installation is active /private/canary?token=secret"}
+        result = MOD.diagnostic_status(raw, fixture)
+        self.assertEqual(result["phase"], "available")
+        self.assertEqual(result["errorCode"], "server_update_pending_http")
+        self.assertEqual(result["errorHttpStatus"], 503)
+        self.assertEqual(result["failure"]["categories"], ["installer", "installer-lock"])
+        self.assertEqual(result["failure"]["installerExitCode"], 1)
+        self.assertNotIn("private", json.dumps(result))
+        self.assertNotIn("secret", json.dumps(result))
+        self.assertNotIn("server_update_pending_http_503", json.dumps(result))
+        for status in (400, 499, 500, 599):
+            value = MOD.rollback_retry_admission({**raw, "error_code": f"server_update_pending_http_{status}"}, fixture)
+            self.assertEqual(value["errorHttpStatus"], status)
+            self.assertEqual(value["errorCode"], "server_update_pending_http")
+            self.assertEqual(MOD.bounded_retry_admission(value), value)
+        for code in ("server_update_pending_http_399", "server_update_pending_http_600", "server_update_pending_http_0503",
+                     "server_update_pending_http_503-private-canary", "server_update_pending_http_503\n", ["private-canary"]):
+            value = MOD.diagnostic_status({**raw, "error_code": code}, fixture)
+            self.assertEqual(value["errorCode"], "other-or-unknown")
+            self.assertIsNone(value["errorHttpStatus"])
+            self.assertNotIn("private", json.dumps(value))
+
+    def test_component_diagnostic_distinguishes_native_pid_version_and_maintenance_without_identity(self):
+        fixture = {"baselineVersion": "1.0.7-beta.21", "targetVersion": "1.0.8-beta.4"}
+        raw = {"version": fixture["targetVersion"], "protocol": 1, "pid": 123,
+               "instance_id": "private-instance", "maintenance_held": False, "argv": ["private-path"]}
+        value = MOD.diagnostic_component(raw, fixture, {"pid": 123})
+        self.assertEqual(value, {"present": True, "version": "candidate", "protocolMatches": True, "pidPresent": True,
+                                "instancePresent": True, "nativePidMatches": True, "maintenance": "released"})
+        self.assertFalse(MOD.diagnostic_component(raw, fixture, {"pid": 124})["nativePidMatches"])
+        malformed = MOD.diagnostic_component({**raw, "pid": True, "protocol": True, "maintenance_held": "false"}, fixture, {"pid": True})
+        self.assertFalse(malformed["pidPresent"])
+        self.assertFalse(malformed["protocolMatches"])
+        self.assertIsNone(malformed["nativePidMatches"])
+        self.assertEqual(malformed["maintenance"], "unknown")
+        self.assertEqual(MOD.diagnostic_component(None, fixture, {}), {"present": False})
+        self.assertNotIn("private", json.dumps([value, malformed]))
+
+    def diagnostic_lock_fixture(self, home):
+        root = home / "install"
+        root.mkdir(mode=0o700)
+        lock = root / ".install-lock"
+        lock.mkdir(mode=0o700)
+        (lock / "pid").write_text("222\n")
+        (lock / "pid").chmod(0o600)
+        transaction = "activation-" + "a" * 24
+        recovery = root / ".activation-recovery"
+        recovery.mkdir(mode=0o700)
+        directory = recovery / transaction
+        directory.mkdir(mode=0o700)
+        binding = root.stat()
+        owner = {"root_binding": {"device": binding.st_dev, "inode": binding.st_ino}, "root": str(root), "home": str(home),
+                 "platform": "Linux", "transaction_id": transaction, "version": "1.0.8-beta.4",
+                 "expected_server_identity": "private-server-identity", "interpreter": "/private/python"}
+        MOD.write_private(directory / "owner.json", owner)
+        MOD.write_private(directory / "terminal.json", {"private": "private-terminal", "phase": "rolled-back"})
+        retirement = {"format": 1, "transaction_id": transaction,
+                      "terminal_sha256": MOD.sha((directory / "terminal.json").read_bytes())}
+        MOD.write_private(directory / "finalized.json", retirement)
+        MOD.write_private(directory / "retired.json", retirement)
+        unit = home / ".config/systemd/user" / ("agents-server-recovery-" + "a" * 24 + ".service")
+        unit.parent.mkdir(parents=True, mode=0o700)
+        unit.write_text("[Service]\nExecStart=/private/recovery\n")
+        unit.chmod(0o644)
+        fixture = {"installRoot": str(root), "home": str(home), "targetVersion": "1.0.8-beta.4",
+                   "serverIdentity": "private-server-identity"}
+        return fixture, transaction, directory, unit
+
+    def test_pre_retry_lock_snapshot_is_cheap_read_only_and_never_native_queries_or_waits(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            home = Path(temporary).resolve()
+            fixture, transaction, directory, unit = self.diagnostic_lock_fixture(home)
+            original = {path: path.read_bytes() for path in home.rglob("*") if path.is_file()}
+            with patch.object(MOD, "command", side_effect=AssertionError("no native command")) as command, \
+                    patch.object(MOD, "request", side_effect=AssertionError("no HTTP")) as request, \
+                    patch.object(MOD, "sha", side_effect=AssertionError("no payload hashing")) as digest, \
+                    patch.object(MOD.time, "sleep", side_effect=AssertionError("no waiting")) as sleep, \
+                    patch.object(MOD.os, "kill", return_value=None) as kill:
+                result = MOD.rollback_lock_snapshot(fixture, transaction)
+            self.assertTrue(result["lockPresent"])
+            self.assertTrue(result["lockSafe"])
+            self.assertTrue(result["ownerAlive"])
+            self.assertEqual(result["nativeState"], "not-queried")
+            self.assertIsNone(result["nativeRegistered"])
+            self.assertEqual(result["ownerRole"], "unknown")
+            kill.assert_called_once_with(222, 0)
+            for unused in (command, request, digest, sleep):
+                unused.assert_not_called()
+            self.assertEqual(original, {path: path.read_bytes() for path in home.rglob("*") if path.is_file()})
+            self.assertNotIn("private", json.dumps(result))
+            self.assertNotIn(str(home), json.dumps(result))
+            self.assertNotIn(transaction, json.dumps(result))
+
+    def test_lock_snapshot_refuses_unsafe_links_modes_hardlinks_and_foreign_ownership(self):
+        for change in ("pid-link", "lock-link", "pid-mode", "lock-mode", "pid-hardlink", "pid-text", "uid"):
+            with self.subTest(change=change), tempfile.TemporaryDirectory() as temporary:
+                home = Path(temporary).resolve()
+                fixture, transaction, directory, unit = self.diagnostic_lock_fixture(home)
+                lock = Path(fixture["installRoot"]) / ".install-lock"
+                pid = lock / "pid"
+                if change == "pid-link":
+                    destination = home / "private-pid"
+                    pid.rename(destination)
+                    pid.symlink_to(destination)
+                elif change == "lock-link":
+                    destination = home / "private-lock"
+                    lock.rename(destination)
+                    lock.symlink_to(destination, target_is_directory=True)
+                elif change == "pid-mode": pid.chmod(0o666)
+                elif change == "lock-mode": lock.chmod(0o777)
+                elif change == "pid-hardlink": os.link(pid, home / "private-pid")
+                elif change == "pid-text": pid.write_text("private-token\n")
+                uid = os.getuid() + (1 if change == "uid" else 0)
+                with patch.object(MOD.os, "getuid", return_value=uid), patch.object(MOD.os, "kill") as kill, \
+                        patch.object(MOD, "command", side_effect=AssertionError("no native command")):
+                    result = MOD.rollback_lock_snapshot(fixture, transaction)
+                if change == "uid":
+                    self.assertEqual(result, {"observed": False})
+                    kill.assert_not_called()
+                    continue
+                self.assertFalse(result["lockSafe"])
+                self.assertIsNone(result["ownerAlive"])
+                self.assertEqual(result["ownerRole"], "unknown")
+                kill.assert_not_called()
+                self.assertNotIn("private", json.dumps(result))
+
+    def test_terminal_lock_owner_proof_requires_fixture_native_pid_and_exact_process(self):
+        for change in (None, "identity", "root", "transaction", "version", "native-pid", "argv", "uid", "cwd", "replaced-lock"):
+            with self.subTest(change=change), tempfile.TemporaryDirectory() as temporary:
+                home = Path(temporary).resolve()
+                fixture, transaction, directory, unit = self.diagnostic_lock_fixture(home)
+                owner_path = directory / "owner.json"
+                owner = json.loads(owner_path.read_text())
+                key = {"identity": "expected_server_identity", "root": "root", "transaction": "transaction_id", "version": "version"}.get(change)
+                if key:
+                    owner_path.unlink()
+                    MOD.write_private(owner_path, {**owner, key: "private-mismatch"})
+                process = home / "proc/222"
+                process.mkdir(parents=True)
+                uid = str(os.getuid() + (1 if change == "uid" else 0))
+                (process / "status").write_text("Uid:\t" + "\t".join([uid] * 4) + "\n")
+                (process / "stat").write_text("222 (python recovery) " + " ".join(["S"] + ["0"] * 18 + ["12345", "0"]))
+                argv = [owner["interpreter"], "-B", str(directory / "execution_recovery.py"), "run", "--root", fixture["installRoot"], "--transaction-id", transaction]
+                if change == "argv": argv[3] = "private-wrong-command"
+                (process / "cmdline").write_bytes(("\0".join(argv) + "\0").encode())
+                (process / "cwd").symlink_to(home if change == "cwd" else directory)
+                def native(args, **kwargs):
+                    self.assertEqual(args, ["systemctl", "--user", "show", unit.name, "--property=LoadState,ActiveState,MainPID"])
+                    self.assertEqual(kwargs["timeout"], 5)
+                    if change == "replaced-lock":
+                        pid = Path(fixture["installRoot"]) / ".install-lock/pid"
+                        pid.rename(pid.with_name("private-old-pid"))
+                        pid.write_text("222\n")
+                        pid.chmod(0o600)
+                    return subprocess.CompletedProcess(args, 0, f"LoadState=loaded\nActiveState=active\nMainPID={223 if change == 'native-pid' else 222}\n".encode(), b"private-stderr")
+                with patch.object(MOD.os, "kill", return_value=None) as kill, patch.object(MOD, "command", side_effect=native) as command, \
+                        patch.object(MOD, "service") as service:
+                    result = MOD.rollback_lock_snapshot(fixture, transaction, query_native=True, proc_root=home / "proc")
+                self.assertEqual(result["ownerRole"], "recovery" if change is None else "unknown")
+                self.assertEqual(result["recoveryOwnerVerified"], not bool(key))
+                if key: command.assert_not_called()
+                service.assert_not_called()
+                kill.assert_called_once_with(222, 0)
+                self.assertNotIn("private", json.dumps(result))
+                self.assertNotIn(str(home), json.dumps(result))
+
+    def test_terminal_lock_query_timeout_is_finite_and_does_not_replace_acceptance_failure(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            home = Path(temporary).resolve()
+            fixture, transaction, directory, unit = self.diagnostic_lock_fixture(home)
+            with patch.object(MOD.os, "kill", return_value=None), \
+                    patch.object(MOD, "command", side_effect=subprocess.TimeoutExpired(["private-command"], 5, output=b"private-token")):
+                value = MOD.rollback_lock_snapshot(fixture, transaction, query_native=True)
+                diagnostic = {"stage": "retry-health", "transient502": 0, "transient503": 203,
+                              "candidateProcessesFaulted": 24, "rollbackPhasesObserved": 3,
+                              "watcherStopped": True, "_recoveryTransaction": transaction}
+                with patch.object(MOD, "rollback_state_diagnostic", return_value={"diagnosticOnly": True, "collected": False}), \
+                        patch.dict(os.environ, {"GITHUB_RUN_ID": "123", "GITHUB_RUN_ATTEMPT": "1"}):
+                    report = MOD.rollback_failure_report(SimpleNamespace(receipt_sha256="c" * 64),
+                        {"sourceSha": "a" * 40, "version": "1.0.8-beta.4"}, diagnostic,
+                        RuntimeError("original private-health-failure"), "b" * 40, fixture=fixture)
+            self.assertEqual(value["ownerRole"], "unknown")
+            self.assertIsNone(value["nativeRegistered"])
+            self.assertEqual(report["diagnostic"]["failureCategory"], "assertion")
+            self.assertEqual(report["diagnostic"]["stage"], "retry-health")
+            self.assertFalse(report["observed"])
+            self.assertNotIn("private", json.dumps(report))
+
+    def test_rollback_state_diagnostic_uses_disk_status_not_mutating_update_get_or_history(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            home = Path(temporary).resolve()
+            install, state = home / "install", home / "state"
+            install.mkdir(mode=0o700)
+            (state / "admin").mkdir(parents=True, mode=0o700)
+            preparation = "a" * 32
+            prep = install / ".update-preparations" / preparation
+            prep.mkdir(parents=True, mode=0o700)
+            (prep / "prepare.log").write_text("HTTP Error 404: private-token\nanother AgentsServer installation is active /private/path\n")
+            raw_status = {"phase": "available", "target_version": "1.0.8-beta.4", "preparation_phase": "ready",
+                          "error_code": "server_update_pending_http_503", "preparation_id": preparation,
+                          "message": "installer failed (1): private-token another AgentsServer installation is active"}
+            MOD.write_private(state / "admin/server-update.json", raw_status)
+            fixture = {"installRoot": str(install), "stateRoot": str(state), "home": str(home),
+                       "baselineVersion": "1.0.7-beta.21", "targetVersion": "1.0.8-beta.4", "serverIdentity": "private-identity"}
+            before = {path: path.read_bytes() for path in home.rglob("*") if path.is_file()}
+            def observe(fixture_arg, route, *args, **kwargs):
+                self.assertEqual(route, "/api/health", "GET update can advance production recovery and is not read-only")
+                return {"ok": True, "server_version": fixture["baselineVersion"], "server_identity": "private-identity",
+                        "gateway": {"version": fixture["baselineVersion"], "protocol": 1, "pid": 123, "instance_id": "private-gateway"},
+                        "execution_service": {"version": fixture["baselineVersion"], "protocol": 1, "pid": 124, "instance_id": "private-worker", "maintenance_held": False}}
+            with patch.object(MOD, "registered_services", return_value=[]), patch.object(MOD, "request", side_effect=observe) as request, \
+                    patch.object(MOD, "state_snapshot", side_effect=AssertionError("no history/session traversal")) as snapshot, \
+                    patch.object(MOD, "command", side_effect=AssertionError("no unowned native queries")) as command, \
+                    patch.object(MOD, "service") as service:
+                result = MOD.rollback_state_diagnostic(fixture)
+            self.assertTrue(result["collected"])
+            self.assertNotIn("updateStatus", result)
+            self.assertEqual(result["journals"]["update"]["phase"], "available")
+            self.assertEqual(result["journals"]["update"]["errorHttpStatus"], 503)
+            self.assertEqual(result["logs"]["preparation"]["categories"], ["http-404", "installer-lock"])
+            self.assertEqual(result["health"]["components"]["worker"]["version"], "baseline")
+            self.assertEqual(result["health"]["components"]["worker"]["maintenance"], "released")
+            request.assert_called_once()
+            for unused in (snapshot, command, service): unused.assert_not_called()
+            self.assertEqual(before, {path: path.read_bytes() for path in home.rglob("*") if path.is_file()})
+            self.assertNotIn("private", json.dumps(result))
+            self.assertNotIn(preparation, json.dumps(result))
+            self.assertNotIn(str(home), json.dumps(result))
+
+    def test_actual_failure_collector_rejects_nested_raw_fields_invalid_enums_and_unbound_metadata(self):
+        workflow = (MOD.ROOT / ".github/workflows/ci.yml").read_text()
+        section = workflow.split("- name: Collect bounded non-publishing server-only observations", 1)[1]
+        program = textwrap.dedent(section.split("<<'NODE'\n", 1)[1].split("\n          NODE", 1)[0])
+        fixture = {"baselineVersion": "1.0.7-beta.21", "targetVersion": "1.0.8-beta.4"}
+        status = MOD.diagnostic_status({"phase": "available", "target_version": fixture["targetVersion"],
+            "error_code": "server_update_pending_http_503", "message": "installer failed (1): another AgentsServer installation is active private-canary"}, fixture)
+        component = MOD.diagnostic_component({"version": fixture["baselineVersion"], "protocol": 1, "pid": 123,
+            "instance_id": "private-canary", "maintenance_held": False}, fixture, {"pid": 123})
+        lock = MOD.bounded_lock_snapshot({"observed": True, "lockPresent": True, "lockSafe": True, "ownerAlive": True,
+            "recoveryOwnerVerified": True, "retiredPresent": True, "unitFilePresent": True, "nativeRegistered": True,
+            "ownerRole": "recovery", "nativeState": "active"})
+        state = {"diagnosticOnly": True, "collected": True, "currentRuntime": "baseline", "registrationsVerified": True,
+                 "services": {"worker": {"registered": True, "querySucceeded": True, "state": "active", "pid": 123, "lastExitCode": 0}},
+                 "health": {"reachable": True, "ok": True, "identityMatches": True, "version": "baseline",
+                            "components": {"gateway": component, "worker": component}},
+                 "logs": {key: {"readable": True, "categories": ["installer-lock"]} for key in
+                          ("updater", "legacyStderr", "workerStderr", "gatewayStderr", "preparation")},
+                 "tmuxTrust": {"daemonAvailable": True, "ownedTrustBundleAvailable": True, "trustBundleMatches": True},
+                 "journals": {"activation": {"readable": False}, "execution": {"readable": False}, "update": status}}
+        cases = [(None, None), (("diagnostic", "retryAdmission", "raw"), "private-canary"),
+                 (("diagnostic", "retryAdmission", "errorCode"), "server_update_pending_http_503-private-canary"),
+                 (("diagnostic", "retryAdmission", "errorHttpStatus"), True),
+                 (("diagnostic", "retryAdmission", "errorHttpStatus"), 600),
+                 (("diagnostic", "beforeRetry", "pid"), 123), (("diagnostic", "afterAdmission", "nativeState"), "private-canary"),
+                 (("diagnostic", "failureLock", "ownerRole"), "private-canary"),
+                 (("diagnostic", "state", "raw"), "private-canary"),
+                 (("diagnostic", "state", "health", "components", "worker", "instance_id"), "private-canary"),
+                 (("diagnostic", "state", "health", "components", "worker", "maintenance"), "private-canary"),
+                 (("diagnostic", "state", "services", "worker", "pid"), 2 ** 31),
+                 (("diagnostic", "state", "services", "worker", "argv"), ["private-canary"]),
+                 (("diagnostic", "state", "logs", "preparation", "categories"), ["private-canary"]),
+                 (("diagnostic", "state", "logs", "updater", "categories"), ["installer-lock", "installer-lock"]),
+                 (("diagnostic", "state", "tmuxTrust", "bundle"), "private-canary"),
+                 (("diagnostic", "state", "journals", "update", "failure", "raw"), "private-canary"),
+                 (("diagnostic", "state", "journals", "update", "failure", "knownError"), "private-canary"),
+                 (("diagnostic", "state", "journals", "update", "failure", "installerExitCode"), 32768),
+                 (("harnessSourceSha",), "d" * 40), (("runAttempt",), "2"), (("version",), "1.0.8-beta.3"),
+                 (("releaseReceiptSha256",), "d" * 64)]
+        for path, value in cases:
+            with self.subTest(path=path, value=value), tempfile.TemporaryDirectory() as temporary:
+                root = Path(temporary)
+                source, destination = root / "source", root / "public"
+                source.mkdir()
+                receipt = {"sourceSha": "a" * 40, "version": fixture["targetVersion"]}
+                receipt_path = root / "receipt.json"
+                receipt_path.write_bytes(MOD.canonical(receipt))
+                args = SimpleNamespace(receipt_sha256=MOD.sha(receipt_path.read_bytes()))
+                environment = {**os.environ, "GITHUB_RUN_ID": "123", "GITHUB_RUN_ATTEMPT": "1",
+                               "GITHUB_SHA": "b" * 40, "RECEIPT_SHA256": args.receipt_sha256}
+                diagnostic = {"stage": "retry-completion", "transient502": 0, "transient503": 203,
+                              "candidateProcessesFaulted": 24, "rollbackPhasesObserved": 3, "watcherStopped": True,
+                              "retryAdmission": MOD.rollback_retry_admission({"phase": "pending", "error_code": "server_update_pending_http_503"}, fixture),
+                              "beforeRetry": lock, "afterAdmission": lock}
+                with patch.dict(os.environ, environment), patch.object(MOD, "rollback_state_diagnostic", return_value=state), \
+                        patch.object(MOD, "rollback_lock_snapshot", return_value=lock):
+                    report = MOD.rollback_failure_report(args, receipt, diagnostic, RuntimeError("private-canary"), "b" * 40, fixture=fixture)
+                report = copy.deepcopy(report)
+                self.assertNotIn("private-canary", json.dumps(report))
+                if path:
+                    parent = report
+                    for key in path[:-1]: parent = parent[key]
+                    parent[path[-1]] = value
+                (source / "rollback-failure.json").write_bytes(MOD.canonical(report))
+                result = subprocess.run(["node", "--input-type=module", "-", str(source), str(destination), str(receipt_path)],
+                                        input=program, text=True, capture_output=True, timeout=10, env=environment)
+                self.assertEqual(result.returncode == 0, path is None, result.stderr)
+                self.assertEqual((destination / "rollback-failure.json").exists(), path is None)
+                self.assertNotIn("private-canary", result.stdout + result.stderr)
 
     def test_legacy_failure_classification_covers_fixed_descriptor_archive_and_installer_errors(self):
         cases = [

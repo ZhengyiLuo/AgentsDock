@@ -51,7 +51,7 @@ SESSION_KEYS = ("id", "title", "folder", "cwd", "backend", "model", "effort",
 # not a looser source-pattern match or a changed signed candidate.
 ROOT_NORMALIZING_INSTALLER_SHA256 = "df21400431ea5f79a78d4f6cede5cfae4f7584166798565c38f5dffff70f38e3"
 ROLLBACK_STAGES = {"preflight", "start-request", "observe-rollback", "rollback-proof", "preservation",
-                   "retry-request", "retry-health", "retry-verification"}
+                   "retry-request", "retry-health", "retry-completion", "retry-verification"}
 
 
 class NativeTransientHTTPError(RuntimeError):
@@ -584,6 +584,14 @@ DIAGNOSTIC_PHASES = frozenset({"idle", "available", "current", "pending", "start
     "verifying", "installing", "restarting", "complete", "failed", "prepared", "guarded", "quiescing", "quiesced",
     "linking", "linked", "stopping", "stopped", "fencing", "fenced", "authorizing", "authority", "candidate-starting",
     "candidate-healthy", "committing", "committed", "rolling-back", "rolled-back", "rollback-healthy"})
+PREPARATION_PHASES = frozenset({"checking", "downloading", "staging", "ready"})
+UPDATE_ERROR_CODES = frozenset({"server_update_preparation_failed", "server_update_preparation_invalid",
+                              "server_update_rolled_back", "server_update_pending", "server_update_pending_http"})
+STATUS_FLAGS = ("retryable", "errorPresent", "scheduleIdPresent", "updateIdPresent", "preparationIdPresent")
+
+
+def finite_label(value: object, allowed: frozenset) -> str:
+    return value if isinstance(value, str) and value in allowed else "absent" if value is None else "other-or-unknown"
 
 
 def diagnostic_version(value: object, fixture: dict) -> str:
@@ -667,6 +675,9 @@ def diagnostic_legacy_failure(message: object) -> dict:
         "signature-verification": ("invalidsignature", "invalid signature", "signature verification failed"),
         "archive-extraction": ("not a gzip file", "invalid header",),
         "dependency-prerequisite": ("missing required prerequisites", "trusted uv executable", "no solution found", "failed to download"),
+        "installer-lock": ("another agentsserver installation is active", "another agentsserver installation is already running or its lock is unsafe",
+                           "agentsserver install lock ownership changed", "agentsserver install lock owner changed"),
+        "service-activation": ("failed to start agents-server", "failed to restart agents-server", "failed to enable unit"),
         "missing-python-module": ("modulenotfounderror",), "permission-denied": ("permission denied",),
         "missing-file-or-executable": ("no such file or directory", "no module named"),
         "health-readiness": ("could not verify that agentsserver is idle before restart:", "server became busy before restart:", "server health response"),
@@ -694,11 +705,19 @@ def diagnostic_status(value: object, fixture: dict) -> dict:
     if not isinstance(value, dict):
         return {"readable": False}
     phase = value.get("phase")
+    code = value.get("error_code")
+    http = re.fullmatch(r"server_update_pending_http_([45][0-9]{2})", code) if isinstance(code, str) else None
+    error_present = bool(value.get("error") or code)
     return {"readable": True, "phase": phase if isinstance(phase, str) and phase in DIAGNOSTIC_PHASES else "other-or-unknown",
             "target": diagnostic_version(value.get("target_version", value.get("release_version")), fixture),
             "retryable": value.get("retryable") is True,
-            "errorPresent": bool(value.get("error") or value.get("error_code")),
-            **({"failure": diagnostic_legacy_failure(value.get("message"))} if phase == "failed" else {})}
+            "errorPresent": error_present,
+            "preparationPhase": finite_label(value.get("preparation_phase"), PREPARATION_PHASES),
+            "errorCode": "server_update_pending_http" if http else finite_label(code, UPDATE_ERROR_CODES),
+            "errorHttpStatus": int(http[1]) if http else None,
+            **{label: isinstance(value.get(key), str) and bool(value[key]) for label, key in
+               (("scheduleIdPresent", "schedule_id"), ("updateIdPresent", "update_id"), ("preparationIdPresent", "preparation_id"))},
+            **({"failure": diagnostic_legacy_failure(value.get("message"))} if phase == "failed" or error_present else {})}
 
 
 def diagnostic_service_output(result: subprocess.CompletedProcess, system: str) -> dict:
@@ -740,7 +759,11 @@ def diagnostic_log_categories(path: Path, owner_root: Path) -> dict:
                     "permission-denied": (b"permission denied",), "connection-refused": (b"connection refused",),
                     "dependency-resolution": (b"no solution found", b"failed to download"),
                     "native-health-failure": (b"health check failed", b"did not become healthy", b"rollback is incomplete"),
-                    "signature-rejected": (b"invalid signature", b"signature verification failed",)}
+                    "signature-rejected": (b"invalid signature", b"signature verification failed",),
+                    "http-404": (b"http error 404:",),
+                    "installer-lock": (b"another agentsserver installation is active", b"another agentsserver installation is already running or its lock is unsafe",
+                                       b"agentsserver install lock ownership changed", b"agentsserver install lock owner changed"),
+                    "service-activation": (b"failed to start agents-server", b"failed to restart agents-server", b"failed to enable unit")}
         return {"readable": True, "categories": sorted(name for name, needles in patterns.items() if any(needle in data for needle in needles))}
     except (OSError, RuntimeError):
         return {"readable": False, "categories": []}
@@ -768,7 +791,22 @@ def diagnostic_tmux_trust(fixture: dict) -> dict:
     return result
 
 
-def diagnose(fixture: dict) -> dict:
+def diagnostic_component(value: object, fixture: dict, native: dict) -> dict:
+    """Classify component identity without returning identities, paths or argv."""
+    if not isinstance(value, dict):
+        return {"present": False}
+    pid, native_pid = value.get("pid"), native.get("pid")
+    has_pid = type(pid) is int and 1 < pid < 2 ** 31
+    has_native_pid = type(native_pid) is int and 1 < native_pid < 2 ** 31
+    return {"present": True, "version": diagnostic_version(value.get("version"), fixture),
+            "protocolMatches": type(value.get("protocol")) is int and value["protocol"] == 1,
+            "pidPresent": has_pid, "instancePresent": isinstance(value.get("instance_id"), str) and bool(value["instance_id"]),
+            "nativePidMatches": pid == native_pid if has_pid and has_native_pid else None,
+            "maintenance": "held" if value.get("maintenance_held") is True else
+                           "released" if value.get("maintenance_held") is False else "unknown"}
+
+
+def diagnose(fixture: dict, *, include_preservation: bool = True) -> dict:
     """Read-only failure observations; not an acceptance test or recovery tool."""
     root, state, home = (Path(fixture[key]) for key in ("installRoot", "stateRoot", "home"))
     current = root / "current"
@@ -801,31 +839,225 @@ def diagnose(fixture: dict) -> dict:
         except (OSError, RuntimeError, ValueError):
             result["services"][role] = {"querySucceeded": False}
     try:
-        live = request(fixture, "/api/health")
+        live = request(fixture, "/api/health", expected=(200, 502, 503))
         result["health"] = {"reachable": True, "ok": live.get("ok") is True,
                             "identityMatches": live.get("server_identity") == fixture["serverIdentity"],
-                            "version": diagnostic_version(live.get("server_version"), fixture)}
+                            "version": diagnostic_version(live.get("server_version"), fixture),
+                            "components": {role: diagnostic_component(live.get(field), fixture, result["services"].get(role, {}))
+                                           for role, field in (("gateway", "gateway"), ("worker", "execution_service"))}}
+    except NativeTransientHTTPError as error:
+        result["health"] = {"reachable": False, "failureCategory": "gateway-unavailable", "httpStatus": error.status}
+    except json.JSONDecodeError:
+        result["health"] = {"reachable": False, "failureCategory": "invalid-json", "httpStatus": None}
     except (OSError, RuntimeError, ValueError, http.client.HTTPException):
-        result["health"] = {"reachable": False}
+        result["health"] = {"reachable": False, "failureCategory": "request-failed", "httpStatus": None}
+    # Do not GET /api/admin/update here: legacy implementations reconcile
+    # interrupted updates while serving that route. The owned journal below is
+    # the non-mutating source for diagnostic update state.
     records = [("activation", root / ".activation-transaction/manifest.json", root),
                ("execution", root / ".execution-transaction/manifest.json", root),
                ("update", state / "admin/server-update.json", state)]
     for label, path, owner in records:
         try:
             contained(path, owner)
-            result["journals"][label] = diagnostic_status(json.loads(read_regular(path, 256 * 1024, private=True)), fixture)
+            raw_status = json.loads(read_regular(path, 256 * 1024, private=True))
+            result["journals"][label] = diagnostic_status(raw_status, fixture)
+            if label == "update":
+                preparation_id = raw_status.get("preparation_id") if isinstance(raw_status, dict) else None
+                if isinstance(preparation_id, str) and re.fullmatch(r"[0-9a-f]{32}", preparation_id):
+                    result["preparationLog"] = diagnostic_log_categories(root / ".update-preparations" / preparation_id / "prepare.log", root)
         except (OSError, RuntimeError, ValueError):
             result["journals"][label] = {"readable": False}
     result["logs"] = {"updater": diagnostic_log_categories(state / "admin/server-update.log", state),
                        "legacyStderr": diagnostic_log_categories(home / "Library/Logs/AgentsServer/server-error.log", home),
                        "workerStderr": diagnostic_log_categories(state / "execution/logs/worker.stderr.log", state),
                        "gatewayStderr": diagnostic_log_categories(state / "execution/logs/gateway.stderr.log", state)}
+    result["logs"]["preparation"] = result.pop("preparationLog", {"readable": False, "categories": []})
     result["tmuxTrust"] = diagnostic_tmux_trust(fixture)
-    try:
-        result["preservation"] = snapshot_differences(fixture["snapshot"], state_snapshot(fixture))
-    except (OSError, RuntimeError, ValueError, KeyError, TypeError, http.client.HTTPException):
-        result["preservation"] = {"readable": False}
+    if include_preservation:
+        try:
+            result["preservation"] = snapshot_differences(fixture["snapshot"], state_snapshot(fixture))
+        except (OSError, RuntimeError, ValueError, KeyError, TypeError, http.client.HTTPException):
+            result["preservation"] = {"readable": False}
     return result
+
+
+def rollback_retry_admission(value: object, fixture: dict) -> dict:
+    """Keep only the immediately returned retry phase, target class and flag."""
+    status = diagnostic_status(value, fixture)
+    if status["readable"] is not True:
+        return {"observed": False}
+    return {"observed": True, **{key: status[key] for key in ("phase", "target", "preparationPhase", "errorCode", "errorHttpStatus", *STATUS_FLAGS)}}
+
+
+def bounded_retry_admission(value: object) -> dict:
+    if not isinstance(value, dict) or value.get("observed") is not True:
+        return {"observed": False}
+    phase, target = value.get("phase"), value.get("target")
+    return {"observed": True, "phase": phase if isinstance(phase, str) and phase in DIAGNOSTIC_PHASES else "other-or-unknown",
+            "target": target if isinstance(target, str) and target in {"baseline", "candidate"} else "other-or-unknown",
+            "preparationPhase": finite_label(value.get("preparationPhase"), PREPARATION_PHASES | {"absent"}),
+            "errorCode": finite_label(value.get("errorCode"), UPDATE_ERROR_CODES | {"absent"}),
+            "errorHttpStatus": value["errorHttpStatus"] if type(value.get("errorHttpStatus")) is int
+                               and 400 <= value["errorHttpStatus"] <= 599 else None,
+            **{key: value.get(key) is True for key in STATUS_FLAGS}}
+
+
+def bounded_lock_snapshot(value: object) -> dict:
+    """Re-project before stderr/public receipts, not only at artifact upload."""
+    if not isinstance(value, dict) or value.get("observed") is not True:
+        return {"observed": False}
+    native_state = value.get("nativeState")
+    return {"observed": True,
+            **{key: value.get(key) is True for key in ("lockPresent", "lockSafe", "recoveryOwnerVerified")},
+            **{key: value.get(key) if type(value.get(key)) is bool else None for key in
+               ("ownerAlive", "retiredPresent", "unitFilePresent", "nativeRegistered")},
+            "ownerRole": "recovery" if value.get("ownerRole") == "recovery" else "unknown",
+            "nativeState": native_state if isinstance(native_state, str) and native_state in
+                           {"active", "inactive", "failed", "activating", "deactivating", "not-queried"} else "other-or-unknown"}
+
+
+def rollback_lock_snapshot(fixture: dict, transaction: object, *, query_native: bool = False,
+                           proc_root: Path = Path("/proc")) -> dict:
+    """Observe only the faulted fixture's lock/recovery owner. Never acquire it.
+
+    Pre/post-admission snapshots avoid native subprocesses and payload hashing
+    so diagnostics do not deliberately wait out the suspected retirement race.
+    A recovery role is asserted only in terminal diagnostics with native PID,
+    exact private owner bindings, exact process argv/cwd and stable start ticks.
+    """
+    value = {"observed": False, "lockPresent": False, "lockSafe": False, "ownerAlive": None,
+             "ownerRole": "unknown", "recoveryOwnerVerified": False, "retiredPresent": None,
+             "unitFilePresent": None, "nativeRegistered": None, "nativeState": "not-queried"}
+    identity = lambda info: (info.st_dev, info.st_ino, info.st_ctime_ns)
+    lock_pid = None
+    try:
+        root, home = Path(fixture["installRoot"]), Path(fixture["home"])
+        contained(root, home)
+        root_info = owned_directory(root)
+        value["observed"] = True
+        lock = root / ".install-lock"
+        try:
+            directory_before = lock.lstat()
+            value["lockPresent"] = True
+            contained(lock, root)
+            owned_directory(lock)
+            need(stat.S_IMODE(directory_before.st_mode) == 0o700, "Unsafe diagnostic lock.")
+            path = lock / "pid"
+            before = path.lstat()
+            descriptor = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+            try:
+                info = os.fstat(descriptor)
+                need(identity(before) == identity(info) and stat.S_ISREG(info.st_mode) and info.st_nlink == 1
+                     and info.st_uid == os.getuid() and stat.S_IMODE(info.st_mode) in {0o600, 0o644}
+                     and 1 <= info.st_size <= 32, "Unsafe diagnostic lock owner.")
+                raw = os.read(descriptor, 33).strip()
+                need(raw.isdigit() and 1 < int(raw) < 2 ** 31, "Invalid diagnostic lock owner.")
+                lock_pid = int(raw)
+                try:
+                    os.kill(lock_pid, 0)
+                    alive = True
+                except ProcessLookupError:
+                    alive = False
+                except PermissionError:
+                    alive = None
+                need(identity(info) == identity(os.fstat(descriptor)) == identity(path.lstat())
+                     and identity(directory_before) == identity(lock.lstat()), "Diagnostic lock changed.")
+                pid_identity = identity(info)
+                value.update(lockSafe=True, ownerAlive=alive)
+            finally:
+                os.close(descriptor)
+        except FileNotFoundError:
+            pass
+        except (OSError, RuntimeError, ValueError):
+            lock_pid = None
+        if not isinstance(transaction, str) or not re.fullmatch(r"activation-[0-9a-f]{24}", transaction):
+            return bounded_lock_snapshot(value)
+        directory = root / ".activation-recovery" / transaction
+        contained(directory, root)
+        owned_directory(directory.parent)
+        owned_directory(directory)
+        owner = json.loads(read_regular(directory / "owner.json", 256 * 1024, private=True))
+        binding = owner.get("root_binding") if isinstance(owner, dict) else None
+        need(isinstance(binding, dict) and binding.get("device") == root_info.st_dev and binding.get("inode") == root_info.st_ino
+             and owner.get("root") == str(root) and owner.get("home") == str(home) and owner.get("platform") == "Linux"
+             and owner.get("transaction_id") == transaction and owner.get("version") == fixture["targetVersion"]
+             and owner.get("expected_server_identity") == fixture["serverIdentity"], "Recovery fixture binding differs.")
+        value["recoveryOwnerVerified"] = True
+        retired = directory / "retired.json"
+        if retired.exists() or retired.is_symlink():
+            info = retired.lstat()
+            need(stat.S_ISREG(info.st_mode) and info.st_uid == os.getuid() and info.st_nlink == 1
+                 and stat.S_IMODE(info.st_mode) == 0o600, "Unsafe retirement evidence.")
+            # Presence is not proof of released lock or retired native service.
+            value["retiredPresent"] = True
+        else:
+            value["retiredPresent"] = False
+        unit = home / ".config/systemd/user" / ("agents-server-recovery-" + transaction.removeprefix("activation-") + ".service")
+        contained(unit, home)
+        if unit.exists() or unit.is_symlink():
+            info = unit.lstat()
+            need(stat.S_ISREG(info.st_mode) and info.st_uid == os.getuid() and info.st_nlink == 1 and not info.st_mode & 0o022,
+                 "Unsafe recovery unit.")
+            value["unitFilePresent"] = True
+        else:
+            value["unitFilePresent"] = False
+        if not query_native:
+            return bounded_lock_snapshot(value)
+        native = command(["systemctl", "--user", "show", unit.name,
+                          "--property=LoadState,ActiveState,MainPID"], timeout=5, allowed=(0, 1, 3, 4))
+        rows = dict(line.split("=", 1) for line in native.stdout.decode(errors="replace").splitlines() if "=" in line)
+        value["nativeRegistered"] = True if rows.get("LoadState") == "loaded" else False if rows.get("LoadState") == "not-found" else None
+        value["nativeState"] = rows.get("ActiveState")
+        if not (value["lockSafe"] and value["ownerAlive"] is True and rows.get("MainPID") == str(lock_pid)):
+            return bounded_lock_snapshot(value)
+        process = proc_root / str(lock_pid)
+        before = read_regular(process / "stat", 65536).decode()
+        start = before[before.rfind(")") + 2:].split()[19]
+        uids = [line.split()[1:] for line in read_regular(process / "status", 65536).decode().splitlines() if line.startswith("Uid:")]
+        expected = [owner.get("interpreter"), "-B", str(directory / "execution_recovery.py"), "run", "--root", str(root), "--transaction-id", transaction]
+        argv = read_regular(process / "cmdline", 65536).decode().rstrip("\0").split("\0")
+        after = read_regular(process / "stat", 65536).decode()
+        # Recheck the exact lock bytes/inode after the process/native proof.
+        if (uids == [[str(os.getuid())] * 4] and start.isdigit() and start == after[after.rfind(")") + 2:].split()[19]
+                and argv == expected and (process / "cwd").resolve(strict=True) == directory
+                and identity(directory_before) == identity(lock.lstat()) and pid_identity == identity((lock / "pid").lstat())
+                and read_regular(lock / "pid", 32).strip() == str(lock_pid).encode()):
+            value["ownerRole"] = "recovery"
+    except Exception:
+        # This observational helper must never replace the acceptance failure
+        # or create a new acceptance failure merely because a query raced exit.
+        pass
+    return bounded_lock_snapshot(value)
+
+
+def rollback_state_diagnostic(fixture: dict) -> dict:
+    """Best-effort finite observation before CI removes routing/trust.
+
+    Never recover services or turn a diagnostic error into another retry. The
+    original acceptance failure remains authoritative if observation fails.
+    """
+    try:
+        value = diagnose(fixture, include_preservation=False)
+        # Diagnose already emits finite projections. Exclude its broader
+        # preservation query from this compact rollback failure receipt.
+        result = {key: value[key] for key in ("diagnosticOnly", "currentRuntime", "registrationsVerified",
+                                             "services", "health", "logs", "tmuxTrust")}
+        def phase_only(status: dict) -> dict:
+            if status.get("readable") is not True:
+                return {"readable": False}
+            projected = {key: status[key] for key in ("readable", "phase", "target", "preparationPhase", "errorCode", "errorHttpStatus", *STATUS_FLAGS)}
+            if (status.get("phase") == "failed" or status.get("errorPresent") is True) and isinstance(status.get("failure"), dict):
+                # The classifier above emits finite categories, never message
+                # text; retain numeric HTTP/installer status only if present.
+                projected["failure"] = {key: status["failure"][key] for key in
+                    ("messageState", "categories", "knownError", "httpStatus", "installerExitCode") if key in status["failure"]}
+            return projected
+        result["journals"] = {role: phase_only(value["journals"][role]) for role in ("activation", "execution", "update")}
+        result["collected"] = True
+        return result
+    except Exception:
+        return {"diagnosticOnly": True, "collected": False}
 
 
 def safe_extract(archive: Path, destination: Path) -> Path:
@@ -1292,6 +1524,9 @@ def rollback_retry(args: argparse.Namespace, fixture: dict, receipt: dict, *, di
                 if journal.get("phase") != "candidate-starting":
                     continue
                 observed["transactionId"] = journal["transaction_id"]
+                # Private in-memory selector only; public reports re-project
+                # fixed fields and never copy this identifier.
+                diagnostic["_recoveryTransaction"] = observed["transactionId"]
                 try:
                     fd = os.pidfd_open(pid)
                 except ProcessLookupError:
@@ -1360,10 +1595,14 @@ def rollback_retry(args: argparse.Namespace, fixture: dict, receipt: dict, *, di
     # The watcher is fully stopped before retry. Retained journals and fences
     # are not edited: production recovery owns them.
     diagnostic["stage"] = "retry-request"
-    request(fixture, "/api/admin/update/start", {
+    diagnostic["beforeRetry"] = rollback_lock_snapshot(fixture, observed["transactionId"])
+    admission = request(fixture, "/api/admin/update/start", {
         **body, "expected_server_instance_id": recovered["server_instance_id"]})
+    diagnostic["afterAdmission"] = rollback_lock_snapshot(fixture, observed["transactionId"])
+    diagnostic["retryAdmission"] = rollback_retry_admission(admission, fixture)
     diagnostic["stage"] = "retry-health"
     health(fixture, receipt["version"], timeout=1500)
+    diagnostic["stage"] = "retry-completion"
     wait_update_complete(fixture, receipt["version"])
     diagnostic["stage"] = "retry-verification"
     native_accepted = rollback_native_state(fixture, receipt["version"])
@@ -1377,13 +1616,16 @@ def rollback_retry(args: argparse.Namespace, fixture: dict, receipt: dict, *, di
             "faultDisabledBeforeRetry": True, "candidateActivationCompletedAfterRetry": True,
             "bothComponentsHealthyAfterRollbackAndRetry": True, "maintenanceReleasedAfterRollbackAndRetry": True,
             "activationJournalsClearedByInstaller": True, "sameAcceptedVersionRetried": True,
+            "retryAdmission": bounded_retry_admission(diagnostic.get("retryAdmission")),
+            "beforeRetry": bounded_lock_snapshot(diagnostic.get("beforeRetry")),
+            "afterAdmission": bounded_lock_snapshot(diagnostic.get("afterAdmission")),
             "teamHubFenceCleanupObserved": False, "desktopUpdateObserved": False,
             "exactRuntimeFilesCompared": count, **preservation, **root_observations,
             "nonemptyProviderHistoryObserved": False}
 
 
 def rollback_failure_report(args: argparse.Namespace, receipt: dict, diagnostic: dict,
-                            error: Exception, harness_sha: str) -> dict:
+                            error: Exception, harness_sha: str, *, fixture: dict | None = None) -> dict:
     """A bounded failed observation, never a rollback/retry acceptance receipt."""
     need(diagnostic.get("stage") in ROLLBACK_STAGES, "Invalid rollback diagnostic stage.")
     counters = {}
@@ -1401,7 +1643,14 @@ def rollback_failure_report(args: argparse.Namespace, receipt: dict, diagnostic:
             "sourceSha": receipt["sourceSha"], "harnessSourceSha": harness_sha,
             "releaseReceiptSha256": args.receipt_sha256, "version": receipt["version"], "platform": "linux",
             "diagnostic": {"stage": diagnostic["stage"], "failureCategory": category, **counters,
-                           "watcherStopped": diagnostic.get("watcherStopped") is True}}
+                           "watcherStopped": diagnostic.get("watcherStopped") is True,
+                           "retryAdmission": bounded_retry_admission(diagnostic.get("retryAdmission")),
+                           "beforeRetry": bounded_lock_snapshot(diagnostic.get("beforeRetry")),
+                           "afterAdmission": bounded_lock_snapshot(diagnostic.get("afterAdmission")),
+                           "failureLock": rollback_lock_snapshot(fixture, diagnostic.get("_recoveryTransaction"), query_native=True)
+                                          if fixture is not None else {"observed": False},
+                           "state": rollback_state_diagnostic(fixture) if fixture is not None else
+                                    {"diagnosticOnly": True, "collected": False}}}
 
 
 def failure_retry(args: argparse.Namespace, fixture: dict, receipt: dict) -> dict:
@@ -1854,9 +2103,15 @@ def main() -> None:
                 observations = rollback_retry(args, fixture, receipt, diagnostic=diagnostic)
             except Exception as error:
                 if server_linux:
-                    failure = rollback_failure_report(args, receipt, diagnostic, error, harness_sha)
-                    write_private(args.work / "rollback-failure.json", failure)
-                    print(json.dumps({"kind": "native-rollback-failure", **failure["diagnostic"]}), file=sys.stderr)
+                    try:
+                        failure = rollback_failure_report(args, receipt, diagnostic, error, harness_sha, fixture=fixture)
+                        write_private(args.work / "rollback-failure.json", failure)
+                        print(json.dumps({"kind": "native-rollback-failure", **failure["diagnostic"]}), file=sys.stderr)
+                    except Exception:
+                        try:
+                            print("Native rollback diagnostics unavailable; original acceptance failure retained.", file=sys.stderr)
+                        except Exception:
+                            pass
                 raise
             observed_version = receipt["version"]
         elif args.operation == "diagnose":
