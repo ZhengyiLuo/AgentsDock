@@ -21,6 +21,7 @@
     var labels = isZh ? {
       setup: '安装与连接',
       iphone: '客户端安装',
+      agents: '连接 agents',
       firstChat: '第一个会话',
       features: '功能概览',
       shortcuts: '键盘快捷键',
@@ -34,6 +35,7 @@
     } : {
       setup: 'Setup guide',
       iphone: 'Client install',
+      agents: 'Connect agents',
       firstChat: 'First chat',
       features: 'Features',
       shortcuts: 'Keyboard shortcuts',
@@ -50,6 +52,7 @@
       { label: '开始使用', items: [
         ['setup.html', labels.setup],
         ['iphone.html', labels.iphone],
+        ['agents.html', labels.agents],
         ['first-chat.html', labels.firstChat]
       ] },
       { label: '使用 AgentsDock', items: [
@@ -71,6 +74,7 @@
       { label: 'Get started', items: [
         ['setup.html', labels.setup],
         ['iphone.html', labels.iphone],
+        ['agents.html', labels.agents],
         ['first-chat.html', labels.firstChat]
       ] },
       { label: 'Using AgentsDock', items: [

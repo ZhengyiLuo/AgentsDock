@@ -3,24 +3,24 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <meta name="description" content="How to start your first conversation with an agent in AgentsDock — confirm your server is connected, create a chat, check the working directory, and switch providers." />
+    <meta name="description" content="Connect and manage Claude Code, Codex, OpenCode, Cursor, and custom API endpoints in AgentsDock." />
     <!-- Social preview (Open Graph / Twitter) -->
     <meta property="og:type" content="website" />
     <meta property="og:site_name" content="AgentsDock" />
-    <meta property="og:title" content="Start your first chat · AgentsDock" />
-    <meta property="og:description" content="How to start your first conversation with an agent in AgentsDock — connect to your server, create a chat, check the working directory, and switch providers." />
-    <meta property="og:url" content="https://agentsdock.net/first-chat.html" />
+    <meta property="og:title" content="Connect and manage agents · AgentsDock" />
+    <meta property="og:description" content="Connect and manage Claude Code, Codex, OpenCode, Cursor, and custom API endpoints in AgentsDock." />
+    <meta property="og:url" content="https://agentsdock.net/agents.html" />
     <meta property="og:image" content="https://agentsdock.net/assets/og-card.png?v=82a3bdda" />
     <meta property="og:image:width" content="1200" />
     <meta property="og:image:height" content="630" />
     <meta property="og:image:alt" content="AgentsDock — an IDE designed for agentic AI research" />
     <meta name="twitter:card" content="summary_large_image" />
-    <meta name="twitter:title" content="Start your first chat · AgentsDock" />
-    <meta name="twitter:description" content="Connect to your server, create a chat, check the working directory, and switch providers." />
+    <meta name="twitter:title" content="Connect and manage agents · AgentsDock" />
+    <meta name="twitter:description" content="Connect and manage Claude Code, Codex, OpenCode, Cursor, and custom API endpoints in AgentsDock." />
     <meta name="twitter:image" content="https://agentsdock.net/assets/og-card.png?v=82a3bdda" />
     <meta name="theme-color" content="#0d1013" />
     <meta name="robots" content="index,follow" />
-    <title>Start Your First Chat · AgentsDock</title>
+    <title>Connect and Manage Agents · AgentsDock</title>
     <link rel="icon" href="./favicon.ico" sizes="any" />
     <link rel="icon" type="image/png" href="./assets/favicon-96.png" sizes="96x96" />
     <link rel="apple-touch-icon" href="./assets/apple-touch-icon.png" />
@@ -38,9 +38,9 @@
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Instrument+Sans:wght@400;500;600;700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
-    <link rel="alternate" hreflang="en" href="https://agentsdock.net/first-chat.html" />
-    <link rel="alternate" hreflang="zh-CN" href="https://agentsdock.net/zh/first-chat.html" />
-    <link rel="alternate" hreflang="x-default" href="https://agentsdock.net/first-chat.html" />
+    <link rel="alternate" hreflang="en" href="https://agentsdock.net/agents.html" />
+    <link rel="alternate" hreflang="zh-CN" href="https://agentsdock.net/zh/agents.html" />
+    <link rel="alternate" hreflang="x-default" href="https://agentsdock.net/agents.html" />
     <link rel="stylesheet" href="./styles.css?v=c8d74e91" />
   </head>
   <body>
@@ -59,23 +59,26 @@
         <button type="button" class="lang-switch-btn" aria-haspopup="listbox" aria-expanded="false" aria-label="Language"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18"/></svg><span class="lang-switch-label">English</span><svg class="lang-switch-chev" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg></button>
         <ul class="lang-switch-menu" role="listbox" hidden>
           <li><a role="option" class="is-current" aria-selected="true" aria-current="true" lang="en">English<svg class="lang-switch-check" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12l5 5L20 7"/></svg></a></li>
-          <li><a role="option" href="./zh/first-chat.html" hreflang="zh-CN" lang="zh-CN">简体中文</a></li>
+          <li><a role="option" href="./zh/agents.html" hreflang="zh-CN" lang="zh-CN">简体中文</a></li>
         </ul>
       </div>
     </header>
 
     <main class="docs">
-      <aside class="docs-nav" aria-label="Documentation" data-lang-href="./zh/first-chat.html" data-lang-label="中文">
+      <aside class="docs-nav" aria-label="Documentation" data-lang-href="./zh/agents.html" data-lang-label="中文">
         <nav>
           <p class="docs-nav-label">Getting started</p>
           <a class="docs-nav-link" href="./setup.html">Setup guide</a>
           <a class="docs-nav-link" href="./iphone.html">Client install</a>
-          <a class="docs-nav-link" href="./agents.html">Connect agents</a>
-          <a class="docs-nav-link current" href="./first-chat.html">Start your first chat</a>
+          <a class="docs-nav-link current" href="./agents.html">Connect agents</a>
           <span class="docs-nav-subs">
-            <a href="#connect">Check you're connected</a>
-            <a href="#new-chat">Start a chat</a>
+            <a href="#providers">Providers</a>
+            <a href="#cli-login">CLI login</a>
+            <a href="#custom-api">Custom API</a>
+            <a href="#new-chat">Use it in a chat</a>
+            <a href="#manage">Manage status</a>
           </span>
+          <a class="docs-nav-link" href="./first-chat.html">Start your first chat</a>
           <p class="docs-nav-label">Guides</p>
           <a class="docs-nav-link" href="./features.html">Key features</a>
           <a class="docs-nav-link" href="./shortcuts.html">Keyboard shortcuts</a>
@@ -93,39 +96,84 @@
 
       <article class="legal docs-body">
         <p class="section-kicker">Docs</p>
-        <h1>Start your first chat</h1>
-        <p class="legal-lead">Once your server is set up and connected, starting a conversation with an agent takes one click.</p>
+        <h1>Connect and manage agents</h1>
+        <p class="legal-lead">AgentsDock supports Claude Code, Codex, OpenCode, and Cursor on the server you connect to. You can connect a provider in two ways: use the provider's own CLI login on the server, or configure a custom API endpoint for that provider.</p>
 
-        <h2 id="connect">First, check you're connected</h2>
-        <p>Open AgentsDock and check your server in the switcher. A <strong>green dot</strong> means the server is online and you're connected; a <strong>red dot</strong> means the app can't reach it.</p>
-        <figure class="docs-shot">
-          <img src="./assets/first-chat-servers.png" alt="AgentsDock server switcher — one server offline with a red dot, and the selected Mac Mini server online with a green dot" loading="lazy" />
-          <figcaption>Green = connected and online. Red = not reachable.</figcaption>
-        </figure>
-        <p>To connect to a server you need two things: its <strong>address</strong> — the server's IP or hostname with port <code>7850</code> — and its <strong>access token</strong>. Add them in the app, then hit <strong>Test connection</strong>.</p>
-        <figure class="docs-shot">
-          <img src="./assets/first-chat-addserver.png" alt="AgentsDock Add server form with a Server URL field, an Access token field, and a Test connection button" loading="lazy" />
-          <figcaption>Add a server with its URL and access token, then <strong>Test connection</strong>.</figcaption>
-        </figure>
-        <p>Haven't set your server up yet? The <a href="./setup.html">Setup guide</a> walks you through getting your server running and finding its address and access token, then connecting your device.</p>
+        <h2 id="providers">Supported providers</h2>
+        <div class="provider-grid" aria-label="Supported agent providers">
+          <a class="provider-card" href="https://code.claude.com/docs" target="_blank" rel="noopener">
+            <span class="provider-logo"><img src="./assets/claude-code-logo.png" alt="" /></span>
+            <span><strong>Claude Code</strong></span>
+          </a>
+          <a class="provider-card" href="https://developers.openai.com/codex/cli" target="_blank" rel="noopener">
+            <span class="provider-logo"><img src="./assets/codex-logo.png" alt="" /></span>
+            <span><strong>Codex</strong></span>
+          </a>
+          <a class="provider-card" href="https://opencode.ai/" target="_blank" rel="noopener">
+            <span class="provider-logo provider-logo--dark"><img src="./assets/opencode-logo.png" alt="" /></span>
+            <span><strong>OpenCode</strong></span>
+          </a>
+          <a class="provider-card" href="https://cursor.com/cli" target="_blank" rel="noopener">
+            <span class="provider-logo"><img src="./assets/cursor-logo.png" alt="" /></span>
+            <span><strong>Cursor</strong></span>
+          </a>
+        </div>
 
-        <h2 id="new-chat">Start a chat</h2>
-        <p>Click the <strong>+</strong> button at the top of the sidebar — the <strong>New chat</strong> button — or press <code>⌘N</code>.</p>
-        <figure class="docs-shot">
-          <video autoplay muted loop playsinline preload="metadata" poster="./assets/first-chat-new-chat-poster.jpg">
-            <source src="./assets/first-chat-new-chat.mp4" type="video/mp4" />
-          </video>
-          <figcaption>New chat starts with the previous chat's working directory selected. Use the provider picker in the lower-left corner to switch agent providers.</figcaption>
-        </figure>
-        <p>Before you send the first message, check two things:</p>
-        <ul>
-          <li>the <strong>working directory</strong> — AgentsDock defaults to the previous chat's folder, and you can change it to another folder on the remote;</li>
-          <li>the <strong>agent provider</strong> — use the picker in the lower-left corner to switch between providers available on that server, such as Claude Code, Codex, OpenCode, or Cursor.</li>
+        <h2 id="ways">Two ways to connect</h2>
+        <ul class="docs-intro-list">
+          <li><strong>CLI Login</strong> uses the provider CLI or runtime installed and signed in on the remote server.</li>
+          <li><strong>Custom API</strong> lets AgentsDock use an endpoint and token/key you configure for this server.</li>
         </ul>
-        <p>Then type your first message and press <code>Enter</code> to send. That's it — the agent runs on your server in that directory, and the chat keeps its own persistent terminal you can attach to from any device, anytime. Need to connect another provider first? See <a href="./agents.html">Connect agents</a>.</p>
 
-        <h2 id="next">What next</h2>
-        <p>Explore what else AgentsDock can do in <a href="./features.html">Key features</a>, or speed things up with <a href="./shortcuts.html">Keyboard shortcuts</a>.</p>
+        <h2 id="cli-login">CLI login</h2>
+        <p>Run the login command on the machine that runs AgentsServer. After the provider finishes signing in, return to AgentsDock and recheck that provider.</p>
+        <pre><code># Claude Code
+claude auth login
+
+# Codex
+codex login
+
+# OpenCode
+opencode auth login
+
+# Cursor
+cursor-agent login</code></pre>
+        <ul>
+          <li><strong>Claude Code</strong> confirms authentication on the next message; rechecking only verifies the CLI is installed.</li>
+          <li><strong>Codex</strong> uses the Codex CLI login saved on that server.</li>
+          <li><strong>OpenCode</strong> uses <code>opencode auth login</code> for the model provider you choose inside OpenCode.</li>
+          <li><strong>Cursor</strong> may expose the binary as <code>cursor-agent</code> or <code>agent</code>; use the name installed on your server.</li>
+        </ul>
+        <p>If a provider still says <strong>Not connected</strong>, confirm you are looking at the right server, then click <strong>Recheck</strong> on that provider card.</p>
+
+        <h2 id="custom-api">Custom API</h2>
+        <p>Use <strong>Custom API</strong> when you want AgentsDock to use an endpoint instead of the provider's normal CLI login. A custom endpoint usually needs an API base URL and an API key or token. Some providers also expose optional advanced fields such as protocol, model, or auth header.</p>
+        <figure class="docs-shot">
+          <img src="./assets/custom-api-settings.png" alt="AgentsDock Custom API form showing API base URL, API key, advanced options, and Connect button" loading="lazy" />
+          <figcaption>Custom API is the endpoint path: add the base URL, paste the API key or token, then connect. These settings apply to the current server.</figcaption>
+        </figure>
+        <ul>
+          <li><strong>Claude Code</strong> custom API uses Anthropic-compatible endpoints.</li>
+          <li><strong>Codex</strong> exposes its provider-specific API configuration from its provider card.</li>
+          <li><strong>OpenCode</strong> custom API supports Anthropic, Chat Completions, and Responses-compatible endpoints.</li>
+          <li><strong>Cursor</strong> custom API uses Cursor's API endpoint and a Cursor API key.</li>
+        </ul>
+        <p>Custom API settings are stored on the server you are configuring. If you use multiple servers, configure the endpoint on each server where you want it available.</p>
+
+        <h2 id="new-chat">Use it in a chat</h2>
+        <p>After a provider is connected, start a new chat and use the provider picker in the lower-left corner to choose it. AgentsDock shows every provider that is ready on the current server, so switching servers can change the available list. If a provider has both CLI login and a custom endpoint, the custom endpoint appears as a separate choice from the CLI login.</p>
+        <figure class="docs-shot">
+          <img src="./assets/new-chat-provider-picker.png" alt="AgentsDock new chat provider picker showing Claude, Codex, Cursor, and Cursor API key as separate choices" loading="lazy" />
+          <figcaption>In a new chat, connected providers appear in the picker. A custom endpoint is listed separately from the same provider's CLI login, such as <strong>Cursor</strong> and <strong>Cursor API key</strong>.</figcaption>
+        </figure>
+
+        <h2 id="manage">Manage agent status</h2>
+        <p>Open <strong>Settings</strong> &rarr; <strong>My Agents</strong> to see what is connected on the current server. This page is server-specific: if you switch from one server to another, the connected providers can change too.</p>
+        <figure class="docs-shot">
+          <img src="./assets/my-agents-settings.png" alt="AgentsDock Settings showing My Agents with Codex, Claude Code, Cursor, and OpenCode provider connection status" loading="lazy" />
+          <figcaption><strong>Current server</strong> shows which machine you are configuring. Use <strong>Reload settings</strong> or the provider <strong>Recheck</strong> buttons after installing, signing in, or changing a custom API.</figcaption>
+        </figure>
+        <p>Need the basics first? Install the client from <a href="./iphone.html">Client install</a>, connect a server with the <a href="./setup.html">Setup guide</a>, then walk through <a href="./first-chat.html">Start your first chat</a>.</p>
       </article>
     </main>
 

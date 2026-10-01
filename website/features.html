@@ -3,12 +3,12 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <meta name="description" content="AgentsDock key features — a full terminal on every device, agent-to-agent messaging, scheduled jobs, and file view & edit, all from a self-hosted server you own." />
+    <meta name="description" content="AgentsDock key features — a full terminal on every device, side chats, agent-to-agent messaging, scheduled jobs, and file view & edit, all from a self-hosted server you own." />
     <!-- Social preview (Open Graph / Twitter) -->
     <meta property="og:type" content="website" />
     <meta property="og:site_name" content="AgentsDock" />
     <meta property="og:title" content="Key Features · AgentsDock" />
-    <meta property="og:description" content="AgentsDock key features — a full terminal on every device, agent-to-agent messaging, scheduled jobs, and file view & edit, all from a self-hosted server you own." />
+    <meta property="og:description" content="AgentsDock key features — a full terminal on every device, side chats, agent-to-agent messaging, scheduled jobs, and file view & edit, all from a self-hosted server you own." />
     <meta property="og:url" content="https://agentsdock.net/features.html" />
     <meta property="og:image" content="https://agentsdock.net/assets/og-card.png?v=82a3bdda" />
     <meta property="og:image:width" content="1200" />
@@ -16,7 +16,7 @@
     <meta property="og:image:alt" content="AgentsDock — an IDE designed for agentic AI research" />
     <meta name="twitter:card" content="summary_large_image" />
     <meta name="twitter:title" content="Key Features · AgentsDock" />
-    <meta name="twitter:description" content="AgentsDock key features — a full terminal on every device, agent-to-agent messaging, scheduled jobs, and file view & edit, all from a self-hosted server you own." />
+    <meta name="twitter:description" content="AgentsDock key features — a full terminal on every device, side chats, agent-to-agent messaging, scheduled jobs, and file view & edit, all from a self-hosted server you own." />
     <meta name="twitter:image" content="https://agentsdock.net/assets/og-card.png?v=82a3bdda" />
     <meta name="theme-color" content="#0d1013" />
     <meta name="robots" content="index,follow" />
@@ -34,14 +34,14 @@
     </script>
     <script src="./analytics.js" defer></script>
     <script src="./site-nav.js?v=e6b98484" defer></script>
-    <script src="./docs-nav.js?v=88f24bbf" defer></script>
+    <script src="./docs-nav.js?v=1c49a7d2" defer></script>
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Instrument+Sans:wght@400;500;600;700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
     <link rel="alternate" hreflang="en" href="https://agentsdock.net/features.html" />
     <link rel="alternate" hreflang="zh-CN" href="https://agentsdock.net/zh/features.html" />
     <link rel="alternate" hreflang="x-default" href="https://agentsdock.net/features.html" />
-    <link rel="stylesheet" href="./styles.css?v=7f6a91c4" />
+    <link rel="stylesheet" href="./styles.css?v=c8d74e91" />
   </head>
   <body>
     <header class="site-header">
@@ -70,6 +70,7 @@
           <p class="docs-nav-label">Getting started</p>
           <a class="docs-nav-link" href="./setup.html">Setup guide</a>
           <a class="docs-nav-link" href="./iphone.html">Client install</a>
+          <a class="docs-nav-link" href="./agents.html">Connect agents</a>
           <a class="docs-nav-link" href="./first-chat.html">Start your first chat</a>
           <p class="docs-nav-label">Guides</p>
           <a class="docs-nav-link current" href="./features.html">Key features</a>
@@ -81,6 +82,7 @@
             <a href="#feat-resume">5 · Resume other chats</a>
             <a href="#feat-slash">6 · Slash commands</a>
             <a href="#feat-fork">7 · Fork chat</a>
+            <a href="#feat-side-chat">8 · Side chat</a>
           </span>
           <a class="docs-nav-link" href="./shortcuts.html">Keyboard shortcuts</a>
           <a class="docs-nav-link" href="./update.html">Updates</a>
@@ -201,6 +203,19 @@
             <img src="./assets/feature-fork-menu.png" alt="The chat context menu in the sidebar, with Fork Chat highlighted" loading="lazy" />
             <figcaption>Right-click a chat in the sidebar and choose <strong>Fork Chat</strong>.</figcaption>
           </figure>
+        </section>
+
+        <section class="feature-doc">
+          <div class="feature-doc-head" id="feat-side-chat"><span class="feature-doc-num">08</span><h2>Side chat for quick questions</h2></div>
+          <p class="feature-doc-desc">Ask a side question with the current chat's provider context, without adding it to the main conversation.</p>
+          <p>Click the <strong>Side chat</strong> button near the composer when you need a quick check, clarification, or summary while the main thread keeps moving. AgentsDock opens a compact side panel tied to the current chat, so Codex or Claude can use the native provider context, including tool results, while the side question stays separate from the main conversation.</p>
+          <figure class="docs-shot">
+            <video autoplay muted loop playsinline preload="metadata" poster="./assets/feature-side-chat-poster.jpg">
+              <source src="./assets/feature-side-chat.mp4" type="video/mp4" />
+            </video>
+            <figcaption>Side chat opens over the current chat and keeps the answer out of the main thread.</figcaption>
+          </figure>
+          <p>Use it for questions like “what folder are we in?”, “what did that last tool result say?”, or “can you summarize the current change?” without steering the active agent away from its task.</p>
         </section>
       </article>
     </main>

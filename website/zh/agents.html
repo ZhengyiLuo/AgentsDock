@@ -3,24 +3,24 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <meta name="description" content="如何在 AgentsDock 中开始第一个会话：确认服务器已连接，创建会话，检查默认沿用的工作目录，并切换 agent provider。" />
+    <meta name="description" content="在 AgentsDock 里连接和管理 Claude Code、Codex、OpenCode、Cursor，以及自定义 API endpoint。" />
     <!-- Social preview (Open Graph / Twitter) -->
     <meta property="og:type" content="website" />
     <meta property="og:site_name" content="AgentsDock" />
-    <meta property="og:title" content="开始第一个会话 · AgentsDock" />
-    <meta property="og:description" content="如何在 AgentsDock 中开始第一个会话：确认服务器已连接，创建会话，检查默认沿用的工作目录，并切换 agent provider。" />
-    <meta property="og:url" content="https://agentsdock.net/zh/first-chat.html" />
+    <meta property="og:title" content="连接与管理 agents · AgentsDock" />
+    <meta property="og:description" content="在 AgentsDock 里连接和管理 Claude Code、Codex、OpenCode、Cursor，以及自定义 API endpoint。" />
+    <meta property="og:url" content="https://agentsdock.net/zh/agents.html" />
     <meta property="og:image" content="https://agentsdock.net/assets/og-card.png?v=82a3bdda" />
     <meta property="og:image:width" content="1200" />
     <meta property="og:image:height" content="630" />
     <meta property="og:image:alt" content="AgentsDock — an IDE designed for agentic AI research" />
     <meta name="twitter:card" content="summary_large_image" />
-    <meta name="twitter:title" content="开始第一个会话 · AgentsDock" />
-    <meta name="twitter:description" content="如何在 AgentsDock 中开始第一个会话：确认服务器已连接，创建会话，检查默认沿用的工作目录，并切换 agent provider。" />
+    <meta name="twitter:title" content="连接与管理 agents · AgentsDock" />
+    <meta name="twitter:description" content="在 AgentsDock 里连接和管理 Claude Code、Codex、OpenCode、Cursor，以及自定义 API endpoint。" />
     <meta name="twitter:image" content="https://agentsdock.net/assets/og-card.png?v=82a3bdda" />
     <meta name="theme-color" content="#0d1013" />
     <meta name="robots" content="index,follow" />
-    <title>开始第一个会话 · AgentsDock</title>
+    <title>连接与管理 Agents · AgentsDock</title>
     <link rel="icon" href="../favicon.ico" sizes="any" />
     <link rel="icon" type="image/png" href="../assets/favicon-96.png" sizes="96x96" />
     <link rel="apple-touch-icon" href="../assets/apple-touch-icon.png" />
@@ -38,10 +38,10 @@
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Instrument+Sans:wght@400;500;600;700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
-    <link rel="alternate" hreflang="en" href="https://agentsdock.net/first-chat.html" />
-    <link rel="alternate" hreflang="zh-CN" href="https://agentsdock.net/zh/first-chat.html" />
-    <link rel="alternate" hreflang="x-default" href="https://agentsdock.net/first-chat.html" />
     <meta property="og:locale" content="zh_CN" />
+    <link rel="alternate" hreflang="en" href="https://agentsdock.net/agents.html" />
+    <link rel="alternate" hreflang="zh-CN" href="https://agentsdock.net/zh/agents.html" />
+    <link rel="alternate" hreflang="x-default" href="https://agentsdock.net/agents.html" />
     <link rel="stylesheet" href="../styles.css?v=c8d74e91" />
   </head>
   <body>
@@ -59,24 +59,27 @@
       <div class="lang-switch header-lang">
         <button type="button" class="lang-switch-btn" aria-haspopup="listbox" aria-expanded="false" aria-label="语言"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18"/></svg><span class="lang-switch-label">中文</span><svg class="lang-switch-chev" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg></button>
         <ul class="lang-switch-menu" role="listbox" hidden>
-          <li><a role="option" href="../first-chat.html" hreflang="en" lang="en">English</a></li>
+          <li><a role="option" href="../agents.html" hreflang="en" lang="en">English</a></li>
           <li><a role="option" class="is-current" aria-selected="true" aria-current="true" lang="zh-CN">简体中文<svg class="lang-switch-check" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12l5 5L20 7"/></svg></a></li>
         </ul>
       </div>
     </header>
 
     <main class="docs">
-      <aside class="docs-nav" aria-label="文档" data-docs-label="文档" data-docs-menu-label="打开文档目录" data-lang-href="../first-chat.html" data-lang-label="EN">
+      <aside class="docs-nav" aria-label="文档" data-docs-label="文档" data-docs-menu-label="打开文档目录" data-lang-href="../agents.html" data-lang-label="EN">
         <nav>
           <p class="docs-nav-label">入门</p>
           <a class="docs-nav-link" href="./setup.html">搭建指南</a>
           <a class="docs-nav-link" href="./iphone.html">客户端安装</a>
-          <a class="docs-nav-link" href="./agents.html">连接 agents</a>
-          <a class="docs-nav-link current" href="./first-chat.html">开始第一个会话</a>
+          <a class="docs-nav-link current" href="./agents.html">连接 agents</a>
           <span class="docs-nav-subs">
-            <a href="#connect">确认已连接</a>
-            <a href="#new-chat">开始会话</a>
+            <a href="#providers">支持的 provider</a>
+            <a href="#cli-login">CLI 登录</a>
+            <a href="#custom-api">Custom API</a>
+            <a href="#new-chat">在会话中使用</a>
+            <a href="#manage">管理状态</a>
           </span>
+          <a class="docs-nav-link" href="./first-chat.html">开始第一个会话</a>
           <p class="docs-nav-label">指南</p>
           <a class="docs-nav-link" href="./features.html">主要功能</a>
           <a class="docs-nav-link" href="./shortcuts.html">键盘快捷键</a>
@@ -94,39 +97,84 @@
 
       <article class="legal docs-body">
         <p class="section-kicker">文档</p>
-        <h1>开始第一个会话</h1>
-        <p class="legal-lead">服务器搭建并连接好之后，和 agent 开始一段对话只需一次点击。</p>
+        <h1>连接与管理 agents</h1>
+        <p class="legal-lead">AgentsDock 支持在你连接的服务器上使用 Claude Code、Codex、OpenCode 和 Cursor。连接 provider 有两种方式：在服务器上使用 provider 自己的 CLI 登录，或者为这个 provider 配置自定义 API endpoint。</p>
 
-        <h2 id="connect">首先，确认已连接</h2>
-        <p>打开 AgentsDock，在服务器切换器里查看你的服务器。<strong>绿点</strong>表示服务器在线且已连接；<strong>红点</strong>表示应用无法访问它。</p>
-        <figure class="docs-shot">
-          <img src="../assets/first-chat-servers.png" alt="AgentsDock server switcher — one server offline with a red dot, and the selected Mac Mini server online with a green dot" loading="lazy" />
-          <figcaption>绿 = 已连接、在线。红 = 无法访问。</figcaption>
-        </figure>
-        <p>连接服务器需要两样东西：它的<strong>地址</strong>——服务器的 IP 或主机名加端口 <code>7850</code>——以及它的<strong>访问令牌</strong>。在应用里填好后，点击<strong>测试连接（Test connection）</strong>。</p>
-        <figure class="docs-shot">
-          <img src="../assets/first-chat-addserver.png" alt="AgentsDock Add server form with a Server URL field, an Access token field, and a Test connection button" loading="lazy" />
-          <figcaption>用 URL 和访问令牌添加服务器，然后<strong>测试连接</strong>。</figcaption>
-        </figure>
-        <p>还没搭建服务器？<a href="./setup.html">搭建指南</a>会一步步带你把服务器跑起来、找到它的地址和访问令牌，再连接你的设备。</p>
+        <h2 id="providers">支持的 provider</h2>
+        <div class="provider-grid" aria-label="支持的 agent provider">
+          <a class="provider-card" href="https://code.claude.com/docs" target="_blank" rel="noopener">
+            <span class="provider-logo"><img src="../assets/claude-code-logo.png" alt="" /></span>
+            <span><strong>Claude Code</strong></span>
+          </a>
+          <a class="provider-card" href="https://developers.openai.com/codex/cli" target="_blank" rel="noopener">
+            <span class="provider-logo"><img src="../assets/codex-logo.png" alt="" /></span>
+            <span><strong>Codex</strong></span>
+          </a>
+          <a class="provider-card" href="https://opencode.ai/" target="_blank" rel="noopener">
+            <span class="provider-logo provider-logo--dark"><img src="../assets/opencode-logo.png" alt="" /></span>
+            <span><strong>OpenCode</strong></span>
+          </a>
+          <a class="provider-card" href="https://cursor.com/cli" target="_blank" rel="noopener">
+            <span class="provider-logo"><img src="../assets/cursor-logo.png" alt="" /></span>
+            <span><strong>Cursor</strong></span>
+          </a>
+        </div>
 
-        <h2 id="new-chat">开始会话</h2>
-        <p>点击侧边栏顶部的 <strong>+</strong> 按钮——即<strong>新建会话（New chat）</strong>——或按 <code>⌘N</code>。</p>
-        <figure class="docs-shot">
-          <video autoplay muted loop playsinline preload="metadata" poster="../assets/first-chat-new-chat-poster.jpg">
-            <source src="../assets/first-chat-new-chat.mp4" type="video/mp4" />
-          </video>
-          <figcaption>新建会话会默认选中上一个会话的工作目录。左下角的 provider 切换器可以切换不同的 agent provider。</figcaption>
-        </figure>
-        <p>发送第一条消息前，检查两件事：</p>
-        <ul>
-          <li><strong>工作目录</strong>——AgentsDock 会默认沿用上一个会话的文件夹；如果这次要在别的项目里工作，可以改成远程机器上的其他目录。</li>
-          <li><strong>agent provider</strong>——用左下角的切换器，在这台服务器可用的 Claude Code、Codex、OpenCode、Cursor 等 provider 之间切换。</li>
+        <h2 id="ways">两种连接方式</h2>
+        <ul class="docs-intro-list">
+          <li><strong>CLI Login</strong> 使用安装在远程服务器上的 provider CLI 或 runtime。</li>
+          <li><strong>Custom API</strong> 使用你为当前服务器配置的 endpoint 和 token/key。</li>
         </ul>
-        <p>然后输入第一条消息，按 <code>Enter</code> 发送。就这么简单——agent 在你服务器上的那个目录里运行，而这个会话拥有自己的持久终端，你随时可以从任何设备接入。如果还需要先连接另一个 provider，可以看<a href="./agents.html">连接 agents</a>。</p>
 
-        <h2 id="next">接下来</h2>
-        <p>到<a href="./features.html">主要功能</a>看看 AgentsDock 还能做什么，或用<a href="./shortcuts.html">键盘快捷键</a>提速。</p>
+        <h2 id="cli-login">CLI 登录</h2>
+        <p>请在运行 AgentsServer 的那台机器上执行登录命令。provider 完成登录后，回到 AgentsDock 重新检查对应 provider。</p>
+        <pre><code># Claude Code
+claude auth login
+
+# Codex
+codex login
+
+# OpenCode
+opencode auth login
+
+# Cursor
+cursor-agent login</code></pre>
+        <ul>
+          <li><strong>Claude Code</strong> 会在下一次发送消息时确认登录；重新检查只验证 CLI 是否安装。</li>
+          <li><strong>Codex</strong> 使用保存在这台服务器上的 Codex CLI 登录。</li>
+          <li><strong>OpenCode</strong> 使用 <code>opencode auth login</code> 登录你在 OpenCode 里选择的模型 provider。</li>
+          <li><strong>Cursor</strong> 的命令可能是 <code>cursor-agent</code> 或 <code>agent</code>，以你服务器上安装的命令名为准。</li>
+        </ul>
+        <p>如果某个 provider 仍显示 <strong>Not connected</strong>，先确认你正在看正确的服务器，然后在对应卡片里点 <strong>Recheck</strong>。</p>
+
+        <h2 id="custom-api">Custom API</h2>
+        <p>如果你想让 AgentsDock 使用 endpoint，而不是 provider 默认的 CLI 登录，可以使用 <strong>Custom API</strong>。自定义 endpoint 通常需要 API base URL 和 API key 或 token。有些 provider 还会在高级选项里提供 protocol、model、auth header 等字段。</p>
+        <figure class="docs-shot">
+          <img src="../assets/custom-api-settings.png" alt="AgentsDock Custom API form showing API base URL, API key, advanced options, and Connect button" loading="lazy" />
+          <figcaption>Custom API 是 endpoint 连接方式：填入 base URL，粘贴 API key 或 token，然后连接。这个配置作用于当前服务器。</figcaption>
+        </figure>
+        <ul>
+          <li><strong>Claude Code</strong> 的 Custom API 使用 Anthropic-compatible endpoint。</li>
+          <li><strong>Codex</strong> 在它自己的 provider 卡片里提供对应的 API 配置。</li>
+          <li><strong>OpenCode</strong> 的 Custom API 支持 Anthropic、Chat Completions 和 Responses-compatible endpoint。</li>
+          <li><strong>Cursor</strong> 的 Custom API 使用 Cursor API endpoint 和 Cursor API key。</li>
+        </ul>
+        <p>Custom API 设置保存在当前服务器上。如果你有多台服务器，需要在每台想使用它的服务器上分别配置。</p>
+
+        <h2 id="new-chat">在会话中使用</h2>
+        <p>provider 连接好以后，新建会话，在左下角的 provider picker 里选择它。AgentsDock 会显示当前服务器上所有已经可用的 provider，所以切换服务器后列表可能会变化。如果同一个 provider 同时有 CLI 登录和自定义 endpoint，自定义 endpoint 会作为一个独立选项显示，不会和 CLI 登录混在一起。</p>
+        <figure class="docs-shot">
+          <img src="../assets/new-chat-provider-picker.png" alt="AgentsDock new chat provider picker showing Claude, Codex, Cursor, and Cursor API key as separate choices" loading="lazy" />
+          <figcaption>新建会话时，已连接的 provider 会出现在 picker 里。自定义 endpoint 会和同一个 provider 的 CLI 登录分开显示，例如 <strong>Cursor</strong> 和 <strong>Cursor API key</strong>。</figcaption>
+        </figure>
+
+        <h2 id="manage">管理 agent 状态</h2>
+        <p>打开 <strong>Settings</strong> &rarr; <strong>My Agents</strong> 可以查看当前服务器上哪些 provider 已连接。这个页面按服务器分别配置：如果你切换到另一台服务器，可用的 provider 也可能不同。</p>
+        <figure class="docs-shot">
+          <img src="../assets/my-agents-settings.png" alt="AgentsDock Settings showing My Agents with Codex, Claude Code, Cursor, and OpenCode provider connection status" loading="lazy" />
+          <figcaption><strong>Current server</strong> 表示你正在配置哪台机器。安装、登录或更改 Custom API 后，可以点 <strong>Reload settings</strong>，也可以在对应 provider 卡片里点 <strong>Recheck</strong>。</figcaption>
+        </figure>
+        <p>如果还没完成基础配置，先看 <a href="./iphone.html">客户端安装</a>，再按 <a href="./setup.html">搭建指南</a> 连接服务器，然后继续 <a href="./first-chat.html">开始第一个会话</a>。</p>
       </article>
     </main>
 
@@ -135,7 +183,7 @@
       <p>为 agentic AI 研究而设计的 IDE。<span class="footer-copyright">&copy; 2026 AgentsDock</span></p>
       <div>
         <a href="./setup.html">文档</a>
-        <a href="../support.html">支持</a>
+        <a href="../support.html">Support</a>
         <a href="./report-issue.html">反馈问题</a>
         <a href="../privacy.html">隐私</a>
         <a href="https://discord.gg/ZGDrhEWqPt" target="_blank" rel="noopener">Discord &#8599;</a>

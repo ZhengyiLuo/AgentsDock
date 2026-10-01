@@ -34,14 +34,14 @@
     </script>
     <script src="./analytics.js" defer></script>
     <script src="./site-nav.js?v=e6b98484" defer></script>
-    <script src="./docs-nav.js?v=88f24bbf" defer></script>
+    <script src="./docs-nav.js?v=1c49a7d2" defer></script>
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Instrument+Sans:wght@400;500;600;700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
     <link rel="alternate" hreflang="en" href="https://agentsdock.net/setup.html" />
     <link rel="alternate" hreflang="zh-CN" href="https://agentsdock.net/zh/setup.html" />
     <link rel="alternate" hreflang="x-default" href="https://agentsdock.net/setup.html" />
-    <link rel="stylesheet" href="./styles.css?v=7f6a91c4" />
+    <link rel="stylesheet" href="./styles.css?v=c8d74e91" />
   </head>
   <body>
     <header class="site-header">
@@ -76,6 +76,7 @@
             <a href="#troubleshoot">Not connecting?</a>
           </span>
           <a class="docs-nav-link" href="./iphone.html">Client install</a>
+          <a class="docs-nav-link" href="./agents.html">Connect agents</a>
           <a class="docs-nav-link" href="./first-chat.html">Start your first chat</a>
           <p class="docs-nav-label">Guides</p>
           <a class="docs-nav-link" href="./features.html">Key features</a>
@@ -106,7 +107,7 @@
         <ul>
           <li>A <strong>remote machine</strong> you control — a macOS or Linux computer that stays on — to run the server. <code>tmux</code> is optional, only needed for the in-app terminal.</li>
           <li>A <strong>Tailscale</strong> account <em>(optional)</em> — only needed to reach the remote from <strong>outside its local network</strong>. On the same Wi&#8209;Fi you can use the machine's local IP address; Tailscale is what lets you connect securely from anywhere else.</li>
-          <li>Any provider CLI you plan to use — <strong>Claude Code</strong>, <strong>Codex</strong>, or <strong>Cursor</strong> — installed on the remote.</li>
+          <li>Any provider CLI you plan to use — <strong>Claude Code</strong>, <strong>Codex</strong>, <strong>OpenCode</strong>, or <strong>Cursor</strong> — installed on the remote.</li>
           <li>A device that can run an <strong>AgentsDock client</strong>: macOS, Windows, Linux, iPhone, iPad, or Android.</li>
         </ul>
         <div class="guide-note">
@@ -128,7 +129,7 @@ cd AgentsServer
         <p><a class="quickstart-docs" href="https://github.com/ZhengyiLuo/AgentsServer" target="_blank" rel="noopener">View the AgentsServer repository on GitHub <span aria-hidden="true">&rarr;</span></a></p>
 
         <h3 class="docs-step" id="remote-cli"><span class="step-n">2</span>Sign in to provider CLIs on the remote</h3>
-        <p>Install and sign in to whichever provider CLIs you want AgentsDock to use on the remote: <a href="https://code.claude.com/docs" target="_blank" rel="noopener">Claude Code</a>, <a href="https://developers.openai.com/codex/cli" target="_blank" rel="noopener">Codex</a>, or <a href="https://cursor.com/docs/cli/reference/authentication" target="_blank" rel="noopener">Cursor</a>. Use that provider's normal login flow, such as browser sign-in or API-key configuration. If the app still shows a backend as unavailable, click <strong>Recheck CLIs</strong> in Settings.</p>
+        <p>Install and sign in to whichever provider CLIs you want AgentsDock to use on the remote: <a href="https://code.claude.com/docs" target="_blank" rel="noopener">Claude Code</a>, <a href="https://developers.openai.com/codex/cli" target="_blank" rel="noopener">Codex</a>, <a href="https://dev.opencode.ai/docs/cli/" target="_blank" rel="noopener">OpenCode</a>, or <a href="https://cursor.com/docs/cli/reference/authentication" target="_blank" rel="noopener">Cursor</a>. Use that provider's normal login flow, such as browser sign-in or API-key configuration. For custom endpoints, see <a href="./agents.html">Connect agents</a>.</p>
 
         <h3 class="docs-step" id="remote-tailscale"><span class="step-n">3</span>Install Tailscale on the remote <span class="docs-step-opt">optional</span></h3>
         <p><strong>Only needed to reach the remote from outside its local network.</strong> If your devices are on the same Wi&#8209;Fi as the remote, you can skip this and use the machine's local IP address in Part 2.</p>

@@ -3,12 +3,12 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <meta name="description" content="AgentsDock 主要功能——每台设备上的完整终端、agent 之间通话、定时任务、文件查看与编辑，全部来自你自己托管的服务器。" />
+    <meta name="description" content="AgentsDock 主要功能——每台设备上的完整终端、Side chat、agent 之间通话、定时任务、文件查看与编辑，全部来自你自己托管的服务器。" />
     <!-- Social preview (Open Graph / Twitter) -->
     <meta property="og:type" content="website" />
     <meta property="og:site_name" content="AgentsDock" />
     <meta property="og:title" content="主要功能 · AgentsDock" />
-    <meta property="og:description" content="AgentsDock 主要功能——每台设备上的完整终端、agent 之间通话、定时任务、文件查看与编辑，全部来自你自己托管的服务器。" />
+    <meta property="og:description" content="AgentsDock 主要功能——每台设备上的完整终端、Side chat、agent 之间通话、定时任务、文件查看与编辑，全部来自你自己托管的服务器。" />
     <meta property="og:url" content="https://agentsdock.net/zh/features.html" />
     <meta property="og:image" content="https://agentsdock.net/assets/og-card.png?v=82a3bdda" />
     <meta property="og:image:width" content="1200" />
@@ -16,7 +16,7 @@
     <meta property="og:image:alt" content="AgentsDock — an IDE designed for agentic AI research" />
     <meta name="twitter:card" content="summary_large_image" />
     <meta name="twitter:title" content="主要功能 · AgentsDock" />
-    <meta name="twitter:description" content="AgentsDock 主要功能——每台设备上的完整终端、agent 之间通话、定时任务、文件查看与编辑，全部来自你自己托管的服务器。" />
+    <meta name="twitter:description" content="AgentsDock 主要功能——每台设备上的完整终端、Side chat、agent 之间通话、定时任务、文件查看与编辑，全部来自你自己托管的服务器。" />
     <meta name="twitter:image" content="https://agentsdock.net/assets/og-card.png?v=82a3bdda" />
     <meta name="theme-color" content="#0d1013" />
     <meta name="robots" content="index,follow" />
@@ -34,7 +34,7 @@
     </script>
     <script src="../analytics.js" defer></script>
     <script src="../site-nav.js?v=e6b98484" defer></script>
-    <script src="../docs-nav.js?v=88f24bbf" defer></script>
+    <script src="../docs-nav.js?v=1c49a7d2" defer></script>
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Instrument+Sans:wght@400;500;600;700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
@@ -42,7 +42,7 @@
     <link rel="alternate" hreflang="zh-CN" href="https://agentsdock.net/zh/features.html" />
     <link rel="alternate" hreflang="x-default" href="https://agentsdock.net/features.html" />
     <meta property="og:locale" content="zh_CN" />
-    <link rel="stylesheet" href="../styles.css?v=7f6a91c4" />
+    <link rel="stylesheet" href="../styles.css?v=c8d74e91" />
   </head>
   <body>
     <header class="site-header">
@@ -71,6 +71,7 @@
           <p class="docs-nav-label">入门</p>
           <a class="docs-nav-link" href="./setup.html">搭建指南</a>
           <a class="docs-nav-link" href="./iphone.html">客户端安装</a>
+          <a class="docs-nav-link" href="./agents.html">连接 agents</a>
           <a class="docs-nav-link" href="./first-chat.html">开始第一个会话</a>
           <p class="docs-nav-label">指南</p>
           <a class="docs-nav-link current" href="./features.html">主要功能</a>
@@ -82,6 +83,7 @@
             <a href="#feat-resume">5 · 恢复其他会话</a>
             <a href="#feat-slash">6 · 斜杠命令</a>
             <a href="#feat-fork">7 · Fork 会话</a>
+            <a href="#feat-side-chat">8 · Side chat</a>
           </span>
           <a class="docs-nav-link" href="./shortcuts.html">键盘快捷键</a>
           <a class="docs-nav-link" href="./update.html">更新</a>
@@ -202,6 +204,19 @@
             <img src="../assets/feature-fork-menu.png" alt="The chat context menu in the sidebar, with Fork Chat highlighted" loading="lazy" />
             <figcaption>在侧边栏右键点击一个会话，选择 <strong>Fork Chat</strong>。</figcaption>
           </figure>
+        </section>
+
+        <section class="feature-doc">
+          <div class="feature-doc-head" id="feat-side-chat"><span class="feature-doc-num">08</span><h2>Side chat 侧聊</h2></div>
+          <p class="feature-doc-desc">围绕当前会话随手问一个旁路问题，但不把它写进主对话。</p>
+          <p>当你需要快速确认、追问或总结时，点击输入框旁的 <strong>Side chat</strong> 按钮。AgentsDock 会打开一个绑定当前会话的小面板，Codex 或 Claude 可以使用当前会话的原生上下文，包括工具结果；而 Side chat 里的问题和回答会留在侧边，不会打断主线。</p>
+          <figure class="docs-shot">
+            <video autoplay muted loop playsinline preload="metadata" poster="../assets/feature-side-chat-poster.jpg">
+              <source src="../assets/feature-side-chat.mp4" type="video/mp4" />
+            </video>
+            <figcaption>Side chat 覆盖在当前会话上方，答案不会进入主会话。</figcaption>
+          </figure>
+          <p>它适合问“现在在哪个目录？”“上一个工具结果说了什么？”“当前改动能不能总结一下？”这类问题，不需要把正在执行任务的 agent 从主线拉走。</p>
         </section>
       </article>
     </main>

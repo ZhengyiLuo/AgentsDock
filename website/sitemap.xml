@@ -15,6 +15,13 @@
     <xhtml:link rel="alternate" hreflang="x-default" href="https://agentsdock.net/backup-uninstall.html" />
   </url>
   <url>
+    <loc>https://agentsdock.net/agents.html</loc>
+    <lastmod>2026-10-01</lastmod>
+    <xhtml:link rel="alternate" hreflang="en" href="https://agentsdock.net/agents.html" />
+    <xhtml:link rel="alternate" hreflang="zh-CN" href="https://agentsdock.net/zh/agents.html" />
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://agentsdock.net/agents.html" />
+  </url>
+  <url>
     <loc>https://agentsdock.net/features.html</loc>
     <lastmod>2026-09-22</lastmod>
     <xhtml:link rel="alternate" hreflang="en" href="https://agentsdock.net/features.html" />
@@ -112,6 +119,13 @@
     <xhtml:link rel="alternate" hreflang="en" href="https://agentsdock.net/backup-uninstall.html" />
     <xhtml:link rel="alternate" hreflang="zh-CN" href="https://agentsdock.net/zh/backup-uninstall.html" />
     <xhtml:link rel="alternate" hreflang="x-default" href="https://agentsdock.net/backup-uninstall.html" />
+  </url>
+  <url>
+    <loc>https://agentsdock.net/zh/agents.html</loc>
+    <lastmod>2026-10-01</lastmod>
+    <xhtml:link rel="alternate" hreflang="en" href="https://agentsdock.net/agents.html" />
+    <xhtml:link rel="alternate" hreflang="zh-CN" href="https://agentsdock.net/zh/agents.html" />
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://agentsdock.net/agents.html" />
   </url>
   <url>
     <loc>https://agentsdock.net/zh/features.html</loc>

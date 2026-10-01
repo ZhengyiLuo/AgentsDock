@@ -34,7 +34,7 @@
     </script>
     <script src="../analytics.js" defer></script>
     <script src="../site-nav.js?v=e6b98484" defer></script>
-    <script src="../docs-nav.js?v=88f24bbf" defer></script>
+    <script src="../docs-nav.js?v=1c49a7d2" defer></script>
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Instrument+Sans:wght@400;500;600;700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
@@ -42,7 +42,7 @@
     <link rel="alternate" hreflang="zh-CN" href="https://agentsdock.net/zh/setup.html" />
     <link rel="alternate" hreflang="x-default" href="https://agentsdock.net/setup.html" />
     <meta property="og:locale" content="zh_CN" />
-    <link rel="stylesheet" href="../styles.css?v=7f6a91c4" />
+    <link rel="stylesheet" href="../styles.css?v=c8d74e91" />
   </head>
   <body>
     <header class="site-header">
@@ -77,6 +77,7 @@
             <a href="#troubleshoot">连不上？</a>
           </span>
           <a class="docs-nav-link" href="./iphone.html">客户端安装</a>
+          <a class="docs-nav-link" href="./agents.html">连接 agents</a>
           <a class="docs-nav-link" href="./first-chat.html">开始第一个会话</a>
           <p class="docs-nav-label">指南</p>
           <a class="docs-nav-link" href="./features.html">主要功能</a>
@@ -107,7 +108,7 @@
         <ul>
           <li>一台由你掌控、保持开机的远程机器（macOS 或 Linux）来运行服务器。<code>tmux</code> 是可选的，只有应用内终端需要它。</li>
           <li>一个 <a href="https://tailscale.com/download" target="_blank" rel="noopener">Tailscale</a> 账号（可选）——仅在需要从局域网之外访问远程机器时才用得到。在同一 Wi‑Fi 下可以直接用机器的局域网 IP；Tailscale 让你能从其他任何地方安全连接。</li>
-          <li>你计划使用的提供方 CLI（<strong>Claude Code</strong>、<strong>Codex</strong> 或 <strong>Cursor</strong>）已安装在远程机器上。</li>
+          <li>你计划使用的提供方 CLI（<strong>Claude Code</strong>、<strong>Codex</strong>、<strong>OpenCode</strong> 或 <strong>Cursor</strong>）已安装在远程机器上。</li>
           <li>一台能运行 <strong>AgentsDock 客户端</strong>的设备：macOS、Windows、Linux、iPhone、iPad 或 Android。</li>
         </ul>
         <div class="guide-note">
@@ -129,7 +130,7 @@ cd AgentsServer
         <p><a class="quickstart-docs" href="https://github.com/ZhengyiLuo/AgentsServer" target="_blank" rel="noopener">在 GitHub 上查看 AgentsServer 仓库 <span aria-hidden="true">&rarr;</span></a></p>
 
         <h3 class="docs-step" id="remote-cli"><span class="step-n">2</span>在远程机器上登录提供方 CLI</h3>
-        <p>安装并登录你要让 AgentsDock 使用的提供方 CLI：<a href="https://code.claude.com/docs" target="_blank" rel="noopener">Claude Code</a>、<a href="https://developers.openai.com/codex/cli" target="_blank" rel="noopener">Codex</a> 或 <a href="https://cursor.com/docs/cli/reference/authentication" target="_blank" rel="noopener">Cursor</a>。按提供方支持的正常方式登录即可，例如浏览器登录或配置 API key。若应用仍显示某个后端不可用，请在设置里点击 <strong>Recheck CLIs</strong> 重新检查。</p>
+        <p>安装并登录你要让 AgentsDock 使用的提供方 CLI：<a href="https://code.claude.com/docs" target="_blank" rel="noopener">Claude Code</a>、<a href="https://developers.openai.com/codex/cli" target="_blank" rel="noopener">Codex</a>、<a href="https://dev.opencode.ai/docs/cli/" target="_blank" rel="noopener">OpenCode</a> 或 <a href="https://cursor.com/docs/cli/reference/authentication" target="_blank" rel="noopener">Cursor</a>。按提供方支持的正常方式登录即可，例如浏览器登录或配置 API key。自定义 endpoint 的配置见<a href="./agents.html">连接 agents</a>。</p>
 
         <h3 class="docs-step" id="remote-tailscale"><span class="step-n">3</span>在远程机器上安装 Tailscale <span class="docs-step-opt">可选</span></h3>
         <p>仅在需要从局域网之外访问远程机器时才需要。如果你的设备和远程机器在同一 Wi‑Fi 下，可以跳过这一步，在第二步直接使用机器的局域网 IP。</p>

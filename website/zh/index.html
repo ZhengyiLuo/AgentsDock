@@ -3,12 +3,12 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <meta name="description" content="为 agentic AI 研究而设计的 IDE。在你自己的机器上运行 Claude Code、Codex 和 Cursor，桌面与移动端共用一个工作区——从任何设备访问。" />
+    <meta name="description" content="为 agentic AI 研究而设计的 IDE。在你自己的机器上运行 Claude Code、Codex、OpenCode 和 Cursor，桌面与移动端共用一个工作区——从任何设备访问。" />
     <!-- Social preview (Open Graph / Twitter) -->
     <meta property="og:type" content="website" />
     <meta property="og:site_name" content="AgentsDock" />
     <meta property="og:title" content="AgentsDock — 为 agentic AI 研究而设计的 IDE" />
-    <meta property="og:description" content="为 agentic AI 研究而设计的 IDE。在你自己的机器上运行 Claude Code、Codex 和 Cursor，桌面与移动端共用一个工作区——从任何设备访问。" />
+    <meta property="og:description" content="为 agentic AI 研究而设计的 IDE。在你自己的机器上运行 Claude Code、Codex、OpenCode 和 Cursor，桌面与移动端共用一个工作区——从任何设备访问。" />
     <meta property="og:url" content="https://agentsdock.net/zh/index.html" />
     <meta property="og:image" content="https://agentsdock.net/assets/og-card.png?v=82a3bdda" />
     <meta property="og:image:width" content="1200" />
@@ -16,7 +16,7 @@
     <meta property="og:image:alt" content="AgentsDock — an IDE designed for agentic AI research" />
     <meta name="twitter:card" content="summary_large_image" />
     <meta name="twitter:title" content="AgentsDock — 为 agentic AI 研究而设计的 IDE" />
-    <meta name="twitter:description" content="为 agentic AI 研究而设计的 IDE。在你自己的机器上运行 Claude Code、Codex 和 Cursor，桌面与移动端共用一个工作区——从任何设备访问。" />
+    <meta name="twitter:description" content="为 agentic AI 研究而设计的 IDE。在你自己的机器上运行 Claude Code、Codex、OpenCode 和 Cursor，桌面与移动端共用一个工作区——从任何设备访问。" />
     <meta name="twitter:image" content="https://agentsdock.net/assets/og-card.png?v=82a3bdda" />
     <meta name="theme-color" content="#0d1013" />
     <title>AgentsDock — 为 agentic AI 研究而设计的 IDE</title>
@@ -37,7 +37,7 @@
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&amp;family=Instrument+Sans:wght@400;500;600;700&amp;family=Inter:wght@400;500;600;700&amp;display=swap" rel="stylesheet" />
     <meta property="og:locale" content="zh_CN" />
-    <link rel="stylesheet" href="../styles.css?v=7f6a91c4" />
+    <link rel="stylesheet" href="../styles.css?v=c8d74e91" />
   </head>
   <body>
     <header class="site-header">
@@ -73,7 +73,7 @@
             <span class="github-badge-count" data-gh-stars>76</span>
           </a>
           <h1 id="hero-title">AgentsDock</h1>
-          <p class="hero-lede">为 agentic AI 研究而设计的 IDE。AgentsDock 目前在同一个桌面与移动端工作区中支持 Claude Code、Codex 和 Cursor。</p>
+          <p class="hero-lede">为 agentic AI 研究而设计的 IDE。AgentsDock 目前在同一个桌面与移动端工作区中支持 Claude Code、Codex、OpenCode 和 Cursor。</p>
           <div class="hero-actions" aria-label="Downloads">
             <a class="download-button primary" data-dl="macos" href="https://github.com/ZhengyiLuo/AgentsDock/releases/download/v1.0.8-beta.5/AgentsDock-1.0.8-beta.5-mac-universal.dmg" target="_blank" rel="noopener">
               <svg class="button-icon" width="17" height="17" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M17.05 12.04c-.03-2.6 2.12-3.85 2.22-3.9-1.21-1.77-3.1-2.02-3.77-2.04-1.6-.16-3.12.94-3.93.94-.81 0-2.06-.92-3.39-.9-1.74.03-3.35 1.01-4.25 2.57-1.81 3.14-.46 7.78 1.3 10.32.86 1.24 1.89 2.63 3.24 2.58 1.3-.05 1.79-.84 3.36-.84 1.57 0 2.01.84 3.39.81 1.4-.02 2.29-1.26 3.15-2.51.99-1.44 1.4-2.83 1.42-2.9-.03-.01-2.73-1.05-2.76-4.15zM14.6 4.2c.72-.87 1.2-2.08 1.07-3.28-1.03.04-2.28.69-3.02 1.56-.66.77-1.24 2-1.08 3.18 1.15.09 2.32-.58 3.03-1.46z"/></svg>
@@ -503,6 +503,10 @@
                   <span class="ways-tile-label">Codex</span>
                 </li>
                 <li class="ways-tile">
+                  <span class="ways-icon"><img src="../assets/opencode-logo.png" alt="" /></span>
+                  <span class="ways-tile-label">OpenCode</span>
+                </li>
+                <li class="ways-tile">
                   <span class="ways-icon"><img src="../assets/cursor-logo.png" alt="" /></span>
                   <span class="ways-tile-label">Cursor</span>
                 </li>
@@ -541,7 +545,7 @@
           </figure>
           <div class="showcase-copy">
             <h3>所有 agent，并排使用</h3>
-            <p>在一个地方并排和不同的 agent 聊天——Claude Code、Codex，还有更多。</p>
+            <p>在一个地方并排和不同的 agent 聊天——Claude Code、Codex、OpenCode、Cursor，还有更多。</p>
           </div>
         </div>
 
@@ -612,7 +616,7 @@
         <div>
           <p class="section-kicker" id="release-version">桌面 Beta 1.0.8-beta.5</p>
           <h2 id="download-title">下载 AgentsDock</h2>
-          <p>安装桌面客户端，连接到你的 AgentsDock 服务器，让 Claude 和 Codex 在你用的每台机器上随时可用。</p>
+          <p>安装桌面客户端，连接到你的 AgentsDock 服务器，让 Claude Code、Codex、OpenCode 和 Cursor 在你用的每台机器上随时可用。</p>
           <p class="download-seeall"><a href="https://github.com/ZhengyiLuo/AgentsDock/releases/tag/v1.0.6" target="_blank" rel="noopener">桌面稳定版 v1.0.6</a><span aria-hidden="true"> · </span><a href="https://github.com/ZhengyiLuo/AgentsDock/releases" target="_blank" rel="noopener">所有桌面发布版本 <span aria-hidden="true">&rarr;</span></a></p>
         </div>
         <div class="download-options">

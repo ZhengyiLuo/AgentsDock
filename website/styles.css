@@ -747,6 +747,14 @@ a.quote-author--link:hover .quote-handle { text-decoration: none; }
 .docs-shot.medium { max-width: 487px; }
 .docs-shot img, .docs-shot video { display: block; width: 100%; height: auto; border-radius: 12px; box-shadow: 0 0 0 1px var(--line), 0 24px 60px rgba(0,0,0,.4); }
 .docs-shot figcaption { margin-top: 12px; font-size: 14px; line-height: 1.55; color: var(--muted); }
+.provider-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(205px, 1fr)); gap: 12px; margin: 22px 0 34px; }
+.provider-card { display: flex; align-items: center; gap: 13px; min-height: 76px; padding: 14px; border-radius: 8px; background: var(--surface); box-shadow: 0 0 0 1px var(--line); text-decoration: none; transition: box-shadow .2s ease-in-out, transform .2s ease-in-out; }
+.provider-card:hover { box-shadow: 0 0 0 1px rgba(255,255,255,.28); transform: translateY(-1px); }
+.provider-logo { flex: 0 0 38px; width: 38px; height: 38px; border-radius: 9px; display: grid; place-items: center; background: #fff; box-shadow: 0 0 0 1px rgba(255,255,255,.08); }
+.provider-logo--dark { background: #161313; }
+.provider-logo img { display: block; width: 25px; height: 25px; object-fit: contain; }
+.provider-card strong { display: block; color: var(--text); font-size: 15px; line-height: 1.2; }
+.provider-card small { display: block; margin-top: 4px; color: var(--muted); font-size: 13px; line-height: 1.35; }
 /* Keyboard-shortcuts tables — each key is its own keycap */
 .sc-table { width: 100%; border-collapse: collapse; margin: 14px 0 40px; }
 .sc-table thead th { text-align: left; padding: 0 16px 10px; font-family: var(--display); font-size: 13px; font-weight: 600; color: var(--muted); border-bottom: 1px solid var(--line); }
