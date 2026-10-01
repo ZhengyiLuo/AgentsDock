@@ -1,5 +1,27 @@
 # Public development log
 
+## Mobile reasoning controls and accepted-send recovery — unreleased
+
+- Expose model-scoped Reasoning choices in the composer agent menu even while
+  work is active. Keep provider reload/backend restrictions separate; show
+  saving, success and actionable failures without changing the draft or run.
+- Use bounded inline Model/Reasoning/Agent jobs choices inside Chat details
+  instead of another native modal. Preserve locked choices, explicit close,
+  server defaults, duplicate-tap protection and scoped request ownership.
+- Clear the native input at the exact send-admission transition, including
+  delayed recipient preflight. Do not clear newer typing on HTTP completion,
+  later edits, quick messages or a changed chat/admission.
+- Preserve received turn acceptance when response decoding or connection
+  validation fails. Do not restore already-submitted text or replay the POST;
+  preserve newer drafts/files and offer read-only chat recovery.
+- Focused regressions reproduce the missing busy-chat reasoning menu, skipped
+  native clear and accepted-send rollback before correction. Component and
+  real-client transport tests use mocked native hosts and server responses.
+  TypeScript, 114 library/API/store modules, 523 rendered/contract checks and
+  production iOS JavaScript export passed; focused checks overlap those suites.
+  Actual iPhone/dictation and client/server acceptance remain pending because
+  native test setup is blocked. Source only; no new TestFlight upload.
+
 ## Mobile search and cross-chat presentation — unreleased
 
 - Keep sidebar search in one ranked list, matching committed desktop

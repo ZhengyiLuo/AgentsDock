@@ -79,7 +79,7 @@ import {
   isCompactComposerToolbar,
   isDenseComposerToolbar,
 } from '../lib/composer-toolbar-layout'
-import { cursorBackendUnavailableReason, isBackendLocked, selectableChatBackends } from '../lib/runtime-catalog'
+import { cursorBackendUnavailableReason, isBackendLocked, runtimeEffortOptions, selectableChatBackends } from '../lib/runtime-catalog'
 import { usePalette } from '../theme'
 import type { AgentCrossChatRoute, AgentFile, Backend, ChatReference, ChatReferenceAction, FailedUpload, Health, QueuedTurn, Session, TeamReference, UploadRef } from '../types'
 import { appendWelcomeExchange, isWelcomeSession } from '../lib/welcome-session'
@@ -171,6 +171,13 @@ export function Composer({ sessionId, keyboardVisible, onSent, onOpenMcp }: { se
   const stopping = useAppStore(state => state.stoppingSessionIds.has(sessionId))
   const [pickingAttachment, setPickingAttachment] = useState(false)
   const [providerReloading, setProviderReloading] = useState(false)
+  const reasoningScope = composerReasoningScopeKey(useAppStore.getState(), sessionId)
+  const [reasoningFeedback, setReasoningFeedback] = useState<{ scope: string; phase: 'saving' | 'saved' | 'error'; message: string } | null>(null)
+  const reasoningRequest = useRef<{ scope: string; token: symbol } | null>(null)
+  const reasoningMounted = useRef(true)
+  useEffect(() => { reasoningMounted.current = true; return () => { reasoningMounted.current = false } }, [])
+  const currentReasoningFeedback = reasoningFeedback?.scope === reasoningScope ? reasoningFeedback : null
+  const reasoningSaving = currentReasoningFeedback?.phase === 'saving'
   const [attachmentSendGuarded, setAttachmentSendGuarded] = useState(false)
   const [preview, setPreview] = useState<{ name: string; source: AttachmentImageSource } | null>(null)
   const [pickerTrigger, setPickerTrigger] = useState<ComposerMentionTrigger | null>(null)
@@ -240,7 +247,8 @@ export function Composer({ sessionId, keyboardVisible, onSent, onOpenMcp }: { se
   const providerReloadDisabled = networkDisabled || active || sending || admitting || stopping || providerReloading || !backend || backend === 'cursor'
   // A brand-new chat has no provider session yet, so its coding agent can still
   // change. Once the agent starts (backend_locked or a provider session id) or a
-  // turn is in flight, the backend is fixed and only reload remains.
+  // turn is in flight, the backend is fixed. Reasoning remains independently
+  // editable for subsequent turns; it must not inherit the reload restriction.
   const backendSwitchable = Boolean(backend) && !networkDisabled && !active && !admitting && !sending && !stopping && !providerReloading && !(sourceSession && isBackendLocked(sourceSession))
   // Provider tools stay compact; primary turn actions get their own labeled
   // row while active so Queue and Steer remain distinct on a narrow phone.
@@ -639,6 +647,24 @@ export function Composer({ sessionId, keyboardVisible, onSent, onOpenMcp }: { se
         }
         if (!remoteComposerScopeIsCurrent(activeProfileId, profileGeneration, sessionId)) return
       }
+      let nativeAdmissionObserved = false
+      const beforeConsumption = useAppStore.getState()
+      const clearConsumedInput = (state: ReturnType<typeof useAppStore.getState>, previous: ReturnType<typeof useAppStore.getState>) => {
+        if (!consumeComposer || nativeAdmissionObserved || previous.sendingSessionIds.has(sessionId)
+          || !state.sendingSessionIds.has(sessionId)) return
+        // The store starts sending and conditionally consumes the draft in one
+        // atomic update. Retire this observer even when it preserves a newer
+        // draft; later user edits must not trigger a native clear.
+        nativeAdmissionObserved = true
+        if (!composerScopeIsCurrent(activeProfileId, profileGeneration, sessionId)
+          || state.turnAdmissionTokens[sessionId] !== admissionToken
+          || (state.drafts[sessionId] ?? '').length) return
+        // Consumption may follow an asynchronous recipient preflight. Observe
+        // that exact transition, not the eventual HTTP response: clearing on
+        // success would erase a newer draft typed while the request was pending.
+        inputRef.current?.clear()
+      }
+      const unsubscribeConsumption = consumeComposer ? useAppStore.subscribe(clearConsumedInput) : () => {}
       try {
         const request = sendPrompt(steer, profileGeneration, sessionId, {
           promptOverride,
@@ -649,19 +675,14 @@ export function Composer({ sessionId, keyboardVisible, onSent, onOpenMcp }: { se
           chatReferences: outgoingReferences,
           teamReferences: outgoingTeamReferences,
         })
-        // sendPrompt consumes an accepted composer draft synchronously, before
-        // its first network await. Clear the focused native buffer in the same
-        // turn so iOS cannot echo the submitted text back through onChangeText.
-        if (
-          consumeComposer
-          && useAppStore.getState().sendingSessionIds.has(sessionId)
-          && !(useAppStore.getState().drafts[sessionId] ?? '').length
-        ) inputRef.current?.clear()
+        clearConsumedInput(useAppStore.getState(), beforeConsumption)
         const sent = await request
         if (sent) trackEvent('message_sent')
         if (sent && remoteComposerScopeIsCurrent(activeProfileId, profileGeneration, sessionId)) onSent()
       } catch {
         // The store surfaces request failures; keep the draft available to retry.
+      } finally {
+        unsubscribeConsumption()
       }
     } finally {
       useAppStore.getState().endTurnAdmission(sessionId, admissionToken)
@@ -802,6 +823,38 @@ export function Composer({ sessionId, keyboardVisible, onSent, onOpenMcp }: { se
     }
   }
   const cursorUnavailableReason = cursorBackendUnavailableReason(health, runtime)
+  const reasoningOptions = backend && backend !== 'cursor' ? runtimeEffortOptions(runtime, backend, model, effort) : []
+  const changeReasoning = async (value: string) => {
+    const current = () => reasoningMounted.current
+      && remoteComposerScopeIsCurrent(activeProfileId, profileGeneration, sessionId)
+      && composerReasoningScopeKey(useAppStore.getState(), sessionId) === reasoningScope
+    if (!current() || providerReloading || reasoningRequest.current?.scope === reasoningScope) return
+    const state = useAppStore.getState()
+    const session = state.sessions.find(candidate => candidate.id === sessionId)
+    if (!session || session.backend === 'cursor') return
+    const option = runtimeEffortOptions(state.runtime, session.backend, session.model, session.effort).find(candidate => candidate.value === value)
+    if (!option || option.locked || (session.effort || '') === value) return
+    const token = Symbol('reasoning-save')
+    reasoningRequest.current = { scope: reasoningScope, token }
+    setReasoningFeedback({ scope: reasoningScope, phase: 'saving', message: 'Saving reasoning…' })
+    try {
+      const saved = await updateSession(sessionId, { effort: value || null }, profileGeneration)
+      if (!current() || reasoningRequest.current?.token !== token) return
+      const accepted = useAppStore.getState().sessions.find(candidate => candidate.id === sessionId)?.effort || ''
+      if (!saved || accepted !== value) {
+        setReasoningFeedback({ scope: reasoningScope, phase: 'error', message: !saved
+          ? useAppStore.getState().error || 'Could not save reasoning. Choose the level again to retry.'
+          : 'The server did not apply that reasoning level. Choose an available level and retry.' })
+      } else setReasoningFeedback({ scope: reasoningScope, phase: 'saved', message: `Reasoning saved: ${option.label}. Applies to subsequent turns.` })
+    } catch (cause) {
+      if (current() && reasoningRequest.current?.token === token) setReasoningFeedback({ scope: reasoningScope, phase: 'error', message: cause instanceof Error ? cause.message : 'Could not save reasoning. Choose the level again to retry.' })
+    } finally {
+      if (reasoningRequest.current?.token === token) {
+        reasoningRequest.current = null
+        if (reasoningMounted.current) setReasoningFeedback(previous => previous?.scope === reasoningScope && previous.phase === 'saving' ? null : previous)
+      }
+    }
+  }
   const backendActions: MenuAction[] = backendSwitchable ? selectableChatBackends(health).map(value => ({
     id: `switch-backend:${value}`,
     title: backendLabel(value),
@@ -809,6 +862,10 @@ export function Composer({ sessionId, keyboardVisible, onSent, onOpenMcp }: { se
     attributes: value === 'cursor' && Boolean(cursorUnavailableReason) ? { disabled: true } : undefined,
   })) : []
   const runtimeActions: MenuAction[] = []
+  if (reasoningOptions.length) runtimeActions.push({ id: 'reasoning-effort', title: `Reasoning: ${reasoningOptions.find(option => option.value === (effort || ''))?.label || effort || 'Server default'}`, subactions: reasoningOptions.map(option => ({
+    id: `set-effort:${option.value}`, title: option.label, state: option.value === (effort || '') ? 'on' : 'off',
+    attributes: { disabled: Boolean(option.locked || networkDisabled || providerReloading || reasoningSaving) },
+  })) })
   if (backendActions.length) runtimeActions.push({ id: 'switch-backend', title: 'Coding agent', displayInline: true, subactions: backendActions })
   if (!providerReloadDisabled) runtimeActions.push({ id: 'reload-provider', title: `Reload ${providerName}`, image: 'arrow.clockwise' })
   const runtimeInteractive = runtimeActions.length > 0
@@ -839,6 +896,7 @@ export function Composer({ sessionId, keyboardVisible, onSent, onOpenMcp }: { se
       const action = event.nativeEvent.event
       if (action === 'reload-provider') void reloadChatAgent()
       else if (action.startsWith('switch-backend:')) void switchChatBackend(action.slice('switch-backend:'.length) as Backend)
+      else if (action.startsWith('set-effort:')) void changeReasoning(action.slice('set-effort:'.length))
     }}
     style={[styles.runtimeMenu, compactToolbar && styles.runtimeMenuCompact, denseToolbar && styles.runtimeMenuDense]}
   >
@@ -924,6 +982,7 @@ export function Composer({ sessionId, keyboardVisible, onSent, onOpenMcp }: { se
         }}
         style={[styles.composer, { backgroundColor: colors.surface, borderColor: colors.border }]}
       >
+        {currentReasoningFeedback ? <Text testID="chat-reasoning-feedback" accessibilityRole={currentReasoningFeedback.phase === 'error' ? 'alert' : 'text'} accessibilityLiveRegion="polite" style={{ color: currentReasoningFeedback.phase === 'error' ? colors.red : colors.muted, fontSize: 12, padding: 8 }}>{currentReasoningFeedback.message}</Text> : null}
         <TextInput
           ref={inputRef}
           testID="chat-composer-input"
@@ -1945,6 +2004,12 @@ function composerActionScopeKey(state: ReturnType<typeof useAppStore.getState>, 
 function remoteComposerScopeIsCurrent(profileId: string | null, profileGeneration: number, sessionId: string): boolean {
   const state = useAppStore.getState()
   return composerScopeIsCurrent(profileId, profileGeneration, sessionId) && client.isValidated && state.connected && !state.connecting
+}
+
+function composerReasoningScopeKey(state: ReturnType<typeof useAppStore.getState>, sessionId: string): string {
+  const session = state.sessions.find(candidate => candidate.id === sessionId)
+  return JSON.stringify([composerActionScopeKey(state, sessionId), session?.backend, session?.model,
+    session && session.backend !== 'cursor' ? runtimeEffortOptions(state.runtime, session.backend, session.model) : []])
 }
 
 function pickerError(error: unknown): string {

@@ -14,7 +14,7 @@ import { client, useAppStore } from '../store/useAppStore'
 import { activeScheduledJobId, activeSessionRunId, currentRunningJobIds, scheduledJobRuntimeError } from '../lib/scheduled-job-activity'
 import { isSubagentActive, subagentDetailText, subagentDisplayName, subagentLogText, subagentStatusLabel, subagentsFromEvents } from '../lib/subagents'
 import { usePalette } from '../theme'
-import type { Event, ProviderJobsAccess, RuntimeOption } from '../types'
+import type { Event, ProviderJobsAccess, RuntimeOption, Session } from '../types'
 import { Text, TextInput } from './AppText'
 import { MediaGrid } from './MediaGrid'
 import { IconButton, SectionHeader } from './ui'
@@ -26,6 +26,11 @@ const EMPTY_EVENTS: Event[] = []
 type JobRunFeedback = {
   phase: 'requesting' | 'deferred' | 'started' | 'failed'
   message: string
+}
+
+type SessionChoice = 'model' | 'effort' | 'provider_jobs_access'
+function sessionChoiceKey(session: Pick<Session, 'backend' | 'model' | 'effort' | 'provider_jobs_access'>): string {
+  return JSON.stringify([session.backend, session.model || '', session.effort || '', session.provider_jobs_access ?? null])
 }
 
 export function Inspector({ sessionId, onDigest, onJob, onTerminal, onProcesses, onTmux, onFileViewerRequested }: { sessionId: string; onDigest: () => void; onJob: (jobId?: string) => void; onTerminal: () => void; onProcesses: () => void; onTmux: () => void; onFileViewerRequested?: () => void }) {
@@ -101,6 +106,10 @@ export function Inspector({ sessionId, onDigest, onJob, onTerminal, onProcesses,
   const jobRunsInFlight = useRef(new Map<string, symbol>())
   const [jobAction, setJobAction] = useState<string | null>(null)
   const jobActionRef = useRef<symbol | null>(null)
+  const [choiceSaving, setChoiceSaving] = useState<SessionChoice | null>(null)
+  const [choiceNotice, setChoiceNotice] = useState<{ error: boolean; text: string } | null>(null)
+  const choiceRequest = useRef<symbol | null>(null)
+  const choiceCatalogKey = JSON.stringify([session?.backend, runtime?.backends[session?.backend ?? ''] ?? null])
   const jobRunFeedbackTimers = useRef(new Map<string, ReturnType<typeof setTimeout>>())
   const scopeIsCurrent = () => {
     const state = useAppStore.getState()
@@ -111,6 +120,54 @@ export function Inspector({ sessionId, onDigest, onJob, onTerminal, onProcesses,
   }
   const networkScopeCurrent = () => scopeIsCurrent() && client === connection && workingDirectoryConnected(sessionId)
     && workingDirectoryScopeKey(useAppStore.getState(), sessionId) === actionScopeKey
+  useEffect(() => {
+    choiceRequest.current = null
+    setChoiceSaving(null); setChoiceNotice(null)
+    return () => { choiceRequest.current = null }
+  }, [actionScopeKey, choiceCatalogKey])
+  const saveChoice = async (field: SessionChoice, value: string): Promise<boolean> => {
+    const state = useAppStore.getState()
+    const current = state.sessions.find(candidate => candidate.id === sessionId)
+    if (choiceRequest.current || !session || !current || !networkScopeCurrent()
+      || sessionChoiceKey(current) !== sessionChoiceKey(session)
+      || JSON.stringify([current.backend, state.runtime?.backends[current.backend] ?? null]) !== choiceCatalogKey) return false
+    const options: RuntimeOption[] = field === 'model' ? runtimeCatalogOptions(state.runtime, current.backend, 'models', current.model)
+      : field === 'effort' ? runtimeEffortOptions(state.runtime, current.backend, current.model, current.effort)
+        : PROVIDER_JOBS_ACCESS_MODES.map(option => ({ value: option, label: providerJobsAccessLabel(option) }))
+    if (!options.some(option => option.value === value && !option.locked)
+      || field === 'effort' && current.backend === 'cursor'
+      || field !== 'provider_jobs_access' && !state.runtime
+      || field === 'provider_jobs_access' && !providerJobsAccessState(current, state.health).available) return false
+    const patch = field === 'model'
+      ? { model: value || null, effort: runtimeEffortAfterModelChange(state.runtime, current.backend, value || null, current.effort) }
+      : field === 'effort' ? { effort: value || null }
+        : { provider_jobs_access: value as ProviderJobsAccess }
+    const expectedKey = sessionChoiceKey({ ...current, ...patch })
+    const beforeKey = sessionChoiceKey(current)
+    const token = Symbol(); choiceRequest.current = token
+    setChoiceSaving(field); setChoiceNotice(null)
+    const resultIsCurrent = (saved = false) => {
+      const latest = useAppStore.getState()
+      const latestSession = latest.sessions.find(candidate => candidate.id === sessionId)
+      return choiceRequest.current === token && networkScopeCurrent() && latestSession
+        && JSON.stringify([latestSession.backend, latest.runtime?.backends[latestSession.backend] ?? null]) === choiceCatalogKey
+        && (saved ? sessionChoiceKey(latestSession) === expectedKey : [beforeKey, expectedKey].includes(sessionChoiceKey(latestSession)))
+        && (field !== 'provider_jobs_access' || providerJobsAccessState(latestSession, latest.health).available)
+    }
+    try {
+      const saved = await update(sessionId, patch, profileGeneration)
+      if (!resultIsCurrent(saved)) return false
+      setChoiceNotice(saved
+        ? { error: false, text: field === 'provider_jobs_access' ? 'Saved agent job access.' : 'Saved for the next turn. Work already running keeps its current settings.' }
+        : { error: true, text: useAppStore.getState().error || 'This setting was not saved. Choose it again to retry.' })
+      return saved
+    } catch (cause) {
+      if (resultIsCurrent()) setChoiceNotice({ error: true, text: cause instanceof Error ? cause.message : 'This setting was not saved. Choose it again to retry.' })
+      return false
+    } finally {
+      if (choiceRequest.current === token) { choiceRequest.current = null; setChoiceSaving(null) }
+    }
+  }
   useEffect(() => {
     jobRunsInFlight.current.clear(); jobActionRef.current = null
     setJobAction(null); setJobRunFeedback({}); directoryOpenRef.current = false; setDirectoryOpen(false)
@@ -246,10 +303,12 @@ export function Inspector({ sessionId, onDigest, onJob, onTerminal, onProcesses,
     <View style={[styles.card, { backgroundColor: colors.raised }]}>
       <SectionHeader title="Session" />
       <Field label="Name"><TextInput value={title} onChangeText={setTitle} onBlur={() => { const clean = title.trim(); if (scopeIsCurrent() && clean && clean !== session.title) void update(sessionId, { title: clean }, profileGeneration) }} style={[styles.input, { color: colors.text, borderColor: colors.border, backgroundColor: colors.surface }]} /></Field>
-      <Field label="Model"><ChoiceField value={session.model ?? ''} options={modelOptions} onChange={model => { if (scopeIsCurrent()) void update(sessionId, { model, effort: runtimeEffortAfterModelChange(runtime, session.backend, model, session.effort) }, profileGeneration) }} /></Field>
-      {session.backend !== 'cursor' ? <Field label="Effort"><ChoiceField value={session.effort ?? ''} options={effortOptions} onChange={effort => { if (scopeIsCurrent()) void update(sessionId, { effort }, profileGeneration) }} /></Field> : null}
+      <Field label="Model"><ChoiceField label="Model" testID="inspector-model-choice" scopeKey={actionScopeKey} disabled={!networkScopeCurrent() || !runtime || choiceSaving !== null} value={session.model ?? ''} options={modelOptions} onChange={model => saveChoice('model', model)} /></Field>
+      {session.backend !== 'cursor' ? <Field label="Reasoning"><ChoiceField label="Reasoning" testID="inspector-reasoning-choice" scopeKey={actionScopeKey} disabled={!networkScopeCurrent() || !runtime || choiceSaving !== null} value={session.effort ?? ''} options={effortOptions} onChange={effort => saveChoice('effort', effort)} /></Field> : null}
       {selectionError ? <Text accessibilityRole="alert" style={[styles.hint, { color: colors.orange }]}>{selectionError}</Text> : null}
-      <Field label="Agent jobs"><ChoiceField disabled={!jobsAccess.available} value={jobsAccess.effective} options={jobsAccessOptions} onChange={value => { if (scopeIsCurrent() && jobsAccess.available) void update(sessionId, { provider_jobs_access: value as ProviderJobsAccess }, profileGeneration) }} /></Field>
+      <Field label="Agent jobs"><ChoiceField label="Agent jobs" testID="inspector-jobs-choice" scopeKey={actionScopeKey} disabled={!networkScopeCurrent() || !jobsAccess.available || choiceSaving !== null} value={jobsAccess.effective} options={jobsAccessOptions} onChange={value => saveChoice('provider_jobs_access', value)} /></Field>
+      {choiceSaving ? <View testID="inspector-choice-saving" style={styles.choiceFeedback}><ActivityIndicator size="small" color={colors.blue} /><Text style={[styles.hint, { color: colors.muted }]}>Saving…</Text></View> : null}
+      {choiceNotice ? <Text testID={choiceNotice.error ? 'inspector-choice-error' : 'inspector-choice-saved'} accessibilityRole={choiceNotice.error ? 'alert' : 'text'} accessibilityLiveRegion="polite" selectable style={[styles.hint, { color: choiceNotice.error ? colors.red : colors.muted }]}>{choiceNotice.text}</Text> : null}
       <Text style={[styles.hint, { color: colors.muted }]}>{jobsAccess.available ? `${providerJobsAccessLabel(jobsAccess.effective)}${jobsAccess.inheritedDefault ? ' (server default)' : ''}. ${providerJobsAccessDescription(jobsAccess.effective)}` : 'Update AgentsServer to set Read-only or Blocked. Human job controls remain available.'}</Text>
       <Field label="System prompt"><TextInput value={systemPrompt} onChangeText={setSystemPrompt} onBlur={() => { const clean = systemPrompt.trim(); if (scopeIsCurrent() && clean !== (session.system_prompt ?? '')) void update(sessionId, { system_prompt: clean || null }, profileGeneration) }} multiline maxLength={12_000} placeholder="Optional per-chat instructions" placeholderTextColor={colors.muted} style={[styles.multilineInput, { color: colors.text, borderColor: colors.border, backgroundColor: colors.surface }]} /></Field>
       <Field label="Folder"><TextInput value={folder} onChangeText={setFolder} onBlur={() => { if (scopeIsCurrent()) void update(sessionId, { folder: folder.trim() || 'General' }, profileGeneration) }} style={[styles.input, { color: colors.text, borderColor: colors.border, backgroundColor: colors.surface }]} /></Field>
@@ -351,9 +410,46 @@ function SubagentsSection({ sessionId, backend, events }: { sessionId: string; b
 function Field({ label, children }: { label: string; children: React.ReactNode }) { const colors = usePalette(); return <View style={styles.field}><Text style={[styles.label, { color: colors.muted }]}>{label}</Text><View style={{ flex: 1 }}>{children}</View></View> }
 function Command({ icon: Icon, label, onPress, destructive, disabled = false, hint, testID }: { icon: typeof Pin; label: string; onPress: () => void; destructive?: boolean; disabled?: boolean; hint?: string; testID?: string }) { const colors = usePalette(); return <Pressable testID={testID} accessibilityRole="button" accessibilityLabel={label} accessibilityHint={hint} accessibilityState={{ disabled }} disabled={disabled} onPress={onPress} style={({ pressed }) => [styles.command, { backgroundColor: colors.raised, opacity: disabled ? 0.4 : pressed ? 0.65 : 1 }]}><Icon size={15} color={destructive ? colors.red : colors.muted} /><Text style={{ color: destructive ? colors.red : colors.text, fontSize: 11, fontWeight: '700' }}>{label}</Text></Pressable> }
 
-function ChoiceField({ value, options, onChange, disabled = false }: { value: string; options: RuntimeOption[]; onChange: (value: string) => void; disabled?: boolean }) {
-  const colors = usePalette(); const [open, setOpen] = useState(false); const selected = options.find(option => option.value === value) ?? options[0]
-  return <><Pressable accessibilityRole="button" accessibilityLabel={selected?.label ?? (value || 'Default')} accessibilityState={{ expanded: open, disabled }} disabled={disabled} onPress={() => { setOpen(true); requestAnimationFrame(dismissAppKeyboard) }} style={[styles.choice, { borderColor: colors.border, backgroundColor: colors.surface, opacity: disabled ? 0.45 : 1 }]}><Text style={{ flex: 1, color: colors.text, fontSize: 12 }} numberOfLines={1}>{selected?.label ?? (value || 'Default')}</Text><ChevronDown size={14} color={colors.muted} /></Pressable><Modal visible={open && !disabled} transparent animationType="fade" onRequestClose={() => setOpen(false)}><View style={styles.modalBackdrop}><Pressable accessibilityRole="button" accessibilityLabel="Dismiss choices" style={StyleSheet.absoluteFill} onPress={() => setOpen(false)} /><View style={[styles.choiceMenu, { backgroundColor: colors.surface, borderColor: colors.border }]}><ScrollView keyboardShouldPersistTaps="always">{options.map(option => <Pressable key={option.value || '__default'} accessibilityRole="button" accessibilityLabel={option.locked ? `${option.label}, upgrade required` : option.label} accessibilityHint={option.locked ? option.locked_reason ?? undefined : undefined} accessibilityState={{ disabled: option.locked, selected: option.value === value }} disabled={option.locked} onPress={() => { onChange(option.value); setOpen(false) }} style={[styles.choiceOption, { backgroundColor: option.value === value ? colors.raised : 'transparent', opacity: option.locked ? 0.45 : 1 }]}><Text style={{ color: colors.text }}>{option.label}{option.locked ? ' (upgrade required)' : ''}</Text></Pressable>)}</ScrollView></View></View></Modal></>
+function ChoiceField({ label, testID, scopeKey, value, options, onChange, disabled = false }: {
+  label: string; testID: string; scopeKey: string; value: string; options: RuntimeOption[]; onChange: (value: string) => Promise<boolean>; disabled?: boolean
+}) {
+  const colors = usePalette()
+  const [open, setOpen] = useState(false)
+  const openRef = useRef(false), epochRef = useRef(0), selectionRef = useRef<symbol | null>(null)
+  const selected = options.find(option => option.value === value)
+  const optionsKey = JSON.stringify(options)
+  const bindingKey = JSON.stringify([scopeKey, value, optionsKey])
+  const liveBinding = useRef(bindingKey); liveBinding.current = bindingKey
+  const epoch = epochRef.current
+  const close = () => { openRef.current = false; epochRef.current++; setOpen(false) }
+  useEffect(() => {
+    close(); selectionRef.current = null
+    return () => { openRef.current = false; epochRef.current++; selectionRef.current = null }
+  }, [scopeKey, optionsKey])
+  const select = async (option: RuntimeOption) => {
+    if (!openRef.current || epochRef.current !== epoch || liveBinding.current !== bindingKey
+      || disabled || option.locked || selectionRef.current) return
+    const token = Symbol(); selectionRef.current = token
+    try {
+      const saved = await onChange(option.value)
+      if (saved && selectionRef.current === token && epochRef.current === epoch && openRef.current) close()
+    } finally { if (selectionRef.current === token) selectionRef.current = null }
+  }
+  return <View>
+    <Pressable testID={testID} accessibilityRole="button" accessibilityLabel={`${label}: ${selected?.label ?? (value || 'Server default')}`} accessibilityState={{ expanded: open, disabled }} disabled={disabled} onPress={() => {
+      if (disabled || liveBinding.current !== bindingKey) return
+      if (openRef.current) close()
+      else { openRef.current = true; epochRef.current++; setOpen(true); requestAnimationFrame(dismissAppKeyboard) }
+    }} style={[styles.choice, { borderColor: colors.border, backgroundColor: colors.surface, opacity: disabled ? 0.45 : 1 }]}>
+      <Text style={{ flex: 1, color: colors.text, fontSize: 12 }} numberOfLines={1}>{selected?.label ?? (value || 'Server default')}</Text><ChevronDown size={14} color={colors.muted} />
+    </Pressable>
+    {open ? <View testID={`${testID}-options`} onAccessibilityEscape={close} style={[styles.choiceMenu, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+      <Pressable testID={`${testID}-close`} accessibilityRole="button" accessibilityLabel={`Close ${label.toLowerCase()} choices`} onPress={close} style={styles.choiceClose}><Text style={{ flex: 1, color: colors.text, fontSize: 12 }}>{label}</Text><Text style={{ color: colors.blue }}>Close</Text></Pressable>
+      <ScrollView testID={`${testID}-list`} style={styles.choiceList} keyboardShouldPersistTaps="always" nestedScrollEnabled>
+        {options.map(option => <Pressable key={option.value || '__default'} accessibilityRole="button" accessibilityLabel={option.locked ? `${option.label}, upgrade required` : option.label} accessibilityHint={option.locked ? option.locked_reason ?? undefined : undefined} accessibilityState={{ disabled: disabled || option.locked === true, selected: option.value === value }} disabled={disabled || option.locked === true} onPress={() => { void select(option) }} style={[styles.choiceOption, { backgroundColor: option.value === value ? colors.raised : 'transparent', opacity: disabled || option.locked ? 0.45 : 1 }]}><Text style={{ color: colors.text }}>{option.label}{option.locked ? ' (upgrade required)' : ''}</Text></Pressable>)}
+      </ScrollView>
+    </View> : null}
+  </View>
 }
 function nextRunLabel(value?: string | null): string { if (!value) return ''; const date = new Date(value); return Number.isNaN(date.getTime()) ? '' : ` · next ${date.toLocaleString([], { dateStyle: 'short', timeStyle: 'short' })}` }
 
@@ -372,6 +468,10 @@ const styles = StyleSheet.create({
   jobContent: { minHeight: 44, width: '100%', minWidth: 0, justifyContent: 'center' },
   runJobButton: { width: 44, height: 44, alignItems: 'center', justifyContent: 'center' }, jobRunStatus: { minHeight: 20, paddingHorizontal: 6, paddingBottom: 4, fontSize: 10, fontWeight: '700' },
   headerActions: { flexDirection: 'row', alignItems: 'center' }, scheduleJob: { minHeight: 44, borderRadius: 5, paddingHorizontal: 8, flexDirection: 'row', alignItems: 'center', gap: 4 },
-  modalBackdrop: { flex: 1, backgroundColor: '#00000088', alignItems: 'center', justifyContent: 'center', padding: 30 }, choiceMenu: { width: '100%', maxWidth: 380, maxHeight: '70%', borderRadius: 8, borderWidth: StyleSheet.hairlineWidth, padding: 6 }, choiceOption: { minHeight: 44, borderRadius: 5, paddingHorizontal: 12, justifyContent: 'center' },
+  modalBackdrop: { flex: 1, backgroundColor: '#00000088', alignItems: 'center', justifyContent: 'center', padding: 30 },
+  choiceMenu: { width: '100%', borderRadius: 8, borderWidth: StyleSheet.hairlineWidth, padding: 6, marginTop: 6 },
+  choiceClose: { minHeight: 44, flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 8 },
+  choiceList: { maxHeight: 264, flexGrow: 0 }, choiceFeedback: { minHeight: 28, flexDirection: 'row', alignItems: 'center', gap: 6 },
+  choiceOption: { minHeight: 44, borderRadius: 5, paddingHorizontal: 12, paddingVertical: 8, justifyContent: 'center' },
   pinPreview: { width: '100%', maxWidth: 680, maxHeight: '78%', borderRadius: 8, borderWidth: StyleSheet.hairlineWidth, padding: 14, gap: 10 }, pinPreviewHeader: { minHeight: 38, flexDirection: 'row', alignItems: 'center' }, pinPreviewTitle: { flex: 1, fontSize: 14, fontWeight: '800' },
 })

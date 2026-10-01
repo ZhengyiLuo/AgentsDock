@@ -7,13 +7,11 @@ const dialogs = fs.readFileSync(path.resolve('src/components/Dialogs.tsx'), 'utf
 const inspector = fs.readFileSync(path.resolve('src/components/Inspector.tsx'), 'utf8')
 
 test('chat runtime choices distinguish the server default from a pinned model', () => {
-  // Per-chat model/effort selection lives in the chat details Inspector. (The
-  // old Create Chat dialog's copy of these selects was removed in favor of
-  // direct plus-button creation.)
+  // Inspector offers both settings; the composer also exposes Reasoning.
   assert.match(inspector, /runtimeCatalogOptions\(runtime, session\.backend, 'models', session\.model\)/)
   assert.match(inspector, /runtimeEffortOptions\(runtime, session\.backend, session\.model, session\.effort\)/)
-  assert.match(inspector, /runtimeEffortAfterModelChange\(runtime, session\.backend, model, session\.effort\)/)
-  assert.match(inspector, /<ChoiceField value=\{session\.model \?\? ''\} options=\{modelOptions\}/)
+  assert.match(inspector, /runtimeEffortAfterModelChange\(state\.runtime, current\.backend, value \|\| null, current\.effort\)/)
+  assert.match(inspector, /<ChoiceField label="Model"[^\n]*value=\{session\.model \?\? ''\} options=\{modelOptions\}/)
   assert.doesNotMatch(inspector, /label: runtime\?\.backends\[session\.backend\]\?\.default_model/)
 })
 

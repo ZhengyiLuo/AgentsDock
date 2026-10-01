@@ -40,7 +40,7 @@ import type {
   UploadRef,
   WorkspacePreferences,
 } from '../types'
-import { AgentServerClient, AgentServerClientDisposedError, AgentServerClientUnvalidatedError, ServerError, WebSocketConnectionError } from '../api/AgentServerClient'
+import { AgentServerClient, AgentServerClientDisposedError, AgentServerClientUnvalidatedError, AgentServerTurnAcceptedError, ServerError, WebSocketConnectionError } from '../api/AgentServerClient'
 import { errorMessage, mergeEvents, mergeFiles, normalizeServerURL } from '../lib/format'
 import { completedPrefixForkAvailable, forkErrorMessage, RUNNING_FORK_UNAVAILABLE } from '../lib/session-fork'
 import { healthActiveSessions } from '../lib/active-sessions'
@@ -2318,6 +2318,7 @@ export const useAppStore = create<AppState>((set, get) => ({
     const sessionRead = sessionMutations.captureRead()
     const admittedServerIdentity = get().health?.server_identity
     const queueScopeCurrent = captureAgentRouteGuard(scope, get)
+    let turnAccepted = false
     try {
       const clientCapabilities = interactiveClientCapabilities(session, get().health)
       const response = await scope.client.sendTurn(
@@ -2330,6 +2331,7 @@ export const useAppStore = create<AppState>((set, get) => ({
         chatReferences,
         teamReferences,
       )
+      turnAccepted = true
       if (!queueScopeCurrent()) {
         // A successful POST is not safe to replay after a server restart or
         // revalidation. Discard its stale projection, but reconcile the same
@@ -2406,6 +2408,28 @@ export const useAppStore = create<AppState>((set, get) => ({
       void get().syncSelectedSession('recovery')
       return true
     } catch (error) {
+      if (turnAccepted || error instanceof AgentServerTurnAcceptedError) {
+        // HTTP acceptance survives response decoding and validation failures.
+        // Never restore this prompt or replay the POST during reconciliation.
+        const current = get()
+        if (connectionIsCurrent(scope) && current.activeProfileId === scope.profileId
+          && current.profileGeneration === scope.generation && !current.workspaceAdopting
+          && current.selectedSessionId === sessionId && admittedServerIdentity
+          && current.health?.server_identity === admittedServerIdentity) {
+          const admittedFiles = new Set(files)
+          set(state => ({
+            uploads: consumeComposer ? { ...state.uploads,
+              [sessionId]: (state.uploads[sessionId] ?? []).filter(file => !admittedFiles.has(file)),
+            } : state.uploads,
+            error: new AgentServerTurnAcceptedError(error).message,
+          }))
+          if (consumeComposer) void saveCurrentWorkspace(get)
+          if (scope.client.isValidated && current.connected && !current.connecting && !current.switchingProfileId) {
+            void get().syncSelectedSession('recovery')
+          }
+        }
+        return false
+      }
       if (consumeComposer && consumedDraft && connectionIsCurrent(scope)) {
         set(state => {
           const currentDraft = state.drafts[sessionId] ?? ''

@@ -68,7 +68,7 @@ function reset(patch = {}) {
   fixture.alerts.length=0; fixture.reads.length=0; fixture.sends.length=0; fixture.client.isValidated=true; fixture.client.validationRevision=1
   fixture.routeReads.length=0;fixture.revokes.length=0;fixture.skips.length=0;fixture.width=390;fixture.height=844;fixture.scheme='dark'
   fixture.codexRuntime={supported:false,goalsSupported:false,goalsEnabled:false,runtime:null,session:null,mutating:false,error:null,scopeKey:'profile:1:chat',refresh:async()=>null,updateGoal:async()=>null,clearGoal:async()=>null}
-  fixture.focusedInput=null;fixture.blurredInputs=[];fixture.dismissals=0
+  fixture.focusedInput=null;fixture.blurredInputs=[];fixture.dismissals=0;fixture.inputClears=0
   fixture.client.crossChatHandoff=async()=>{throw new Error('Unexpected message body read')}
   fixture.client.teamNetworkGet = async (base, endpoint) => {
     fixture.reads.push([base,endpoint])
@@ -97,7 +97,7 @@ function reset(patch = {}) {
 }
 async function render({expandQueue=true,...overrides}={}) {
   let renderer
-  await act(async()=>{renderer=TestRenderer.create(React.createElement(Composer,{sessionId:'chat',keyboardVisible:true,onSent(){},onOpenMcp(){},...overrides}),{createNodeMock:element=>({focus(){fixture.focusedInput=element.props.testID},isFocused(){return fixture.focusedInput===element.props.testID},blur(){fixture.blurredInputs.push(element.props.testID);fixture.focusedInput=null},clear(){},setNativeProps(){}})})})
+  await act(async()=>{renderer=TestRenderer.create(React.createElement(Composer,{sessionId:'chat',keyboardVisible:true,onSent(){},onOpenMcp(){},...overrides}),{createNodeMock:element=>({focus(){fixture.focusedInput=element.props.testID},isFocused(){return fixture.focusedInput===element.props.testID},blur(){fixture.blurredInputs.push(element.props.testID);fixture.focusedInput=null},clear(){if(element.props.testID==='chat-composer-input')fixture.inputClears++},setNativeProps(){}})})})
   if(expandQueue && byID(renderer,'queued-section-toggle').length)await click(renderer,'queued-section-toggle')
   return renderer
 }
@@ -121,6 +121,127 @@ function goalRuntime() {
     runtime:{available:true,goal:{threadId:'thread',objective:'Long goal objective '.repeat(200),status:'active',tokensUsed:12,timeUsedSeconds:20,createdAt:1,updatedAt:2},status:{type:'idle'},goals_enabled:true}}
 }
 function stop(renderer){return act(async()=>renderer.unmount())}
+
+function reasoningFixture(patch={}) {
+  const writes=[]
+  const options=[{value:'low',label:'Low'},{value:'high',label:'High'},{value:'ultra',label:'Ultra'},{value:'locked',label:'Locked',locked:true}]
+  reset({sessions:[{id:'chat',title:'Mobile',backend:'codex',model:'test-model',effort:'high',backend_locked:true}],
+    runtime:{backends:{codex:{models:[{value:'test-model',label:'Test model'}],efforts:options,model_efforts:{'test-model':options},default_model:'test-model',default_effort:'high'}}},
+    updateSession:async(...args)=>{writes.push(args);store.setState(state=>({sessions:state.sessions.map(session=>session.id===args[0]?{...session,...args[1]}:session)}));return true},...patch})
+  return writes
+}
+const reasoningMenu=tree=>tree.root.findAllByType('MenuView').find(node=>node.props.actions.some(action=>action.id==='reasoning-effort'))
+const chooseReasoning=(menu,value)=>menu.props.onPressAction({nativeEvent:{event:`set-effort:${value}`}})
+
+test('reasoning menu remains actionable during active work and writes the model-scoped effort without sending or stopping',async()=>{
+  for(const busy of [{},{activeSessionIds:new Set(['chat'])},{turnAdmissionTokens:{chat:'pending'}},{sendingSessionIds:new Set(['chat'])}]){
+    const writes=reasoningFixture(busy),tree=await render()
+    try{
+      const menu=reasoningMenu(tree);assert.ok(menu,'Reasoning must stay available independently of reload/backend controls')
+      assert.equal(menu.props.actions.find(action=>action.id==='reasoning-effort').subactions.find(action=>action.id==='set-effort:ultra').attributes?.disabled,false)
+      await act(async()=>chooseReasoning(menu,'ultra'))
+      assert.deepEqual(writes,[['chat',{effort:'ultra'},1]]);assert.deepEqual(fixture.sends,[])
+      assert.match(texts(tree),/Reasoning saved/)
+      await act(async()=>chooseReasoning(reasoningMenu(tree),''));assert.equal(writes.at(-1)[1].effort,null)
+    }finally{await stop(tree)}
+  }
+})
+
+test('reasoning changes are single-flight, show failures locally, and retry without changing the draft',async()=>{
+  const held=deferred(),writes=[]
+  reasoningFixture({drafts:{chat:'Keep this draft'},updateSession:async(...args)=>{writes.push(args);return held.promise}})
+  const tree=await render()
+  try{
+    const menu=reasoningMenu(tree);assert.ok(menu)
+    await act(async()=>{chooseReasoning(menu,'ultra');chooseReasoning(menu,'low')})
+    assert.equal(writes.length,1);assert.match(texts(tree),/Saving reasoning/)
+    await act(async()=>{store.setState({error:'Server refused reasoning change'});held.resolve(false)})
+    assert.match(texts(tree),/Server refused reasoning change/);assert.equal(store.getState().drafts.chat,'Keep this draft')
+    await act(async()=>store.setState({updateSession:async(...args)=>{writes.push(args);return true}}))
+    await act(async()=>chooseReasoning(reasoningMenu(tree),'low'));assert.equal(writes.length,2)
+  }finally{await stop(tree)}
+})
+
+test('reasoning rejects locked/removed choices and stale chat, model, connection and profile callbacks',async()=>{
+  for(const change of [()=>store.setState({selectedSessionId:'other'}),()=>store.setState({profileGeneration:2}),()=>{fixture.client.validationRevision++},()=>store.setState({sessions:[{...store.getState().sessions[0],model:'other-model'}]}),()=>store.setState({connected:false}),()=>store.setState({runtime:{backends:{codex:{models:[],efforts:[]}}}})]){
+    const writes=reasoningFixture(),tree=await render()
+    try{
+      const menu=reasoningMenu(tree);assert.ok(menu)
+      await act(async()=>chooseReasoning(menu,'locked'));assert.equal(writes.length,0)
+      await act(async()=>{change();chooseReasoning(menu,'ultra')});assert.equal(writes.length,0)
+    }finally{await stop(tree)}
+  }
+})
+
+test('retired reasoning saves cannot leave the original scope permanently disabled when it returns',async()=>{
+  const held=deferred()
+  reasoningFixture({updateSession:async()=>held.promise})
+  const tree=await render()
+  try{
+    await act(async()=>chooseReasoning(reasoningMenu(tree),'ultra'))
+    await act(async()=>store.setState({connected:false}))
+    await act(async()=>held.resolve(false))
+    await act(async()=>store.setState({connected:true}))
+    assert.doesNotMatch(texts(tree),/Saving reasoning/)
+    assert.equal(reasoningMenu(tree).props.actions.find(action=>action.id==='reasoning-effort').subactions.find(action=>action.id==='set-effort:ultra').attributes.disabled,false)
+  }finally{await stop(tree)}
+})
+
+test('delayed send admission clears the native input at consumption, never after a newer draft is typed',async()=>{
+  const admission=deferred(),receipt=deferred()
+  reset({drafts:{chat:'Submitted message'},activeSessionIds:new Set(['chat']),sendPrompt:async()=>{
+    await admission.promise
+    store.setState({drafts:{chat:''},sendingSessionIds:new Set(['chat'])})
+    return receipt.promise
+  }})
+  const tree=await render()
+  try{
+    await click(tree,'chat-send');assert.equal(fixture.inputClears,0)
+    await act(async()=>admission.resolve());assert.equal(fixture.inputClears,1,'asynchronous preflight must not leave the native draft visible')
+    await type(tree,'A newer draft')
+    await act(async()=>receipt.resolve(true))
+    assert.equal(fixture.inputClears,1);assert.equal(store.getState().drafts.chat,'A newer draft')
+  }finally{await stop(tree)}
+})
+
+test('admission that preserves a newer draft cannot clear the input on a later edit',async()=>{
+  const admission=deferred(),receipt=deferred()
+  reset({drafts:{chat:'Submitted message'},sendPrompt:async()=>{
+    await admission.promise
+    store.setState({sendingSessionIds:new Set(['chat'])})
+    return receipt.promise
+  }})
+  const tree=await render()
+  try{
+    await click(tree,'chat-send');await type(tree,'Newer draft before admission')
+    await act(async()=>admission.resolve());assert.equal(fixture.inputClears,0)
+    await type(tree,'');assert.equal(fixture.inputClears,0)
+    await type(tree,'Still newer');await act(async()=>receipt.resolve(true))
+    assert.equal(fixture.inputClears,0);assert.equal(store.getState().drafts.chat,'Still newer')
+  }finally{await stop(tree)}
+})
+
+test('late admission cannot clear another chat or a replaced admission token',async()=>{
+  for(const change of [()=>store.setState({selectedSessionId:'other'}),()=>store.setState({turnAdmissionTokens:{chat:'replacement'}})]){
+    const admission=deferred()
+    reset({drafts:{chat:'Submitted message'},sendPrompt:async()=>{await admission.promise;store.setState({drafts:{chat:''},sendingSessionIds:new Set(['chat'])});return true}})
+    const tree=await render()
+    try{
+      await click(tree,'chat-send');await act(async()=>{change();admission.resolve()})
+      assert.equal(fixture.inputClears,0)
+    }finally{await stop(tree)}
+  }
+})
+
+test('quick messages never clear or consume the native draft',async()=>{
+  reset({drafts:{chat:'Keep composing'},sendPrompt:async()=>{store.setState({sendingSessionIds:new Set(['chat'])});return true}})
+  const tree=await render()
+  try{
+    const menu=tree.root.findAllByType('MenuView').find(node=>node.props.actions.some(action=>action.id==='quick-message:0'))
+    assert.ok(menu);await act(async()=>menu.props.onPressAction({nativeEvent:{event:'quick-message:0'}}))
+    assert.equal(fixture.inputClears,0);assert.equal(store.getState().drafts.chat,'Keep composing')
+  }finally{await stop(tree)}
+})
 
 test('active primary controls stay labeled and distinct when a consumed draft leaves the composer empty',async()=>{
   queued()

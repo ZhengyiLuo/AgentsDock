@@ -49,6 +49,101 @@ function reset(patch={}){
 async function render(component=Inspector,patch={}){let tree;const props=component===Inspector?{sessionId:'chat',onDigest(){},onJob(){},onTerminal(){},onProcesses(){},onTmux(){},...patch}:{visible:true,sessionId:'chat',initialPath:'/srv',onChoose:async path=>{fixture.writes.push(path);return true},onClose(){fixture.closed=true},...patch};await act(async()=>{tree=TestRenderer.create(React.createElement(component,props))});return{tree,props}}
 const unmount=tree=>act(async()=>tree.unmount())
 
+const reasoningCatalog=()=>({backends:{codex:{default_model:'gpt-test',default_effort:'medium',models:[{value:'gpt-test',label:'GPT Test',efforts:[{value:'medium',label:'Medium'},{value:'high',label:'High'},{value:'ultra',label:'Ultra'}]},{value:'small',label:'Small',efforts:[{value:'low',label:'Low'}]},{value:'locked',label:'Locked model',locked:true}],efforts:[{value:'medium',label:'Medium'},{value:'high',label:'High'}]}}})
+function resetReasoning(patch={}){reset({runtime:reasoningCatalog(),sessions:[{id:'chat',title:'Chat',folder:'General',cwd:'/srv',backend:'codex',model:'gpt-test',effort:'medium'}],updateSession:async(...args)=>{fixture.writes.push(args);store.setState({sessions:store.getState().sessions.map(session=>session.id===args[0]?{...session,...args[1]}:session)});return true},...patch})}
+test('Inspector reasoning is an inline touch-safe disclosure and stays selectable during active work',async()=>{
+  resetReasoning({activeSessionIds:new Set(['chat']),turnAdmissionTokens:{chat:'admission'}});const {tree}=await render()
+  try{
+    const trigger=byID(tree,'inspector-reasoning-choice')[0];assert.ok(trigger,'Existing chats need a discoverable Reasoning control')
+    assert.equal(trigger.props.disabled,false);await click(tree,'inspector-reasoning-choice')
+    assert.equal(tree.root.findAllByType('Modal').length,0,'Reasoning must not open another native modal inside Chat details')
+    assert.ok(style(byID(tree,'inspector-reasoning-choice-list')[0].props.style).maxHeight<=264)
+    assert.ok(style(byID(tree,'inspector-reasoning-choice-close')[0].props.style).minHeight>=44)
+    assert.ok(labeled(tree,'Ultra'));await act(async()=>labeled(tree,'Ultra').props.onPress())
+    assert.deepEqual(fixture.writes,[['chat',{effort:'ultra'},1]])
+    assert.match(text(tree),/Saved.*next turn/i);assert.deepEqual(fixture.stops,[])
+  }finally{await unmount(tree)}
+})
+test('Inspector saves server defaults as null and model changes reconcile reasoning without nested presentation',async()=>{
+  resetReasoning();const {tree}=await render()
+  try{
+    await click(tree,'inspector-reasoning-choice');await act(async()=>labeled(tree,'Server default (medium)').props.onPress())
+    assert.deepEqual(fixture.writes[0],['chat',{effort:null},1]);assert.equal(byID(tree,'inspector-reasoning-choice')[0].props.accessibilityLabel,'Reasoning: Server default (medium)')
+    await click(tree,'inspector-model-choice');assert.equal(labeled(tree,'Locked model, upgrade required').props.disabled,true)
+    await act(async()=>labeled(tree,'Locked model, upgrade required').props.onPress());assert.equal(fixture.writes.length,1)
+    await act(async()=>labeled(tree,'Small').props.onPress());assert.deepEqual(fixture.writes[1],['chat',{model:'small',effort:null},1])
+    await click(tree,'inspector-reasoning-choice');assert.ok(labeled(tree,'Low'));assert.equal(labeled(tree,'Ultra'),undefined)
+    await act(async()=>labeled(tree,'Low').props.onPress());assert.equal(store.getState().sessions[0].effort,'low')
+    await click(tree,'inspector-model-choice');await act(async()=>labeled(tree,'Server default (GPT Test)').props.onPress())
+    assert.deepEqual(fixture.writes[3],['chat',{model:null,effort:'medium'},1]);assert.equal(tree.root.findAllByType('Modal').length,0)
+  }finally{await unmount(tree)}
+})
+test('Inspector reasoning save is single-flight and rejected saves roll back with visible retry in Chat details',async()=>{
+  resetReasoning();const held=deferred();const previous=store.getState().sessions[0]
+  store.setState({updateSession:async(...args)=>{fixture.writes.push(args);store.setState({sessions:[{...previous,...args[1]}]});const saved=await held.promise;if(!saved)store.setState({sessions:[previous],error:'The server rejected this reasoning level.'});return saved}})
+  const {tree}=await render()
+  try{
+    await click(tree,'inspector-reasoning-choice');const select=labeled(tree,'High').props.onPress
+    await act(async()=>{select();select()});assert.equal(fixture.writes.length,1);assert.equal(byID(tree,'inspector-choice-saving').length,1)
+    assert.equal(byID(tree,'inspector-model-choice')[0].props.disabled,true);assert.equal(byID(tree,'inspector-choice-saved').length,0)
+    await act(async()=>held.resolve(false));assert.match(text(tree),/The server rejected this reasoning level/)
+    assert.equal(byID(tree,'inspector-choice-error')[0].props.accessibilityRole,'alert');assert.equal(byID(tree,'inspector-choice-saving').length,0)
+    assert.equal(byID(tree,'inspector-reasoning-choice')[0].props.accessibilityLabel,'Reasoning: Medium')
+    await act(async()=>store.setState({updateSession:async(...args)=>{fixture.writes.push(args);store.setState({sessions:[{...previous,...args[1]}]});return true}}))
+    await act(async()=>labeled(tree,'High').props.onPress());assert.equal(fixture.writes.length,2);assert.equal(byID(tree,'inspector-choice-error').length,0);assert.match(text(tree),/Saved for the next turn/)
+  }finally{await unmount(tree)}
+})
+test('Inspector catches unexpected save errors locally and closes choices without mutating the chat',async()=>{
+  resetReasoning({updateSession:async()=>{throw Error('Connection dropped')}});const {tree}=await render()
+  try{
+    await click(tree,'inspector-reasoning-choice');const old=labeled(tree,'High').props.onPress
+    await act(async()=>old());assert.match(text(tree),/Connection dropped/)
+    await click(tree,'inspector-reasoning-choice-close');await click(tree,'inspector-reasoning-choice')
+    await act(async()=>old());assert.deepEqual(fixture.writes,[]);assert.equal(byID(tree,'inspector-choice-saving').length,0)
+    await click(tree,'inspector-reasoning-choice-close');assert.equal(byID(tree,'inspector-reasoning-choice-list').length,0)
+  }finally{await unmount(tree)}
+})
+test('Inspector rejects captured reasoning callbacks after same-tick connection, scope, model or catalog changes',async()=>{
+  const changes=[
+    ()=>store.setState({profileGeneration:2}),()=>store.setState({selectedSessionId:'other'}),
+    ()=>{fixture.client.validationRevision++},()=>{fixture.client.isValidated=false},
+    ()=>store.setState({health:{...health(),server_instance_id:'replacement'}}),()=>store.setState({workspaceAdopting:true}),
+    ()=>store.setState({sessions:[{...store.getState().sessions[0],model:'small'}]}),
+    ()=>store.setState({runtime:{backends:{codex:{...reasoningCatalog().backends.codex,model_efforts:{'gpt-test':[{value:'medium',label:'Medium'}]}}}}}),
+  ]
+  for(const change of changes){resetReasoning();const {tree}=await render()
+    try{await click(tree,'inspector-reasoning-choice');const old=labeled(tree,'High').props.onPress;await act(async()=>{change();old()});assert.deepEqual(fixture.writes,[])}finally{await unmount(tree)}
+  }
+})
+test('Inspector retires old responses without clearing a newer pending reasoning save',async()=>{
+  resetReasoning();const first=deferred(),second=deferred()
+  store.setState({updateSession:async(...args)=>{fixture.writes.push(args);store.setState({sessions:store.getState().sessions.map(session=>({...session,...args[1]}))});return fixture.writes.length===1?first.promise:second.promise}})
+  const {tree}=await render()
+  try{
+    await click(tree,'inspector-reasoning-choice');await act(async()=>labeled(tree,'High').props.onPress())
+    await act(async()=>{fixture.client.validationRevision++;store.setState({health:health()})})
+    assert.equal(byID(tree,'inspector-choice-saving').length,0);await click(tree,'inspector-reasoning-choice');await act(async()=>labeled(tree,'Ultra').props.onPress())
+    await act(async()=>first.resolve(true));assert.equal(byID(tree,'inspector-choice-saved').length,0);assert.equal(byID(tree,'inspector-choice-saving').length,1)
+    await act(async()=>second.resolve(true));assert.equal(byID(tree,'inspector-choice-saving').length,0);assert.match(text(tree),/Saved for the next turn/)
+  }finally{await unmount(tree)}
+})
+test('Inspector hides Cursor reasoning and prevents offline runtime changes',async()=>{
+  resetReasoning({connected:false});const {tree}=await render()
+  try{assert.equal(byID(tree,'inspector-reasoning-choice')[0].props.disabled,true);await click(tree,'inspector-reasoning-choice');assert.equal(byID(tree,'inspector-reasoning-choice-list').length,0)
+    await act(async()=>store.setState({connected:true,sessions:[{...store.getState().sessions[0],backend:'cursor'}]}));assert.equal(byID(tree,'inspector-reasoning-choice').length,0)
+  }finally{await unmount(tree)}
+})
+test('Inspector Agent jobs uses the same inline choices and rechecks permission capability before saving',async()=>{
+  resetReasoning({health:{...health(),capabilities:{...health().capabilities,provider_jobs_access_control_v1:{available:true,version:1,modes:['full','read_only','blocked'],default:'full'}}}})
+  const {tree}=await render()
+  try{
+    await click(tree,'inspector-jobs-choice');assert.equal(tree.root.findAllByType('Modal').length,0)
+    await act(async()=>labeled(tree,'Read-only').props.onPress());assert.deepEqual(fixture.writes,[['chat',{provider_jobs_access:'read_only'},1]])
+    assert.match(text(tree),/Saved agent job access/);await click(tree,'inspector-jobs-choice');const old=labeled(tree,'Blocked').props.onPress
+    await act(async()=>{store.setState({health:health()});old()});assert.equal(fixture.writes.length,1)
+  }finally{await unmount(tree)}
+})
+
 const importHealth=()=>({...health(),api_contract_version:15,capabilities:{...health().capabilities,local_session_import_v1:{available:true,required:false,message:'',action:null,version:1,max_batch_items:25,max_list_items:12}}})
 const candidate=(patch={})=>({backend:'codex',provider_session_id:'provider',label:'Provider chat',cwd:'/srv/project',updated_at:'2026-09-14T10:00:00Z',...patch})
 const importedSession=(patch={})=>({id:'imported',backend:'codex',title:'Imported',session_id:'provider',cwd:'/srv/project',...patch})
