@@ -19,12 +19,10 @@
       alt="Join the AgentsDock Discord"
     />
   </a>
-  <a href="server/">
-    <img
-      src="https://img.shields.io/badge/backend-self--hosted-2563EB"
-      alt="Self-hosted backend"
-    />
-  </a>
+  <img
+    src="https://img.shields.io/badge/backend-self--hosted-2563EB"
+    alt="Self-hosted backend"
+  />
   <a href="CONTRIBUTING.md">
     <img
       src="https://img.shields.io/badge/contributions-welcome-brightgreen.svg"
@@ -45,10 +43,9 @@
 
 <div align="center">
   AgentsDock brings <strong>Claude Code</strong>, <strong>Codex</strong>,
-  and <strong>Cursor</strong> into one desktop and mobile workspace, with
-  <strong>OpenCode</strong> available on desktop. Use your agents for coding,
-  research, and long-running work without living in a terminal. Easily review
-  files and rich media.
+  <strong>Cursor</strong>, and <strong>OpenCode</strong> into one desktop and
+  mobile workspace. Use your agents for coding, research, and long-running work
+  without living in a terminal. Easily review files and rich media.
   <br />
   <br />
   <strong>Desktop stable 1.0.9:</strong>
@@ -71,17 +68,12 @@
   <br />
   <br />
   <strong>
-    AgentsDock is the client;
-    <a href="server/">AgentsServer</a>
-    is the self-hosted backend.
+    AgentsDock is the client; AgentsServer is the self-hosted backend.
   </strong>
 </div>
 
 ## What you can do
 
-- **Use OpenCode on desktop:** available in stable 1.0.9 with the matching
-  server. Install OpenCode on the server and configure its provider; see
-  [setup and feature limits](electron/README.md#opencode).
 - **Work with your agents:** start and resume chats, follow live activity, and
   queue the next task.
 - **Ask a side question:** Codex Side chat has independent model and reasoning
@@ -97,16 +89,16 @@
 
 ## How it works
 
-**AgentsDock is the client. [AgentsServer](server/README.md)
-is the backend.** Install the server on the machine that has your projects and
-agent CLIs. That can be the same computer as the desktop app or a remote
-machine you control. The desktop and mobile apps connect to it to send tasks
-and display results.
+**AgentsDock is the client. AgentsServer is the self-hosted backend.** Install
+the server on the machine that has your projects and agent CLIs. That can be
+the same computer as the desktop app or a remote machine you control. The
+desktop and mobile apps connect to it to send tasks and display results.
 
 The agent CLIs must be installed and authenticated **on the server**, not on
 your phone. Self-hosting gives you control of the server and stored history;
 it does not make the models local. Your selected provider still processes
-model requests, and clients may cache content on your devices.
+model requests, and clients may cache content on your devices. Available
+providers and features depend on the client and server version.
 
 ## Get started
 
@@ -137,9 +129,8 @@ model requests, and clients may cache content on your devices.
 **Already using AgentsDock?** Update the desktop app from Settings. After
 relaunch, 1.0.9 coordinates each supported server's matching signed update;
 busy servers wait until idle, and offline servers resume after reconnecting.
-The [signed 1.0.9 server bridge](https://github.com/ZhengyiLuo/AgentsServer/releases/tag/v1.0.9)
-remains available for supported older installations. See the
-[release notes](https://github.com/ZhengyiLuo/AgentsDock/releases/tag/v1.0.9)
+The signed 1.0.9 server bridge remains available for supported older
+installations. See the [release notes](https://github.com/ZhengyiLuo/AgentsDock/releases/tag/v1.0.9)
 for upgrade validation limits.
 
 For remote access, use a private network such as Tailscale rather than exposing
@@ -201,18 +192,6 @@ Use a simulator or your own signing configuration. Read the
 device: using the existing bundle identifier can replace your installed app.
 Android development requires the Android toolchain.
 
-### Website
-
-The product site is plain HTML, CSS, and JavaScript. With Python 3 installed,
-run this from the repository root:
-
-```bash
-cd website
-npm run dev
-```
-
-Open `http://localhost:4175`. No website dependency installation is needed.
-
 ## Where things live
 
 | Directory | Purpose |
@@ -226,9 +205,7 @@ Open `http://localhost:4175`. No website dependency installation is needed.
 | `Sources/`, `Apps/`, `ZenithDock.xcodeproj` | Legacy Swift clients, not the current Electron or React Native apps |
 
 The maintained backend lives in `server/`. Its Python dependencies and installer
-are self-contained; server users do not need to build either client. The
-[AgentsServer repository](https://github.com/ZhengyiLuo/AgentsServer) remains the
-legacy download and compatibility destination during migration. See
+are self-contained; server users do not need to build either client. See
 [the source migration notes](docs/SERVER_SOURCE_MIGRATION.md) before exporting
 changes or preparing a coordinated release.
 

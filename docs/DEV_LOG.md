@@ -1,5 +1,15 @@
 # Public development log
 
+## 2026-10-01 — Simplify the repository overview
+
+- Group Claude Code, Codex, Cursor and OpenCode in the product introduction.
+  Keep CLI prerequisites in general setup guidance and provider availability
+  scoped to the client and server version.
+- Remove the separate OpenCode installation callout, backend-name links,
+  standalone server repository links and website development walkthrough.
+  Keep stable 1.0.9 downloads and the maintained server setup documentation.
+- Documentation only; no provider, mobile, installer or release changes.
+
 ## 2026-10-01 — Refresh the README for stable 1.0.9
 
 - Point the repository's desktop badge, downloads and release notes to the
