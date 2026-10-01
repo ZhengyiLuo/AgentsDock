@@ -1,5 +1,16 @@
 # Public development log
 
+## 2026-09-30 — Prepare matched stable 1.0.9
+
+- Select `1.0.9` for the next matched direct desktop app, npm server and signed
+  legacy bridge. Retain the beta.5 installer-lock fix and scoped Codex Side chat
+  model/effort and activity changes. Preserve every published artifact and the
+  existing server trust key; no mobile release or live deployment is included.
+- Source preparation is not acceptance or publication. Stable-to-stable and
+  beta-to-stable upgrade replays, native provider journeys and exact signed
+  packaged verification must complete before release. Previously recorded beta
+  evidence does not establish stable acceptance.
+
 ## 2026-09-30 — Integrate scoped Codex Side chat updates for 1.0.9
 
 - Integrate independent model/effort controls and retained native Codex activity
