@@ -5343,3 +5343,19 @@ not a pixel-for-pixel comparison against an installed Codex desktop app.
 Server package/install/deploy manifests include the new progress module.
 Availability: local source; paired server deployment is required and awaits
 fresh approval. No production restart or deployment performed.
+
+
+## Restore mailbox-only same-server messaging
+
+- Restore the retirement of same-server direct deliveries and request/reply
+  exchanges in the current release candidate. Older paired callers also submit
+  mailbox messages; they no longer create a queued provider turn or live waiter.
+- Scheduled references to an existing pair retain their exact saved actions and
+  use the mailbox. Existing legacy queue records are retired without executing
+  their prompts, discarding their ledger bodies, or disturbing user messages.
+- Validation: focused route, retirement, prompt, and history regressions; isolated
+  full-server HTTP/SQLite/scheduler/helper acceptance for ordinary and question-only
+  saved references. Busy recipients kept their run and gained no queued delivery;
+  ordered reads, idempotent receipt reuse, and idle mailbox wake passed. Provider
+  inference was synthetic. Desktop packaged acceptance remains a release check.
+- Availability: source correction only; no live service deployment or restart.
