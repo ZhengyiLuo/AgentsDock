@@ -1,5 +1,17 @@
 # Public development log
 
+## 2026-10-01 — Refresh the README for stable 1.0.9
+
+- Point the repository's desktop badge, downloads and release notes to the
+  published 1.0.9 stable release. Describe OpenCode's desktop availability and
+  Codex Side chat controls, keeping mobile availability separate.
+- Add the stable npm command for fresh server installations, My Agents setup
+  guidance and the managed update path for existing servers, including the
+  signed legacy bridge. Link backend documentation to the maintained source.
+- Update the linked desktop OpenCode guide and preserve its previous anchor.
+  Verify the four desktop download URLs and relative documentation links and
+  anchors. Documentation only; no application, service or release changes.
+
 ## 2026-09-30 — Desktop workflow usage events
 
 - Add 33 aggregate desktop events for side chats, custom API settings, goals,
