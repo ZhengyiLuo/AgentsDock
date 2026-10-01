@@ -1,4 +1,4 @@
-# Unpublished macOS candidate rehearsal
+# Private macOS candidate rehearsal and publication records
 
 This is a scoped test in the existing registered `ci.yml`, not a product release
 workflow. It installs exact signed packages and changes origin routing/trust only
@@ -114,7 +114,7 @@ changes remain rejected. A corrected descendant harness must report its own
 truthful commit independently of the unchanged signed artifact source. The
 original failed runs and all non-acceptance flags remain part of the evidence.
 
-### Completed 1.0.9 scoped runs; publication still pending
+### Completed 1.0.9 scoped runs; original pre-publication evidence
 
 Mac run [36828381882](https://github.com/ZhengyiLuo/AgentsDock/actions/runs/36828381882)
 passes all eleven native jobs on attempt 1. Linux run
@@ -184,10 +184,38 @@ active native work plus a durable queue during a managed update, interactive
 pairing and optional-dependency decline, and logout/reboot service survival.
 It does not establish another provider's behavior, natural OAuth renewal or
 public-feed delivery. The audit still records `releaseAcceptance: false` and no
-publication. The missing dedicated publishing credential remains an independent
-release blocker; the accepted source, build and package hashes are unchanged.
+publication. At that review, the dedicated CI publishing credential was missing.
+The subsequent verified publication path is recorded below; the accepted source,
+build, package hashes and original acceptance flags remain unchanged.
 
 ## Current delivery status
+
+Stable `1.0.9`, build 1243, is now public in the canonical desktop repository,
+legacy desktop mirror, npm registry and signed server bridge. Product source is
+`33c21482170010108830aef8009831d5d1da624c`; standalone export is
+`77cbd97d55bc6ec4063157f863dec80a06ac9ba8`. The source and hashes above still
+identify the released bytes. Npm `latest` now selects `1.0.9`; `beta` remains
+`1.0.8-beta.5`, and the previously published stable `1.0.8` is retained.
+
+The original four native desktop publication jobs passed in
+[36835821983](https://github.com/ZhengyiLuo/AgentsDock/actions/runs/36835821983),
+attempt 1, using verification workflow
+`9c4eaa1ec34dc1c730d9468eb90d5a26edf395d8`. Its original receipt artifact and
+live GitHub run/job identities were independently checked against all five equal
+checksum seals. The verification-only run did not publish. The exact npm tarball
+was then published and downloaded/verified by its existing OIDC workflow
+[36836420634](https://github.com/ZhengyiLuo/AgentsDock/actions/runs/36836420634),
+followed by the signed bridge and desktop/mirror through the immutable helpers
+with existing local GitHub authentication. No token was extracted or repurposed.
+
+Publication was explicitly requested after disclosure of the remaining native
+migration, active/queued-work, interactive setup, reboot and Windows-update gaps.
+Those boundaries remain unvalidated: all original observation archives and
+`publicationEligible: false` / `releaseAcceptance: false` fields are retained.
+This publication record is not a replacement acceptance receipt. See
+[the public release record](DEV_LOG.md#2026-10-01--publish-matched-stable-109-build-1243).
+
+### Previous Beta delivery (unchanged)
 
 The newest published Beta is `1.0.8-beta.5`, build 1242, from source
 `85327b94a378c441949da5e775e265626743b6c6`. It adds bounded contention handling
@@ -206,7 +234,8 @@ promote these scoped observations to full production acceptance. Receipt SHA-256
 `fdcf48e5f256a21856a1b3e0475b467ebd903bb9c12ce8a466d57c7a07e4ee5f`;
 transport ZIP SHA-256:
 `4d479f1c9ee64f4784da2cdb52cda345c80187565a105cc5a324d8267b312b8e`.
-Npm `beta` selects `1.0.8-beta.5`; stable npm `1.0.8` remains unchanged.
+At that Beta publication, npm `beta` selected `1.0.8-beta.5` and `latest` remained
+stable `1.0.8`. The newer stable publication is recorded above.
 Beta.4's frozen evidence below is retained;
 none may be relabeled as beta.5 acceptance.
 

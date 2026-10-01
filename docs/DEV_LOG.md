@@ -1,5 +1,51 @@
 # Public development log
 
+## 2026-10-01 — Publish matched stable 1.0.9, build 1243
+
+- Publish [AgentsDock 1.0.9](https://github.com/ZhengyiLuo/AgentsDock/releases/tag/v1.0.9),
+  its [desktop mirror](https://github.com/ZhengyiLuo/AgentsDock-Releases/releases/tag/v1.0.9),
+  [npm server](https://www.npmjs.com/package/@agentsdock/server/v/1.0.9), and
+  [signed legacy bridge](https://github.com/ZhengyiLuo/AgentsServer/releases/tag/v1.0.9).
+  Both desktop feeds contain the same 16 assets. Universal macOS is signed and
+  notarized; Linux x64/ARM64 packages are included. Windows x64 is explicitly
+  unsigned and may show security warnings.
+- Preserve frozen product source `33c21482170010108830aef8009831d5d1da624c`,
+  standalone export `77cbd97d55bc6ec4063157f863dec80a06ac9ba8`, build 1243,
+  existing signing identities and all prepared package bytes. This release adds
+  scoped Codex Side chat model/effort controls, activity and Stop/Clear safety;
+  later video-menu, existing-chat endpoint and mailbox-only changes are excluded.
+- Pass all four unchanged native publication verifiers in
+  [36835821983](https://github.com/ZhengyiLuo/AgentsDock/actions/runs/36835821983),
+  attempt 1, from reviewed verification workflow
+  `9c4eaa1ec34dc1c730d9468eb90d5a26edf395d8`. Independently verify the original
+  receipt artifact, run/job provenance and all five identical package seals.
+  The verification-only run performs no publication.
+- Publish the exact npm tarball first through trusted publishing in
+  [36836420634](https://github.com/ZhengyiLuo/AgentsDock/actions/runs/36836420634);
+  verify the public archive, then publish the signed bridge, then the desktop
+  and mirror using the immutable release helpers and existing local GitHub
+  authentication. No credential is extracted, copied or added to CI. Npm
+  `latest` selects `1.0.9`; `beta` remains `1.0.8-beta.5` and older versions
+  remain available.
+- Verify all three public stable/latest release identities and exact source or
+  export tags. Check all 32 desktop asset digests across both repositories and
+  anonymously download their four latest updater feeds, checksum manifests and
+  signed npm descriptors. Verify both public server archives and all 119 runtime
+  files/modes agree; the previous stable npm archive remains accessible.
+- Accepted full desktop checksum-manifest SHA-256:
+  `8b5c44b5872392f89cd43b9996ba658c2d364c541748b0cb05f2801258f2be5c`.
+  Signed npm descriptor SHA-256:
+  `58cffd8372f495f18dcf77d1aff0c8240543548e3b1fa984d35c8993e024df1d`.
+  Public npm archive SHA-256:
+  `33ca47b105e8d2e8256df6b5c199e0e95972f9228399d8944e32c2e910de8ab8`.
+- The owner explicitly requested publication after disclosure of remaining
+  acceptance gaps. Scoped native update/recovery and real-Codex packaged checks
+  passed, but populated provider-history migration, active/queued work during
+  managed updates, interactive fresh setup, logout/reboot and Windows updating
+  remain unvalidated. Preserve the original reports and their false acceptance
+  flags; publication does not turn missing tests into passes. No installed app,
+  live server or mobile target is changed by this release operation.
+
 ## 2026-10-01 — Preserve native verification for an authenticated manual release
 
 - Add a verification-only mode to the existing desktop publication workflow.
