@@ -4431,3 +4431,25 @@ a synthetic recovery ledger/provider transcript: the original input and answer
 remained visible, the replay was hidden, and a genuine later repeat survived
 reopening. No live provider turn, user installation, release, or service restart
 was part of this replay acceptance.
+
+### Pending idle updates leave scheduled work running
+
+An update reserved for when the server is idle no longer blocks automatic
+scheduled jobs or automatic titles. These use the same update admission policy
+as ordinary turns. Previously parked, unchanged schedule occurrences are
+rearmed on startup or update-status reconciliation without cancelling the
+pending update or rewriting edited schedules.
+
+Idle updates also wait for queued messages, including already persisted ones,
+instead of treating their ability to survive a restart as permission to jump
+ahead of them. Existing active-work checks remain in place. Explicit force
+updates keep their separate, confirmed behavior.
+
+The focused scheduler, update, admission, status-reconciliation, and generated
+title suites passed (248 tests). The unchanged signed desktop build 1245 was
+exercised against an isolated patched server with real Codex: an automatic
+scheduled turn completed and appeared in the chat while another chat's native
+tool continued and the update stayed pending. The pending reservation was a
+test fixture with updater polling disabled; no installation or live deployment
+was exercised. Provider credentials were copied only into disposable test state
+and the original remained unchanged. This is a source fix, not a published beta.
