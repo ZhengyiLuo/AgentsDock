@@ -5422,3 +5422,35 @@ is also restored. The published 1.0.9 artifacts are unchanged.
   and native Codex 0.159.2 acceptance passed. Signed packaging, platform-specific
   installation/update checks, and acceptance against a real custom service remain
   separate release checks. This entry does not record publication or deployment.
+
+### 1.0.10-beta.1 release verification in progress
+
+The signed artifact source is `7790690fc91f0d6331b265820ef64234f5213abd`,
+with desktop build 1245. Subsequent test-only corrections do not change the
+packaged application or server runtime.
+
+- Full desktop validation passed: 5,139 tests passed and six skipped, with
+  type checking and compilation. Canonical run `36908809068` passed.
+- Signed npm/legacy server preparation passed in signer run `36908812734`.
+  Fresh npm native installation, restart, and cache-independence passed on
+  macOS and Linux in canonical run `36909055299`.
+- Desktop preparation run `36909050354` passed for Linux x64/arm64 and unsigned
+  Windows. The matching universal Mac build passed Developer ID verification,
+  notarization, Gatekeeper, archive/DMG parity, and isolated launch/termination.
+- The exact signed Mac app and signed npm runtime passed an isolated real
+  ChatGPT-backed Codex journey: main tool call, inherited Side chat context,
+  follow-up, live side tool activity, side cancellation while the main task
+  continued, normal parent completion, and retained history after reload.
+- The broad server run exposed obsolete tests that required retired direct
+  delivery/request-reply execution. Those expectations are replaced by explicit
+  retirement checks: every unowned legacy execution state remains cancelled,
+  bodies and user queue items survive, exact already-running owners finish,
+  automatic replies cannot restart the provider, and legacy reference actions
+  issue no local direct/reply grants. Database/history, secure-peer, real user
+  admission, and mailbox tests remain enabled. Mailbox coverage exercises actual
+  SQLite idempotency, restart/replay, attested user provenance, revocation,
+  cancellation, wake races, busy goals, and independent Send/Ask receipts.
+- Other test fixtures now match additive pending-reason fields, current policy
+  versions, provider descendant lookup, and acknowledged subagent configuration
+  receipts. These are test changes only. The original failing CI run is retained;
+  the revised suite must pass before publication.
