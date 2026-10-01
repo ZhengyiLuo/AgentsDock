@@ -1,5 +1,25 @@
 # Public development log
 
+## 2026-09-30 — Integrate scoped Codex Side chat updates for 1.0.9
+
+- Integrate independent model/effort controls and retained native Codex activity
+  from scoped source commits `c61cb72` and `9a9ed53`, with cherry-pick provenance
+  in `b79d617` and `e7ba60e`. Preserve the published beta.5 installer-lock wait,
+  executable instance helper, existing runtime manifests and Side chat limits.
+  Do not include unrelated limit-removal or subagent changes from the source branch.
+- On integrated source `e7ba60e`, pass 143 focused desktop tests, 144 server
+  Side chat/manifest tests, and 28 installer-lock, preparation, cleanup, update
+  succession and archive-reproducibility tests. Use frozen desktop and server
+  dependencies, Python 3.13, clean process environments and synthetic test homes.
+  TypeScript, production compilation, compiled-entry audit and installer/deploy
+  shell syntax checks pass.
+- Test surface: component, transport and isolated server/runtime fixtures;
+  provider responses and service controls are synthetic. These checks do not
+  establish native app/provider acceptance or revalidate the original source
+  branch's acceptance notes. Actual integrated app journeys and exact packaged
+  release validation remain pending. Availability: committed source and local
+  compilation only; no signed package, publication, deployment or live restart.
+
 ## 2026-09-28 — Independent Codex Side chat model and effort
 
 - Add a compact model and reasoning picker to the Side chat composer, using
