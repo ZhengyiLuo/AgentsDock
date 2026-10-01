@@ -1,21 +1,37 @@
 {
-  "version": "1.0.0",
-  "published_at": "2026-09-14T23:20:43Z",
-  "notes_url": "https://github.com/ZhengyiLuo/AgentsDock/releases/tag/v1.0.0",
+  "version": "1.0.8-beta.5",
+  "channel": "beta",
+  "published_at": "2026-10-01T01:54:02Z",
+  "notes_url": "https://github.com/ZhengyiLuo/AgentsDock/releases/tag/v1.0.8-beta.5",
+  "stable_notes_url": "https://github.com/ZhengyiLuo/AgentsDock/releases/tag/v1.0.6",
   "platforms": {
     "macos": {
       "available": true,
-      "filename": "AgentsDock-1.0.0-mac-universal.dmg",
-      "url": "https://github.com/ZhengyiLuo/AgentsDock/releases/download/v1.0.0/AgentsDock-1.0.0-mac-universal.dmg",
-      "sha256": "fa335f1e9c45164a0a0fe1d3124e3e6bc628717147dab1136ae905afc3ef3f31",
-      "label": "Universal macOS build for Apple silicon and Intel, signed with Developer ID and notarized by Apple."
+      "filename": "AgentsDock-1.0.8-beta.5-mac-universal.dmg",
+      "url": "https://github.com/ZhengyiLuo/AgentsDock/releases/download/v1.0.8-beta.5/AgentsDock-1.0.8-beta.5-mac-universal.dmg",
+      "sha256": "36fe3a3be74643875a7c361d34b08b269e1be6fdfd7e0a8e9483600608dfe153",
+      "label": "Beta universal macOS build for Apple silicon and Intel, signed with Developer ID and notarized by Apple."
     },
     "linux": {
       "available": true,
-      "filename": "AgentsDock-1.0.0-linux-x86_64.AppImage",
-      "url": "https://github.com/ZhengyiLuo/AgentsDock/releases/download/v1.0.0/AgentsDock-1.0.0-linux-x86_64.AppImage",
-      "sha256": "5a54367f0eb497fcf616490d59f6ff0933ffbba5744dc2bfe990261e0e399002",
-      "label": "Linux x64 AppImage with automatic stable updates; a portable tarball is also available in the release notes."
+      "filename": "AgentsDock-1.0.8-beta.5-linux-x86_64.AppImage",
+      "url": "https://github.com/ZhengyiLuo/AgentsDock/releases/download/v1.0.8-beta.5/AgentsDock-1.0.8-beta.5-linux-x86_64.AppImage",
+      "sha256": "e3bbca75d795b967750fda0a015b3b809e5862a6ecf9ee8855bed83089628c41",
+      "label": "Beta Linux x86_64 AppImage; a portable tarball is also available in the release notes."
+    },
+    "linux-arm64": {
+      "available": true,
+      "filename": "AgentsDock-1.0.8-beta.5-linux-arm64.AppImage",
+      "url": "https://github.com/ZhengyiLuo/AgentsDock/releases/download/v1.0.8-beta.5/AgentsDock-1.0.8-beta.5-linux-arm64.AppImage",
+      "sha256": "88bda9913ebab9e0873a3b083dee4e4087d62ba77d39f2464c9c7c7b51588833",
+      "label": "Beta Linux ARM64 AppImage; a portable tarball is also available in the release notes."
+    },
+    "windows": {
+      "available": true,
+      "filename": "AgentsDock-1.0.8-beta.5-win-x64.exe",
+      "url": "https://github.com/ZhengyiLuo/AgentsDock/releases/download/v1.0.8-beta.5/AgentsDock-1.0.8-beta.5-win-x64.exe",
+      "sha256": "70c1d363db3304ae42d3e64cb05860eb9576e42034923335d05a6c8528241683",
+      "label": "Unsigned beta preview for Windows x64."
     }
   }
 }

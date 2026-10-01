@@ -24,6 +24,31 @@ function findAsset(release, matcher) {
   return asset && asset.browser_download_url
 }
 
+function releaseVersion(release) {
+  return (release?.tag_name || '').replace(/^v/, '')
+}
+
+function isChineseReleaseLabel(label) {
+  return /^版本|^桌面/.test((label?.textContent || '').trim())
+}
+
+function setDesktopVersionLabel(release) {
+  const version = releaseVersion(release)
+  const label = document.querySelector('#release-version')
+  if (!label || !version) return
+
+  if (release.prerelease) {
+    label.textContent = isChineseReleaseLabel(label)
+      ? `桌面 Beta ${version}`
+      : `Desktop Beta ${version}`
+    return
+  }
+
+  label.textContent = isChineseReleaseLabel(label)
+    ? `版本 ${version}`
+    : `Version ${version}`
+}
+
 async function loadReleases(url) {
   let releases
   try {
@@ -57,9 +82,7 @@ async function loadRelease() {
     setPlatformHref('linux', findAsset(latestWith(ASSET_MATCHERS.linux), ASSET_MATCHERS.linux))
     setPlatformHref('linux-arm64', findAsset(latestWith(ASSET_MATCHERS['linux-arm64']), ASSET_MATCHERS['linux-arm64']))
     setPlatformHref('windows', findAsset(latestWith(ASSET_MATCHERS.windows), ASSET_MATCHERS.windows))
-    const version = (desktop.tag_name || '').replace(/^v/, '')
-    const label = document.querySelector('#release-version')
-    if (label && version) label.textContent = `Version ${version}`
+    setDesktopVersionLabel(desktop)
   }
 
 }

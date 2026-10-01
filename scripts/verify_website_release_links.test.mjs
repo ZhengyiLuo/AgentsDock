@@ -13,7 +13,7 @@ const release = (repo, version, date, platforms = desktopPlatforms, extra = {}) 
   tag_name: `v${version}`, published_at: date, draft: false,
   assets: platforms.map(platform => ({ name: `AgentsDock-${version}-${suffixes[platform]}`, browser_download_url: `https://github.com/ZhengyiLuo/${repo}/releases/download/v${version}/AgentsDock-${version}-${suffixes[platform]}` })), ...extra
 })
-const stable = release('AgentsDock', '1.0.0', '2026-09-14T23:20:43Z')
+const stable = release('AgentsDock', '1.0.6', '2026-09-22T23:00:30Z')
 const oldBeta = release('AgentsDock-Releases', '1.0.0-beta.2', '2026-09-15T00:00:00Z')
 const android = release('AgentsDock-Releases', '0.1.1-beta.8', '2026-09-15T00:01:00Z', ['android'])
 const response = body => ({ ok: true, json: async () => body })
@@ -30,7 +30,12 @@ async function render(replies) {
   const calls = []
   const pending = vm.runInNewContext(script, {
     document: {
-      querySelectorAll: selector => links.get(selector.match(/data-dl="([^"]+)"/)[1]) || [],
+      querySelectorAll: selector => {
+        const platform = selector.match(/data-dl="([^"]+)"/)
+        if (platform) return links.get(platform[1]) || []
+        if (selector === '[data-gh-stars]') return []
+        return []
+      },
       querySelector: selector => selector === '#release-version' ? label : null
     },
     fetch: async (url, options) => {
@@ -57,54 +62,62 @@ function expectDesktop(state, version) {
   assert.equal(state.label.textContent, `Version ${version}`)
 }
 
+function expectDesktopBeta(state, version) {
+  for (const platform of desktopPlatforms) {
+    assert.equal(state.links.get(platform).length, 2)
+    for (const link of state.links.get(platform)) assert.equal(link.href, `https://github.com/ZhengyiLuo/AgentsDock/releases/download/v${version}/AgentsDock-${version}-${suffixes[platform]}`)
+  }
+  assert.equal(state.label.textContent, `Desktop Beta ${version}`)
+}
+
 test('canonical desktop wins over a later legacy beta; Android stays on its legacy feed', async () => {
   const state = await render({ [canonical]: response([stable]), [legacy]: response([oldBeta, android]) })
-  expectDesktop(state, '1.0.0')
+  expectDesktop(state, '1.0.6')
   assert(state.links.get('android').every(link => link.href === android.assets[0].browser_download_url))
 })
 
 for (const [name, failed] of [
   ['HTTP failure', { ok: false, status: 403 }], ['network failure', new Error('Offline')],
   ['empty response', response([])], ['invalid response', response({ message: 'Unavailable' })]
-]) test(`canonical ${name} retains stable fallbacks without legacy desktop downgrade`, async () => {
+]) test(`canonical ${name} retains beta fallbacks without legacy desktop downgrade`, async () => {
   const state = await render({ [canonical]: failed, [legacy]: response([oldBeta, android]) })
-  expectDesktop(state, '1.0.0')
+  expectDesktopBeta(state, '1.0.8-beta.5')
   for (const platform of desktopPlatforms) assert.deepEqual(state.links.get(platform).map(link => link.href), state.initial.get(platform))
   assert(state.links.get('android').every(link => link.href === android.assets[0].browser_download_url))
 })
 
 test('Android failure leaves its fallback untouched without blocking canonical desktop', async () => {
-  const newer = release('AgentsDock', '1.1.0', '2026-09-20T00:00:00Z')
+  const newer = release('AgentsDock', '1.1.0', '2026-09-25T00:00:00Z')
   const state = await render({ [canonical]: response([stable, newer]), [legacy]: new Error('Offline') })
   expectDesktop(state, '1.1.0')
   assert.deepEqual(state.links.get('android').map(link => link.href), state.initial.get('android'))
 })
 
 test('canonical newest-per-platform policy still includes prereleases but excludes drafts', async () => {
-  const beta = release('AgentsDock', '1.1.0-beta.1', '2026-09-20T00:00:00Z', desktopPlatforms, { prerelease: true })
-  const draft = release('AgentsDock', '9.0.0', '2026-09-21T00:00:00Z', desktopPlatforms, { draft: true })
+  const beta = release('AgentsDock', '1.1.0-beta.1', '2026-09-25T00:00:00Z', desktopPlatforms, { prerelease: true })
+  const draft = release('AgentsDock', '9.0.0', '2026-09-26T00:00:00Z', desktopPlatforms, { draft: true })
   const state = await render({ [canonical]: response([draft, stable, beta]), [legacy]: response([]) })
-  expectDesktop(state, '1.1.0-beta.1')
+  expectDesktopBeta(state, '1.1.0-beta.1')
 })
 
 test('a pending Android lookup does not delay desktop links', async () => {
   let finish
-  const newer = release('AgentsDock', '1.1.0', '2026-09-20T00:00:00Z')
+  const newer = release('AgentsDock', '1.1.0', '2026-09-25T00:00:00Z')
   const state = await render({ [canonical]: response([newer]), [legacy]: () => new Promise(resolve => { finish = resolve }) })
   expectDesktop(state, '1.1.0')
   finish(response([android]))
-  await state.pending
+  await flush()
   assert(state.links.get('android').every(link => link.href === android.assets[0].browser_download_url))
   assert.equal(state.calls.length, 2)
 })
 
-test('a pending desktop lookup does not delay Android or replace stable fallbacks', async () => {
+test('a pending desktop lookup does not delay Android or replace beta fallbacks', async () => {
   let finish
   const state = await render({ [canonical]: () => new Promise(resolve => { finish = resolve }), [legacy]: response([oldBeta, android]) })
-  expectDesktop(state, '1.0.0')
+  expectDesktopBeta(state, '1.0.8-beta.5')
   assert(state.links.get('android').every(link => link.href === android.assets[0].browser_download_url))
   finish(response([stable]))
   await flush()
-  expectDesktop(state, '1.0.0')
+  expectDesktop(state, '1.0.6')
   assert.equal(state.calls.length, 2)
 })

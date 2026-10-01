@@ -22,6 +22,18 @@ painful to rediscover later.
   active server and push the latest server repository/code to GitHub so app and
   server contract versions do not drift.
 
+## 2026-10-01 - Point website desktop downloads at beta 1.0.8-beta.5
+
+- Updated the static website desktop download fallbacks, runtime release label,
+  and `website/releases/latest.json` to the public `v1.0.8-beta.5` desktop beta
+  assets for macOS, Windows, Linux x86_64, and Linux ARM64.
+- Kept mobile downloads unchanged. The homepage now labels the desktop build as
+  Beta, calls out the Windows build as an unsigned beta preview, and keeps a
+  separate stable desktop `v1.0.6` link.
+- Verified GitHub release metadata, SHA-256 entries, static local preview copy,
+  release-link tests, JSON validation, diff checks, and anonymous range
+  downloads for all four desktop assets.
+
 ## 2026-07-14 - Restore Claude reasoning choices
 
 - Fixed Claude runtime discovery after Claude Code moved the allowed `--effort`
