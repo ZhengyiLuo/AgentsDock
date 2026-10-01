@@ -5454,3 +5454,32 @@ packaged application or server runtime.
   versions, provider descendant lookup, and acknowledged subagent configuration
   receipts. These are test changes only. The original failing CI run is retained;
   the revised suite must pass before publication.
+
+### Accepted 1.0.10-beta.1 release — 2026-10-01
+
+Published matched desktop build 1245 and server 1.0.10-beta.1 from immutable
+artifact source `7790690fc91f0d6331b265820ef64234f5213abd`. The standalone
+server export is `cf22affd963c9d8a7271d071b22db321c31e723f`.
+
+- The revised complete server suite passed all eight shards in canonical run
+  `36912725627`: 5,926 tests, including seven skips, at test/docs-only descendant
+  `00d1568a4c5c2a430c081733a888b1ab0912de8c`. Packaged runtime bytes are unchanged.
+- Hosted desktop verification `36912018634`, attempt 1, passed Mac, Linux x64,
+  Linux arm64, Windows, and the final receipt job. The accepted desktop checksum
+  manifest is `bf692d32c2b86d1b117761b1a9bd46e9bbe285b11a3fa57be44f965585d4505c`.
+- Trusted npm publication `36913569068` accepted the signed package on attempt 1.
+  Registry processing delayed public downloads; attempt 3 verified the public
+  metadata and exact downloaded archive successfully, without republishing.
+  The accepted npm descriptor is
+  `01286c1d46b6c0673d849b23b258056ebba35068e195ae500e789eb82b21f3fc`.
+- Published the signed legacy server bridge, desktop beta, and identical legacy
+  desktop mirror after npm verification. Beta selects 1.0.10-beta.1; stable
+  desktop releases and npm `latest` remain 1.0.9. Windows remains unsigned.
+- Public releases: [desktop](https://github.com/ZhengyiLuo/AgentsDock/releases/tag/v1.0.10-beta.1),
+  [server](https://github.com/ZhengyiLuo/AgentsServer/releases/tag/v1.0.10-beta.1),
+  and [desktop mirror](https://github.com/ZhengyiLuo/AgentsDock-Releases/releases/tag/v1.0.10-beta.1).
+- Acceptance boundaries remain explicit: real ChatGPT-backed packaged Side chat
+  passed; deterministic reasoning presentation and custom endpoint retry cases
+  used synthetic upstreams. These results do not establish compatibility with
+  every custom service or every historical installation/migration state.
+  Publication did not install applications or restart running user servers.
