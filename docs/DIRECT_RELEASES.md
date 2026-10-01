@@ -177,8 +177,38 @@ Preserve the former private repository's history and artifacts. At the first
 public native build, stop dispatching its preparation workflow: concurrency and
 build counters are separate between repositories, so the old pipeline could
 reuse a build number. Disable the old native workflows as part of cutover and
-use only the public publisher thereafter. Do not publish the same candidate
-through both pipelines.
+use only the canonical release process thereafter. Do not publish the same
+candidate through both pipelines.
+
+### Verification-only replay with existing local publication access
+
+When the release owner has an authenticated local GitHub CLI but the dedicated
+CI publication secret is unavailable, the registered publication workflow can
+run with `verification_only=true`. Supply the independently reviewed
+`expected_source_sha` and `expected_manifest_sha256`; this mode never creates,
+publishes or edits a release. Stage the unchanged complete asset set privately
+first with the existing release helper.
+
+The inspection job uses the canonical repository's job token only to read its
+private draft. GitHub requires Contents write for that draft read; no helper
+write operation is used. The existing environment and branch restrictions remain
+in force. macOS, Linux x64, Linux ARM64 and Windows run the same native verifiers
+on the same downloaded asset set and pinned application source as normal
+publication. A separate receipt is produced only when inspection and all four
+platforms agree on the exact checksum-manifest hash. The publication and
+post-publication migration jobs are disabled in this mode.
+
+Before an explicitly authorized local publication, verify the receipt's GitHub
+run/attempt, reviewed workflow commit, source commit, version, track and manifest
+against the original downloaded artifact and successful job records. A supplied
+hash alone, a local assembly receipt or successful preparation is not this gate.
+Publish npm through the registered trusted-publishing workflow first; then use
+the existing manual helpers and normal local GitHub authentication for the
+signed legacy bridge, desktop and mirror. The desktop helper rechecks both
+repositories and public signed server paths; never replace assets or skip a
+failed verification. Do not extract or copy the local login into CI secrets.
+Keep untested acceptance boundaries separate from native package verification
+and verify public feeds after publication.
 
 ## Local verification
 

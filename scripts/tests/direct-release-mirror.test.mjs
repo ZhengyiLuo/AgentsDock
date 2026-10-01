@@ -407,18 +407,25 @@ test('workflows keep public source pinning, build once, guarded mirror writes an
 
 test('public native automation is manual, canonical, source-pinned and environment-gated before secrets', () => {
   const guard = "github.event_name == 'workflow_dispatch' && github.repository == 'ZhengyiLuo/AgentsDock' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/release/'))"
-  for (const [name, expectedJobs] of [['draft', 6], ['publish', 7]]) {
+  for (const [name, expectedJobs] of [['draft', 6], ['publish', 8]]) {
     const workflow = readFileSync(new URL(`../../.github/workflows/direct-desktop-release-${name}.yml`, import.meta.url), 'utf8')
     assert.match(workflow, /^on:\n  workflow_dispatch:/m)
     assert.doesNotMatch(workflow, /^  (?:pull_request(?:_target)?|push|workflow_run|workflow_call|schedule|release):/m)
     assert.match(workflow, /^permissions:\n  contents: read\n/m)
-    assert.doesNotMatch(workflow, /contents: write|id-token: write|secrets: inherit|AgentsDock-Internal/)
+    assert.doesNotMatch(workflow, /id-token: write|secrets: inherit|AgentsDock-Internal/)
+    if (name === 'draft') assert.doesNotMatch(workflow, /contents: write/)
     const jobs = workflow.split(/^  (?=[a-z][a-z0-9-]+:\n)/m).filter(section => /^[-a-z0-9]+:\n/.test(section) && /^    runs-on:/m.test(section))
     assert.equal(jobs.length, expectedJobs)
     for (const job of jobs) {
       const condition = job.match(/^    if: (.+)$/m)?.[1]
       assert.ok(condition?.includes(guard), `manual canonical trusted-ref guard missing from ${job.split('\n')[0]}`)
       if (job.includes('secrets.')) assert.match(job, /^    environment: direct-production$/m, `secret job is unprotected: ${job.split('\n')[0]}`)
+      if (job.includes('contents: write')) {
+        assert.equal(name, 'publish')
+        assert.ok(job.startsWith('inspect-draft:\n'))
+        assert.match(job, /^    permissions:\n      contents: write$/m)
+        assert.match(job, /inputs\.verification_only && github\.token \|\| secrets\.AGENTSDOCK_RELEASE_TOKEN/)
+      }
     }
     const checkouts = workflow.split(/      - uses: actions\/checkout@[0-9a-f]+/).slice(1)
     for (const checkout of checkouts) assert.match(checkout.split(/\n      - /)[0], /persist-credentials: false/)

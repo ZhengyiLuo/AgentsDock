@@ -1,5 +1,23 @@
 # Public development log
 
+## 2026-10-01 — Preserve native verification for an authenticated manual release
+
+- Add a verification-only mode to the existing desktop publication workflow.
+  Read the source/hash-pinned private canonical draft with the repository job
+  token; keep the four native verification jobs unchanged. Publish no release
+  from this mode and require all five matching inspection/platform seals before
+  recording a provenance-bound verification receipt.
+- Preserve the normal protected publisher. An explicitly authorized manual
+  release may use existing local GitHub authentication only after checking the
+  successful hosted receipt and unchanged assets; npm still uses its registered
+  trusted-publishing workflow. No credentials are extracted or copied into CI.
+- Keep the frozen `1.0.9` source, build 1243 and all package bytes unchanged.
+  This is release-verification tooling, not new runtime behavior or completion
+  of the separately documented migration, busy-work, setup and reboot checks.
+- Pass all 319 release-tooling/npm CLI tests, workflow YAML parsing and diff
+  checks. Confirm the four native verifier job bodies are byte-identical to the
+  frozen application source; their next hosted execution is a separate gate.
+
 ## 2026-10-01 — Exercise the frozen 1.0.9 package with real Codex
 
 - Review a separate native acceptance receipt for the unchanged signed Mac

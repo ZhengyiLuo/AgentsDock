@@ -23,6 +23,21 @@ on:
         required: true
         default: false
         type: boolean
+      verification_only:
+        description: Verify the pinned canonical draft on all four native platforms without publishing
+        required: false
+        default: false
+        type: boolean
+      expected_source_sha:
+        description: Exact full artifact source SHA (required for verification-only)
+        required: false
+        default: ''
+        type: string
+      expected_manifest_sha256:
+        description: Exact full asset-set SHA256SUMS digest (required for verification-only)
+        required: false
+        default: ''
+        type: string
       migration_qa_sha:
         description: Full reviewed public QA commit for native updater migration (required for stable 1.0.0)
         required: false
@@ -47,6 +62,11 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     environment: direct-production
+    # GitHub requires Contents write to see private drafts with GITHUB_TOKEN.
+    # Verification-only uses a GET/download-only client; normal publication
+    # continues to use the dedicated cross-repository release credential.
+    permissions:
+      contents: write
     outputs:
       coordinated_updates: ${{ steps.inspect.outputs.coordinated_updates }}
       source_sha: ${{ steps.inspect.outputs.source_sha }}
@@ -62,6 +82,7 @@ jobs:
           git check-ref-format "$GITHUB_REF"
 
       - name: Validate the optional independently pinned migration QA
+        if: ${{ !inputs.verification_only }}
         env:
           MIGRATION_QA_SHA: ${{ inputs.migration_qa_sha }}
           RELEASE_VERSION: ${{ inputs.version }}
@@ -90,17 +111,30 @@ jobs:
       - id: inspect
         name: Validate draft identity and exact asset set
         env:
-          GH_TOKEN: ${{ secrets.AGENTSDOCK_RELEASE_TOKEN }}
+          GH_TOKEN: ${{ inputs.verification_only && github.token || secrets.AGENTSDOCK_RELEASE_TOKEN }}
           RELEASE_VERSION: ${{ inputs.version }}
           RELEASE_TRACK: ${{ inputs.track }}
           ALLOW_UNSIGNED_WINDOWS: ${{ inputs.allow_unsigned_windows }}
           LEGACY_RELEASE_TAG: ${{ inputs.legacy_tag }}
+          VERIFICATION_ONLY: ${{ inputs.verification_only }}
+          EXPECTED_SOURCE_SHA: ${{ inputs.expected_source_sha }}
+          EXPECTED_MANIFEST_SHA256: ${{ inputs.expected_manifest_sha256 }}
         run: |
-          node scripts/direct-release-mirror.mjs inspect \
-            --version "$RELEASE_VERSION" --track "$RELEASE_TRACK" \
-            --allow-unsigned-windows "$ALLOW_UNSIGNED_WINDOWS" \
-            --legacy-tag "$LEGACY_RELEASE_TAG" \
-            --assets "$RUNNER_TEMP/release" >> "$GITHUB_OUTPUT"
+          if [[ "$VERIFICATION_ONLY" = true ]]; then
+            node scripts/direct-release-verification.mjs inspect \
+              --verification-only "$VERIFICATION_ONLY" \
+              --version "$RELEASE_VERSION" --track "$RELEASE_TRACK" \
+              --expected-source-sha "$EXPECTED_SOURCE_SHA" \
+              --expected-manifest-sha256 "$EXPECTED_MANIFEST_SHA256" \
+              --allow-unsigned-windows "$ALLOW_UNSIGNED_WINDOWS" \
+              --assets "$RUNNER_TEMP/release" >> "$GITHUB_OUTPUT"
+          else
+            node scripts/direct-release-mirror.mjs inspect \
+              --version "$RELEASE_VERSION" --track "$RELEASE_TRACK" \
+              --allow-unsigned-windows "$ALLOW_UNSIGNED_WINDOWS" \
+              --legacy-tag "$LEGACY_RELEASE_TAG" \
+              --assets "$RUNNER_TEMP/release" >> "$GITHUB_OUTPUT"
+          fi
 
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
@@ -404,8 +438,49 @@ jobs:
           $Hash = (Get-FileHash -Algorithm SHA256 -LiteralPath "$env:RUNNER_TEMP/release/SHA256SUMS").Hash.ToLowerInvariant()
           "manifest_sha256=$Hash" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
 
+  verification-receipt:
+    if: github.event_name == 'workflow_dispatch' && github.repository == 'ZhengyiLuo/AgentsDock' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/release/')) && inputs.verification_only
+    needs:
+      - inspect-draft
+      - verify-macos
+      - verify-linux-x64
+      - verify-linux-arm64
+      - verify-windows-x64
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    environment: direct-production
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+        with:
+          persist-credentials: false
+
+      - name: Record successful native verification without publication
+        env:
+          VERIFICATION_ONLY: ${{ inputs.verification_only }}
+          RELEASE_VERSION: ${{ inputs.version }}
+          RELEASE_TRACK: ${{ inputs.track }}
+          EXPECTED_SOURCE_SHA: ${{ inputs.expected_source_sha }}
+          EXPECTED_MANIFEST_SHA256: ${{ inputs.expected_manifest_sha256 }}
+          DIRECT_RELEASE_VERIFICATION_NEEDS: ${{ toJSON(needs) }}
+        run: |
+          node scripts/direct-release-verification.mjs receipt \
+            --verification-only "$VERIFICATION_ONLY" \
+            --version "$RELEASE_VERSION" --track "$RELEASE_TRACK" \
+            --expected-source-sha "$EXPECTED_SOURCE_SHA" \
+            --expected-manifest-sha256 "$EXPECTED_MANIFEST_SHA256" \
+            --workflow-sha "$GITHUB_WORKFLOW_SHA" --workflow-ref "$GITHUB_WORKFLOW_REF" \
+            --run-id "$GITHUB_RUN_ID" --run-attempt "$GITHUB_RUN_ATTEMPT" \
+            > "$RUNNER_TEMP/direct-desktop-platform-verification.json"
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: AgentsDock-${{ inputs.version }}-platform-verification-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/direct-desktop-platform-verification.json
+          if-no-files-found: error
+          retention-days: 14
+
   publish:
-    if: github.event_name == 'workflow_dispatch' && github.repository == 'ZhengyiLuo/AgentsDock' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/release/'))
+    if: github.event_name == 'workflow_dispatch' && github.repository == 'ZhengyiLuo/AgentsDock' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/release/')) && !inputs.verification_only
     needs:
       - inspect-draft
       - verify-macos
@@ -515,7 +590,7 @@ jobs:
 
   verify-native-migration:
     needs: [inspect-draft, publish]
-    if: ${{ github.event_name == 'workflow_dispatch' && github.repository == 'ZhengyiLuo/AgentsDock' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/release/')) && inputs.migration_qa_sha != '' }}
+    if: ${{ github.event_name == 'workflow_dispatch' && github.repository == 'ZhengyiLuo/AgentsDock' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/release/')) && !inputs.verification_only && inputs.migration_qa_sha != '' }}
     strategy:
       fail-fast: false
       matrix:
