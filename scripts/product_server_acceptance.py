@@ -49,7 +49,7 @@ SESSION_KEYS = ("id", "title", "folder", "cwd", "backend", "model", "effort",
 # rollback deliberately do not restore broader legacy directory permissions.
 # Keep this whole-file pin: changed installer logic requires another review,
 # not a looser source-pattern match or a changed signed candidate.
-ROOT_NORMALIZING_INSTALLER_SHA256 = "df21400431ea5f79a78d4f6cede5cfae4f7584166798565c38f5dffff70f38e3"
+ROOT_NORMALIZING_INSTALLER_SHA256 = "1ad0dc6fc8255959cbd15da08239331401f44467760490818a5669f6f3f75f15"
 ROLLBACK_STAGES = {"preflight", "start-request", "observe-rollback", "rollback-proof", "preservation",
                    "retry-request", "retry-health", "retry-completion", "retry-verification"}
 

@@ -9,6 +9,13 @@ turn blocked or unobserved scenarios into full release acceptance.
 
 ## Current delivery status
 
+Source preparation for `1.0.8-beta.5` adds bounded contention handling to the
+pinned installer preparation/activation path. It retains the beta.4 desktop
+contribution and all existing admission/identity safeguards. It is not yet a
+signed or accepted candidate. Beta.4's frozen artifacts and evidence below are
+retained; none may be relabeled as beta.5 acceptance. Stable npm `1.0.8` must
+remain unchanged.
+
 The newest prepared candidate is `1.0.8-beta.4`, build 1241, from source
 `1a99b00b6e50271bc97dadd12ec3d701c3168809`. Its universal Mac app is signed,
 notarized and checked; its matched npm/legacy archives retain the existing

@@ -1,5 +1,32 @@
 # Public development log
 
+## 2026-10-01 — Prepare beta.5 with bounded installer-lock contention
+
+- Retain the latest reviewed desktop contribution from beta.4 and prepare
+  `1.0.8-beta.5` as a new matched app/npm/legacy candidate. Beta.4's signed
+  artifacts and original failed Linux replay remain immutable and unpublished.
+- Pinned server preparation and activation may now wait up to 30 seconds for
+  a safe live installation-lock owner to retire. One monotonic deadline covers
+  owner changes. Acquisition still requires the atomic rename; root identity,
+  prepared receipt, update ownership and repeated admission checks remain
+  mandatory. Ordinary installation and recovery stay fail-fast. Unsafe locks
+  fail immediately, and cancellation never removes or signals the incumbent.
+- Add real independent-process lock-boundary regressions for preparation and
+  activation, timeout, cancellation, changing owners, unsafe/replaced paths,
+  retirement races and post-acquisition admission. These disposable tests do
+  not run service or dependency installation. The before-fix contender fails
+  under the held lock; the corrected contender proceeds only after release.
+- All 144 focused installer/update tests pass, including 12 new contention
+  regressions. Release/npm CLI tests (295), packaging/preparation/export checks
+  (58), native-harness checks (89), coordinator tests (73), Electron typecheck
+  and shell syntax checks pass. Make one existing unsafe-directory fixture's
+  permissions explicit without changing its rejection assertion.
+- This corrects the reproduced contention mechanism, not a proven cause of the
+  earlier CI timeout. Source checks do not establish native migration or
+  packaged-app update acceptance. Fresh signed packages and exact-package
+  native replays are still required before beta.5 publication. Stable npm
+  `1.0.8`, `latest`, stable desktop and legacy feeds remain unchanged.
+
 ## 2026-09-30 — Validate the beta.4 desktop and matched server candidate
 
 - Freeze the reviewed desktop changes and all matched server artifacts at
