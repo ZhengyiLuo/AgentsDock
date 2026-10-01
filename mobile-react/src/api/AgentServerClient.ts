@@ -133,6 +133,13 @@ export class AgentServerClientUnvalidatedError extends Error {
   }
 }
 
+export class AgentServerTurnAcceptedError extends Error {
+  constructor(cause: unknown) {
+    super('The server accepted this message, but its response could not be reconciled. Refresh the chat before sending it again.', { cause })
+    this.name = 'AgentServerTurnAcceptedError'
+  }
+}
+
 export class WebSocketConnectionError extends Error {
   constructor(
     public code: number,
@@ -505,7 +512,7 @@ export class AgentServerClient {
     return (await this.get<{ results?: TimelineSearchResult[] }>(`/api/search?${params}`)).results ?? []
   }
 
-  sendTurn(
+  async sendTurn(
     sessionId: string,
     prompt: string,
     fileIds: string[],
@@ -526,7 +533,17 @@ export class AgentServerClient {
     if (clientCapabilities.length) body.client_capabilities = [...clientCapabilities]
     if (chatReferences.length) body.chat_references = chatReferences.map(reference => ({ ...reference }))
     if (teamReferences.length) body.team_references = teamReferences.map(reference => ({ ...reference }))
-    return this.post(`/api/sessions/${encodeURIComponent(sessionId)}/turns`, body)
+    let accepted = false
+    try {
+      return await this.request(`/api/sessions/${encodeURIComponent(sessionId)}/turns`, {
+        method: 'POST', body: JSON.stringify(body),
+      }, 30_000, false, 'standard', () => { accepted = true })
+    } catch (error) {
+      // A received success cannot become an unsent draft because validation
+      // changed or decoding failed after the server had accepted the message.
+      if (accepted) throw new AgentServerTurnAcceptedError(error)
+      throw error
+    }
   }
   async stopTurn(sessionId: string): Promise<TurnStopResult> {
     const response = await this.post<Partial<TurnStopResult>>(`/api/sessions/${encodeURIComponent(sessionId)}/stop`, {})
@@ -1051,6 +1068,7 @@ export class AgentServerClient {
     timeoutMs = 30_000,
     allowUnvalidated = false,
     authentication: 'standard' | 'team-network' | 'native-control' = 'standard',
+    onAccepted?: () => void,
   ): Promise<T> {
     const scope = this.captureScope(allowUnvalidated)
     const headers = new Headers(init.headers)
@@ -1059,7 +1077,7 @@ export class AgentServerClient {
       : authHeaders(scope.configuration.token)
     for (const [key, value] of Object.entries(credentials)) headers.set(key, value)
     if (init.body && !(init.body instanceof FormData)) headers.set('Content-Type', 'application/json')
-    const response = await this.fetchWithTimeout(buildURL(scope.configuration.baseURL, path), { ...init, headers }, timeoutMs, scope.signal)
+    const response = await this.fetchWithTimeout(buildURL(scope.configuration.baseURL, path), { ...init, headers }, timeoutMs, scope.signal, onAccepted)
     if (!response.ok) {
       const error = await this.serverError(response)
       this.assertScopeActive(scope)
@@ -1075,7 +1093,7 @@ export class AgentServerClient {
     this.assertScopeActive(scope)
     return value
   }
-  private async fetchWithTimeout(url: string, init: RequestInit, timeoutMs: number, scopeSignal: AbortSignal): Promise<Response> {
+  private async fetchWithTimeout(url: string, init: RequestInit, timeoutMs: number, scopeSignal: AbortSignal, onAccepted?: () => void): Promise<Response> {
     const controller = new AbortController()
     const externalSignals = [scopeSignal, init.signal].filter((signal): signal is AbortSignal => Boolean(signal))
     const abortListeners: Array<{ signal: AbortSignal; listener: () => void }> = []
@@ -1090,6 +1108,7 @@ export class AgentServerClient {
     const timer = setTimeout(() => controller.abort(), timeoutMs)
     try {
       const response = await fetch(url, { ...init, signal: controller.signal })
+      if (response.ok) onAccepted?.()
       if (scopeSignal.aborted) this.throwScopeAbort(scopeSignal)
       return response
     } catch (error) {

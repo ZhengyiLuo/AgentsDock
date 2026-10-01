@@ -1,4 +1,21 @@
-# Mobile / Mac parity — 2026-09-22
+# Mobile / Mac parity — 2026-10-01
+
+## Unreleased: reasoning controls and send acknowledgement
+
+- Match committed desktop `adb5fea`'s reasoning availability during active
+  work: model-scoped choices remain separate from reload/backend restrictions.
+  Keep save/error feedback visible and reject obsolete choice callbacks.
+- Chat details uses inline runtime choices with an explicit close action;
+  failures are shown within that screen rather than behind its native sheet.
+- Input clearing follows exact composer consumption, including delayed
+  preflight, never a late response that could erase a subsequent draft.
+- A received successful turn response cannot be rolled back into an unsent
+  draft when decoding or validation fails. Preserve new content and recover
+  by reading; never automatically resend the accepted message.
+- Regressions cover busy/idle, repeated selection, locked/default choices,
+  reconnect/scope changes and accepted/rejected/delayed responses. Native
+  hosts and server responses are mocked; actual iPhone input/dictation and
+  real-service acceptance are still pending. These changes are not released.
 
 ## Unreleased: sidebar search and current cross-chat bubbles
 

@@ -115,7 +115,7 @@ test('audited keyboard and failure paths cannot swallow the first tap silently',
   const artifactViewer = fs.readFileSync(path.resolve('src/components/file-viewer/ArtifactFileViewerModal.tsx'), 'utf8')
   const terminal = fs.readFileSync(path.resolve('src/components/TerminalView.tsx'), 'utf8')
   assert.match(controls, /<ScrollView[\s\S]*?testID="codex-controls-scroll"[\s\S]*?keyboardShouldPersistTaps="always"/)
-  assert.match(inspector, /<ScrollView keyboardShouldPersistTaps="always">/)
+  assert.match(inspector, /<ScrollView testID=\{`\$\{testID\}-list`\} style=\{styles\.choiceList\} keyboardShouldPersistTaps="always" nestedScrollEnabled>/)
   assert.match(terminal, /<ScrollView horizontal keyboardShouldPersistTaps="always"/)
   assert.match(media, /<FileTransferNotice state=\{transfer\.state\}/)
   assert.doesNotMatch(media, /media failures stay local to the invoked action/)

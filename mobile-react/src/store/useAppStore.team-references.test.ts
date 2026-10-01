@@ -190,9 +190,9 @@ try {
     client.revokeValidation()
     gate.resolve(response())
     assert.equal(await sending, false)
-    const restored = `${admitted}\n\n${newer}`
-    assert.equal(useAppStore.getState().drafts[SESSION], restored)
-    assert.deepEqual(useAppStore.getState().teamReferencesBySession[SESSION], [reference(restored), reference(restored, 'Other', 'server-other')])
+    assert.equal(useAppStore.getState().drafts[SESSION], newer)
+    assert.deepEqual(useAppStore.getState().teamReferencesBySession[SESSION], [reference(newer, 'Other', 'server-other')])
+    assert.match(useAppStore.getState().error ?? '', /accepted.*[Rr]efresh.*before sending it again/u)
     client.markValidated()
   })
 
