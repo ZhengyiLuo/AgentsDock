@@ -5359,3 +5359,27 @@ fresh approval. No production restart or deployment performed.
   ordered reads, idempotent receipt reuse, and idle mailbox wake passed. Provider
   inference was synthetic. Desktop packaged acceptance remains a release check.
 - Availability: source correction only; no live service deployment or restart.
+
+## 2026-10-01 — Restore Codex endpoint handoff and video controls
+
+- Restored normal/custom Codex selection in existing conversations, including
+  pending selection visibility and automatic handoff when owned work finishes.
+  Handoff preserves native history and goal state, releases the old native writer,
+  and restores previously unarchived descendants. Reset credentials no longer
+  prevent switching back to ordinary Codex. Ordinary account credentials remain
+  separate.
+- Restored scrolling inside the native video playback-speed menu while keeping
+  the surrounding media dialog's scroll behavior.
+- Preserve malformed custom Responses stream error details through a narrow owned
+  transport, so native Codex can report the actual upstream failure. Valid stream
+  frames remain unchanged; retries stay native and no user task is replayed.
+- Validation: compiled desktop app through real IPC and authenticated server with
+  native Codex 0.159.2 and synthetic upstreams. Switched the same chat in both
+  directions, retained history and a blocked goal, kept an unrelated chat running,
+  displayed an upstream rate-limit failure, and successfully sent again afterward.
+  Tested native retry recovery, stream cancellation, credential isolation, and
+  targeted provider/UI regressions. Chromium's native speed menu scrolled both
+  directions and applied 2x playback. Desktop type checking and compilation passed.
+- These are source and local acceptance results, not an accepted release. The
+  integrated signed package, real upstream accounts, and installation/update paths
+  still require release validation. No live service was changed by this work.

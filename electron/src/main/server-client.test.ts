@@ -16,6 +16,7 @@ import { PinRevisionConflictError } from './pin-sync'
 import { TEAM_MAIL_HINTS_PATH, TEAM_MAIL_HINTS_PROTOCOL, type MailboxCoverage } from '../shared/team-mail-hints'
 import { emptyBulletinCursor, TEAM_ACTIVITY_HINTS_PROTOCOL, type BulletinChangeCursor } from '../shared/team-bulletin-hints'
 import { appLog } from './logger'
+import { sessionRuntimeForNextTurn } from '../shared/runtime-catalog'
 
 vi.mock('./logger', () => ({ appLog: vi.fn() }))
 
@@ -1713,6 +1714,66 @@ describe('AgentServerClient live stream', () => {
     expect(runtimePackets).toHaveLength(1)
     expect(runtimePackets[0]).toMatchObject({ session_id: 'chat', usage_generation: 7 })
     expect(received).toHaveLength(1)
+    expect(String(FakeWebSocket.instances[1].url)).toContain('after=6')
+    stop()
+  })
+
+  it('routes acknowledged subagent limits without treating them as timeline events', () => {
+    vi.useFakeTimers()
+    vi.spyOn(Math, 'random').mockReturnValue(0)
+    vi.stubGlobal('WebSocket', FakeWebSocket)
+    const received = vi.fn()
+    const runtime = vi.fn()
+    const client = new AgentServerClient('http://example.test:7850', 'token')
+    const stop = client.stream('chat', 5, received, () => {}, runtime)
+    const first = FakeWebSocket.instances[0]
+    const pending = {
+      type: 'provider_runtime_changed', session_id: 'chat', backend: 'codex', runtime: 'subagent_limit', ephemeral: true,
+      subagent_limit: 64, subagent_limit_control: { supported: true, applies_to: 'automatically_when_idle',
+        application_state: 'pending', requested_limit: 64, effective_limit: 16 }
+    }
+    const applied = { ...pending, subagent_limit_control: { ...pending.subagent_limit_control,
+      application_state: 'applied', effective_limit: 64 } }
+    first.emit('message', JSON.stringify(pending))
+    first.emit('message', JSON.stringify(applied))
+    first.emit('message', JSON.stringify({ ...applied, session_id: 'another-chat' }))
+    for (const subagent_limit of [undefined, -1, 0, '64', 1.5]) {
+      first.emit('message', JSON.stringify({ ...applied, seq: 900, subagent_limit }))
+    }
+    first.emit('message', JSON.stringify({ ...applied, seq: 900, subagent_limit_control: { ...applied.subagent_limit_control, effective_limit: '64' } }))
+    first.emit('message', JSON.stringify({ id: 'e6', session_id: 'chat', seq: 6, type: 'assistant_text', ts: 'now' }))
+    first.emit('close')
+    vi.advanceTimersByTime(500)
+    expect(runtime.mock.calls.map(([value]) => value)).toEqual([pending, applied])
+    expect(received).toHaveBeenCalledOnce()
+    expect(String(FakeWebSocket.instances[1].url)).toContain('after=6')
+    stop()
+  })
+
+  it('routes Codex endpoint session changes without advancing the timeline cursor', () => {
+    vi.useFakeTimers()
+    vi.spyOn(Math, 'random').mockReturnValue(0)
+    vi.stubGlobal('WebSocket', FakeWebSocket)
+    const received = vi.fn(), runtime = vi.fn()
+    const client = new AgentServerClient('http://example.test:7850', 'token')
+    const stop = client.stream('chat', 5, received, () => {}, runtime)
+    const first = FakeWebSocket.instances[0]
+    const session = { id: 'chat', title: 'Chat', backend: 'codex', codex_provider: 'custom',
+      model: 'new-model', codex_provider_catalog: { available: true, configured: true,
+        model: 'new-model', base_url: 'https://new.example/v1' } }
+    const packet = { type: 'provider_runtime_changed', session_id: 'chat', backend: 'codex',
+      runtime: 'codex_provider', ephemeral: true, session }
+    first.emit('message', JSON.stringify(packet))
+    for (const invalid of [
+      { ...packet, session_id: 'another-chat' }, { ...packet, session: { ...session, id: 'another-chat' } },
+      { ...packet, backend: 'claude' }, { ...packet, session: null },
+      { ...packet, session: { ...session, codex_provider: 'invalid' } }
+    ]) first.emit('message', JSON.stringify({ ...invalid, seq: 900 }))
+    first.emit('message', JSON.stringify({ id: 'e6', session_id: 'chat', seq: 6, type: 'assistant_text', ts: 'now' }))
+    first.emit('close')
+    vi.advanceTimersByTime(500)
+    expect(runtime).toHaveBeenCalledExactlyOnceWith(packet)
+    expect(received).toHaveBeenCalledOnce()
     expect(String(FakeWebSocket.instances[1].url)).toContain('after=6')
     stop()
   })
@@ -3793,5 +3854,44 @@ describe('AgentServerClient emergency contact bridge', () => {
     expect(socket.closed).toBe(true)
     expect(FakeWebSocket.instances).toHaveLength(1)
     expect(states).toEqual([{ connected: false, error }])
+  })
+})
+
+
+describe('pending Codex runtime compatibility over native HTTP', () => {
+  it('inherits unreported legacy settings while preserving explicit default and selected overrides', async () => {
+    const oldSession: Session = { id: 'legacy-chat', title: 'Legacy', backend: 'codex',
+      codex_provider: 'default', model: 'old-active', effort: 'xhigh',
+      codex_provider_control: { pending: true, active_provider: 'default', requested_provider: 'custom',
+        active_base_url: null, requested_base_url: 'https://synthetic.example/v1' } }
+    // These saved choices exist on the legacy server but are absent from its public session response.
+    const saved = { model: 'saved-custom-model', effort: 'low' }
+    const received: Record<string, unknown>[] = []
+    await withLocalHTTPServer(async (request, response) => {
+      expect(request.method).toBe('POST')
+      expect(request.url).toBe('/api/sessions/legacy-chat/turns')
+      expect(request.headers['x-agentsdock-token']).toBe('synthetic-token')
+      const payload = JSON.parse(await incomingBody(request)) as Record<string, unknown>
+      received.push(payload)
+      // Existing server admission updates only fields supplied with a non-null value.
+      if (typeof payload.model === 'string') saved.model = payload.model
+      if (typeof payload.effort === 'string') saved.effort = payload.effort
+      response.setHeader('Content-Type', 'application/json')
+      response.end(JSON.stringify({ session: oldSession, queued: false }))
+    }, async baseURL => {
+      const client = new AgentServerClient(baseURL, 'synthetic-token')
+      try {
+        const selected = sessionRuntimeForNextTurn(oldSession)
+        await client.sendTurn(oldSession.id, 'Keep the saved choice', [], selected.model, selected.effort)
+        expect(saved).toEqual({ model: 'saved-custom-model', effort: 'low' })
+        expect(received[0]).not.toHaveProperty('model')
+        expect(received[0]).not.toHaveProperty('effort')
+        await client.sendTurn(oldSession.id, 'Choose defaults', [], null, null)
+        expect(saved).toEqual({ model: '', effort: '' })
+        await client.sendTurn(oldSession.id, 'Choose explicit settings', [], 'another-model', 'high')
+        expect(saved).toEqual({ model: 'another-model', effort: 'high' })
+      } finally { client.dispose() }
+    })
+    expect(received).toHaveLength(3)
   })
 })

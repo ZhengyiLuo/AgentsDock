@@ -1418,13 +1418,71 @@ describe('Composer', () => {
     expect(update).not.toHaveBeenCalled()
   })
 
-  it('keeps the custom provider fixed once the native thread starts', () => {
-    useAppStore.setState({ sessions: [{ id: 'chat-1', title: 'Chat', backend: 'codex', codex_provider: 'custom', codex_thread_id: 'native-custom' }] })
+  it('switches an established Codex conversation in both directions without offering other backends', async () => {
+    const original: Session = { id: 'chat-1', title: 'Chat', backend: 'codex', codex_provider: 'custom', codex_thread_id: 'native-custom', model: 'custom-model', effort: 'high', backend_locked: true }
+    const update = vi.fn().mockImplementation(async (_id, patch) => ({ ...original, ...patch }))
+    window.agentsDock.sessions = { update } as unknown as AgentsDockAPI['sessions']
+    useAppStore.setState({ sessions: [original],
+      health: { ok: true, capabilities: { codex_provider_v1: { per_chat: true, per_chat_models: true } } },
+      runtimeCatalog: { backends: { codex: { models: [], efforts: [], custom_provider: {
+        configured: true, available: true, model: 'custom-model', base_url: 'https://endpoint.example/v1'
+      } } } } })
+    const user = userEvent.setup()
     render(<Composer />)
-    const chip = screen.getByTitle('Backend is fixed after the provider session starts')
-    expect(chip).toBeDisabled()
-    expect(chip).toHaveTextContent('Codex · Custom')
-    expect(chip).toHaveAccessibleName('Codex runtime · Custom endpoint')
+    await user.click(screen.getByTitle('Change Codex endpoint'))
+    expect(screen.queryByRole('menuitemcheckbox', { name: 'Claude' })).not.toBeInTheDocument()
+    await user.click(screen.getByRole('menuitemcheckbox', { name: 'Codex' }))
+    await waitFor(() => expect(update).toHaveBeenCalledWith('chat-1', expect.objectContaining({ backend: 'codex', codex_provider: 'default', model: null, effort: null })))
+    expect(useAppStore.getState().sessions[0].codex_thread_id).toBe('native-custom')
+    await user.click(screen.getByTitle('Change Codex endpoint'))
+    await user.click(screen.getByRole('menuitemcheckbox', { name: 'Codex runtime · Custom endpoint' }))
+    await waitFor(() => expect(update).toHaveBeenLastCalledWith('chat-1', expect.objectContaining({ backend: 'codex', codex_provider: 'custom' })))
+    expect(useAppStore.getState().sessions[0].codex_thread_id).toBe('native-custom')
+  })
+
+  it('saves an endpoint switch during a running Codex turn and shows active versus pending state', async () => {
+    const original: Session = { id: 'chat-1', title: 'Chat', backend: 'codex', codex_provider: 'custom', codex_thread_id: 'native-custom' }
+    const update = vi.fn().mockResolvedValue({ ...original, codex_provider_control: {
+      pending: true, active_provider: 'custom', requested_provider: 'default',
+      active_base_url: 'https://endpoint.example/v1', requested_base_url: null
+    } })
+    window.agentsDock.sessions = { update } as unknown as AgentsDockAPI['sessions']
+    useAppStore.setState({ sessions: [original], activeSessionIds: new Set(['chat-1']) })
+    const user = userEvent.setup()
+    render(<Composer />)
+    await user.click(screen.getByTitle('Change Codex endpoint'))
+    await user.click(screen.getByRole('menuitemcheckbox', { name: 'Codex' }))
+    await screen.findByLabelText('Selection saved. Applies when running work finishes.')
+    expect(screen.getByTitle('Change Codex endpoint')).toHaveTextContent('Codex · Custom · Saved')
+    expect(useAppStore.getState().activeSessionIds.has('chat-1')).toBe(true)
+    await user.click(screen.getByTitle('Change Codex endpoint'))
+    expect(screen.getByRole('menuitemcheckbox', { name: 'Codex' })).toHaveAttribute('aria-checked', 'true')
+  })
+
+  it('keeps the current Codex endpoint and displays the server error if switching fails', async () => {
+    const original: Session = { id: 'chat-1', title: 'Chat', backend: 'codex', codex_provider: 'custom', codex_thread_id: 'native-custom', model: 'custom-model', effort: 'high' }
+    const update = vi.fn().mockRejectedValue(new Error('This server cannot change the endpoint of an existing thread.'))
+    window.agentsDock.sessions = { update } as unknown as AgentsDockAPI['sessions']
+    useAppStore.setState({ sessions: [original] })
+    const user = userEvent.setup()
+    render(<Composer />)
+    await user.click(screen.getByTitle('Change Codex endpoint'))
+    await user.click(screen.getByRole('menuitemcheckbox', { name: 'Codex' }))
+    await waitFor(() => expect(useAppStore.getState().error).toBe('This server cannot change the endpoint of an existing thread.'))
+    expect(useAppStore.getState().sessions[0]).toEqual(original)
+    expect(screen.getByTitle('Change Codex endpoint')).toHaveTextContent('Codex · Custom')
+  })
+
+  it('opens endpoint settings from an existing normal Codex conversation', async () => {
+    const update = vi.fn()
+    window.agentsDock.sessions = { update } as unknown as AgentsDockAPI['sessions']
+    useAppStore.setState({ sessions: [{ id: 'chat-1', title: 'Chat', backend: 'codex', codex_thread_id: 'native-normal' }] })
+    const user = userEvent.setup()
+    render(<Composer />)
+    await user.click(screen.getByTitle('Change Codex endpoint'))
+    await user.click(screen.getByRole('menuitem', { name: 'Codex runtime · Custom endpoint Configure in Settings' }))
+    expect(useAppStore.getState().modals.appSettings).toBe(true)
+    expect(update).not.toHaveBeenCalled()
   })
 
   it('changes custom endpoint models and effort in the usual picker and permits an unlisted model', async () => {
@@ -1450,6 +1508,82 @@ describe('Composer', () => {
     await user.type(screen.getByLabelText('Model ID'), 'provider/unlisted')
     await user.click(screen.getByRole('button', { name: 'Use model' }))
     await waitFor(() => expect(update).toHaveBeenLastCalledWith('chat-1', { model: 'provider/unlisted', effort: null }))
+  })
+
+  it('keeps a pending custom model and effort visible after PATCH and sends the saved settings', async () => {
+    const customCatalog = { configured: true, available: true, model: 'custom-a', base_url: 'https://custom.example/v1',
+      models: [{ value: 'custom-a', label: 'Custom A' }, { value: 'custom-b', label: 'Custom B' }],
+      model_efforts: { 'custom-a': [{ value: 'low', label: 'Low' }, { value: 'high', label: 'High' }], 'custom-b': [{ value: 'low', label: 'Low' }] } }
+    const active: Session = { id: 'chat-1', title: 'Chat', backend: 'codex', backend_locked: true,
+      codex_provider: 'default', model: 'normal-old', effort: 'xhigh', codex_thread_id: 'native-parent',
+      codex_provider_control: { pending: true, active_provider: 'default', requested_provider: 'custom',
+        active_base_url: null, requested_base_url: customCatalog.base_url,
+        requested_model: 'custom-a', requested_effort: 'high', requested_catalog: customCatalog } }
+    let saved = active
+    const update = vi.fn().mockImplementation(async (_id, patch) => {
+      saved = { ...active, codex_provider_control: { ...saved.codex_provider_control!,
+        ...('model' in patch ? { requested_model: patch.model } : {}),
+        ...('effort' in patch ? { requested_effort: patch.effort } : {}) } }
+      return saved
+    })
+    const reloadProvider = vi.fn()
+    const send = vi.fn().mockImplementation(async () => ({ session: saved, queued: false }))
+    window.agentsDock.sessions = { update, reloadProvider } as unknown as AgentsDockAPI['sessions']
+    window.agentsDock.turns = { send } as unknown as AgentsDockAPI['turns']
+    useAppStore.setState({ sessions: [active], health: { ok: true, capabilities: { codex_provider_v1: { per_chat: true, per_chat_models: true } }, runtimes: {
+      codex: { backend: 'codex', status: 'unauthenticated', available: false, message: 'Normal Codex needs login' }
+    } }, runtimeCatalog: { backends: { codex: { models: [{ value: 'normal-old', label: 'Normal old', locked: true }], efforts: [{ value: 'xhigh', label: 'XHigh' }],
+      custom_provider: { configured: false, available: false, model: null, base_url: null } } } } })
+    const user = userEvent.setup()
+    const { container } = render(<Composer />)
+    expect(screen.getByTitle('Change Codex endpoint')).toHaveTextContent('Codex · Saved')
+    expect(screen.queryByText('Normal Codex needs login')).not.toBeInTheDocument()
+    const chip = () => container.querySelector<HTMLButtonElement>('.runtime-chip')!
+    expect(chip()).toHaveTextContent('Custom A · High')
+    await user.click(chip())
+    expect(screen.queryByRole('menuitemcheckbox', { name: /Normal old/ })).not.toBeInTheDocument()
+    await user.click(screen.getByRole('menuitemcheckbox', { name: 'Low' }))
+    await waitFor(() => expect(update).toHaveBeenLastCalledWith('chat-1', { effort: 'low' }))
+    expect(useAppStore.getState().sessions[0].effort).toBe('xhigh')
+    expect(chip()).toHaveTextContent('Custom A · Low')
+    await user.click(chip())
+    expect(screen.getByRole('menuitemcheckbox', { name: 'Low' })).toHaveAttribute('aria-checked', 'true')
+    await user.click(screen.getByRole('menuitemcheckbox', { name: 'Custom B · Unverified' }))
+    await waitFor(() => expect(update).toHaveBeenLastCalledWith('chat-1', { model: 'custom-b', effort: 'low' }))
+    expect(chip()).toHaveTextContent('Custom B · Low')
+    await user.type(screen.getByPlaceholderText('Message'), 'Use my saved settings')
+    await user.click(screen.getByRole('button', { name: 'Send message' }))
+    await waitFor(() => expect(send).toHaveBeenCalledWith(expect.objectContaining({ model: 'custom-b', effort: 'low' })))
+    expect(reloadProvider).not.toHaveBeenCalled()
+    expect(useAppStore.getState().error).toBeNull()
+  })
+
+  it('shows and sends pending normal Codex defaults instead of the old custom endpoint settings', async () => {
+    const active: Session = { id: 'chat-1', title: 'Chat', backend: 'codex', backend_locked: true, codex_provider: 'custom',
+      model: 'custom-old', effort: 'high', codex_provider_catalog: { configured: false, available: false, model: null, base_url: null },
+      codex_provider_control: { pending: true, active_provider: 'custom', requested_provider: 'default',
+        active_base_url: 'https://old.example/v1', requested_base_url: null,
+        requested_model: 'normal-next', requested_effort: 'low', requested_catalog: null } }
+    const send = vi.fn().mockResolvedValue({ session: active, queued: false })
+    const reloadProvider = vi.fn()
+    window.agentsDock.sessions = { reloadProvider } as unknown as AgentsDockAPI['sessions']
+    window.agentsDock.turns = { send } as unknown as AgentsDockAPI['turns']
+    useAppStore.setState({ sessions: [active], health: { ok: true }, runtimeCatalog: { backends: { codex: {
+      models: [{ value: 'normal-next', label: 'Normal next' }], efforts: [{ value: 'low', label: 'Low' }],
+      diagnostic: { backend: 'codex', status: 'ready', available: true, message: 'Ready' }
+    } } } })
+    const user = userEvent.setup()
+    const { container } = render(<Composer />)
+    expect(screen.getByTitle('Change Codex endpoint')).toHaveTextContent('Codex · Custom · Saved')
+    expect(container.querySelector('.runtime-chip')).toHaveTextContent('Normal next · Low')
+    await user.click(screen.getByTitle('Change Codex endpoint'))
+    expect(screen.getByRole('menuitemcheckbox', { name: 'Codex' })).toHaveAttribute('aria-checked', 'true')
+    await user.keyboard('{Escape}')
+    await user.type(screen.getByPlaceholderText('Message'), 'Normal account please')
+    await user.click(screen.getByRole('button', { name: 'Send message' }))
+    await waitFor(() => expect(send).toHaveBeenCalledWith(expect.objectContaining({ model: 'normal-next', effort: 'low' })))
+    expect(reloadProvider).not.toHaveBeenCalled()
+    expect(useAppStore.getState().error).toBeNull()
   })
 
   it('sends a custom Codex chat independently of normal OpenAI sign-in', async () => {
@@ -2237,7 +2371,7 @@ describe('Composer', () => {
     expect(useAppStore.getState().pendingTurnSubmissions['chat-1']?.prompt).toBe('Use the new policy')
     expect(screen.getByRole('status').textContent).toContain('Starting…')
     expect((screen.getByPlaceholderText('Message') as HTMLTextAreaElement).value).toBe('')
-    expect((screen.getByTitle('Wait for the message to be accepted before changing backend') as HTMLButtonElement).disabled).toBe(true)
+    expect(screen.getByTitle('Change Codex endpoint')).toBeEnabled()
     fireEvent.change(screen.getByPlaceholderText('Message'), { target: { value: 'Draft the next request' } })
     permissionResponse.resolve()
     await waitFor(() => expect(send).toHaveBeenCalledWith(expect.objectContaining({
@@ -4482,7 +4616,7 @@ describe('Composer', () => {
 
     await user.type(editor, 'First request')
     await user.click(screen.getByRole('button', { name: 'Send message' }))
-    expect(screen.getByTitle('Wait for the message to be accepted before changing backend')).toBeDisabled()
+    expect(screen.getByTitle('Change Codex endpoint')).toBeEnabled()
     await user.type(editor, newerDraft)
     await act(async () => rejectSend(new Error('offline')))
 

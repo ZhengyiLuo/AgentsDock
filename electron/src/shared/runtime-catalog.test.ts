@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import type { Health, RuntimeCatalog, RuntimeDiagnostic } from './types'
+import type { Health, RuntimeCatalog, RuntimeDiagnostic, Session } from './types'
 import {
   chatBackendChoice,
   chatBackendSelection,
@@ -17,6 +17,7 @@ import {
   runtimeDiagnosticNeedsAttention,
   runtimeModelLockReason,
   runtimeSelectionError,
+  sessionRuntimeForNextTurn,
   selectableChatBackends,
 } from './runtime-catalog'
 
@@ -477,5 +478,30 @@ describe('runtime diagnostics', () => {
     expect(runtimeDiagnosticNeedsAttention(diagnostic)).toBe(false)
     expect(runtimeDiagnosticLabel(diagnostic)).toBe('Ready')
     expect(runtimeDiagnosticCurrentError(diagnostic)).toBe('')
+  })
+})
+
+
+describe('saved next-turn Codex runtime', () => {
+  const session: Session = { id: 'chat', title: 'Chat', backend: 'codex', codex_provider: 'default', model: 'normal', effort: 'high',
+    codex_provider_control: { pending: true, active_provider: 'default', requested_provider: 'custom', active_base_url: null, requested_base_url: 'https://custom.example/v1' } }
+
+  it('projects saved settings without changing active ownership and preserves explicit defaults', () => {
+    const requestedCatalog = { configured: true, available: true, model: 'custom', base_url: 'https://custom.example/v1' }
+    const active = { ...session, codex_provider_control: { ...session.codex_provider_control!, requested_model: 'custom', requested_effort: 'low', requested_catalog: requestedCatalog } }
+    expect(sessionRuntimeForNextTurn(active)).toMatchObject({ codex_provider: 'custom', model: 'custom', effort: 'low', codex_provider_catalog: requestedCatalog })
+    expect(active).toMatchObject({ codex_provider: 'default', model: 'normal', effort: 'high' })
+    expect(sessionRuntimeForNextTurn({ ...active, codex_provider_control: { ...active.codex_provider_control, requested_model: null, requested_effort: null } }))
+      .toMatchObject({ model: null, effort: null })
+  })
+
+  it('leaves unreported pending settings unknown on older servers', () => {
+    expect(sessionRuntimeForNextTurn(session)).toMatchObject({ codex_provider: 'custom', model: undefined, effort: undefined })
+    const sameEndpoint = { ...session, codex_provider_control: { ...session.codex_provider_control!, requested_provider: 'default' as const } }
+    expect(sessionRuntimeForNextTurn(sameEndpoint)).toMatchObject({ codex_provider: 'default', model: undefined, effort: undefined })
+    const idle = { ...session, codex_provider_control: { ...session.codex_provider_control!, pending: false } }
+    expect(sessionRuntimeForNextTurn(idle)).toBe(idle)
+    const claude = { ...session, backend: 'claude' as const }
+    expect(sessionRuntimeForNextTurn(claude)).toBe(claude)
   })
 })

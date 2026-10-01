@@ -2441,6 +2441,19 @@ export class AppService {
       this.health = { ...this.health, runtimes: { ...this.health.runtimes, codex: diagnostic } }
       this.emitConnection(scope, true, this.health)
     }
+    // Session catalogs describe the active endpoint and may differ from the
+    // server default while work finishes. Refresh the visible chat once after
+    // an explicit save/reset/discovery, including on servers without notices.
+    const focused = this.sessions.find(session => session.id === this.focusedSessionId)
+    if (focused?.backend === 'codex' && (focused.codex_provider === 'custom'
+      || focused.codex_provider_control?.requested_provider === 'custom')) {
+      try {
+        const page = await scope.client.sessionPage(focused.id, { limit: 1 })
+        this.assertCurrentScope(scope)
+        this.upsertSession(scope, page.session)
+      } catch { /* The saved setting remains valid if this detail refresh fails. */ }
+      this.assertCurrentScope(scope)
+    }
   }
 
   async codexServerSubagents(expected: CodexServerSettingsScope): Promise<CodexSubagentsConfiguration> {
@@ -6980,6 +6993,7 @@ export class AppService {
 
   private emitProviderRuntimeChanged(scope: ConnectionScope, event: ProviderRuntimeChanged): void {
     if (!this.isCurrentScope(scope)) return
+    if (event.runtime === 'codex_provider') this.upsertSession(scope, event.session)
     this.emit('server:provider-runtime', {
       profileId: scope.profileId,
       profileGeneration: scope.generation,
@@ -7830,16 +7844,41 @@ export function mergeSessionSummaries(previous: Session[], incoming: Session[]):
 }
 
 function preserveCustomProviderModels(previous: Session, incoming: Session): Session {
-  const saved = previous.codex_provider_catalog
-  const summary = incoming.codex_provider_catalog
-  if (incoming.codex_provider !== 'custom' || previous.codex_provider !== 'custom' || !saved || !summary
-    || !summary.configured || saved.base_url !== summary.base_url || summary.models !== undefined) return incoming
-  return { ...incoming, codex_provider_catalog: {
+  const previousControl = previous.codex_provider_control
+  const catalogs = [
+    previous.codex_provider === 'custom' ? previous.codex_provider_catalog : undefined,
+    previousControl?.pending && previousControl.requested_provider === 'custom'
+      ? previousControl.requested_catalog : undefined
+  ]
+  let merged = incoming
+  if (incoming.codex_provider === 'custom') {
+    const catalog = preserveProviderCatalogModels(catalogs, incoming.codex_provider_catalog)
+    if (catalog !== incoming.codex_provider_catalog) merged = { ...merged, codex_provider_catalog: catalog ?? undefined }
+  }
+  const control = incoming.codex_provider_control
+  if (control?.pending && control.requested_provider === 'custom') {
+    const catalog = preserveProviderCatalogModels(catalogs, control.requested_catalog)
+    if (catalog !== control.requested_catalog) merged = { ...merged,
+      codex_provider_control: { ...control, requested_catalog: catalog }
+    }
+  }
+  return merged
+}
+
+function preserveProviderCatalogModels(
+  savedCatalogs: Array<Session['codex_provider_catalog'] | null>,
+  summary: Session['codex_provider_catalog'] | null
+): Session['codex_provider_catalog'] | null {
+  if (!summary?.configured || summary.models !== undefined) return summary
+  const saved = savedCatalogs.find(catalog => catalog?.models !== undefined
+    && catalog.base_url === summary.base_url && catalog.credential_id === summary.credential_id)
+  if (!saved) return summary
+  return {
     ...summary,
-    ...(saved.models !== undefined ? { models: saved.models } : {}),
+    models: saved.models,
     ...(saved.model_efforts !== undefined ? { model_efforts: saved.model_efforts } : {}),
     ...(saved.model_capabilities !== undefined ? { model_capabilities: saved.model_capabilities } : {})
-  } }
+  }
 }
 
 export function mergePolledSessionSummaries(previous: Session[], incoming: Session[]): Session[] {

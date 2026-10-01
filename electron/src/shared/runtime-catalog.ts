@@ -1,4 +1,4 @@
-import type { Backend, CodexProvider, Health, RuntimeBackendCatalog, RuntimeCatalog, RuntimeDiagnostic, RuntimeOption } from './types'
+import type { Backend, CodexProvider, Health, RuntimeBackendCatalog, RuntimeCatalog, RuntimeDiagnostic, RuntimeOption, Session } from './types'
 import { t } from './i18n'
 
 /** UI identity only: the native runtime remains Codex for both choices. */
@@ -32,6 +32,26 @@ export function codexCustomProviderAvailable(health: Health | null | undefined, 
   if (catalog?.backends?.codex?.custom_provider?.configured === false) return false
   const custom = customCatalog ?? catalog?.backends?.codex?.custom_provider
   return codexCustomProviderSupported(health) && custom?.configured === true && custom.available === true
+}
+
+/** Composer selection and new turns use saved settings, not the owner of running work. */
+export function sessionRuntimeForNextTurn(session: Session): Session {
+  const control = session.codex_provider_control
+  if (session.backend !== 'codex' || !control?.pending) return session
+  const provider = control.requested_provider
+  const providerChanged = provider !== (session.codex_provider ?? 'default')
+  return {
+    ...session,
+    codex_provider: provider,
+    // Older servers do not expose pending runtime choices. Leave them unknown
+    // so the transport inherits the server's saved choice rather than clearing
+    // it or resubmitting the previous endpoint's active model/effort.
+    model: control.requested_model,
+    effort: control.requested_effort,
+    codex_provider_catalog: provider === 'custom'
+      ? control.requested_catalog ?? (providerChanged ? undefined : session.codex_provider_catalog)
+      : undefined
+  }
 }
 
 /** Keep endpoint discovery separate from the normal Codex account's catalog. */

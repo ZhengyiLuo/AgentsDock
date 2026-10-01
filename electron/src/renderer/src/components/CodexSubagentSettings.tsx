@@ -61,6 +61,7 @@ export function CodexSubagentSettings({ connected, profileId, profileGeneration 
   const scopeMatches = configurationScope?.profileId === profileId && configurationScope?.profileGeneration === profileGeneration
   const editable = connected && profileId != null && scopeMatches && configuration?.configurable === true && !unavailable && !loading && !saving
   const changed = configuration != null && limit !== configuration.max_concurrent_threads_per_session
+  const automatic = configuration?.applies_to === 'automatically_when_idle'
 
   async function save() {
     if (!editable || !valid || !changed || !profileId) return
@@ -90,7 +91,7 @@ export function CodexSubagentSettings({ connected, profileId, profileGeneration 
           : configuration?.configurable === false
             ? configuration.reason === 'unsupported_transport' ? t('codexSubagents.transport') : configuration.message
             : t('codexSubagents.help')}</small>
-      {connected && !unavailable && configuration?.configurable !== false && <small>{t('codexSubagents.applies')}</small>}
+      {connected && !unavailable && configuration?.configurable !== false && <small>{t(automatic ? 'codexSubagents.automaticApplies' : 'codexSubagents.applies')}</small>}
       <form className="codex-subagent-settings-controls" onSubmit={event => { event.preventDefault(); void save() }}>
         <input id={fieldId} type="text" inputMode="numeric" value={draft}
           placeholder={t('codexSubagents.default')} disabled={!editable}
@@ -104,7 +105,7 @@ export function CodexSubagentSettings({ connected, profileId, profileGeneration 
       </form>
       {!valid && <small role="alert">{t('codexSubagents.invalid')}</small>}
       {error && <small role="alert">{error}</small>}
-      {saved && <small role="status">{t('codexSubagents.saved')}</small>}
+      {saved && <small role="status">{t(automatic ? 'codexSubagents.savedAutomatic' : 'codexSubagents.saved')}</small>}
     </div>
   </section>
 }

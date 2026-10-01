@@ -13,6 +13,7 @@ import {
   runtimeDiagnosticLabel,
   runtimeDiagnosticNeedsAttention,
   runtimeDiagnosticTone,
+  sessionRuntimeForNextTurn,
 } from '@shared/runtime-catalog'
 import { memo, useState } from 'react'
 import { useAppStore } from '../store/app-store'
@@ -142,7 +143,10 @@ function RuntimeStatus({
   const chatError = useAppStore(state => (
     compact && sessionId ? latestChatRunError(state.snapshots[sessionId]?.events, backend) : ''
   ))
-  const customCatalog = useAppStore(state => { const session = state.sessions.find(item => item.id === sessionId); return session?.provider_connection_catalog ?? session?.codex_provider_catalog })
+  const customCatalog = useAppStore(state => {
+    const session = state.sessions.find(candidate => candidate.id === sessionId)
+    return session ? session.provider_connection_catalog ?? sessionRuntimeForNextTurn(session).codex_provider_catalog : undefined
+  })
   const diagnostic = runtimeDiagnosticFor(health, catalog, backend, codexProvider, customCatalog)
   const cursorUnavailable = codexProvider !== 'custom' && (backend === 'cursor' && !cursorBackendAvailable(health, catalog) || backend === 'opencode' && !opencodeBackendAvailable(health, catalog))
   // Provider last_error is backend-wide, not session-scoped. Keep it in the

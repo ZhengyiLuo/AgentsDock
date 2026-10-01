@@ -3492,3 +3492,26 @@ button.tool-event-toggle:hover { background: #242424; }
 :root[data-theme="light"] .ports-row { border-color: var(--border); }
 :root[data-theme="light"] .ports-remote code { color: #334044; background: var(--surface-2); border-color: var(--border); }
 :root[data-theme="light"] .ports-empty-icon { color: var(--muted); background: var(--surface-2); }
+
+.codex-endpoint-pending {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 10px;
+  padding: 6px 12px;
+  color: var(--muted);
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+.codex-endpoint-pending > span:first-child { color: var(--text); }
+.codex-endpoint-pending button {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-compact);
+  padding: 4px 8px;
+  background: var(--surface-2);
+  color: var(--text);
+  font: inherit;
+  cursor: pointer;
+}
+.codex-endpoint-pending button:hover { background: var(--surface-3); }
+.codex-endpoint-pending button:disabled { opacity: .55; cursor: default; }

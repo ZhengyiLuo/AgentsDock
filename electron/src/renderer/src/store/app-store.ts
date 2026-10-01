@@ -10,7 +10,7 @@ import { mailHintPending, type MailArrivalCursor, type MailboxCoverage, type Mai
 import { bulletinHintPending, type BulletinHintRefresh } from '@shared/team-bulletin-hints'
 import { applyOpenCodeSessionEvent, openCodeProviderCommandsAvailable } from '@shared/opencode'
 import { t } from '@shared/i18n'
-import { chatBackendChoice, runtimeSelectionError, runtimeSendAdmissionError, selectableChatBackendChoices } from '@shared/runtime-catalog'
+import { chatBackendChoice, runtimeSelectionError, runtimeSendAdmissionError, sessionRuntimeForNextTurn, selectableChatBackendChoices } from '@shared/runtime-catalog'
 import { isAsyncCrossChatMessage, isNativeGoalSteerEvent, isNativeSteerTransitionStop, timelineSemanticUnits } from '@shared/semantic-timeline'
 import { turnSendErrorMessage } from '@shared/server-errors'
 import { completedPrefixForkAvailable, RUNNING_FORK_UNAVAILABLE } from '@shared/session-fork'
@@ -840,6 +840,25 @@ export const useAppStore = create<AppState>((set, get) => ({
       }),
       window.agentsDock.events.on('server:runtime', payload => {
         if (profileEventMatches(payload, get())) set({ runtimeCatalog: payload.runtimeCatalog })
+      }),
+      window.agentsDock.events.on('server:provider-runtime', payload => {
+        if (!profileEventMatches(payload, get()) || !['subagent_limit', 'codex_provider'].includes(payload.event.runtime)) return
+        const event = payload.event
+        set(state => {
+          const session = state.sessions.find(candidate => candidate.id === event.session_id)
+          if (!session || session.backend !== 'codex') return state
+          const patch = event.runtime === 'codex_provider' ? event.session
+            : event.runtime === 'subagent_limit' ? { subagent_limit: event.subagent_limit, subagent_limit_control: event.subagent_limit_control }
+              : {}
+          const updated = { ...session, ...patch }
+          const snapshot = state.snapshots[session.id]
+          return {
+            sessions: state.sessions.map(candidate => candidate.id === session.id ? updated : candidate),
+            snapshots: snapshot ? { ...state.snapshots, [session.id]: {
+              ...snapshot, session: { ...snapshot.session, ...patch }
+            } } : state.snapshots
+          }
+        })
       }),
       window.agentsDock.events.on('ports:changed', payload => {
         const current = get()
@@ -1817,7 +1836,8 @@ export const useAppStore = create<AppState>((set, get) => ({
       set({ error: 'The selected chat is no longer available.' })
       return false
     }
-    const runtimeError = runtimeSendAdmissionError(get().health, currentTarget.backend, currentTarget.provider_connection === 'custom' ? 'custom' : currentTarget.codex_provider)
+    const selectedRuntime = sessionRuntimeForNextTurn(currentTarget)
+    const runtimeError = runtimeSendAdmissionError(get().health, selectedRuntime.backend, selectedRuntime.provider_connection === 'custom' ? 'custom' : selectedRuntime.codex_provider)
     if (runtimeError) {
       set({ error: runtimeError })
       return false
@@ -1871,8 +1891,8 @@ export const useAppStore = create<AppState>((set, get) => ({
         prompt,
         fileIds: uploads.map(file => file.id),
         ...(pendingSubmission.sharedChatRequestId ? { sharedChatRequestId: pendingSubmission.sharedChatRequestId } : {}),
-        model: session?.model,
-        effort: session?.effort,
+        model: selectedRuntime.model,
+        effort: selectedRuntime.effort,
         clientCapabilities: interactiveClientCapabilities(session, get().health, Boolean(options?.skillSelection)),
         chatReferences,
         teamReferences,
@@ -2175,8 +2195,27 @@ export const useAppStore = create<AppState>((set, get) => ({
     const previousSession = get().sessions.find(session => session.id === sessionId)
     const version = ++pendingSessionPatchVersion
     const existing = pendingSessionPatches.get(sessionId)?.patch ?? {}
-    pendingSessionPatches.set(sessionId, { version, patch: { ...existing, ...patch } })
-    set(state => ({ sessions: state.sessions.map(session => session.id === sessionId ? { ...session, ...patch } as Session : session) }))
+    const pendingControl = previousSession?.backend === 'codex' && previousSession.codex_provider_control?.pending
+      ? previousSession.codex_provider_control : null
+    const displayPatch: Partial<Session> = pendingControl && ['codex_provider', 'model', 'effort'].some(key => key in patch)
+      ? { ...patch,
+        // Keep the in-flight provider owner intact while projecting the new
+        // selection through the same fields returned by the server.
+        ...('codex_provider' in patch ? { codex_provider: previousSession?.codex_provider } : {}),
+        ...('model' in patch ? { model: previousSession?.model } : {}),
+        ...('effort' in patch ? { effort: previousSession?.effort } : {}),
+        codex_provider_control: {
+        ...pendingControl,
+        ...('codex_provider' in patch ? {
+          requested_provider: patch.codex_provider ?? 'default',
+          ...(patch.codex_provider !== pendingControl.requested_provider ? { requested_catalog: null } : {})
+        } : {}),
+        ...('model' in patch ? { requested_model: patch.model } : {}),
+        ...('effort' in patch ? { requested_effort: patch.effort } : {})
+      } }
+      : patch
+    pendingSessionPatches.set(sessionId, { version, patch: { ...existing, ...displayPatch } })
+    set(state => ({ sessions: state.sessions.map(session => session.id === sessionId ? { ...session, ...displayPatch } as Session : session) }))
     try {
       const updated = await window.agentsDock.sessions.update(sessionId, normalizeSessionPatch(patch))
       if (!profileScopeMatches(scope, get())) return

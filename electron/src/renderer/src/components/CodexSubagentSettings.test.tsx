@@ -18,6 +18,26 @@ const props = { connected: true, profileId: 'studio', profileGeneration: 1 }
 afterEach(() => { cleanup(); setLocale('en'); vi.useRealTimers() })
 
 describe('Codex subagent settings', () => {
+  it('saves an automatic default without instructing users to reload existing chats', async () => {
+    const automatic = (limit: number | null) => ({ ...snapshot(limit), applies_to: 'automatically_when_idle' as const })
+    const { read, write } = bridge(vi.fn().mockResolvedValue(automatic(16)),
+      vi.fn().mockImplementation(async (_scope, limit) => automatic(limit)))
+    render(<CodexSubagentSettings {...props} />)
+    const input = await screen.findByDisplayValue('16')
+    expect(screen.getByText(/Chat-specific overrides take priority/)).toHaveTextContent('Applies automatically')
+    expect(screen.queryByText(/Reload provider/)).not.toBeInTheDocument()
+    fireEvent.change(input, { target: { value: '64' } })
+    expect(write).not.toHaveBeenCalled()
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+    expect(await screen.findByRole('status')).toHaveTextContent('Saved. Chats using this default pick it up automatically after their current work finishes.')
+    expect(input).toHaveValue('64')
+    expect(screen.getByRole('button', { name: 'Save' })).toBeDisabled()
+    vi.useFakeTimers()
+    await act(async () => { vi.advanceTimersByTime(60_000) })
+    expect(read).toHaveBeenCalledExactlyOnceWith({ profileId: 'studio', profileGeneration: 1 })
+    expect(write).toHaveBeenCalledExactlyOnceWith({ profileId: 'studio', profileGeneration: 1 }, 64)
+  })
+
   it('loads once, keeps typing local and saves only on explicit submit', async () => {
     const { read, write } = bridge()
     render(<CodexSubagentSettings {...props} />)
