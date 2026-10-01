@@ -1,5 +1,32 @@
 # Public development log
 
+## 2026-09-30 — Desktop workflow usage events
+
+- Add 33 aggregate desktop events for side chats, custom API settings, goals,
+  workspace saves and Git actions, uploads, queue/steering, built-in slash
+  selection, and explicit app/server update actions. Include keyboard entry
+  points in the existing Open file metric. The complete catalog and outcome
+  definitions are in `docs/ANALYTICS_EVENTS.md`.
+- Keep the existing anonymous envelope and `success`-only property allowlist.
+  Do not send content, names, paths, model/provider details, credentials or
+  resource IDs. Team Network instrumentation is unchanged; shared-browser and
+  iOS analytics remain disabled. Update requests are not installation success,
+  and chat-reference submission is not proof of peer delivery.
+- Verified with an isolated native macOS Electron app, production IPC/HTTP and
+  a disposable AgentsServer: send and queue two real Codex turns; open, send a
+  follow-up and stop a side chat; save/clear a Codex goal; open a file by button
+  and shortcut, edit/save it, stage it and commit the reviewed disposable index;
+  open My Agents and fail a connection check against an unavailable test
+  endpoint; check desktop/server updates and change the desktop channel.
+  Captured analytics requests locally and blocked delivery to Mixpanel; only
+  the documented property keys were present. No production app/server restart.
+- Validation: 951 focused tests, TypeScript and production compilation passed.
+  Live acceptance is partial for upload, steering, Claude goals, goal
+  pause/resume, credential persistence, Git conflict/abort and actual update
+  install/cancel/retry paths; these were not exercised in this run. No claim of
+  release readiness or completed installation is made. Availability: source
+  and isolated local build only; no release or deployment.
+
 ## 2026-09-29 — Preserve Claude history activity access
 
 - Keep the activity disclosure when a compact Claude history page uses the
