@@ -9,14 +9,21 @@ turn blocked or unobserved scenarios into full release acceptance.
 
 ## Current delivery status
 
-Source preparation for `1.0.8-beta.5` adds bounded contention handling to the
-pinned installer preparation/activation path. It retains the beta.4 desktop
-contribution and all existing admission/identity safeguards. It is not yet a
-signed or accepted candidate. Beta.4's frozen artifacts and evidence below are
-retained; none may be relabeled as beta.5 acceptance. Stable npm `1.0.8` must
-remain unchanged.
+The newest prepared candidate is `1.0.8-beta.5`, build 1242, from source
+`85327b94a378c441949da5e775e265626743b6c6`. It adds bounded contention handling
+to the pinned installer preparation/activation path and retains the beta.4
+desktop contribution and admission/identity safeguards. Signed server bundles,
+fresh npm validation and all platform builds pass. The Mac app and DMG are
+signed/notarized and independently verified. Exact-package Mac replay
+`36801481030` and Linux rollback/retry `36801483306` are dispatched, not yet
+accepted; the candidate is unpublished. Receipt SHA-256:
+`fdcf48e5f256a21856a1b3e0475b467ebd903bb9c12ce8a466d57c7a07e4ee5f`;
+transport ZIP SHA-256:
+`4d479f1c9ee64f4784da2cdb52cda345c80187565a105cc5a324d8267b312b8e`.
+Stable npm `1.0.8` remains unchanged. Beta.4's frozen evidence below is retained;
+none may be relabeled as beta.5 acceptance.
 
-The newest prepared candidate is `1.0.8-beta.4`, build 1241, from source
+The preceding candidate is `1.0.8-beta.4`, build 1241, from source
 `1a99b00b6e50271bc97dadd12ec3d701c3168809`. Its universal Mac app is signed,
 notarized and checked; its matched npm/legacy archives retain the existing
 server trust key. Exact fresh npm installation passes on macOS and Linux in
@@ -139,7 +146,7 @@ Dispatch `ci.yml` on the receipt's reviewed `release/*` branch with:
 
 ```text
 candidate_replay=true
-candidate_tag=candidate-replay-v1.0.8-beta.4
+candidate_tag=candidate-replay-v1.0.8-beta.5
 candidate_receipt_sha256=<independently reviewed candidate.json SHA-256>
 candidate_bundle_sha256=<independently reviewed candidate-bundle.zip SHA-256>
 npm_native_validation=false
@@ -155,7 +162,7 @@ an existing local guest, and never remove an app's `disable-auto-update` marker.
 ## Separate stable-server no-downgrade case
 
 Stable server `1.0.8` must not be downgraded to the receipt's `1.0.8-beta.N`
-candidate (currently `1.0.8-beta.4`). The fixture accepts only that same-base
+candidate (currently `1.0.8-beta.5`). The fixture accepts only that same-base
 numbered Beta line and binds every observation to the exact signed candidate
 receipt; it rejects other bases, Stable, RC and locally relabeled versions.
 That requires a

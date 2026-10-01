@@ -26,6 +26,46 @@
   packaged-app update acceptance. Fresh signed packages and exact-package
   native replays are still required before beta.5 publication. Stable npm
   `1.0.8`, `latest`, stable desktop and legacy feeds remain unchanged.
+- Freeze artifact source `85327b94a378c441949da5e775e265626743b6c6` and desktop
+  build 1242. Source checks
+  [36799486387](https://github.com/ZhengyiLuo/AgentsDock/actions/runs/36799486387)
+  and all eight server shards in
+  [36799486397](https://github.com/ZhengyiLuo/AgentsDock/actions/runs/36799486397)
+  pass. The broader isolated installer sweep passes 245 tests with four
+  platform skips. Later documentation does not change the artifact source pin.
+- Existing signer
+  [36800017840](https://github.com/ZhengyiLuo/AgentsServer/actions/runs/36800017840)
+  signs exact export `86fec97aa7bc48fb22d505d49761c5d3e142a617`. Both signatures,
+  original Actions ZIP, immutable URLs and 118 runtime files/modes are verified.
+  Npm descriptor SHA-256:
+  `43fc9b2ebbdca7df6040dcc0536adf96a8cdd408a4e88cf9e3e7809e8886d858`.
+  Fresh npm installation/restart/cache independence passes on macOS and Linux in
+  [36800260241](https://github.com/ZhengyiLuo/AgentsDock/actions/runs/36800260241).
+- The official universal Mac app and DMG pass Developer ID signing,
+  notarization/stapling, Gatekeeper, fuses, updater metadata, ZIP/DMG parity,
+  exact signed server resources and isolated launch/termination. All 88 compiled
+  output files match the app archive. The full local Electron suite passes
+  5,085 tests with six existing skips on the second attempt. The first attempt
+  stopped before packaging on an existing render/passive-effect assertion race;
+  the unchanged targeted file then passed three times. No assertion or source
+  was changed to obtain the successful build. Preserve that first failure log.
+  Accepted Mac ZIP SHA-256:
+  `dc481f894ef6fe4607f8d439722b7c526f1e795f8e0ac6ce13e7af070ef29299`.
+- Linux x64/ARM64 and Windows x64 package checks pass in
+  [36800287034](https://github.com/ZhengyiLuo/AgentsDock/actions/runs/36800287034),
+  workflow run 25, build 1242. Windows remains an explicitly unsigned beta
+  preview; its installer/launch/uninstall check is not update-journey acceptance.
+- Seal the unchanged Mac/server inputs for native replays. Receipt SHA-256:
+  `fdcf48e5f256a21856a1b3e0475b467ebd903bb9c12ce8a466d57c7a07e4ee5f`;
+  transport ZIP SHA-256:
+  `4d479f1c9ee64f4784da2cdb52cda345c80187565a105cc5a324d8267b312b8e`.
+  Mac replay
+  [36801481030](https://github.com/ZhengyiLuo/AgentsDock/actions/runs/36801481030)
+  and Linux rollback/retry
+  [36801483306](https://github.com/ZhengyiLuo/AgentsDock/actions/runs/36801483306)
+  are dispatched, not yet accepted. Beta.5 remains unpublished. These scoped
+  receipts do not establish real-provider history, busy/queued-work migration,
+  reboot recovery or Windows update acceptance.
 
 ## 2026-09-30 — Validate the beta.4 desktop and matched server candidate
 
