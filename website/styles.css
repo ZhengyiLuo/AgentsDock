@@ -911,7 +911,8 @@ footer a:hover { color: var(--text); }
 }
 
 /* ── FAQ page: search + expandable questions ── */
-.faq-page .legal { max-width: 760px; }
+.faq-page { padding: 0 max(6vw, 24px); }
+.faq-page .legal { width: min(960px, 100%); max-width: none; padding: 152px 0 96px; }
 .faq-search { display: flex; align-items: center; gap: 10px; margin: 0 0 28px; padding: 0 14px; height: 48px; border: 1px solid var(--line); border-radius: 12px; background: rgba(255,255,255,.02); color: var(--muted); transition: border-color .15s ease, background-color .15s ease; }
 .faq-search:focus-within { border-color: var(--blue); background: rgba(91,157,255,.05); color: var(--text); }
 .faq-search svg { flex-shrink: 0; }

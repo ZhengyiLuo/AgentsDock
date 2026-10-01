@@ -22,6 +22,15 @@ painful to rediscover later.
   active server and push the latest server repository/code to GitHub so app and
   server contract versions do not drift.
 
+## 2026-10-01 - Widen FAQ layout on desktop
+
+- Fixed `website/faq.html` and `website/zh/faq.html` inheriting `.legal` side
+  padding that scaled with viewport width while the FAQ container stayed capped,
+  which made the FAQ content look phone-sized on very wide desktop screens.
+- FAQ pages now use outer page gutters and a 960 px content column, while
+  retaining mobile gutters. Bumped the shared stylesheet cache token so the
+  deployed site cannot keep the old FAQ width.
+
 ## 2026-10-01 - Point website desktop downloads at beta 1.0.8-beta.5
 
 - Updated the static website desktop download fallbacks, runtime release label,
