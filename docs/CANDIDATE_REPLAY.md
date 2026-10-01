@@ -15,8 +15,12 @@ to the pinned installer preparation/activation path and retains the beta.4
 desktop contribution and admission/identity safeguards. Signed server bundles,
 fresh npm validation and all platform builds pass. The Mac app and DMG are
 signed/notarized and independently verified. Exact-package Mac replay
-`36801481030` and Linux rollback/retry `36801483306` are dispatched, not yet
-accepted; the candidate is unpublished. Receipt SHA-256:
+`36801481030` (all eight scenarios) and Linux rollback/retry `36801483306`
+(both root modes) pass on attempt 1. All ten original observation archives
+match their GitHub provenance and exact candidate pins. The signed app really
+replaces/relaunches, then automatically reconciles the reconnected server;
+the stable `1.0.8` no-downgrade case and scoped recovery checks also pass.
+Publication is recorded separately in [DEV_LOG.md](DEV_LOG.md). Receipt SHA-256:
 `fdcf48e5f256a21856a1b3e0475b467ebd903bb9c12ce8a466d57c7a07e4ee5f`;
 transport ZIP SHA-256:
 `4d479f1c9ee64f4784da2cdb52cda345c80187565a105cc5a324d8267b312b8e`.

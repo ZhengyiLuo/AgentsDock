@@ -63,9 +63,28 @@
   [36801481030](https://github.com/ZhengyiLuo/AgentsDock/actions/runs/36801481030)
   and Linux rollback/retry
   [36801483306](https://github.com/ZhengyiLuo/AgentsDock/actions/runs/36801483306)
-  are dispatched, not yet accepted. Beta.5 remains unpublished. These scoped
-  receipts do not establish real-provider history, busy/queued-work migration,
-  reboot recovery or Windows update acceptance.
+  both pass on attempt 1 with the exact artifact source. All ten original
+  observation ZIPs match GitHub provenance, sizes and SHA-256 digests. Mac replay
+  observes the signed app replacing `1.0.6` and relaunching before the server
+  reconnects, then automatic reconciliation from legacy `1.0.7-beta.21` with
+  zero server-update clicks. Both root modes preserve fixture state, identity
+  and token; two native clients share one operation and final service instance.
+  Interrupted transfer and failed-stage retry pass. Linux observes actual
+  rollback, restored incumbent health, cleared journals/maintenance, and
+  successful same-byte retry with both components and 118 runtime files checked.
+  Stable server `1.0.8` remains unchanged through Settings/app reopening with
+  no update request. These particular native runs do not prove that a live lock
+  wait occurred or establish the original beta.4 timeout's cause.
+- The scoped native audit receipt SHA-256 is
+  `74ef29fe0f1dab80f6cb75fcc57ac2bd7629643e47ec13a43f876fd7fd4eadc1`.
+  Reports retain `releaseAcceptance: false` and their explicitly blocked
+  real-provider/native-history, busy/queued-work, interactive installation,
+  logout/reboot and Windows update coverage. This is Beta testing evidence,
+  not complete production acceptance. Final publication is recorded separately.
+- Independently verify the exact 16-asset desktop set and both private drafts,
+  including original Linux/Windows Actions archives, feed sizes/SHA-512 and
+  identical signed server resources. All-platform checksum-manifest SHA-256:
+  `07460d66d1f97713b83a8a0542c8e5f5e481ed8724fc9ef77b2a036690e366ae`.
 
 ## 2026-09-30 — Validate the beta.4 desktop and matched server candidate
 
