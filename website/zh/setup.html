@@ -123,7 +123,7 @@
 cd AgentsServer
 ./install.sh</code></pre>
         <p>服务器默认监听 7850 端口，并在远程机器上持续运行——你的设备连接的就是它。</p>
-        <p>它由一个访问令牌保护，安装脚本结束时会打印一次——现在就复制下来，第二步在每台设备上都要输入。之后想再次查看，在远程机器上运行：</p>
+        <p>服务器会用一个 token 保护；安装脚本结束时会打印一次 token——现在就复制下来，第二步在每台设备上都要输入。之后想再次查看，在远程机器上运行：</p>
         <pre><code>./install.sh --show-token</code></pre>
         <p class="legal-meta">所有服务器命令——更新、重启、日志、卸载——都在<a href="./server.html">管理服务器</a>页面。</p>
         <p><a class="quickstart-docs" href="https://github.com/ZhengyiLuo/AgentsServer" target="_blank" rel="noopener">在 GitHub 上查看 AgentsServer 仓库 <span aria-hidden="true">&rarr;</span></a></p>
@@ -151,14 +151,14 @@ cd AgentsServer
         <p>仅当你在远程机器上安装了 Tailscale 时才需要。在这台设备上也安装它并用同一账号登录，这样两端就在同一个私有网络里，应用才能连到服务器。若在同一局域网内，跳过这一步，直接用远程机器的局域网 IP。</p>
 
         <h3 class="docs-step" id="device-connect"><span class="step-n">3</span>连接到你的服务器</h3>
-        <p>在 AgentsDock 中添加服务器，填入远程机器的地址——它的 Tailscale <code>100.x.x.x</code> 地址加端口 <code>7850</code>——然后把第一步得到的访问令牌粘贴到<strong>访问令牌（Access token）</strong>字段。它长这样：</p>
+        <p>在 AgentsDock 中添加服务器，填入远程机器的地址——它的 Tailscale <code>100.x.x.x</code> 地址加端口 <code>7850</code>——然后把第一步得到的 token 粘贴到<strong>token</strong>字段。它长这样：</p>
         <pre><code>ad_tok_9f3b7c2e••••••••••••••••••••   (sample)</code></pre>
-        <p>这个令牌存放在你的服务器机器上——也就是第一步搭建的远程机器，而不是你正在用来连接的设备。想再次获取，在远程机器上运行：</p>
+        <p>这个 token 存放在你的服务器机器上——也就是第一步搭建的远程机器，而不是你正在用来连接的设备。想再次获取，在远程机器上运行：</p>
         <pre><code>./install.sh --show-token</code></pre>
         <p>点击<strong>测试连接（Test connection）</strong>确认应用能连到服务器，再点<strong>添加并切换（Add &amp; switch）</strong>。连接成功后：新建一个会话，选择一个提供方，并指定远程机器上的一个工作目录。</p>
         <figure class="docs-shot">
           <img src="../assets/setup-token.png" alt="AgentsDock connection form on macOS with the Access token field, a Test connection button, and Add and switch" loading="lazy" />
-          <figcaption>把访问令牌粘贴到<strong>访问令牌</strong>字段，保存前先点击<strong>测试连接</strong>验证。</figcaption>
+          <figcaption>把 token 粘贴到<strong>token</strong>字段，保存前先点击<strong>测试连接</strong>验证。</figcaption>
         </figure>
         <figure class="docs-shot">
           <img src="../assets/setup-connection.png" alt="AgentsDock Settings on macOS showing a connected Mac Mini server and a Runtimes & prerequisites panel with tmux and provider CLI status" loading="lazy" />
@@ -176,7 +176,7 @@ cd AgentsServer
         <ul>
           <li>确认在同一台设备的浏览器里能打开服务器 URL——浏览器打不开的话，应用也连不上。</li>
           <li>检查两端的 Tailscale 都已开启并登录，并且你用的是远程机器的 <code>100.x.x.x</code> Tailscale 地址（而不是只在远程机器自己网络里有效的局域网 IP）。</li>
-          <li>确保 URL 带了端口（<code>7850</code>），且访问令牌完全一致、没有多余空格。</li>
+          <li>确保 URL 带了端口（<code>7850</code>），且 token 完全一致、没有多余空格。</li>
         </ul>
         <p>还是不行？前往<a href="../support.html">支持</a>页面，或在我们的 <a href="https://discord.gg/ZGDrhEWqPt" target="_blank" rel="noopener">Discord</a> 提问。</p>
 
