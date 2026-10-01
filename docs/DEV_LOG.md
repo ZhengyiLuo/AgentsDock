@@ -73,6 +73,30 @@
   No timeout, retry, fault scope, acceptance assertion or packaged runtime is
   changed. All 89 harness Python tests and 16 candidate-receipt tests pass;
   these tests do not establish the native failure's cause or recovery.
+- Instrumented run
+  [36796459142](https://github.com/ZhengyiLuo/AgentsDock/actions/runs/36796459142),
+  attempt 1, passes both Linux root modes with the original signed source and
+  harness `963ddeba38f7e9b77435e7fa89562b6b2aabab8d`. Both exact original
+  Actions archives are independently verified. Retry admission is `pending`
+  with preparation `checking`; both snapshots see no installation lock, while
+  the owned recovery unit file remains present with no retired marker. Native
+  registration/process state is deliberately not queried at these two points.
+  Both cases then complete the same-byte retry, paired health and all 118
+  runtime-file comparisons with fixture identity/token/state retained. This
+  establishes successful scoped retries, not the earlier timeout's cause.
+  Preserve the first failure and investigate its plausible lock-ordering path;
+  do not turn a green rerun into a claim that a production fix was applied.
+- A bounded production-function probe reproduces a concrete retry hazard:
+  recovery advertises a retryable failure while it still owns the installation
+  lock; the published beta.21 preparation code admits the next attempt, then
+  the exact signed beta.4 installer lock functions refuse the live owner.
+  Preparation becomes `server_update_preparation_failed` and does not resume
+  merely because recovery later releases its lock. The unlocked control crosses
+  that same lock boundary. This is not native/HTTP acceptance or proof of the
+  first CI timeout's cause: the probe substitutes inert native-service hooks,
+  uses a synthetic recovery journal and deliberately stops before dependency
+  or service operations. Keep beta.4 immutable while correcting this contract
+  in a new candidate rather than publishing an unexplained recovery risk.
 - The beta.4 npm, bridge and desktop artifacts remain unpublished drafts.
   Publication is held for investigation of the failed recovery case. Stable
   releases, feeds and existing installations remain unchanged.

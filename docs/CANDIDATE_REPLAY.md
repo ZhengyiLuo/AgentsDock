@@ -41,6 +41,16 @@ update status and owned lock/recovery observations for an instrumented Linux
 replay. It does not change the signed packages, waits, retry count, fault scope
 or acceptance assertions. The original failed run remains part of the evidence;
 instrumentation passing its own tests is not recovery acceptance.
+Run `36796459142`, attempt 1, passes both instrumented Linux cases on harness
+`963ddeba38f7e9b77435e7fa89562b6b2aabab8d` and unchanged signed source. The
+reports observe successful exact-package retries but do not establish the
+first run's timeout cause. Its failure remains unresolved; publication is still
+held pending targeted investigation rather than silently cleared by a rerun.
+A separate function-boundary probe reproduces a live recovery-lock collision
+causing the published beta.21 preparation path to fail without automatic
+continuation after unlock. It does not establish the original CI cause or
+native acceptance. A production correction requires a new version/source pin
+and rebuilt matched packages; beta.4's signed bytes must not be replaced.
 
 This is an explicitly authorized Beta testing release, not complete coordinated
 release acceptance. Genuine authenticated provider-history preservation and
