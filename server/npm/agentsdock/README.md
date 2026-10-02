@@ -75,10 +75,12 @@ interrupt running work; wait for chats to finish first. Remove retains the
 existing confirmation and history-preservation behavior. Tokens are private;
 `token` only reads an existing token and does not reinstall or restart a server.
 Without a name, `agentsdock token` lists this OS user's existing servers on the
-machine (including stopped instances), then asks for a number or server name.
+machine (including stopped instances). Use Up/Down arrows to highlight a server
+and Enter to select it; Esc, Ctrl+C or Ctrl+D cancels without showing a token.
+The menu scrolls when needed and restores terminal input before showing a token.
 It displays only the selected token, retaining the optional clipboard prompt.
-Enter, Ctrl+C or end-of-input cancels without showing a token. Even a single
-server requires a choice; there is no automatic default. In a script or with
+Basic terminals without cursor control retain the numbered/name prompt, where
+empty input cancels. Even a single server requires confirmation. In a script or with
 redirected output, select explicitly: `agentsdock token default` or
 `agentsdock token work`. Loopback binding is local-only; choose a reachable bind
 explicitly if another device needs access.

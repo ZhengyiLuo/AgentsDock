@@ -17,6 +17,7 @@ import os
 from pathlib import Path
 import plistlib
 import re
+import select
 import shlex
 import shutil
 import socket
@@ -24,7 +25,9 @@ import stat
 import subprocess
 import sys
 import tempfile
+import termios
 import time
+import tty
 from urllib.parse import urlsplit
 
 INSTANCE_PROTOCOL = 1
@@ -633,6 +636,72 @@ def show_status(instance: Instance, *, network: dict[str, str]) -> None:
     print()
 
 
+def read_token_menu_key(fd: int) -> str:
+    key = os.read(fd, 1)
+    if key in (b"", b"\x03", b"\x04"):
+        return "cancel"
+    if key in (b"\r", b"\n"):
+        return "enter"
+    if key != b"\x1b":
+        return "other"
+    sequence = b""
+    while len(sequence) < 16 and select.select([fd], [], [], 0.15)[0]:
+        part = os.read(fd, 1)
+        if not part:
+            return "cancel"
+        sequence += part
+        if sequence in (b"[A", b"OA"):
+            return "up"
+        if sequence in (b"[B", b"OB"):
+            return "down"
+        if sequence[:1] not in (b"[", b"O") or (len(sequence) > 1 and 0x40 <= part[0] <= 0x7e):
+            return "other"
+    return "cancel" if not sequence else "other"
+
+
+def arrow_token_choice(rows: list[str], fd: int, settings: list) -> int | None:
+    """Render a bounded terminal menu and restore input mode before token output."""
+    size = shutil.get_terminal_size(fallback=(80, 24))
+    visible = min(len(rows), max(1, size.lines - 6), 10)
+    width = max(1, size.columns - 1)
+    selected, start = 0, 0
+    hint = "Use ↑/↓ to choose; Enter to select; Esc to cancel."
+
+    def render(redraw=False):
+        if redraw:
+            sys.stdout.write(f"\x1b[{visible + 1}A")
+        for index in range(start, start + visible):
+            row = ("  > " if index == selected else "    ") + rows[index]
+            row = row[:width]
+            if index == selected:
+                row = terminal_color(row, "1;36")
+            sys.stdout.write("\r\x1b[2K" + row + "\n")
+        sys.stdout.write("\r\x1b[2K" + hint[:width] + "\n")
+        sys.stdout.flush()
+
+    try:
+        tty.setcbreak(fd, termios.TCSANOW)
+        sys.stdout.write("\x1b[?25l")
+        render()
+        while True:
+            key = read_token_menu_key(fd)
+            if key == "cancel":
+                return None
+            if key == "enter":
+                return selected
+            if key not in ("up", "down"):
+                continue
+            selected = (selected + (1 if key == "down" else -1)) % len(rows)
+            start = min(start, selected) if selected < start else max(start, selected - visible + 1)
+            render(redraw=True)
+    except KeyboardInterrupt:
+        return None
+    finally:
+        termios.tcsetattr(fd, termios.TCSANOW, settings)
+        sys.stdout.write("\x1b[?25h\n")
+        sys.stdout.flush()
+
+
 def choose_token_instance(registry: Registry) -> Instance | None:
     """Select by stable instance name; never default or expose unselected tokens."""
     items = registry.instances()
@@ -643,11 +712,28 @@ def choose_token_instance(registry: Registry) -> Instance | None:
         raise ValueError("Choose a server in an interactive terminal, or run agentsdock token NAME "
                          "(for example: agentsdock token default). No token was shown.")
     print("\nChoose a server to view its access token:\n")
+    rows = []
     for index, instance in enumerate(items, 1):
         config = read_config(instance)
         port = config.get("AGENTSDOCK_AGENT_PORT") or "not configured"
-        name = terminal_color(f"{instance.name:<20}", "34")
-        print(f"  {index}. {name} {service_status(instance):<10} Port: {port}")
+        rows.append(f"{instance.name:<20} {service_status(instance):<10} Port: {port}")
+    if os.environ.get("TERM", "dumb") not in ("", "dumb"):
+        try:
+            fd = sys.stdin.fileno()
+            settings = termios.tcgetattr(fd)
+        except (OSError, ValueError, termios.error):
+            pass  # Basic terminals retain the explicit numbered/name prompt.
+        else:
+            index = arrow_token_choice(rows, fd, settings)
+            if index is None:
+                print("Cancelled; no token was shown.")
+                return None
+            selected = items[index]
+            if selected.name not in {item.name for item in registry.instances()}:
+                raise ValueError("That server is no longer available. Run agentsdock token again. No token was shown.")
+            return selected
+    for index, row in enumerate(rows, 1):
+        print(f"  {index}. {row}")
     print()
     names = {item.name: item for item in items}
     while True:

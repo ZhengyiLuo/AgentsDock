@@ -1,5 +1,20 @@
 # Public development log
 
+## 2026-10-02 — Navigate the token chooser with arrow keys
+
+- Use Up/Down to highlight an existing server and Enter to confirm. Esc,
+  Ctrl+C or Ctrl+D cancels without exposing a token. Keep explicit `token NAME`
+  and the numbered/name fallback for basic terminals without cursor control.
+- Bound the rendered menu to terminal width/height, scroll longer lists and
+  restore terminal input mode and cursor visibility before token/clipboard
+  output, on cancellation and on read failure. No new package dependency.
+- Validation: 36 JavaScript, 95 instance-manager, five CLI packaging and 11
+  runtime packaging tests passed. Actual packaged pseudo-terminal tests cover
+  normal/application arrow sequences, returning to the first item, Esc/Ctrl+D
+  cancellation, only-selected-token output and restored terminal modes.
+  Unit checks also cover wraparound, scrolling and interruption/read failure.
+  No provider, incumbent server lifecycle or registry publication changes.
+
 ## 2026-10-02 — Choose a server before showing its token
 
 - Make bare `agentsdock token` list the current OS user's known local instances

@@ -55,6 +55,7 @@ class InstanceTests(unittest.TestCase):
             stack.enter_context(patch.object(instances, "Registry", return_value=self.registry))
             stack.enter_context(patch.object(instances, "service_status", return_value="stopped"))
             stack.enter_context(patch.object(instances, "tailscale_status", return_value={"status": "unavailable", "ipv4": ""}))
+            stack.enter_context(patch.dict(os.environ, {"TERM": "dumb"}))
             output, errors = io.StringIO(), io.StringIO()
             stack.enter_context(patch.object(output, "isatty", return_value=terminal))
             stack.enter_context(contextlib.redirect_stdout(output))
@@ -200,6 +201,51 @@ class InstanceTests(unittest.TestCase):
             code, output, errors, mocks = self.cli("token", terminal=True, run={"side_effect": subprocess.CalledProcessError(7, "fixture")})
         self.assertEqual(code, 7)
         mocks["run"].assert_called_once()
+
+    def test_arrow_token_menu_moves_wraps_scrolls_and_restores_terminal(self):
+        rows = [f"server-{index} running Port: {7850 + index}" for index in range(12)]
+        for keys, expected in ((["down", "down", "up", "enter"], 1),
+                               (["up", "enter"], 11), (["up", "down", "enter"], 0),
+                               (["other", "cancel"], None)):
+            output = io.StringIO()
+            with self.subTest(keys=keys), contextlib.redirect_stdout(output), \
+                    patch.object(instances.shutil, "get_terminal_size", return_value=os.terminal_size((40, 10))), \
+                    patch.object(instances.tty, "setcbreak") as cbreak, \
+                    patch.object(instances.termios, "tcsetattr") as restore, \
+                    patch.object(instances, "read_token_menu_key", side_effect=keys):
+                self.assertEqual(instances.arrow_token_choice(rows, 17, ["original settings"]), expected)
+            cbreak.assert_called_once_with(17, instances.termios.TCSANOW)
+            restore.assert_called_once_with(17, instances.termios.TCSANOW, ["original settings"])
+            self.assertIn("\033[?25l", output.getvalue())
+            self.assertTrue(output.getvalue().endswith("\033[?25h\n"))
+            if "up" in keys or "down" in keys:
+                self.assertIn("\033[5A", output.getvalue())
+            plain = re.sub(r"\x1b\[[0-9;?]*[A-Za-z]", "", output.getvalue())
+            self.assertTrue(all(len(line) <= 39 for line in plain.splitlines()))
+
+    def test_arrow_token_menu_restores_input_on_interrupt_and_read_error(self):
+        for failure in (KeyboardInterrupt(), OSError("read failed")):
+            with contextlib.redirect_stdout(io.StringIO()), patch.object(instances.tty, "setcbreak"), \
+                    patch.object(instances.termios, "tcsetattr") as restore, \
+                    patch.object(instances, "read_token_menu_key", side_effect=failure):
+                if isinstance(failure, KeyboardInterrupt):
+                    self.assertIsNone(instances.arrow_token_choice(["only-server"], 17, ["original"]))
+                else:
+                    with self.assertRaises(OSError):
+                        instances.arrow_token_choice(["only-server"], 17, ["original"])
+            restore.assert_called_once_with(17, instances.termios.TCSANOW, ["original"])
+
+    def test_arrow_menu_key_decoding_accepts_csi_and_application_keys(self):
+        for encoded, expected in ((b"\x1b[A", "up"), (b"\x1bOA", "up"),
+                                  (b"\x1b[B", "down"), (b"\x1bOB", "down"),
+                                  (b"\r", "enter"), (b"\n", "enter"),
+                                  (b"\x1b", "cancel"), (b"\x04", "cancel"),
+                                  (b"\x03", "cancel"), (b"", "cancel"),
+                                  (b"\x1b[C", "other")):
+            chunks = [bytes([byte]) for byte in encoded] or [b""]
+            with self.subTest(encoded=encoded), patch.object(instances.os, "read", side_effect=chunks), \
+                    patch.object(instances.select, "select", return_value=([17] if len(encoded) > 1 else [], [], [])):
+                self.assertEqual(instances.read_token_menu_key(17), expected)
 
     def test_status_one_instance_and_info_json_remain_distinct(self):
         self.configured(self.default, 7850)

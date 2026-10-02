@@ -11,6 +11,7 @@ import subprocess
 import sys
 import tarfile
 import tempfile
+import termios
 import time
 import unittest
 
@@ -189,12 +190,12 @@ if (require.main === module) {
             self.assertEqual(result.returncode, 0, result.stderr)
             return result.stdout
 
-        def invoke_terminal(args, replies):
+        def invoke_terminal(args, replies, term="dumb"):
             """Real prompt/child-installer boundary; only synthetic fixture tokens."""
             master, slave = pty.openpty()
-            process = subprocess.Popen(args, cwd=outside, env=env, stdin=slave,
+            original_settings = termios.tcgetattr(slave)
+            process = subprocess.Popen(args, cwd=outside, env={**env, "TERM": term}, stdin=slave,
                                        stdout=slave, stderr=slave, start_new_session=True)
-            os.close(slave)
             output, offset, next_reply = bytearray(), 0, 0
             deadline = time.monotonic() + 30
             try:
@@ -222,9 +223,18 @@ if (require.main === module) {
                 self.assertIsNotNone(process.wait(timeout=3))
                 text = output.decode(errors="replace")
                 self.assertEqual(process.returncode, 0, text)
+                restored_settings = termios.tcgetattr(slave)
+                expected_settings = list(original_settings)
+                if sys.platform == "darwin":
+                    # Darwin's tty driver sets PENDIN when ICANON is restored.
+                    # This pending-input state is not a changed terminal mode.
+                    restored_settings[3] &= ~termios.PENDIN
+                    expected_settings[3] &= ~termios.PENDIN
+                self.assertEqual(restored_settings, expected_settings)
                 return text
             finally:
                 os.close(master)
+                os.close(slave)
                 if process.poll() is None:
                     process.terminate()
                     process.wait(timeout=5)
@@ -277,6 +287,21 @@ if (require.main === module) {
         self.assertNotIn("Access token (", cancelled)
         self.assertNotIn("fixture-only-token", cancelled)
         self.assertNotIn("separate-fixture-token", cancelled)
+        arrow_hint = "Use ↑/↓ to choose; Enter to select; Esc to cancel."
+        for keys, selected, not_selected in (("\x1b[B\r", "separate-fixture-token", "fixture-only-token"),
+                                             ("\x1b[B\x1b[A\r", "fixture-only-token", "separate-fixture-token"),
+                                             ("\x1bOA\r", "separate-fixture-token", "fixture-only-token")):
+            chosen = invoke_terminal(["agentsdock", "token"],
+                                     [(arrow_hint, keys), ("[y/N] ", "n\n")], term="xterm-256color")
+            self.assertIn(selected, chosen)
+            self.assertNotIn(not_selected, chosen)
+            self.assertIn("\x1b[?25h", chosen)
+        for key in ("\x1b", "\x04"):
+            cancelled = invoke_terminal(["agentsdock", "token"], [(arrow_hint, key)], term="xterm-256color")
+            self.assertIn("Cancelled; no token was shown", cancelled)
+            self.assertNotIn("Access token (", cancelled)
+            self.assertNotIn("fixture-only-token", cancelled)
+            self.assertNotIn("separate-fixture-token", cancelled)
         statuses = invoke(["agentsdock", "status"])
         self.assertIn("Server (default):", statuses)
         self.assertIn("Server (work):", statuses)
