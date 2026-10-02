@@ -15,7 +15,10 @@
   tests and 11 runtime packaging tests passed. Actual packaged CLI terminal
   tests in disposable homes exercise invalid-then-valid selection, name
   selection, cancellation and only-selected-token output with synthetic tokens.
-  No provider, service lifecycle or release behavior changes.
+  Reinstalled the committed local npm packages on macOS and exercised the actual
+  chooser by number/name, cancellation, redirected-input refusal and explicit
+  selection; incumbent listeners/configuration stayed unchanged and clipboard
+  copying was declined. No provider, service lifecycle or release changes.
 
 ## 2026-10-02 — Make CLI status and setup guidance easier to read
 
