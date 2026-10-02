@@ -1,5 +1,31 @@
 # Public development log
 
+## 2026-10-02 — Validate the short npm CLI against current main
+
+- Merge current main into the prepared CLI branch. The only conflict was two
+  sets of development-log additions; retain both histories without changing
+  the CLI behavior or the existing runtime lifecycle implementation.
+- Install the actual matching CLI/runtime tarballs globally on Apple silicon
+  macOS. Initial and repeated npm installation detect existing state and leave
+  incumbent services unchanged. Exercise help/version, listing and aliases,
+  default/named token output, info/status, guarded setup/install, no-journal
+  recovery, and missing-target/update-argument errors.
+- Exercise two disposable native launchd instances: explicit name/port and
+  automatic name/free port, start/stop/restart, authenticated health and wrong
+  token rejection, interactive uninstall cancellation, successful removal and
+  name release. Confirm that a synthetic saved-state marker survives in the
+  private backup and that incumbent listeners/configuration remain unchanged.
+  Terminal output retains blue names, green success, red removal warnings,
+  separate token lines and the optional clipboard prompt (declined).
+- Validation: 35 JavaScript, five CLI packaging, 11 runtime packaging and 82
+  instance-manager tests pass. Package the clean merged source; the source
+  version remains unchanged. Both disposable services are removed afterward.
+- Remaining acceptance: fresh-default macOS auto setup, real signed update
+  activation, migration repair, bulk destructive operations and clipboard
+  copying were not exercised. The existing split-service binding check still
+  refuses the default installation; no bypass or lifecycle fix was added.
+  No desktop/provider workflow, registry publication or incumbent deployment.
+
 ## 2026-09-28 — Automatically set up the first server during global npm install
 
 - Change the earlier CLI-only install behavior: a direct global

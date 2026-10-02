@@ -85,6 +85,13 @@ Do not bypass the binding check or stop only one process. Fresh auto setup and
 safe repeated npm installation have been verified independently on Linux;
 macOS first-service creation still needs disposable native acceptance.
 
+The packaged CLI has also been installed and reinstalled on Apple silicon
+macOS with existing services. Disposable named launchd instances passed real
+creation (explicit and automatic name/port), token/authenticated-health,
+start/stop/restart, uninstall cancellation and removal/name-release checks.
+Saved test data remained in its private backup. This does not close the
+fresh-default or split-service acceptance gaps above.
+
 ## Complete public command comparison
 
 `work` is an example instance name; `default` selects the original instance.
