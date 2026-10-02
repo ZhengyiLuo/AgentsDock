@@ -1,5 +1,22 @@
 # Public development log
 
+## Mobile goal editor controls and recovery — unreleased
+
+- Keep the direct goal editor open after confirmed Clear removes its goal
+  card. Reset an unchanged form, preserve newer pending edits, and allow
+  saving a replacement goal without losing the draft. Close it on scope change.
+- Give both goal-containing sheets keyboard-adjusted scrolling and drag
+  dismissal so numeric budget entry has a path back to the action buttons.
+- Expose a visible, single-flight retry when the Codex runtime cannot load,
+  instead of leaving goal actions disabled without recovery on that surface.
+- Goal endpoint and Pause/Resume payload contracts remain aligned with desktop;
+  no server changes or live user goal mutations were made. Rendered regressions
+  cover the actual card-to-editor entry path, clear-and-replace, newer drafts,
+  navigation, failed loading and repeated retry. Native hosts and responses are
+  mocked. TypeScript, focused goal checks and production iOS JavaScript export
+  passed. Native touch/keyboard and real-service acceptance remain blocked by
+  simulator external-volume access. Source only; not a new TestFlight release.
+
 ## Mobile reasoning controls and accepted-send recovery — unreleased
 
 - Expose model-scoped Reasoning choices in the composer agent menu even while

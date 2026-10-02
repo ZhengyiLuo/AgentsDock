@@ -1,7 +1,7 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { ActivityIndicator, Alert, AppState, Modal, Pressable, ScrollView, StyleSheet, View } from 'react-native'
 import { SafeAreaView } from 'react-native-safe-area-context'
-import { ChevronDown, Goal, Pause, Pencil, Play, Trash2 } from 'lucide-react-native'
+import { ChevronDown, Goal, Pause, Pencil, Play, RefreshCw, Trash2 } from 'lucide-react-native'
 import { dismissAppKeyboard } from '../lib/app-keyboard'
 import { buildCodexGoalInput, formatGoalBudget, goalElapsedSeconds, goalStatusLabel, goalViewState } from '../lib/codex-goals'
 import { useAppStore } from '../store/useAppStore'
@@ -68,7 +68,23 @@ export function CodexGoalBar() {
     const timer = setInterval(() => setClock(Date.now()), 1_000)
     return () => clearInterval(timer)
   }, [appActive, goal?.status, goalsEnabled, threadActive])
-  if (!supported || !session || !goal || !view) return null
+  const closeEditor = () => { setEditorOpen(false); requestAnimationFrame(dismissAppKeyboard) }
+  const editor = editorOpen ? <Modal visible animationType="slide" presentationStyle="pageSheet" allowSwipeDismissal onRequestClose={closeEditor}>
+    <SafeAreaView style={[styles.sheet, { backgroundColor: colors.background }]} edges={['top', 'bottom']}>
+      <View style={[styles.sheetHeader, { borderBottomColor: colors.border }]}>
+        <Goal size={21} color={colors.blue} />
+        <Text style={[styles.title, styles.grow, { color: colors.text }]}>Persistent goal</Text>
+        <SheetCloseButton testID="codex-goal-editor-close" label="Close goal editor" onPress={closeEditor} />
+      </View>
+      <ScrollView testID="codex-goal-editor-scroll" style={styles.sheet} contentContainerStyle={styles.sheetContent} automaticallyAdjustKeyboardInsets keyboardDismissMode="on-drag" keyboardShouldPersistTaps="always">
+        <CodexGoalEditor key={scopeKey} />
+      </ScrollView>
+    </SafeAreaView>
+  </Modal> : null
+  if (!supported || !session) return null
+  // Keep the editor at the same sibling position when Clear removes the card.
+  // Remounting the modal would discard edits made while that request was pending.
+  if (!goal || !view) return <>{null}{editor}</>
   const elapsed = goalElapsedSeconds(goal, { threadActive: goalsEnabled && threadActive, observedAt, now: clock })
   const accent = !goalsEnabled || goal.status === 'paused' || view.tone === 'warning' ? colors.orange : view.tone === 'success' ? colors.green : colors.blue
   const available = goalsSupported && goalsEnabled && runtime?.available === true
@@ -96,7 +112,6 @@ export function CodexGoalBar() {
       if (statusActionEpoch.current === epoch) statusActionInFlight.current = false
     }
   }
-  const closeEditor = () => { setEditorOpen(false); requestAnimationFrame(dismissAppKeyboard) }
   return <>
     <View testID="codex-goal-bar" accessibilityLabel="Persistent Codex goal" style={[styles.card, { backgroundColor: colors.surface, borderColor: accent }]}>
       <Pressable
@@ -134,6 +149,7 @@ export function CodexGoalBar() {
           <GoalAction testID="codex-goal-clear" label="Clear" accessibilityLabel="Clear goal" icon={Trash2} danger disabled={!available || mutating} onPress={() => confirmClear()} />
         </View> : null}
         {goalError ? <Text testID="codex-goal-error" accessibilityRole="alert" selectable style={[styles.help, { color: colors.red }]}>{goalError}</Text> : null}
+        {goalsSupported && goalsEnabled && !available ? <GoalRuntimeRecovery testID="codex-goal-runtime-refresh" /> : null}
         <Text testID="codex-goal-objective-full" selectable style={[styles.objective, { color: colors.text }]}>{goal.objective}</Text>
         <Text style={[styles.help, { color: colors.muted }]}>{!goalsSupported
           ? 'This server does not support persistent goal controls.'
@@ -142,18 +158,7 @@ export function CodexGoalBar() {
             : view.message}</Text>
       </ScrollView> : null}
     </View>
-    {editorOpen ? <Modal visible animationType="slide" presentationStyle="pageSheet" allowSwipeDismissal onRequestClose={closeEditor}>
-      <SafeAreaView style={[styles.sheet, { backgroundColor: colors.background }]} edges={['top', 'bottom']}>
-        <View style={[styles.sheetHeader, { borderBottomColor: colors.border }]}>
-          <Goal size={21} color={colors.blue} />
-          <Text style={[styles.title, styles.grow, { color: colors.text }]}>Persistent goal</Text>
-          <SheetCloseButton testID="codex-goal-editor-close" label="Close goal editor" onPress={closeEditor} />
-        </View>
-        <ScrollView contentContainerStyle={styles.sheetContent} keyboardShouldPersistTaps="always">
-          <CodexGoalEditor key={scopeKey} />
-        </ScrollView>
-      </SafeAreaView>
-    </Modal> : null}
+    {editor}
   </>
 }
 
@@ -254,6 +259,7 @@ export function CodexGoalEditor() {
     {view?.message ? <Text style={[styles.help, { color: view.timeBudgetExhausted || view.tokenBudgetExhausted ? colors.orange : colors.muted }]}>{view.message}</Text> : null}
     <Text style={[styles.help, { color: colors.muted }]}>The time limit is enforced by AgentsDock; Codex reports elapsed time.</Text>
     {!available ? <Text accessibilityRole="alert" style={[styles.help, { color: colors.orange }]}>Goal controls are unavailable until the Codex runtime is loaded.</Text> : null}
+    {!available ? <GoalRuntimeRecovery testID="codex-goal-editor-refresh" /> : null}
     {saveError || clearError || error ? <Text testID="codex-goal-save-error" accessibilityRole="alert" style={[styles.help, { color: colors.red }]}>{saveError ?? clearError ?? error}</Text> : null}
     {feedback ? <Text testID="codex-goal-feedback" accessibilityLiveRegion="polite" style={[styles.help, { color: colors.green }]}>{feedback}</Text> : null}
     <View style={styles.actions}>
@@ -267,6 +273,27 @@ export function CodexGoalEditor() {
       <GoalAction testID="codex-goal-save" label={saving ? 'Saving…' : saveError ? 'Retry save' : 'Save goal'} icon={Goal} busy={saving} disabled={!available || mutating || !draft.objective.trim()} onPress={() => void save()} />
     </View>
   </View>
+}
+
+function GoalRuntimeRecovery({ testID }: { testID: string }) {
+  const { supported, loading, refreshing, mutating, scopeKey, refresh } = useCodexRuntime()
+  const request = useRef<object | null>(null)
+  const currentScope = useRef<string | null>(scopeKey)
+  useLayoutEffect(() => {
+    currentScope.current = scopeKey
+    request.current = null
+    return () => { currentScope.current = null; request.current = null }
+  }, [scopeKey])
+  const busy = loading || refreshing
+  const retry = async () => {
+    if (!supported || busy || mutating || request.current || currentScope.current !== scopeKey) return
+    const owner = {}
+    request.current = owner
+    try { await refresh() } finally {
+      if (request.current === owner) request.current = null
+    }
+  }
+  return <GoalAction testID={testID} label={busy ? 'Loading goal controls…' : 'Retry loading goal controls'} icon={RefreshCw} busy={busy} disabled={!supported || busy || mutating} onPress={() => void retry()} />
 }
 
 function useConfirmedGoalClear(goal: CodexGoal | null) {

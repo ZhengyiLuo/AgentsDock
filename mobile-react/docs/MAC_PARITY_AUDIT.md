@@ -1,4 +1,16 @@
-# Mobile / Mac parity — 2026-10-01
+# Mobile / Mac parity — 2026-10-02
+
+## Unreleased: goal editor interaction and recovery
+
+- Preserve the direct editor after Clear removes the compact goal card, including
+  a newer draft entered while that request is pending. Keep explicit Save and
+  scope-change closure; do not introduce an automatic restart or budget reset.
+- Apply keyboard-aware scrolling and drag dismissal to both goal editor hosts.
+  Offer a single-flight runtime retry when loading fails and actions are disabled.
+- Component regressions cover the real card-to-editor composition with mocked
+  native hosts and service responses. Native interaction remains unaccepted
+  because simulator creation on the external volume is permission-blocked.
+  These changes are source only; no TestFlight upload or server change.
 
 ## Unreleased: reasoning controls and send acknowledgement
 

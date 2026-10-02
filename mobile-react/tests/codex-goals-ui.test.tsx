@@ -480,6 +480,62 @@ test('confirmed editor Clear resets the form so a new goal starts with explicitl
   assert.deepEqual(inputs, [{ objective: 'A fresh objective', status: 'active', token_budget: null, time_budget_seconds: null }])
 })
 
+test('clearing through the goal card keeps the editor and newer draft available for saving a replacement', async () => {
+  let value = runtime({ ...goal, status: 'complete' })
+  const cleared = deferred<CodexGoalSnapshot>()
+  const inputs: CodexGoalInput[] = []
+  let clears = 0
+  setTestClient({ codexRuntime: async () => value, clearCodexGoal: () => { clears++; return cleared.promise }, setCodexGoal: async (_id, input) => {
+    inputs.push(input)
+    value = { ...runtime({ ...goal, objective: input.objective!, status: input.status!, tokenBudget: input.token_budget!, tokensUsed: 0, timeUsedSeconds: 0, createdAt: 3 }), time_budget_seconds: input.time_budget_seconds! }
+    return { goal: value.goal, time_budget_seconds: value.time_budget_seconds }
+  } })
+  const tree = await mount()
+  await press(tree, 'codex-goal-details')
+  await press(tree, 'codex-goal-edit')
+  await press(tree, 'codex-goal-editor-clear')
+  await act(async () => Alert.__calls[0].buttons?.find(button => button.style === 'destructive')?.onPress?.())
+  assert.equal(clears, 1)
+  await change(tree, 'codex-goal-objective-input', 'A replacement drafted while clearing')
+  await press(tree, 'codex-goal-status')
+  await press(tree, 'codex-goal-status-active')
+  await change(tree, 'codex-goal-token-budget', '2000')
+  await change(tree, 'codex-goal-time-budget', '900')
+  value = { ...runtime(null), time_budget_seconds: null }
+  await act(async () => cleared.resolve({ goal: null, time_budget_seconds: null }))
+  assert.equal(nodes(tree, 'codex-goal-bar').length, 0)
+  assert.equal(nodes(tree, 'codex-goal-editor').length, 1, 'clearing the card must not dismiss its editor')
+  assert.equal(node(tree, 'codex-goal-objective-input').props.value, 'A replacement drafted while clearing')
+  assert.equal(node(tree, 'codex-goal-token-budget').props.value, '2000')
+  assert.equal(node(tree, 'codex-goal-time-budget').props.value, '900')
+  assert.match(contents(node(tree, 'codex-goal-feedback')), /newer draft is still unsaved/)
+  await press(tree, 'codex-goal-save')
+  assert.deepEqual(inputs, [{ objective: 'A replacement drafted while clearing', status: 'active', token_budget: 2000, time_budget_seconds: 900 }])
+  assert.equal(contents(node(tree, 'codex-goal-objective')), 'A replacement drafted while clearing')
+  assert.equal(nodes(tree, 'codex-goal-editor').length, 1)
+  await press(tree, 'codex-goal-editor-close')
+  assert.equal(nodes(tree, 'codex-goal-editor').length, 0)
+  assert.equal(nodes(tree, 'codex-goal-bar').length, 1)
+})
+
+test('a direct editor left open after Clear closes when the server scope changes', async () => {
+  let value = runtime()
+  setTestClient({ codexRuntime: async () => value, clearCodexGoal: async () => {
+    value = { ...runtime(null), time_budget_seconds: null }
+    return { goal: null, time_budget_seconds: null }
+  } })
+  const tree = await mount()
+  await press(tree, 'codex-goal-details')
+  await press(tree, 'codex-goal-edit')
+  await press(tree, 'codex-goal-editor-clear')
+  await act(async () => Alert.__calls[0].buttons?.find(button => button.style === 'destructive')?.onPress?.())
+  assert.equal(node(tree, 'codex-goal-objective-input').props.value, '')
+  value = runtime({ ...goal, objective: 'The other server goal' })
+  await act(async () => useAppStore.setState({ activeProfileId: 'profile-b' }))
+  assert.equal(nodes(tree, 'codex-goal-editor').length, 0)
+  assert.equal(contents(node(tree, 'codex-goal-objective')), 'The other server goal')
+})
+
 test('goal drafts survive polling and newer edits survive a pending save', async () => {
   let value = runtime({ ...goal, status: 'paused' })
   const saved = deferred<CodexGoalSnapshot>()
@@ -636,6 +692,52 @@ test('direct Edit opens the goal editor and refreshes the current chat', async (
   assert.ok(reads > before)
   assert.equal(node(tree, 'codex-goal-objective-input').props.value, goal.objective)
   assert.equal(node(tree, 'codex-goal-status').props.accessibilityLabel, 'Goal status: Goal paused')
+})
+
+test('both goal editor sheets adjust their scroll area and dismiss the keyboard on drag', async () => {
+  const direct = await mount()
+  await press(direct, 'codex-goal-details')
+  await press(direct, 'codex-goal-edit')
+  const controls = await mount('status')
+  await press(controls, 'codex-status')
+  for (const [tree, id] of [[direct, 'codex-goal-editor-scroll'], [controls, 'codex-controls-scroll']] as const) {
+    const scroll = node(tree, id)
+    assert.equal(scroll.props.automaticallyAdjustKeyboardInsets, true, `${id} must reserve space for the iOS keyboard`)
+    assert.equal(scroll.props.keyboardDismissMode, 'on-drag', `${id} must let number-pad users dismiss the keyboard`)
+    assert.equal(scroll.props.keyboardShouldPersistTaps, 'always', `${id} must deliver the first tap to goal controls`)
+  }
+})
+
+test('a failed first runtime read exposes a single-flight retry on the goal card and editor', async () => {
+  for (const content of ['bar', 'editor'] as const) {
+    const recovered = deferred<CodexRuntimeSnapshot>()
+    let reads = 0
+    setTestClient({ codexRuntime: () => {
+      reads++
+      return reads === 1 ? Promise.reject(new Error('Runtime connection was interrupted')) : recovered.promise
+    } })
+    const tree = await mount(content)
+    if (content === 'bar') await press(tree, 'codex-goal-details')
+    const retryId = content === 'bar' ? 'codex-goal-runtime-refresh' : 'codex-goal-editor-refresh'
+    const actionId = content === 'bar' ? 'codex-goal-toggle' : 'codex-goal-save'
+    const errorId = content === 'bar' ? 'codex-goal-error' : 'codex-goal-save-error'
+    assert.equal(reads, 1)
+    assert.match(contents(node(tree, errorId)), /Runtime connection was interrupted/)
+    assert.equal(node(tree, actionId).props.disabled, true)
+    assert.equal(node(tree, retryId).props.disabled, false)
+    const retry = node(tree, retryId).props.onPress
+    await act(async () => { retry(); retry() })
+    assert.equal(reads, 2, 'same-frame retry taps must issue one runtime request')
+    assert.equal(node(tree, retryId).props.disabled, true)
+    assert.equal(node(tree, retryId).props.accessibilityState.busy, true)
+    await act(async () => recovered.resolve(runtime()))
+    assert.equal(reads, 2, 'duplicate retry taps must not schedule an extra trailing read')
+    assert.equal(node(tree, actionId).props.disabled, false)
+    assert.equal(nodes(tree, retryId).length, 0)
+    assert.equal(nodes(tree, errorId).length, 0)
+    await act(async () => tree.unmount())
+    mounted.splice(mounted.indexOf(tree), 1)
+  }
 })
 
 test('explicitly unsupported goals stay read-only and unavailable runtime actions stay disabled', async () => {

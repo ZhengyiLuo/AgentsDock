@@ -386,6 +386,8 @@ function CodexControlsSheet({ visible, onClose }: { visible: boolean; onClose: (
           testID="codex-controls-scroll"
           style={{ flex: 1 }}
           contentContainerStyle={styles.controls}
+          automaticallyAdjustKeyboardInsets
+          keyboardDismissMode="on-drag"
           keyboardShouldPersistTaps="always"
         >
           {loading ? <View style={styles.loading}><ActivityIndicator color={colors.blue} /><Text style={{ color: colors.muted }}>Loading thread controls…</Text></View> : null}
