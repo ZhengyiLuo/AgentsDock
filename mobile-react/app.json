@@ -58,7 +58,7 @@
       [
         "expo-image-picker",
         {
-          "photosPermission": "Allow AgentsDock to access photos you choose to attach to agent messages.",
+          "photosPermission": "Allow AgentsDock to access photos and videos you choose to attach to agent messages.",
           "cameraPermission": false,
           "microphonePermission": false
         }

@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { convertFormDataAsync } from 'expo/src/winter/fetch/convertFormData'
 
-import { photoAssetsToUploads } from '../lib/uploads'
+import { mediaAssetsToUploads } from '../lib/uploads'
 import { AgentServerClient } from './AgentServerClient'
 
 interface RawFormEntry {
@@ -54,17 +54,21 @@ globalThis.fetch = (async (_input: RequestInfo | URL, init?: RequestInit) => {
 }) as typeof fetch
 
 try {
-  const [photo] = photoAssetsToUploads([
+  const [photo, video] = mediaAssetsToUploads([
     { uri: 'file:///picker/render', mimeType: 'image/png' },
+    { uri: 'file:///picker/movie', mimeType: 'video/mp4', fileSize: 1_000 },
   ], 1234)
   assert(photo)
+  assert(video)
 
   const client = new AgentServerClient('https://upload.example', 'upload-token')
   const result = await client.upload('session /?', photo)
+  const videoResult = await client.upload('session /?', video)
   client.dispose()
 
   assert.equal(result.filename, 'photo-1234-1.png')
-  assert.equal(requests.length, 1)
+  assert.equal(videoResult.filename, 'video-1234-2.mp4')
+  assert.equal(requests.length, 2)
   const request = requests[0]
   assert(request)
   assert.equal(request.part.name, 'photo-1234-1.png')
@@ -76,6 +80,13 @@ try {
   assert.match(request.multipart, /fixture:file:\/\/\/picker\/render/)
   assert.equal(request.headers.get('X-ZenithDock-Token'), 'upload-token')
   assert.equal(request.headers.has('Content-Type'), false)
+  const videoRequest = requests[1]
+  assert(videoRequest)
+  assert.equal(videoRequest.part.name, 'video-1234-2.mp4')
+  assert.equal(videoRequest.part.type, 'video/mp4')
+  assert.equal(new TextDecoder().decode(videoRequest.bytes), 'fixture:file:///picker/movie')
+  assert.match(videoRequest.multipart, /content-disposition: form-data; name="file"; filename="video-1234-2.mp4"/)
+  assert.match(videoRequest.multipart, /content-type: video\/mp4/)
 } finally {
   globalThis.fetch = originalFetch
   globalThis.FormData = originalFormData
