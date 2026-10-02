@@ -79,6 +79,36 @@ describe('analytics privacy configuration', () => {
     expect(request).not.toHaveBeenCalled()
   })
 
+  it('records one operation outcome without exposing its response or changing errors', async () => {
+    const request = vi.fn().mockResolvedValue({ ok: true })
+    vi.stubGlobal('fetch', request)
+    const analytics = await loadAnalytics()
+    const response = { ok: false, api_key: 'private-key', path: '/private/file', message: 'private reply' }
+    const action = vi.fn(async () => response)
+    expect(await analytics.trackOperation('provider_connection_tested', action, value => value.ok)).toBe(response)
+    expect(action).toHaveBeenCalledOnce()
+    const failure = new Error('private server details')
+    await expect(analytics.trackOperation('workspace_file_saved', async () => { throw failure })).rejects.toBe(failure)
+    await analytics.trackOperation('goal_saved', async () => response)
+    const payloads = request.mock.calls.map(([, init]) => JSON.parse(init.body)[0])
+    expect(payloads.map(item => [item.event, item.properties.success])).toEqual([
+      ['provider_connection_tested', false], ['workspace_file_saved', false], ['goal_saved', true]
+    ])
+    for (const item of payloads) {
+      expect(Object.keys(item.properties).sort()).toEqual(['distinct_id', 'platform', 'success', 'time', 'token'])
+      expect(JSON.stringify(item)).not.toContain('private')
+    }
+  })
+
+  it('does not enable shared-browser analytics when recording an operation', async () => {
+    const request = vi.fn()
+    vi.stubGlobal('fetch', request)
+    Object.defineProperty(window, 'agentsDock', { configurable: true, value: { sharedChat: {}, native: { analyticsDisabled: true } } })
+    const analytics = await loadAnalytics()
+    expect(await analytics.trackOperation('attachment_uploaded', async () => 'ok')).toBe('ok')
+    expect(request).not.toHaveBeenCalled()
+  })
+
   it('posts an app-owned allow-listed payload with the anonymous per-install id', async () => {
     const request = vi.fn().mockResolvedValue({ ok: true })
     vi.stubGlobal('fetch', request)

@@ -135,8 +135,41 @@ export const ANALYTICS_EVENTS = [
   'chat_reordered',
   'team_network_opened',
   'message_sent',
+  'message_queued',
+  'message_steered',
+  'side_chat_opened',
+  'side_chat_message_submitted',
+  'side_chat_stop_requested',
+  'provider_settings_opened',
+  'provider_connection_tested',
+  'provider_connection_saved',
+  'provider_connection_forgotten',
+  'provider_default_model_saved',
+  'goal_saved',
+  'goal_cleared',
+  'goal_paused',
+  'goal_resumed',
+  'workspace_file_saved',
+  'workspace_changes_opened',
+  'workspace_git_staged',
+  'workspace_git_unstaged',
+  'workspace_git_committed',
+  'workspace_git_conflict_resolved',
+  'workspace_git_continued',
+  'workspace_git_aborted',
+  'attachment_uploaded',
+  'app_update_checked',
+  'app_update_channel_changed',
+  'app_update_install_requested',
+  'app_update_cancelled',
+  'server_update_checked',
+  'server_update_requested',
+  'server_update_now_requested',
+  'server_update_cancelled',
+  'server_update_retry_requested',
   'slash_skill_used',
   'slash_command_used',
+  'builtin_slash_command_used',
   'chat_reference_sent',
   'team_reference_sent',
   'folder_created',
@@ -153,6 +186,23 @@ export const ANALYTICS_EVENTS = [
 ] as const
 
 export type AnalyticsEvent = typeof ANALYTICS_EVENTS[number]
+
+/** One explicit operation, not a subscription/replay. Never serialize its input,
+ * result or error; success means this request resolved, not eventual completion. */
+export async function trackOperation<T>(
+  name: AnalyticsEvent,
+  operation: () => Promise<T>,
+  succeeded: (result: T) => boolean = () => true
+): Promise<T> {
+  try {
+    const result = await operation()
+    trackEvent(name, { success: succeeded(result) })
+    return result
+  } catch (error) {
+    trackEvent(name, { success: false })
+    throw error
+  }
+}
 
 export function trackEvent(name: AnalyticsEvent, props?: AnalyticsEventProps): void {
   const invokedRevision = consentRevision

@@ -5,6 +5,7 @@ import { Virtuoso } from 'react-virtuoso'
 import type { WorkspaceProfileScope } from '@shared/types'
 import type { WorkspaceGitAction, WorkspaceGitConflict, WorkspaceGitDiff, WorkspaceGitStatus } from '@shared/workspace-git'
 import { useWorkspaceGitLabels } from '../lib/workspace-git-labels'
+import { trackEvent, trackOperation } from '../lib/analytics'
 import './WorkspaceChanges.css'
 
 type Selection = { path: string; view: 'staged' | 'unstaged' | 'conflict' }
@@ -51,6 +52,11 @@ function WorkspaceChangesPanel({ scope, sessionId, active = true, readOnly = fal
   const dirtyRef = useRef(conflictDirty)
   dirtyRef.current = conflictDirty
   const owner = useRef({ scope, sessionId }).current
+  const wasActive = useRef(false)
+  useEffect(() => {
+    if (active && !wasActive.current) trackEvent('workspace_changes_opened')
+    wasActive.current = active
+  }, [active])
 
   useEffect(() => {
     mounted.current = true
@@ -104,7 +110,11 @@ function WorkspaceChangesPanel({ scope, sessionId, active = true, readOnly = fal
     mutation.current = true; statusEpoch.current++; detailEpoch.current++
     setBusy(true); setLoading(false); setDetailLoading(false); setError(null); setNotice(null)
     try {
-      const next = await git.action(owner.scope, owner.sessionId, { ...input, expected_revision: revision })
+      const event = {
+        stage: 'workspace_git_staged', unstage: 'workspace_git_unstaged', commit: 'workspace_git_committed',
+        resolve: 'workspace_git_conflict_resolved', continue: 'workspace_git_continued', abort: 'workspace_git_aborted'
+      } as const
+      const next = await trackOperation(event[input.action], () => git.action(owner.scope, owner.sessionId, { ...input, expected_revision: revision }))
       if (!mounted.current) return
       setStatus(next)
       if (input.action === 'commit') { setMessage(''); setReviewRevision(null); setNotice(labels.committed) }

@@ -71,6 +71,73 @@
   disposable native acceptance. The new public package requires owned registry
   publication and release-pipeline integration after that acceptance; current
   public registry commands and frozen release candidates are unchanged.
+## 2026-10-01 — Simplify the repository overview
+
+- Group Claude Code, Codex, Cursor and OpenCode in the product introduction.
+  Keep CLI prerequisites in general setup guidance and provider availability
+  scoped to the client and server version.
+- Remove the separate OpenCode installation callout, backend-name links,
+  standalone server repository links and website development walkthrough.
+  Keep stable 1.0.9 downloads and the maintained server setup documentation.
+- Documentation only; no provider, mobile, installer or release changes.
+
+## 2026-10-01 — Refresh the README for stable 1.0.9
+
+- Point the repository's desktop badge, downloads and release notes to the
+  published 1.0.9 stable release. Describe OpenCode's desktop availability and
+  Codex Side chat controls, keeping mobile availability separate.
+- Add the stable npm command for fresh server installations, My Agents setup
+  guidance and the managed update path for existing servers, including the
+  signed legacy bridge. Link backend documentation to the maintained source.
+- Update the linked desktop OpenCode guide and preserve its previous anchor.
+  Verify the four desktop download URLs and relative documentation links and
+  anchors. Documentation only; no application, service or release changes.
+
+## 2026-09-30 — Desktop workflow usage events
+
+- Add 33 aggregate desktop events for side chats, custom API settings, goals,
+  workspace saves and Git actions, uploads, queue/steering, built-in slash
+  selection, and explicit app/server update actions. Include keyboard entry
+  points in the existing Open file metric. The complete catalog and outcome
+  definitions are in `docs/ANALYTICS_EVENTS.md`.
+- Keep the existing anonymous envelope and `success`-only property allowlist.
+  Do not send content, names, paths, model/provider details, credentials or
+  resource IDs. Team Network instrumentation is unchanged; shared-browser and
+  iOS analytics remain disabled. Update requests are not installation success,
+  and chat-reference submission is not proof of peer delivery.
+- Verified with an isolated native macOS Electron app, production IPC/HTTP and
+  a disposable AgentsServer: send and queue two real Codex turns; open, send a
+  follow-up and stop a side chat; save/clear a Codex goal; open a file by button
+  and shortcut, edit/save it, stage it and commit the reviewed disposable index;
+  open My Agents and fail a connection check against an unavailable test
+  endpoint; check desktop/server updates and change the desktop channel.
+  Captured analytics requests locally and blocked delivery to Mixpanel; only
+  the documented property keys were present. No production app/server restart.
+- Validation: 951 focused tests, TypeScript and production compilation passed.
+  Live acceptance is partial for upload, steering, Claude goals, goal
+  pause/resume, credential persistence, Git conflict/abort and actual update
+  install/cancel/retry paths; these were not exercised in this run. No claim of
+  release readiness or completed installation is made. Availability: source
+  and isolated local build only; no release or deployment.
+
+## 2026-09-29 — Preserve Claude history activity access
+
+- Keep the activity disclosure when a compact Claude history page uses the
+  final commentary as its only trace anchor. Deduplicate the visible reply
+  while retaining the run and sequence needed to load its activity on demand.
+- Claude text blocks are projected as assistant output in the server source;
+  the desktop also surfaces legacy report-shaped commentary when those events
+  are present, after ownership filtering and final-answer deduplication. These
+  source changes do not imply a server deployment.
+- Verified in the actual local macOS package against the connected server:
+  reopened an affected historical chat, expanded the restored activity control,
+  loaded its report and tool details, then collapsed it. Focused timeline/UI
+  regressions (324), 88 Claude SDK/print-runner tests, TypeScript and production
+  compilation passed.
+- Acceptance remains partial: the running server's compact history can omit
+  legacy report text until expansion. Default-visible recovery through that
+  paging boundary and a new native Claude turn remain unverified. No claim of
+  full native-provider parity or release readiness is made.
 
 ## 2026-09-28 — Combine editor line endings with desktop/server fixes
 
@@ -4419,3 +4486,64 @@ Forget is in the API card's three-dot menu and requires confirmation.
 
 Future entries should describe public-facing changes and validation without
 including credentials, user data, private infrastructure, or internal history.
+
+## Recovered Codex turns do not duplicate user messages
+
+History reconciliation now recognizes exact public Codex message items even
+when Stop or server-restart recovery omitted the normal completion receipt.
+It repairs already imported copies and prevents duplicate inputs on subsequent
+imports without rewriting the transcript. Genuine repeated messages in distinct
+turns remain visible.
+
+The new recovered-stop regression failed before the change and passed afterward;
+all 40 native history-repair tests passed. The signed desktop build 1245 was
+exercised against an isolated patched server over its real HTTP interface using
+a synthetic recovery ledger/provider transcript: the original input and answer
+remained visible, the replay was hidden, and a genuine later repeat survived
+reopening. No live provider turn, user installation, release, or service restart
+was part of this replay acceptance.
+
+### Pending idle updates leave scheduled work running
+
+An update reserved for when the server is idle no longer blocks automatic
+scheduled jobs or automatic titles. These use the same update admission policy
+as ordinary turns. Previously parked, unchanged schedule occurrences are
+rearmed on startup or update-status reconciliation without cancelling the
+pending update or rewriting edited schedules.
+
+Idle updates also wait for queued messages, including already persisted ones,
+instead of treating their ability to survive a restart as permission to jump
+ahead of them. Existing active-work checks remain in place. Explicit force
+updates keep their separate, confirmed behavior.
+
+The focused scheduler, update, admission, status-reconciliation, and generated
+title suites passed (248 tests). The unchanged signed desktop build 1245 was
+exercised against an isolated patched server with real Codex: an automatic
+scheduled turn completed and appeared in the chat while another chat's native
+tool continued and the update stayed pending. The pending reservation was a
+test fixture with updater polling disabled; no installation or live deployment
+was exercised. Provider credentials were copied only into disposable test state
+and the original remained unchanged. This is a source fix, not a published beta.
+
+## 2026-10-02 — Codex browsing and unchanged sign-in rechecks
+
+- Selecting, reopening, or reconnecting a chat now reads Codex status without
+  automatically resuming its native thread. Explicit provider controls still
+  load a persisted thread; normal Send uses the existing server resume path.
+  Browsing therefore does not hold the provider lifecycle lock needed by Send.
+- Recheck CLIs no longer retires a native Codex process when its known sign-in
+  revision is unchanged. Subagent inspection can read the owning process while
+  a genuine login handoff is pending. Native request/callback ownership scopes
+  idle handoff to the affected chat, preserving other chats' ongoing work.
+- Validation: 54 desktop controls tests, TypeScript checking, production compile
+  and compiled-entry verification; 130 targeted server tests. A local compiled
+  Electron app exercised real authenticated HTTP and native Codex in isolated
+  state: first message and follow-up both produced the expected answers, browsing
+  an unloaded persisted chat issued zero native-load requests, and an unchanged
+  sign-in recheck allowed the follow-up while another chat's shell work completed
+  without interruption. Original credentials were unchanged; test copies removed.
+- Acceptance boundary: this validates unchanged-sign-in rechecks, not migration
+  between different real accounts. An earlier forced process-retirement probe
+  encountered Codex's retained native writer after unsubscribe; that probe is
+  failed, and genuine cross-process credential handoff remains unaccepted.
+  No public release, installed-app replacement, or live-service deployment.

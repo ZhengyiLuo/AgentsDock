@@ -1,4 +1,5 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
+import { trackEvent } from '../lib/analytics'
 import { CheckCircle2, Circle, ChevronRight, RefreshCw, KeyRound } from 'lucide-react'
 import { t } from '@shared/i18n'
 import type { Backend } from '@shared/types'
@@ -66,6 +67,10 @@ function ProviderGroup({ backend, requested }: { backend: Backend; requested?: {
 
 export function AIProviderSettings({ requested }: { requested?: { backend?: Backend } } = {}) {
   useLocale()
+  const tracked = useRef(false)
+  useEffect(() => {
+    if (!tracked.current) { tracked.current = true; trackEvent('provider_settings_opened') }
+  }, [])
   const profile = useAppStore(state => state.profiles.find(item => item.id === state.activeProfileId))
   const generation = useAppStore(state => state.profileGeneration)
   const connected = useAppStore(state => state.connected)

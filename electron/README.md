@@ -73,15 +73,19 @@ Server identity scopes sessions, preferences, timeline rows, read state, jobs,
 files, and pins so aliases for one server share data without contaminating a
 different server.
 
-## OpenCode (optional beta backend)
+<a id="opencode-optional-beta-backend"></a>
 
-OpenCode appears in the chat backend picker. A matching standalone
-AgentsServer must advertise the OpenCode v1 contract; an older server shows
-an upgrade requirement and cannot silently switch the chat to another backend.
+## OpenCode
+
+OpenCode is available in desktop stable 1.0.9 with AgentsServer 1.0.9 and appears
+in the chat backend picker. The server must advertise the OpenCode v1 contract;
+an older server shows an upgrade requirement and cannot silently switch the
+chat to another backend.
 Install the server-supported OpenCode CLI and configure its provider on the
-server host, not in Electron. Settings → AI Providers → Recheck CLIs reports
-readiness and setup guidance. OpenCode is optional and does not block other
-providers when it is absent.
+server host. Settings → My Agents → OpenCode reports readiness and setup
+guidance and supports custom API connections. OpenCode is optional and does not
+block other providers when it is absent. This availability applies to desktop;
+mobile provider support depends on its separately released client.
 
 Choose a server-advertised model, or leave the model empty to use OpenCode's
 native default. Existing AgentsDock chats resume their native OpenCode session
@@ -97,7 +101,7 @@ resets native OpenCode context while retaining the visible AgentsDock timeline.
 
 OpenCode supports explicitly authorized cross-chat routes through the run-bound
 AgentsDock tool on matching servers, including tool-capable custom API models.
-This beta does not provide external history import, native session forks,
+The 1.0.9 release does not provide external history import, native session forks,
 side chats, live steering, or native goals for OpenCode.
 Ordinary queued follow-ups and Stop remain available. A copied-memory fork
 is not presented as a native clone.

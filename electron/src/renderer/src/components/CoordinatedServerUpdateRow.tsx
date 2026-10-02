@@ -3,6 +3,7 @@ import { LoaderCircle, RefreshCw } from 'lucide-react'
 import type { AppUpdateStatus, CoordinatedServerUpdate } from '@shared/types'
 import { t } from '../lib/i18n'
 import { useAppStore } from '../store/app-store'
+import { trackEvent } from '../lib/analytics'
 
 function updateDescription(server: CoordinatedServerUpdate): string {
   const raw = server.message.trim()
@@ -40,6 +41,7 @@ export function CoordinatedServerUpdateRow({ server, onUpdate }: {
   const retry = async () => {
     if (retryInFlight.current) return
     retryInFlight.current = true
+    trackEvent('server_update_retry_requested')
     setRetrying(true)
     try {
       onUpdate(await window.agentsDock.updates.retryServers(server.profileId))

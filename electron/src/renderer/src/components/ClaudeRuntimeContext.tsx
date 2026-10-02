@@ -14,6 +14,7 @@ import type {
   Session
 } from '@shared/types'
 import { useAppStore } from '../store/app-store'
+import { trackOperation } from '../lib/analytics'
 
 export const CLAUDE_RUNTIME_REFRESH_TIMEOUT_MS = 10_000
 
@@ -366,7 +367,8 @@ export function ClaudeRuntimeProvider({ session, capability, children }: ClaudeR
     mutationCount.current += 1
     setMutating(true)
     try {
-      const next = await (condition === null ? bridge.clearGoal(sessionId) : bridge.setGoal(sessionId, condition))
+      const next = await trackOperation(condition === null ? 'goal_cleared' : 'goal_saved',
+        () => condition === null ? bridge.clearGoal(sessionId) : bridge.setGoal(sessionId, condition))
       if (!current()) return null
       // Only native runtime snapshots create or clear the visible goal. A
       // command acknowledgement may precede the native goal status event.
