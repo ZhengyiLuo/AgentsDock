@@ -1,5 +1,29 @@
 # Public development log
 
+## 2026-10-02 — Codex sign-in handoff recovery (unreleased)
+
+- Catalog refresh, including reconnect refresh from another client, no longer
+  requests authentication handoff. Explicit provider reload retains the opaque
+  credential-store recovery path; custom endpoints keep their own credentials.
+- Report the actual per-chat handoff blocker with a distinct retryable error
+  code. Preserve ownership on failed native metadata reads and retry on the next
+  send. Completion of pending provider requests wakes handoff cleanup without
+  polling; failed metadata notifications cannot repeatedly trigger themselves.
+- Keep the failed-send explanation beside the restored draft. Do not show
+  unrelated cached login instructions or a duplicate toast covering Send.
+- Validation: 91 lifecycle/recovery tests, 67 authentication/provider/reload
+  tests, 252 Composer/RuntimeHealth tests, two restart/catalog service tests,
+  TypeScript and production Electron compilation passed. Used two isolated
+  compiled native app profiles over loopback and Tailscale with real Codex:
+  repeated refreshes, retained context, concurrent work, restored draft, and
+  retry after an injected metadata failure all passed with the same native
+  thread ID. A second machine also exercised the catalog endpoint.
+- Boundaries: the login revision change and metadata outage were injected in
+  isolated test state; this is not real OAuth re-login acceptance. Both app
+  processes ran on one test machine. The reported local-versus-remote difference
+  on an affected installation remains unverified. No production deployment,
+  user installation replacement, release packaging, or publication in this pass.
+
 ## 2026-10-01 — Publish matched stable 1.0.9, build 1243
 
 - Publish [AgentsDock 1.0.9](https://github.com/ZhengyiLuo/AgentsDock/releases/tag/v1.0.9),

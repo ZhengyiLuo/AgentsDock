@@ -5446,6 +5446,9 @@ export class AppService {
     const providerRevision = this.providerCatalogRevision ?? 0
     try {
       const catalog = await scope.client.runtimeCatalog(forceProbe)
+      // Refresh probes CLI/catalog metadata, including after a restart.
+      // It must never request an authentication handoff; the server owns
+      // native login change detection independently of connected clients.
       if (!this.isCurrentScope(scope)) return
       if (providerRevision !== (this.providerCatalogRevision ?? 0)) return
       if (!runtimeCatalogHasSelectableModels(catalog)) {

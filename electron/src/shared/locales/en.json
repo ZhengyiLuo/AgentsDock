@@ -1,4 +1,5 @@
 {
+  "codexAuth.handoffWaiting": "Waiting for sign-in handoff",
   "subagents.runningOne": "1 subagent running",
   "subagents.runningMany": "{count} subagents running",
   "subagents.stop": "Stop subagents",

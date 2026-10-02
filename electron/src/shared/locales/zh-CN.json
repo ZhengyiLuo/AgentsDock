@@ -1,4 +1,5 @@
 {
+  "codexAuth.handoffWaiting": "等待切换登录会话",
   "subagents.runningOne": "1 个子代理正在运行",
   "subagents.runningMany": "{count} 个子代理正在运行",
   "subagents.stop": "停止子代理",
