@@ -53,10 +53,34 @@ test('token always selects exactly one existing instance and only asks to show i
   }
 })
 
+test('existing setup/install refusal explains how to add an instance without retrying installation', async t => {
+  const f = fixture(t)
+  for (const command of ['setup', 'install']) {
+    const error = Object.assign(new Error('An existing server installation or state was found.'),
+      { code: 'AGENTSDOCK_EXISTING_INSTALLATION' })
+    let attempts = 0
+    f.context.load = () => ({ run: async () => { attempts++; throw error } })
+    await assert.rejects(run([command], f.context), actual => {
+      assert.equal(actual, error)
+      assert.match(actual.message, /If you want to add a new server instance, run: agentsdock new/)
+      assert.match(actual.message, /agentsdock new work --port 7854/)
+      assert.equal(actual.code, 'AGENTSDOCK_EXISTING_INSTALLATION')
+      return true
+    })
+    assert.equal(attempts, 1)
+  }
+  for (const [command, code] of [['setup', undefined], ['update', 'AGENTSDOCK_EXISTING_INSTALLATION']]) {
+    const error = Object.assign(new Error('Original failure'), { code })
+    f.context.load = () => ({ run: async () => { throw error } })
+    await assert.rejects(run([command], f.context), actual => actual === error && actual.message === 'Original failure')
+  }
+  assert.equal(f.calls.length, 0)
+})
+
 test('status and public server commands delegate exact argument arrays with terminal attached', async t => {
   const f = fixture(t)
   for (const [args, expected] of [
-    [['status'], ['list']], [['status', '--instance', 'work'], ['info', 'work']],
+    [['status'], ['status']], [['status', '--instance', 'work'], ['status', 'work']],
     [['servers'], ['list']], [['instances', 'list'], ['list']],
     [['servers', 'new', '--name', 'work', '--port', '7854'], ['new', '--name', 'work', '--port', '7854']],
     ...['info', 'start', 'stop', 'restart', 'remove'].map(action => [['servers', action, 'work'], [action, 'work']]),

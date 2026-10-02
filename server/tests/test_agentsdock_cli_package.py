@@ -212,11 +212,22 @@ if (require.main === module) {
         self.assertEqual(invoke(["agentsdock", "token", "--instance", "work"]).strip(), "separate-fixture-token")
         self.assertEqual(invoke(["agentsdock", "token", "work"]).strip(), "separate-fixture-token")
         self.assertEqual(invoke(["agentsdock", "token", "--instance", "default"]).strip(), "fixture-only-token")
+        statuses = invoke(["agentsdock", "status"])
+        self.assertIn("Server (default):", statuses)
+        self.assertIn("Server (work):", statuses)
+        for field in ("Status:", "Address:", "Version:", "Port:"):
+            self.assertEqual(statuses.count(field), 2)
+        self.assertNotIn("fixture-token", statuses)
+        self.assertNotIn("fixture-only-token", statuses)
+        named_status = invoke(["agentsdock", "status", "work"])
+        self.assertIn("Server (work):", named_status)
+        self.assertNotIn("Server (default):", named_status)
         before = private_env.read_bytes()
         rejected = subprocess.run(["agentsdock", "install", "--dry-run"], cwd=outside,
                                   env=env, capture_output=True, text=True, timeout=20)
         self.assertNotEqual(rejected.returncode, 0)
         self.assertIn("existing server installation or state", rejected.stderr)
+        self.assertIn("If you want to add a new server instance, run: agentsdock new", rejected.stderr)
         self.assertEqual(private_env.read_bytes(), before)
         for command in ("restart", "remove", "uninstall"):
             rejected = subprocess.run(["agentsdock", command], cwd=outside, env=env,

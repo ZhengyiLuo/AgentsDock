@@ -611,6 +611,28 @@ def show(instance: Instance, *, network: dict[str, str] | None = None):
     print()
 
 
+def show_status(instance: Instance, *, network: dict[str, str]) -> None:
+    """Read-only per-instance summary; never print configuration or tokens."""
+    item = describe(instance)
+    print(terminal_color(f"Server ({item['name']}):", "34"))
+    print(f"  Status:   {item['status']}")
+    addresses = []
+    if item["port"]:
+        choices = connection_choices(read_config(instance).get("AGENTSDOCK_AGENT_BIND", "0.0.0.0"),
+                                     item["port"], item["addresses"], network)
+        if choices["tailscale"]:
+            addresses.append(f"{choices['tailscale']} (Tailscale / other networks)")
+        for key, label in (("lan", "Same Wi-Fi / LAN"), ("local", "This machine only"),
+                           ("other", "Other / unverified")):
+            addresses.extend(f"{url} ({label})" for url in choices[key])
+    print("  Address:  " + (addresses[0] if addresses else "Not configured"))
+    for address in addresses[1:]:
+        print("            " + address)
+    print(f"  Version:  {item['version'] or 'unknown'}")
+    print(f"  Port:     {item['port'] or 'Not configured'}")
+    print()
+
+
 def terminal_color(text: str, code: str) -> str:
     color = sys.stdout.isatty() and os.environ.get("TERM") != "dumb" and "NO_COLOR" not in os.environ
     return f"\033[{code}m{text}\033[0m" if color else text
@@ -749,6 +771,8 @@ def parser() -> argparse.ArgumentParser:
     commands.add_parser("list")
     info = commands.add_parser("info")
     info.add_argument("name", type=instance_name)
+    status = commands.add_parser("status", help="Show readable details for all instances or one name")
+    status.add_argument("name", nargs="?", type=instance_name)
     new = commands.add_parser("new")
     new.add_argument("--name", type=instance_name)
     new.add_argument("--port", type=int)
@@ -785,13 +809,20 @@ def main(argv: list[str] | None = None) -> int:
             validate_binding(instance)
             print(instance.shell_bindings())
             return 0
-        if args.command in {None, "list", "info"}:
+        if args.command in {None, "list", "info", "status"}:
             items = registry.instances()
-            if args.command == "info":
+            if args.command in {"info", "status"} and args.name:
                 items = [item for item in items if item.name == args.name]
                 if not items:
                     raise ValueError("Unknown instance.")
+            if args.command == "info":
                 print(json.dumps(describe(items[0]), indent=2))
+            elif args.command == "status":
+                network = tailscale_status() if items else None
+                for item in items:
+                    show_status(item, network=network)
+                if not items:
+                    print("No installations found. Run agentsdock setup to create your first server.")
             else:
                 network = tailscale_status() if items else None
                 print("NAME                 STATUS     PORT")

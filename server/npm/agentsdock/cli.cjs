@@ -22,6 +22,7 @@ const HELP = `Usage: agentsdock setup [--port PORT] [--bind IP] [--non-interacti
 setup/install creates a fresh default server. Use new for another instance.
 remove (also uninstall) asks for confirmation and preserves history by default.
 token shows the existing token (default instance if omitted); keep it private.
+status shows each instance's status, addresses, installed version and port; add NAME for one instance.
 update uses the signed managed updater; npm installation alone never upgrades a running server.
 start/stop/restart/remove also accept --all [--exclude NAME]; an omitted target never selects all.
 new --name NAME, token/status --instance NAME, and servers/instances ACTION remain supported.
@@ -71,7 +72,7 @@ function parse(argv) {
   }
   if (command === 'status') {
     const name = selector(args)
-    return { kind: 'local', script: 'instances.sh', args: name ? ['info', name] : ['list'] }
+    return { kind: 'local', script: 'instances.sh', args: name ? ['status', name] : ['status'] }
   }
   if (INSTANCE_ACTIONS.includes(command) || command === 'uninstall') {
     return instanceRequest(command === 'uninstall' ? 'remove' : command, args)
@@ -129,7 +130,15 @@ async function run(argv, overrides = {}) {
   const runtime = context.load()
   if (request.kind === 'version') { context.print(runtime.version); return 0 }
   if (request.kind === 'core') {
-    return runtime.run(request.args, { print: text => context.print(text.replaceAll('agentsdock-server', 'agentsdock')) })
+    try {
+      return await runtime.run(request.args, { print: text => context.print(text.replaceAll('agentsdock-server', 'agentsdock')) })
+    } catch (error) {
+      if (request.args[0] === 'install' && error.code === 'AGENTSDOCK_EXISTING_INSTALLATION') {
+        error.message += '\nIf you want to add a new server instance, run: agentsdock new' +
+          '\nOr choose its name and port: agentsdock new work --port 7854'
+      }
+      throw error
+    }
   }
   const env = localEnvironment(context)
   const script = path.join(runtime.payload, request.script)

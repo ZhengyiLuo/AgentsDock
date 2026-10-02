@@ -76,6 +76,14 @@ existing confirmation and history-preservation behavior. Tokens are private;
 Omitting its selector reads the default instance. Loopback binding is local-only;
 choose a reachable bind explicitly if another device needs access.
 
+`agentsdock status` prints a separate readable block for every instance: status,
+addresses, installed version and port. `agentsdock status work` selects just one.
+The status is the native service-manager state, not an authenticated health probe;
+the version comes from that instance's installed runtime, not the npm CLI package.
+`agentsdock info work` retains JSON output. If `setup` finds an existing default
+installation, it leaves it unchanged and points to `agentsdock new` for another
+instance (or `agentsdock new work --port 7854` for an explicit name and port).
+
 Current acceptance gap: the native instance manager still validates the older
 single-service layout. `remove default --yes` was observed refusing a current
 split gateway/execution installation before making changes. Start/stop/restart
@@ -103,8 +111,9 @@ mailbox/jobs/team tools supplied to agents inside an authorized chat.
 | Install the command and create a fresh default server | `npm install -g @agentsdock/server` then `agentsdock-server install` | `npm install -g agentsdock` (automatic first setup) |
 | Explicit retry/custom default setup | `agentsdock-server install` / first `./install.sh` | `agentsdock setup` or `agentsdock install` |
 | All instances and connection addresses | `./instances.sh list` | `agentsdock list` |
-| All instance statuses | `./instances.sh list` | `agentsdock status` (same listing) |
-| One instance's details | `./instances.sh info work` | `agentsdock info work` or `agentsdock status work` |
+| All instance statuses, addresses, versions and ports | `./instances.sh status` | `agentsdock status` (separate blocks) |
+| One instance's readable status | `./instances.sh status work` | `agentsdock status work` |
+| One instance's details as JSON | `./instances.sh info work` | `agentsdock info work` |
 | New automatic name/free port | `./instances.sh new` | `agentsdock new` |
 | New named instance | `./instances.sh new --name work --port 7854` | `agentsdock new work --port 7854` |
 | Start one | `./instances.sh start work` | `agentsdock start work` |

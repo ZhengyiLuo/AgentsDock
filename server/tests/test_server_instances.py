@@ -100,6 +100,56 @@ class InstanceTests(unittest.TestCase):
         self.configured(self.work)
         self.assertEqual([item.name for item in self.registry.instances()], ["work"])
 
+    def test_status_prints_all_instances_with_their_own_version_without_writes_or_tokens(self):
+        for item, port, version in ((self.default, 7850, "1.0.9"), (self.work, 7851, "1.0.10-beta.1")):
+            self.configured(item, port)
+            (item.runtime / "current").mkdir()
+            (item.runtime / "current/VERSION").write_text(version)
+        result, output, errors, mocks = self.cli("status", run={},
+            service_status={"side_effect": lambda item: "running" if item.name == "default" else "stopped"},
+            tailscale_status={"return_value": {"status": "connected", "ipv4": "100.64.0.2"}})
+        self.assertEqual(result, 0, errors)
+        self.assertIn("Server (default):\n  Status:   running\n  Address:  http://127.0.0.1:7850 (This machine only)\n  Version:  1.0.9\n  Port:     7850\n\n", output)
+        self.assertIn("Server (work):\n  Status:   stopped\n  Address:  http://127.0.0.1:7851 (This machine only)\n  Version:  1.0.10-beta.1\n  Port:     7851\n\n", output)
+        self.assertNotIn("100.64.0.2", output)  # Loopback services never advertise Tailscale access.
+        self.assertNotIn("test-token", output)
+        self.assertNotIn(str(self.home), output)
+        self.assertFalse(self.registry.root.exists())
+        mocks["run"].assert_not_called()
+        mocks["tailscale_status"].assert_called_once()
+
+    def test_status_one_instance_and_info_json_remain_distinct(self):
+        self.configured(self.default, 7850)
+        self.configured(self.work)
+        result, output, errors, _ = self.cli("status", "work")
+        self.assertEqual(result, 0, errors)
+        self.assertIn("Server (work):", output)
+        self.assertIn("Version:  not installed", output)
+        self.assertNotIn("Server (default)", output)
+        result, output, errors, _ = self.cli("info", "work")
+        self.assertEqual(result, 0, errors)
+        self.assertEqual(json.loads(output)["name"], "work")
+
+    def test_status_empty_and_unknown_name_do_not_create_state(self):
+        result, output, errors, _ = self.cli("status")
+        self.assertEqual(result, 0, errors)
+        self.assertIn("No installations found. Run agentsdock setup", output)
+        result, output, errors, _ = self.cli("status", "missing")
+        self.assertEqual(result, 1)
+        self.assertEqual(output, "")
+        self.assertIn("Unknown instance", errors)
+        self.assertFalse(self.registry.root.exists())
+
+    def test_status_colors_only_the_header_when_terminal_supports_color(self):
+        self.configured(self.work)
+        output = io.StringIO()
+        with contextlib.redirect_stdout(output), patch.object(output, "isatty", return_value=True), \
+                patch.dict(os.environ, {"TERM": "xterm"}, clear=True), \
+                patch.object(instances, "service_status", return_value="stopped"):
+            instances.show_status(self.work, network={"status": "unavailable", "ipv4": ""})
+        self.assertIn("\033[34mServer (work):\033[0m\n", output.getvalue())
+        self.assertIn("  Status:   stopped", output.getvalue())
+
     def test_private_registry_contains_only_name_and_status(self):
         with self.registry.locked():
             self.registry.save(self.work, "installed")
