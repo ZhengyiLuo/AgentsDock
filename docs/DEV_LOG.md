@@ -4453,3 +4453,26 @@ tool continued and the update stayed pending. The pending reservation was a
 test fixture with updater polling disabled; no installation or live deployment
 was exercised. Provider credentials were copied only into disposable test state
 and the original remained unchanged. This is a source fix, not a published beta.
+
+## 2026-10-02 — Codex browsing and unchanged sign-in rechecks
+
+- Selecting, reopening, or reconnecting a chat now reads Codex status without
+  automatically resuming its native thread. Explicit provider controls still
+  load a persisted thread; normal Send uses the existing server resume path.
+  Browsing therefore does not hold the provider lifecycle lock needed by Send.
+- Recheck CLIs no longer retires a native Codex process when its known sign-in
+  revision is unchanged. Subagent inspection can read the owning process while
+  a genuine login handoff is pending. Native request/callback ownership scopes
+  idle handoff to the affected chat, preserving other chats' ongoing work.
+- Validation: 54 desktop controls tests, TypeScript checking, production compile
+  and compiled-entry verification; 130 targeted server tests. A local compiled
+  Electron app exercised real authenticated HTTP and native Codex in isolated
+  state: first message and follow-up both produced the expected answers, browsing
+  an unloaded persisted chat issued zero native-load requests, and an unchanged
+  sign-in recheck allowed the follow-up while another chat's shell work completed
+  without interruption. Original credentials were unchanged; test copies removed.
+- Acceptance boundary: this validates unchanged-sign-in rechecks, not migration
+  between different real accounts. An earlier forced process-retirement probe
+  encountered Codex's retained native writer after unsubscribe; that probe is
+  failed, and genuine cross-process credential handoff remains unaccepted.
+  No public release, installed-app replacement, or live-service deployment.

@@ -99,7 +99,7 @@ export function CodexStatusButton() {
       if (!session || detail?.sessionId !== session.id) return
       setFocusGoal(detail.focus === 'goal')
       setDialogOpen(true)
-      void refresh()
+      void refresh(true)
     }
     window.addEventListener('agentsdock:open-codex-controls', open)
     return () => window.removeEventListener('agentsdock:open-codex-controls', open)
@@ -111,7 +111,7 @@ export function CodexStatusButton() {
     // The thread can load after the chat is selected. Always reconcile the
     // control panel with the server when it opens instead of presenting a
     // stale notLoaded snapshot.
-    if (open) void refresh()
+    if (open) void refresh(true)
   }}>
     <Dialog.Trigger asChild>
       <ProviderStatusTrigger provider="Codex" status={label} tone={tone} loading={loading}
@@ -146,7 +146,7 @@ export function CodexContextIndicator() {
     ? detail
     : `${formattedPercent} context used · ${detail}`
   return <Dialog.Root onOpenChange={open => {
-    if (open) { setFocusGoal(false); void refresh() }
+    if (open) { setFocusGoal(false); void refresh(true) }
   }}>
     <Tooltip.Provider delayDuration={100}>
       <Tooltip.Root>
@@ -283,7 +283,7 @@ export function CodexGoalBar() {
   const openControls = (goalOnly: boolean) => {
     setFocusGoal(goalOnly)
     setDialogOpen(true)
-    void refresh()
+    void refresh(true)
   }
   const pendingLabel = statusAction?.pending
     ? statusAction.status === 'active' ? t('codexGoal.resuming') : t('codexGoal.pausing')
@@ -368,7 +368,7 @@ export function CodexControlsPanel({ onOpenGoal }: { onOpenGoal(): void }) {
           {runtime?.thread_loaded === false ? t("ui.CodexControls.CodexControlsPanel.thread_not_loaded_08b0501") : ''}
         </Dialog.Description>
       </div>
-      <button type="button" className="icon-button" aria-label={t("ui.CodexControls.CodexControlsPanel.refresh_codex_status_da5990a")} disabled={refreshing || mutating || sharedDisconnected} onClick={() => void refresh()}>
+      <button type="button" className="icon-button" aria-label={t("ui.CodexControls.CodexControlsPanel.refresh_codex_status_da5990a")} disabled={refreshing || mutating || sharedDisconnected} onClick={() => void refresh(true)}>
         <RefreshCw className={refreshing ? 'spin' : ''} size={15} />
       </button>
       <Dialog.Close asChild><button type="button" className="icon-button" aria-label={t("ui.CodexControls.CodexControlsPanel.close_codex_controls_9fa3e16")}><X size={16} /></button></Dialog.Close>

@@ -512,7 +512,7 @@ describe('Codex controls', () => {
     expect(screen.getByRole('button', { name: 'Retry save' })).toBeEnabled()
   })
 
-  it('waits for an in-flight passive thread load before sending a goal mutation', async () => {
+  it('waits for an explicit controls thread load before sending a goal mutation', async () => {
     runtimeResponse = { ...runtime, status: { type: 'idle' } }
     renderControls()
     await userEvent.setup().click(await screen.findByRole('button', { name: 'Codex controls: Idle' }))
@@ -770,7 +770,7 @@ describe('Codex controls', () => {
     await waitFor(() => expect(setGoal).toHaveBeenLastCalledWith('chat-1', { status: 'paused' }))
   })
 
-  it('shows resume progress while waiting for an already-started thread load', async () => {
+  it('shows resume progress while waiting for an explicitly requested thread load', async () => {
     runtimeResponse = {
       ...runtime,
       status: { type: 'idle' },
@@ -778,7 +778,7 @@ describe('Codex controls', () => {
     }
     render(
       <CodexRuntimeProvider session={session} capability={{ available: true }}>
-        <RuntimeRefreshProbe />
+        <RuntimeRefreshProbe loadForControls />
         <CodexGoalBar />
       </CodexRuntimeProvider>
     )
@@ -858,7 +858,7 @@ describe('Codex controls', () => {
     expect(await screen.findByText('Native context compaction started.')).toBeInTheDocument()
   })
 
-  it('automatically reloads a persisted thread after an app-server restart', async () => {
+  it('does not resume a persisted thread merely to open its chat after a restart', async () => {
     runtimeResponse = { ...runtime, thread_loaded: false, status: { type: 'notLoaded' } }
     const summarySession: Session = {
       id: 'chat-1',
@@ -867,9 +867,8 @@ describe('Codex controls', () => {
     }
     renderControls(false, false, summarySession)
 
-    expect(await screen.findByRole('button', { name: 'Codex controls: Idle' })).toBeInTheDocument()
-    expect(loadThread).toHaveBeenCalledOnce()
-    expect(loadThread).toHaveBeenCalledWith('chat-1')
+    expect(await screen.findByRole('button', { name: 'Codex controls: Not loaded' })).toBeInTheDocument()
+    expect(loadThread).not.toHaveBeenCalled()
   })
 
   it('does not passively resume an unfocused split-pane thread', async () => {
@@ -888,10 +887,11 @@ describe('Codex controls', () => {
         <CodexContextIndicator />
       </CodexRuntimeProvider>
     )
-    await waitFor(() => expect(loadThread).toHaveBeenCalledWith('chat-1'))
+    await waitFor(() => expect(window.agentsDock.codex.runtime).toHaveBeenCalledTimes(2))
+    expect(loadThread).not.toHaveBeenCalled()
   })
 
-  it('cancels a passive resume when its pane loses focus during the settle window', async () => {
+  it('does not resume a thread when its pane gains or loses focus', async () => {
     vi.useFakeTimers()
     try {
       runtimeResponse = { ...runtime, thread_loaded: false, status: { type: 'notLoaded' } }
@@ -992,25 +992,23 @@ describe('Codex controls', () => {
       </CodexRuntimeProvider>
     )
 
-    await waitFor(() => expect(loadThread).toHaveBeenCalledWith('chat-2'))
-    expect(loadThread).not.toHaveBeenCalledWith('chat-1')
+    await waitFor(() => expect(window.agentsDock.codex.runtime).toHaveBeenCalledWith('chat-2'))
+    expect(loadThread).not.toHaveBeenCalled()
   })
 
-  it('retries a failed automatic thread load from the controls', async () => {
+  it('loads a persisted thread only when its controls are explicitly opened', async () => {
     runtimeResponse = { ...runtime, thread_loaded: false, status: { type: 'notLoaded' } }
-    loadThread
-      .mockRejectedValueOnce(new Error('Codex thread resume failed'))
-      .mockResolvedValueOnce({ ...runtime, thread_loaded: true, status: { type: 'idle' } })
+    loadThread.mockResolvedValueOnce({ ...runtime, thread_loaded: true, status: { type: 'idle' } })
     renderControls()
-    const trigger = await screen.findByRole('button', { name: 'Codex controls: Error' })
-
+    const trigger = await screen.findByRole('button', { name: 'Codex controls: Not loaded' })
+    expect(loadThread).not.toHaveBeenCalled()
     await userEvent.setup().click(trigger)
 
     await waitFor(() => {
       expect(screen.getByText('Idle', { selector: 'strong' })).toBeInTheDocument()
       expect(screen.getByText('Loaded', { selector: 'strong' })).toBeInTheDocument()
     })
-    expect(loadThread).toHaveBeenCalledTimes(2)
+    expect(loadThread).toHaveBeenCalledOnce()
   })
 
   it('keeps a brand-new chat unloaded until its first Codex turn', async () => {
@@ -1045,11 +1043,11 @@ describe('Codex controls', () => {
     renderControls()
 
     expect(await screen.findByRole('button', { name: 'Codex controls: Not loaded' })).toBeInTheDocument()
-    expect(loadThread).toHaveBeenCalledWith('chat-1')
+    expect(loadThread).not.toHaveBeenCalled()
     expect(screen.queryByRole('alert')).not.toBeInTheDocument()
   })
 
-  it('reloads the selected persisted thread when the server reconnects', async () => {
+  it('refreshes status without resuming the selected thread when the server reconnects', async () => {
     runtimeResponse = { ...runtime, status: { type: 'idle' } }
     renderControls()
     expect(await screen.findByRole('button', { name: 'Codex controls: Idle' })).toBeInTheDocument()
@@ -1058,8 +1056,8 @@ describe('Codex controls', () => {
     act(() => useAppStore.setState({ connected: false }))
     act(() => useAppStore.setState({ connected: true }))
 
-    await waitFor(() => expect(loadThread).toHaveBeenCalledWith('chat-1'))
-    expect(screen.getByRole('button', { name: 'Codex controls: Idle' })).toBeInTheDocument()
+    expect(await screen.findByRole('button', { name: 'Codex controls: Not loaded' })).toBeInTheDocument()
+    expect(loadThread).not.toHaveBeenCalled()
   })
 
   it('requires confirmation before stopping every background terminal', async () => {
@@ -1229,9 +1227,9 @@ function renderControls(withShelf = false, withGoal = false, selectedSession = s
   )
 }
 
-function RuntimeRefreshProbe() {
+function RuntimeRefreshProbe({ loadForControls = false }: { loadForControls?: boolean }) {
   const { refresh, refreshing } = useCodexRuntime()
-  return <button type="button" disabled={refreshing} onClick={() => void refresh()}>Refresh probe</button>
+  return <button type="button" disabled={refreshing} onClick={() => void refresh(loadForControls)}>Refresh probe</button>
 }
 
 function RuntimeGoalClearProbe() {
