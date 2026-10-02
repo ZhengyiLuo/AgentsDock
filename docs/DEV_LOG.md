@@ -4415,3 +4415,19 @@ Forget is in the API card's three-dot menu and requires confirmation.
 
 Future entries should describe public-facing changes and validation without
 including credentials, user data, private infrastructure, or internal history.
+
+## Recovered Codex turns do not duplicate user messages
+
+History reconciliation now recognizes exact public Codex message items even
+when Stop or server-restart recovery omitted the normal completion receipt.
+It repairs already imported copies and prevents duplicate inputs on subsequent
+imports without rewriting the transcript. Genuine repeated messages in distinct
+turns remain visible.
+
+The new recovered-stop regression failed before the change and passed afterward;
+all 40 native history-repair tests passed. The signed desktop build 1245 was
+exercised against an isolated patched server over its real HTTP interface using
+a synthetic recovery ledger/provider transcript: the original input and answer
+remained visible, the replay was hidden, and a genuine later repeat survived
+reopening. No live provider turn, user installation, release, or service restart
+was part of this replay acceptance.
