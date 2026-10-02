@@ -21,7 +21,7 @@ const HELP = `Usage: agentsdock setup [--port PORT] [--bind IP] [--non-interacti
 
 setup/install creates a fresh default server. Use new for another instance.
 remove (also uninstall) asks for confirmation and preserves history by default.
-token shows the existing token (default instance if omitted); keep it private.
+token lists existing servers and asks you to choose one; token NAME selects it directly. Keep tokens private.
 status shows each instance's status, addresses, installed version and port; add NAME for one instance.
 update uses the signed managed updater; npm installation alone never upgrades a running server.
 start/stop/restart/remove also accept --all [--exclude NAME]; an omitted target never selects all.
@@ -68,7 +68,10 @@ function parse(argv) {
     return { kind: 'core', args: [command === 'setup' ? 'install' : command, ...args] }
   }
   if (command === 'token') {
-    return { kind: 'local', script: 'install.sh', args: ['--instance', selector(args, 'default'), '--show-token'] }
+    const name = selector(args)
+    return name
+      ? { kind: 'local', script: 'install.sh', args: ['--instance', name, '--show-token'] }
+      : { kind: 'local', script: 'instances.sh', args: ['token'] }
   }
   if (command === 'status') {
     const name = selector(args)

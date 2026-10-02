@@ -1,13 +1,17 @@
 """Real npm packing/bin checks in disposable homes/prefixes; no service install."""
 import hashlib
+import errno
 import json
 import os
+import pty
 from pathlib import Path
 import shutil
+import select
 import subprocess
 import sys
 import tarfile
 import tempfile
+import time
 import unittest
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -185,6 +189,46 @@ if (require.main === module) {
             self.assertEqual(result.returncode, 0, result.stderr)
             return result.stdout
 
+        def invoke_terminal(args, replies):
+            """Real prompt/child-installer boundary; only synthetic fixture tokens."""
+            master, slave = pty.openpty()
+            process = subprocess.Popen(args, cwd=outside, env=env, stdin=slave,
+                                       stdout=slave, stderr=slave, start_new_session=True)
+            os.close(slave)
+            output, offset, next_reply = bytearray(), 0, 0
+            deadline = time.monotonic() + 30
+            try:
+                while time.monotonic() < deadline:
+                    ready, _, _ = select.select([master], [], [], 0.2)
+                    if ready:
+                        try:
+                            data = os.read(master, 65536)
+                        except OSError as error:
+                            if error.errno == errno.EIO:
+                                break
+                            raise
+                        if not data:
+                            break
+                        output.extend(data)
+                        if next_reply < len(replies):
+                            prompt, answer = replies[next_reply]
+                            position = output.find(prompt.encode(), offset)
+                            if position >= 0:
+                                os.write(master, answer.encode())
+                                offset = position + len(prompt)
+                                next_reply += 1
+                    elif process.poll() is not None:
+                        break
+                self.assertIsNotNone(process.wait(timeout=3))
+                text = output.decode(errors="replace")
+                self.assertEqual(process.returncode, 0, text)
+                return text
+            finally:
+                os.close(master)
+                if process.poll() is None:
+                    process.terminate()
+                    process.wait(timeout=5)
+
         prefix = self.work / "global"
         invoke(["npm", "install", "--global", "--prefix", str(prefix), "--ignore-scripts",
                 "--no-audit", "--no-fund", "--offline", *archives])
@@ -203,7 +247,12 @@ if (require.main === module) {
         private_env = config / "env"
         private_env.write_text("AGENTSDOCK_AGENT_TOKEN=fixture-only-token\n")
         private_env.chmod(0o600)
-        self.assertEqual(invoke(["agentsdock", "token"]).strip(), "fixture-only-token")
+        self.assertEqual(invoke(["agentsdock", "token", "default"]).strip(), "fixture-only-token")
+        no_selector = subprocess.run(["agentsdock", "token"], cwd=outside, env=env,
+                                     capture_output=True, text=True, timeout=20)
+        self.assertNotEqual(no_selector.returncode, 0)
+        self.assertIn("agentsdock token NAME", no_selector.stderr)
+        self.assertNotIn("fixture-only-token", no_selector.stdout + no_selector.stderr)
         named_config = home / ".config/agents-server-instances/work"
         named_config.mkdir(parents=True, mode=0o700)
         named_env = named_config / "env"
@@ -212,6 +261,22 @@ if (require.main === module) {
         self.assertEqual(invoke(["agentsdock", "token", "--instance", "work"]).strip(), "separate-fixture-token")
         self.assertEqual(invoke(["agentsdock", "token", "work"]).strip(), "separate-fixture-token")
         self.assertEqual(invoke(["agentsdock", "token", "--instance", "default"]).strip(), "fixture-only-token")
+        prompt = "Enter a number or server name (Enter to cancel): "
+        chosen = invoke_terminal(["agentsdock", "token"],
+                                 [(prompt, "0\n"), (prompt, "2\n"), ("[y/N] ", "n\n")])
+        self.assertIn("Please enter a number from 1 to 2", chosen)
+        self.assertIn("Access token (work):", chosen)
+        self.assertIn("separate-fixture-token", chosen)
+        self.assertNotIn("fixture-only-token", chosen)
+        chosen = invoke_terminal(["agentsdock", "token"], [(prompt, "default\n"), ("[y/N] ", "n\n")])
+        self.assertIn("Access token (default):", chosen)
+        self.assertIn("fixture-only-token", chosen)
+        self.assertNotIn("separate-fixture-token", chosen)
+        cancelled = invoke_terminal(["agentsdock", "token"], [(prompt, "\n")])
+        self.assertIn("Cancelled; no token was shown", cancelled)
+        self.assertNotIn("Access token (", cancelled)
+        self.assertNotIn("fixture-only-token", cancelled)
+        self.assertNotIn("separate-fixture-token", cancelled)
         statuses = invoke(["agentsdock", "status"])
         self.assertIn("Server (default):", statuses)
         self.assertIn("Server (work):", statuses)

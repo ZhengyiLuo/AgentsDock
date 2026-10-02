@@ -41,12 +41,14 @@ test('setup, install, signed update and recovery retain the core CLI without new
   }
 })
 
-test('token always selects exactly one existing instance and only asks to show its token', async t => {
+test('bare token opens the chooser; explicit token selects exactly one instance without a prompt', async t => {
   const f = fixture(t)
-  for (const args of [[], ['--instance', 'work']]) {
+  assert.equal(await run(['token'], f.context), 0)
+  assert.deepEqual(f.calls.at(-1).slice(0, 2), ['/bin/bash', [path.join(f.payload, 'instances.sh'), 'token']])
+  for (const [args, name] of [[['default'], 'default'], [['work'], 'work'], [['--instance', 'work'], 'work']]) {
     assert.equal(await run(['token', ...args], f.context), 0)
     assert.deepEqual(f.calls.at(-1).slice(0, 2), ['/bin/bash', [path.join(f.payload, 'install.sh'),
-      '--instance', args[1] || 'default', '--show-token']])
+      '--instance', name, '--show-token']])
   }
   for (const args of [['--default'], ['--instance'], ['--instance', 'work', '--bind', '0.0.0.0']]) {
     await assert.rejects(run(['token', ...args], f.context))

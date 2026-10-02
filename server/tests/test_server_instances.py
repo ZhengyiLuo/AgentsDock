@@ -50,12 +50,13 @@ class InstanceTests(unittest.TestCase):
         else:
             service.write_text(f"[Service]\nEnvironmentFile={instance.config / 'env'}\nExecStart={instance.runtime / 'current/.venv/bin/python'} {instance.runtime / 'current/agent_server.py'} serve --port {port}\n")
 
-    def cli(self, *args, **patches):
+    def cli(self, *args, terminal=False, **patches):
         with contextlib.ExitStack() as stack:
             stack.enter_context(patch.object(instances, "Registry", return_value=self.registry))
             stack.enter_context(patch.object(instances, "service_status", return_value="stopped"))
             stack.enter_context(patch.object(instances, "tailscale_status", return_value={"status": "unavailable", "ipv4": ""}))
             output, errors = io.StringIO(), io.StringIO()
+            stack.enter_context(patch.object(output, "isatty", return_value=terminal))
             stack.enter_context(contextlib.redirect_stdout(output))
             stack.enter_context(contextlib.redirect_stderr(errors))
             mocks = {name: stack.enter_context(patch.object(instances, name, **options)) for name, options in patches.items()}
@@ -117,6 +118,88 @@ class InstanceTests(unittest.TestCase):
         self.assertFalse(self.registry.root.exists())
         mocks["run"].assert_not_called()
         mocks["tailscale_status"].assert_called_once()
+
+    def test_token_chooser_selects_only_the_named_or_numbered_instance(self):
+        self.configured(self.default, 7850)
+        self.configured(self.work, 7851)
+        before = {item.name: (item.config / "env").read_bytes() for item in (self.default, self.work)}
+        for answer, expected in (("2", self.work), ("work", self.work), ("1", self.default), ("default", self.default)):
+            with self.subTest(answer=answer), patch("sys.stdin.isatty", return_value=True), \
+                    patch("builtins.input", return_value=answer):
+                code, output, errors, mocks = self.cli("token", terminal=True, run={})
+            self.assertEqual(code, 0, errors)
+            self.assertIn("1.", output)
+            self.assertIn("default", output)
+            self.assertIn("work", output)
+            self.assertIn("stopped", output)  # Stopped servers remain selectable.
+            self.assertIn("7850", output)
+            self.assertIn("7851", output)
+            self.assertNotIn("test-token", output)
+            mocks["run"].assert_called_once()
+            self.assertEqual(mocks["run"].call_args.args[0],
+                             ["/bin/bash", str(ROOT / "install.sh"), "--instance", expected.name, "--show-token"])
+            self.assertEqual(mocks["run"].call_args.kwargs["env"]["AGENTS_SERVER_CONFIG_DIR"], str(expected.config))
+        self.assertEqual(before, {item.name: (item.config / "env").read_bytes() for item in (self.default, self.work)})
+        self.assertFalse(self.registry.root.exists())
+
+    def test_token_chooser_invalid_input_retries_without_defaulting(self):
+        self.configured(self.work)
+        with patch("sys.stdin.isatty", return_value=True), \
+                patch("builtins.input", side_effect=["0", "2", "../default", "unknown", "9" * 5000, "1"]):
+            code, output, errors, mocks = self.cli("token", terminal=True, run={})
+        self.assertEqual(code, 0, errors)
+        self.assertEqual(output.count("Please enter a number from 1 to 1"), 5)
+        self.assertEqual(mocks["run"].call_args.args[0][-2:], ["work", "--show-token"])
+        mocks["run"].assert_called_once()
+
+    def test_token_chooser_cancel_eof_and_interrupt_do_not_read_a_token(self):
+        self.configured(self.default)
+        for answer in ("", EOFError(), KeyboardInterrupt()):
+            with self.subTest(answer=type(answer)), patch("sys.stdin.isatty", return_value=True), \
+                    patch("builtins.input", side_effect=[answer]) as prompt:
+                code, output, errors, mocks = self.cli("token", terminal=True, run={})
+            self.assertEqual(code, 0, errors)
+            self.assertIn("Cancelled; no token was shown", output)
+            self.assertNotIn("test-token", output)
+            prompt.assert_called_once()  # Even one server must be explicitly selected.
+            mocks["run"].assert_not_called()
+        self.assertFalse(self.registry.root.exists())
+
+    def test_token_chooser_noninteractive_requires_name_and_empty_installation_is_inert(self):
+        code, output, errors, mocks = self.cli("token", run={})
+        self.assertEqual(code, 0, errors)
+        self.assertIn("No installations found", output)
+        mocks["run"].assert_not_called()
+        self.configured(self.work)
+        for stdin_tty, stdout_tty in ((False, True), (True, False), (False, False)):
+            with patch("sys.stdin.isatty", return_value=stdin_tty), \
+                    patch("builtins.input") as prompt:
+                code, output, errors, mocks = self.cli("token", terminal=stdout_tty, run={})
+            self.assertEqual(code, 1)
+            self.assertIn("agentsdock token NAME", errors)
+            self.assertNotIn("test-token", output + errors)
+            prompt.assert_not_called()
+            mocks["run"].assert_not_called()
+        self.assertFalse(self.registry.root.exists())
+
+    def test_token_chooser_does_not_retarget_after_selected_instance_disappears(self):
+        self.configured(self.default)
+        self.configured(self.work)
+        with patch.object(self.registry, "instances", side_effect=[[self.default, self.work], [self.default]]), \
+                patch("sys.stdin.isatty", return_value=True), \
+                patch("builtins.input", return_value="2"):
+            code, output, errors, mocks = self.cli("token", terminal=True, run={})
+        self.assertEqual(code, 1)
+        self.assertIn("no longer available", errors)
+        mocks["run"].assert_not_called()
+
+    def test_token_chooser_preserves_token_helper_failure_without_fallback(self):
+        self.configured(self.work)
+        with patch("sys.stdin.isatty", return_value=True), \
+                patch("builtins.input", return_value="work"):
+            code, output, errors, mocks = self.cli("token", terminal=True, run={"side_effect": subprocess.CalledProcessError(7, "fixture")})
+        self.assertEqual(code, 7)
+        mocks["run"].assert_called_once()
 
     def test_status_one_instance_and_info_json_remain_distinct(self):
         self.configured(self.default, 7850)

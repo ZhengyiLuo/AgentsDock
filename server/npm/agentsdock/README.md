@@ -61,6 +61,7 @@ agentsdock list
 agentsdock status
 agentsdock new work --port 7854 --bind 127.0.0.1
 agentsdock status work
+agentsdock token
 agentsdock token work
 agentsdock restart work
 agentsdock remove work
@@ -73,8 +74,14 @@ explicit instance or the native helper's explicit `--all` selector. Stop/restart
 interrupt running work; wait for chats to finish first. Remove retains the
 existing confirmation and history-preservation behavior. Tokens are private;
 `token` only reads an existing token and does not reinstall or restart a server.
-Omitting its selector reads the default instance. Loopback binding is local-only;
-choose a reachable bind explicitly if another device needs access.
+Without a name, `agentsdock token` lists this OS user's existing servers on the
+machine (including stopped instances), then asks for a number or server name.
+It displays only the selected token, retaining the optional clipboard prompt.
+Enter, Ctrl+C or end-of-input cancels without showing a token. Even a single
+server requires a choice; there is no automatic default. In a script or with
+redirected output, select explicitly: `agentsdock token default` or
+`agentsdock token work`. Loopback binding is local-only; choose a reachable bind
+explicitly if another device needs access.
 
 `agentsdock status` prints a separate readable block for every instance: status,
 addresses, installed version and port. `agentsdock status work` selects just one.
@@ -119,7 +126,8 @@ mailbox/jobs/team tools supplied to agents inside an authorized chat.
 | Start one | `./instances.sh start work` | `agentsdock start work` |
 | Stop one | `./instances.sh stop work` | `agentsdock stop work` |
 | Restart one | `./instances.sh restart work` | `agentsdock restart work` |
-| Read default token | `./install.sh --show-token` | `agentsdock token` |
+| Choose an existing server and read its token | `./instances.sh token` | `agentsdock token` |
+| Read default token directly | `./install.sh --show-token` | `agentsdock token default` |
 | Read named token | `./install.sh --instance work --show-token` | `agentsdock token work` |
 | Uninstall one, preserve history | `./uninstall.sh --instance work` / `./instances.sh remove work` | `agentsdock remove work` or `agentsdock uninstall work` |
 | Explicitly purge instance state | `./uninstall.sh --instance work --purge-state` | `agentsdock remove work --purge-state` |

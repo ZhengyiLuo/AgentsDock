@@ -1,5 +1,22 @@
 # Public development log
 
+## 2026-10-02 — Choose a server before showing its token
+
+- Make bare `agentsdock token` list the current OS user's known local instances
+  with numbered names, native service states and ports. Accept a number or exact
+  name, including stopped instances, and display only that instance's token via
+  the existing private-token/optional-clipboard path. Explicit `token NAME` and
+  `token --instance NAME` remain available for direct or scripted use.
+- Do not default automatically, even with one server. Empty input, EOF and
+  Ctrl+C cancel without displaying a token; invalid choices retry. Refuse an
+  implicit selection when input/output is redirected. Recheck a selected name
+  before reading its token and never fall back to another instance on failure.
+- Validation: 36 JavaScript tests, 92 instance-manager tests, five CLI packaging
+  tests and 11 runtime packaging tests passed. Actual packaged CLI terminal
+  tests in disposable homes exercise invalid-then-valid selection, name
+  selection, cancellation and only-selected-token output with synthetic tokens.
+  No provider, service lifecycle or release behavior changes.
+
 ## 2026-10-02 — Make CLI status and setup guidance easier to read
 
 - Print one readable `agentsdock status` block per instance with native service

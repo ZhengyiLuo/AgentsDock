@@ -633,6 +633,42 @@ def show_status(instance: Instance, *, network: dict[str, str]) -> None:
     print()
 
 
+def choose_token_instance(registry: Registry) -> Instance | None:
+    """Select by stable instance name; never default or expose unselected tokens."""
+    items = registry.instances()
+    if not items:
+        print("No installations found. Run agentsdock setup to create your first server.")
+        return None
+    if not (sys.stdin.isatty() and sys.stdout.isatty()):
+        raise ValueError("Choose a server in an interactive terminal, or run agentsdock token NAME "
+                         "(for example: agentsdock token default). No token was shown.")
+    print("\nChoose a server to view its access token:\n")
+    for index, instance in enumerate(items, 1):
+        config = read_config(instance)
+        port = config.get("AGENTSDOCK_AGENT_PORT") or "not configured"
+        name = terminal_color(f"{instance.name:<20}", "34")
+        print(f"  {index}. {name} {service_status(instance):<10} Port: {port}")
+    print()
+    names = {item.name: item for item in items}
+    while True:
+        try:
+            answer = input("Enter a number or server name (Enter to cancel): ").strip()
+        except (EOFError, KeyboardInterrupt):
+            print()
+            answer = ""
+        if not answer:
+            print("Cancelled; no token was shown.")
+            return None
+        selected = names.get(answer)
+        if re.fullmatch(r"[1-9][0-9]{0,5}", answer) and int(answer) <= len(items):
+            selected = items[int(answer) - 1]
+        if selected is not None:
+            if selected.name not in {item.name for item in registry.instances()}:
+                raise ValueError("That server is no longer available. Run agentsdock token again. No token was shown.")
+            return selected
+        print(f"Please enter a number from 1 to {len(items)} or a listed server name (Enter cancels).")
+
+
 def terminal_color(text: str, code: str) -> str:
     color = sys.stdout.isatty() and os.environ.get("TERM") != "dumb" and "NO_COLOR" not in os.environ
     return f"\033[{code}m{text}\033[0m" if color else text
@@ -769,6 +805,7 @@ def parser() -> argparse.ArgumentParser:
     result = argparse.ArgumentParser(description="Independent AgentsServer instances for the current OS user. Defaults to list.")
     commands = result.add_subparsers(dest="command")
     commands.add_parser("list")
+    commands.add_parser("token", help="Choose an existing server and display only its access token")
     info = commands.add_parser("info")
     info.add_argument("name", type=instance_name)
     status = commands.add_parser("status", help="Show readable details for all instances or one name")
@@ -809,6 +846,16 @@ def main(argv: list[str] | None = None) -> int:
             validate_binding(instance)
             print(instance.shell_bindings())
             return 0
+        if args.command == "token":
+            selected = choose_token_instance(registry)
+            if selected is None:
+                return 0
+            try:
+                run(["/bin/bash", str(ROOT / "install.sh"), "--instance", selected.name, "--show-token"],
+                    env=clean_environment(selected), cwd=ROOT)
+                return 0
+            except subprocess.CalledProcessError as exc:
+                return exc.returncode if exc.returncode > 0 else 1
         if args.command in {None, "list", "info", "status"}:
             items = registry.instances()
             if args.command in {"info", "status"} and args.name:
