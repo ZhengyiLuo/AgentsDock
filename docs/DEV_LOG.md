@@ -1,5 +1,169 @@
 # Public development log
 
+## 2026-10-02 — Align update test fixtures with current idle-update policy
+
+- Final CLI merge validation exposed two pre-existing main-branch CI failures
+  after the idle-update scheduling change: isolated update fixtures omitted
+  queued/run-now state, and a legacy assertion still expected automatic jobs
+  to pause for a pending idle update. Supply empty queue state and assert the
+  current policy allowing both automatic and manual work while waiting for idle.
+- No production update behavior or safety checks changed. All 298 focused
+  update, preparation, scheduling and hardening tests pass with isolated state
+  and a clean environment. The CLI's 147 focused tests and installed-terminal
+  status colors, token selection and cancellation checks also passed.
+- No release, registry publication or existing-service restart.
+
+## 2026-10-02 — Navigate the token chooser with arrow keys
+
+- Use Up/Down to highlight an existing server and Enter to confirm. Esc,
+  Ctrl+C or Ctrl+D cancels without exposing a token. Keep explicit `token NAME`
+  and the numbered/name fallback for basic terminals without cursor control.
+- Bound the rendered menu to terminal width/height, scroll longer lists and
+  restore terminal input mode and cursor visibility before token/clipboard
+  output, on cancellation and on read failure. No new package dependency.
+- Validation: 36 JavaScript, 95 instance-manager, five CLI packaging and 11
+  runtime packaging tests passed. Actual packaged pseudo-terminal tests cover
+  normal/application arrow sequences, returning to the first item, Esc/Ctrl+D
+  cancellation, only-selected-token output and restored terminal modes.
+  Unit checks also cover wraparound, scrolling and interruption/read failure.
+  Reinstalled the matching local packages on macOS; actual terminal Down/Enter,
+  Down/Up/Enter and Esc flows passed with incumbent listeners/configuration
+  unchanged. No provider, server lifecycle or registry publication changes.
+
+## 2026-10-02 — Choose a server before showing its token
+
+- Make bare `agentsdock token` list the current OS user's known local instances
+  with numbered names, native service states and ports. Accept a number or exact
+  name, including stopped instances, and display only that instance's token via
+  the existing private-token/optional-clipboard path. Explicit `token NAME` and
+  `token --instance NAME` remain available for direct or scripted use.
+- Do not default automatically, even with one server. Empty input, EOF and
+  Ctrl+C cancel without displaying a token; invalid choices retry. Refuse an
+  implicit selection when input/output is redirected. Recheck a selected name
+  before reading its token and never fall back to another instance on failure.
+- Validation: 36 JavaScript tests, 92 instance-manager tests, five CLI packaging
+  tests and 11 runtime packaging tests passed. Actual packaged CLI terminal
+  tests in disposable homes exercise invalid-then-valid selection, name
+  selection, cancellation and only-selected-token output with synthetic tokens.
+  Reinstalled the committed local npm packages on macOS and exercised the actual
+  chooser by number/name, cancellation, redirected-input refusal and explicit
+  selection; incumbent listeners/configuration stayed unchanged and clipboard
+  copying was declined. No provider, service lifecycle or release changes.
+
+## 2026-10-02 — Make CLI status and setup guidance easier to read
+
+- Print one readable `agentsdock status` block per instance with native service
+  status, labeled connection addresses, installed runtime version and port.
+  Accept an optional instance name; keep `info` JSON and single-instance token
+  selection unchanged. Status inspection never starts or changes a service.
+- When setup/install safely refuses existing default state, explain
+  `agentsdock new` and the explicit name/port form. Preserve the error code,
+  nonzero exit and no-installer behavior; do not change other error paths.
+- Validation: 36 JavaScript CLI tests, 86 instance-manager tests, five CLI
+  packaging tests and 11 runtime packaging tests passed. Repacked committed
+  source and installed the matching local npm tarballs; exercised actual
+  all-instance and named status, terminal header color, setup/install refusal,
+  unknown-instance errors and unchanged JSON info. Existing service listeners
+  and configurations stayed unchanged. No service restart or npm publication.
+
+## 2026-10-02 — Validate the short npm CLI against current main
+
+- Merge current main into the prepared CLI branch. The only conflict was two
+  sets of development-log additions; retain both histories without changing
+  the CLI behavior or the existing runtime lifecycle implementation.
+- Install the actual matching CLI/runtime tarballs globally on Apple silicon
+  macOS. Initial and repeated npm installation detect existing state and leave
+  incumbent services unchanged. Exercise help/version, listing and aliases,
+  default/named token output, info/status, guarded setup/install, no-journal
+  recovery, and missing-target/update-argument errors.
+- Exercise two disposable native launchd instances: explicit name/port and
+  automatic name/free port, start/stop/restart, authenticated health and wrong
+  token rejection, interactive uninstall cancellation, successful removal and
+  name release. Confirm that a synthetic saved-state marker survives in the
+  private backup and that incumbent listeners/configuration remain unchanged.
+  Terminal output retains blue names, green success, red removal warnings,
+  separate token lines and the optional clipboard prompt (declined).
+- Validation: 35 JavaScript, five CLI packaging, 11 runtime packaging and 82
+  instance-manager tests pass. Package the clean merged source; the source
+  version remains unchanged. Both disposable services are removed afterward.
+- Remaining acceptance: fresh-default macOS auto setup, real signed update
+  activation, migration repair, bulk destructive operations and clipboard
+  copying were not exercised. The existing split-service binding check still
+  refuses the default installation; no bypass or lifecycle fix was added.
+  No desktop/provider workflow, registry publication or incumbent deployment.
+
+## 2026-09-28 — Automatically set up the first server during global npm install
+
+- Change the earlier CLI-only install behavior: a direct global
+  `npm install -g agentsdock` now invokes the bundled fresh installer, waits for
+  its health-checked success receipt, and starts the first default server.
+  Existing default/named installation or state is left unchanged; repeated npm
+  installation never selects an upgrade or restarts an existing server.
+- Keep local/dependency/link/CI installations inert. Respect `--ignore-scripts`
+  and `AGENTSDOCK_SKIP_SETUP=1`; retain `agentsdock setup` for explicit/custom
+  installation. Native prerequisites remain required. A failed automatic setup
+  returns failure, with a recovery command, instead of reporting a ready server.
+- Filter installer output before it reaches npm logs so access tokens and raw
+  diagnostics are not captured there. Accept the installer's validated local,
+  LAN or Tailscale address; use `agentsdock token` for private token retrieval.
+  Preserve Linux per-user service environment for native systemd operations.
+- Validation: 35 JavaScript tests, five facade packaging tests and 11 existing
+  runtime packaging tests passed. Real npm lifecycle tests cover fresh setup,
+  reinstall, skips and failure with a labelled service fixture. A separate
+  disposable Linux account exercised actual global npm installation, starting
+  both managed service processes and passing authenticated health; forced npm
+  reinstallation preserved both process IDs, identity, token and synthetic saved
+  data. The real token was absent from npm logs. The native split-aware
+  uninstaller preserved saved state, and the disposable account was cleaned up.
+- Native testing also found an existing instance-manager gap: its legacy binding
+  validation rejects split-service removal. Split lifecycle controls remain a
+  separate acceptance gap; no validation bypass was added. macOS npm entry/hook
+  tests pass, but macOS first-service creation, provider chats and app workflows
+  were not exercised. No existing user service was changed. This is local source
+  work, not registry publication or integration into the product release pipeline.
+
+## 2026-09-28 — Flatten public CLI instance commands
+
+- Make `agentsdock list`, `info`, `new`, `start`, `stop`, `restart` and `remove`
+  the primary instance interface. Accept `new NAME`, `token NAME`, `status NAME`,
+  `uninstall NAME` and `version`; preserve the earlier `servers`/`instances`
+  commands and explicit name flags. Conflicting positional/flag selectors are
+  rejected rather than silently choosing a different instance.
+- Document the full old/new public command mapping, bulk selectors and actual
+  differences: fresh-only setup, signed updates, guarded recovery, and explicit
+  uninstall targets. Source-only reconfiguration, bulk manifests, Team Hub and
+  developer/transaction controls are not presented as implemented short commands.
+- Validation: 27 JavaScript CLI tests and four Python packaging tests passed.
+  Actual npm global/local installations exercise the flat command, version,
+  per-instance token reads and rejection of restart/remove without a target.
+  Synthetic configuration is retained and no service is created or controlled.
+  No existing server restart, provider execution, deployment or npm publication.
+
+## 2026-09-28 — Prepare the short agentsdock npm command
+
+- Add the `agentsdock` CLI package, pinning the exact same-version
+  `@agentsdock/server` runtime. Global npm installation exposes `agentsdock`;
+  local installation uses `npx agentsdock`. Neither runs installation hooks,
+  changes shell configuration nor starts or updates a server automatically.
+- Expose `setup`/`install`, `servers` management, `status`, and per-instance
+  `token` commands. Signed updates and guarded recovery retain the existing
+  implementation. Internal helper commands and the source-installer update
+  bypass are not public CLI commands; existing server signing identities,
+  manifests and scoped-package behavior remain unchanged.
+- Verify 25 JavaScript CLI tests and 15 Python packaging tests. Real offline npm
+  global/local installs of the actual matching packages exercise the executable
+  from another directory, version/help, empty-instance discovery, recovery with
+  no journal, distinct synthetic default/named tokens and safe reinstall refusal.
+  Package inventory, permissions, exact dependency pins, reproducibility and
+  checksum receipts are checked. Add these checks to source CI; hosted execution
+  has not yet run. JavaScript/Python syntax and workflow YAML checks pass.
+- Availability: source and local packaging checks only. No service creation,
+  restart, provider chat, desktop UI change, npm publication or deployment is
+  included. Fresh service creation/control through the new wrapper still needs
+  disposable native acceptance. The new public package requires owned registry
+  publication and release-pipeline integration after that acceptance; current
+  public registry commands and frozen release candidates are unchanged.
+
 ## 2026-10-02 — Mobile fallback for missing selectable text native view
 
 - Diagnose a test iOS build rendering Claude assistant Markdown as red
