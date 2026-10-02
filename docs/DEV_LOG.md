@@ -13,7 +13,9 @@
   normal/application arrow sequences, returning to the first item, Esc/Ctrl+D
   cancellation, only-selected-token output and restored terminal modes.
   Unit checks also cover wraparound, scrolling and interruption/read failure.
-  No provider, incumbent server lifecycle or registry publication changes.
+  Reinstalled the matching local packages on macOS; actual terminal Down/Enter,
+  Down/Up/Enter and Esc flows passed with incumbent listeners/configuration
+  unchanged. No provider, server lifecycle or registry publication changes.
 
 ## 2026-10-02 — Choose a server before showing its token
 
