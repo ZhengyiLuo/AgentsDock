@@ -1,5 +1,18 @@
 # Public development log
 
+## 2026-10-02 — Align update test fixtures with current idle-update policy
+
+- Final CLI merge validation exposed two pre-existing main-branch CI failures
+  after the idle-update scheduling change: isolated update fixtures omitted
+  queued/run-now state, and a legacy assertion still expected automatic jobs
+  to pause for a pending idle update. Supply empty queue state and assert the
+  current policy allowing both automatic and manual work while waiting for idle.
+- No production update behavior or safety checks changed. All 298 focused
+  update, preparation, scheduling and hardening tests pass with isolated state
+  and a clean environment. The CLI's 147 focused tests and installed-terminal
+  status colors, token selection and cancellation checks also passed.
+- No release, registry publication or existing-service restart.
+
 ## 2026-10-02 — Navigate the token chooser with arrow keys
 
 - Use Up/Down to highlight an existing server and Enter to confirm. Esc,
