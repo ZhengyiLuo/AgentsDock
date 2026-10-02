@@ -150,6 +150,42 @@
   disposable native acceptance. The new public package requires owned registry
   publication and release-pipeline integration after that acceptance; current
   public registry commands and frozen release candidates are unchanged.
+
+## 2026-10-02 — Mobile fallback for missing selectable text native view
+
+- Diagnose a test iOS build rendering Claude assistant Markdown as red
+  `Unimplemented component: <RNUITextView...>` boxes. The data and server
+  response were intact; the running native app did not expose the
+  `@bsky.app/react-native-uitextview` Fabric views expected by the JS bundle.
+- Route Markdown and text-file previews through a local `SelectableText`
+  wrapper. When both `RNUITextView` native view managers are registered, the
+  app keeps the iOS range-selection behavior; otherwise it falls back to React
+  Native `Text` so chat content remains readable in stale or mismatched test
+  shells.
+- Verified against the local 7850 server on the iPhone simulator by opening the
+  affected Claude test chat and confirming the assistant Markdown renders as
+  normal text with no `RNUITextView`/unimplemented component in the hierarchy.
+  Focused text-selection/Markdown tests and TypeScript passed.
+
+## 2026-10-02 — Mobile photo picker accepts videos
+
+- Extend the iOS composer library picker from image-only selection to mixed
+  photos and videos. Preserve Files attachments, add video upload naming and
+  MIME inference, request read access before opening the iOS library, and keep
+  iCloud-backed media download enabled for picker results.
+- Use the existing upload API with video-aware attachment UI and copy. Videos
+  now render with a video icon in pending, failed and uploaded states.
+- Verified focused upload/composer regressions, TypeScript, iOS export, native
+  prebuild, Info.plist permission text and iOS native dependency parity. Also
+  ran a disposable local AgentsServer and confirmed a video selected through
+  the mobile upload mapping reaches `/api/sessions/:id/files` as `video/mp4`.
+  Built and launched the Debug app on the iPhone simulator, opened a real chat,
+  verified the attachment menu shows `Photos and Videos`, and opened the
+  multi-select iOS media picker from that option. CoreSimulator media import
+  via `simctl addmedia` was not reliable in this run, so selecting a newly
+  imported video inside the real picker remains unverified. Source only; no
+  release or deployment.
+
 ## 2026-10-01 — Simplify the repository overview
 
 - Group Claude Code, Codex, Cursor and OpenCode in the product introduction.

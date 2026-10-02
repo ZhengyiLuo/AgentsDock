@@ -9,7 +9,7 @@ import { build } from 'esbuild'
 
 globalThis.IS_REACT_ACT_ENVIRONMENT = true
 const mocks = {
-  'react-native': `export const View = 'View', Text = 'Text', ScrollView = 'ScrollView'; export const Linking = { openURL: async () => {} }; export const StyleSheet = { create: value => value, flatten: value => Array.isArray(value) ? Object.assign({}, ...value.filter(Boolean)) : value };`,
+  'react-native': `export const View = 'View', Text = 'Text', ScrollView = 'ScrollView'; export const Platform = { OS: 'ios' }; export const UIManager = { hasViewManagerConfig: () => true }; export const Linking = { openURL: async () => {} }; export const StyleSheet = { create: value => value, flatten: value => Array.isArray(value) ? Object.assign({}, ...value.filter(Boolean)) : value };`,
   '@bsky.app/react-native-uitextview': `export const UITextView = 'SelectableText';`,
   'react-native-svg': `export const SvgXml = 'SvgXml';`,
   'react-native-markdown-display': `export default 'Markdown'; export class MarkdownIt {}`,
