@@ -1,5 +1,21 @@
 # Public development log
 
+## 2026-10-02 — Make CLI status and setup guidance easier to read
+
+- Print one readable `agentsdock status` block per instance with native service
+  status, labeled connection addresses, installed runtime version and port.
+  Accept an optional instance name; keep `info` JSON and single-instance token
+  selection unchanged. Status inspection never starts or changes a service.
+- When setup/install safely refuses existing default state, explain
+  `agentsdock new` and the explicit name/port form. Preserve the error code,
+  nonzero exit and no-installer behavior; do not change other error paths.
+- Validation: 36 JavaScript CLI tests, 86 instance-manager tests, five CLI
+  packaging tests and 11 runtime packaging tests passed. Repacked committed
+  source and installed the matching local npm tarballs; exercised actual
+  all-instance and named status, terminal header color, setup/install refusal,
+  unknown-instance errors and unchanged JSON info. Existing service listeners
+  and configurations stayed unchanged. No service restart or npm publication.
+
 ## 2026-10-02 — Validate the short npm CLI against current main
 
 - Merge current main into the prepared CLI branch. The only conflict was two
