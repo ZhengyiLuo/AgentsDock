@@ -625,7 +625,7 @@ jobs:
       matrix:
         kind: [legacy]
         legacy_mode: ['0755', '0750']
-        baseline_profile: ${{ fromJSON(inputs.candidate_tag == 'candidate-replay-v1.0.9' && '["legacy","stable108","beta1085"]' || '["legacy"]') }}
+        baseline_profile: ${{ fromJSON(inputs.candidate_tag == 'candidate-replay-v1.0.9' && '["legacy","stable108","beta1085"]' || inputs.candidate_tag == 'candidate-replay-v1.0.10-beta.2' && '["legacy","beta1101"]' || '["legacy"]') }}
         include:
           - kind: fresh
             legacy_mode: '0755'
@@ -965,7 +965,7 @@ jobs:
 
   candidate-no-downgrade:
     # Separate genuine newer-server fixture: never relax positive upgrade guards.
-    if: github.event_name == 'workflow_dispatch' && inputs.candidate_replay && inputs.candidate_tag != 'candidate-replay-v1.0.9' && !inputs.npm_native_validation && github.repository == 'ZhengyiLuo/AgentsDock' && startsWith(github.ref, 'refs/heads/release/')
+    if: github.event_name == 'workflow_dispatch' && inputs.candidate_replay && startsWith(inputs.candidate_tag, 'candidate-replay-v1.0.8-beta.') && !inputs.npm_native_validation && github.repository == 'ZhengyiLuo/AgentsDock' && startsWith(github.ref, 'refs/heads/release/')
     needs: [release-tooling, electron, mobile-source]
     runs-on: macos-15
     timeout-minutes: 60
