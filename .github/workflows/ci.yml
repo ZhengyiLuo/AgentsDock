@@ -51,7 +51,6 @@ concurrency:
   cancel-in-progress: ${{ !(github.event_name == 'workflow_dispatch' && (inputs.npm_native_validation || inputs.candidate_replay || inputs.candidate_server_rollback)) }}
 
 jobs:
-
   release-tooling:
     runs-on: ubuntu-24.04
     timeout-minutes: 15
@@ -130,6 +129,26 @@ jobs:
           python3 -m unittest discover -s scripts/tests -p 'test_*.py'
           python3 -m unittest discover -s server/tests -t server -p test_npm_release_package.py
           python3 -m unittest discover -s server/tests -t server -p test_release_file_manifest_isolated.py
+
+  server-cli:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        with:
+          node-version: 24
+          package-manager-cache: false
+      - name: Verify public CLI and existing signed-update entry point
+        run: node --test server/npm/cli.test.cjs server/npm/agentsdock/cli.test.cjs server/npm/agentsdock/postinstall.test.cjs
+      - name: Pack and install exact CLI/runtime in disposable npm prefixes
+        env:
+          PYTHONDONTWRITEBYTECODE: "1"
+        run: |
+          python3 -m unittest discover -s server/tests -t server -p test_agentsdock_cli_package.py
+          python3 -m unittest discover -s server/tests -t server -p test_npm_release_package.py
 
   electron:
     if: ${{ !(github.event_name == 'workflow_dispatch' && inputs.npm_native_validation) }}

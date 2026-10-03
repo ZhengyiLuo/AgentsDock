@@ -4,6 +4,7 @@ import { t } from '@shared/i18n'
 import type { CodexServerSettingsScope } from '@shared/types'
 import type { ConnectionAction, ConnectionBackend, ConnectionProtocol, ConnectionResult, ProviderConnectionConfiguration } from '@shared/provider-connections'
 import { useLocale } from '../lib/i18n'
+import { trackOperation } from '../lib/analytics'
 import './CodexAuthSettings.css'
 import './ProviderConnectionSettings.css'
 import { CustomModelSettings } from './CustomModelSettings'
@@ -78,7 +79,8 @@ export function ProviderConnectionSettings({ backend, ...props }: Props & { back
     const input = action === 'save' ? { base_url: baseURL, model: model.trim() || null, protocol, auth_header: authHeader,
       api_key: key.current?.value ?? '', expected_revision: saved.revision } : { expected_revision: saved.revision }
     try {
-      const reply = await request(scope, backend, action, input)
+      const reply = await trackOperation(action === 'save' ? 'provider_connection_saved' : action === 'check' ? 'provider_connection_tested' : 'provider_connection_forgotten',
+        () => request(scope, backend, action, input), value => value.ok !== false)
       if (!owns(n, scope)) return
       if (reply.configuration) setSaved(reply.configuration)
       if (reply.ok === false) setError(reply.status ?? 'failed')

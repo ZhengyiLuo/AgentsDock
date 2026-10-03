@@ -28,7 +28,9 @@ const teamspaceHarness = vi.hoisted(() => ({
   }
 }))
 
-vi.mock('./lib/analytics', () => analytics)
+vi.mock('./lib/analytics', async importOriginal => ({
+  ...await importOriginal<typeof import('./lib/analytics')>(), ...analytics
+}))
 
 vi.mock('./components/Sidebar', () => ({
   Sidebar: ({ hidden = false }: { hidden?: boolean }) => {

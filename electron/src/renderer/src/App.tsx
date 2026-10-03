@@ -139,6 +139,11 @@ export function App() {
   const [inspectorTab, setInspectorTab] = useState<InspectorWorkspaceTab>('details')
   const [sideChatFocusVersion, setSideChatFocusVersion] = useState(0)
   const [sideChatOpenTarget, setSideChatOpenTarget] = useState<string | null>(null)
+  const previousSideChatTarget = useRef<string | null>(null)
+  useEffect(() => {
+    if (sideChatOpenTarget && sideChatOpenTarget !== previousSideChatTarget.current) trackEvent('side_chat_opened')
+    previousSideChatTarget.current = sideChatOpenTarget
+  }, [sideChatOpenTarget])
   useEffect(() => {
     const unsubscribe = useAppStore.subscribe((state, previous) => {
       if (state.profiles !== previous.profiles) sideChatController.reconcileProfiles(state.profiles)

@@ -65,7 +65,7 @@ import {
   readEditorAppearance,
   writeEditorAppearance
 } from '../lib/editor-appearance'
-import { trackEvent } from '../lib/analytics'
+import { trackEvent, trackOperation } from '../lib/analytics'
 import { getWorkspacePreference, setWorkspacePreference } from '../lib/workspace-preferences'
 import {
   workspacePathForAgentFile,
@@ -841,6 +841,7 @@ export function WorkspaceEditor({
       setWorkspaceError(capabilityMessage)
       return
     }
+    if (!paletteOpenRef.current) trackEvent('open_file_clicked')
     paletteReturnToChatOnCancelRef.current = returnToChatOnCancel
     setWorkspaceError(null)
     setPaletteError(null)
@@ -3120,12 +3121,12 @@ export function WorkspaceEditor({
         }
       }
       assertCreationAuthority()
-      const saved = await window.agentsDock.workspace.write(
+      const saved = await trackOperation('workspace_file_saved', () => window.agentsDock.workspace.write(
         session.id,
         targetPath,
         draft,
         target.revision
-      )
+      ))
       writeCompleted = true
       if (!mountedRef.current) return
       const currentFiles = openFilesRef.current
@@ -3248,13 +3249,13 @@ export function WorkspaceEditor({
     const draft = file.draft
     updateFile(path, current => ({ ...current, saving: true, error: null }))
     try {
-      const saved = file.origin === 'external'
+      const saved = await trackOperation('workspace_file_saved', () => file.origin === 'external'
         ? overwriteConflict
-          ? await window.agentsDock.workspace.overwriteAbsolute(session.id, path, draft)
-          : await window.agentsDock.workspace.writeAbsolute(session.id, path, draft, file.revision)
+          ? window.agentsDock.workspace.overwriteAbsolute(session.id, path, draft)
+          : window.agentsDock.workspace.writeAbsolute(session.id, path, draft, file.revision)
         : overwriteConflict
-          ? await window.agentsDock.workspace.overwrite(session.id, path, draft)
-          : await window.agentsDock.workspace.write(session.id, path, draft, file.revision)
+          ? window.agentsDock.workspace.overwrite(session.id, path, draft)
+          : window.agentsDock.workspace.write(session.id, path, draft, file.revision))
       if (!mountedRef.current) return null
       const stillCurrent = openFilesRef.current.find(current => current.path === path)?.draft === draft
       updateFile(path, current => ({
@@ -3564,7 +3565,7 @@ export function WorkspaceEditor({
         </div>
       })}
     </div>
-    <button type="button" className="workspace-editor-command-button" aria-label={t('editor.openFile')} title={t('editor.openFile')} onClick={() => { trackEvent('open_file_clicked'); requestOpenPalette() }}><Search size={13} aria-hidden="true" /><span className="workspace-editor-open-label">{t('editor.openFile')}</span><ShortcutKey shortcut="openWorkspaceFile" /></button>
+    <button type="button" className="workspace-editor-command-button" aria-label={t('editor.openFile')} title={t('editor.openFile')} onClick={() => requestOpenPalette()}><Search size={13} aria-hidden="true" /><span className="workspace-editor-open-label">{t('editor.openFile')}</span><ShortcutKey shortcut="openWorkspaceFile" /></button>
   </div>
 
   const renderEditorGroup = (file: OpenWorkspaceFile | null, group: EditorGroupId) => {

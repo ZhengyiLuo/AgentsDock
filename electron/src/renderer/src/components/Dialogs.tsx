@@ -8,7 +8,7 @@ import { ArrowRight, Check, ChevronDown, ChevronRight, CircleAlert, Clock3, Comm
 import type { AppUpdateStatus, AppUpdateTrack, Backend, BulkImportSessionItem, BulkImportSessionResult, ChatReference, ChatReferenceAction, CoordinatedServerUpdate, CreateJobInput, Health, Job, JobContextMode, JobScheduleKind, LocalSessionCandidate, ServerRestartBlockerSnapshot, ServerSetupCapabilities, ServerSetupProgress, ServerUpdateStatus, ServerUpdateTrack, Session, TeamReference, UpdateJobInput, WorkspaceProfileScope } from '@shared/types'
 import { cursorLocalSessionImportSupported, localSessionImportKey, localSessionImportSupported } from '@shared/local-session-import'
 import { opencodeBackendAvailable, opencodeBackendUnavailableReason, chatBackendSelection, codexCustomProviderAvailable, cursorBackendAvailable, cursorBackendUnavailableReason, runtimeCatalogOptions, runtimeEffortAfterModelChange, runtimeEffortOptions, runtimeSelectionError, selectableChatBackendChoices, selectableChatBackends, type ChatBackendChoice } from '@shared/runtime-catalog'
-import { trackEvent } from '../lib/analytics'
+import { trackEvent, trackOperation } from '../lib/analytics'
 import { readAppearance, setAppearanceMode, type AppearanceMode } from '../lib/appearance'
 import { t, useLanguagePreference, type LanguagePreference } from '../lib/i18n'
 import { canonicalizeLocalRouteHints, chatMentionTrigger, chatReferenceDisplayText, currentRouteHintReference, insertChatReference, parseStoredChatReferences, reconcileChatReferences, routeHintMentionsAvailable, supportedCrossChatTargetBackends, validChatReferences, type ChatMentionTrigger } from '../lib/chat-references'
@@ -543,21 +543,24 @@ export function AppSettingsDialog({ serverSettings, serverUpdates, onServerUpdat
   const chooseUpdateTrack = async (track: AppUpdateTrack) => {
     if (!update || update.track === track) return
     setUpdateTrackBusy(true)
-    try { setUpdate(await window.agentsDock.updates.setTrack(track)) }
+    try { setUpdate(await trackOperation('app_update_channel_changed', () => window.agentsDock.updates.setTrack(track), value => value.track === track && value.state !== 'error')) }
     catch (error) { useAppStore.getState().setError(message(error)) }
     finally { setUpdateTrackBusy(false) }
   }
   const checkForUpdates = async () => {
-    try { setUpdate(await window.agentsDock.updates.check()) }
+    try { setUpdate(await trackOperation('app_update_checked', () => window.agentsDock.updates.check(), value => !['error', 'disabled'].includes(value.state))) }
     catch (error) { useAppStore.getState().setError(message(error)) }
   }
   const installUpdate = async () => {
+    // Installation quits the renderer. Count the explicit request, not an
+    // assumed successful installation or a startup/status replay.
+    trackEvent('app_update_install_requested')
     try { await window.agentsDock.updates.install() }
     catch (error) { useAppStore.getState().setError(message(error)) }
   }
   const cancelUpdate = async () => {
     setUpdateCancelBusy(true)
-    try { setUpdate(await window.agentsDock.updates.cancel()) }
+    try { setUpdate(await trackOperation('app_update_cancelled', () => window.agentsDock.updates.cancel(), value => value.state !== 'error')) }
     catch (error) { useAppStore.getState().setError(message(error)) }
     finally { setUpdateCancelBusy(false) }
   }
@@ -2021,7 +2024,7 @@ export function SettingsDialog() {
     const requestId = ++serverUpdateRequestRef.current
     setServerUpdateBusy(true)
     try {
-      const next = await window.agentsDock.serverUpdates.check(track)
+      const next = await trackOperation('server_update_checked', () => window.agentsDock.serverUpdates.check(track), value => !['failed', 'unavailable'].includes(value.phase))
       if (serverRequestIsCurrent(requestId)) applyCheckedServerUpdate(next, track)
     }
     catch (error) {
@@ -2036,7 +2039,7 @@ export function SettingsDialog() {
     const requestId = ++serverUpdateRequestRef.current
     setServerUpdateBusy(true)
     try {
-      const next = await window.agentsDock.serverUpdates.check(track)
+      const next = await trackOperation('server_update_checked', () => window.agentsDock.serverUpdates.check(track), value => !['failed', 'unavailable'].includes(value.phase))
       if (serverRequestIsCurrent(requestId)) applyCheckedServerUpdate(next, track)
     } catch (error) {
       if (serverRequestIsCurrent(requestId)) useAppStore.getState().setError(message(error))
@@ -2059,6 +2062,7 @@ export function SettingsDialog() {
       openServerSetupWhenSafe(serverUpdateTrack === 'beta' ? 'update-beta' : 'setup')
       return
     }
+    trackEvent('server_update_requested')
     const durableReservation = serverSupportsPassiveUpdateReservation(currentHealth)
     const work = serverWorkCounts(currentHealth)
     const blockingQueued = serverUpdateBlockingQueuedTurns(currentHealth)
@@ -2139,7 +2143,7 @@ export function SettingsDialog() {
     const requestId = ++serverUpdateRequestRef.current
     setServerUpdateBusy(true)
     try {
-      const next = await window.agentsDock.serverUpdates.cancel(scheduleId)
+      const next = await trackOperation('server_update_cancelled', () => window.agentsDock.serverUpdates.cancel(scheduleId), value => value.phase !== 'failed')
       if (serverRequestIsCurrent(requestId)) setServerUpdate(next)
     } catch (error) {
       if (serverRequestIsCurrent(requestId)) {
@@ -2527,6 +2531,7 @@ export function SettingsDialog() {
       // additive field, so send its supported blocker revision only after the
       // exact schedule, target, and track have been reconciled immediately above.
       restartAttempted = true
+      trackEvent('server_update_now_requested')
       const restarted = await useAppStore.getState().restartServer(target.serverInstanceId, {
         force: true,
         forceConfirmed: true,

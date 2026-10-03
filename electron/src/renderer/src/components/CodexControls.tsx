@@ -1,6 +1,7 @@
 // Localized display strings use semantic catalog keys.
 import { t } from '@shared/i18n'
 import { useLocale } from '../lib/i18n'
+import { trackOperation } from '../lib/analytics'
 import { useEffect, useId, useMemo, useRef, useState, type FormEvent } from 'react'
 import * as Dialog from '@radix-ui/react-dialog'
 import * as Tooltip from '@radix-ui/react-tooltip'
@@ -99,7 +100,7 @@ export function CodexStatusButton() {
       if (!session || detail?.sessionId !== session.id) return
       setFocusGoal(detail.focus === 'goal')
       setDialogOpen(true)
-      void refresh()
+      void refresh(true)
     }
     window.addEventListener('agentsdock:open-codex-controls', open)
     return () => window.removeEventListener('agentsdock:open-codex-controls', open)
@@ -111,7 +112,7 @@ export function CodexStatusButton() {
     // The thread can load after the chat is selected. Always reconcile the
     // control panel with the server when it opens instead of presenting a
     // stale notLoaded snapshot.
-    if (open) void refresh()
+    if (open) void refresh(true)
   }}>
     <Dialog.Trigger asChild>
       <ProviderStatusTrigger provider="Codex" status={label} tone={tone} loading={loading}
@@ -146,7 +147,7 @@ export function CodexContextIndicator() {
     ? detail
     : `${formattedPercent} context used · ${detail}`
   return <Dialog.Root onOpenChange={open => {
-    if (open) { setFocusGoal(false); void refresh() }
+    if (open) { setFocusGoal(false); void refresh(true) }
   }}>
     <Tooltip.Provider delayDuration={100}>
       <Tooltip.Root>
@@ -257,7 +258,7 @@ export function CodexGoalBar() {
       statusActionInFlight.current = true
       setStatusAction({ status, pending: true, error: null })
       void run(async () => {
-        const snapshot = await requiredBridge().setGoal(session.id, { status })
+        const snapshot = await trackOperation(status === 'paused' ? 'goal_paused' : 'goal_resumed', () => requiredBridge().setGoal(session.id, { status }))
         if (epoch === statusActionEpoch.current) applyGoalSnapshot(snapshot)
       }).then(() => {
         if (epoch === statusActionEpoch.current) setStatusAction(null)
@@ -276,14 +277,14 @@ export function CodexGoalBar() {
   const clear = () => {
     setStatusAction(null)
     runSilently(run(async () => {
-      const snapshot = await requiredBridge().clearGoal(session.id)
+      const snapshot = await trackOperation('goal_cleared', () => requiredBridge().clearGoal(session.id))
       applyGoalSnapshot(snapshot)
     }))
   }
   const openControls = (goalOnly: boolean) => {
     setFocusGoal(goalOnly)
     setDialogOpen(true)
-    void refresh()
+    void refresh(true)
   }
   const pendingLabel = statusAction?.pending
     ? statusAction.status === 'active' ? t('codexGoal.resuming') : t('codexGoal.pausing')
@@ -369,7 +370,7 @@ export function CodexControlsPanel({ onOpenGoal }: { onOpenGoal(): void }) {
           {runtime?.thread_loaded === false ? t("ui.CodexControls.CodexControlsPanel.thread_not_loaded_08b0501") : ''}
         </Dialog.Description>
       </div>
-      <button type="button" className="icon-button" aria-label={t("ui.CodexControls.CodexControlsPanel.refresh_codex_status_da5990a")} disabled={refreshing || mutating || sharedDisconnected} onClick={() => void refresh()}>
+      <button type="button" className="icon-button" aria-label={t("ui.CodexControls.CodexControlsPanel.refresh_codex_status_da5990a")} disabled={refreshing || mutating || sharedDisconnected} onClick={() => void refresh(true)}>
         <RefreshCw className={refreshing ? 'spin' : ''} size={15} />
       </button>
       <Dialog.Close asChild><button type="button" className="icon-button" aria-label={t("ui.CodexControls.CodexControlsPanel.close_codex_controls_9fa3e16")}><X size={16} /></button></Dialog.Close>
@@ -556,12 +557,12 @@ function GoalSettings({ onNotice, notice }: { onNotice(value: string): void; not
     setGoalAction('saving')
     setGoalActionError(null)
     void run(async () => {
-      const snapshot = await requiredBridge().setGoal(session.id, {
+      const snapshot = await trackOperation('goal_saved', () => requiredBridge().setGoal(session.id, {
         objective: trimmedObjective,
         status,
         token_budget: tokenBudgetResult.value,
         time_budget_seconds: timeBudgetResult.value
-      })
+      }))
       if (epoch !== actionEpoch.current) return
       const appliedToForm = applyGoalFormSnapshot(snapshot, submittedRevision)
       setGoalAction(appliedToForm ? 'saved' : 'idle')
@@ -585,7 +586,7 @@ function GoalSettings({ onNotice, notice }: { onNotice(value: string): void; not
     setGoalAction('clearing')
     setGoalActionError(null)
     void run(async () => {
-      const snapshot = await requiredBridge().clearGoal(session.id)
+      const snapshot = await trackOperation('goal_cleared', () => requiredBridge().clearGoal(session.id))
       if (epoch !== actionEpoch.current) return
       const appliedToForm = applyGoalFormSnapshot(snapshot, submittedRevision)
       setGoalAction('idle')

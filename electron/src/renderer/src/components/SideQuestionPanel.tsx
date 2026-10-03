@@ -134,7 +134,7 @@ export function SideQuestionPanel({ session, scope, controller, active = true, f
             onChange={settings => controller.setRuntimeSettings(scope, session, settings)} />}
           {snapshot.pending
             ? <button type="button" className="side-chat-send" aria-label={t('sideChat.cancel')} title={t('sideChat.cancel')}
-              onClick={() => { void controller.cancel(scope, session.id) }}><Square size={12} fill="currentColor" /></button>
+              onClick={() => { void controller.cancel(scope, session.id, true) }}><Square size={12} fill="currentColor" /></button>
             : <button type="submit" className="side-chat-send" aria-label={t('sideChat.send')} title={t('sideChat.send')}
               disabled={!ready || !length || length > limit}><ArrowUp size={16} /></button>}
         </div>

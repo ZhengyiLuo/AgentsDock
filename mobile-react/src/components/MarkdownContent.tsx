@@ -1,10 +1,10 @@
 import { useCallback, useMemo } from 'react'
-import { UITextView as SelectableText } from '@bsky.app/react-native-uitextview'
 import { Linking, ScrollView, StyleSheet, Text as NativeText, View, type TextStyle } from 'react-native'
 import Markdown, { MarkdownIt, type ASTNode, type RenderRules } from 'react-native-markdown-display'
 import { SvgXml } from 'react-native-svg'
 
 import type { ChatReference } from '../types'
+import { SelectableText } from './SelectableText'
 import { createMarkdownStyle, markdownTableColumnCount, markdownTableMinimumWidth } from '../lib/markdown'
 import { installMathMarkdown } from '../lib/math-markdown'
 import {

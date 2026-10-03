@@ -1694,6 +1694,7 @@ export const Composer = memo(function Composer({ dropActive = false, sessionId, 
       window.requestAnimationFrame(() => textareaRef.current?.focus())
       return
     }
+    trackEvent('builtin_slash_command_used')
     if (command.id === 'chat') {
       replaceCommand('/chat ')
       return

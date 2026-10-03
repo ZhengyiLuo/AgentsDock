@@ -1916,6 +1916,10 @@ export const useAppStore = create<AppState>((set, get) => ({
         invalidateQueuedTurnsRequests(sessionId)
       }
       const responseQueued = Boolean(response.queued || response.queued_id || response.event?.type === 'turn_queued')
+      // Use the server receipt, not the optimistic busy state. A queue request
+      // can start immediately and steering can require a second admission.
+      if (responseQueued) trackEvent('message_queued')
+      else if (steer) trackEvent('message_steered')
       set(state => {
         const snapshot = state.snapshots[sessionId]
         const authoritativeQueuedReceipt = Boolean(
@@ -1965,6 +1969,7 @@ export const useAppStore = create<AppState>((set, get) => ({
           const turns = await steerQueuedTurn(steeringScope, queuedId, options?.confirmSteer)
           if (!profileScopeMatches(scope, get())) return false
           get().applyQueuedTurnsResponse(sessionId, request, turns)
+          trackEvent('message_steered')
         } catch (error) {
           if (!isSteeringCancellation(error) && profileScopeMatches(scope, get())) set({ error: errorMessage(error) })
         }
@@ -2043,6 +2048,7 @@ export const useAppStore = create<AppState>((set, get) => ({
     } }))
     try {
       const uploaded = await window.agentsDock.files.upload(id, files.map(file => file.path))
+      trackEvent('attachment_uploaded', { success: uploaded.length === files.length })
       if (!profileScopeMatches(scope, get())) return
       set(state => {
         const snapshot = state.snapshots[id]
@@ -2064,6 +2070,7 @@ export const useAppStore = create<AppState>((set, get) => ({
         }
       })
     } catch (error) {
+      trackEvent('attachment_uploaded', { success: false })
       if (!profileScopeMatches(scope, get())) return
       set(state => ({
         uploadPathsBySession: {

@@ -1,5 +1,31 @@
 # Public development log
 
+## 2026-10-03 — Prepare matched 1.0.10-beta.2 with the short npm CLI
+
+- Merge current main, including PR #58, into the existing beta release line.
+  Retain the published beta.1 mailbox, Side chat, endpoint and release-tooling
+  changes instead of cutting from the older main-only feature baseline.
+  Resolve the Side chat analytics/runtime-settings overlap and preserve both
+  settled-response and per-session ownership checks in Codex handoff.
+- Select `1.0.10-beta.2` for the app, signed npm runtime, legacy bridge and new
+  `agentsdock` command package. The short package pins the exact same-version
+  `@agentsdock/server`; it is a separate npm publication, not a rename of the
+  existing runtime or a reason to move stable `latest` away from `1.0.9`.
+- Preserve both source-CI jobs: release-tooling verification and isolated
+  public-CLI packaging/install checks. Pass 573 focused desktop fixture tests,
+  TypeScript and production compilation; 73 isolated server ownership/handoff
+  checks; 36 CLI/postinstall tests; five CLI packaging tests, eleven runtime
+  packaging tests and nine runtime-inventory checks. The existing 319
+  release-tooling/CLI tests also pass before adding the new facade verifier.
+- These are integrated source and isolated-fixture checks, not signed-package
+  or native upgrade acceptance. Fresh-default macOS automatic setup and
+  split-service lifecycle control remain documented CLI limitations; existing
+  split-layout guards must not be bypassed. Native package and update checks,
+  first-package npm authorization and notarization setup remain release gates.
+- Availability: preparation source only. No beta.2 package has been published,
+  no native build number is consumed, and no installed application, live server
+  or mobile release is changed by this preparation.
+
 ## 2026-10-01 — Publish matched stable 1.0.9, build 1243
 
 - Publish [AgentsDock 1.0.9](https://github.com/ZhengyiLuo/AgentsDock/releases/tag/v1.0.9),
@@ -962,6 +988,272 @@
   needs correction and real-app verification. Signed desktop packaging and
   installed-version migration, busy/offline recovery and no-downgrade acceptance
   remain required before a coordinated release.
+## 2026-10-02 — Align update test fixtures with current idle-update policy
+
+- Final CLI merge validation exposed two pre-existing main-branch CI failures
+  after the idle-update scheduling change: isolated update fixtures omitted
+  queued/run-now state, and a legacy assertion still expected automatic jobs
+  to pause for a pending idle update. Supply empty queue state and assert the
+  current policy allowing both automatic and manual work while waiting for idle.
+- No production update behavior or safety checks changed. All 298 focused
+  update, preparation, scheduling and hardening tests pass with isolated state
+  and a clean environment. The CLI's 147 focused tests and installed-terminal
+  status colors, token selection and cancellation checks also passed.
+- No release, registry publication or existing-service restart.
+
+## 2026-10-02 — Navigate the token chooser with arrow keys
+
+- Use Up/Down to highlight an existing server and Enter to confirm. Esc,
+  Ctrl+C or Ctrl+D cancels without exposing a token. Keep explicit `token NAME`
+  and the numbered/name fallback for basic terminals without cursor control.
+- Bound the rendered menu to terminal width/height, scroll longer lists and
+  restore terminal input mode and cursor visibility before token/clipboard
+  output, on cancellation and on read failure. No new package dependency.
+- Validation: 36 JavaScript, 95 instance-manager, five CLI packaging and 11
+  runtime packaging tests passed. Actual packaged pseudo-terminal tests cover
+  normal/application arrow sequences, returning to the first item, Esc/Ctrl+D
+  cancellation, only-selected-token output and restored terminal modes.
+  Unit checks also cover wraparound, scrolling and interruption/read failure.
+  Reinstalled the matching local packages on macOS; actual terminal Down/Enter,
+  Down/Up/Enter and Esc flows passed with incumbent listeners/configuration
+  unchanged. No provider, server lifecycle or registry publication changes.
+
+## 2026-10-02 — Choose a server before showing its token
+
+- Make bare `agentsdock token` list the current OS user's known local instances
+  with numbered names, native service states and ports. Accept a number or exact
+  name, including stopped instances, and display only that instance's token via
+  the existing private-token/optional-clipboard path. Explicit `token NAME` and
+  `token --instance NAME` remain available for direct or scripted use.
+- Do not default automatically, even with one server. Empty input, EOF and
+  Ctrl+C cancel without displaying a token; invalid choices retry. Refuse an
+  implicit selection when input/output is redirected. Recheck a selected name
+  before reading its token and never fall back to another instance on failure.
+- Validation: 36 JavaScript tests, 92 instance-manager tests, five CLI packaging
+  tests and 11 runtime packaging tests passed. Actual packaged CLI terminal
+  tests in disposable homes exercise invalid-then-valid selection, name
+  selection, cancellation and only-selected-token output with synthetic tokens.
+  Reinstalled the committed local npm packages on macOS and exercised the actual
+  chooser by number/name, cancellation, redirected-input refusal and explicit
+  selection; incumbent listeners/configuration stayed unchanged and clipboard
+  copying was declined. No provider, service lifecycle or release changes.
+
+## 2026-10-02 — Make CLI status and setup guidance easier to read
+
+- Print one readable `agentsdock status` block per instance with native service
+  status, labeled connection addresses, installed runtime version and port.
+  Accept an optional instance name; keep `info` JSON and single-instance token
+  selection unchanged. Status inspection never starts or changes a service.
+- When setup/install safely refuses existing default state, explain
+  `agentsdock new` and the explicit name/port form. Preserve the error code,
+  nonzero exit and no-installer behavior; do not change other error paths.
+- Validation: 36 JavaScript CLI tests, 86 instance-manager tests, five CLI
+  packaging tests and 11 runtime packaging tests passed. Repacked committed
+  source and installed the matching local npm tarballs; exercised actual
+  all-instance and named status, terminal header color, setup/install refusal,
+  unknown-instance errors and unchanged JSON info. Existing service listeners
+  and configurations stayed unchanged. No service restart or npm publication.
+
+## 2026-10-02 — Validate the short npm CLI against current main
+
+- Merge current main into the prepared CLI branch. The only conflict was two
+  sets of development-log additions; retain both histories without changing
+  the CLI behavior or the existing runtime lifecycle implementation.
+- Install the actual matching CLI/runtime tarballs globally on Apple silicon
+  macOS. Initial and repeated npm installation detect existing state and leave
+  incumbent services unchanged. Exercise help/version, listing and aliases,
+  default/named token output, info/status, guarded setup/install, no-journal
+  recovery, and missing-target/update-argument errors.
+- Exercise two disposable native launchd instances: explicit name/port and
+  automatic name/free port, start/stop/restart, authenticated health and wrong
+  token rejection, interactive uninstall cancellation, successful removal and
+  name release. Confirm that a synthetic saved-state marker survives in the
+  private backup and that incumbent listeners/configuration remain unchanged.
+  Terminal output retains blue names, green success, red removal warnings,
+  separate token lines and the optional clipboard prompt (declined).
+- Validation: 35 JavaScript, five CLI packaging, 11 runtime packaging and 82
+  instance-manager tests pass. Package the clean merged source; the source
+  version remains unchanged. Both disposable services are removed afterward.
+- Remaining acceptance: fresh-default macOS auto setup, real signed update
+  activation, migration repair, bulk destructive operations and clipboard
+  copying were not exercised. The existing split-service binding check still
+  refuses the default installation; no bypass or lifecycle fix was added.
+  No desktop/provider workflow, registry publication or incumbent deployment.
+
+## 2026-09-28 — Automatically set up the first server during global npm install
+
+- Change the earlier CLI-only install behavior: a direct global
+  `npm install -g agentsdock` now invokes the bundled fresh installer, waits for
+  its health-checked success receipt, and starts the first default server.
+  Existing default/named installation or state is left unchanged; repeated npm
+  installation never selects an upgrade or restarts an existing server.
+- Keep local/dependency/link/CI installations inert. Respect `--ignore-scripts`
+  and `AGENTSDOCK_SKIP_SETUP=1`; retain `agentsdock setup` for explicit/custom
+  installation. Native prerequisites remain required. A failed automatic setup
+  returns failure, with a recovery command, instead of reporting a ready server.
+- Filter installer output before it reaches npm logs so access tokens and raw
+  diagnostics are not captured there. Accept the installer's validated local,
+  LAN or Tailscale address; use `agentsdock token` for private token retrieval.
+  Preserve Linux per-user service environment for native systemd operations.
+- Validation: 35 JavaScript tests, five facade packaging tests and 11 existing
+  runtime packaging tests passed. Real npm lifecycle tests cover fresh setup,
+  reinstall, skips and failure with a labelled service fixture. A separate
+  disposable Linux account exercised actual global npm installation, starting
+  both managed service processes and passing authenticated health; forced npm
+  reinstallation preserved both process IDs, identity, token and synthetic saved
+  data. The real token was absent from npm logs. The native split-aware
+  uninstaller preserved saved state, and the disposable account was cleaned up.
+- Native testing also found an existing instance-manager gap: its legacy binding
+  validation rejects split-service removal. Split lifecycle controls remain a
+  separate acceptance gap; no validation bypass was added. macOS npm entry/hook
+  tests pass, but macOS first-service creation, provider chats and app workflows
+  were not exercised. No existing user service was changed. This is local source
+  work, not registry publication or integration into the product release pipeline.
+
+## 2026-09-28 — Flatten public CLI instance commands
+
+- Make `agentsdock list`, `info`, `new`, `start`, `stop`, `restart` and `remove`
+  the primary instance interface. Accept `new NAME`, `token NAME`, `status NAME`,
+  `uninstall NAME` and `version`; preserve the earlier `servers`/`instances`
+  commands and explicit name flags. Conflicting positional/flag selectors are
+  rejected rather than silently choosing a different instance.
+- Document the full old/new public command mapping, bulk selectors and actual
+  differences: fresh-only setup, signed updates, guarded recovery, and explicit
+  uninstall targets. Source-only reconfiguration, bulk manifests, Team Hub and
+  developer/transaction controls are not presented as implemented short commands.
+- Validation: 27 JavaScript CLI tests and four Python packaging tests passed.
+  Actual npm global/local installations exercise the flat command, version,
+  per-instance token reads and rejection of restart/remove without a target.
+  Synthetic configuration is retained and no service is created or controlled.
+  No existing server restart, provider execution, deployment or npm publication.
+
+## 2026-09-28 — Prepare the short agentsdock npm command
+
+- Add the `agentsdock` CLI package, pinning the exact same-version
+  `@agentsdock/server` runtime. Global npm installation exposes `agentsdock`;
+  local installation uses `npx agentsdock`. Neither runs installation hooks,
+  changes shell configuration nor starts or updates a server automatically.
+- Expose `setup`/`install`, `servers` management, `status`, and per-instance
+  `token` commands. Signed updates and guarded recovery retain the existing
+  implementation. Internal helper commands and the source-installer update
+  bypass are not public CLI commands; existing server signing identities,
+  manifests and scoped-package behavior remain unchanged.
+- Verify 25 JavaScript CLI tests and 15 Python packaging tests. Real offline npm
+  global/local installs of the actual matching packages exercise the executable
+  from another directory, version/help, empty-instance discovery, recovery with
+  no journal, distinct synthetic default/named tokens and safe reinstall refusal.
+  Package inventory, permissions, exact dependency pins, reproducibility and
+  checksum receipts are checked. Add these checks to source CI; hosted execution
+  has not yet run. JavaScript/Python syntax and workflow YAML checks pass.
+- Availability: source and local packaging checks only. No service creation,
+  restart, provider chat, desktop UI change, npm publication or deployment is
+  included. Fresh service creation/control through the new wrapper still needs
+  disposable native acceptance. The new public package requires owned registry
+  publication and release-pipeline integration after that acceptance; current
+  public registry commands and frozen release candidates are unchanged.
+
+## 2026-10-02 — Mobile fallback for missing selectable text native view
+
+- Diagnose a test iOS build rendering Claude assistant Markdown as red
+  `Unimplemented component: <RNUITextView...>` boxes. The data and server
+  response were intact; the running native app did not expose the
+  `@bsky.app/react-native-uitextview` Fabric views expected by the JS bundle.
+- Route Markdown and text-file previews through a local `SelectableText`
+  wrapper. When both `RNUITextView` native view managers are registered, the
+  app keeps the iOS range-selection behavior; otherwise it falls back to React
+  Native `Text` so chat content remains readable in stale or mismatched test
+  shells.
+- Verified against the local 7850 server on the iPhone simulator by opening the
+  affected Claude test chat and confirming the assistant Markdown renders as
+  normal text with no `RNUITextView`/unimplemented component in the hierarchy.
+  Focused text-selection/Markdown tests and TypeScript passed.
+
+## 2026-10-02 — Mobile photo picker accepts videos
+
+- Extend the iOS composer library picker from image-only selection to mixed
+  photos and videos. Preserve Files attachments, add video upload naming and
+  MIME inference, request read access before opening the iOS library, and keep
+  iCloud-backed media download enabled for picker results.
+- Use the existing upload API with video-aware attachment UI and copy. Videos
+  now render with a video icon in pending, failed and uploaded states.
+- Verified focused upload/composer regressions, TypeScript, iOS export, native
+  prebuild, Info.plist permission text and iOS native dependency parity. Also
+  ran a disposable local AgentsServer and confirmed a video selected through
+  the mobile upload mapping reaches `/api/sessions/:id/files` as `video/mp4`.
+  Built and launched the Debug app on the iPhone simulator, opened a real chat,
+  verified the attachment menu shows `Photos and Videos`, and opened the
+  multi-select iOS media picker from that option. CoreSimulator media import
+  via `simctl addmedia` was not reliable in this run, so selecting a newly
+  imported video inside the real picker remains unverified. Source only; no
+  release or deployment.
+
+## 2026-10-01 — Simplify the repository overview
+
+- Group Claude Code, Codex, Cursor and OpenCode in the product introduction.
+  Keep CLI prerequisites in general setup guidance and provider availability
+  scoped to the client and server version.
+- Remove the separate OpenCode installation callout, backend-name links,
+  standalone server repository links and website development walkthrough.
+  Keep stable 1.0.9 downloads and the maintained server setup documentation.
+- Documentation only; no provider, mobile, installer or release changes.
+
+## 2026-10-01 — Refresh the README for stable 1.0.9
+
+- Point the repository's desktop badge, downloads and release notes to the
+  published 1.0.9 stable release. Describe OpenCode's desktop availability and
+  Codex Side chat controls, keeping mobile availability separate.
+- Add the stable npm command for fresh server installations, My Agents setup
+  guidance and the managed update path for existing servers, including the
+  signed legacy bridge. Link backend documentation to the maintained source.
+- Update the linked desktop OpenCode guide and preserve its previous anchor.
+  Verify the four desktop download URLs and relative documentation links and
+  anchors. Documentation only; no application, service or release changes.
+
+## 2026-09-30 — Desktop workflow usage events
+
+- Add 33 aggregate desktop events for side chats, custom API settings, goals,
+  workspace saves and Git actions, uploads, queue/steering, built-in slash
+  selection, and explicit app/server update actions. Include keyboard entry
+  points in the existing Open file metric. The complete catalog and outcome
+  definitions are in `docs/ANALYTICS_EVENTS.md`.
+- Keep the existing anonymous envelope and `success`-only property allowlist.
+  Do not send content, names, paths, model/provider details, credentials or
+  resource IDs. Team Network instrumentation is unchanged; shared-browser and
+  iOS analytics remain disabled. Update requests are not installation success,
+  and chat-reference submission is not proof of peer delivery.
+- Verified with an isolated native macOS Electron app, production IPC/HTTP and
+  a disposable AgentsServer: send and queue two real Codex turns; open, send a
+  follow-up and stop a side chat; save/clear a Codex goal; open a file by button
+  and shortcut, edit/save it, stage it and commit the reviewed disposable index;
+  open My Agents and fail a connection check against an unavailable test
+  endpoint; check desktop/server updates and change the desktop channel.
+  Captured analytics requests locally and blocked delivery to Mixpanel; only
+  the documented property keys were present. No production app/server restart.
+- Validation: 951 focused tests, TypeScript and production compilation passed.
+  Live acceptance is partial for upload, steering, Claude goals, goal
+  pause/resume, credential persistence, Git conflict/abort and actual update
+  install/cancel/retry paths; these were not exercised in this run. No claim of
+  release readiness or completed installation is made. Availability: source
+  and isolated local build only; no release or deployment.
+
+## 2026-09-29 — Preserve Claude history activity access
+
+- Keep the activity disclosure when a compact Claude history page uses the
+  final commentary as its only trace anchor. Deduplicate the visible reply
+  while retaining the run and sequence needed to load its activity on demand.
+- Claude text blocks are projected as assistant output in the server source;
+  the desktop also surfaces legacy report-shaped commentary when those events
+  are present, after ownership filtering and final-answer deduplication. These
+  source changes do not imply a server deployment.
+- Verified in the actual local macOS package against the connected server:
+  reopened an affected historical chat, expanded the restored activity control,
+  loaded its report and tool details, then collapsed it. Focused timeline/UI
+  regressions (324), 88 Claude SDK/print-runner tests, TypeScript and production
+  compilation passed.
+- Acceptance remains partial: the running server's compact history can omit
+  legacy report text until expansion. Default-visible recovery through that
+  paging boundary and a new native Claude turn remain unverified. No claim of
+  full native-provider parity or release readiness is made.
 
 ## 2026-09-28 — Combine editor line endings with desktop/server fixes
 
@@ -5483,3 +5775,63 @@ server export is `cf22affd963c9d8a7271d071b22db321c31e723f`.
   used synthetic upstreams. These results do not establish compatibility with
   every custom service or every historical installation/migration state.
   Publication did not install applications or restart running user servers.
+## Recovered Codex turns do not duplicate user messages
+
+History reconciliation now recognizes exact public Codex message items even
+when Stop or server-restart recovery omitted the normal completion receipt.
+It repairs already imported copies and prevents duplicate inputs on subsequent
+imports without rewriting the transcript. Genuine repeated messages in distinct
+turns remain visible.
+
+The new recovered-stop regression failed before the change and passed afterward;
+all 40 native history-repair tests passed. The signed desktop build 1245 was
+exercised against an isolated patched server over its real HTTP interface using
+a synthetic recovery ledger/provider transcript: the original input and answer
+remained visible, the replay was hidden, and a genuine later repeat survived
+reopening. No live provider turn, user installation, release, or service restart
+was part of this replay acceptance.
+
+### Pending idle updates leave scheduled work running
+
+An update reserved for when the server is idle no longer blocks automatic
+scheduled jobs or automatic titles. These use the same update admission policy
+as ordinary turns. Previously parked, unchanged schedule occurrences are
+rearmed on startup or update-status reconciliation without cancelling the
+pending update or rewriting edited schedules.
+
+Idle updates also wait for queued messages, including already persisted ones,
+instead of treating their ability to survive a restart as permission to jump
+ahead of them. Existing active-work checks remain in place. Explicit force
+updates keep their separate, confirmed behavior.
+
+The focused scheduler, update, admission, status-reconciliation, and generated
+title suites passed (248 tests). The unchanged signed desktop build 1245 was
+exercised against an isolated patched server with real Codex: an automatic
+scheduled turn completed and appeared in the chat while another chat's native
+tool continued and the update stayed pending. The pending reservation was a
+test fixture with updater polling disabled; no installation or live deployment
+was exercised. Provider credentials were copied only into disposable test state
+and the original remained unchanged. This is a source fix, not a published beta.
+
+## 2026-10-02 — Codex browsing and unchanged sign-in rechecks
+
+- Selecting, reopening, or reconnecting a chat now reads Codex status without
+  automatically resuming its native thread. Explicit provider controls still
+  load a persisted thread; normal Send uses the existing server resume path.
+  Browsing therefore does not hold the provider lifecycle lock needed by Send.
+- Recheck CLIs no longer retires a native Codex process when its known sign-in
+  revision is unchanged. Subagent inspection can read the owning process while
+  a genuine login handoff is pending. Native request/callback ownership scopes
+  idle handoff to the affected chat, preserving other chats' ongoing work.
+- Validation: 54 desktop controls tests, TypeScript checking, production compile
+  and compiled-entry verification; 130 targeted server tests. A local compiled
+  Electron app exercised real authenticated HTTP and native Codex in isolated
+  state: first message and follow-up both produced the expected answers, browsing
+  an unloaded persisted chat issued zero native-load requests, and an unchanged
+  sign-in recheck allowed the follow-up while another chat's shell work completed
+  without interruption. Original credentials were unchanged; test copies removed.
+- Acceptance boundary: this validates unchanged-sign-in rechecks, not migration
+  between different real accounts. An earlier forced process-retirement probe
+  encountered Codex's retained native writer after unsubscribe; that probe is
+  failed, and genuine cross-process credential handoff remains unaccepted.
+  No public release, installed-app replacement, or live-service deployment.
