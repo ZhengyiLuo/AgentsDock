@@ -17,6 +17,14 @@
   checks; 36 CLI/postinstall tests; five CLI packaging tests, eleven runtime
   packaging tests and nine runtime-inventory checks. The existing 319
   release-tooling/CLI tests also pass before adding the new facade verifier.
+- Add a read-only short-package publication verifier binding the six reviewed
+  CLI files, exact source, accepted archive receipt and signed same-version
+  runtime. Verify registry dependency-resolution metadata as well as archive
+  hashes; reject optional-dependency shadowing and unexpected hooks or files.
+  All 338 release-tooling/CLI tests pass, including 19 short-package cases and
+  a production offline-packager interoperability check. All eight server CI
+  shards pass for preparation commit `7ca13a8e` in
+  [37145485447](https://github.com/ZhengyiLuo/AgentsDock/actions/runs/37145485447).
 - These are integrated source and isolated-fixture checks, not signed-package
   or native upgrade acceptance. Fresh-default macOS automatic setup and
   split-service lifecycle control remain documented CLI limitations; existing

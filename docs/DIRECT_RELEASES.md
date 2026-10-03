@@ -210,6 +210,41 @@ failed verification. Do not extract or copy the local login into CI secrets.
 Keep untested acceptance boundaries separate from native package verification
 and verify public feeds after publication.
 
+## Separate short npm command
+
+The unscoped `agentsdock` CLI is a separate package from the signed
+`@agentsdock/server` runtime. Prepare it from the same clean committed source
+and `server/VERSION` with `server/scripts/package_agentsdock_cli.py
+--require-clean-source --output DIRECTORY`. Preserve its exact tarball and
+`agentsdock-cli-receipt.json`; do not add them to the runtime's three-asset
+`npm-candidate-vVERSION` draft or weaken that draft's verifier.
+
+`scripts/verify_agentsdock_cli_publication.mjs` has read-only `inspect`,
+`preflight` and `verify` operations. Supply the CLI directory, exact version,
+source SHA, accepted receipt hash, signed runtime directory, accepted runtime
+manifest hash and the independently observed prior CLI `latest` value (or
+`absent` for its first publication). It compares all six CLI files to the exact
+committed source, checks the reviewed lifecycle hook and same-version runtime
+dependency, and verifies signed runtime/public registry bytes. The beta path
+requires the prior CLI stable/default tag to remain unchanged.
+
+Publish and verify the signed scoped runtime first, then the accepted CLI
+tarball on the matching `beta` or `latest` tag, before exposing the desktop
+release. First publication requires an authenticated authorized npm account
+and any npm browser/2FA approval. A registry 404 does not establish package
+name ownership. Package-specific trusted publishing must be configured before
+claiming later CLI publication is automated; the scoped runtime's existing
+trusted publisher does not authorize this new package.
+
+The CLI intentionally has a reviewed global-install setup hook; its runtime
+dependency still has no lifecycle hooks. Use `npm publish EXACT_TARBALL
+--ignore-scripts --access public --tag CHANNEL --registry=https://registry.npmjs.org/`
+only after preflight and required native acceptance. This neither installs a
+local server nor authorizes a service restart. Recheck the published metadata,
+actual archive and both package tags with `verify`; never repack accepted bytes
+or retry publication over an existing differing version. Known CLI native
+acceptance boundaries are in `server/npm/agentsdock/README.md`.
+
 ## Local verification
 
 From `electron/`, run `pnpm typecheck`, `pnpm test`, and `pnpm build` after
