@@ -56,6 +56,17 @@ test('runner identity requires exact manual canonical harness SHA and exclusive 
   assert.throws(() => validateRunner(pin, { ...env, NOTARIZE_OTHER_INPUTS: '{}' }))
 })
 
+test('GitHub may omit only optional empty strings, never booleans or unknown operation inputs', () => {
+  const pin = pinFixture(), env = environment(pin)
+  const actual = { npm_native_validation: false, candidate_replay: false,
+    candidate_server_rollback: false, notarize: env.NOTARIZE_PIN }
+  validateRunner(pin, { ...env, NOTARIZE_OTHER_INPUTS: JSON.stringify(actual) })
+  for (const patch of [{ candidate_tag: 'unexpected' }, { candidate_tag: null },
+    { candidate_tag: false }, { arbitrary: '' }, { npm_native_validation: undefined }]) {
+    assert.throws(() => validateRunner(pin, { ...env, NOTARIZE_OTHER_INPUTS: JSON.stringify({ ...actual, ...patch }) }))
+  }
+})
+
 test('request verifies frozen release, signed descriptor and both CDHashes in either pass', () => {
   for (const stage of ['app', 'dmg']) checkRequest(fixture(stage))
   for (const change of [

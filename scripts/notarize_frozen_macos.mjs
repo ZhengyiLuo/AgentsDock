@@ -64,9 +64,12 @@ export function validateRunner(pin, env = process.env) {
   const other = JSON.parse(env.NOTARIZE_OTHER_INPUTS || '{}')
   const booleans = ['npm_native_validation', 'candidate_replay', 'candidate_server_rollback']
   const strings = ['npm_candidate_tag', 'npm_manifest_sha256', 'npm_source_sha', 'candidate_tag', 'candidate_receipt_sha256', 'candidate_bundle_sha256']
-  keys(other, [...booleans, ...strings, 'notarize'])
+  // GitHub omits optional empty string inputs from toJSON(inputs), while
+  // materializing boolean defaults. Absence here means the documented empty
+  // default, never permission for an unknown or nonempty operation input.
+  keys(other, [...booleans, ...strings.filter(key => Object.hasOwn(other, key)), 'notarize'])
   need(other.notarize === env.NOTARIZE_PIN, 'Dispatch notarization pin changed.')
-  need(booleans.every(key => other[key] === false) && strings.every(key => other[key] === ''), 'Notarization inputs are mutually exclusive with every other CI mode.')
+  need(booleans.every(key => other[key] === false) && strings.every(key => !Object.hasOwn(other, key) || other[key] === ''), 'Notarization inputs are mutually exclusive with every other CI mode.')
 }
 
 export function validateRequest(request, pin, manifestBytes, signatureBytes, publicKey) {
