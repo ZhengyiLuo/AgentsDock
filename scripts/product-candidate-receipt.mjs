@@ -51,8 +51,31 @@ export function stableBaselineProfile(name, candidateVersion) {
   return STABLE_BASELINES[name]
 }
 
+// Public beta.1 bytes authenticated independently of the frozen beta.2 receipt.
+// This is one same-Beta journey, not a general mutable baseline selector.
+export const BETA1101_BASELINE = Object.freeze({
+  desktop: Object.freeze({ version: '1.0.10-beta.1', buildNumber: '1245', track: 'beta', repository: 'AgentsDock',
+    sourceSha: '7790690fc91f0d6331b265820ef64234f5213abd',
+    checksumSha256: 'bf692d32c2b86d1b117761b1a9bd46e9bbe285b11a3fa57be44f965585d4505c',
+    zipSha256: '6ba42d86aa8bfd36f3c6abf8e90b385a16c4f5bf857ef171bb35453054e420d4',
+    metadataSha256: 'b923370acefed234af4bdd107a92ebcfbf388b98b75d750813953ef3e751bea8' }),
+  subscription: 'beta',
+  server: Object.freeze({ version: '1.0.10-beta.1', track: 'beta', sourceSha: '7790690fc91f0d6331b265820ef64234f5213abd',
+    manifestSha256: '01286c1d46b6c0673d849b23b258056ebba35068e195ae500e789eb82b21f3fc',
+    signatureSha256: '52286edbd8bf9c40bee555ff9defb4e223ba002eec749d1043609d4171281986',
+    archiveSha256: '050ddc103670df77b3fe31236cd119c71d7b933e0948b7cf85f92afe2ce2056b', archiveBytes: 3727576 })
+})
+
+export function candidateBaselineProfile(name, candidateVersion) {
+  if (name === 'beta1101') {
+    assert(candidateVersion === '1.0.10-beta.2', 'Beta.1 baseline requires the exact beta.2 candidate')
+    return BETA1101_BASELINE
+  }
+  return stableBaselineProfile(name, candidateVersion)
+}
+
 export async function verifyBaselineServer(name, directory, candidateVersion) {
-  const expected = stableBaselineProfile(name, candidateVersion).server
+  const expected = candidateBaselineProfile(name, candidateVersion).server
   const manifest = await regular(join(directory, 'agents-server-npm-manifest.json'), 8192)
   const signature = await regular(join(directory, 'agents-server-npm-manifest.sig'), 64)
   assert.equal(digest(manifest), expected.manifestSha256, 'Baseline descriptor differs from independently pinned bytes')
@@ -66,7 +89,7 @@ export async function verifyBaselineServer(name, directory, candidateVersion) {
 }
 
 export async function verifyBaselineDesktop(name, directory, candidateVersion) {
-  const expected = stableBaselineProfile(name, candidateVersion).desktop
+  const expected = candidateBaselineProfile(name, candidateVersion).desktop
   assert.equal(digest(await regular(join(directory, 'SHA256SUMS'), 65536)), expected.checksumSha256,
     'Baseline public checksum manifest differs from independently pinned bytes')
   assert.equal((await fileIdentity(join(directory, `AgentsDock-${expected.version}-mac-universal.zip`))).sha256,

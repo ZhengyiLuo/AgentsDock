@@ -7,7 +7,7 @@ import { dirname, join } from 'node:path'
 import { test } from 'node:test'
 import { assertCandidateCheckout, assertCandidateServerCheckout, assertCandidateRunner, assertCandidateServerRunner,
   CANDIDATE_HARNESS_PATHS, CANDIDATE_PREREQUISITE_TEST_EXCEPTION, candidateAssets, candidateTrack, stableBaselineProfile, STABLE_BASELINES,
-  verifyBaselineDesktop, verifyBaselineServer } from '../product-candidate-receipt.mjs'
+  candidateBaselineProfile, BETA1101_BASELINE, verifyBaselineDesktop, verifyBaselineServer } from '../product-candidate-receipt.mjs'
 import {STABLE_IDENTITY} from '../product_no_downgrade_desktop.mjs'
 
 test('only reviewed stable 1.0.9 extends the nonpublishing beta candidate contract', () => {
@@ -33,15 +33,36 @@ test('stable baseline profiles retain independent immutable source/archive ident
   for (const [name, version] of [['unknown', '1.0.9'], ['stable108', '1.0.8-beta.5'], ['beta1085', '1.0.10']]) assert.throws(() => stableBaselineProfile(name, version))
 })
 
+test('beta.1 baseline is independently pinned to build 1245 and exclusively scoped to beta.2', () => {
+  const beta = candidateBaselineProfile('beta1101', '1.0.10-beta.2')
+  assert.equal(beta, BETA1101_BASELINE)
+  assert.equal(beta.desktop.version, '1.0.10-beta.1')
+  assert.equal(beta.server.version, beta.desktop.version)
+  assert.equal(beta.desktop.buildNumber, '1245')
+  assert.equal(beta.desktop.sourceSha, '7790690fc91f0d6331b265820ef64234f5213abd')
+  assert.equal(beta.server.sourceSha, beta.desktop.sourceSha)
+  assert.equal(beta.subscription, 'beta')
+  assert.equal(beta.desktop.zipSha256, '6ba42d86aa8bfd36f3c6abf8e90b385a16c4f5bf857ef171bb35453054e420d4')
+  assert.equal(beta.server.manifestSha256, '01286c1d46b6c0673d849b23b258056ebba35068e195ae500e789eb82b21f3fc')
+  assert.equal(beta.server.archiveSha256, '050ddc103670df77b3fe31236cd119c71d7b933e0948b7cf85f92afe2ce2056b')
+  assert.equal(beta.server.archiveBytes, 3727576)
+  assert(Object.isFrozen(beta) && Object.isFrozen(beta.server) && Object.isFrozen(beta.desktop))
+  for (const version of ['1.0.9', '1.0.10', '1.0.10-beta.1', '1.0.10-beta.3', '1.0.10-beta.2+local']) {
+    assert.throws(() => candidateBaselineProfile('beta1101', version))
+  }
+  for (const name of ['stable108', 'beta1085', 'unknown']) assert.throws(() => candidateBaselineProfile(name, '1.0.10-beta.2'))
+  assert.throws(() => stableBaselineProfile('beta1101', '1.0.10-beta.2'))
+})
+
 test('independent baseline verification rejects substituted bytes before trusting metadata', async t => {
   const directory = mkdtempSync(join(tmpdir(), 'baseline-pins-unit-'))
   t.after(() => rmSync(directory, {recursive: true, force: true}))
   writeFileSync(join(directory, 'agents-server-npm-manifest.json'), '{}')
   writeFileSync(join(directory, 'agents-server-npm-manifest.sig'), Buffer.alloc(64))
   writeFileSync(join(directory, 'SHA256SUMS'), 'synthetic untrusted manifest')
-  for (const profile of ['stable108', 'beta1085']) {
-    await assert.rejects(() => verifyBaselineServer(profile, directory, '1.0.9'), /independently pinned/)
-    await assert.rejects(() => verifyBaselineDesktop(profile, directory, '1.0.9'), /independently pinned/)
+  for (const [profile, version] of [['stable108', '1.0.9'], ['beta1085', '1.0.9'], ['beta1101', '1.0.10-beta.2']]) {
+    await assert.rejects(() => verifyBaselineServer(profile, directory, version), /independently pinned/)
+    await assert.rejects(() => verifyBaselineDesktop(profile, directory, version), /independently pinned/)
   }
 })
 
@@ -307,11 +328,13 @@ test('candidate workflow retains sealed artifact pins and supplies exact expecte
   assert.match(candidateJob, /\$\{\{ matrix\.kind \}\}-\$\{\{ matrix\.legacy_mode \}\}/)
 })
 
-test('stable-only matrix selects independent npm baselines without changing beta or publication guards', () => {
+test('exact stable and beta.2 matrices select independent npm baselines without changing publication guards', () => {
   const workflow = readFileSync(new URL('../../.github/workflows/ci.yml', import.meta.url), 'utf8')
   const inputs = readFileSync(new URL('../../.github/actions/product-candidate-inputs/action.yml', import.meta.url), 'utf8')
   const job = workflow.slice(workflow.indexOf('  candidate-native:'), workflow.indexOf('  candidate-no-downgrade:'))
-  assert.match(job, /baseline_profile: \$\{\{ fromJSON\(inputs\.candidate_tag == 'candidate-replay-v1\.0\.9' && '\["legacy","stable108","beta1085"\]' \|\| '\["legacy"\]'\) \}\}/)
+  assert.match(job, /baseline_profile: \$\{\{ fromJSON\(inputs\.candidate_tag == 'candidate-replay-v1\.0\.9' && '\["legacy","stable108","beta1085"\]' \|\| inputs\.candidate_tag == 'candidate-replay-v1\.0\.10-beta\.2' && '\["legacy","beta1101"\]' \|\| '\["legacy"\]'\) \}\}/)
+  const negative = workflow.slice(workflow.indexOf('  candidate-no-downgrade:'))
+  assert.match(negative, /startsWith\(inputs\.candidate_tag, 'candidate-replay-v1\.0\.8-beta\.'\)/)
   assert.match(job, /INSTALL_KIND=npm-baseline/)
   assert.match(job, /--baseline-profile "\$BASELINE_PROFILE" --baseline-npm-directory/)
   assert.match(job, /--baseline-version "\$BASELINE_DESKTOP_VERSION"/)
@@ -332,11 +355,15 @@ test('candidate composite shell parses and profile gates reject out-of-scope sel
   const env = {PATH: process.env.PATH, CANDIDATE_TAG: 'candidate-replay-v1.0.9', BASELINE_PROFILE: 'stable108',
     EXECUTION_SCOPE: 'candidate', RECEIPT_SHA256: 'a'.repeat(64), BUNDLE_SHA256: 'b'.repeat(64)}
   for (const change of [{}, {BASELINE_PROFILE: 'beta1085'}, {BASELINE_PROFILE: 'legacy'},
+    {BASELINE_PROFILE: 'beta1101', CANDIDATE_TAG: 'candidate-replay-v1.0.10-beta.2'},
     {BASELINE_PROFILE: 'legacy', CANDIDATE_TAG: 'candidate-replay-v1.0.8-beta.5'}]) {
     assert.equal(spawnSync('/bin/bash', ['-c', gate], {env: {...env, ...change}}).status, 0)
   }
   for (const change of [{BASELINE_PROFILE: 'unknown'}, {CANDIDATE_TAG: 'candidate-replay-v1.0.8-beta.5'},
-    {CANDIDATE_TAG: 'candidate-replay-v1.0.10'}, {EXECUTION_SCOPE: 'candidate-server-linux'}, {RECEIPT_SHA256: 'wrong'}]) {
+    {CANDIDATE_TAG: 'candidate-replay-v1.0.10'}, {EXECUTION_SCOPE: 'candidate-server-linux'}, {RECEIPT_SHA256: 'wrong'},
+    {BASELINE_PROFILE: 'beta1101'}, {CANDIDATE_TAG: 'candidate-replay-v1.0.10-beta.2'},
+    {BASELINE_PROFILE: 'beta1101', CANDIDATE_TAG: 'candidate-replay-v1.0.10-beta.3'},
+    {BASELINE_PROFILE: 'beta1101', CANDIDATE_TAG: 'candidate-replay-v1.0.10-beta.2', EXECUTION_SCOPE: 'candidate-server-linux'}]) {
     assert.notEqual(spawnSync('/bin/bash', ['-c', gate], {env: {...env, ...change}}).status, 0)
   }
 })
@@ -428,7 +455,7 @@ test('source CI materializes the pinned Electron runtime before concurrent test 
 
 test('candidate recovery rehearses one exact download failure and retry without production acceptance', () => {
   const workflow = readFileSync(new URL('../../.github/workflows/ci.yml', import.meta.url), 'utf8')
-  const candidateJob = workflow.slice(workflow.indexOf('  candidate-native:'))
+  const candidateJob = workflow.slice(workflow.indexOf('  candidate-native:'), workflow.indexOf('  candidate-no-downgrade:'))
   assert.equal((candidateJob.match(/- kind: fresh/g) ?? []).length, 1)
   assert.match(candidateJob, /kind: \[legacy\]\n        legacy_mode: \['0755', '0750'\]/)
   for (const kind of ['recovery', 'stage-recovery']) for (const mode of ['0755', '0750']) {
@@ -498,8 +525,9 @@ test('candidate evidence collector only copies bounded sanitized non-publishing 
 test('stable no-downgrade is an isolated pinned fixture, not a weakened positive migration', () => {
   const workflow = readFileSync(new URL('../../.github/workflows/ci.yml', import.meta.url), 'utf8')
   const positive = workflow.slice(workflow.indexOf('  candidate-native:'), workflow.indexOf('  candidate-no-downgrade:'))
-  const negative = workflow.slice(workflow.indexOf('  candidate-no-downgrade:'))
-  assert.match(negative, /github\.event_name == 'workflow_dispatch' && inputs\.candidate_replay && inputs\.candidate_tag != 'candidate-replay-v1\.0\.9' && !inputs\.npm_native_validation/)
+  const negative = workflow.slice(workflow.indexOf('  candidate-no-downgrade:')).split(/\n  [a-z][a-z0-9-]*:\n/)[0]
+  assert.match(negative, /github\.event_name == 'workflow_dispatch'/)
+  assert.match(negative, /inputs\.candidate_replay && startsWith\(inputs\.candidate_tag, 'candidate-replay-v1\.0\.8-beta\.'\) && !inputs\.npm_native_validation/)
   assert.match(negative, /github\.repository == 'ZhengyiLuo\/AgentsDock' && startsWith\(github\.ref, 'refs\/heads\/release\/'\)/)
   assert.match(negative, /needs: \[release-tooling, electron, mobile-source\]/)
   assert.match(negative, /runs-on: macos-15/)

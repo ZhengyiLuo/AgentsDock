@@ -18,7 +18,7 @@ inputs:
     description: candidate (macOS app/server) or candidate-server-linux (server rollback only)
   baseline_profile:
     default: legacy
-    description: legacy, or stable1.0.9-only stable108 or beta1085
+    description: legacy; stable1.0.9-only stable108/beta1085; beta.2-only beta1101
 outputs:
   version:
     value: ${{ steps.inputs.outputs.version }}
@@ -45,7 +45,7 @@ runs:
         set -euo pipefail
         umask 077
         [[ "$CANDIDATE_TAG" == candidate-replay-v1.0.9 || "$CANDIDATE_TAG" =~ ^candidate-replay-v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)-beta\.[1-9][0-9]*$ ]] || exit 1
-        [[ "$BASELINE_PROFILE" == legacy || ( "$CANDIDATE_TAG" == candidate-replay-v1.0.9 && "$EXECUTION_SCOPE" == candidate && ( "$BASELINE_PROFILE" == stable108 || "$BASELINE_PROFILE" == beta1085 ) ) ]] || exit 1
+        [[ "$BASELINE_PROFILE" == legacy || ( "$EXECUTION_SCOPE" == candidate && ( ( "$CANDIDATE_TAG" == candidate-replay-v1.0.9 && ( "$BASELINE_PROFILE" == stable108 || "$BASELINE_PROFILE" == beta1085 ) ) || ( "$CANDIDATE_TAG" == candidate-replay-v1.0.10-beta.2 && "$BASELINE_PROFILE" == beta1101 ) ) ) ]] || exit 1
         [[ "$RECEIPT_SHA256" =~ ^[a-f0-9]{64}$ && "$BUNDLE_SHA256" =~ ^[a-f0-9]{64}$ ]] || exit 1
         case "$EXECUTION_SCOPE" in
           candidate)
@@ -130,8 +130,8 @@ runs:
           # Independent incumbent identities, never substituted into candidate receipts.
           read -r BASELINE_REPO BASELINE_VERSION BASELINE_TRACK BASELINE_SERVER_VERSION < <(
             node --input-type=module - "$BASELINE_PROFILE" "$PRODUCT_VERSION" <<'NODE'
-        import {stableBaselineProfile} from './scripts/product-candidate-receipt.mjs'
-        const profile = stableBaselineProfile(process.argv[2], process.argv[3])
+        import {candidateBaselineProfile} from './scripts/product-candidate-receipt.mjs'
+        const profile = candidateBaselineProfile(process.argv[2], process.argv[3])
         console.log([profile.desktop.repository, profile.desktop.version, profile.desktop.track, profile.server.version].join(' '))
         NODE
           )
@@ -140,9 +140,9 @@ runs:
           node --input-type=module - "$RUNNER_TEMP/candidate-inputs/baseline-release.json" "$BASELINE_PROFILE" "$PRODUCT_VERSION" <<'NODE'
         import assert from 'node:assert/strict'
         import {readFileSync} from 'node:fs'
-        import {stableBaselineProfile} from './scripts/product-candidate-receipt.mjs'
+        import {candidateBaselineProfile} from './scripts/product-candidate-receipt.mjs'
         const release = JSON.parse(readFileSync(process.argv[2]))
-        const expected = stableBaselineProfile(process.argv[3], process.argv[4]).desktop
+        const expected = candidateBaselineProfile(process.argv[3], process.argv[4]).desktop
         assert(release.tagName === `v${expected.version}` && release.isDraft === false && release.isPrerelease === (expected.track === 'beta'))
         if (expected.sourceSha) assert.equal(release.targetCommitish, expected.sourceSha)
         NODE

@@ -14,7 +14,7 @@ import { basename, dirname, isAbsolute, join, relative, resolve } from 'node:pat
 import { homedir } from 'node:os'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { assertReplayRunner, createProductReplay, createCandidateReplay } from './product-release-replay.mjs'
-import { assertCandidateCheckout, assertCandidateRunner, stableBaselineProfile } from './product-candidate-receipt.mjs'
+import { assertCandidateCheckout, assertCandidateRunner, candidateBaselineProfile } from './product-candidate-receipt.mjs'
 import { appVersion, assertMigrationTrack, connect, freePort, hashFile, MIGRATION_INSTALL_BUTTON_NAMES,
   openMigrationUpdateSettings, processesFor, run, stopOwned, until, verifyApp } from './verify_electron_migration.mjs'
 
@@ -77,7 +77,7 @@ export function assertOlderVersion(previous, candidate) {
 export function desktopJourney(candidate, baseline, profile = 'legacy') {
   assertOlderVersion(baseline, candidate)
   if (profile !== 'legacy') {
-    const expected = stableBaselineProfile(profile, candidate)
+    const expected = candidateBaselineProfile(profile, candidate)
     assert.equal(baseline, expected.desktop.version, 'Desktop baseline differs from its exact profile')
     return { initialTrack: expected.subscription, installedTrack: expected.subscription, switchToBeta: false }
   }
@@ -98,7 +98,7 @@ export function parseDesktopAcceptanceArguments(argv) {
   }
   for (const key of required) if (!(options.scope === 'candidate' && key === 'preparation-run')) assert(options[key], `Missing --${key}`)
   assert(options.scope === undefined || options.scope === 'candidate', 'Unknown desktop acceptance scope')
-  assert(options['baseline-profile'] === undefined || ['legacy', 'stable108', 'beta1085'].includes(options['baseline-profile']),
+  assert(options['baseline-profile'] === undefined || ['legacy', 'stable108', 'beta1085', 'beta1101'].includes(options['baseline-profile']),
     'Unknown desktop baseline profile')
   assert(HASH.test(options['receipt-sha256']), 'Invalid accepted receipt hash')
   assert(VERSION.test(options['baseline-version']), 'Invalid baseline version')
@@ -506,9 +506,9 @@ export async function main(argv = process.argv.slice(2)) {
   const baselineProfile = options['baseline-profile'] ?? 'legacy'
   const journey = desktopJourney(replay.identity.version, options['baseline-version'], baselineProfile)
   if (baselineProfile !== 'legacy') {
-    assert(options.scope === 'candidate', 'Pinned stable profiles are scoped candidate observations only')
+    assert(options.scope === 'candidate', 'Pinned baseline profiles are scoped candidate observations only')
     assert.equal(fixture.baselineProfile, baselineProfile, 'Server and desktop baseline profiles differ')
-    assert.deepEqual(fixture.baselineIdentity, stableBaselineProfile(baselineProfile, replay.identity.version).server)
+    assert.deepEqual(fixture.baselineIdentity, candidateBaselineProfile(baselineProfile, replay.identity.version).server)
     assert.equal(fixture.baselineVersion, fixture.baselineIdentity.version)
   }
   await assertInsideRunner(fixture.workDirectory)
@@ -545,6 +545,11 @@ export async function main(argv = process.argv.slice(2)) {
   try {
     observed('baseline-artifact-verification-starting')
     const previous = await extractVerifiedApp(options['baseline-directory'], options['baseline-version'], join(options.output, 'installation'))
+    if (baselineProfile === 'beta1101') {
+      const pinned = candidateBaselineProfile(baselineProfile, replay.identity.version).desktop
+      assert.equal(run('/usr/libexec/PlistBuddy', ['-c', 'Print :CFBundleVersion', join(previous.app, 'Contents/Info.plist')]).trim(),
+        pinned.buildNumber, 'Baseline native build differs from its independently pinned identity')
+    }
     observed('baseline-artifact-verified')
     observed('candidate-artifact-verification-starting')
     const expected = await extractVerifiedApp(options['desktop-directory'], replay.identity.version, join(options.output, 'expected'))

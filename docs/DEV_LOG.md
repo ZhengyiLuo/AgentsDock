@@ -5843,3 +5843,22 @@ and the original remained unchanged. This is a source fix, not a published beta.
   encountered Codex's retained native writer after unsubscribe; that probe is
   failed, and genuine cross-process credential handoff remains unaccepted.
   No public release, installed-app replacement, or live-service deployment.
+
+## 2026-10-03 — Pin the beta.1 to frozen beta.2 native replay
+
+- Add an exact `beta1101` acceptance profile: published signed desktop build
+  1245 and matching server `1.0.10-beta.1`, retaining Beta through the real
+  candidate updater/relaunch and server reconciliation. Independently verify
+  the public release source, checksum manifest, ZIP/build, updater metadata,
+  signed npm descriptor/archive and byte-identical official registry delivery.
+- Limit this profile to `1.0.10-beta.2` and both existing `0755`/`0750` fixtures.
+  Preserve the frozen artifact source `8d5327a9077f69f9a0a14c58b8e087a80f7f1762`,
+  build 1246 and signed bytes; distinguish the later harness source. Associate
+  beta.2 only with its unchanged, whole-file-pinned beta.1 installer policy.
+  Keep the old no-downgrade job limited to its actual `1.0.8-beta.N` scope.
+- This is test-harness support, not a successful native upgrade or release
+  receipt. Reports retain `releaseAcceptance: false` and
+  `publicationEligible: false`; genuine provider-history migration,
+  active/queued work, reboot, Windows update, public-feed delivery and unscoped
+  CLI global-auto-setup/split-lifecycle acceptance remain separate gaps.
+  No application/runtime change, service installation, publication or deployment.

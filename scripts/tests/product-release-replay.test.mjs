@@ -146,15 +146,19 @@ test('reviewed stable candidate exposes exact stable routes but stays publicatio
   assert.throws(() => validateCandidateReceipt({...f.value, version: '1.0.10'}))
 })
 
-test('baseline routing keeps beta metadata and strict version order confined to stable 1.0.9', () => {
+test('baseline routing keeps beta metadata and strict version order confined to exact reviewed journeys', () => {
   assert.deepEqual(replayBaselineMetadata('1.0.8-beta.5', '1.0.9', true),
     {track: 'beta', metadata: 'beta-mac.yml', prerelease: true})
   assert.deepEqual(replayBaselineMetadata('1.0.6', '1.0.9', true),
     {track: 'stable', metadata: 'latest-mac.yml', prerelease: false})
   assert.equal(replayBaselineMetadata('1.0.6', '1.0.8-beta.5', true).track, 'stable')
+  assert.deepEqual(replayBaselineMetadata('1.0.10-beta.1', '1.0.10-beta.2', true),
+    {track: 'beta', metadata: 'beta-mac.yml', prerelease: true})
   for (const args of [['1.0.8-beta.5', '1.0.9', false], ['1.0.8-beta.4', '1.0.9', true],
     ['1.0.8-beta.5', '1.0.9-beta.1', true], ['1.0.9', '1.0.9', true], ['1.0.10', '1.0.9', true],
-    ['1.0.8', '1.0.9', true], ['1.0.6+local', '1.0.9', true]]) assert.throws(() => replayBaselineMetadata(...args))
+    ['1.0.8', '1.0.9', true], ['1.0.6+local', '1.0.9', true],
+    ['1.0.10-beta.1', '1.0.10-beta.2', false], ['1.0.10-beta.1', '1.0.10-beta.3', true],
+    ['1.0.8-beta.5', '1.0.10-beta.2', true], ['1.0.10-beta.2', '1.0.10-beta.2', true]]) assert.throws(() => replayBaselineMetadata(...args))
 })
 
 test('candidate verifies original signer transport and every macOS artifact hash', async t => {

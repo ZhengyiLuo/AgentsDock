@@ -7,6 +7,62 @@ All candidate receipts and observations remain `publicationEligible: false`;
 observations also remain `releaseAcceptance: false`. A successful job does not
 turn blocked or unobserved scenarios into full release acceptance.
 
+## Frozen 1.0.10-beta.2: exact beta.1 upgrade rehearsal
+
+The `beta1101` profile is limited to candidate `1.0.10-beta.2`, build 1246,
+whose frozen application/server source is
+`8d5327a9077f69f9a0a14c58b8e087a80f7f1762`. A reviewed harness-only descendant
+may exercise those unchanged signed bytes; its own truthful source SHA remains
+separate, and the receipt still names `release/1.0.10-beta.2`. Existing checkout,
+ancestry, hosted-runner and explicit test/docs allowlist guards remain intact.
+
+The baseline is the published signed app `1.0.10-beta.1`, native build 1245,
+and matching signed npm server, both from
+`7790690fc91f0d6331b265820ef64234f5213abd`. The public release identity, actual
+downloaded assets, descriptor signature and archive bytes were independently
+checked. The npm archive also matched anonymous official-registry delivery.
+The committed profile pins are:
+
+| Baseline input | SHA-256 |
+| --- | --- |
+| Public desktop `SHA256SUMS` | `bf692d32c2b86d1b117761b1a9bd46e9bbe285b11a3fa57be44f965585d4505c` |
+| Universal Mac ZIP, build 1245 | `6ba42d86aa8bfd36f3c6abf8e90b385a16c4f5bf857ef171bb35453054e420d4` |
+| `beta-mac.yml` | `b923370acefed234af4bdd107a92ebcfbf388b98b75d750813953ef3e751bea8` |
+| Npm descriptor | `01286c1d46b6c0673d849b23b258056ebba35068e195ae500e789eb82b21f3fc` |
+| Npm signature | `52286edbd8bf9c40bee555ff9defb4e223ba002eec749d1043609d4171281986` |
+| Npm archive, 3,727,576 bytes | `050ddc103670df77b3fe31236cd119c71d7b933e0948b7cf85f92afe2ce2056b` |
+
+For this exact candidate, `candidate_replay=true` adds `beta1101` positive
+macOS jobs with installation-root modes `0755` and `0750` to the existing
+legacy/fresh/recovery matrix. The real app begins and remains on Beta, installs
+the exact signed candidate, relaunches, and reconciles the saved server through
+the real coordinator. No manual server-update click substitutes for that path.
+The npm-baseline fixture still refuses a fresh candidate install over its
+incumbent, retires both temporary npm prefixes/caches before native restart, and
+authenticates the pinned installed runtime. Beta.2 retains the complete reviewed
+beta.1 installer, SHA-256
+`51a6ae6f242476ae4f19712b95ecbaba212b2256e3928d389d8f617a6c367ed7`;
+only that exact version association is added to the root-normalization policy.
+
+Dispatch the existing `ci.yml` on `release/1.0.10-beta.2` with
+`candidate_tag=candidate-replay-v1.0.10-beta.2`, independently reviewed candidate
+receipt/bundle hashes, `candidate_replay=true`, `npm_native_validation=false`
+and `candidate_server_rollback=false`. Leave npm-only inputs empty. The private
+draft must retain exactly the original `candidate.json` and
+`candidate-bundle.zip`; the signed candidate is never rebuilt by this harness.
+
+This harness support and its tests do not record a successful native run or
+publication. The old no-downgrade fixture remains limited to its actual
+same-base `1.0.8-beta.N` scope; it is not relabeled as beta.2 evidence. Keeping
+public stable `1.0.9` and its registry/feed tags unchanged is a separate release
+publication invariant. Reports retain `publicationEligible: false` and
+`releaseAcceptance: false`. Empty API-session persistence is not genuine older
+provider-history acceptance; the fixture deliberately stops its owned server
+before app replacement and cannot establish active/queued-work safety. Reboot,
+Windows updater and public candidate-feed delivery remain unobserved. The new
+unscoped CLI global-auto-setup and split-layout lifecycle checks are separate
+native acceptance gaps, not covered by scoped npm installation or this replay.
+
 ## Reviewed stable 1.0.9 rehearsal extension
 
 The harness now also accepts the exact stable version `1.0.9`, with a stable
