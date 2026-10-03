@@ -42,16 +42,21 @@ on:
         description: Independently reviewed candidate-bundle.zip SHA-256
         type: string
         default: ''
+      notarize:
+        description: 'Exclusive frozen beta.2 notarization JSON pin: stage, draftId, requestSha256, inputSha256, harnessSha; empty disables'
+        type: string
+        default: ''
 
 permissions:
   contents: read
 
 concurrency:
-  group: verify-source-${{ github.ref }}${{ github.event_name == 'workflow_dispatch' && inputs.npm_native_validation && '-npm-native' || '' }}${{ github.event_name == 'workflow_dispatch' && inputs.candidate_replay && '-candidate' || '' }}${{ github.event_name == 'workflow_dispatch' && inputs.candidate_server_rollback && '-server-rollback-linux' || '' }}
-  cancel-in-progress: ${{ !(github.event_name == 'workflow_dispatch' && (inputs.npm_native_validation || inputs.candidate_replay || inputs.candidate_server_rollback)) }}
+  group: verify-source-${{ github.ref }}${{ github.event_name == 'workflow_dispatch' && inputs.npm_native_validation && '-npm-native' || '' }}${{ github.event_name == 'workflow_dispatch' && inputs.candidate_replay && '-candidate' || '' }}${{ github.event_name == 'workflow_dispatch' && inputs.candidate_server_rollback && '-server-rollback-linux' || '' }}${{ github.event_name == 'workflow_dispatch' && inputs.notarize != '' && '-notarize' || '' }}
+  cancel-in-progress: ${{ !(github.event_name == 'workflow_dispatch' && (inputs.npm_native_validation || inputs.candidate_replay || inputs.candidate_server_rollback || inputs.notarize != '')) }}
 
 jobs:
   release-tooling:
+    if: ${{ !(github.event_name == 'workflow_dispatch' && inputs.notarize != '') }}
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     env:
@@ -131,6 +136,7 @@ jobs:
           python3 -m unittest discover -s server/tests -t server -p test_release_file_manifest_isolated.py
 
   server-cli:
+    if: ${{ !(github.event_name == 'workflow_dispatch' && inputs.notarize != '') }}
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
@@ -151,7 +157,7 @@ jobs:
           python3 -m unittest discover -s server/tests -t server -p test_npm_release_package.py
 
   electron:
-    if: ${{ !(github.event_name == 'workflow_dispatch' && inputs.npm_native_validation) }}
+    if: ${{ !(github.event_name == 'workflow_dispatch' && (inputs.npm_native_validation || inputs.notarize != '')) }}
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
@@ -180,7 +186,7 @@ jobs:
         working-directory: electron
 
   mobile-source:
-    if: ${{ !(github.event_name == 'workflow_dispatch' && inputs.npm_native_validation) }}
+    if: ${{ !(github.event_name == 'workflow_dispatch' && (inputs.npm_native_validation || inputs.notarize != '')) }}
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
@@ -231,7 +237,7 @@ jobs:
 
   npm-native:
     # Scoped npm validation is not desktop/mobile or legacy product acceptance.
-    if: github.event_name == 'workflow_dispatch' && inputs.npm_native_validation && !inputs.candidate_replay && github.repository == 'ZhengyiLuo/AgentsDock' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/release/'))
+    if: github.event_name == 'workflow_dispatch' && inputs.npm_native_validation && !inputs.candidate_replay && github.repository == 'ZhengyiLuo/AgentsDock' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/release/')) && inputs.notarize == ''
     needs: [release-tooling]
     strategy:
       fail-fast: false
@@ -318,7 +324,7 @@ jobs:
   candidate-server-rollback-linux:
     # Server-only exact-package rehearsal. It cannot validate a desktop app or
     # authorize publication, and does not broaden the macOS candidate guard.
-    if: github.event_name == 'workflow_dispatch' && inputs.candidate_server_rollback && !inputs.candidate_replay && !inputs.npm_native_validation && github.repository == 'ZhengyiLuo/AgentsDock' && startsWith(github.ref, 'refs/heads/release/')
+    if: github.event_name == 'workflow_dispatch' && inputs.candidate_server_rollback && !inputs.candidate_replay && !inputs.npm_native_validation && github.repository == 'ZhengyiLuo/AgentsDock' && startsWith(github.ref, 'refs/heads/release/') && inputs.notarize == ''
     needs: [release-tooling, electron, mobile-source]
     strategy:
       fail-fast: false
@@ -618,14 +624,14 @@ jobs:
     # This existing registered workflow may be explicitly dispatched on a reviewed
     # release branch before the separate production acceptance workflow is merged.
     # Its observations are deliberately ineligible for production publication.
-    if: github.event_name == 'workflow_dispatch' && inputs.candidate_replay && !inputs.npm_native_validation && github.repository == 'ZhengyiLuo/AgentsDock' && startsWith(github.ref, 'refs/heads/release/')
+    if: github.event_name == 'workflow_dispatch' && inputs.candidate_replay && !inputs.npm_native_validation && github.repository == 'ZhengyiLuo/AgentsDock' && startsWith(github.ref, 'refs/heads/release/') && inputs.notarize == ''
     needs: [release-tooling, electron, mobile-source]
     strategy:
       fail-fast: false
       matrix:
         kind: [legacy]
         legacy_mode: ['0755', '0750']
-        baseline_profile: ${{ fromJSON(inputs.candidate_tag == 'candidate-replay-v1.0.9' && '["legacy","stable108","beta1085"]' || '["legacy"]') }}
+        baseline_profile: ${{ fromJSON(inputs.candidate_tag == 'candidate-replay-v1.0.9' && '["legacy","stable108","beta1085"]' || inputs.candidate_tag == 'candidate-replay-v1.0.10-beta.2' && '["legacy","beta1101"]' || '["legacy"]') }}
         include:
           - kind: fresh
             legacy_mode: '0755'
@@ -965,7 +971,7 @@ jobs:
 
   candidate-no-downgrade:
     # Separate genuine newer-server fixture: never relax positive upgrade guards.
-    if: github.event_name == 'workflow_dispatch' && inputs.candidate_replay && inputs.candidate_tag != 'candidate-replay-v1.0.9' && !inputs.npm_native_validation && github.repository == 'ZhengyiLuo/AgentsDock' && startsWith(github.ref, 'refs/heads/release/')
+    if: github.event_name == 'workflow_dispatch' && inputs.candidate_replay && startsWith(inputs.candidate_tag, 'candidate-replay-v1.0.8-beta.') && !inputs.npm_native_validation && github.repository == 'ZhengyiLuo/AgentsDock' && startsWith(github.ref, 'refs/heads/release/') && inputs.notarize == ''
     needs: [release-tooling, electron, mobile-source]
     runs-on: macos-15
     timeout-minutes: 60
@@ -1092,5 +1098,108 @@ jobs:
           if-no-files-found: warn
           retention-days: 14
 
-# The optional rehearsal contains no signing credentials or publishing commands.
+  notarize-frozen-macos:
+    # A nonempty pin selects only this job; it cannot build, launch, or publish.
+    if: github.event_name == 'workflow_dispatch' && inputs.notarize != '' && github.repository == 'ZhengyiLuo/AgentsDock' && github.ref == 'refs/heads/release/1.0.10-beta.2-harness'
+    environment: direct-production
+    runs-on: macos-15
+    timeout-minutes: 50
+    permissions:
+      contents: write # GitHub requires this to GET an unpublished draft.
+      actions: read
+    defaults:
+      run:
+        shell: bash
+    env:
+      NOTARIZE_PIN: ${{ inputs.notarize }}
+      NOTARIZE_OTHER_INPUTS: ${{ toJSON(inputs) }}
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        with:
+          node-version: 24
+          package-manager-cache: false
+      - name: Validate exclusive dispatch and frozen source ancestry before any private input
+        run: |
+          set -euo pipefail
+          node scripts/notarize_frozen_macos.mjs validate-dispatch
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          git merge-base --is-ancestor 8d5327a9077f69f9a0a14c58b8e087a80f7f1762 HEAD
+          git diff --exit-code 8d5327a9077f69f9a0a14c58b8e087a80f7f1762 -- \
+            scripts/verify_electron_app_zip.py scripts/audit_electron_bundle.sh \
+            scripts/verify_coordinated_resources.mjs scripts/stage_coordinated_release.mjs \
+            server/release-public-key.pem electron/package.json electron/pnpm-lock.yaml
+          node --test scripts/tests/notarize_frozen_macos.test.mjs
+      - uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v6
+        with:
+          version: 11.9.0
+          run_install: false
+      - name: Install static audit dependencies without lifecycle execution or cache
+        run: pnpm --dir electron install --frozen-lockfile --ignore-scripts
+      - name: GET the exact unpublished notarization input without mutation
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: node scripts/notarize_frozen_macos.mjs download "$RUNNER_TEMP/notary-input"
+      - id: native
+        name: Verify input hashes, signatures, universal app and coordinated descriptor without launch
+        run: node scripts/notarize_frozen_macos.mjs verify "$RUNNER_TEMP/notary-input"
+      - id: submit
+        name: Submit only the verified artifact with protected Apple credentials
+        env:
+          APPLE_API_KEY_P8_BASE64: ${{ secrets.APPLE_API_KEY_P8_BASE64 }}
+          APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
+          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+        run: |
+          set +x
+          set -euo pipefail
+          umask 077
+          PRIVATE_DIR="$RUNNER_TEMP/notary-input/private"
+          KEY_DIR="$RUNNER_TEMP/agentsdock-notary-private"
+          KEY_PATH="$KEY_DIR/AuthKey.p8"
+          mkdir "$PRIVATE_DIR" "$KEY_DIR"
+          trap 'rm -f "$KEY_PATH"' EXIT
+          test -n "$APPLE_API_KEY_P8_BASE64"
+          [[ "$APPLE_API_KEY_ID" =~ ^[A-Za-z0-9]{10,32}$ ]]
+          [[ "$APPLE_API_ISSUER" =~ ^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$ ]]
+          printf '%s' "$APPLE_API_KEY_P8_BASE64" | openssl base64 -d -A -out "$KEY_PATH" 2> "$PRIVATE_DIR/key-error.txt"
+          test -s "$KEY_PATH"
+          INPUT_NAME="$(node --input-type=module -e 'import {parsePin} from "./scripts/notarize_frozen_macos.mjs"; const p=parsePin(process.env.NOTARIZE_PIN); process.stdout.write(p.stage === "app" ? "notary-input.zip" : "notary-input.dmg")' 2> "$PRIVATE_DIR/pin-error.txt")"
+          SUBMIT_STATUS=0
+          /usr/bin/xcrun notarytool submit "$RUNNER_TEMP/notary-input/$INPUT_NAME" \
+            --key "$KEY_PATH" --key-id "$APPLE_API_KEY_ID" --issuer "$APPLE_API_ISSUER" \
+            --wait --timeout 30m --output-format json \
+            > "$PRIVATE_DIR/submission.json" 2> "$PRIVATE_DIR/submit-error.txt" || SUBMIT_STATUS=$?
+          SUBMISSION_ID="$(node --input-type=module - "$PRIVATE_DIR/submission.json" <<'NODE' 2> "$PRIVATE_DIR/id-error.txt"
+          import {readFileSync} from 'node:fs'
+          try {
+            const result = JSON.parse(readFileSync(process.argv[2]))
+            if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(result.id || '')) process.exit(1)
+            process.stdout.write(result.id)
+          } catch { process.exit(1) }
+          NODE
+          )"
+          /usr/bin/xcrun notarytool log "$SUBMISSION_ID" "$PRIVATE_DIR/notary-log.json" \
+            --key "$KEY_PATH" --key-id "$APPLE_API_KEY_ID" --issuer "$APPLE_API_ISSUER" \
+            > "$PRIVATE_DIR/log-command.txt" 2> "$PRIVATE_DIR/log-error.txt"
+          exit "$SUBMIT_STATUS"
+      - name: Create allowlisted submission receipt; require matching Apple acceptance
+        if: always() && steps.native.outcome == 'success' && steps.submit.outcome != 'skipped'
+        run: node scripts/notarize_frozen_macos.mjs receipt "$RUNNER_TEMP/notary-input"
+      - name: Remove all private key material and raw Apple diagnostics
+        if: always()
+        run: |
+          rm -rf "$RUNNER_TEMP/agentsdock-notary-private" "$RUNNER_TEMP/notary-input/private"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        if: always()
+        with:
+          name: frozen-macos-notarization-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/notary-input/notary-receipt.json
+          if-no-files-found: ignore
+          retention-days: 14
+
+# Optional rehearsals and notarization receipts are not product acceptance.
 # Only product-release-acceptance.yml can supply production acceptance evidence.
