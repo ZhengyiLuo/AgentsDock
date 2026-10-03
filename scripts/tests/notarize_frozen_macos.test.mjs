@@ -1,10 +1,10 @@
 import assert from 'node:assert/strict'
 import { createHash } from 'node:crypto'
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs'
+import { mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { test } from 'node:test'
-import { IDENTITY, NotarizationReader, parsePin, sanitizedReceipt, validateDraft, validateRequest, validateRunner } from '../notarize_frozen_macos.mjs'
+import { IDENTITY, NotarizationReader, parsePin, sanitizedReceipt, validateDraft, validateRequest, validateRunner, validateUpdaterConfig, verifyPackagedUpdater } from '../notarize_frozen_macos.mjs'
 import { signedFixture } from './coordinated-release-fixture.mjs'
 
 const hash = value => createHash('sha256').update(value).digest('hex')
@@ -29,7 +29,7 @@ function fixture(stage = 'app') {
   const request = { ...IDENTITY, stage, artifact: { name: `notary-input.${stage === 'app' ? 'zip' : 'dmg'}`, sha256: pin.inputSha256, size: 1000 },
     manifestSha256: hash(signed.bytes), signatureSha256: hash(signed.signature), appCDHashes: { arm64: 'd'.repeat(40), x86_64: 'e'.repeat(40) } }
   const names = ['notary-request.json', request.artifact.name, 'agents-server-npm-manifest.json', 'agents-server-npm-manifest.sig']
-  const draft = { id: pin.draftId, draft: true, prerelease: true, tag_name: `notarize-v${IDENTITY.version}-${stage}`, target_commitish: IDENTITY.sourceSha,
+  const draft = { id: pin.draftId, draft: true, prerelease: true, tag_name: `notarize-v${IDENTITY.version}-${stage}-r2`, target_commitish: IDENTITY.sourceSha,
     assets: names.map((name, index) => ({ id: index + 1, name, state: 'uploaded', size: 100, digest: `sha256:${'f'.repeat(64)}` })) }
   return { pin, request, signed, draft }
 }
@@ -92,6 +92,54 @@ test('descriptor signature and exact frozen source cannot be substituted', () =>
   bad.signed.signature[0] ^= 1
   bad.request.signatureSha256 = hash(bad.signed.signature)
   assert.throws(() => checkRequest(bad), /signature is invalid/)
+})
+
+test('revision two requires a separate immutable request and tag; prior attempts stay rejected', () => {
+  assert.equal(IDENTITY.transportRevision, 2)
+  for (const stage of ['app', 'dmg']) {
+    const f = fixture(stage)
+    checkRequest(f)
+    validateDraft(f.draft, f.pin)
+    f.draft.tag_name = `notarize-v${IDENTITY.version}-${stage}`
+    assert.throws(() => validateDraft(f.draft, f.pin))
+    f.request.transportRevision = 1
+    assert.throws(() => checkRequest(f), /transportRevision changed/)
+    delete f.request.transportRevision
+    assert.throws(() => checkRequest(f), /Unexpected object fields/)
+  }
+})
+
+test('updater must be present and target the canonical public beta feed', () => {
+  const good = { provider: 'github', owner: 'ZhengyiLuo', repo: 'AgentsDock', channel: 'beta' }
+  validateUpdaterConfig(good)
+  for (const config of [null, [], {}, { ...good, provider: 'generic' }, { ...good, owner: 'other' },
+    { ...good, repo: 'AgentsDock-Releases' }, { ...good, channel: 'latest' }, { ...good, channel: undefined }]) {
+    assert.throws(() => validateUpdaterConfig(config), /canonical public beta feed/)
+  }
+})
+
+test('native preflight rejects missing, symlinked, oversized and marker-disabled updater inputs', t => {
+  const directory = mkdtempSync(join(tmpdir(), 'notary-updater-test-'))
+  t.after(() => rmSync(directory, { recursive: true, force: true }))
+  const file = join(directory, 'app-update.yml')
+  const bytes = JSON.stringify({ provider: 'github', owner: 'ZhengyiLuo', repo: 'AgentsDock', channel: 'beta' })
+  assert.throws(() => verifyPackagedUpdater(directory, JSON.parse), /ENOENT/)
+  writeFileSync(file, bytes)
+  assert.deepEqual(verifyPackagedUpdater(directory, JSON.parse), { updater: 'github:ZhengyiLuo/AgentsDock:beta', updaterConfigSha256: hash(bytes) })
+  for (const name of ['disable-auto-update', 'adhoc-isolated-user-data']) {
+    const marker = join(directory, name)
+    // Even a dangling marker symlink must fail; existence checks can miss it.
+    symlinkSync('missing-target', marker)
+    assert.throws(() => verifyPackagedUpdater(directory, JSON.parse), /must not disable updates/)
+    rmSync(marker)
+  }
+  writeFileSync(file, 'x'.repeat(8193))
+  assert.throws(() => verifyPackagedUpdater(directory, JSON.parse), /bounded regular/)
+  rmSync(file)
+  writeFileSync(join(directory, 'real-updater'), bytes)
+  symlinkSync('real-updater', file)
+  assert.throws(() => verifyPackagedUpdater(directory, JSON.parse))
+  assert.match(helper, /function verifyApp\(app, request, directory\) \{[\s\S]*?verifyPackagedUpdater\(join\(app, 'Contents\/Resources'\)\)/)
 })
 
 test('only the exact private draft and four uploaded bounded assets are accepted', () => {

@@ -5,6 +5,7 @@ import { createHash } from 'node:crypto'
 import { spawnSync } from 'node:child_process'
 import { closeSync, constants, createReadStream, fstatSync, lstatSync, mkdirSync, openSync, readFileSync, readdirSync, realpathSync, writeFileSync } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
+import { createRequire } from 'node:module'
 import { fileURLToPath } from 'node:url'
 import { validateDescriptor } from './stage_coordinated_release.mjs'
 
@@ -13,6 +14,7 @@ export const IDENTITY = Object.freeze({
   schema: 'agentsdock-macos-notarization-v1', repository: 'ZhengyiLuo/AgentsDock',
   sourceSha: '8d5327a9077f69f9a0a14c58b8e087a80f7f1762', sourceRef: 'release/1.0.10-beta.2',
   version: '1.0.10-beta.2', buildNumber: '1246', track: 'beta', preparationRunId: '37159258614',
+  transportRevision: 2,
 })
 const HARNESS_REF = 'refs/heads/release/1.0.10-beta.2-harness'
 const MANIFEST = 'agents-server-npm-manifest.json', SIGNATURE = 'agents-server-npm-manifest.sig'
@@ -22,7 +24,8 @@ const hex = (value, length) => typeof value === 'string' && new RegExp(`^[0-9a-f
 const need = (value, message) => { if (!value) throw new Error(message) }
 const keys = (value, expected) => need(value && !Array.isArray(value) && JSON.stringify(Object.keys(value).sort()) === JSON.stringify([...expected].sort()), 'Unexpected object fields.')
 const artifactName = stage => stage === 'app' ? 'notary-input.zip' : 'notary-input.dmg'
-const stageTag = stage => `notarize-v${IDENTITY.version}-${stage}`
+// Revision one remains preserved evidence, not an acceptable transport input.
+const stageTag = stage => `notarize-v${IDENTITY.version}-${stage}-r2`
 
 function regular(filename, maximum) {
   const fd = openSync(filename, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK)
@@ -169,8 +172,33 @@ function codeHashes(app) {
   return result
 }
 
+export function validateUpdaterConfig(config) {
+  need(config && typeof config === 'object' && !Array.isArray(config) &&
+    config.provider === 'github' && config.owner === 'ZhengyiLuo' &&
+    config.repo === 'AgentsDock' && config.channel === 'beta',
+  'Packaged updater must select the canonical public beta feed.')
+}
+
+export function verifyPackagedUpdater(resources, loadYaml) {
+  const entries = readdirSync(resources)
+  need(!entries.includes('disable-auto-update') && !entries.includes('adhoc-isolated-user-data'),
+    'Release app must not disable updates or override isolated user data.')
+  const bytes = regular(join(resources, 'app-update.yml'), 8192)
+  if (!loadYaml) {
+    // Same locked audit dependency used by the full release verifier; load it
+    // only in the pre-secret native job after --frozen-lockfile installation.
+    const store = join(ROOT, 'electron/node_modules/.pnpm')
+    const versions = readdirSync(store).filter(name => /^js-yaml@[0-9]/.test(name))
+    need(versions.length === 1, 'Expected one locked YAML audit dependency.')
+    loadYaml = createRequire(import.meta.url)(join(store, versions[0], 'node_modules/js-yaml/index.js')).load
+  }
+  validateUpdaterConfig(loadYaml(bytes.toString('utf8')))
+  return { updater: 'github:ZhengyiLuo/AgentsDock:beta', updaterConfigSha256: sha(bytes) }
+}
+
 function verifyApp(app, request, directory) {
   need(lstatSync(app).isDirectory() && realpathSync(app) === app, 'Expected a real AgentsDock.app directory.')
+  verifyPackagedUpdater(join(app, 'Contents/Resources'))
   const info = join(app, 'Contents/Info.plist')
   for (const [key, expected] of Object.entries({ CFBundleIdentifier: 'com.zhengyiluo.AgentsDock', CFBundleShortVersionString: IDENTITY.version, CFBundleVersion: IDENTITY.buildNumber })) need(native('/usr/libexec/PlistBuddy', ['-c', `Print :${key}`, info]) === expected, `Packaged ${key} changed.`)
   native('/usr/bin/codesign', ['--verify', '--deep', '--strict', app])
