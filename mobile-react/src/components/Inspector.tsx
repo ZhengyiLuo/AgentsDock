@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { AccessibilityInfo, ActivityIndicator, Alert, Modal, Platform, Pressable, ScrollView, StyleSheet, View } from 'react-native'
+import { AccessibilityInfo, ActionSheetIOS, ActivityIndicator, Alert, Modal, Platform, Pressable, ScrollView, StyleSheet, View } from 'react-native'
 import * as Clipboard from 'expo-clipboard'
 import { useShallow } from 'zustand/react/shallow'
 import { Archive, Check, ChevronDown, Copy, FileText, GitFork, Pause, Pencil, Pin, Play, Plus, RefreshCw, Search, SquareTerminal, Trash2, X } from 'lucide-react-native'
@@ -194,10 +194,10 @@ export function Inspector({ sessionId, onDigest, onJob, onTerminal, onProcesses,
     <View style={[styles.card, { backgroundColor: colors.raised }]}>
       <SectionHeader title="Session" />
       <Field label="Name"><TextInput value={title} onChangeText={setTitle} onBlur={() => { const clean = title.trim(); if (scopeIsCurrent() && clean && clean !== session.title) void update(sessionId, { title: clean }, profileGeneration) }} style={[styles.input, { color: colors.text, borderColor: colors.border, backgroundColor: colors.surface }]} /></Field>
-      <Field label="Model"><ChoiceField value={session.model ?? ''} options={modelOptions} onChange={model => { if (scopeIsCurrent()) void update(sessionId, { model, effort: runtimeEffortAfterModelChange(runtime, session.backend, model, session.effort) }, profileGeneration) }} /></Field>
-      {session.backend !== 'cursor' ? <Field label="Effort"><ChoiceField value={session.effort ?? ''} options={effortOptions} onChange={effort => { if (scopeIsCurrent()) void update(sessionId, { effort }, profileGeneration) }} /></Field> : null}
+      <Field label="Model"><ChoiceField title="Model" value={session.model ?? ''} options={modelOptions} onChange={model => { if (scopeIsCurrent()) void update(sessionId, { model, effort: runtimeEffortAfterModelChange(runtime, session.backend, model, session.effort) }, profileGeneration) }} /></Field>
+      {session.backend !== 'cursor' ? <Field label="Effort"><ChoiceField title="Effort" value={session.effort ?? ''} options={effortOptions} onChange={effort => { if (scopeIsCurrent()) void update(sessionId, { effort }, profileGeneration) }} /></Field> : null}
       {selectionError ? <Text accessibilityRole="alert" style={[styles.hint, { color: colors.orange }]}>{selectionError}</Text> : null}
-      <Field label="Agent jobs"><ChoiceField disabled={!jobsAccess.available} value={jobsAccess.effective} options={jobsAccessOptions} onChange={value => { if (scopeIsCurrent() && jobsAccess.available) void update(sessionId, { provider_jobs_access: value as ProviderJobsAccess }, profileGeneration) }} /></Field>
+      <Field label="Agent jobs"><ChoiceField title="Agent jobs" disabled={!jobsAccess.available} value={jobsAccess.effective} options={jobsAccessOptions} onChange={value => { if (scopeIsCurrent() && jobsAccess.available) void update(sessionId, { provider_jobs_access: value as ProviderJobsAccess }, profileGeneration) }} /></Field>
       <Text style={[styles.hint, { color: colors.muted }]}>{jobsAccess.available ? `${providerJobsAccessLabel(jobsAccess.effective)}${jobsAccess.inheritedDefault ? ' (server default)' : ''}. ${providerJobsAccessDescription(jobsAccess.effective)}` : 'Update AgentsServer to set Read-only or Blocked. Human job controls remain available.'}</Text>
       <Field label="System prompt"><TextInput value={systemPrompt} onChangeText={setSystemPrompt} onBlur={() => { const clean = systemPrompt.trim(); if (scopeIsCurrent() && clean !== (session.system_prompt ?? '')) void update(sessionId, { system_prompt: clean || null }, profileGeneration) }} multiline maxLength={12_000} placeholder="Optional per-chat instructions" placeholderTextColor={colors.muted} style={[styles.multilineInput, { color: colors.text, borderColor: colors.border, backgroundColor: colors.surface }]} /></Field>
       <Field label="Folder"><TextInput value={folder} onChangeText={setFolder} onBlur={() => { if (scopeIsCurrent()) void update(sessionId, { folder: folder.trim() || 'General' }, profileGeneration) }} style={[styles.input, { color: colors.text, borderColor: colors.border, backgroundColor: colors.surface }]} /></Field>
@@ -264,9 +264,43 @@ export function Inspector({ sessionId, onDigest, onJob, onTerminal, onProcesses,
 function Field({ label, children }: { label: string; children: React.ReactNode }) { const colors = usePalette(); return <View style={styles.field}><Text style={[styles.label, { color: colors.muted }]}>{label}</Text><View style={{ flex: 1 }}>{children}</View></View> }
 function Command({ icon: Icon, label, onPress, destructive, disabled = false, hint, testID }: { icon: typeof Pin; label: string; onPress: () => void; destructive?: boolean; disabled?: boolean; hint?: string; testID?: string }) { const colors = usePalette(); return <Pressable testID={testID} accessibilityRole="button" accessibilityLabel={label} accessibilityHint={hint} accessibilityState={{ disabled }} disabled={disabled} onPress={onPress} style={({ pressed }) => [styles.command, { backgroundColor: colors.raised, opacity: disabled ? 0.4 : pressed ? 0.65 : 1 }]}><Icon size={15} color={destructive ? colors.red : colors.muted} /><Text style={{ color: destructive ? colors.red : colors.text, fontSize: 11, fontWeight: '700' }}>{label}</Text></Pressable> }
 
-function ChoiceField({ value, options, onChange, disabled = false }: { value: string; options: RuntimeOption[]; onChange: (value: string) => void; disabled?: boolean }) {
-  const colors = usePalette(); const [open, setOpen] = useState(false); const selected = options.find(option => option.value === value) ?? options[0]
-  return <><Pressable accessibilityRole="button" accessibilityLabel={selected?.label ?? (value || 'Default')} accessibilityState={{ expanded: open, disabled }} disabled={disabled} onPress={() => { setOpen(true); requestAnimationFrame(dismissAppKeyboard) }} style={[styles.choice, { borderColor: colors.border, backgroundColor: colors.surface, opacity: disabled ? 0.45 : 1 }]}><Text style={{ flex: 1, color: colors.text, fontSize: 12 }} numberOfLines={1}>{selected?.label ?? (value || 'Default')}</Text><ChevronDown size={14} color={colors.muted} /></Pressable><Modal visible={open && !disabled} transparent animationType="fade" onRequestClose={() => setOpen(false)}><View style={styles.modalBackdrop}><Pressable accessibilityRole="button" accessibilityLabel="Dismiss choices" style={StyleSheet.absoluteFill} onPress={() => setOpen(false)} /><View style={[styles.choiceMenu, { backgroundColor: colors.surface, borderColor: colors.border }]}><ScrollView keyboardShouldPersistTaps="always">{options.map(option => <Pressable key={option.value || '__default'} accessibilityRole="button" accessibilityLabel={option.locked ? `${option.label}, upgrade required` : option.label} accessibilityHint={option.locked ? option.locked_reason ?? undefined : undefined} accessibilityState={{ disabled: option.locked, selected: option.value === value }} disabled={option.locked} onPress={() => { onChange(option.value); setOpen(false) }} style={[styles.choiceOption, { backgroundColor: option.value === value ? colors.raised : 'transparent', opacity: option.locked ? 0.45 : 1 }]}><Text style={{ color: colors.text }}>{option.label}{option.locked ? ' (upgrade required)' : ''}</Text></Pressable>)}</ScrollView></View></View></Modal></>
+function ChoiceField({ title = 'Choose option', value, options, onChange, disabled = false }: { title?: string; value: string; options: RuntimeOption[]; onChange: (value: string) => void; disabled?: boolean }) {
+  const colors = usePalette()
+  const [open, setOpen] = useState(false)
+  const choices = options.filter((option, index) => options.findIndex(candidate => candidate.value === option.value) === index)
+  const selected = choices.find(option => option.value === value) ?? choices[0]
+  const close = () => setOpen(false)
+  const choose = (option: RuntimeOption) => {
+    if (option.locked) return
+    onChange(option.value)
+    close()
+  }
+  const openChoices = () => {
+    if (disabled) return
+    dismissAppKeyboard()
+    if (Platform.OS === 'ios') {
+      const labels = choices.map(option => option.locked ? `${option.label} (upgrade required)` : option.label)
+      const cancelButtonIndex = labels.length
+      const disabledButtonIndices = choices.flatMap((option, index) => option.locked ? [index] : [])
+      ActionSheetIOS.showActionSheetWithOptions({
+        title,
+        message: selected?.label ? `Current: ${selected.label}` : undefined,
+        options: [...labels, 'Cancel'],
+        cancelButtonIndex,
+        disabledButtonIndices,
+      }, buttonIndex => {
+        if (buttonIndex === cancelButtonIndex) return
+        const option = choices[buttonIndex]
+        if (option) choose(option)
+      })
+      return
+    }
+    setOpen(true)
+  }
+  return <>
+    <Pressable accessibilityRole="button" accessibilityLabel={selected?.label ?? (value || 'Default')} accessibilityState={{ expanded: Platform.OS === 'ios' ? false : open, disabled }} disabled={disabled} onPress={openChoices} style={[styles.choice, { borderColor: colors.border, backgroundColor: colors.surface, opacity: disabled ? 0.45 : 1 }]}><Text style={{ flex: 1, color: colors.text, fontSize: 12 }} numberOfLines={1}>{selected?.label ?? (value || 'Default')}</Text><ChevronDown size={14} color={colors.muted} /></Pressable>
+    {Platform.OS !== 'ios' ? <Modal visible={open && !disabled} transparent animationType="fade" onRequestClose={close}><View style={styles.modalBackdrop}><Pressable accessibilityRole="button" accessibilityLabel="Dismiss choices" style={StyleSheet.absoluteFill} onPress={close} /><View style={[styles.choiceMenu, { backgroundColor: colors.surface, borderColor: colors.border }]}><ScrollView keyboardShouldPersistTaps="always">{choices.map(option => <Pressable key={option.value || '__default'} accessibilityRole="button" accessibilityLabel={option.locked ? `${option.label}, upgrade required` : option.label} accessibilityHint={option.locked ? option.locked_reason ?? undefined : undefined} accessibilityState={{ disabled: option.locked, selected: option.value === value }} disabled={option.locked} onPress={() => choose(option)} style={[styles.choiceOption, { backgroundColor: option.value === value ? colors.raised : 'transparent', opacity: option.locked ? 0.45 : 1 }]}><Text style={{ color: colors.text }}>{option.label}{option.locked ? ' (upgrade required)' : ''}</Text></Pressable>)}</ScrollView></View></View></Modal> : null}
+  </>
 }
 function nextRunLabel(value?: string | null): string { if (!value) return ''; const date = new Date(value); return Number.isNaN(date.getTime()) ? '' : ` · next ${date.toLocaleString([], { dateStyle: 'short', timeStyle: 'short' })}` }
 
