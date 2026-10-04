@@ -5446,3 +5446,15 @@ is also restored. The published 1.0.9 artifacts are unchanged.
   and native Codex 0.159.2 acceptance passed. Signed packaging, platform-specific
   installation/update checks, and acceptance against a real custom service remain
   separate release checks. This entry does not record publication or deployment.
+## 2026-10-03 — Display-trimmed Codex cron history
+
+- Fix long scheduled prompts reappearing as human messages after history sync.
+  Verify the complete native input and its import checkpoint before suppressing
+  the duplicate, preserving the original scheduled run and output.
+- Cover both new imports and existing-history projection, including different
+  full-text tails, unowned turns, forged hashes and absent source proof.
+- Validate 73 focused history tests; the incident regression fails before the
+  fix. Exercise opening and reloading the compiled Electron app through real
+  IPC/server HTTP with synthetic provider-history fixtures: the duplicate user
+  bubble is absent and genuine input/output remains. This is history-rendering
+  acceptance, not a live provider execution or a packaged release test.
