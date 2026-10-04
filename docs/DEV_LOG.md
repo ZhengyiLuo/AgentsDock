@@ -1,5 +1,16 @@
 # Public development log
 
+## iOS/iPadOS TestFlight preparation — 0.1.2 (180), unreleased
+
+- Prepare the integrated mobile line, retaining shipped build 177 and the
+  pending search, cross-chat, reasoning, accepted-send and goal editor fixes.
+  Include current main's native choices, keyboard settlement, iPad layout and
+  video-library support. This is a separately scoped mobile release; desktop
+  and server releases are unchanged.
+- Reserve build 180 without reusing intervening local preparation numbers.
+  Native interaction, signed package verification and Apple processing remain
+  required. This entry is preparation only, not an accepted TestFlight receipt.
+
 ## Mobile main integration and native verification — unreleased
 
 - Integrate main through `3964cf80`, retaining the pending mobile goal,
