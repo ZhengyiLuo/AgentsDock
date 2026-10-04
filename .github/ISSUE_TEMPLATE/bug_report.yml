@@ -37,23 +37,6 @@ body:
       description: Describe the bug. What did you see go wrong?
     validations:
       required: true
-  - type: textarea
-    id: steps
-    attributes:
-      label: Steps to reproduce
-      description: What did you do right before it happened?
-      placeholder: |
-        1. Open ...
-        2. Tap ...
-        3. See ...
-    validations:
-      required: false
-  - type: textarea
-    id: expected
-    attributes:
-      label: What did you expect instead?
-    validations:
-      required: false
   - type: dropdown
     id: frequency
     attributes:

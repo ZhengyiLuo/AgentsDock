@@ -2,6 +2,7 @@
 import { t, getLocale } from '@shared/i18n'
 import { openAIProviderSettings } from '../lib/provider-settings'
 import { isSharedChatCollaborator } from '@shared/chat-shares'
+import { issueReportURL } from '@shared/issue-report'
 import { useLocale } from '../lib/i18n'
 import { forwardRef, memo, useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from 'react'
 import * as Dialog from '@radix-ui/react-dialog'
@@ -1715,7 +1716,24 @@ export const Composer = memo(function Composer({ dropActive = false, sessionId, 
     } else if (command.id === 'digest') {
       useAppStore.getState().setModal('digest', true)
     } else if (command.id === 'feedback') {
-      void window.agentsDock.native.openExternal('https://github.com/ZhengyiLuo/AgentsDock/issues/new').catch(reportActionError)
+      // Capture this pane's context before the IPC await; never attach a later chat/server.
+      const state = useAppStore.getState()
+      const profile = state.profiles.find(item => item.id === state.activeProfileId)
+      const custom = session.provider_connection === 'custom' || session.codex_provider === 'custom'
+      const backendCatalog = state.runtimeCatalog?.backends[session.backend]
+      const defaultModel = custom
+        ? (session.provider_connection_catalog ?? session.codex_provider_catalog ?? backendCatalog?.custom_provider)?.default_model
+          || (session.provider_connection_catalog ?? session.codex_provider_catalog ?? backendCatalog?.custom_provider)?.model
+        : backendCatalog?.default_model
+      const context = {
+        serverVersion: state.connected ? state.health?.server_version : profile?.serverVersion,
+        serverConnected: state.connected,
+        backend: session.backend,
+        model: session.model || (defaultModel ? `${defaultModel} (server default)` : 'Server default (not reported)')
+      }
+      void window.agentsDock.native.issueReportEnvironment()
+        .then(environment => window.agentsDock.native.openExternal(issueReportURL(environment, context)))
+        .catch(reportActionError)
     } else if (command.id === 'goal') {
       openGoalControls()
     } else if (command.id === 'import') {

@@ -1,4 +1,5 @@
 import type { ProviderUsageScope, ProviderUsageSnapshot, UsageBackend } from './provider-usage'
+import type { IssueReportEnvironment } from './issue-report'
 import type {
   AgentFile,
   AgentCrossChatRoute,
@@ -619,6 +620,7 @@ export interface AgentsDockAPI {
     setScoped<T>(scope: WorkspaceProfileScope, key: string, value: T): Promise<void>
   }
   native: {
+    issueReportEnvironment(): Promise<IssueReportEnvironment>
     // True only when AGENTSDOCK_DISABLE_ANALYTICS=1 is set in the process
     // environment - used by CI's packaged-app smoke-test launches (which run
     // the real binary with a fresh, disposable user-data directory) so they
