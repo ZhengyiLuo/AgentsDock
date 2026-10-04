@@ -1,4 +1,9 @@
 {
+  "claudeGoal.status.idle": "Goal saved · not running",
+  "claudeGoal.continuationLimit": "Claude stopped after repeated goal continuations. The goal is unfinished. Continue to run it again.",
+  "claudeGoal.continue": "Continue goal",
+  "timeline.ui.pinnedMessageMissing": "This pinned message is no longer available in this chat.",
+  "codexAuth.handoffWaiting": "Waiting for sign-in handoff",
   "subagents.runningOne": "1 subagent running",
   "subagents.runningMany": "{count} subagents running",
   "subagents.stop": "Stop subagents",

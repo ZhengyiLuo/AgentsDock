@@ -65,6 +65,56 @@
 - Availability: preparation source only. No beta.2 package has been published,
   no native build number is consumed, and no installed application, live server
   or mobile release is changed by this preparation.
+## 2026-10-03 — Exact pinned-message navigation and Claude goal execution status (unreleased)
+
+- Locate old pinned messages by their saved event identity, independent of
+  preview formatting, repeated words, search indexing, and the current history
+  window. Older servers use their existing paged history API. Show an explicit
+  missing-message error and ignore navigation responses superseded by another
+  selection or server switch.
+- Distinguish a saved Claude goal from a running turn. Project Claude's native
+  continuation-limit warning, display why execution stopped, and provide
+  Continue using the same native goal condition and session. Dismiss the goal
+  dialog after an accepted start or replacement. Claude's continuation limit
+  itself remains unchanged; this is execution visibility and manual recovery,
+  not an automatic monitoring scheduler or unlimited continuation policy.
+- Validation: 230 focused Electron tests, 19 server projection/route tests,
+  TypeScript checking, and production compilation passed. In an isolated
+  compiled Electron app connected through real IPC and authenticated HTTP,
+  clicking a pin outside the loaded window visibly reached the exact message;
+  returning to latest and repeating against an older-server route surface also
+  passed. The same app displayed the native stop-warning fixture and sent the
+  exact condition through Continue. The fixture provider boundary was synthetic.
+- Live native Claude accepted the goal command and the app dismissed its dialog,
+  but model generation was rejected by local authentication. Live goal
+  continuation/clear acceptance remains pending; do not treat fixture results
+  as provider acceptance. No release, installation, or live-server restart is
+  included in this change.
+
+
+## 2026-10-02 — Codex sign-in handoff recovery (unreleased)
+
+- Catalog refresh, including reconnect refresh from another client, no longer
+  requests authentication handoff. Explicit provider reload retains the opaque
+  credential-store recovery path; custom endpoints keep their own credentials.
+- Report the actual per-chat handoff blocker with a distinct retryable error
+  code. Preserve ownership on failed native metadata reads and retry on the next
+  send. Completion of pending provider requests wakes handoff cleanup without
+  polling; failed metadata notifications cannot repeatedly trigger themselves.
+- Keep the failed-send explanation beside the restored draft. Do not show
+  unrelated cached login instructions or a duplicate toast covering Send.
+- Validation: 91 lifecycle/recovery tests, 67 authentication/provider/reload
+  tests, 252 Composer/RuntimeHealth tests, two restart/catalog service tests,
+  TypeScript and production Electron compilation passed. Used two isolated
+  compiled native app profiles over loopback and Tailscale with real Codex:
+  repeated refreshes, retained context, concurrent work, restored draft, and
+  retry after an injected metadata failure all passed with the same native
+  thread ID. A second machine also exercised the catalog endpoint.
+- Boundaries: the login revision change and metadata outage were injected in
+  isolated test state; this is not real OAuth re-login acceptance. Both app
+  processes ran on one test machine. The reported local-versus-remote difference
+  on an affected installation remains unverified. No production deployment,
+  user installation replacement, release packaging, or publication in this pass.
 
 ## 2026-10-01 — Publish matched stable 1.0.9, build 1243
 
@@ -5940,3 +5990,15 @@ and the original remained unchanged. This is a source fix, not a published beta.
   active/queued work, reboot, Windows update, public-feed delivery and unscoped
   CLI global-auto-setup/split-lifecycle acceptance remain separate gaps.
   No application/runtime change, service installation, publication or deployment.
+## 2026-10-03 — Display-trimmed Codex cron history
+
+- Fix long scheduled prompts reappearing as human messages after history sync.
+  Verify the complete native input and its import checkpoint before suppressing
+  the duplicate, preserving the original scheduled run and output.
+- Cover both new imports and existing-history projection, including different
+  full-text tails, unowned turns, forged hashes and absent source proof.
+- Validate 73 focused history tests; the incident regression fails before the
+  fix. Exercise opening and reloading the compiled Electron app through real
+  IPC/server HTTP with synthetic provider-history fixtures: the duplicate user
+  bubble is absent and genuine input/output remains. This is history-rendering
+  acceptance, not a live provider execution or a packaged release test.

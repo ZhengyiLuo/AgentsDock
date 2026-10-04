@@ -216,6 +216,7 @@ const api: AgentsDockAPI = {
     around: (sessionId, anchorSeq, limit) => ipcRenderer.invoke('timeline:around', sessionId, anchorSeq, limit),
     trace: (sessionId, runId, anchorSeq, after, limit) => ipcRenderer.invoke('timeline:trace', sessionId, runId, anchorSeq, after, limit),
     index: sessionId => ipcRenderer.invoke('timeline:index', sessionId),
+    findEvent: (sessionId, eventId) => ipcRenderer.invoke('timeline:find-event', sessionId, eventId),
     search: (sessionId, query, limit) => ipcRenderer.invoke('timeline:search', sessionId, query, limit),
     subscribe: (sessionId, after) => ipcRenderer.invoke('timeline:subscribe', sessionId, after),
     unsubscribe: sessionId => ipcRenderer.invoke('timeline:unsubscribe', sessionId),

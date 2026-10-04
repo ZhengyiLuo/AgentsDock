@@ -97,6 +97,7 @@ function result(eventId: string, seq: number, snippet = 'Matching timeline answe
 
 describe('Timeline search navigation', () => {
   const search = vi.fn<AgentsDockAPI['timeline']['search']>()
+  const findEvent = vi.fn<AgentsDockAPI['timeline']['findEvent']>()
   const around = vi.fn<AgentsDockAPI['timeline']['around']>()
   const historicalOlder = vi.fn<AgentsDockAPI['timeline']['historicalOlder']>()
 
@@ -109,6 +110,7 @@ describe('Timeline search navigation', () => {
     virtuosoHarness.renderCount = 0
     virtuosoHarness.initialLocation = undefined
     search.mockReset()
+    findEvent.mockReset()
     around.mockReset()
     historicalOlder.mockReset()
     Object.defineProperty(window, 'agentsDock', {
@@ -122,6 +124,7 @@ describe('Timeline search navigation', () => {
             event_count: 1
           }),
           search,
+          findEvent,
           around,
           historicalOlder,
           saveViewState: vi.fn().mockResolvedValue(undefined)
@@ -265,7 +268,7 @@ describe('Timeline search navigation', () => {
 
   it('loads an unloaded pinned message from full chat history', async () => {
     const historicalEvent = timelineEvent(2, { id: 'pinned-event' })
-    search.mockResolvedValue([result(historicalEvent.id, historicalEvent.seq, 'Pinned older answer')])
+    findEvent.mockResolvedValue(result(historicalEvent.id, historicalEvent.seq, 'Pinned older answer'))
     around.mockResolvedValue({
       session,
       events: [historicalEvent],
@@ -285,9 +288,32 @@ describe('Timeline search navigation', () => {
       }))
     })
 
-    await waitFor(() => expect(search).toHaveBeenCalledWith(SESSION_ID, 'Pinned older answer', 100))
+    await waitFor(() => expect(findEvent).toHaveBeenCalledWith(SESSION_ID, historicalEvent.id))
+    expect(search).not.toHaveBeenCalled()
     await waitFor(() => expect(around).toHaveBeenCalledWith(SESSION_ID, historicalEvent.seq, expect.any(Number)))
     expect(await screen.findByText('turn:seq-2:assistant')).toBeInTheDocument()
+  })
+
+  it('reports a missing pin instead of silently doing nothing', async () => {
+    findEvent.mockResolvedValue(null)
+    render(<Timeline />)
+    act(() => window.dispatchEvent(new CustomEvent('agentsdock:find-event', {
+      detail: { sessionId: SESSION_ID, eventId: 'gone' }
+    })))
+    await waitFor(() => expect(useAppStore.getState().error).toBe('This pinned message is no longer available in this chat.'))
+    expect(around).not.toHaveBeenCalled()
+  })
+
+  it('ignores a pin lookup that resolves after another pin was selected', async () => {
+    let finish!: (value: TimelineSearchResult) => void
+    findEvent.mockImplementationOnce(() => new Promise(resolve => { finish = resolve }))
+    findEvent.mockResolvedValueOnce(result('new-pin', 4))
+    around.mockResolvedValue({ session, events: [timelineEvent(4, { id: 'new-pin' })], has_more: false, next_before: null, latest_seq: 100 })
+    render(<Timeline />)
+    for (const eventId of ['old-pin', 'new-pin']) act(() => window.dispatchEvent(new CustomEvent('agentsdock:find-event', { detail: { sessionId: SESSION_ID, eventId } })))
+    await waitFor(() => expect(around).toHaveBeenCalledWith(SESSION_ID, 4, expect.any(Number)))
+    await act(async () => { finish(result('old-pin', 2)) })
+    expect(around).toHaveBeenCalledTimes(1)
   })
 
   it('uses the non-persistent history lane when paging an older search window', async () => {

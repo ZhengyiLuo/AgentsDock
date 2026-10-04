@@ -405,6 +405,7 @@ export interface AgentsDockAPI {
     around(sessionId: string, anchorSeq: number, limit?: number): Promise<TimelinePage>
     trace(sessionId: string, runId: string, anchorSeq: number, after?: number, limit?: number): Promise<TimelineTracePage>
     index(sessionId: string): Promise<TimelineIndex>
+    findEvent(sessionId: string, eventId: string): Promise<TimelineSearchResult | null>
     search(sessionId: string, query: string, limit?: number): Promise<TimelineSearchResult[]>
     subscribe(sessionId: string, after: number): Promise<void>
     unsubscribe(sessionId: string): Promise<void>

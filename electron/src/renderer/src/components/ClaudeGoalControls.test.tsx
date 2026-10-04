@@ -84,6 +84,17 @@ describe('Claude native goals', () => {
     expect(within(dialog).getByRole('button', { name: 'Start goal' })).toBeEnabled()
   })
 
+  it('shows a saved-but-stopped goal and resumes its exact native condition', async () => {
+    runtime.mockResolvedValue({ ...active, status: { type: 'idle' }, goal: {
+      ...active.goal!, execution_stop_reason: 'continuation_limit', execution_stopped_at: Date.now()
+    } })
+    render(surface(false))
+    expect(await screen.findByText(/Goal saved · not running/)).toBeInTheDocument()
+    expect(screen.getByText(/Claude stopped after repeated goal continuations/)).toBeInTheDocument()
+    await userEvent.setup().click(screen.getByRole('button', { name: 'Continue goal' }))
+    expect(setGoal).toHaveBeenCalledWith(session.id, active.goal!.condition)
+  })
+
   it('keeps old servers usable without probing unsupported goal mutations', async () => {
     runtime.mockResolvedValue({ ...empty, features: {} })
     render(surface())

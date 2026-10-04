@@ -3895,3 +3895,32 @@ describe('pending Codex runtime compatibility over native HTTP', () => {
     expect(received).toHaveLength(3)
   })
 })
+
+
+describe('pinned message identity lookup', () => {
+  it('finds the exact old message without using its preview as a search query', async () => {
+    await withLocalHTTPServer((req, res) => {
+      expect(req.url).toBe('/api/sessions/chat/timeline-event/pin-old')
+      res.setHeader('Content-Type', 'application/json')
+      res.end(JSON.stringify({ event: { session_id: 'chat', event_id: 'pin-old', seq: 2, ts: '', role: 'assistant', snippet: '' } }))
+    }, async url => {
+      const client = new AgentServerClient(url, 'test-token')
+      expect((await client.findTimelineEvent('chat', 'pin-old'))?.seq).toBe(2)
+    })
+  })
+  it('works on old servers by paging exact event IDs, including repeated preview text', async () => {
+    const requests: string[] = []
+    await withLocalHTTPServer((req, res) => {
+      requests.push(req.url!)
+      res.setHeader('Content-Type', 'application/json')
+      if (req.url!.includes('/timeline-event/')) { res.statusCode = 404; res.end('{"detail":"Not Found"}'); return }
+      const older = new URL(req.url!, 'http://localhost').searchParams.get('before') === '100'
+      res.end(JSON.stringify({ session: { id: 'chat' }, events: [{ id: older ? 'pin-old' : 'other', seq: older ? 2 : 100, session_id: 'chat', type: 'assistant_text', text: '**Repeated preview**', ts: '2026-01-01T00:00:00Z' }], events_omitted_before: older ? 0 : 50 }))
+    }, async url => {
+      const client = new AgentServerClient(url, 'test-token')
+      expect((await client.findTimelineEvent('chat', 'pin-old'))?.seq).toBe(2)
+      expect(requests).toHaveLength(3)
+      expect(requests.some(path => path.includes('/search'))).toBe(false)
+    })
+  })
+})

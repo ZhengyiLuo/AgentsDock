@@ -488,8 +488,7 @@ describe('Inspector', () => {
       expect(findEvent).toHaveBeenCalledOnce()
       expect((findEvent.mock.calls[0][0] as CustomEvent).detail).toEqual({
         sessionId: 'chat-1',
-        eventId: 'event-1',
-        query: 'Keep this deployment command for later.'
+        eventId: 'event-1'
       })
     } finally {
       window.removeEventListener('agentsdock:find-event', findEvent)

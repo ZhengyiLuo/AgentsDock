@@ -1,5 +1,12 @@
 import type { CodexAuthStatus } from './types'
 
+// Electron IPC preserves the server's message but not custom Error fields.
+// Recognize the old server message too during mixed-version upgrades.
+export function isCodexLoginHandoffMessage(message: string | undefined): boolean {
+  return Boolean(message && (message.startsWith('Codex sign-in handoff is waiting:')
+    || message.startsWith('Refreshing Codex sign-in.')))
+}
+
 export function validateCodexApiKey(value: unknown): string {
   if (typeof value !== 'string') throw new Error('CODEX_AUTH_INVALID_KEY')
   const key = value.trim()

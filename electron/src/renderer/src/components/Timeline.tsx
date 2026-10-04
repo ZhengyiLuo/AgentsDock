@@ -831,22 +831,26 @@ function TimelineSession({ profileId, profileGeneration, serverIdentity, session
     }
   }, [cancelSavedViewRestore, scrollToLoadedIndex, sessionId])
 
-  const openPinnedEvent = useCallback(async (eventId: string, query?: string) => {
+  const openPinnedEvent = useCallback(async (eventId: string) => {
     cancelSavedViewRestore()
     const lease = ++historySeekLease.current
     const index = projected.current.findIndex(item => timelineItemHasEvent(item, eventId))
     if (index >= 0) {
+      setSeekingHistory(false)
       scrollToLoadedIndex(index, 'smooth')
       return
     }
-    const clean = query?.trim()
-    if (!clean) return
+    setSeekingHistory(true)
     try {
-      const result = (await window.agentsDock.timeline.search(sessionId, clean, 100))
-        .find(candidate => candidate.event_id === eventId)
-      if (result && lease === historySeekLease.current) await openSearchResult(result)
+      const result = await window.agentsDock.timeline.findEvent(sessionId, eventId)
+      if (lease !== historySeekLease.current) return
+      if (!result) throw new Error(t('timeline.ui.pinnedMessageMissing'))
+      // This navigation now owns its own lease and loading state.
+      await openSearchResult(result)
     } catch (error) {
       if (lease === historySeekLease.current) useAppStore.getState().setError(error instanceof Error ? error.message : String(error))
+    } finally {
+      if (lease === historySeekLease.current) setSeekingHistory(false)
     }
   }, [cancelSavedViewRestore, openSearchResult, scrollToLoadedIndex, sessionId])
 
@@ -856,7 +860,7 @@ function TimelineSession({ profileId, profileGeneration, serverIdentity, session
       if (!timelineEventTargetsSession(event, sessionId, focused)) return
       const detail = (event as CustomEvent<string | { eventId: string; query?: string }>).detail
       const eventId = typeof detail === 'string' ? detail : detail?.eventId
-      if (eventId) void openPinnedEvent(eventId, typeof detail === 'string' ? undefined : detail.query)
+      if (eventId) void openPinnedEvent(eventId)
     }
     window.addEventListener('agentsdock:find-in-chat', openSearch)
     window.addEventListener('agentsdock:find-event', findEvent)

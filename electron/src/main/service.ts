@@ -3107,6 +3107,17 @@ export class AppService {
     return diff
   }
 
+  async findTimelineEvent(sessionId: string, eventId: string): Promise<TimelineSearchResult | null> {
+    const scope = this.captureScope()
+    await this.ensureValidatedScope(scope)
+    const result = await scope.client.findTimelineEvent(sessionId, eventId)
+    this.assertCurrentScope(scope)
+    if (result && (result.session_id !== sessionId || result.event_id !== eventId)) {
+      throw new Error('The pinned message response belongs to a different message')
+    }
+    return result
+  }
+
   async searchTimeline(sessionId: string, query: string, limit = 40): Promise<TimelineSearchResult[]> {
     const clean = query.trim()
     if (clean.length < 2) return []
@@ -5446,6 +5457,9 @@ export class AppService {
     const providerRevision = this.providerCatalogRevision ?? 0
     try {
       const catalog = await scope.client.runtimeCatalog(forceProbe)
+      // Refresh probes CLI/catalog metadata, including after a restart.
+      // It must never request an authentication handoff; the server owns
+      // native login change detection independently of connected clients.
       if (!this.isCurrentScope(scope)) return
       if (providerRevision !== (this.providerCatalogRevision ?? 0)) return
       if (!runtimeCatalogHasSelectableModels(catalog)) {

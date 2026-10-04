@@ -20,6 +20,7 @@ import { useAppStore } from '../store/app-store'
 import { eventErrorText, isTimelineError } from '../lib/timeline'
 import { NativeProviderSignIn } from './NativeProviderSignIn'
 import { openAIProviderSettings } from '../lib/provider-settings'
+import { isCodexLoginHandoffMessage } from '@shared/codex-auth'
 
 export const RuntimeHealthNotice = memo(function RuntimeHealthNotice({ backend, sessionId, codexProvider, admissionError }: { backend: Backend; sessionId: string; codexProvider?: CodexProvider; admissionError?: string }) {
   useLocale()
@@ -164,7 +165,9 @@ function RuntimeStatus({
   // Only an actual failed send/run belongs above the composer. Cached login
   // status can outlive reconnection and must never demand configuration here.
   if (compact && !chatError && !admissionError) return null
-  const tone = chatError ? 'warning' : !compact && diagnostic?.installed !== false
+  const handoffWait = backend === 'codex' && codexProvider !== 'custom'
+    && isCodexLoginHandoffMessage(admissionError || chatError)
+  const tone = handoffWait ? 'unknown' : chatError ? 'warning' : !compact && diagnostic?.installed !== false
     ? connected && diagnostic?.authenticated === true && diagnostic.status === 'ready' ? 'ready' : 'unknown'
     : cursorUnavailable ? 'error' : runtimeDiagnosticTone(diagnostic)
   const Icon = tone === 'ready' ? CheckCircle2 : tone === 'error' ? XCircle : tone === 'warning' ? AlertTriangle : CircleHelp
@@ -178,12 +181,12 @@ function RuntimeStatus({
     || (!compact ? runtimeDiagnosticCurrentError(diagnostic) : '')
     || diagnostic?.message
     || `${provider} has not been checked yet.`
-  const label = !compact && !connected ? t('connections.unavailable')
+  const label = handoffWait ? t('codexAuth.handoffWaiting') : !compact && !connected ? t('connections.unavailable')
     : !compact && diagnostic?.installed !== false
       ? tone === 'ready' ? t('connections.signedIn') : diagnostic?.authenticated === false ? t('codexAuth.signedOut') : t('connections.loginUnknown')
       : compact && admissionError ? t('connections.checkFailed') : compact && chatError ? 'Latest chat error' : cursorUnavailable ? 'Unavailable' : runtimeDiagnosticLabel(diagnostic)
   const cursorAction = diagnostic?.action?.trim() || cursorCapability?.action?.trim()
-  const action = cursorUnavailable
+  const action = handoffWait ? undefined : cursorUnavailable
     ? cursorAction && !cursorUnavailableDetail.includes(cursorAction) ? cursorAction : undefined
     : diagnostic?.action
   return <div className={`runtime-health-row ${tone} ${compact ? 'compact' : ''}`} role={tone === 'error' ? 'alert' : 'status'}>
@@ -192,10 +195,10 @@ function RuntimeStatus({
       <strong>{provider} <span>{label}</span></strong>
       <small>{detail}</small>
       {action ? <small className="runtime-action">{action}</small> : null}
-      {!compact && tone !== 'ready' && <NativeProviderSignIn key={`${backend}:${profileId}:${profileGeneration}`} backend={backend} disabled={!connected} />}
+      {!compact && !handoffWait && tone !== 'ready' && <NativeProviderSignIn key={`${backend}:${profileId}:${profileGeneration}`} backend={backend} disabled={!connected} />}
     </div>
     {compact && codexProvider === 'custom' && <button type="button" className="quiet-button runtime-recheck-button" onClick={() => openAIProviderSettings(backend)}>{t('connections.configure')}</button>}
-    {compact && codexProvider !== 'custom' && providerNeedsAttention && onRecheck
+    {compact && !handoffWait && codexProvider !== 'custom' && providerNeedsAttention && onRecheck
       ? <button
           type="button"
           className="quiet-button runtime-recheck-button"

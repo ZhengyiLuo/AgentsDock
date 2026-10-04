@@ -1,4 +1,9 @@
 {
+  "claudeGoal.status.idle": "目标已保存 · 未运行",
+  "claudeGoal.continuationLimit": "Claude 在多次继续目标后停止了运行。目标尚未完成，可点击继续再次运行。",
+  "claudeGoal.continue": "继续目标",
+  "timeline.ui.pinnedMessageMissing": "此固定消息已无法在该聊天中找到。",
+  "codexAuth.handoffWaiting": "等待切换登录会话",
   "subagents.runningOne": "1 个子代理正在运行",
   "subagents.runningMany": "{count} 个子代理正在运行",
   "subagents.stop": "停止子代理",

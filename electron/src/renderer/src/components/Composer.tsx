@@ -1,5 +1,6 @@
 // Localized display strings use semantic catalog keys.
 import { t, getLocale } from '@shared/i18n'
+import { isCodexLoginHandoffMessage } from '@shared/codex-auth'
 import { openAIProviderSettings } from '../lib/provider-settings'
 import { isSharedChatCollaborator } from '@shared/chat-shares'
 import { issueReportURL } from '@shared/issue-report'
@@ -1460,7 +1461,12 @@ export const Composer = memo(function Composer({ dropActive = false, sessionId, 
       submissionAccepted = sent
       if (!sent && composerSessionIsCurrent(activeProfileId, profileGeneration, serverIdentity, session.id, draftContextRef, mountedRef)) {
         const message = useAppStore.getState().error
-        if (message) setSendFailure({ context: sendContext, message })
+        if (message) {
+          setSendFailure({ context: sendContext, message })
+          // Keep this recoverable wait beside the restored draft. A duplicate
+          // global toast covers the Send button and makes retry inaccessible.
+          if (isCodexLoginHandoffMessage(cleanActionError(message))) useAppStore.getState().setError(null)
+        }
       }
       if (sent) {
         trackEvent('message_sent')

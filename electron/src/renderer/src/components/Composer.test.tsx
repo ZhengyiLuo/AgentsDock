@@ -4597,6 +4597,27 @@ describe('Composer', () => {
     await waitFor(() => expect(screen.queryByText('Sending now…')).not.toBeInTheDocument())
   })
 
+  it('keeps a handoff wait beside the draft without a global toast and retries once', async () => {
+    const message = "Codex sign-in handoff is waiting: Codex could not report this chat's goal state. Your message has not been sent. Retry the message to check again."
+    const send = vi.fn().mockRejectedValueOnce(new Error(message)).mockResolvedValueOnce({ session: { id: 'chat-1', title: 'Chat', backend: 'codex' }, queued: false })
+    Object.defineProperty(window, 'agentsDock', { configurable: true, value: {
+      preferences: { get: vi.fn().mockResolvedValue(''), set: vi.fn().mockResolvedValue(undefined) },
+      turns: { send },
+    } as unknown as AgentsDockAPI })
+    const user = userEvent.setup()
+    render(<Composer />)
+    const input = screen.getByRole('textbox')
+    await user.type(input, 'Keep this draft')
+    await user.click(screen.getByRole('button', { name: 'Send message' }))
+    await screen.findByText('Waiting for sign-in handoff')
+    expect(input).toHaveValue('Keep this draft')
+    expect(useAppStore.getState().error).toBeNull()
+    expect(useAppStore.getState().turnAdmissionTokens['chat-1']).toBeUndefined()
+    await user.click(screen.getByRole('button', { name: 'Send message' }))
+    await waitFor(() => expect(input).toHaveValue(''))
+    expect(send).toHaveBeenCalledTimes(2)
+  })
+
   it.each([
     ['Next request', 'First request\n\nNext request'],
     ['First request', 'First request'],
