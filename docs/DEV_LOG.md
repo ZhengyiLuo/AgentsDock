@@ -1,5 +1,37 @@
 # Public development log
 
+## 2026-10-03 — Verify private 1.0.10-beta.2, build 1246
+
+- Preserve product source `8d5327a9077f69f9a0a14c58b8e087a80f7f1762`,
+  standalone export `60e51fd35bfa81021ce339467c93a9d50026b455`, and build 1246.
+  App, signed npm runtime, short CLI and legacy bridge share `1.0.10-beta.2`.
+- Complete Developer ID signing, Apple notarization and stapling for the
+  updater-ready universal Mac ZIP/DMG using the existing signing identities.
+  An earlier Mac packaging attempt omitted the updater configuration and was
+  rejected before sealing; its outputs are not release candidates.
+- All four native package verifiers pass in
+  [37164216745](https://github.com/ZhengyiLuo/AgentsDock/actions/runs/37164216745),
+  including macOS, Linux x64/ARM64 and the explicitly unsigned Windows preview.
+  Verify the original receipt and complete 16-file checksum-manifest seal:
+  `f9a3e6a5e3c0b4f2bc12352291394d17383b4346cb378448f48e957771539649`.
+- Nine scoped Mac replay jobs pass in
+  [37164598428](https://github.com/ZhengyiLuo/AgentsDock/actions/runs/37164598428),
+  and two Linux rollback/retry jobs pass in
+  [37164599869](https://github.com/ZhengyiLuo/AgentsDock/actions/runs/37164599869).
+  Actual signed app replacement/relaunch precedes automatic reconciliation of
+  both server components from the signed legacy and beta.1 baselines, with zero
+  manual server-update clicks. Check root modes `0755` and `0750`, reconnection,
+  shared-client operation, interrupted download and failed-stage recovery.
+- These are scoped native observations, not full production acceptance.
+  Populated provider history, active/queued work, logout/reboot and the public
+  feed journey remain unverified; original non-acceptance flags are retained.
+  Fresh macOS global auto-setup of the exact short CLI still needs native
+  account testing; hosted CI deliberately skips that hook. Existing split
+  gateway/execution instance-management limitations remain documented.
+- Availability: signed private candidates and test attachments only. No beta.2
+  npm package, desktop release or legacy bridge is public. Stable `1.0.9`,
+  existing services, installed apps and mobile releases remain unchanged.
+
 ## 2026-10-03 — Prepare matched 1.0.10-beta.2 with the short npm CLI
 
 - Merge current main, including PR #58, into the existing beta release line.
