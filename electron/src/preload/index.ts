@@ -422,6 +422,7 @@ const api: AgentsDockAPI = {
     setScoped: (scope, key, value) => ipcRenderer.invoke('preferences:set-scoped', scope, key, value)
   },
   native: {
+    issueReportEnvironment: () => ipcRenderer.invoke('native:issue-report-environment'),
     analyticsDisabled: process.env.AGENTSDOCK_DISABLE_ANALYTICS === '1',
     openExternal: url => ipcRenderer.invoke('native:open-external', url),
     showItemInFolder: path => ipcRenderer.invoke('native:show-item', path),

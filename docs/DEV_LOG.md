@@ -1,5 +1,27 @@
 # Public development log
 
+## 2026-10-03 — Prefill the public bug-report form
+
+- `/feedback` opens the existing AgentsDock GitHub bug-report form with the
+  running app version/build, client platform/OS version/architecture, current
+  server version, agent and selected model. Environment details use the
+  existing additional-information field so no template rollout is required.
+  Description and screenshot uploads remain user-entered. Remove the separate
+  reproduction-steps and expected-behavior questions to shorten the form; this
+  template simplification takes effect when merged into the default branch.
+- Read app metadata through trusted native IPC. Capture the originating chat
+  and server context before awaiting it. Mark cached offline server versions
+  and server-default models explicitly; do not infer an unknown model.
+  Do not include session IDs, titles, chat content, paths, server addresses or
+  credentials. Opening the form does not submit an issue or send a chat turn.
+- Five focused component/URL tests, TypeScript and the desktop production
+  build pass. Tests mock the native browser bridge; actual UI-to-browser
+  acceptance remains pending because computer use is disabled in this run.
+  Built and launched an ad-hoc local macOS package (source version 0.2.0,
+  build 85, based on main 3c5e6e59); bundle audit and signature validation pass.
+  Startup reaches the renderer and connected server; user acceptance is pending.
+  Desktop only; no server update, mobile change or public release.
+
 ## 2026-10-02 — Align update test fixtures with current idle-update policy
 
 - Final CLI merge validation exposed two pre-existing main-branch CI failures
