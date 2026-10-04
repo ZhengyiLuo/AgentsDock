@@ -152,13 +152,31 @@ test('baseline routing keeps beta metadata and strict version order confined to 
   assert.deepEqual(replayBaselineMetadata('1.0.6', '1.0.9', true),
     {track: 'stable', metadata: 'latest-mac.yml', prerelease: false})
   assert.equal(replayBaselineMetadata('1.0.6', '1.0.8-beta.5', true).track, 'stable')
-  assert.deepEqual(replayBaselineMetadata('1.0.10-beta.1', '1.0.10-beta.2', true),
-    {track: 'beta', metadata: 'beta-mac.yml', prerelease: true})
+  for (const candidate of ['1.0.10-beta.2', '1.0.10-beta.3']) {
+    assert.deepEqual(replayBaselineMetadata('1.0.10-beta.1', candidate, true),
+      {track: 'beta', metadata: 'beta-mac.yml', prerelease: true})
+  }
   for (const args of [['1.0.8-beta.5', '1.0.9', false], ['1.0.8-beta.4', '1.0.9', true],
     ['1.0.8-beta.5', '1.0.9-beta.1', true], ['1.0.9', '1.0.9', true], ['1.0.10', '1.0.9', true],
     ['1.0.8', '1.0.9', true], ['1.0.6+local', '1.0.9', true],
-    ['1.0.10-beta.1', '1.0.10-beta.2', false], ['1.0.10-beta.1', '1.0.10-beta.3', true],
+    ['1.0.10-beta.1', '1.0.10-beta.2', false], ['1.0.10-beta.1', '1.0.10-beta.3', false],
+    ['1.0.10-beta.1', '1.0.10-beta.4', true], ['1.0.10-beta.2', '1.0.10-beta.3', true],
+    ['1.0.8-beta.5', '1.0.10-beta.3', true], ['1.0.10-beta.1', '1.0.10-beta.3+local', true],
     ['1.0.8-beta.5', '1.0.10-beta.2', true], ['1.0.10-beta.2', '1.0.10-beta.2', true]]) assert.throws(() => replayBaselineMetadata(...args))
+})
+
+test('beta.2 and beta.3 replay remain nonpublishing and verify the independent beta.1 seal before routing', async t => {
+  for (const version of ['1.0.10-beta.2', '1.0.10-beta.3']) {
+    const f = scopedFixture(t, version), replay = await createCandidateReplay(f.options)
+    assert.equal(replay.identity.kind, 'candidate')
+    assert.equal(replay.identity.publicationEligible, false)
+    assert.throws(() => validateCandidateReceipt({...f.value, publicationEligible: true}))
+    const baselineDesktopDirectory = join(f.root, 'baseline')
+    mkdirSync(baselineDesktopDirectory)
+    writeFileSync(join(baselineDesktopDirectory, 'SHA256SUMS'), 'substituted baseline manifest')
+    await assert.rejects(() => createCandidateReplay({...f.options, baselineDesktopDirectory,
+      baselineVersion: '1.0.10-beta.1'}), /Baseline public checksum manifest differs from independently pinned bytes/)
+  }
 })
 
 test('candidate verifies original signer transport and every macOS artifact hash', async t => {

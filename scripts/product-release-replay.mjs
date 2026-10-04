@@ -15,7 +15,7 @@ import { pipeline } from 'node:stream/promises'
 import { expectedAssets, verifyAssets } from './direct-release-mirror.mjs'
 import { validatePreparationRun, verifyReceiptBundle } from './product-release.mjs'
 import { assertCandidateCheckout, assertCandidateRunner, assertCandidateServerCheckout, assertCandidateServerRunner,
-  candidateAssets, inspectCandidate, verifyBaselineDesktop } from './product-candidate-receipt.mjs'
+  BETA1101_CANDIDATE_VERSIONS, candidateAssets, inspectCandidate, verifyBaselineDesktop } from './product-candidate-receipt.mjs'
 
 const HOSTS = ['github.com', 'api.github.com', 'registry.npmjs.org']
 const DESKTOP_REPOSITORIES = ['ZhengyiLuo/AgentsDock', 'ZhengyiLuo/AgentsDock-Releases']
@@ -36,7 +36,7 @@ export function replayBaselineMetadata(baselineVersion, candidateVersion, candid
   need(difference >= 0 && a[difference] < b[difference], 'Replay baseline must be strictly older than the candidate.')
   const beta = baselineVersion.includes('-beta.')
   need(!beta || (candidate && (candidateVersion === '1.0.9' && baselineVersion === '1.0.8-beta.5'
-    || candidateVersion === '1.0.10-beta.2' && baselineVersion === '1.0.10-beta.1')),
+    || BETA1101_CANDIDATE_VERSIONS.includes(candidateVersion) && baselineVersion === '1.0.10-beta.1')),
     'Beta desktop baseline requires an exact reviewed candidate journey.')
   if (candidate && candidateVersion === '1.0.9') need(['1.0.6', '1.0.8-beta.5'].includes(baselineVersion),
     'Stable candidate requires an independently pinned desktop baseline.')
@@ -426,7 +426,7 @@ async function createReplay({ receiptPath, acceptedReceiptSha256, preparationRun
     await directory(baselineDesktopDirectory)
     if (candidate && receipt.version === '1.0.9') await verifyBaselineDesktop(
       baselineVersion === '1.0.6' ? 'stable108' : 'beta1085', baselineDesktopDirectory, receipt.version)
-    if (candidate && receipt.version === '1.0.10-beta.2' && baselineVersion === '1.0.10-beta.1') {
+    if (candidate && BETA1101_CANDIDATE_VERSIONS.includes(receipt.version) && baselineVersion === '1.0.10-beta.1') {
       await verifyBaselineDesktop('beta1101', baselineDesktopDirectory, receipt.version)
     }
     const bytes = await regular(join(baselineDesktopDirectory, 'SHA256SUMS'))

@@ -1,5 +1,27 @@
 # Public development log
 
+## 2026-10-04 — Prepare matched 1.0.10-beta.3 (unreleased)
+
+- Prepare the integrated beta line for the direct desktop app, signed npm
+  server, short `agentsdock` CLI and legacy signed server bridge. Preserve
+  public stable `1.0.9`, its npm `latest` tag, and all frozen beta.2 artifacts.
+- Include the existing sign-in/catalog handoff recovery, cron import repair,
+  exact pinned-message navigation, stopped Claude goal presentation, and
+  native Codex goal helper/attachment corrections. Keep mobile builds separate.
+- Restore the approved Chinese terms for a missing pinned message; the full
+  desktop test pass caught this copy regression before release packaging.
+- Commit the exact release source before signing or packaging. Reuse the
+  established server trust key, Developer ID and notarization identity; bind
+  every component to the new version and source rather than relabeling beta.2.
+- Extend the scoped native replay only to this beta.3 target, preserving the
+  genuine beta.1 baseline, immutable package checks and original non-acceptance
+  flags. Fresh native packaging, signing, notarization, registry verification
+  and packaged acceptance remain required; this is not a publication receipt.
+- Existing unobserved boundaries remain explicit: populated provider-history
+  migration, active/queued work during managed upgrades, logout/reboot, native
+  Windows updating, fresh macOS short-CLI auto-setup, and live Claude goal
+  continuation. Earlier source checks do not establish these native outcomes.
+
 ## 2026-10-04 — Restore provider tools and attachments during Codex goals
 
 - Resolve authenticated native goal tool calls through the exact live

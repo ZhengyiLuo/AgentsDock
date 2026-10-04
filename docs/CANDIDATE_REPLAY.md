@@ -7,9 +7,25 @@ All candidate receipts and observations remain `publicationEligible: false`;
 observations also remain `releaseAcceptance: false`. A successful job does not
 turn blocked or unobserved scenarios into full release acceptance.
 
+## 1.0.10-beta.3 harness preparation only
+
+The exact `1.0.10-beta.3` candidate may use the same independently pinned
+`beta1101` baseline and both `0755`/`0750` macOS journeys described below.
+Historical beta.2 support and receipts remain unchanged; beta.3 requires its
+own committed source, native build reservation, signed packages and sealed
+candidate receipt/bundle. The complete beta.3 installer is byte-identical to
+the reviewed beta.1/beta.2 installer pinned below. No other candidate version,
+baseline, execution scope, source/hash guard or acceptance policy is added.
+Dispatch inputs, when separately authorized and those exact artifacts exist,
+must name `candidate-replay-v1.0.10-beta.3` and its own independently reviewed
+hashes. This preparation is not a native-run, signing or publication receipt:
+`publicationEligible: false`, `releaseAcceptance: false` and every unobserved
+provider-history, active/queued-work, reboot, public-feed, Windows and short-CLI
+boundary remain intact. Never relabel beta.2 observations as beta.3 evidence.
+
 ## Frozen 1.0.10-beta.2: exact beta.1 upgrade rehearsal
 
-The `beta1101` profile is limited to candidate `1.0.10-beta.2`, build 1246,
+For this frozen beta.2 rehearsal, `beta1101` targets `1.0.10-beta.2`, build 1246,
 whose frozen application/server source is
 `8d5327a9077f69f9a0a14c58b8e087a80f7f1762`. A reviewed harness-only descendant
 may exercise those unchanged signed bytes; its own truthful source SHA remains

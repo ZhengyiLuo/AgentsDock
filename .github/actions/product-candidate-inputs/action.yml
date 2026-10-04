@@ -18,7 +18,7 @@ inputs:
     description: candidate (macOS app/server) or candidate-server-linux (server rollback only)
   baseline_profile:
     default: legacy
-    description: legacy; stable1.0.9-only stable108/beta1085; beta.2-only beta1101
+    description: legacy; stable1.0.9-only stable108/beta1085; exact 1.0.10-beta.2/beta.3 beta1101
 outputs:
   version:
     value: ${{ steps.inputs.outputs.version }}
@@ -45,7 +45,7 @@ runs:
         set -euo pipefail
         umask 077
         [[ "$CANDIDATE_TAG" == candidate-replay-v1.0.9 || "$CANDIDATE_TAG" =~ ^candidate-replay-v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)-beta\.[1-9][0-9]*$ ]] || exit 1
-        [[ "$BASELINE_PROFILE" == legacy || ( "$EXECUTION_SCOPE" == candidate && ( ( "$CANDIDATE_TAG" == candidate-replay-v1.0.9 && ( "$BASELINE_PROFILE" == stable108 || "$BASELINE_PROFILE" == beta1085 ) ) || ( "$CANDIDATE_TAG" == candidate-replay-v1.0.10-beta.2 && "$BASELINE_PROFILE" == beta1101 ) ) ) ]] || exit 1
+        [[ "$BASELINE_PROFILE" == legacy || ( "$EXECUTION_SCOPE" == candidate && ( ( "$CANDIDATE_TAG" == candidate-replay-v1.0.9 && ( "$BASELINE_PROFILE" == stable108 || "$BASELINE_PROFILE" == beta1085 ) ) || ( ( "$CANDIDATE_TAG" == candidate-replay-v1.0.10-beta.2 || "$CANDIDATE_TAG" == candidate-replay-v1.0.10-beta.3 ) && "$BASELINE_PROFILE" == beta1101 ) ) ) ]] || exit 1
         [[ "$RECEIPT_SHA256" =~ ^[a-f0-9]{64}$ && "$BUNDLE_SHA256" =~ ^[a-f0-9]{64}$ ]] || exit 1
         case "$EXECUTION_SCOPE" in
           candidate)

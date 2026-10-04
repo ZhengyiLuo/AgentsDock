@@ -58,7 +58,8 @@ STABLE109_ROOT_NORMALIZING_INSTALLER_SHA256 = "52b6212d6bd00fdf2b071cbd5ec8f01ea
 # inventory and compile/import checks; installer permission logic is unchanged.
 BETA1101_ROOT_NORMALIZING_INSTALLER_SHA256 = "51a6ae6f242476ae4f19712b95ecbaba212b2256e3928d389d8f617a6c367ed7"
 NPM_BASELINE_VERSIONS = {"stable108": "1.0.8", "beta1085": "1.0.8-beta.5", "beta1101": "1.0.10-beta.1"}
-NPM_BASELINE_TARGETS = {"stable108": "1.0.9", "beta1085": "1.0.9", "beta1101": "1.0.10-beta.2"}
+NPM_BASELINE_TARGETS = {"stable108": ("1.0.9",), "beta1085": ("1.0.9",),
+                        "beta1101": ("1.0.10-beta.2", "1.0.10-beta.3")}
 ROLLBACK_STAGES = {"preflight", "start-request", "observe-rollback", "rollback-proof", "preservation",
                    "retry-request", "retry-health", "retry-completion", "retry-verification"}
 
@@ -1433,8 +1434,8 @@ def root_normalization_contract(bundle: Path, receipt: dict) -> str:
                  "Root-normalization package must contain one bounded installer.")
             with package.extractfile(members[0]) as stream:
                 installers.append(stream.read(2 * 1024 * 1024 + 1))
-    # Frozen beta.2 retains the complete reviewed beta.1 installer unchanged.
-    expected_hash = (BETA1101_ROOT_NORMALIZING_INSTALLER_SHA256 if version in {"1.0.10-beta.1", "1.0.10-beta.2"}
+    # Frozen beta.2 and reviewed beta.3 retain the complete beta.1 installer.
+    expected_hash = (BETA1101_ROOT_NORMALIZING_INSTALLER_SHA256 if version in {"1.0.10-beta.1", "1.0.10-beta.2", "1.0.10-beta.3"}
                      else STABLE109_ROOT_NORMALIZING_INSTALLER_SHA256 if version == "1.0.9"
                      else ROOT_NORMALIZING_INSTALLER_SHA256)
     need(installers[0] == installers[1] == read_regular(ROOT / "server/install.sh", 2 * 1024 * 1024)
@@ -1935,14 +1936,14 @@ def validate_baseline_arguments(args: argparse.Namespace, receipt: dict) -> None
         need(profile is None and directory is None, "Npm baseline arguments require the npm-baseline kind.")
         return
     need(getattr(args, "candidate", False) and not getattr(args, "candidate_server_linux", False)
-         and sys.platform == "darwin" and receipt.get("version") in NPM_BASELINE_TARGETS.values()
+         and sys.platform == "darwin" and any(receipt.get("version") in targets for targets in NPM_BASELINE_TARGETS.values())
          and not getattr(args, "staging_failure_fixture", False),
          "Npm baselines require an exact reviewed candidate macOS journey.")
     need(not any(getattr(args, key, None) is not None for key in
                  ("baseline_archive", "baseline_manifest", "baseline_signature")),
          "Npm and legacy baseline inputs cannot be combined.")
     if operation == "bootstrap":
-        need(isinstance(profile, str) and NPM_BASELINE_TARGETS.get(profile) == receipt.get("version")
+        need(isinstance(profile, str) and receipt.get("version") in NPM_BASELINE_TARGETS.get(profile, ())
              and isinstance(directory, Path),
              "Npm baseline bootstrap requires an exact baseline profile and directory.")
         need(args.legacy_root_mode in {"0755", "0750"}, "Unsupported baseline installation-root mode.")
@@ -1954,7 +1955,7 @@ def validate_baseline_arguments(args: argparse.Namespace, receipt: dict) -> None
 def verify_npm_baseline(profile: str, directory: Path, candidate_version: str) -> dict:
     """The shared verifier authenticates independent pins, signature and archive."""
     need(isinstance(profile, str) and profile in NPM_BASELINE_VERSIONS
-         and NPM_BASELINE_TARGETS.get(profile) == candidate_version,
+         and candidate_version in NPM_BASELINE_TARGETS.get(profile, ()),
          "Unknown or out-of-scope npm baseline profile.")
     checked = command(["node", str(ROOT / "scripts/product-candidate-receipt.mjs"),
                        "verify-baseline-server", profile, str(directory), candidate_version], timeout=90)
@@ -1984,7 +1985,7 @@ def load_fixture(args: argparse.Namespace, receipt: dict, home: Path) -> dict:
          and value.get("targetVersion") == receipt["version"], "Fixture belongs to another account, run or candidate.")
     if "baselineProfile" in value or "baselineIdentity" in value:
         need(getattr(args, "candidate", False) and not getattr(args, "candidate_server_linux", False)
-             and sys.platform == "darwin" and receipt.get("version") in NPM_BASELINE_TARGETS.values(),
+             and sys.platform == "darwin" and any(receipt.get("version") in targets for targets in NPM_BASELINE_TARGETS.values()),
              "Npm baseline fixture cannot leave its candidate macOS scope.")
         directory = args.work / "npm-baseline-bundle/npm"
         contained(directory, args.work)

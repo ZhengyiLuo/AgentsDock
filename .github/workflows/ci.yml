@@ -625,7 +625,7 @@ jobs:
       matrix:
         kind: [legacy]
         legacy_mode: ['0755', '0750']
-        baseline_profile: ${{ fromJSON(inputs.candidate_tag == 'candidate-replay-v1.0.9' && '["legacy","stable108","beta1085"]' || inputs.candidate_tag == 'candidate-replay-v1.0.10-beta.2' && '["legacy","beta1101"]' || '["legacy"]') }}
+        baseline_profile: ${{ fromJSON(inputs.candidate_tag == 'candidate-replay-v1.0.9' && '["legacy","stable108","beta1085"]' || (inputs.candidate_tag == 'candidate-replay-v1.0.10-beta.2' || inputs.candidate_tag == 'candidate-replay-v1.0.10-beta.3') && '["legacy","beta1101"]' || '["legacy"]') }}
         include:
           - kind: fresh
             legacy_mode: '0755'
