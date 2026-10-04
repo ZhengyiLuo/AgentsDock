@@ -8,6 +8,7 @@ import type { LazyTeamHubService } from './team-hub-lazy-service'
 import { LOCAL_SESSION_IMPORT_HARD_LIST_LIMIT, parseBulkImportSessionItems } from '../shared/local-session-import'
 import type { LanguageSettings } from './language'
 import { reportStorageError } from './storage-health'
+import { issueReportEnvironment } from './issue-report'
 
 export interface RegisterIpcOptions {
   language?: Pick<LanguageSettings, 'get' | 'set'>
@@ -464,6 +465,7 @@ export function registerIpc(
   handle('preferences:get-scoped', (scope, key, fallback) => service.scopedPreference(scope, key, fallback))
   handle('preferences:set-scoped', (scope, key, value) => service.putScopedPreference(scope, key, value))
 
+  handle('native:issue-report-environment', issueReportEnvironment)
   handle('native:open-external', async url => {
     const parsed = new URL(url)
     if (!['http:', 'https:', 'mailto:'].includes(parsed.protocol)) throw new Error('Unsupported external URL')

@@ -1028,6 +1028,52 @@
   needs correction and real-app verification. Signed desktop packaging and
   installed-version migration, busy/offline recovery and no-downgrade acceptance
   remain required before a coordinated release.
+## 2026-10-03 — Preserve automatic naming across follow-up messages
+
+- Compare effective title runtime settings before and after session updates,
+  rather than cancelling because a provider/model field was included. Normal
+  and queued follow-ups with unchanged settings keep their in-flight title.
+  Missing legacy default-provider fields normalize to the explicit defaults.
+- Manual renames (including identical text), opt-out, archive and actual
+  runtime/credential-revision changes still cancel. Stale-result checks and
+  the one-attempt usage limit remain; no retroactive chat rewrites or retries.
+- Verification: 279 focused server tests pass, covering naming, runtime
+  updates, provider bindings and queue behavior. Regression fails on the
+  previous implementation. Desktop typecheck, production compilation and 573
+  focused client transport/service tests pass (with the tests' expected 022
+  umask; inherited 077 made an unrelated clipboard fixture private).
+- Exercised the main-based desktop build (source version 0.2.0/build 85) in an
+  isolated offscreen native Electron profile against the branch's authenticated
+  server. Real Codex replies, a follow-up and queued promotion completed while
+  a test-only timing gate held the independent title request. Releasing the
+  gate produced a summarized title, displayed in the header/list and retained
+  after reload, persisted as generated metadata. Provider
+  requests, HTTP/IPC, authorization and persistence were real, not mocked.
+  Cursor lifecycle coverage is synthetic; its provider adapter is unchanged.
+- Source only: no existing service restart, deployment or release.
+
+## 2026-10-03 — Prefill the public bug-report form
+
+- `/feedback` opens the existing AgentsDock GitHub bug-report form with the
+  running app version/build, client platform/OS version/architecture, current
+  server version, agent and selected model. Environment details use the
+  existing additional-information field so no template rollout is required.
+  Description and screenshot uploads remain user-entered. Remove the separate
+  reproduction-steps and expected-behavior questions to shorten the form; this
+  template simplification takes effect when merged into the default branch.
+- Read app metadata through trusted native IPC. Capture the originating chat
+  and server context before awaiting it. Mark cached offline server versions
+  and server-default models explicitly; do not infer an unknown model.
+  Do not include session IDs, titles, chat content, paths, server addresses or
+  credentials. Opening the form does not submit an issue or send a chat turn.
+- Five focused component/URL tests, TypeScript and the desktop production
+  build pass. Tests mock the native browser bridge; actual UI-to-browser
+  acceptance remains pending because computer use is disabled in this run.
+  Built and launched an ad-hoc local macOS package (source version 0.2.0,
+  build 85, based on main 3c5e6e59); bundle audit and signature validation pass.
+  Startup reaches the renderer and connected server; user acceptance is pending.
+  Desktop only; no server update, mobile change or public release.
+
 ## 2026-10-02 — Align update test fixtures with current idle-update policy
 
 - Final CLI merge validation exposed two pre-existing main-branch CI failures
