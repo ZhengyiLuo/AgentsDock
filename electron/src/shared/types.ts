@@ -96,6 +96,9 @@ export interface ClaudeRuntimeFeatures {
 }
 
 export interface ClaudeGoal {
+  /** Native stop-hook limit ended execution without completing the saved goal. */
+  execution_stop_reason?: 'continuation_limit'
+  execution_stopped_at?: number
   condition: string
   status: 'active' | 'achieved' | 'cleared' | 'failed'
   iterations?: number

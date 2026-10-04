@@ -3107,6 +3107,17 @@ export class AppService {
     return diff
   }
 
+  async findTimelineEvent(sessionId: string, eventId: string): Promise<TimelineSearchResult | null> {
+    const scope = this.captureScope()
+    await this.ensureValidatedScope(scope)
+    const result = await scope.client.findTimelineEvent(sessionId, eventId)
+    this.assertCurrentScope(scope)
+    if (result && (result.session_id !== sessionId || result.event_id !== eventId)) {
+      throw new Error('The pinned message response belongs to a different message')
+    }
+    return result
+  }
+
   async searchTimeline(sessionId: string, query: string, limit = 40): Promise<TimelineSearchResult[]> {
     const clean = query.trim()
     if (clean.length < 2) return []

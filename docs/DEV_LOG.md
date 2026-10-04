@@ -1,5 +1,32 @@
 # Public development log
 
+## 2026-10-03 — Exact pinned-message navigation and Claude goal execution status (unreleased)
+
+- Locate old pinned messages by their saved event identity, independent of
+  preview formatting, repeated words, search indexing, and the current history
+  window. Older servers use their existing paged history API. Show an explicit
+  missing-message error and ignore navigation responses superseded by another
+  selection or server switch.
+- Distinguish a saved Claude goal from a running turn. Project Claude's native
+  continuation-limit warning, display why execution stopped, and provide
+  Continue using the same native goal condition and session. Dismiss the goal
+  dialog after an accepted start or replacement. Claude's continuation limit
+  itself remains unchanged; this is execution visibility and manual recovery,
+  not an automatic monitoring scheduler or unlimited continuation policy.
+- Validation: 230 focused Electron tests, 19 server projection/route tests,
+  TypeScript checking, and production compilation passed. In an isolated
+  compiled Electron app connected through real IPC and authenticated HTTP,
+  clicking a pin outside the loaded window visibly reached the exact message;
+  returning to latest and repeating against an older-server route surface also
+  passed. The same app displayed the native stop-warning fixture and sent the
+  exact condition through Continue. The fixture provider boundary was synthetic.
+- Live native Claude accepted the goal command and the app dismissed its dialog,
+  but model generation was rejected by local authentication. Live goal
+  continuation/clear acceptance remains pending; do not treat fixture results
+  as provider acceptance. No release, installation, or live-server restart is
+  included in this change.
+
+
 ## 2026-10-02 — Codex sign-in handoff recovery (unreleased)
 
 - Catalog refresh, including reconnect refresh from another client, no longer

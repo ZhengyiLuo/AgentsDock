@@ -272,6 +272,7 @@ export function registerIpc(
   handle('timeline:around', (sessionId, anchorSeq, limit) => service.timelineAround(sessionId, anchorSeq, limit))
   handle('timeline:trace', (sessionId, runId, anchorSeq, after, limit) => service.timelineTrace(sessionId, runId, anchorSeq, after, limit))
   handle('timeline:index', sessionId => service.timelineIndex(sessionId))
+  handle('timeline:find-event', (sessionId, eventId) => service.findTimelineEvent(sessionId, eventId))
   handle('timeline:search', (sessionId, query, limit) => service.searchTimeline(sessionId, query, limit))
   handle('timeline:subscribe', (sessionId, after) => service.subscribeTimeline(sessionId, after))
   handle('timeline:unsubscribe', sessionId => service.unsubscribeTimeline(sessionId))

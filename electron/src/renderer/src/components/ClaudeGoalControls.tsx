@@ -96,6 +96,7 @@ export function ClaudeGoalControls({ open, onOpenChange, disabled = false }: {
       const snapshot = await (next === null ? clearGoal() : setGoal(next))
       if (scopeRef.current !== requestScope || !snapshot) return
       setClearRequested(next === null && snapshot.goal?.status === 'active')
+      if (next !== null) onOpenChange(false)
     } catch (cause) {
       if (scopeRef.current !== requestScope) return
       errorAction.current = next === null ? 'clear' : 'set'
@@ -104,8 +105,11 @@ export function ClaudeGoalControls({ open, onOpenChange, disabled = false }: {
     }
   }
   const trimmedCondition = condition.trim()
-  const elapsed = goal ? goalElapsed(goal.duration_ms ?? (active && goal.set_at != null ? now - goal.set_at : NaN)) : null
+  const elapsed = goal ? goalElapsed(goal.duration_ms ?? (active && goal.set_at != null ? (goal.execution_stopped_at ?? now) - goal.set_at : NaN)) : null
   const waiting = runtime?.goal_starting === true || clearRequested
+  const stopped = active && !busy && !waiting
+  const statusLabel = stopped ? t('claudeGoal.status.idle') : t(`claudeGoal.status.${goal?.status ?? 'active'}`)
+  const stopReason = stopped && goal?.execution_stop_reason === 'continuation_limit' ? t('claudeGoal.continuationLimit') : null
   const clearLabel = busy ? t('claudeGoal.clearAndStop') : t('claudeGoal.clear')
   const clearHint = busy ? t('claudeGoal.clearAndStopHint') : t('claudeGoal.clear')
 
@@ -113,17 +117,18 @@ export function ClaudeGoalControls({ open, onOpenChange, disabled = false }: {
   return <>
     {active && goal && <GoalSummaryBar label={t('claudeGoal.title')} condition={goal.condition}
       openLabel={t('claudeGoal.title')} onOpen={() => onOpenChange(true)}
-      metadata={[goal.iterations != null ? t('claudeGoal.iterationCount', { count: String(goal.iterations) }) : null, elapsed].filter(Boolean).join(' · ')}
-      actions={<button type="button" className="quiet-button" aria-label={clearHint} title={clearHint} disabled={blocked || mutating} onClick={() => void changeGoal(null)}>{clearLabel}</button>} />}
+      metadata={[stopped ? statusLabel : null, goal.iterations != null ? t('claudeGoal.iterationCount', { count: String(goal.iterations) }) : null, elapsed].filter(Boolean).join(' · ')}
+      actions={<>{stopped && <button type="button" className="quiet-button" disabled={blocked || mutating} onClick={() => void changeGoal(goal.condition)}>{t('claudeGoal.continue')}</button>}<button type="button" className="quiet-button" aria-label={clearHint} title={clearHint} disabled={blocked || mutating} onClick={() => void changeGoal(null)}>{clearLabel}</button></>} />}
+    {!open && stopReason && <p className="goal-feedback" role="status">{stopReason}</p>}
     {!open && (error || waiting) && <p className={`goal-feedback${error ? ' error' : ''}`} role={error ? 'alert' : 'status'}>{error || t('claudeGoal.requested')}</p>}
     <Dialog.Root open={open} onOpenChange={onOpenChange}>
       <GoalDialogContent title={t('claudeGoal.title')} description={t('claudeGoal.description')} closeLabel={t('claudeGoal.close')} busy={mutating}>
           <form onSubmit={event => { event.preventDefault(); if (trimmedCondition && condition.length <= 4000) void changeGoal(trimmedCondition) }}>
             {!available && <p className="goal-feedback" role="status">{t(runtime ? 'claudeGoal.unavailable' : 'claudeGoal.loading')}</p>}
             {available && runtime?.goal_loading && <p className="goal-feedback" role="status">{t('claudeGoal.loading')}</p>}
-            {goal && <GoalProgress label={t('claudeGoal.current')} status={t(`claudeGoal.status.${goal.status}`)} condition={goal.condition}
+            {goal && <GoalProgress label={t('claudeGoal.current')} status={statusLabel} condition={goal.condition}
               metrics={[{ label: t('claudeGoal.elapsed'), value: elapsed ?? '—' }, { label: t('claudeGoal.iterations'), value: goal.iterations ?? '—' }]}
-              reason={goal.last_reason ? { label: t('claudeGoal.reason'), text: goal.last_reason } : null} />}
+              reason={stopReason || goal.last_reason ? { label: t('claudeGoal.reason'), text: stopReason || goal.last_reason! } : null} />}
             <GoalConditionField label={t('claudeGoal.condition')} placeholder={t('claudeGoal.placeholder')}
               value={condition} disabled={blocked || mutating} onChange={value => { conditionEdited.current = true; setCondition(value) }} />
             {(error || runtimeError) && <p className="goal-feedback error" role="alert">{error || runtimeError}</p>}

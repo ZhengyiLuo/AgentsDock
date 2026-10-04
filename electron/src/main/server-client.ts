@@ -1222,6 +1222,30 @@ export class AgentServerClient {
     return this.requestText(`/api/sessions/${encodeURIComponent(sessionId)}/diffs/${encodeURIComponent(runId)}`)
   }
 
+  async findTimelineEvent(sessionId: string, eventId: string): Promise<TimelineSearchResult | null> {
+    const configuration = this.configuration
+    try {
+      const response = await this.get<{ event: TimelineSearchResult | null }>(
+        `/api/sessions/${encodeURIComponent(sessionId)}/timeline-event/${encodeURIComponent(eventId)}`, configuration)
+      return response.event
+    } catch (error) {
+      if (!(error instanceof ServerError) || error.status !== 404) throw error
+    }
+    // Older servers have no identity endpoint. Read exact IDs through their
+    // existing history API; do not search a shortened/merged display preview.
+    let before: number | undefined
+    for (;;) {
+      if (this.configuration !== configuration) throw new Error('Server changed while locating the pinned message')
+      const page = await this.sessionPageWithConfiguration(configuration, sessionId, { before, limit: 1000, tail: true, visible: true })
+      const event = page.events.find(event => event.session_id === sessionId && event.id === eventId)
+      if (event) return { session_id: sessionId, event_id: event.id, seq: event.seq, ts: event.ts, role: 'system', snippet: '' }
+      if (!page.has_more) return null
+      const next = page.next_before ?? page.before ?? page.events[0]?.seq
+      if (next == null || before != null && next >= before) throw new Error('Unable to load older history for this pinned message')
+      before = next
+    }
+  }
+
   async searchTimeline(sessionId: string, query: string, limit = 40): Promise<TimelineSearchResult[]> {
     const params = new URLSearchParams({ q: query, limit: String(limit) })
     const response = await this.get<{ results?: TimelineSearchResult[] }>(`/api/sessions/${encodeURIComponent(sessionId)}/search?${params}`)
