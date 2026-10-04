@@ -1,5 +1,29 @@
 # Public development log
 
+## 2026-10-03 — Preserve automatic naming across follow-up messages
+
+- Compare effective title runtime settings before and after session updates,
+  rather than cancelling because a provider/model field was included. Normal
+  and queued follow-ups with unchanged settings keep their in-flight title.
+  Missing legacy default-provider fields normalize to the explicit defaults.
+- Manual renames (including identical text), opt-out, archive and actual
+  runtime/credential-revision changes still cancel. Stale-result checks and
+  the one-attempt usage limit remain; no retroactive chat rewrites or retries.
+- Verification: 279 focused server tests pass, covering naming, runtime
+  updates, provider bindings and queue behavior. Regression fails on the
+  previous implementation. Desktop typecheck, production compilation and 573
+  focused client transport/service tests pass (with the tests' expected 022
+  umask; inherited 077 made an unrelated clipboard fixture private).
+- Exercised the main-based desktop build (source version 0.2.0/build 85) in an
+  isolated offscreen native Electron profile against the branch's authenticated
+  server. Real Codex replies, a follow-up and queued promotion completed while
+  a test-only timing gate held the independent title request. Releasing the
+  gate produced a summarized title, displayed in the header/list and retained
+  after reload, persisted as generated metadata. Provider
+  requests, HTTP/IPC, authorization and persistence were real, not mocked.
+  Cursor lifecycle coverage is synthetic; its provider adapter is unchanged.
+- Source only: no existing service restart, deployment or release.
+
 ## 2026-10-03 — Prefill the public bug-report form
 
 - `/feedback` opens the existing AgentsDock GitHub bug-report form with the
