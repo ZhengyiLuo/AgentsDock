@@ -1,5 +1,25 @@
 # Public development log
 
+## 2026-10-04 — Restore provider tools and attachments during Codex goals
+
+- Resolve authenticated native goal tool calls through the exact live
+  thread/turn supervisor when Codex omits the original message's client
+  metadata. Retain transport authentication, thread ownership, Stop/revocation
+  checks and call replay protection; incomplete or invalid supplied proofs
+  never become fallback authority.
+- Give explicit goal resume its own helper capability before native work
+  starts, using an ordinary run identity and existing durable mailbox routes.
+  Clean up that capability if resume fails. Do not create routes from goal text.
+- Allow a live, supervised goal turn to attach files. The artifact endpoint
+  previously rejected all native operations, including goal continuation.
+- Validate 324 targeted server tests, 478 desktop tests, desktop type checking
+  and production compilation. In the compiled desktop app with disposable
+  server/provider state, start a real Codex goal from its dialog, observe two
+  native goal turns, attach a file during the automatic second turn, inspect
+  its visible file card, and download identical bytes. Also exercise explicit
+  resume with the real provider helper. These are source-build observations;
+  signed-package acceptance and beta publication are separate, pending steps.
+
 ## 2026-10-03 — Verify private 1.0.10-beta.2, build 1246
 
 - Preserve product source `8d5327a9077f69f9a0a14c58b8e087a80f7f1762`,
