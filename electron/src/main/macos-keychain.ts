@@ -3,6 +3,8 @@ import { execFileSync } from 'node:child_process'
 const SECURITY_TOOL = '/usr/bin/security'
 const MAX_INTERACTIVE_LITERAL_LENGTH = 512
 const INTERACTIVE_LITERAL_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:\-]*$/
+const MAX_PASSWORD_LENGTH = 4096
+const PRINTABLE_PASSWORD_PATTERN = /^[\x20-\x7e]+$/
 
 export interface MacOSKeychainWriteCommand {
   args: ['-i']
@@ -22,18 +24,21 @@ export type MacOSKeychainCommandRunner = (
 
 /**
  * Build one command for `security -i`. The interactive parser treats spaces,
- * quotes, and backslashes as syntax, so only bounded literal tokens are
- * accepted. Callers can fall back to Electron safeStorage for any other value.
+ * quotes, and backslashes as syntax. Service/account stay bounded literals;
+ * other printable access tokens use security's hexadecimal password input.
+ * The encoding is transport only: Keychain stores the original password.
  */
 export function buildMacOSKeychainWriteCommand(
   service: string,
   account: string,
   value: string
 ): MacOSKeychainWriteCommand | null {
-  if (![service, account, value].every(isInteractiveLiteral)) return null
+  if (![service, account].every(isInteractiveLiteral)
+    || value.length > MAX_PASSWORD_LENGTH || !PRINTABLE_PASSWORD_PATTERN.test(value)) return null
+  const password = isInteractiveLiteral(value) ? `-w ${value}` : `-X ${Buffer.from(value, 'utf8').toString('hex')}`
   return {
     args: ['-i'],
-    input: `add-generic-password -U -s ${service} -a ${account} -w ${value}\n`
+    input: `add-generic-password -U -s ${service} -a ${account} ${password}\n`
   }
 }
 

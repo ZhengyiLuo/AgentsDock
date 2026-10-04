@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type {
   AgentCrossChatRoute, AgentFile, BootstrapPayload, ChatReference, Event, Health, NativeFileRef, ProfileBootstrapPayload, PublicServerProfile,
-  QueuedTurn, Session, SessionSnapshot, TimelinePage, TurnStopResult
+  QueuedTurn, Session, SessionSnapshot, TeamReference, TimelinePage, TurnStopResult
 } from '@shared/types'
 import type { AgentsDockAPI } from '@shared/ipc'
 import { RUNNING_FORK_UNAVAILABLE } from '@shared/session-fork'
@@ -9,6 +9,9 @@ import { isImportedProviderInterruption } from '@shared/provider-origin'
 import { CHAT_FONT_SIZES } from '../lib/chat-font'
 import { cancelPendingSteering, isSteeringPending, steerQueuedTurn, type SteeringScope } from '../lib/queue-actions'
 import { boundedDeferredTimelineEvents, cacheSnapshot, compactSnapshotEvents, crossChatQueueRefreshSessionId, handleMenuCommand, interactiveClientCapabilities, mergeEvents, mergeSnapshots, reconcileSessions, replaceSnapshot, snapshotNeedsAuthoritativeTail, syncSnapshotSessions, timelineReplacementIsDiscontinuous, updateActiveSessions, updateQueuedTurns, useAppStore } from './app-store'
+
+const analytics = vi.hoisted(() => ({ trackEvent: vi.fn() }))
+vi.mock('../lib/analytics', () => analytics)
 
 const event = (type: string, patch: Partial<Event> = {}): Event => ({ id: `event-${type}`, session_id: 'chat-1', seq: 1, type, ts: '2026-07-09T10:00:00Z', ...patch })
 const providerInterruption = (patch: Partial<Event> = {}): Event => event('provider_interruption', {
@@ -366,6 +369,7 @@ describe('chat forking', () => {
   })
 
   it('forks a supported running chat without stopping it or clearing its admission', async () => {
+    analytics.trackEvent.mockClear()
     const fork = vi.fn().mockResolvedValue(sessionFor('child-chat'))
     const stop = vi.fn()
     Object.defineProperty(window, 'agentsDock', {
@@ -392,14 +396,21 @@ describe('chat forking', () => {
       expect(useAppStore.getState().activeSessionIds).toContain('chat-1')
       expect(useAppStore.getState().turnAdmissionTokens['chat-1']).toBe('admission-1')
       expect(useAppStore.getState().error).toBeNull()
+      expect(analytics.trackEvent).toHaveBeenCalledExactlyOnceWith('chat_forked')
     } finally {
       useAppStore.setState({ refreshSessions: originalRefresh, selectSession: originalSelect })
     }
   })
 
-  it('translates a raced server conflict instead of exposing the raw IPC error', async () => {
+  it.each([
+    ['wait for or stop the active turn before forking this chat', RUNNING_FORK_UNAVAILABLE],
+    [
+      'The native completed-turn fork could not be verified. The running chat was left unchanged.',
+      'The native completed-turn fork could not be verified. The running chat was left unchanged.'
+    ]
+  ])('shows a readable fork failure for %s', async (detail, expectedMessage) => {
     const fork = vi.fn().mockRejectedValue(new Error(
-      "Error invoking remote method 'sessions:fork': Error: wait for or stop the active turn before forking this chat"
+      `Error invoking remote method 'sessions:fork': Error: ${detail}`
     ))
     Object.defineProperty(window, 'agentsDock', {
       configurable: true,
@@ -414,7 +425,7 @@ describe('chat forking', () => {
     await useAppStore.getState().forkSession('chat-1')
 
     expect(fork).toHaveBeenCalledWith('chat-1')
-    expect(useAppStore.getState().error).toBe(RUNNING_FORK_UNAVAILABLE)
+    expect(useAppStore.getState().error).toBe(expectedMessage)
   })
 })
 
@@ -924,6 +935,27 @@ describe('instant new chat defaults', () => {
     modals: closedModals
   }))
 
+  it.each([true, false])('preserves custom Codex defaults and fails closed when readiness is %s', async ready => {
+    const stored = { version: 1, folder: 'Saved', cwd: '/work/saved', backend: 'codex', codex_provider: 'custom', model: 'gpt-6-astra', effort: null }
+    const create = vi.fn().mockResolvedValue({ id: 'custom-created', title: 'New chat', ...stored })
+    Object.defineProperty(window, 'agentsDock', { configurable: true, value: {
+      native: { analyticsDisabled: true }, preferences: { getScoped: vi.fn().mockResolvedValue(stored), setScoped: vi.fn().mockResolvedValue(undefined) }, sessions: { create }
+    } as unknown as AgentsDockAPI })
+    useAppStore.setState({ requestNewChat, profiles: [profile], activeProfileId: profile.id, profileGeneration: 1, switchingProfileId: null,
+      sessions: [], selectedSessionId: null, folderOrder: [], creatingChat: false, modals: closedModals,
+      health: { ok: true, capabilities: { codex_provider_v1: { per_chat: true, per_chat_models: true } } },
+      runtimeCatalog: { backends: { codex: { models: [], efforts: [], custom_provider: {
+        configured: ready, available: ready, model: ready ? 'gpt-6-astra' : null, base_url: ready ? 'https://inference.example/v1' : null
+      } } } }, refreshSessions: vi.fn().mockResolvedValue(undefined), selectSession: vi.fn().mockResolvedValue(undefined)
+    })
+    await useAppStore.getState().requestNewChat()
+    if (ready) expect(create).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ backend: 'codex', codex_provider: 'custom', model: 'gpt-6-astra' }))
+    else {
+      expect(create).not.toHaveBeenCalled()
+      expect(useAppStore.getState().modals.newChat).toBe(true)
+    }
+  })
+
   it('opens the chooser for the first chat in an empty workspace', async () => {
     const create = vi.fn()
     Object.defineProperty(window, 'agentsDock', {
@@ -967,7 +999,7 @@ describe('instant new chat defaults', () => {
       requestNewChat,
       profiles: [profile], activeProfileId: profile.id, profileGeneration: 1, switchingProfileId: null,
       sessions: [{ id: 'older', title: 'Older chat', folder: 'Older', cwd: '/work/older', backend: 'codex', model: 'gpt-old' }],
-      selectedSessionId: 'older', folderOrder: ['Older', 'Fresh'], health: { ok: true }, runtimeCatalog: null,
+      selectedSessionId: 'older', folderOrder: ['Older', 'Fresh'], health: { ok: true }, runtimeCatalog: { backends: { claude: { native_credentials_present: true, models: [], efforts: [] } } },
       refreshSessions: refresh, selectSession: select, creatingChat: false, modals: closedModals
     })
 
@@ -1009,7 +1041,7 @@ describe('instant new chat defaults', () => {
       requestNewChat,
       profiles: [profile], activeProfileId: profile.id, profileGeneration: 1, switchingProfileId: null,
       sessions: [{ id: 'selected', title: 'Selected chat', folder: 'Research', cwd: '/work/research', backend: 'codex', model: 'gpt-current' }],
-      selectedSessionId: 'selected', folderOrder: ['Older', 'Research'], health: { ok: true }, runtimeCatalog: null,
+      selectedSessionId: 'selected', folderOrder: ['Older', 'Research'], health: { ok: true }, runtimeCatalog: { backends: { claude: { native_credentials_present: true, models: [], efforts: [] } } },
       refreshSessions: vi.fn().mockResolvedValue(undefined), selectSession: vi.fn().mockResolvedValue(undefined),
       creatingChat: false, modals: closedModals
     })
@@ -1046,7 +1078,7 @@ describe('instant new chat defaults', () => {
         { id: 'first', title: 'First chat', folder: 'First', cwd: '/work/first', backend: 'codex' },
         { id: 'second', title: 'Second chat', folder: 'Second', cwd: '/work/second', backend: 'codex' }
       ],
-      selectedSessionId: 'first', folderOrder: ['First', 'Second'], health: { ok: true }, runtimeCatalog: null,
+      selectedSessionId: 'first', folderOrder: ['First', 'Second'], health: { ok: true }, runtimeCatalog: { backends: { claude: { native_credentials_present: true, models: [], efforts: [] } } },
       refreshSessions: vi.fn().mockResolvedValue(undefined), selectSession: vi.fn().mockResolvedValue(undefined),
       creatingChat: false, modals: closedModals
     })
@@ -1390,9 +1422,120 @@ describe('send rollback', () => {
     chatReferencesBySession: {},
     teamReferencesBySession: {},
     turnAdmissionTokens: {},
+    pendingTurnSubmissions: {},
+    activeSessionIds: new Set(),
     health: null,
     error: null
   }))
+
+  it('keeps a memory-only pending submission until authoritative history follows an eventless success', async () => {
+    const pendingSend = deferred<{ session: Session; queued: boolean; event?: Event }>()
+    const send = vi.fn(() => pendingSend.promise)
+    const timelineOpen = vi.fn().mockRejectedValue(new Error('temporary timeline failure'))
+    Object.defineProperty(window, 'agentsDock', {
+      configurable: true,
+      value: {
+        turns: { send },
+        timeline: { cached: vi.fn().mockResolvedValue(null), open: timelineOpen }
+      } as unknown as AgentsDockAPI
+    })
+    const image: AgentFile = { id: 'image-1', filename: 'screen.png', content_type: 'image/png' }
+    const reference: ChatReference = {
+      session_id: 'chat-b', display_title_snapshot: 'Target',
+      source_text_start: 6, source_text_end: 13, action: 'instruction'
+    }
+    const localSend = vi.fn()
+    window.addEventListener('agentsdock:local-send', localSend)
+    useAppStore.setState({
+      activeProfileId: 'local', profileGeneration: 1, switchingProfileId: null,
+      selectedSessionId: 'chat-a', chatPanes: { primary: 'chat-a', secondary: null },
+      sessions: [{ ...sessionFor('chat-a'), latest_event_seq: 7 }, { ...sessionFor('chat-b'), title: 'Target' }],
+      health: {
+        ok: true,
+        capabilities: { cross_chat_handoffs_v1: { available: true, required: false, message: '', action: null, version: 1 } }
+      },
+      snapshots: { 'chat-a': snapshot('chat-a', [eventFor('chat-a', 9)]) },
+      drafts: { 'chat-a': '  Ask @Target  ' },
+      uploadsBySession: { 'chat-a': [image] }, uploadPathsBySession: {},
+      chatReferencesBySession: { 'chat-a': [reference] }, teamReferencesBySession: {},
+      activeSessionIds: new Set(), turnAdmissionTokens: {}, pendingTurnSubmissions: {}, error: null
+    })
+
+    try {
+      const request = useAppStore.getState().sendPrompt()
+      const submission = useAppStore.getState().pendingTurnSubmissions['chat-a']
+
+      expect(send).toHaveBeenCalledTimes(1)
+      expect(localSend).toHaveBeenCalledTimes(1)
+      expect(submission).toMatchObject({
+        token: expect.any(String),
+        prompt: 'Ask @Target',
+        files: [image],
+        chatReferences: [{ ...reference, source_text_start: 4, source_text_end: 11 }],
+        teamReferences: [],
+        createdAt: expect.any(Number),
+        afterSeq: 9,
+        mode: 'start',
+        phase: 'submitting',
+        consumeComposer: true
+      })
+      expect(useAppStore.getState().activeSessionIds.has('chat-a')).toBe(false)
+      expect(useAppStore.getState().snapshots['chat-a'].events).toHaveLength(1)
+
+      pendingSend.resolve({ session: sessionFor('chat-a'), queued: false })
+      await expect(request).resolves.toBe(true)
+      expect(useAppStore.getState().pendingTurnSubmissions['chat-a']).toMatchObject({
+        token: expect.any(String),
+        prompt: 'Ask @Target',
+        phase: 'submitted'
+      })
+      await vi.waitFor(() => expect(timelineOpen).toHaveBeenCalledWith('chat-a', true))
+      expect(useAppStore.getState().error).toBeNull()
+      expect(useAppStore.getState().pendingTurnSubmissions['chat-a']?.phase).toBe('submitted')
+    } finally {
+      window.removeEventListener('agentsdock:local-send', localSend)
+    }
+  })
+
+  it('removes the matching pending submission in the authoritative response commit', async () => {
+    const pendingSend = deferred<{ session: Session; queued: boolean; event: Event }>()
+    const send = vi.fn(() => pendingSend.promise)
+    Object.defineProperty(window, 'agentsDock', {
+      configurable: true,
+      value: { turns: { send } } as unknown as AgentsDockAPI
+    })
+    useAppStore.setState({
+      activeProfileId: 'local', profileGeneration: 1, switchingProfileId: null,
+      selectedSessionId: 'chat-a', chatPanes: { primary: 'chat-a', secondary: null },
+      sessions: [sessionFor('chat-a')], snapshots: { 'chat-a': snapshot('chat-a', [eventFor('chat-a', 1)]) },
+      drafts: { 'chat-a': 'Start now' }, uploadsBySession: {}, uploadPathsBySession: {},
+      chatReferencesBySession: {}, teamReferencesBySession: {}, activeSessionIds: new Set(),
+      turnAdmissionTokens: {}, pendingTurnSubmissions: {}
+    })
+    const observed: Array<{ eventApplied: boolean; pending: boolean }> = []
+    const unsubscribe = useAppStore.subscribe(state => {
+      observed.push({
+        eventApplied: state.snapshots['chat-a']?.events.some(item => item.id === 'accepted-start') ?? false,
+        pending: Boolean(state.pendingTurnSubmissions['chat-a'])
+      })
+    })
+
+    try {
+      const request = useAppStore.getState().sendPrompt()
+      expect(useAppStore.getState().pendingTurnSubmissions['chat-a']).toBeDefined()
+      pendingSend.resolve({
+        session: sessionFor('chat-a'), queued: false,
+        event: eventFor('chat-a', 2, { id: 'accepted-start', type: 'turn_started', prompt: 'Start now' })
+      })
+
+      await expect(request).resolves.toBe(true)
+      expect(useAppStore.getState().pendingTurnSubmissions['chat-a']).toBeUndefined()
+      expect(useAppStore.getState().snapshots['chat-a'].events.some(item => item.id === 'accepted-start')).toBe(true)
+      expect(observed).not.toContainEqual({ eventApplied: true, pending: true })
+    } finally {
+      unsubscribe()
+    }
+  })
 
   it('rejects direct store sends when the selected Cursor backend contract is unavailable', async () => {
     const send = vi.fn()
@@ -1847,12 +1990,15 @@ describe('send rollback', () => {
     useAppStore.setState({
       selectedSessionId: 'chat-a', sessions: [sessionFor('chat-a')], snapshots: {},
       drafts: { 'chat-a': 'First request' }, uploadsBySession: { 'chat-a': [oldFile] },
-      uploadPathsBySession: { 'chat-a': [] }
+      uploadPathsBySession: { 'chat-a': [] }, activeSessionIds: new Set(), pendingTurnSubmissions: {}
     })
 
     const pending = useAppStore.getState().sendPrompt()
     expect(useAppStore.getState().drafts['chat-a']).toBe('')
     expect(useAppStore.getState().turnAdmissionTokens['chat-a']).toBeTruthy()
+    expect(useAppStore.getState().pendingTurnSubmissions['chat-a']).toMatchObject({
+      prompt: 'First request', files: [oldFile], mode: 'start', phase: 'submitting'
+    })
     useAppStore.setState({
       drafts: { 'chat-a': 'Next request' }, uploadsBySession: { 'chat-a': [newFile] },
       uploadPathsBySession: { 'chat-a': [newPath] }
@@ -1861,11 +2007,103 @@ describe('send rollback', () => {
     rejectSend(new Error(genericIpcError))
 
     await expect(pending).resolves.toBe(false)
-    expect(useAppStore.getState().drafts['chat-a']).toBe('Next request')
+    expect(useAppStore.getState().drafts['chat-a']).toBe('First request\n\nNext request')
     expect(useAppStore.getState().uploadsBySession['chat-a'].map(file => file.id)).toEqual(['new-file', 'old-file'])
     expect(useAppStore.getState().uploadPathsBySession['chat-a'].map(file => file.path)).toEqual(['/tmp/new.txt'])
     expect(useAppStore.getState().turnAdmissionTokens['chat-a']).toBeUndefined()
+    expect(useAppStore.getState().pendingTurnSubmissions['chat-a']).toBeUndefined()
     expect(useAppStore.getState().error).toBe(genericIpcError)
+  })
+
+  it.each(['Continue', '  Continue\n'])('preserves an identical next draft %j when the staged send fails', async newerDraft => {
+    let rejectSend!: (error: Error) => void
+    const send = vi.fn(() => new Promise((_resolve, reject) => { rejectSend = reject }))
+    Object.defineProperty(window, 'agentsDock', {
+      configurable: true,
+      value: { turns: { send } } as unknown as AgentsDockAPI
+    })
+    useAppStore.setState({
+      selectedSessionId: 'chat-a', sessions: [sessionFor('chat-a')], snapshots: {},
+      drafts: { 'chat-a': 'Continue' }, uploadsBySession: {}, uploadPathsBySession: {},
+      activeSessionIds: new Set(), pendingTurnSubmissions: {}
+    })
+
+    const pending = useAppStore.getState().sendPrompt()
+    useAppStore.setState({ drafts: { 'chat-a': newerDraft } })
+    rejectSend(new Error('connection closed'))
+
+    await expect(pending).resolves.toBe(false)
+    expect(useAppStore.getState().drafts['chat-a']).toBe(newerDraft)
+    expect(send).toHaveBeenCalledTimes(1)
+  })
+
+  it('keeps current reference selections and attachments when identical preflight text is restored', () => {
+    const prompt = 'Ask @Target and @@Team'
+    const oldReference: ChatReference = {
+      session_id: 'old-target', display_title_snapshot: 'Target',
+      source_text_start: 4, source_text_end: 11, action: 'instruction'
+    }
+    const oldTeamReference: TeamReference = {
+      kind: 'recipient', recipient_kind: 'server', team_id: 'old-team', target_id: 'old-member',
+      display_name_snapshot: 'Team', source_text_start: 16, source_text_end: 22, grant_intent: true
+    }
+    const oldFile: AgentFile = { id: 'old-file', filename: 'old.txt', content_type: 'text/plain' }
+    const newFile: AgentFile = { id: 'new-file', filename: 'new.txt', content_type: 'text/plain' }
+    const oldPath: NativeFileRef = { path: '/tmp/old.txt', name: 'old.txt' }
+    const newPath: NativeFileRef = { path: '/tmp/new.txt', name: 'new.txt' }
+    useAppStore.setState({
+      activeProfileId: 'local', profileGeneration: 1, switchingProfileId: null,
+      selectedSessionId: 'chat-a', sessions: [sessionFor('chat-a')], snapshots: {},
+      drafts: { 'chat-a': prompt }, chatReferencesBySession: { 'chat-a': [oldReference] },
+      teamReferencesBySession: { 'chat-a': [oldTeamReference] },
+      uploadsBySession: { 'chat-a': [oldFile] }, uploadPathsBySession: { 'chat-a': [oldPath] },
+      turnAdmissionTokens: {}, pendingTurnSubmissions: {}, activeSessionIds: new Set()
+    })
+    const token = useAppStore.getState().beginTurnAdmission('chat-a')!
+    expect(useAppStore.getState().stagePendingTurnSubmission('chat-a', token, { prompt })).toBe(true)
+    const newerReference = { ...oldReference, session_id: 'new-target', source_text_start: 6, source_text_end: 13 }
+    useAppStore.setState({
+      drafts: { 'chat-a': `  ${prompt}  ` },
+      chatReferencesBySession: { 'chat-a': [newerReference] },
+      teamReferencesBySession: { 'chat-a': [] },
+      uploadsBySession: { 'chat-a': [newFile, oldFile] },
+      uploadPathsBySession: { 'chat-a': [newPath, oldPath] }
+    })
+
+    useAppStore.getState().rollbackPendingTurnSubmission('chat-a', token)
+
+    const state = useAppStore.getState()
+    expect(state.drafts['chat-a']).toBe(`  ${prompt}  `)
+    expect(state.chatReferencesBySession['chat-a']).toEqual([newerReference])
+    expect(state.teamReferencesBySession['chat-a']).toEqual([])
+    expect(state.uploadsBySession['chat-a']).toEqual([newFile, oldFile])
+    expect(state.uploadPathsBySession['chat-a']).toEqual([newPath, oldPath])
+    expect(state.pendingTurnSubmissions['chat-a']).toBeUndefined()
+  })
+
+  it('does not restore a failed send into another profile using the same chat ID', async () => {
+    const pendingSend = deferred<never>()
+    const send = vi.fn(() => pendingSend.promise)
+    Object.defineProperty(window, 'agentsDock', {
+      configurable: true, value: { turns: { send } } as unknown as AgentsDockAPI
+    })
+    useAppStore.setState({
+      activeProfileId: 'profile-a', profileGeneration: 1, switchingProfileId: null,
+      selectedSessionId: 'chat-a', chatPanes: { primary: 'chat-a', secondary: null },
+      sessions: [sessionFor('chat-a')], snapshots: {}, drafts: { 'chat-a': 'Old profile prompt' },
+      uploadsBySession: {}, uploadPathsBySession: {}, turnAdmissionTokens: {}, pendingTurnSubmissions: {}
+    })
+    const request = useAppStore.getState().sendPrompt()
+    useAppStore.setState({
+      activeProfileId: 'profile-b', profileGeneration: 2, drafts: { 'chat-a': 'New profile draft' },
+      turnAdmissionTokens: {}, pendingTurnSubmissions: {}, error: null
+    })
+    pendingSend.reject(new Error('old connection closed'))
+
+    await expect(request).resolves.toBe(false)
+    expect(useAppStore.getState().drafts['chat-a']).toBe('New profile draft')
+    expect(useAppStore.getState().error).toBeNull()
+    expect(send).toHaveBeenCalledTimes(1)
   })
 
   it('turns the screenshot-shaped FastAPI Team reference failure into upgrade guidance', async () => {
@@ -2357,6 +2595,63 @@ describe('selected live timeline', () => {
       { capture: true, passive: true }
     )
     addEventListener.mockRestore()
+  })
+
+  it.each([false, true])('keeps a live-accepted prompt consumed when its HTTP response fails (steer=%s)', async steer => {
+    vi.useFakeTimers()
+    try {
+      const handlers = await initializeLiveEventHandlers()
+      const pendingSend = deferred<never>()
+      const send = vi.fn(() => pendingSend.promise)
+      const runNow = vi.fn().mockResolvedValue(true)
+      Object.defineProperty(window, 'agentsDock', {
+        configurable: true,
+        value: { ...window.agentsDock, turns: { send }, queue: { runNow, list: vi.fn().mockResolvedValue([]) } }
+      })
+      useAppStore.setState({
+        drafts: { 'chat-a': 'Already accepted' }, uploadsBySession: {}, uploadPathsBySession: {},
+        chatReferencesBySession: {}, teamReferencesBySession: {},
+        turnAdmissionTokens: {}, pendingTurnSubmissions: {}, error: null
+      })
+      const request = useAppStore.getState().sendPrompt(undefined, steer)
+      handlers.get('server:event')?.({
+        profileId: null, profileGeneration: 0,
+        event: eventFor('chat-a', 2, {
+          type: steer ? 'turn_queued' : 'turn_started', prompt: 'Already accepted', file_ids: [],
+          ...(steer ? { queued_id: 'accepted-queue', position: 1 } : {})
+        })
+      })
+      pendingSend.reject(new Error('HTTP response connection closed'))
+
+      await expect(request).resolves.toBe(true)
+      expect(useAppStore.getState().drafts['chat-a']).toBe('')
+      expect(useAppStore.getState().pendingTurnSubmissions['chat-a']).toBeUndefined()
+      expect(useAppStore.getState().turnAdmissionTokens['chat-a']).toBeUndefined()
+      expect(useAppStore.getState().error).toBeNull()
+      expect(send).toHaveBeenCalledTimes(1)
+      if (steer) expect(runNow).toHaveBeenCalledWith('chat-a', 'accepted-queue')
+      else expect(runNow).not.toHaveBeenCalled()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('updates an OpenCode provider binding and reset in the live session without a refresh', async () => {
+    vi.useFakeTimers()
+    try {
+      const handlers = await initializeLiveEventHandlers()
+      const session: Session = { ...sessionFor('chat-a'), backend: 'opencode', latest_event_seq: 0 }
+      useAppStore.setState({ sessions: [session], snapshots: { 'chat-a': { ...snapshot('chat-a', []), session } } })
+      handlers.get('server:event')?.({ profileId: null, profileGeneration: 0,
+        event: eventFor('chat-a', 1, { type: 'provider_session', backend: 'opencode', provider_session_id: 'ses-native' }) })
+      await vi.advanceTimersByTimeAsync(1_000)
+      expect(useAppStore.getState().sessions[0]).toMatchObject({ opencode_session_id: 'ses-native', backend_locked: true })
+      expect(useAppStore.getState().snapshots['chat-a'].session.opencode_session_id).toBe('ses-native')
+      handlers.get('server:event')?.({ profileId: null, profileGeneration: 0,
+        event: eventFor('chat-a', 2, { type: 'provider_session_reset', backend: 'opencode', previous_provider_session_id: 'ses-native' }) })
+      await vi.advanceTimersByTimeAsync(1_000)
+      expect(useAppStore.getState().sessions[0]).toMatchObject({ opencode_session_id: null, session_id: null, backend_locked: true })
+    } finally { vi.useRealTimers() }
   })
 
   it('lets emergency alerts interrupt input without pulling an unrelated input batch', async () => {
@@ -3279,6 +3574,7 @@ describe('chat selection', () => {
   })
 
   it('opens a chat in primary when no primary pane exists', async () => {
+    analytics.trackEvent.mockClear()
     const subscribe = vi.fn().mockResolvedValue(undefined)
     Object.defineProperty(window, 'agentsDock', {
       configurable: true,
@@ -3294,6 +3590,36 @@ describe('chat selection', () => {
 
     expect(useAppStore.getState().chatPanes).toEqual({ primary: 'chat-a', secondary: null })
     expect(useAppStore.getState().focusedChatPane).toBe('primary')
+    expect(analytics.trackEvent).not.toHaveBeenCalledWith('split_view_opened')
+  })
+
+  it('records only the transition from one pane to two distinct chats', async () => {
+    const subscribe = vi.fn().mockResolvedValue(undefined)
+    const unsubscribe = vi.fn().mockResolvedValue(undefined)
+    Object.defineProperty(window, 'agentsDock', {
+      configurable: true,
+      value: { timeline: { subscribe, unsubscribe } } as unknown as AgentsDockAPI
+    })
+    useAppStore.setState({
+      activeProfileId: 'local', profileGeneration: 1, switchingProfileId: null,
+      chatPanes: { primary: 'chat-a', secondary: null }, focusedChatPane: 'primary', selectedSessionId: 'chat-a',
+      loadingSessionIds: new Set(), loadingSessionId: null,
+      sessions: [sessionFor('chat-a'), sessionFor('chat-b'), sessionFor('chat-c')],
+      snapshots: {
+        'chat-a': snapshot('chat-a', [eventFor('chat-a', 1)]),
+        'chat-b': snapshot('chat-b', [eventFor('chat-b', 2)]),
+        'chat-c': snapshot('chat-c', [eventFor('chat-c', 3)])
+      }
+    })
+    analytics.trackEvent.mockClear()
+
+    await useAppStore.getState().openSessionInSplit('chat-b')
+    expect(useAppStore.getState().chatPanes).toEqual({ primary: 'chat-a', secondary: 'chat-b' })
+    expect(analytics.trackEvent.mock.calls.filter(([name]) => name === 'split_view_opened')).toHaveLength(1)
+
+    await useAppStore.getState().openSessionInSplit('chat-c')
+    expect(useAppStore.getState().chatPanes).toEqual({ primary: 'chat-a', secondary: 'chat-c' })
+    expect(analytics.trackEvent.mock.calls.filter(([name]) => name === 'split_view_opened')).toHaveLength(1)
   })
 
   it('subscribes a prefetched fallback that becomes visible after deleting the sole pane', async () => {
@@ -4197,6 +4523,7 @@ describe('timeline memory cache', () => {
 })
 
 describe('untouched startup chat cleanup', () => {
+  const refreshSessions = useAppStore.getState().refreshSessions
   const profile: PublicServerProfile = {
     ...profileFor('cleanup-profile'),
     serverIdentity: 'cleanup-server'
@@ -4223,6 +4550,44 @@ describe('untouched startup chat cleanup', () => {
 
   afterEach(() => vi.restoreAllMocks())
 
+  it('cleans a marked blank on explicit refresh, but preserves unsaved local drafts', async () => {
+    const empty = untouchedStartupChat('refresh-empty')
+    const draft = untouchedStartupChat('refresh-draft')
+    const harness = installStartupCleanupHarness(profile, [empty, draft])
+    useAppStore.setState({ profiles: [profile], activeProfileId: profile.id, profileGeneration: 7,
+      sessions: [empty, draft], jobs: [], creatingChat: false, drafts: { [draft.id]: 'not sent yet' } })
+    await refreshSessions(true)
+    expect(harness.remove).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ profileId: profile.id }), empty.id, empty.updated_at)
+    expect(useAppStore.getState().sessions.map(s => s.id)).toEqual([draft.id])
+  })
+
+  it('does not fall back to ordinary Delete when the server rejects conditional cleanup', async () => {
+    const placeholder = untouchedStartupChat('old-server')
+    const harness = installStartupCleanupHarness(profile, [placeholder])
+    harness.remove.mockRejectedValueOnce(new Error('404: discard-empty unavailable'))
+    await useAppStore.getState().initialize()
+    expect(harness.remove).toHaveBeenCalledOnce()
+    expect(window.agentsDock.sessions.remove).not.toHaveBeenCalled()
+    expect(useAppStore.getState().sessions).toEqual([placeholder])
+  })
+
+  it('flushes the live composer before proving emptiness and blocks admission during discard', async () => {
+    const placeholder = untouchedStartupChat('live-editor-draft')
+    const harness = installStartupCleanupHarness(profile, [placeholder])
+    useAppStore.setState({ profiles: [profile], activeProfileId: profile.id, profileGeneration: 7,
+      sessions: [placeholder], jobs: [], drafts: {}, creatingChat: false, turnAdmissionTokens: {} })
+    const flush = () => {
+      expect(useAppStore.getState().discardingEmptyChats[placeholder.id]).toBe(`${profile.id}:7`)
+      expect(useAppStore.getState().beginTurnAdmission(placeholder.id)).toBeNull()
+      useAppStore.getState().setDraftForSession(placeholder.id, 'still in the editor, not persisted')
+    }
+    window.addEventListener('agentsdock:flush-draft', flush)
+    try { await refreshSessions(true) } finally { window.removeEventListener('agentsdock:flush-draft', flush) }
+    expect(harness.remove).not.toHaveBeenCalled()
+    expect(useAppStore.getState().sessions).toEqual([placeholder])
+    expect(useAppStore.getState().discardingEmptyChats).toEqual({})
+  })
+
   it('removes only a marked, fully untouched direct-create placeholder', async () => {
     const placeholder = untouchedStartupChat('untouched')
     const harness = installStartupCleanupHarness(profile, [placeholder])
@@ -4231,7 +4596,7 @@ describe('untouched startup chat cleanup', () => {
     await settleMicrotasks()
 
     expect(harness.remove).toHaveBeenCalledOnce()
-    expect(harness.remove).toHaveBeenCalledWith(placeholder.id)
+    expect(harness.remove).toHaveBeenCalledWith(expect.objectContaining({ profileId: profile.id, serverIdentity: profile.serverIdentity }), placeholder.id, placeholder.updated_at)
     expect(harness.setScoped).toHaveBeenCalledWith(
       expect.objectContaining({
         profileId: profile.id,
@@ -4680,6 +5045,57 @@ describe('bootstrap', () => {
     )
     resolveRoutes({ routes: [freshRoute], max_routes: 16 })
     await vi.waitFor(() => expect(useAppStore.getState().agentRoutesBySession['chat-a']?.routes).toEqual([freshRoute]))
+  })
+})
+
+describe('live reasoning summary store integration', () => {
+  it('fences transient summaries by profile and revision, reconciles completion, and clears on reconnect', async () => {
+    const profile = profileFor('profile-reasoning')
+    const handlers = new Map<string, (payload: any) => void>()
+    Object.defineProperty(window, 'agentsDock', {
+      configurable: true,
+      value: {
+        bootstrap: vi.fn().mockResolvedValue(profileBootstrap(profile, [profile], 3)),
+        native: { log: vi.fn().mockResolvedValue(undefined), setBadge: vi.fn().mockResolvedValue(undefined), notify: vi.fn() },
+        events: { on: vi.fn((channel: string, handler: (payload: any) => void) => { handlers.set(channel, handler); return () => {} }) }
+      } as unknown as AgentsDockAPI
+    })
+    useAppStore.setState({ initialized: false, profiles: [], activeProfileId: null, profileGeneration: 0,
+      sessions: [], selectedSessionId: null, chatPanes: { primary: null, secondary: null },
+      focusedChatPane: 'primary', snapshots: {} })
+    await useAppStore.getState().initialize()
+    const initial = snapshot('chat-1', [event('turn_started', { run_id: 'run' })])
+    useAppStore.setState({ snapshots: { 'chat-1': initial }, selectedSessionId: 'chat-1',
+      chatPanes: { primary: 'chat-1', secondary: null }, sessions: [initial.session] })
+    const context = { profileId: profile.id, profileGeneration: 3, sessionId: 'chat-1' }
+    const stream = { type: 'reasoning_summary_stream', session_id: 'chat-1', instance_id: 'server-one', revision: 2,
+      items: [{ run_id: 'run', item_id: 'thought', backend: 'codex', phase: 'summary', text: 'First section',
+        ts: '2026-09-20T04:00:00Z', after_seq: 1 }] }
+    const deliver = handlers.get('server:reasoning-stream')!
+    deliver({ ...context, snapshot: stream })
+    expect(useAppStore.getState().snapshots['chat-1'].reasoningStream).toEqual(stream)
+    expect(useAppStore.getState().snapshots['chat-1'].events).toBe(initial.events)
+    for (const payload of [
+      { ...context, profileGeneration: 2, snapshot: { ...stream, revision: 9, items: [] } },
+      { ...context, profileId: 'other-server', snapshot: { ...stream, revision: 9, items: [] } },
+      { ...context, snapshot: { ...stream, revision: 1, items: [] } },
+      { ...context, snapshot: { ...stream, session_id: 'wrong-chat', revision: 9, items: [] } }
+    ]) deliver(payload)
+    expect(useAppStore.getState().snapshots['chat-1'].reasoningStream).toEqual(stream)
+    handlers.get('server:event')!({ ...context, event: event('reasoning_summary', {
+      id: 'completed-thought', seq: 2, run_id: 'run', item_id: 'thought', text: 'Authoritative final section'
+    }) })
+    deliver({ ...context, snapshot: { ...stream, revision: 3, items: [] } })
+    expect(useAppStore.getState().snapshots['chat-1'].events.at(-1)?.text).toBe('Authoritative final section')
+    expect(useAppStore.getState().snapshots['chat-1'].reasoningStream?.items).toEqual([])
+    deliver({ ...context, snapshot: { ...stream, revision: 4 } })
+    handlers.get('server:sync')!({ ...context, state: 'reconnecting' })
+    expect(useAppStore.getState().snapshots['chat-1'].reasoningStream).toBeUndefined()
+    deliver({ ...context, snapshot: { ...stream, instance_id: 'server-two', revision: 0 } })
+    expect(useAppStore.getState().snapshots['chat-1'].reasoningStream?.instance_id).toBe('server-two')
+    useAppStore.setState({ selectedSessionId: null, chatPanes: { primary: null, secondary: null } })
+    handlers.get('server:sync')!({ ...context, state: 'idle' })
+    expect(useAppStore.getState().snapshots['chat-1'].reasoningStream).toBeUndefined()
   })
 })
 
@@ -5880,6 +6296,7 @@ function untouchedStartupChat(id: string, patch: Partial<Session> = {}): Session
     model: 'gpt-5.6',
     effort: 'medium',
     created_at: '2026-09-08T12:00:00Z',
+    updated_at: '2026-09-08T12:00:00Z',
     latest_event_seq: 1,
     latest_event_type: 'session_created',
     latest_agent_event_seq: 0,
@@ -5949,7 +6366,7 @@ function installStartupCleanupHarness(
     currentSessions = sessions
     return sessions
   })
-  const remove = vi.fn(async (sessionId: string) => {
+  const remove = vi.fn(async (_scope: unknown, sessionId: string) => {
     currentSessions = currentSessions.filter(session => session.id !== sessionId)
     return true
   })
@@ -5999,7 +6416,7 @@ function installStartupCleanupHarness(
     configurable: true,
     value: {
       bootstrap: vi.fn().mockResolvedValue(bootstrapPayload),
-      sessions: { list: sessionsList, remove },
+      sessions: { list: sessionsList, discardEmpty: remove, remove: vi.fn(() => { throw new Error('Automatic cleanup must not use ordinary Delete') }) },
       jobs: { list: jobsList },
       ports: { list: portsList },
       preferences: {

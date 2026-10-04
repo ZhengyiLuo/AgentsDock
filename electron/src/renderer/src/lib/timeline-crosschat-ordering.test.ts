@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it } from 'vitest'
-import type { Event } from '@shared/types'
+import type { AgentFile, Event } from '@shared/types'
 import { updateQueuedTurns } from '@shared/queue'
 import { activityEventSequence, projectTimeline, renderTimelineItems, type RenderTimelineItem } from './timeline'
 import { cachedTimelineProjection, clearTimelineProjectionCache } from './timeline-projection-cache'
@@ -33,16 +33,16 @@ const legacyLeg = (seq: number, kind: 'request' | 'reply', patch: Partial<Event>
   })
 
 // Exercise every live prefix, then compare it with reopening the same event history.
-function projections(events: Event[]): RenderTimelineItem[][] {
+function projections(events: Event[], files: AgentFile[] = []): RenderTimelineItem[][] {
   let live: RenderTimelineItem[] = []
   for (let length = 1; length <= events.length; length++) {
     const prefix = events.slice(0, length)
-    live = cachedTimelineProjection('crosschat-order-live', prefix, []).rendered
+    live = cachedTimelineProjection('crosschat-order-live', prefix, files).rendered
     expect(live, `live prefix ending at sequence ${prefix.at(-1)?.seq}`)
-      .toEqual(renderTimelineItems(projectTimeline(prefix, [])))
+      .toEqual(renderTimelineItems(projectTimeline(prefix, files)))
     expect(new Set(live.map(row => row.key)).size).toBe(live.length)
   }
-  return [renderTimelineItems(projectTimeline(events, [])), live]
+  return [renderTimelineItems(projectTimeline(events, files)), live]
 }
 
 function visibleOrder(rows: RenderTimelineItem[]): string[] {
@@ -106,6 +106,32 @@ describe('cross-chat messages stay at their place in ongoing work', () => {
       expect(rows.filter(row => row.kind === 'progress' && row.active)).toHaveLength(1)
       expect(rows.at(-1)).toMatchObject({ kind: 'progress', active: true })
     }
+  })
+
+  it.each([3, undefined])('keeps sends among ongoing work before final output with early media (file sequence: %s)', fileSeq => {
+    const file: AgentFile = { id: 'rendered-video', filename: 'result.mp4', content_type: 'video/mp4', seq: fileSeq }
+    const live = [start(), progress(2), work(3, 'artifact_created', { artifact: file }),
+      message(4), progress(5), message(6, 'second-send'), progress(7)]
+    const finished = [...live, work(8, 'turn_finished', { result_text: 'The video is ready.' })]
+    const read = [...finished, message(9, 'outgoing', 'read', { delivery_mode: 'mailbox', inbox_state: 'read' })]
+    const afterFinal = [...read, message(10, 'after-final')]
+    const snapshots = [live, finished, read, afterFinal]
+    const original = structuredClone({ snapshots, file })
+    for (const events of snapshots) {
+      for (const rows of projections(events, [file])) {
+        expect(visibleOrder(rows)).toEqual([
+          'user:1', 'activity:2', 'delivery:4', 'activity:5', 'delivery:6', 'activity:7',
+          ...(events.length >= finished.length ? ['assistant:8'] : []),
+          ...(events === afterFinal ? ['delivery:10'] : [])
+        ])
+        const mediaIndex = rows.findIndex(row => row.kind === 'media')
+        expect(rows[mediaIndex]).toMatchObject({ seq: events === live ? 7 : 8, files: [file] })
+        expect(mediaIndex).toBeGreaterThan(rows.findIndex(row => row.kind === 'system' && row.seq === 6))
+        if (events === afterFinal) expect(mediaIndex).toBeLessThan(rows.findIndex(row => row.kind === 'system' && row.seq === 10))
+        expect(rows.filter(row => row.kind === 'system' && row.seq === 4)).toMatchObject([{ anchorTs: live[3].ts }])
+      }
+    }
+    expect({ snapshots, file }).toEqual(original)
   })
 
   it('interleaves legacy request and reply legs without moving their original timestamps on completion', () => {

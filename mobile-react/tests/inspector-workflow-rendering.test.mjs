@@ -11,11 +11,11 @@ import { build } from 'esbuild'
 globalThis.IS_REACT_ACT_ENVIRONMENT=true
 globalThis.requestAnimationFrame??=callback=>setTimeout(callback,0)
 const store=create(()=>({}))
-const fixture={store,client:{isValidated:true,validationRevision:1},reads:[],writes:[],stops:[],runs:[],alerts:[]}
+const fixture={store,client:{isValidated:true,validationRevision:1},reads:[],writes:[],stops:[],runs:[],alerts:[],sheets:[],dismissedSheets:0,platform:'ios'}
 globalThis.__inspectorWorkflow=fixture
 const icons=['Archive','ArrowUp','Bot','Check','ChevronDown','ChevronRight','Copy','FileText','Folder','FolderOpen','GitFork','Pause','Pencil','Pin','Play','Plus','RefreshCw','Search','Square','SquareTerminal','Trash2','X']
 const mocks={
-  'react-native':`import {createElement} from 'react'; export const View='View',Text='Text',TextInput='TextInput',ScrollView='ScrollView',ActivityIndicator='ActivityIndicator',KeyboardAvoidingView='KeyboardAvoidingView';export const Pressable=props=>createElement('Pressable',props,typeof props.children==='function'?props.children({pressed:false}):props.children);export const Modal=({visible=true,...props})=>visible?createElement('Modal',props):null;export const StyleSheet={create:x=>x,hairlineWidth:1,absoluteFill:{}};export const Platform={OS:'ios'};export const AccessibilityInfo={announceForAccessibility(){}};export const Alert={alert:(...args)=>globalThis.__inspectorWorkflow.alerts.push(args)};export const useColorScheme=()=> 'dark';`,
+  'react-native':`import {createElement} from 'react'; export const View='View',Text='Text',TextInput='TextInput',ScrollView='ScrollView',ActivityIndicator='ActivityIndicator',KeyboardAvoidingView='KeyboardAvoidingView';export const Pressable=props=>createElement('Pressable',props,typeof props.children==='function'?props.children({pressed:false}):props.children);export const Modal=({visible=true,...props})=>visible?createElement('Modal',props):null;export const StyleSheet={create:x=>x,hairlineWidth:1,absoluteFill:{}};export const Platform={get OS(){return globalThis.__inspectorWorkflow.platform}};export const AccessibilityInfo={announceForAccessibility(){}};export const Alert={alert:(...args)=>globalThis.__inspectorWorkflow.alerts.push(args)};export const ActionSheetIOS={showActionSheetWithOptions:(options,callback)=>globalThis.__inspectorWorkflow.sheets.push({options,callback}),dismissActionSheet:()=>globalThis.__inspectorWorkflow.dismissedSheets++};export const findNodeHandle=node=>node?.nativeTag??null;export const useColorScheme=()=> 'dark';`,
   'react-native-safe-area-context':`export const SafeAreaView='SafeAreaView';`,
   'lucide-react-native':icons.map(name=>`export const ${name}='${name}';`).join(''),
   'expo-clipboard':`export async function setStringAsync(){}`,
@@ -33,7 +33,7 @@ after(async()=>{await unlink(outfile);delete globalThis.__inspectorWorkflow})
 const {Inspector,WorkingDirectoryPicker,ImportChatDialog}=await import(pathToFileURL(outfile).href)
 const byID=(tree,id)=>tree.root.findAll(node=>typeof node.type==='string'&&node.props.testID===id)
 const text=tree=>tree.root.findAllByType('Text').map(node=>node.children.filter(value=>typeof value==='string').join('')).join('\n')
-const click=(tree,id)=>act(async()=>byID(tree,id)[0].props.onPress())
+const click=(tree,id)=>act(async()=>byID(tree,id)[0].props.onPress({nativeEvent:{target:'321'}}))
 const labeled=(tree,label)=>tree.root.findAllByType('Pressable').find(node=>node.props.accessibilityLabel===label)
 const style=value=>Object.assign({},...[value].flat(Infinity).filter(Boolean))
 const deferred=()=>{let resolve,reject;const promise=new Promise((yes,no)=>{resolve=yes;reject=no});return{promise,resolve,reject}}
@@ -42,7 +42,7 @@ const event=(seq,patch={})=>({id:`e${seq}`,seq,session_id:'chat',ts:'2026-09-14T
 const listing=(input,patch={})=>({input,resolved_path:input||'/srv',base_path:'/srv',exists:true,suggestions:[],truncated:false,...patch})
 const health=()=>({ok:true,server_identity:'server',server_instance_id:'instance',default_cwd:'/srv',capabilities:{working_directory_completion:{available:true},scheduled_jobs:{available:true}}})
 function reset(patch={}){
-  fixture.reads=[];fixture.writes=[];fixture.stops=[];fixture.runs=[];fixture.alerts=[];fixture.client.isValidated=true;fixture.client.validationRevision=1
+  fixture.reads=[];fixture.writes=[];fixture.stops=[];fixture.runs=[];fixture.alerts=[];fixture.sheets=[];fixture.dismissedSheets=0;fixture.platform='ios';fixture.client.isValidated=true;fixture.client.validationRevision=1
   fixture.client.completeWorkingDirectory=async input=>{fixture.reads.push(input);return listing(input,{suggestions:input==='/srv'?[{name:'Project',path:'/srv/project'}]:[]})}
   store.setState({activeProfileId:'profile',profileGeneration:1,selectedSessionId:'chat',connected:true,connecting:false,switchingProfileId:null,workspaceAdopting:false,health:health(),sessions:[{id:'chat',title:'Chat',folder:'General',cwd:'/srv',backend:'codex'}],snapshots:{chat:{events:[],files:[],queuedTurns:[]}},activeSessionIds:new Set(),stoppingSessionIds:new Set(),sendingSessionIds:new Set(),pendingQueuedRunIds:new Set(),pendingJobRunIds:new Set(),turnAdmissionTokens:{},filePaging:{},runtime:null,pins:[],jobs:[{id:'job',session_id:'chat',title:'Daily check',backend:'codex',context_mode:'continuation',enabled:true,prompt:'Check',interval_seconds:60}],refreshJobs:async()=>{},refreshFiles:async()=>{},updateSession:async(...args)=>{fixture.writes.push(args);return true},runJob:async(...args)=>{fixture.runs.push(args);return{ok:true}},stopTurn:async(...args)=>{fixture.stops.push(args)},updateJob:async(...args)=>{fixture.writes.push(args);return true},deleteJob:async(...args)=>fixture.writes.push(args),...patch},true)
 }
@@ -51,15 +51,20 @@ const unmount=tree=>act(async()=>tree.unmount())
 
 const reasoningCatalog=()=>({backends:{codex:{default_model:'gpt-test',default_effort:'medium',models:[{value:'gpt-test',label:'GPT Test',efforts:[{value:'medium',label:'Medium'},{value:'high',label:'High'},{value:'ultra',label:'Ultra'}]},{value:'small',label:'Small',efforts:[{value:'low',label:'Low'}]},{value:'locked',label:'Locked model',locked:true}],efforts:[{value:'medium',label:'Medium'},{value:'high',label:'High'}]}}})
 function resetReasoning(patch={}){reset({runtime:reasoningCatalog(),sessions:[{id:'chat',title:'Chat',folder:'General',cwd:'/srv',backend:'codex',model:'gpt-test',effort:'medium'}],updateSession:async(...args)=>{fixture.writes.push(args);store.setState({sessions:store.getState().sessions.map(session=>session.id===args[0]?{...session,...args[1]}:session)});return true},...patch})}
-test('Inspector reasoning is an inline touch-safe disclosure and stays selectable during active work',async()=>{
+const nativeSheet=()=>fixture.sheets.at(-1)
+function sheetOption(label,sheet=nativeSheet()){const index=sheet.options.options.indexOf(label);assert.notEqual(index,-1,`Missing native choice: ${label}`);return()=>sheet.callback(index)}
+const chooseSheet=label=>act(async()=>sheetOption(label)())
+test('Inspector iOS reasoning uses an anchored native sheet and stays selectable during active work',async()=>{
   resetReasoning({activeSessionIds:new Set(['chat']),turnAdmissionTokens:{chat:'admission'}});const {tree}=await render()
   try{
     const trigger=byID(tree,'inspector-reasoning-choice')[0];assert.ok(trigger,'Existing chats need a discoverable Reasoning control')
     assert.equal(trigger.props.disabled,false);await click(tree,'inspector-reasoning-choice')
     assert.equal(tree.root.findAllByType('Modal').length,0,'Reasoning must not open another native modal inside Chat details')
-    assert.ok(style(byID(tree,'inspector-reasoning-choice-list')[0].props.style).maxHeight<=264)
-    assert.ok(style(byID(tree,'inspector-reasoning-choice-close')[0].props.style).minHeight>=44)
-    assert.ok(labeled(tree,'Ultra'));await act(async()=>labeled(tree,'Ultra').props.onPress())
+    assert.equal(byID(tree,'inspector-reasoning-choice-list').length,0)
+    assert.ok(style(trigger.props.style).minHeight>=44)
+    assert.equal(nativeSheet().options.title,'Reasoning');assert.equal(nativeSheet().options.message,'Current: Medium');assert.equal(nativeSheet().options.anchor,321)
+    assert.equal(nativeSheet().options.options[nativeSheet().options.cancelButtonIndex],'Cancel')
+    await chooseSheet('Ultra')
     assert.deepEqual(fixture.writes,[['chat',{effort:'ultra'},1]])
     assert.match(text(tree),/Saved.*next turn/i);assert.deepEqual(fixture.stops,[])
   }finally{await unmount(tree)}
@@ -67,14 +72,14 @@ test('Inspector reasoning is an inline touch-safe disclosure and stays selectabl
 test('Inspector saves server defaults as null and model changes reconcile reasoning without nested presentation',async()=>{
   resetReasoning();const {tree}=await render()
   try{
-    await click(tree,'inspector-reasoning-choice');await act(async()=>labeled(tree,'Server default (medium)').props.onPress())
+    await click(tree,'inspector-reasoning-choice');await chooseSheet('Server default (medium)')
     assert.deepEqual(fixture.writes[0],['chat',{effort:null},1]);assert.equal(byID(tree,'inspector-reasoning-choice')[0].props.accessibilityLabel,'Reasoning: Server default (medium)')
-    await click(tree,'inspector-model-choice');assert.equal(labeled(tree,'Locked model, upgrade required').props.disabled,true)
-    await act(async()=>labeled(tree,'Locked model, upgrade required').props.onPress());assert.equal(fixture.writes.length,1)
-    await act(async()=>labeled(tree,'Small').props.onPress());assert.deepEqual(fixture.writes[1],['chat',{model:'small',effort:null},1])
-    await click(tree,'inspector-reasoning-choice');assert.ok(labeled(tree,'Low'));assert.equal(labeled(tree,'Ultra'),undefined)
-    await act(async()=>labeled(tree,'Low').props.onPress());assert.equal(store.getState().sessions[0].effort,'low')
-    await click(tree,'inspector-model-choice');await act(async()=>labeled(tree,'Server default (GPT Test)').props.onPress())
+    await click(tree,'inspector-model-choice');assert.ok(nativeSheet().options.disabledButtonIndices.includes(nativeSheet().options.options.indexOf('Locked model (upgrade required)')))
+    await chooseSheet('Locked model (upgrade required)');assert.equal(fixture.writes.length,1)
+    await click(tree,'inspector-model-choice');await chooseSheet('Small');assert.deepEqual(fixture.writes[1],['chat',{model:'small',effort:null},1])
+    await click(tree,'inspector-reasoning-choice');assert.ok(nativeSheet().options.options.includes('Low'));assert.equal(nativeSheet().options.options.includes('Ultra'),false)
+    await chooseSheet('Low');assert.equal(store.getState().sessions[0].effort,'low')
+    await click(tree,'inspector-model-choice');await chooseSheet('Server default (GPT Test)')
     assert.deepEqual(fixture.writes[3],['chat',{model:null,effort:'medium'},1]);assert.equal(tree.root.findAllByType('Modal').length,0)
   }finally{await unmount(tree)}
 })
@@ -83,24 +88,24 @@ test('Inspector reasoning save is single-flight and rejected saves roll back wit
   store.setState({updateSession:async(...args)=>{fixture.writes.push(args);store.setState({sessions:[{...previous,...args[1]}]});const saved=await held.promise;if(!saved)store.setState({sessions:[previous],error:'The server rejected this reasoning level.'});return saved}})
   const {tree}=await render()
   try{
-    await click(tree,'inspector-reasoning-choice');const select=labeled(tree,'High').props.onPress
+    await click(tree,'inspector-reasoning-choice');const select=sheetOption('High')
     await act(async()=>{select();select()});assert.equal(fixture.writes.length,1);assert.equal(byID(tree,'inspector-choice-saving').length,1)
     assert.equal(byID(tree,'inspector-model-choice')[0].props.disabled,true);assert.equal(byID(tree,'inspector-choice-saved').length,0)
     await act(async()=>held.resolve(false));assert.match(text(tree),/The server rejected this reasoning level/)
     assert.equal(byID(tree,'inspector-choice-error')[0].props.accessibilityRole,'alert');assert.equal(byID(tree,'inspector-choice-saving').length,0)
     assert.equal(byID(tree,'inspector-reasoning-choice')[0].props.accessibilityLabel,'Reasoning: Medium')
     await act(async()=>store.setState({updateSession:async(...args)=>{fixture.writes.push(args);store.setState({sessions:[{...previous,...args[1]}]});return true}}))
-    await act(async()=>labeled(tree,'High').props.onPress());assert.equal(fixture.writes.length,2);assert.equal(byID(tree,'inspector-choice-error').length,0);assert.match(text(tree),/Saved for the next turn/)
+    await click(tree,'inspector-reasoning-choice');await chooseSheet('High');assert.equal(fixture.writes.length,2);assert.equal(byID(tree,'inspector-choice-error').length,0);assert.match(text(tree),/Saved for the next turn/)
   }finally{await unmount(tree)}
 })
 test('Inspector catches unexpected save errors locally and closes choices without mutating the chat',async()=>{
   resetReasoning({updateSession:async()=>{throw Error('Connection dropped')}});const {tree}=await render()
   try{
-    await click(tree,'inspector-reasoning-choice');const old=labeled(tree,'High').props.onPress
+    await click(tree,'inspector-reasoning-choice');const old=sheetOption('High')
     await act(async()=>old());assert.match(text(tree),/Connection dropped/)
-    await click(tree,'inspector-reasoning-choice-close');await click(tree,'inspector-reasoning-choice')
+    await click(tree,'inspector-reasoning-choice')
     await act(async()=>old());assert.deepEqual(fixture.writes,[]);assert.equal(byID(tree,'inspector-choice-saving').length,0)
-    await click(tree,'inspector-reasoning-choice-close');assert.equal(byID(tree,'inspector-reasoning-choice-list').length,0)
+    await chooseSheet('Cancel');assert.equal(byID(tree,'inspector-reasoning-choice')[0].props.accessibilityState.expanded,false)
   }finally{await unmount(tree)}
 })
 test('Inspector rejects captured reasoning callbacks after same-tick connection, scope, model or catalog changes',async()=>{
@@ -112,7 +117,7 @@ test('Inspector rejects captured reasoning callbacks after same-tick connection,
     ()=>store.setState({runtime:{backends:{codex:{...reasoningCatalog().backends.codex,model_efforts:{'gpt-test':[{value:'medium',label:'Medium'}]}}}}}),
   ]
   for(const change of changes){resetReasoning();const {tree}=await render()
-    try{await click(tree,'inspector-reasoning-choice');const old=labeled(tree,'High').props.onPress;await act(async()=>{change();old()});assert.deepEqual(fixture.writes,[])}finally{await unmount(tree)}
+    try{await click(tree,'inspector-reasoning-choice');const old=sheetOption('High');await act(async()=>{change();old()});assert.deepEqual(fixture.writes,[])}finally{await unmount(tree)}
   }
 })
 test('Inspector retires old responses without clearing a newer pending reasoning save',async()=>{
@@ -120,27 +125,55 @@ test('Inspector retires old responses without clearing a newer pending reasoning
   store.setState({updateSession:async(...args)=>{fixture.writes.push(args);store.setState({sessions:store.getState().sessions.map(session=>({...session,...args[1]}))});return fixture.writes.length===1?first.promise:second.promise}})
   const {tree}=await render()
   try{
-    await click(tree,'inspector-reasoning-choice');await act(async()=>labeled(tree,'High').props.onPress())
+    await click(tree,'inspector-reasoning-choice');await chooseSheet('High')
     await act(async()=>{fixture.client.validationRevision++;store.setState({health:health()})})
-    assert.equal(byID(tree,'inspector-choice-saving').length,0);await click(tree,'inspector-reasoning-choice');await act(async()=>labeled(tree,'Ultra').props.onPress())
+    assert.equal(byID(tree,'inspector-choice-saving').length,0);await click(tree,'inspector-reasoning-choice');await chooseSheet('Ultra')
     await act(async()=>first.resolve(true));assert.equal(byID(tree,'inspector-choice-saved').length,0);assert.equal(byID(tree,'inspector-choice-saving').length,1)
     await act(async()=>second.resolve(true));assert.equal(byID(tree,'inspector-choice-saving').length,0);assert.match(text(tree),/Saved for the next turn/)
   }finally{await unmount(tree)}
 })
 test('Inspector hides Cursor reasoning and prevents offline runtime changes',async()=>{
   resetReasoning({connected:false});const {tree}=await render()
-  try{assert.equal(byID(tree,'inspector-reasoning-choice')[0].props.disabled,true);await click(tree,'inspector-reasoning-choice');assert.equal(byID(tree,'inspector-reasoning-choice-list').length,0)
+  try{assert.equal(byID(tree,'inspector-reasoning-choice')[0].props.disabled,true);await click(tree,'inspector-reasoning-choice');assert.equal(fixture.sheets.length,0)
     await act(async()=>store.setState({connected:true,sessions:[{...store.getState().sessions[0],backend:'cursor'}]}));assert.equal(byID(tree,'inspector-reasoning-choice').length,0)
   }finally{await unmount(tree)}
 })
-test('Inspector Agent jobs uses the same inline choices and rechecks permission capability before saving',async()=>{
+test('Inspector Agent jobs uses the same native choices and rechecks permission capability before saving',async()=>{
   resetReasoning({health:{...health(),capabilities:{...health().capabilities,provider_jobs_access_control_v1:{available:true,version:1,modes:['full','read_only','blocked'],default:'full'}}}})
   const {tree}=await render()
   try{
     await click(tree,'inspector-jobs-choice');assert.equal(tree.root.findAllByType('Modal').length,0)
-    await act(async()=>labeled(tree,'Read-only').props.onPress());assert.deepEqual(fixture.writes,[['chat',{provider_jobs_access:'read_only'},1]])
-    assert.match(text(tree),/Saved agent job access/);await click(tree,'inspector-jobs-choice');const old=labeled(tree,'Blocked').props.onPress
+    assert.equal(nativeSheet().options.title,'Agent jobs');await chooseSheet('Read-only');assert.deepEqual(fixture.writes,[['chat',{provider_jobs_access:'read_only'},1]])
+    assert.match(text(tree),/Saved agent job access/);await click(tree,'inspector-jobs-choice');const old=sheetOption('Blocked')
     await act(async()=>{store.setState({health:health()});old()});assert.equal(fixture.writes.length,1)
+  }finally{await unmount(tree)}
+})
+
+test('native Cancel, reopen, scope invalidation and unmount retire their exact sheet callbacks',async()=>{
+  resetReasoning();const {tree}=await render()
+  await click(tree,'inspector-reasoning-choice');const cancelled=sheetOption('High');await chooseSheet('Cancel')
+  await click(tree,'inspector-reasoning-choice');await act(async()=>cancelled());assert.deepEqual(fixture.writes,[])
+  const invalidated=sheetOption('High');await act(async()=>{fixture.client.validationRevision++;store.setState({health:health()})})
+  assert.equal(fixture.dismissedSheets,1);await click(tree,'inspector-reasoning-choice');await act(async()=>invalidated());assert.deepEqual(fixture.writes,[])
+  const unmounted=sheetOption('High');await unmount(tree);assert.equal(fixture.dismissedSheets,2);await act(async()=>unmounted());assert.deepEqual(fixture.writes,[])
+})
+test('Android reasoning retains bounded inline choices, locked guards, failure retry and close retirement',async()=>{
+  resetReasoning({updateSession:async(...args)=>{fixture.writes.push(args);throw Error('Connection dropped')}});fixture.platform='android';const {tree}=await render()
+  try{
+    await click(tree,'inspector-model-choice');assert.equal(labeled(tree,'Locked model, upgrade required').props.disabled,true)
+    await act(async()=>labeled(tree,'Locked model, upgrade required').props.onPress());assert.deepEqual(fixture.writes,[])
+    await click(tree,'inspector-model-choice-close');await click(tree,'inspector-reasoning-choice')
+    assert.equal(fixture.sheets.length,0);assert.equal(tree.root.findAllByType('Modal').length,0)
+    assert.ok(style(byID(tree,'inspector-reasoning-choice-list')[0].props.style).maxHeight<=264)
+    assert.ok(style(byID(tree,'inspector-reasoning-choice-close')[0].props.style).minHeight>=44)
+    const old=labeled(tree,'High').props.onPress;await act(async()=>old());assert.match(text(tree),/Connection dropped/)
+    assert.equal(byID(tree,'inspector-reasoning-choice-list').length,1)
+    await act(async()=>old());assert.equal(fixture.writes.length,2)
+    await click(tree,'inspector-reasoning-choice-close');await click(tree,'inspector-reasoning-choice')
+    await act(async()=>old());assert.equal(fixture.writes.length,2)
+    await act(async()=>store.setState({updateSession:async(...args)=>{fixture.writes.push(args);store.setState({sessions:store.getState().sessions.map(session=>({...session,...args[1]}))});return true}}))
+    await act(async()=>labeled(tree,'Ultra').props.onPress());assert.equal(store.getState().sessions[0].effort,'ultra')
+    assert.equal(byID(tree,'inspector-reasoning-choice-list').length,0)
   }finally{await unmount(tree)}
 })
 

@@ -16,6 +16,14 @@ const event = (seq: number, type: string, patch: Partial<Event> = {}): Event => 
 })
 
 describe('timeline semantic units', () => {
+  it('retains OpenCode context resets as separate landmarks even inside scheduled runs', () => {
+    const reset = event(2, 'provider_session_reset', { backend: 'opencode', run_id: 'run', job_id: 'job' })
+    const units = timelineSemanticUnits([
+      event(1, 'turn_started', { backend: 'opencode', run_id: 'run', job_id: 'job' }), reset,
+      event(3, 'turn_stopped', { backend: 'opencode', run_id: 'run', job_id: 'job' })
+    ])
+    expect(units.find(unit => unit.key === 'event:event-2')?.events).toEqual([reset])
+  })
   it('does not count the internal reconciliation-consumed receipt as transcript content', () => {
     expect(timelineSemanticUnits([event(1, 'claude_background_task_reconciliation_consumed')])).toEqual([])
     expect(timelineSemanticUnits([event(1, 'assistant_text', { text: 'Claude Background Task Reconciliation Consumed' })])).toHaveLength(1)

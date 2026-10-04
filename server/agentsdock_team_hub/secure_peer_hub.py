@@ -9,6 +9,7 @@ synthetic, live-checked automation principal.
 from __future__ import annotations
 
 from contextlib import suppress
+from functools import wraps
 import json
 from collections import deque
 import os
@@ -27,8 +28,12 @@ from .secure_peer import (
     PeerAuthorization,
     ProxyRequest,
     ProxyResponse,
+    SecurePeerError,
 )
 from .security import canonical_json
+from .mail_hint_streams import MailHintLease, owned_mail_snapshot
+from .mail_hints import MailHintCapacity, MailHintClosed
+from .notification_hints import NotificationLease, owned_notification_snapshot
 from .store import MAX_NETWORK_BODY_BYTES, HubError, HubStore
 
 
@@ -43,6 +48,21 @@ _CONTENT_RANGE_RE = re.compile(
 _RANGE_RE = re.compile(r"^bytes=(?P<start>[0-9]{0,15})-(?P<end>[0-9]{0,15})$")
 
 
+def _mail_hint_errors(operation):
+    """Keep pre-header Mail failures typed at the authenticated gateway seam."""
+    @wraps(operation)
+    def run(*args, **kwargs):
+        try:
+            return operation(*args, **kwargs)
+        except HubError as exc:
+            raise SecurePeerError(exc.code, str(exc), exc.status_code) from exc
+        except MailHintCapacity as exc:
+            raise SecurePeerError("rate_limited", str(exc), 429) from exc
+        except MailHintClosed as exc:
+            raise SecurePeerError("forbidden", str(exc), 403) from exc
+    return run
+
+
 class SecurePeerHubAdapter:
     """Translate the gateway's exact allowlist into Team Hub store calls."""
 
@@ -54,6 +74,102 @@ class SecurePeerHubAdapter:
         self._in_flight: dict[str, int] = {}
         self._revoking: set[str] = set()
         self._stream_aborters: dict[str, set[Callable[[], None]]] = {}
+        # Passive Mail leases never retain _in_flight or ordinary rate slots.
+        self._mail_leases: dict[str, set[MailHintLease | NotificationLease | object]] = {}
+
+    @_mail_hint_errors
+    def team_mail_hint_snapshot(self, peer: PeerAuthorization, previous_cursor=None, *, version: int = 1) -> dict[str, Any]:
+        self._admit(peer.peer_id, write=False)
+        try:
+            owned = owned_notification_snapshot if version == 2 else owned_mail_snapshot
+            snapshot, _retained = owned(
+                self.store, self._claims(self.store, peer), peer.team_id, previous_cursor,
+            )
+            return {"hub_id": self.store.hub_id, "cursor": snapshot}
+        finally:
+            self._release(peer.peer_id)
+
+    @_mail_hint_errors
+    def subscribe_team_mail_hints(self, peer: PeerAuthorization, previous_cursor=None, *,
+                                  authority_guard: Callable[[], None] | None = None,
+                                  version: int = 1) -> MailHintLease | NotificationLease:
+        token = object()
+        with self._rate_condition:
+            current = self._mail_leases.get(peer.peer_id, set())
+            if peer.peer_id in self._revoking:
+                raise MailHintClosed("Secure peer authorization is being revoked")
+            if len(current) >= 2 or sum(map(len, self._mail_leases.values())) >= 64:
+                raise HubError("rate_limited", "Mail stream capacity reached", 429)
+            self._mail_leases.setdefault(peer.peer_id, set()).add(token)
+        subscription = None
+        lease = None
+        try:
+            claims = self._claims(self.store, peer)
+            owned = owned_notification_snapshot if version == 2 else owned_mail_snapshot
+            _owned, retained = owned(self.store, claims, peer.team_id, previous_cursor)
+            subscriber = self.store.subscribe_team_notifications if version == 2 else self.store.subscribe_team_mail_arrivals
+            subscription, snapshot = subscriber(
+                claims, peer.team_id, previous_cursor=retained,
+            )
+
+            @_mail_hint_errors
+            def authorize() -> None:
+                if authority_guard is not None:
+                    authority_guard()
+                with self._rate_condition:
+                    if peer.peer_id in self._revoking or lease not in self._mail_leases.get(peer.peer_id, ()):
+                        raise MailHintClosed("Secure peer Mail authority changed")
+                live = self.store.team_mail_arrival_snapshot(
+                    self._claims(self.store, peer), peer.team_id,
+                )
+                mail_snapshot = snapshot["mail"] if version == 2 else snapshot
+                if live["recipient_server_id"] != mail_snapshot["recipient_server_id"]:
+                    raise MailHintClosed("Secure peer Mail binding changed")
+
+            def retired() -> None:
+                with self._rate_condition:
+                    members = self._mail_leases.get(peer.peer_id)
+                    if members is not None:
+                        members.discard(lease)
+                        if not members:
+                            self._mail_leases.pop(peer.peer_id, None)
+                    self._rate_condition.notify_all()
+
+            lease_type = NotificationLease if version == 2 else MailHintLease
+            lease = lease_type(
+                subscription, snapshot, hub_id=self.store.hub_id, authorize=authorize,
+                expires_at=peer.certificate_expires_at, on_close=retired,
+            )
+            with self._rate_condition:
+                members = self._mail_leases[peer.peer_id]
+                members.discard(token)
+                members.add(lease)
+                self._rate_condition.notify_all()
+            lease.revalidate()
+            return lease
+        except BaseException:
+            if lease is not None:
+                lease.close()
+            elif subscription is not None:
+                subscription.close()
+            with self._rate_condition:
+                members = self._mail_leases.get(peer.peer_id)
+                if members is not None:
+                    members.discard(token)
+                    if not members:
+                        self._mail_leases.pop(peer.peer_id, None)
+                self._rate_condition.notify_all()
+            raise
+
+    def close_mail_hint_streams(self, peer_id: str | None = None) -> None:
+        with self._rate_condition:
+            leases = tuple(
+                item for key, members in self._mail_leases.items()
+                if peer_id is None or key == peer_id
+                for item in members if isinstance(item, (MailHintLease, NotificationLease))
+            )
+        for lease in leases:
+            lease.close()
 
     def _admit(
         self, peer_id: str, *, write: bool, attachment: bool = False
@@ -138,6 +254,12 @@ class SecurePeerHubAdapter:
         # streams so successful revocation proves no old peer still has bytes.
         with self._rate_condition:
             self._revoking.add(peer_id)
+        self.close_mail_hint_streams(peer_id)
+        # A bounded snapshot admitted before revocation must register/retire
+        # before projection revocation returns. New subscriptions are fenced.
+        with self._rate_condition:
+            while self._mail_leases.get(peer_id):
+                self._rate_condition.wait()
         while True:
             with self._rate_condition:
                 if self._in_flight.get(peer_id, 0) <= 0:
@@ -436,11 +558,16 @@ class SecurePeerHubAdapter:
             not isinstance(recipients, list)
             or not 1 <= len(recipients) <= 16
             or any(
-                not isinstance(item, dict) or not set(item).issubset({"kind", "id"})
+                not isinstance(item, dict) or not set(item).issubset({
+                    "kind", "id", "mail_route_lifecycle_id",
+                })
                 for item in recipients
             )
         ):
             raise HubError("invalid_request", "Request body is invalid", 422)
+        # A durable @@ grant pins the recipient's inbox incarnation. Preserve
+        # that precondition across mTLS just like the direct Hub API; the store
+        # validates its value and checks it inside the message transaction.
         skill = value.get("skill")
         if skill is not None and (
             not isinstance(skill, dict)
@@ -456,15 +583,42 @@ class SecurePeerHubAdapter:
     def _team_receipt_body(cls, request: ProxyRequest) -> dict[str, Any]:
         value = cls._object_body(
             request,
-            allowed={"state", "idempotency_key"},
+            allowed={"state", "idempotency_key", "address_kind", "address_id"},
             required={"state", "idempotency_key"},
         )
         if value.get("state") not in {"delivered", "read"}:
             raise HubError("invalid_request", "Request body is invalid", 422)
+        if ("address_kind" in value) != ("address_id" in value):
+            raise HubError("invalid_request", "Receipt mailbox requires kind and id", 422)
+        if "address_kind" in value and value["address_kind"] not in {"human", "server"}:
+            raise HubError("invalid_request", "Receipt mailbox is invalid", 422)
         return {
             "state": value["state"],
             "idempotency_key": cls._identifier(value["idempotency_key"], minimum=8),
+            **({"address_kind": value["address_kind"], "address_id": cls._identifier(value["address_id"], minimum=8)}
+               if "address_kind" in value else {}),
         }
+
+    @classmethod
+    def _team_dismissal_body(cls, request: ProxyRequest) -> dict[str, Any]:
+        value = cls._object_body(request,
+            allowed={"address_kind", "address_id", "idempotency_key"},
+            required={"address_kind", "address_id", "idempotency_key"})
+        if value["address_kind"] not in {"human", "server"}:
+            raise HubError("invalid_request", "Mailbox is invalid", 422)
+        return {"address_kind": value["address_kind"],
+            "address_id": cls._identifier(value["address_id"], minimum=8),
+            "idempotency_key": cls._identifier(value["idempotency_key"], minimum=8)}
+
+    @classmethod
+    def _team_mailbox_state_body(cls, request: ProxyRequest) -> dict[str, Any]:
+        fields = {"address_kind", "address_id", "unread", "expected_version", "idempotency_key"}
+        value = cls._object_body(request, allowed=fields, required=fields)
+        if value["address_kind"] != "server" or type(value["unread"]) is not bool \
+                or type(value["expected_version"]) is not int or not 0 <= value["expected_version"] < 9_007_199_254_740_991:
+            raise HubError("invalid_request", "Server mailbox state is invalid", 422)
+        return {**value, "address_id": cls._identifier(value["address_id"], minimum=8),
+            "idempotency_key": cls._identifier(value["idempotency_key"], minimum=8)}
 
     @classmethod
     def _team_message_revision_body(cls, request: ProxyRequest) -> dict[str, Any]:
@@ -529,12 +683,21 @@ class SecurePeerHubAdapter:
         ):
             raise HubError("invalid_request", "Query is invalid", 422)
         values = dict(pairs)
-        for key in ("after_sequence", "limit"):
+        for key in ("after_sequence", "limit", "version"):
             if key in values and (
                 not values[key].isdigit() or str(int(values[key])) != values[key]
             ):
                 raise HubError("invalid_request", "Query is invalid", 422)
+        if "q" in values:
+            HubStore._team_message_search_expression(values["q"])
         if "limit" in values and not 1 <= int(values["limit"]) <= 100:
+            raise HubError("invalid_request", "Query is invalid", 422)
+        if "version" in values and not 1 <= int(values["version"]) <= 200:
+            raise HubError("invalid_request", "Query is invalid", 422)
+        for flag in ("include_mail_subject", "include_mailbox_state", "include_mailbox_coverage"):
+            if flag in values and values[flag] not in {"0", "1", "true", "false"}:
+                raise HubError("invalid_request", "Query is invalid", 422)
+        if "after_arrival_id" in values and re.fullmatch(r"tmsg_[0-9a-f]{32}", values["after_arrival_id"]) is None:
             raise HubError("invalid_request", "Query is invalid", 422)
         if "cursor" in values:
             if re.fullmatch(r"v1\.[A-Za-z0-9_-]{38,500}", values["cursor"]) is None:
@@ -907,6 +1070,11 @@ class SecurePeerHubAdapter:
                             "since",
                             "after_sequence",
                             "limit",
+                            "include_revision",
+                            "include_mail_subject",
+                            "include_mailbox_state",
+                            "include_mailbox_coverage", "after_arrival_id",
+                            "q",
                         },
                     )
                     result = self.store.list_team_messages(
@@ -922,22 +1090,42 @@ class SecurePeerHubAdapter:
                         after_sequence=int(values.get("after_sequence", "0")),
                         limit=int(values.get("limit", "50")),
                         include_revision=self._query_flag(values, "include_revision"),
+                        include_mail_subject=self._query_flag(values, "include_mail_subject"),
+                        include_mailbox_state=self._query_flag(values, "include_mailbox_state"),
+                        include_mailbox_coverage=self._query_flag(values, "include_mailbox_coverage"),
+                        after_arrival_id=values.get("after_arrival_id"),
+                        q=values.get("q"),
                     )
                 elif len(pieces) == 4 and pieces[1:3] == [_NETWORK_CHILD, "messages"]:
-                    values = self._team_query(request, allowed={"include_revision"})
+                    values = self._team_query(request, allowed={"include_revision", "include_mail_subject", "include_mailbox_state"})
                     result = self.store.get_team_message(
                         claims,
                         team_id,
                         self._resource_id(pieces[3]),
                         include_revision=self._query_flag(values, "include_revision"),
+                        include_mail_subject=self._query_flag(values, "include_mail_subject"),
+                        include_mailbox_state=self._query_flag(values, "include_mailbox_state"),
                     )
                 elif (
                     len(pieces) == 5
                     and pieces[1:3] == [_NETWORK_CHILD, "messages"]
                     and pieces[4] == "revisions"
                 ):
+                    values = self._team_query(request, allowed={"version"})
                     result = self.store.list_team_message_revisions(
-                        claims, team_id, self._resource_id(pieces[3])
+                        claims, team_id, self._resource_id(pieces[3]),
+                        version=int(values["version"]) if "version" in values else None,
+                    )
+                elif (
+                    len(pieces) == 5
+                    and pieces[1:3] == [_NETWORK_CHILD, "messages"]
+                    and pieces[4] == "thread"
+                ):
+                    values = self._team_query(request, allowed={"after_sequence", "limit"})
+                    result = self.store.get_team_message_thread(
+                        claims, team_id, self._resource_id(pieces[3]),
+                        after_sequence=int(values.get("after_sequence", "0")),
+                        limit=int(values.get("limit", "25")),
                     )
                 elif len(pieces) == 4 and pieces[1:3] == [_NETWORK_CHILD, "attachments"]:
                     result = self.store.get_team_attachment(
@@ -978,7 +1166,13 @@ class SecurePeerHubAdapter:
                 remainder = path[len(_TEAM_PREFIX) :]
                 pieces = remainder.split("/")
                 team_id = pieces[0]
-                if len(pieces) == 3 and pieces[1:] == [_NETWORK_CHILD, "agents"]:
+                if len(pieces) == 3 and pieces[1:] == [_NETWORK_CHILD, "server-profile"]:
+                    self._query(request, allowed=set())
+                    body = self._object_body(request, allowed={"display_name"}, required={"display_name"})
+                    result = self.store.rename_network_server(
+                        claims, team_id, self._identifier(body["display_name"], maximum=160)
+                    )
+                elif len(pieces) == 3 and pieces[1:] == [_NETWORK_CHILD, "agents"]:
                     result = self.store.register_network_agent(
                         claims, team_id, self._network_agent_body(request)
                     )
@@ -1071,11 +1265,28 @@ class SecurePeerHubAdapter:
                     and pieces[1:3] == [_NETWORK_CHILD, "messages"]
                     and pieces[4] == "revisions"
                 ):
+                    values = self._team_query(request, allowed={"include_mail_subject"})
                     result = self.store.revise_team_message(
                         claims,
                         team_id,
                         self._resource_id(pieces[3]),
                         self._team_message_revision_body(request),
+                        include_mail_subject=self._query_flag(values, "include_mail_subject"),
+                    )
+                elif (
+                    len(pieces) == 5
+                    and pieces[1:3] == [_NETWORK_CHILD, "messages"]
+                    and pieces[4] == "dismissals"
+                ):
+                    result = self.store.dismiss_team_message(
+                        claims, team_id, self._resource_id(pieces[3]), self._team_dismissal_body(request)
+                    )
+                elif (
+                    len(pieces) == 5 and pieces[1:3] == [_NETWORK_CHILD, "messages"]
+                    and pieces[4] == "mailbox-state"
+                ):
+                    result = self.store.set_team_message_mailbox_state(
+                        claims, team_id, self._resource_id(pieces[3]), self._team_mailbox_state_body(request)
                     )
                 elif len(pieces) == 3 and pieces[1:] == [_NETWORK_CHILD, "attachments"]:
                     result = self.store.declare_team_attachment(

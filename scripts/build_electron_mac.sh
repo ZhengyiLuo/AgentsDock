@@ -14,6 +14,8 @@ BUILD_LOCK="$DESTINATION_DIR/.AgentsDock.local-build.lock"
 BUNDLED_RUNTIME="$HOME/.cache/codex-runtimes/codex-primary-runtime/dependencies"
 PACKAGE_DIR=""
 STAGE_DIR=""
+COORDINATED_STAGE=""
+COORDINATED_CONFIG_ARGS=()
 ENTITLEMENTS_PLIST=""
 LOCK_HELD=0
 
@@ -46,6 +48,9 @@ cleanup_build_paths() {
   fi
   if [[ -n "$STAGE_DIR" && -d "$STAGE_DIR" ]]; then
     rm -rf "$STAGE_DIR"
+  fi
+  if [[ -n "$COORDINATED_STAGE" && -d "$COORDINATED_STAGE" ]]; then
+    rm -rf "$COORDINATED_STAGE"
   fi
   if [[ -n "$ENTITLEMENTS_PLIST" && -f "$ENTITLEMENTS_PLIST" ]]; then
     /bin/rm -f "$ENTITLEMENTS_PLIST"
@@ -102,6 +107,13 @@ fi
 
 cd "$PROJECT"
 
+if [[ -n "${AGENTSDOCK_COORDINATED_MANIFEST:-}" || -n "${AGENTSDOCK_COORDINATED_SIGNATURE:-}" ]]; then
+  mkdir -p "$ROOT/dist"
+  COORDINATED_STAGE="$(mktemp -d "$ROOT/dist/.coordinated-mac.XXXXXX")"
+  node "$ROOT/scripts/prepare_electron_coordinated_config.mjs" "$PROJECT" "$COORDINATED_STAGE"
+  COORDINATED_CONFIG_ARGS=(--config "$COORDINATED_STAGE/electron-builder.json")
+fi
+
 "$ROOT/scripts/build_electron_icon.sh"
 
 if [[ ! -d node_modules ]]; then
@@ -115,7 +127,7 @@ node "$ROOT/scripts/verify_electron_compile_output.mjs" "$PROJECT"
 PACKAGE_DIR="$(mktemp -d "${TMPDIR:-/tmp}/agentsdock-electron-local.XXXXXX")"
 STAGE_DIR="$(mktemp -d "$DESTINATION_DIR/.AgentsDock-stage.XXXXXX")"
 STAGED_DESTINATION="$STAGE_DIR/AgentsDock.app"
-node_modules/.bin/electron-builder --mac dir --publish never --config.mac.identity=null --config.directories.output="$PACKAGE_DIR"
+node_modules/.bin/electron-builder --mac dir --publish never "${COORDINATED_CONFIG_ARGS[@]}" --config.mac.identity=null --config.directories.output="$PACKAGE_DIR"
 
 /usr/bin/ditto "$PACKAGE_DIR/mac-arm64/AgentsDock.app" "$STAGED_DESTINATION"
 /usr/bin/touch "$STAGED_DESTINATION/Contents/Resources/disable-auto-update"

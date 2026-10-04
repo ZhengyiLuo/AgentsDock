@@ -10,7 +10,7 @@ import { CodexContextIndicator, CodexStatusButton } from './CodexControls'
 import { ClaudeContextIndicator } from './ClaudeContextIndicator'
 import { IconButton } from './ui'
 
-export function ChatHeader({ sessionId, compact, onBack, onOptions, onSearch, onFiles, onToggleInspector, onSetupServer }: { sessionId: string; compact: boolean; onBack: () => void; onOptions: () => void; onSearch: () => void; onFiles: () => void; onToggleInspector: () => void; onSetupServer: () => void }) {
+export function ChatHeader({ sessionId, compact, inlineInspectorAvailable, onBack, onOptions, onSearch, onFiles, onToggleInspector, onSetupServer }: { sessionId: string; compact: boolean; inlineInspectorAvailable: boolean; onBack: () => void; onOptions: () => void; onSearch: () => void; onFiles: () => void; onToggleInspector: () => void; onSetupServer: () => void }) {
   const colors = usePalette()
   const session = useAppStore(state => state.sessions.find(value => value.id === sessionId))
   const connected = useAppStore(state => state.connected)
@@ -51,7 +51,7 @@ export function ChatHeader({ sessionId, compact, onBack, onOptions, onSearch, on
     {!compact ? <IconButton icon={RefreshCw} onPress={() => void retryConnection()} label="Refresh" /> : null}
     <IconButton icon={Search} onPress={onSearch} label="Find in chat" />
     <IconButton icon={FolderOpen} onPress={onFiles} label="Browse workspace files" testID="chat-workspace-files" />
-    {!compact ? <IconButton icon={PanelRight} onPress={onToggleInspector} label="Toggle details" /> : null}
+    {inlineInspectorAvailable ? <IconButton icon={PanelRight} onPress={onToggleInspector} label="Toggle details" /> : null}
     <CodexContextIndicator />
     <ClaudeContextIndicator />
     <CodexStatusButton compact={compact} />

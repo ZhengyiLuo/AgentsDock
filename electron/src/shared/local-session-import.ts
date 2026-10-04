@@ -43,6 +43,14 @@ export function localSessionImportSupported(health: Health | null | undefined): 
   return localSessionImportCapability(health) != null
 }
 
+export function cursorLocalSessionImportSupported(health: Health | null | undefined): boolean {
+  const capability = health?.capabilities?.local_session_import_cursor_v1
+  return localSessionImportSupported(health)
+    && isRecord(capability) && capability.available === true
+    && Number.isInteger(capability.version) && Number(capability.version) >= 1
+    && capability.history_mode === 'initial_text_snapshot'
+}
+
 export function requireLocalSessionImportCapability(health: Health | null | undefined): LocalSessionImportCapability {
   const capability = localSessionImportCapability(health)
   if (!capability) {
@@ -158,12 +166,12 @@ function positiveInteger(value: unknown): value is number {
 }
 
 function parseBackend(value: unknown, field: string): Backend {
-  if (value !== 'claude' && value !== 'codex') throw new Error(`Import Chat ${field} is invalid.`)
+  if (value !== 'claude' && value !== 'codex' && value !== 'cursor') throw new Error(`Import Chat ${field} is invalid.`)
   return value
 }
 
 function parseBackendResponse(value: unknown, field: string): Backend {
-  if (value !== 'claude' && value !== 'codex') throw invalidResponse(field)
+  if (value !== 'claude' && value !== 'codex' && value !== 'cursor') throw invalidResponse(field)
   return value
 }
 
@@ -186,7 +194,7 @@ function responseString(value: unknown, max: number, field: string, allowWhitesp
 }
 
 function responseLabel(value: unknown, backend: Backend, providerSessionId: string): string {
-  const fallback = `${backend === 'claude' ? 'Claude' : 'Codex'} chat ${providerSessionId.slice(0, 8)}`
+  const fallback = `${backend === 'claude' ? 'Claude' : backend === 'cursor' ? 'Cursor' : 'Codex'} chat ${providerSessionId.slice(0, 8)}`
   if (
     typeof value !== 'string'
     || value.length === 0

@@ -19,6 +19,9 @@ export interface MessageItem {
   events: Event[]
   role: 'user' | 'assistant'
   files: AgentFile[]
+  /** Renderer-only outbound message that has not been accepted by AgentsServer yet. */
+  pending?: boolean
+  pendingPhase?: 'preflight' | 'submitting' | 'submitted'
 }
 
 export interface TraceItem {
@@ -38,6 +41,8 @@ export interface ProgressItem {
   seq: number
   /** All user-visible run activity, including commentary, reasoning, and tools. */
   events: Event[]
+  /** Commentary that is also surfaced as assistant output; hide it from expanded details to avoid duplication. */
+  promotedCommentaryIds?: string[]
   /** Unfiltered compact activity retained for merging full trace pages before normalization. */
   sourceEvents?: Event[]
   /** Live commentary stays visible; terminal tool details can collapse. */
@@ -155,14 +160,14 @@ export interface JobItem {
 }
 
 const traceTypes = new Set([
-  'reasoning_summary', 'tool_started', 'tool_finished', 'raw_event', 'process_started',
+  'reasoning_summary', 'reasoning_text', 'tool_started', 'tool_finished', 'raw_event', 'process_started',
   'provider_session', 'cwd_fallback', 'history_imported', 'backend_changed', 'artifact_error',
   'session_created', 'idle_warning', 'code_diff'
 ])
 const hiddenTypes = new Set([
   'turn_queued', 'turn_unqueued', 'turn_queue_updated', 'turn_queue_reordered',
   'turn_queue_run_now', 'turn_queue_paused', 'turn_queue_delivery_fenced', 'queue_snapshot',
-  'subagent_state', 'claude_subagents_stopped', 'job_updated', 'job_deleted',
+  'subagent_state', 'claude_subagents_stopped', 'claude_goal_changed', 'job_updated', 'job_deleted',
   'codex_thread_status', 'codex_goal_updated', 'codex_goal_cleared', 'codex_token_usage',
   'emergency_alert_acknowledged',
   'claude_background_task_reconciliation_consumed',
@@ -183,7 +188,7 @@ function jobLinkedRunIds(event: Event): string[] {
 }
 
 export function isHandoffDigestEvent(event: Event): boolean {
-  return Boolean(event.digest_job_id) &&
+  return event.type !== 'provider_session_reset' && Boolean(event.digest_job_id) &&
     (event.purpose === 'handoff_digest' || event.type.startsWith('handoff_digest_'))
 }
 
@@ -505,6 +510,13 @@ export class TimelineProjector {
       if (ownedFileIds) event = { ...event, file_ids: [...ownedFileIds] }
       this.queuedInputFileIds.delete(queuedId)
       this.removeItem(`turn-deferred:${queuedId}`)
+    }
+    // Context loss is user-visible even when a digest or scheduled turn owns
+    // the run. Keep provenance filtering above, but never absorb this notice
+    // into workflow plumbing or a folded activity card.
+    if (event.type === 'provider_session_reset') {
+      this.addItem({ kind: 'system', id: `event:${event.id}`, key: `event:${event.id}`, seq: event.seq, event })
+      return
     }
     const deliveredDigest = digestBody(event)
     if (deliveredDigest) {
@@ -1173,6 +1185,7 @@ export class TimelineProjector {
       eventFile(event)
       || event.type === 'code_diff'
       || event.type === 'reasoning_summary'
+      || event.type === 'reasoning_text'
       || event.type === 'tool_started'
       || event.type === 'tool_finished'
     )) {
@@ -1921,13 +1934,22 @@ function renderTimelineItem(item: TimelineItem): RenderTimelineItem[] {
     const suffix = segment.after ? `:after:${segment.after.id}` : ''
     const active = last && !item.finishedAt && segment.finals.length === 0
     const activityEvents = omitTerminalClaudeFinalCommentary(segment.events, segment.finals)
-    if ((last && item.stoppedAt) || traceHasVisibleContent(activityEvents)) {
+    // Apply legacy report recovery after ownership filtering and final-answer
+    // deduplication, so repaired imports and repeated final text stay omitted.
+    const promotedAssistantEvents = activityEvents
+      .filter(isLegacyClaudeCommentaryReport)
+      .map(promotedClaudeCommentaryAssistantEvent)
+    // A compact history page can retain only the terminal commentary as its
+    // trace anchor. Deduplicating its text must not remove the entry point for
+    // fetching the rest of that run's activity.
+    if ((last && item.stoppedAt) || traceHasVisibleContent(segment.events)) {
       rows.push({
         kind: 'progress',
         id: `${item.id}:activity${suffix}`,
         key: `${item.key}:activity${suffix}`,
         seq: activityEvents[0] ? activityEventSequence(activityEvents[0], orderingFinalEvents) : item.user?.seq ?? item.seq,
         events: activityEvents,
+        promotedCommentaryIds: promotedAssistantEvents.map(event => event.id),
         sourceEvents: segment.events,
         active,
         hasFinalResponse: segment.finals.length > 0,
@@ -1941,6 +1963,18 @@ function renderTimelineItem(item: TimelineItem): RenderTimelineItem[] {
         terminalSeq: last && item.finishedAt ? item.terminalSeq : undefined
       })
     }
+    for (const event of promotedAssistantEvents) {
+      rows.push({
+        kind: 'message',
+        id: `${item.id}:assistant:promoted:${event.id}${suffix}`,
+        key: `${item.key}:assistant:promoted:${event.id}${suffix}`,
+        seq: event.seq,
+        event,
+        events: [event],
+        role: 'assistant',
+        files: item.files,
+      })
+    }
     if (segment.finals.length) {
       const event = segment.finals[segment.finals.length - 1]
       rows.push({
@@ -1950,7 +1984,16 @@ function renderTimelineItem(item: TimelineItem): RenderTimelineItem[] {
     }
   }
   if (outputFiles.length) {
-    rows.push({ kind: 'media', id: `${item.id}:media`, key: `${item.key}:media`, seq: outputFiles[0].seq ?? item.seq, files: outputFiles })
+    // Media is displayed after the turn's content, even when its first file
+    // was created earlier. An older anchor would pull intervening messages
+    // below the final answer and media when chronological rows are inserted.
+    const toolStartSequences = progressToolStartSequences(sourceEvents)
+    const mediaSeq = rows.reduce((anchor, row) => {
+      if (row.kind !== 'progress') return Math.max(anchor, row.seq)
+      const progress = { ...row, toolStartSequences }
+      return row.events.reduce((seq, event) => Math.max(seq, progressEventSequence(event, progress)), Math.max(anchor, row.seq))
+    }, outputFiles[0].seq ?? item.seq)
+    rows.push({ kind: 'media', id: `${item.id}:media`, key: `${item.key}:media`, seq: mediaSeq, files: outputFiles })
   }
   return rows
 }
@@ -1982,6 +2025,10 @@ function renderCrossChatMessage(item: SystemItem): SystemItem[] {
 
 /** Keep arrival order unless public commentary has an earlier, zoned timestamp in the same run. */
 export function activityEventSequence(event: Event, finals: Event[] = []): number {
+  // A completed summary retains the place where its first live text appeared.
+  // The durable sequence remains untouched for caching, read state and replay.
+  if ((event.type === 'reasoning_summary' || event.type === 'reasoning_text') && Number.isSafeInteger(event.reasoning_after_seq)
+    && event.reasoning_after_seq! >= 0 && event.reasoning_after_seq! < event.seq) return event.reasoning_after_seq! + 0.5
   if (!isPublicCommentary(event) || !event.run_id || !/(?:Z|[+-]\d{2}:\d{2})$/i.test(event.ts)) return event.seq
   const timestamp = Date.parse(event.ts)
   if (!Number.isFinite(timestamp)) return event.seq
@@ -2004,7 +2051,7 @@ function runPresentationSegments(events: Event[], finals: Event[], orderingFinal
   for (const event of orderedEvents) {
     // Post-answer diff/bookkeeping alone is not another working turn.
     if (event.type !== 'tool_started' && event.type !== 'tool_finished'
-      && !(event.type === 'reasoning_summary' && messageText(event).trim())
+      && !((event.type === 'reasoning_summary' || event.type === 'reasoning_text') && messageText(event).trim())
       && !isPublicCommentary(event)) continue
     const seq = activityEventSequence(event, orderingFinalEvents)
     while (finalCursor < finals.length && finals[finalCursor].seq < seq) finalCursor++
@@ -2031,7 +2078,7 @@ function runPresentationSegments(events: Event[], finals: Event[], orderingFinal
 }
 
 export function traceHasVisibleContent(events: Event[]): boolean {
-  return events.some(event => event.type === 'reasoning_summary' && Boolean(messageText(event).trim())) ||
+  return events.some(event => (event.type === 'reasoning_summary' || event.type === 'reasoning_text') && Boolean(messageText(event).trim())) ||
     events.some(isPublicCommentary) ||
     events.some(event => event.type === 'tool_started' || event.type === 'tool_finished') ||
     events.some(event => event.type === 'code_diff' && Boolean(event.run_id)) ||
@@ -2064,7 +2111,7 @@ export function reconcileRenderTimelineItems(previous: RenderTimelineItem[], nex
       sameReferences(before.events, item.events) &&
       sameReferences(before.sourceEvents ?? [], item.sourceEvents ?? []) &&
       sameReferences(before.lifecycle ?? [], item.lifecycle ?? [])) return before
-    if (before.kind === 'media' && item.kind === 'media' && sameReferences(before.files, item.files)) return before
+    if (before.kind === 'media' && item.kind === 'media' && before.seq === item.seq && sameReferences(before.files, item.files)) return before
     return item
   })
 }
@@ -2103,6 +2150,24 @@ export function isPublicCommentary(event: Event): boolean {
   return (event.type === 'reasoning_summary' || event.type === 'assistant_text')
     && event.phase === 'commentary'
     && Boolean(event.text?.trim())
+}
+
+function isLegacyClaudeCommentaryReport(event: Event): boolean {
+  const text = event.text?.trim() || ''
+  return event.backend === 'claude'
+    && event.phase === 'commentary'
+    && event.type === 'reasoning_summary'
+    && Boolean(text)
+    && (
+      text.length >= 1200
+      || /^#{1,6}\s+\S/m.test(text)
+      || /\n\s*\|[^|\n]+\|[^|\n]+\|/.test(text)
+    )
+}
+
+function promotedClaudeCommentaryAssistantEvent(event: Event): Event {
+  const { phase: _phase, ...publicText } = event
+  return { ...publicText, type: 'assistant_text' }
 }
 
 const claudeTerminalBookkeepingTypes = new Set([

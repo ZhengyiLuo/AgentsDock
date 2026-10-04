@@ -10,7 +10,8 @@ const runtimeCustomProperties = new Set([
   '--workspace-editor-width',
   '--workspace-explorer-width',
   '--workspace-markdown-source-percent',
-  '--radix-dropdown-menu-content-transform-origin'
+  '--radix-dropdown-menu-content-transform-origin',
+  '--radix-popover-content-available-height'
 ])
 
 const designSystemCustomProperties = [
@@ -112,6 +113,40 @@ describe('renderer CSS custom properties', () => {
     expect(
       [...missing].map(([property, locations]) => `${property}: ${locations.join(', ')}`)
     ).toEqual([])
+  })
+
+  it('keeps endpoint menus and confirmations above their parent Settings dialog', () => {
+    const shell = sources.find(({ file }) => file === join(rendererRoot, 'styles.css'))?.source ?? ''
+    const component = readFileSync(join(rendererRoot, 'components/EndpointMenu.tsx'), 'utf8')
+    const layer = (name: string) => {
+      const body = shell.split(`.${name} {`)[1]?.split('}')[0] ?? ''
+      const value = Number(body.match(/z-index:\s*(\d+)/)?.[1])
+      expect(Number.isFinite(value), `Missing ${name} layer`).toBe(true)
+      return value
+    }
+    const settings = layer('app-settings-dialog')
+    expect(component).toContain('menu-content endpoint-menu-content')
+    expect(component).toContain('dialog-overlay endpoint-confirm-overlay')
+    expect(component).toContain('form-dialog endpoint-confirm-dialog')
+    expect(layer('endpoint-menu-content')).toBeGreaterThan(settings)
+    expect(layer('endpoint-confirm-overlay')).toBeGreaterThan(settings)
+    expect(layer('endpoint-confirm-dialog')).toBeGreaterThan(layer('endpoint-confirm-overlay'))
+  })
+
+  it('gives the endpoint confirmation centered content and consistent insets', () => {
+    const shell = sources.find(({ file }) => file === join(rendererRoot, 'styles.css'))?.source ?? ''
+    const dialog = shell.split('.endpoint-confirm-dialog {')[1]?.split('}')[0] ?? ''
+    expect(dialog).toContain('padding: var(--space-8)')
+    expect(dialog).toContain('gap: var(--space-7)')
+    expect(dialog).toContain('text-align: center')
+    expect(dialog).toContain('width: min(440px, calc(100vw - 48px))')
+    const actions = shell.split('.endpoint-confirm-actions {')[1]?.split('}')[0] ?? ''
+    expect(actions).toContain('justify-content: center')
+    expect(actions).toContain('flex-wrap: wrap')
+    expect(actions).toContain('gap: var(--space-4)')
+    const component = readFileSync(join(rendererRoot, 'components/EndpointMenu.tsx'), 'utf8')
+    expect(component).toContain('className="endpoint-confirm-actions"')
+    expect(component).toContain('className="endpoint-confirm-description"')
   })
 })
 

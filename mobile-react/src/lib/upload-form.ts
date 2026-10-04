@@ -15,7 +15,7 @@ export function createUploadFormData(file: UploadRef): FormData {
   const part: ExpoMultipartFilePart = {
     name: file.name || source.name || 'upload',
     type: file.type || source.type || 'application/octet-stream',
-    // iOS photo URIs backed by iCloud, a limited-library selection, or a File
+    // iOS media URIs backed by iCloud, a limited-library selection, or a File
     // provider can fail to materialize their bytes. Surface a readable, tappable
     // failure instead of an opaque reject; combined with the attachFiles cleanup
     // this keeps the chip from ever hanging on "Uploading…".
@@ -23,7 +23,7 @@ export function createUploadFormData(file: UploadRef): FormData {
       try {
         return await source.bytes()
       } catch {
-        throw new Error(`Couldn’t read “${label}”. If it’s a photo stored in iCloud, open it once in Photos to download it, then try again.`)
+        throw new Error(`Couldn’t read “${label}”. If it’s a photo or video stored in iCloud, open it once in Photos to download it, then try again.`)
       }
     },
   }

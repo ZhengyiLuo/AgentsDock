@@ -61,6 +61,85 @@ describe('FileUploadGrantRegistry', () => {
     expect(() => grants.admit([second], { ...scope, rendererId: 42 }, 'chat-a')).toThrow(/choose this file again/i)
   })
 
+  it('lets a fresh trusted selection rebind idle files without permitting stale cross-chat replay', () => {
+    const { first, second } = fixture()
+    const grants = new FileUploadGrantRegistry()
+    grants.registerFreshSelection([first, second], scope)
+    expect(admitPaths(grants, [first, second], scope, 'chat-a')).toEqual([
+      realpathSync(first),
+      realpathSync(second)
+    ])
+
+    expect(() => grants.admit([first, second], scope, 'chat-b')).toThrow(/choose this file again/i)
+
+    grants.registerFreshSelection([first, second], scope)
+    expect(admitPaths(grants, [first, second], scope, 'chat-b')).toEqual([
+      realpathSync(first),
+      realpathSync(second)
+    ])
+  })
+
+  it('never replaces an active or managed grant during a fresh selection', () => {
+    const { first, second } = fixture()
+    const grants = new FileUploadGrantRegistry()
+    grants.registerFreshSelection([first], scope)
+    const active = grants.admit([first], scope, 'chat-a')[0]
+
+    expect(() => grants.registerFreshSelection([first], scope)).toThrow(/finish uploading/i)
+    active.close()
+    grants.registerFreshSelection([first], scope)
+    expect(admitPaths(grants, [first], scope, 'chat-b')).toEqual([realpathSync(first)])
+
+    grants.registerManaged(second, scope, vi.fn())
+    expect(() => grants.registerFreshSelection([second], scope)).toThrow(/finish uploading/i)
+    grants.releaseManaged(second, scope)
+  })
+
+  it('does not partially replace a fresh batch when one selected grant is busy', () => {
+    const { first, second } = fixture()
+    const grants = new FileUploadGrantRegistry()
+    grants.registerFreshSelection([first, second], scope)
+    expect(admitPaths(grants, [first], scope, 'chat-a')).toEqual([realpathSync(first)])
+    const busy = grants.admit([second], scope, 'chat-a')[0]
+
+    expect(() => grants.registerFreshSelection([first, second], scope)).toThrow(/finish uploading/i)
+    expect(admitPaths(grants, [first], scope, 'chat-a')).toEqual([realpathSync(first)])
+    busy.close()
+  })
+
+  it('does not evict unrelated active grants or replace declaration-bound grants', () => {
+    const { first, second } = fixture()
+    const grants = new FileUploadGrantRegistry({ maxEntries: 1 })
+    grants.registerFreshSelection([first], scope)
+    const active = grants.admit([first], scope, 'chat-a')[0]
+
+    expect(() => grants.registerFreshSelection([second], scope)).toThrow(/uploads to finish/i)
+    expect(readFileSync(active.fd, 'utf8')).toBe('first')
+    active.close()
+    expect(admitPaths(grants, [first], scope, 'chat-a')).toEqual([realpathSync(first)])
+
+    const declarations = new FileUploadGrantRegistry()
+    declarations.registerFreshSelection([first], scope)
+    const reserved = declarations.reserveDeclaration(first, scope, 'team:team-a')
+    declarations.bindDeclaration(first, scope, 'team:team-a', 'attachment-a')
+    reserved.close()
+    expect(() => declarations.registerFreshSelection([first], scope)).toThrow(/finish uploading/i)
+    const retry = declarations.admit([first], scope, 'team:team-a', 'attachment-a')
+    retry[0].close()
+  })
+
+  it('fences an upload against a newer trusted selection during asynchronous validation', () => {
+    const { first } = fixture()
+    const grants = new FileUploadGrantRegistry()
+    grants.registerFreshSelection([first], scope)
+    const captured = grants.captureAdmission([first], scope, 'chat-a')
+
+    grants.registerFreshSelection([first], scope)
+
+    expect(() => grants.admit([first], scope, 'chat-a', undefined, captured)).toThrow(/choose this file again/i)
+    expect(admitPaths(grants, [first], scope, 'chat-b')).toEqual([realpathSync(first)])
+  })
+
   it('allows only a bounded number of same-chat retries and expires grants', () => {
     const { first } = fixture()
     let now = 1_000

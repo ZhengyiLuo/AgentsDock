@@ -124,7 +124,11 @@ test('audited keyboard and failure paths cannot swallow the first tap silently',
   assert.doesNotMatch(media, /testID="media-viewer-close"/)
   assert.doesNotMatch(media, /video-close-inline|videoClose: \{/)
   assert.match(controls, /setOpen\(true\); requestAnimationFrame\(dismissAppKeyboard\)/)
-  assert.match(inspector, /setOpen\(true\); requestAnimationFrame\(dismissAppKeyboard\)/)
+  assert.match(
+    inspector.slice(inspector.indexOf('function ChoiceField('), inspector.indexOf('function nextRunLabel(')),
+    /setOpen\(true\)\s+if \(Platform\.OS === 'ios'\) \{\s+dismissAppKeyboard\(\)[\s\S]*?ActionSheetIOS\.showActionSheetWithOptions\([\s\S]*?\}\)\s+\} else requestAnimationFrame\(dismissAppKeyboard\)/,
+    'Choices publish open state first, dismiss the keyboard before native iOS presentation, and defer Android keyboard cleanup',
+  )
 })
 
 test('known compact controls retain 44-point minimum targets', () => {

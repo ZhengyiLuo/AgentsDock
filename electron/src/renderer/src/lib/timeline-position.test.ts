@@ -13,16 +13,21 @@ const saved = (topItemId: string, updatedAt = NOW - 1_000): ViewState => ({
 })
 
 describe('initial timeline position', () => {
-  it('opens a selected chat at latest even when a recent mid-scroll position exists', () => {
-    expect(initialTimelineLocation(saved('b'), ['a', 'b', 'c'], false, NOW)).toEqual({ index: 'LAST', align: 'end' })
+  it('restores the saved semantic row and its pixel offset when returning to a chat', () => {
+    expect(initialTimelineLocation(saved('b'), ['a', 'b', 'c'], false, NOW)).toEqual({ index: 1, align: 'start', offset: -17 })
+  })
+
+  it('opens first visits and readers already at the bottom at latest', () => {
+    expect(initialTimelineLocation(undefined, ['a', 'b'], false, NOW)).toEqual({ index: 'LAST', align: 'end' })
+    expect(initialTimelineLocation({ ...saved('a'), atBottom: true }, ['a', 'b'], false, NOW)).toEqual({ index: 'LAST', align: 'end' })
   })
 
   it('opens at latest when the saved row is outside the cached tail', () => {
     expect(initialTimelineLocation(saved('old-row'), ['new-a', 'new-b'], false, NOW)).toEqual({ index: 'LAST', align: 'end' })
   })
 
-  it('opens unread conversations at latest so opening can mark them read', () => {
-    expect(initialTimelineLocation(saved('a'), ['a', 'b'], true, NOW)).toEqual({ index: 'LAST', align: 'end' })
+  it('keeps the reading position when new unread messages arrive elsewhere in the chat', () => {
+    expect(initialTimelineLocation(saved('a'), ['a', 'b'], true, NOW)).toEqual({ index: 0, align: 'start', offset: -17 })
   })
 
   it('identifies the latest location', () => {

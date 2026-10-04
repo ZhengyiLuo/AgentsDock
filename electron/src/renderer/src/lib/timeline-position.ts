@@ -9,16 +9,18 @@ export interface TimelineRemountAnchor {
 }
 
 export function initialTimelineLocation(
-  _saved: ViewState | null | undefined,
-  _itemKeys: string[],
+  saved: ViewState | null | undefined,
+  itemKeys: string[],
   _unread: boolean,
   _now = Date.now()
 ): TimelineInitialLocation {
-  // Selecting or reopening a chat is navigation, not a continuation of the
-  // previous viewport. Always land on the latest message; explicit search and
-  // history navigation still preserve their own anchors while the chat stays
-  // open.
-  return { index: 'LAST', align: 'end' }
+  // Returning to a chat preserves where the reader left off. A first open,
+  // a reader already at the bottom, or a missing cached anchor opens latest.
+  return remountTimelineLocation({
+    atBottom: saved?.atBottom !== false,
+    topItemId: saved?.topItemId ?? null,
+    topOffset: saved?.topOffset
+  }, itemKeys)
 }
 
 export function isLatestTimelineLocation(location: TimelineInitialLocation): boolean {

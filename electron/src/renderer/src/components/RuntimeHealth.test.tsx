@@ -2,7 +2,7 @@ import { cleanup, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { AgentsDockAPI } from '@shared/ipc'
-import type { RuntimeCatalog } from '@shared/types'
+import type { Event, RuntimeCatalog, SessionSnapshot } from '@shared/types'
 import { useAppStore } from '../store/app-store'
 import { RuntimeHealthNotice, RuntimeHealthPanel } from './RuntimeHealth'
 
@@ -48,6 +48,100 @@ beforeEach(() => {
     } as unknown as AgentsDockAPI,
   })
   useAppStore.setState({ error: null })
+})
+
+it('opens the relevant provider settings from a missing custom API without rechecking CLI', async () => {
+  useAppStore.setState({ health: null, runtimeCatalog: readyCatalog, snapshots: {}, sessions: [],
+    modals: { ...useAppStore.getState().modals, appSettings: false } })
+  const listener = vi.fn()
+  window.addEventListener('agentsdock:app-settings-section', listener)
+  try {
+    render(<RuntimeHealthNotice backend="claude" codexProvider="custom" sessionId="missing" admissionError="Configure your API endpoint" />)
+    await userEvent.click(screen.getByRole('button', { name: 'Configure API' }))
+    expect(listener.mock.calls[0][0].detail).toEqual({ section: 'providers', backend: 'claude' })
+    expect(useAppStore.getState().modals.appSettings).toBe(true)
+    expect(window.agentsDock.runtime.catalog).not.toHaveBeenCalled()
+  } finally { window.removeEventListener('agentsdock:app-settings-section', listener) }
+})
+
+describe('passive Claude authentication in the composer', () => {
+  const message = 'Claude Code is installed. Authentication will be checked by Claude when you send a message.'
+  const failure = 'Not logged in. Please run claude auth login and retry your message.'
+  const snapshot = (events: Event[] = []): SessionSnapshot => ({
+    session: { id: 'claude-chat', title: 'Chat', backend: 'claude' },
+    events, queuedTurns: [], files: [], hasMoreEvents: false, filesTotal: 0, cachedAt: 0,
+  })
+  const event = (type: string, run: string, seq: number, text?: string): Event => ({
+    id: `event-${seq}`, seq, session_id: 'claude-chat', backend: 'claude',
+    type, run_id: run, ts: '2026-09-25T20:00:00Z', message: text,
+  })
+  const setup = (status: 'unknown' | 'unauthenticated', events: Event[] = []) => {
+    useAppStore.setState({
+      health: null,
+      runtimeCatalog: { backends: { claude: {
+        models: [{ value: 'sonnet', label: 'Sonnet' }], efforts: [], available: false,
+        diagnostic: {
+          backend: 'claude', status, installed: true, available: false,
+          authenticated: status === 'unknown' ? null : false,
+          message: status === 'unknown' ? message : failure,
+          action: status === 'unknown' ? null : 'Run claude auth login, then retry your message.',
+        },
+      } } },
+      snapshots: { 'claude-chat': snapshot(events) },
+    })
+  }
+
+  it.each(['unknown', 'unauthenticated'] as const)('does not warn before this chat sends when backend auth is %s', status => {
+    setup(status)
+    const { container } = render(<RuntimeHealthNotice backend="claude" sessionId="claude-chat" />)
+    expect(container).toBeEmptyDOMElement()
+    expect(window.agentsDock.runtime.catalog).not.toHaveBeenCalled()
+  })
+
+  it('stays quiet after a successful reply while the client still has unknown readiness', () => {
+    setup('unknown', [event('assistant_message', 'run-1', 1, 'Hello!'), event('turn_finished', 'run-1', 2)])
+    const { container } = render(<RuntimeHealthNotice backend="claude" sessionId="claude-chat" />)
+    expect(container).toBeEmptyDOMElement()
+  })
+
+  it('shows an actual authentication failure from this chat without blocking a native retry', () => {
+    setup('unauthenticated', [event('error', 'run-1', 1, failure)])
+    render(<RuntimeHealthNotice backend="claude" sessionId="claude-chat" />)
+    expect(screen.getByText('Latest chat error')).toBeInTheDocument()
+    expect(screen.getByText(failure)).toBeInTheDocument()
+    expect(screen.getByText('Run claude auth login, then retry your message.')).toBeInTheDocument()
+    expect(window.agentsDock.runtime.catalog).not.toHaveBeenCalled()
+  })
+
+  it('clears the warning after a successful retry even if cached authentication is stale', () => {
+    setup('unauthenticated', [event('error', 'run-1', 1, failure), event('turn_finished', 'run-2', 2)])
+    const { container } = render(<RuntimeHealthNotice backend="claude" sessionId="claude-chat" />)
+    expect(container).toBeEmptyDOMElement()
+  })
+
+  it('does not hide a real send error while readiness is unknown', () => {
+    setup('unknown', [event('error', 'run-1', 1, 'Request timed out.')])
+    render(<RuntimeHealthNotice backend="claude" sessionId="claude-chat" />)
+    expect(screen.getByText('Request timed out.')).toBeInTheDocument()
+    expect(screen.queryByText(/Run claude auth login/)).not.toBeInTheDocument()
+  })
+
+  it('keeps the passive status available in Settings', () => {
+    setup('unknown')
+    render(<RuntimeHealthPanel />)
+    expect(screen.getByText(message)).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Recheck CLIs' })).toBeEnabled()
+    expect(window.agentsDock.runtime.catalog).not.toHaveBeenCalled()
+  })
+
+  it('does not warn from cached missing status before a send', () => {
+    useAppStore.setState({ health: { ok: true, runtimes: { claude: {
+      backend: 'claude', status: 'missing', installed: false, available: false,
+      message: 'Claude Code is not installed.',
+    } } }, runtimeCatalog: null, snapshots: {} })
+    render(<RuntimeHealthNotice backend="claude" sessionId="claude-chat" />)
+    expect(screen.queryByText('Claude Code is not installed.')).not.toBeInTheDocument()
+  })
 })
 
 describe('RuntimeHealthPanel tmux prerequisite', () => {
@@ -130,9 +224,9 @@ describe('RuntimeHealthPanel tmux prerequisite', () => {
       snapshots: {}
     })
 
-    render(<RuntimeHealthNotice backend="cursor" sessionId="cursor-chat" />)
+    render(<RuntimeHealthNotice backend="cursor" sessionId="cursor-chat" admissionError="Cursor is unavailable because this AgentsServer does not support it yet. Update the server, then reconnect." />)
 
-    expect(screen.getByRole('alert')).toHaveTextContent('Cursor Unavailable')
+    expect(screen.getByRole('alert')).toHaveTextContent('Cursor Check failed')
     expect(screen.getByRole('alert')).toHaveTextContent(
       'Cursor is unavailable because this AgentsServer does not support it yet. Update the server, then reconnect.'
     )
@@ -169,9 +263,7 @@ describe('RuntimeHealthPanel tmux prerequisite', () => {
 
     render(<RuntimeHealthNotice backend="cursor" sessionId="cursor-chat" />)
 
-    expect(screen.getByRole('alert')).toHaveTextContent('Cursor Unavailable')
-    expect(screen.getByRole('alert')).toHaveTextContent(/model choices are still loading/i)
-    expect(screen.getByRole('alert')).not.toHaveTextContent('Cursor is installed and authenticated.')
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument()
   })
 
   it('forces a fresh CLI probe and applies its returned diagnostics immediately', async () => {
@@ -218,11 +310,12 @@ describe('RuntimeHealthPanel tmux prerequisite', () => {
       snapshots: {},
     })
     const user = userEvent.setup()
-    render(<RuntimeHealthNotice backend="codex" sessionId="chat-1" />)
+    const { rerender } = render(<RuntimeHealthNotice backend="codex" sessionId="chat-1" admissionError="Codex is not available." />)
 
     await user.click(screen.getByRole('button', { name: 'Recheck Codex CLI status' }))
 
     expect(window.agentsDock.runtime.catalog).toHaveBeenCalledWith(true)
+    rerender(<RuntimeHealthNotice backend="codex" sessionId="chat-1" />)
     await waitFor(() => expect(screen.queryByText('Codex is not available.')).not.toBeInTheDocument())
     expect(screen.queryByRole('button', { name: 'Recheck Codex CLI status' })).not.toBeInTheDocument()
   })
@@ -248,7 +341,7 @@ describe('RuntimeHealthPanel tmux prerequisite', () => {
       snapshots: {},
     })
     const user = userEvent.setup()
-    render(<RuntimeHealthNotice backend="codex" sessionId="chat-1" />)
+    const { rerender } = render(<RuntimeHealthNotice backend="codex" sessionId="chat-1" admissionError="Codex is not available." />)
 
     const recheck = screen.getByRole('button', { name: 'Recheck Codex CLI status' })
     await user.click(recheck)
@@ -260,6 +353,7 @@ describe('RuntimeHealthPanel tmux prerequisite', () => {
     await user.click(recheck)
 
     expect(window.agentsDock.runtime.catalog).toHaveBeenCalledTimes(2)
+    rerender(<RuntimeHealthNotice backend="codex" sessionId="chat-1" />)
     await waitFor(() => expect(screen.queryByText('Codex is not available.')).not.toBeInTheDocument())
     expect(useAppStore.getState().error).toBeNull()
   })

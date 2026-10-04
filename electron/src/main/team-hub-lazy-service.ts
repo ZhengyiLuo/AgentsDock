@@ -25,6 +25,7 @@ import type {
   TeamNetworkPostBulletinInput,
   TeamNetworkProjectionQuery,
   TeamNetworkRegisterAgentInput,
+  TeamNetworkRenameServerInput,
   TeamNetworkReplyPassiveRequestInput,
   TeamNetworkSendMailboxInput,
   TeamAttachmentCacheInput,
@@ -50,6 +51,7 @@ import type {
   SecurePeerCompletionWaitInput,
   SecurePeerDeactivateInput,
   SecurePeerForgetConnectionInput,
+  SecurePeerUpdateEndpointInput,
   SecurePeerJoinInput,
   SecurePeerPublishRouteInput,
   SecurePeerProfileScope,
@@ -116,6 +118,7 @@ export class LazyTeamHubService {
   postMessage(scope: TeamHubScope, input: TeamHubPostMessageInput) { return this.requireService().postMessage(scope, input) }
   networkCapabilities(scope: TeamHubScope) { return this.requireService().networkCapabilities(scope) }
   network(scope: TeamHubScope, query: TeamNetworkProjectionQuery) { return this.requireService().network(scope, query) }
+  renameNetworkServer(scope: TeamHubScope, input: TeamNetworkRenameServerInput) { return this.requireService().renameNetworkServer(scope, input) }
   registerNetworkAgent(scope: TeamHubScope, input: TeamNetworkRegisterAgentInput) { return this.requireService().registerNetworkAgent(scope, input) }
   bulletin(scope: TeamHubScope, query: TeamNetworkBulletinQuery) { return this.requireService().bulletin(scope, query) }
   postBulletin(scope: TeamHubScope, input: TeamNetworkPostBulletinInput) { return this.requireService().postBulletin(scope, input) }
@@ -169,6 +172,7 @@ export class LazyTeamHubService {
   activateSecurePeerPairing(scope: SecurePeerProfileScope, input: SecurePeerActivateInput) { return this.requireService().activateSecurePeerPairing(scope, input) }
   deactivateSecurePeerConnection(scope: SecurePeerProfileScope, input: SecurePeerDeactivateInput) { return this.requireService().deactivateSecurePeerConnection(scope, input) }
   forgetSecurePeerConnection(scope: SecurePeerProfileScope, input: SecurePeerForgetConnectionInput) { return this.requireService().forgetSecurePeerConnection(scope, input) }
+  updateSecurePeerConnectionEndpoint(scope: SecurePeerProfileScope, input: SecurePeerUpdateEndpointInput) { return this.requireService().updateSecurePeerConnectionEndpoint(scope, input) }
   securePeers(scope: TeamHubScope, teamId: string) { return this.requireService().securePeers(scope, teamId) }
   revokeSecurePeer(scope: TeamHubScope, teamId: string, input: SecurePeerRevokeInput) { return this.requireService().revokeSecurePeer(scope, teamId, input) }
   publishSecurePeerRoute(scope: SecurePeerProfileScope, input: SecurePeerPublishRouteInput) { return this.requireService().publishSecurePeerRoute(scope, input) }

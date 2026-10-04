@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { automaticPairingCompletionAvailable, parseSecurePeerControlStatus, parseSecurePeerPairing } from './secure-peer-contract'
+import { automaticPairingCompletionAvailable, securePeerEndpointUpdateAvailable, parseSecurePeerControlStatus, parseSecurePeerPairing } from './secure-peer-contract'
 
 const scope = { profileId: 'profile-a', profileGeneration: 7, serverIdentity: 'server-local' }
 const pairingId = '09d7bb2e-3b47-4be7-89fc-2cecd90f4434'
@@ -73,6 +73,26 @@ function status(overrides: Record<string, unknown> = {}) {
 }
 
 describe('secure peer control contract', () => {
+  it('requires the exact separately versioned endpoint-update control capability', () => {
+    const capability = { available: true, version: 1, endpoint_update_version: 1,
+      endpoint_update_path: '/api/admin/secure-peers/v1/connections/{connection_id}/endpoint' }
+    expect(securePeerEndpointUpdateAvailable(capability)).toBe(true)
+    for (const value of [undefined, true, { ...capability, available: false }, { ...capability, version: 2 },
+      { ...capability, endpoint_update_version: 2 }, { ...capability, endpoint_update_version: undefined },
+      { ...capability, endpoint_update_path: 'https://other.invalid/endpoint' }]) {
+      expect(securePeerEndpointUpdateAvailable(value)).toBe(false)
+    }
+  })
+  it('preserves null expiry for durable pending requests without changing lifecycle or consent', () => {
+    const durable = pairing({ expires_at: null, complete_on_approval: true })
+    const parsed = parseSecurePeerControlStatus(status({ pairings: [durable] }), scope)
+    expect(parsed.pairings[0]).toMatchObject({ id: pairingId, status: 'pending_approval', trustState: 'pending',
+      transportState: 'disconnected', completeOnApproval: true, expiresAt: null })
+    expect(parsed.activeConnectionId).toBeNull()
+    expect(parsed.pairingCompletion).toBeUndefined()
+    expect(parseSecurePeerPairing(pairing()).expiresAt).toBe('2026-08-24T00:00:00Z')
+  })
+
   it('requires the exact separate automatic-completion contract, not status v2 or listener availability', () => {
     const capability = { available: true, version: 1, completion_path: '/api/admin/secure-peers/v1/pairings/{pairing_id}/completion', max_wait_seconds: 600 }
     expect(automaticPairingCompletionAvailable(capability)).toBe(true)

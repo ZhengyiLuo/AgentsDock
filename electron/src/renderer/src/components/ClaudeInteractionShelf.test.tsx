@@ -594,6 +594,34 @@ describe('Claude interaction shelf', () => {
     })
     expect(progress).toHaveAttribute('aria-valuenow', '25')
   })
+
+  it('preserves the terminal runtime refresh when timeline updates replace the same session', async () => {
+    vi.useFakeTimers()
+    const listeners = captureServerEventListeners()
+    const capability = { available: true, interactive_client_capability: 'claude_sdk_interactive_v1' }
+    const view = render(
+      <ClaudeRuntimeProvider session={session} capability={capability}>
+        <RuntimeStatusProbe />
+      </ClaudeRuntimeProvider>
+    )
+    await act(async () => {})
+    expect(screen.getByTestId('claude-runtime-status')).toHaveTextContent('active')
+    runtimeRequest.mockResolvedValue({ ...runtime, status: { type: 'idle' }, pending_interactions: [] })
+
+    act(() => listeners.get('server:event')?.({
+      profileId: 'profile-1', profileGeneration: 3,
+      event: { session_id: session.id, type: 'turn_finished', seq: 42 }
+    }))
+    view.rerender(
+      <ClaudeRuntimeProvider session={{ ...session, latest_event_seq: 42 }} capability={capability}>
+        <RuntimeStatusProbe />
+      </ClaudeRuntimeProvider>
+    )
+    await act(async () => { await vi.advanceTimersByTimeAsync(100) })
+
+    expect(runtimeRequest).toHaveBeenCalledTimes(2)
+    expect(screen.getByTestId('claude-runtime-status')).toHaveTextContent('idle')
+  })
 })
 
 function deferred<T>() {
@@ -672,6 +700,10 @@ function RuntimeRefreshProbe() {
     <button type="button" onClick={() => void refresh()}>Refresh Claude runtime</button>
     <output data-testid="claude-runtime-error">{runtimeError}</output>
   </>
+}
+
+function RuntimeStatusProbe() {
+  return <output data-testid="claude-runtime-status">{useClaudeRuntime().runtime?.status?.type}</output>
 }
 
 function renderShelf(capability: unknown, selectedSession: Session = session) {

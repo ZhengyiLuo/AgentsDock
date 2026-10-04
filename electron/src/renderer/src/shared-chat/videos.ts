@@ -13,34 +13,44 @@ export function isSharedVideoId(value: unknown): value is string {
     && /^video_[A-Za-z0-9_-]+\.[a-f0-9]{64}$/.test(value)
 }
 
-function videoFile(value: unknown, sessionId: string): AgentFile | null {
+export function isSharedFileId(value: unknown): value is string {
+  return typeof value === 'string' && value.length <= 1024
+    && /^shared_file_[A-Za-z0-9_-]+\.[a-f0-9]{64}$/.test(value)
+}
+
+function sharedFile(value: unknown, sessionId: string, videoOnly: boolean): AgentFile | null {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return null
-  const video = value as Record<string, unknown>
-  if (Object.keys(video).some(key => !['id', 'filename', 'content_type', 'size'].includes(key))
-    || !isSharedVideoId(video.id)
-    || typeof video.filename !== 'string' || !video.filename.trim()
-    || [...video.filename].length > 255 || /[\u0000-\u001f\u007f/\\]/.test(video.filename)
-    || video.filename === '.' || video.filename === '..'
-    || !['video/mp4', 'video/webm', 'video/quicktime', 'video/ogg'].includes(String(video.content_type))
-    || !Number.isSafeInteger(video.size) || Number(video.size) <= 0) return null
-  return { id: video.id, session_id: sessionId, filename: video.filename,
-    content_type: video.content_type as SharedVideo['content_type'], size: Number(video.size) }
+  const file = value as Record<string, unknown>
+  if (Object.keys(file).some(key => !['id', 'filename', 'content_type', 'size'].includes(key))
+    || typeof file.id !== 'string' || !(videoOnly ? isSharedVideoId(file.id) : isSharedFileId(file.id))
+    || typeof file.filename !== 'string' || !file.filename.trim()
+    || [...file.filename].length > 255 || /[\u0000-\u001f\u007f/\\]/.test(file.filename)
+    || file.filename === '.' || file.filename === '..' || typeof file.content_type !== 'string'
+    || (videoOnly ? !['video/mp4', 'video/webm', 'video/quicktime', 'video/ogg'].includes(file.content_type)
+      : !/^[a-zA-Z0-9!#$&^_.+-]+\/[a-zA-Z0-9!#$&^_.+-]+$/.test(file.content_type))
+    || !Number.isSafeInteger(file.size) || Number(file.size) < (videoOnly ? 1 : 0)) return null
+  return { id: file.id, session_id: sessionId, filename: file.filename,
+    content_type: file.content_type, size: Number(file.size) }
 }
 
 /** Keep native chronology intact; never promote raw files, paths, or unused uploads. */
 export function projectSharedVideoEvents(events: Event[], sessionId: string): { events: Event[]; files: AgentFile[] } {
   const files = new Map<string, AgentFile>()
   const projected = events.map(event => {
-    const raw = event as Event & { shared_videos?: unknown; display_file_ids?: unknown; files?: unknown }
-    const { shared_videos: descriptors, file: _file, artifact: _artifact, file_ids: _fileIds,
+    const raw = event as Event & { shared_videos?: unknown; shared_files?: unknown; display_file_ids?: unknown; files?: unknown }
+    const { shared_videos: videoDescriptors, shared_files: fileDescriptors, file: _file, artifact: _artifact, file_ids: _fileIds,
       display_file_ids: _displayIds, files: _files, attachments: _attachments, ...rest } = raw
     // Older already-scoped server pages can omit the redundant owner field.
     const safe = { ...rest, session_id: event.session_id || sessionId }
     const attached = event.type === 'turn_started' || event.type === 'turn_steered'
     const published = event.type === 'artifact_created'
-    if ((event.session_id && event.session_id !== sessionId) || !Array.isArray(descriptors) || descriptors.length > 32
+    const descriptors = [
+      ...(Array.isArray(videoDescriptors) ? videoDescriptors.map(value => sharedFile(value, sessionId, true)) : []),
+      ...(Array.isArray(fileDescriptors) ? fileDescriptors.map(value => sharedFile(value, sessionId, false)) : [])
+    ]
+    if ((event.session_id && event.session_id !== sessionId)
       || (!attached && !published) || (published && descriptors.length > 1)) return safe as Event
-    const videos = descriptors.map(value => videoFile(value, sessionId)).filter((file): file is AgentFile => file !== null)
+    const videos = descriptors.filter((file): file is AgentFile => file !== null)
     for (const file of videos) files.set(file.id, file)
     return { ...safe, ...(published && videos[0] ? { artifact: videos[0] } : {}),
       ...(attached && videos.length ? { file_ids: [...new Set(videos.map(file => file.id))] } : {}) } as Event

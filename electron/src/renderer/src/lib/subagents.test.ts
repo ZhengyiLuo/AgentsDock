@@ -15,6 +15,13 @@ const event = (seq: number, type: string, patch: Partial<Event> = {}): Event => 
 })
 
 describe('subagentsFromEvents', () => {
+  it('does not mislabel OpenCode tasks or their backend-less continuations as Codex agents', () => {
+    expect(subagentsFromEvents([
+      event(1, 'turn_started', { backend: 'opencode' }),
+      event(2, 'tool_started', { tool: { name: 'agent', input: { description: 'spawn_agent' } }, tool_id: 'task-a' }),
+      event(3, 'subagent_state', { subagent_id: 'child', subagent_status: 'running' })
+    ])).toEqual([])
+  })
   it.each(['___', '---'])('keeps separator-only task labels visible (%s)', task => {
     const [agent] = subagentsFromEvents([event(1, 'subagent_state', {
       backend: 'codex', subagent_id: 'child-live', subagent_status: 'running',

@@ -39,7 +39,7 @@ interface CodexRuntimeContextValue {
   error: string | null
   runtime: CodexRuntimeSnapshot | null
   session: Session | null
-  refresh(): Promise<CodexRuntimeSnapshot | null>
+  refresh(loadForControls?: boolean): Promise<CodexRuntimeSnapshot | null>
   run<T>(operation: () => Promise<T>): Promise<T>
   applyGoalSnapshot(snapshot: CodexGoalSnapshot): void
 }
@@ -57,7 +57,7 @@ const CodexRuntimeContext = createContext<CodexRuntimeContextValue>({
   applyGoalSnapshot: () => undefined
 })
 
-const SELECTED_THREAD_LOAD_SETTLE_MS = 120
+const CONTROL_THREAD_LOAD_SETTLE_MS = 120
 const ACTIVE_RUNTIME_POLL_MS = 2_000
 
 interface CodexRuntimeProviderProps {
@@ -105,7 +105,7 @@ export function CodexRuntimeProvider({ session, capability, focused = true, chil
     loadThreadInFlight.current = null
   }, [])
 
-  const refresh = useCallback(async () => {
+  const refresh = useCallback(async (loadForControls = false) => {
     const sessionId = session?.id
     const bridge = codexBridge()
     if (mutationCount.current > 0) return runtimeRef.current
@@ -125,13 +125,15 @@ export function CodexRuntimeProvider({ session, capability, focused = true, chil
     try {
       const observed = await bridge.runtime(sessionId)
       if (epoch !== requestEpoch.current || sessionIdRef.current !== sessionId) return null
+      // Opening a chat reads status only. Resuming a long native thread can
+      // take minutes and holds the send lock; reserve that work for explicit
+      // provider controls (normal send already resumes on the server).
       let next = observed
-      if (!window.agentsDock.sharedChat && focusedRef.current && shouldLoadPersistedThread(session, observed)) {
+      if (loadForControls && !window.agentsDock.sharedChat && focusedRef.current && shouldLoadPersistedThread(session, observed)) {
         try {
-          // A short selection settle window prevents fast chat-list browsing
-          // from launching expensive, uncancellable app-server resumes for
-          // chats the user has already left.
-          await new Promise(resolve => window.setTimeout(resolve, SELECTED_THREAD_LOAD_SETTLE_MS))
+          // Let an explicit controls open settle before starting a native
+          // resume; navigation can invalidate it without loading the old chat.
+          await new Promise(resolve => window.setTimeout(resolve, CONTROL_THREAD_LOAD_SETTLE_MS))
           if (epoch !== requestEpoch.current || sessionIdRef.current !== sessionId) return null
           if (focusedRef.current) {
             next = await loadPersistedThread(bridge, sessionId, loadThreadInFlight)
@@ -358,7 +360,7 @@ export function CodexRuntimeProvider({ session, capability, focused = true, chil
     setMutating(true)
     let succeeded = false
     try {
-      // A passive thread/resume owns the server's per-session lifecycle lock.
+      // An explicitly requested thread/resume owns the per-session lock.
       // Wait for the already-started resume before sending a mutation so its
       // shorter HTTP timeout cannot expire in the lock queue and apply later
       // as a ghost write. A mutation that arrives during the settle window

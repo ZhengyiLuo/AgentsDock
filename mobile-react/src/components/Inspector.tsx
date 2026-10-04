@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { AccessibilityInfo, ActivityIndicator, Alert, Modal, Platform, Pressable, ScrollView, StyleSheet, View } from 'react-native'
+import { AccessibilityInfo, ActionSheetIOS, ActivityIndicator, Alert, Modal, Platform, Pressable, ScrollView, StyleSheet, View } from 'react-native'
 import * as Clipboard from 'expo-clipboard'
 import { useShallow } from 'zustand/react/shallow'
 import { Archive, Bot, Check, ChevronDown, Copy, FileText, FolderOpen, GitFork, Pause, Pencil, Pin, Play, Plus, RefreshCw, Search, Square, SquareTerminal, Trash2, X } from 'lucide-react-native'
@@ -416,37 +416,67 @@ function ChoiceField({ label, testID, scopeKey, value, options, onChange, disabl
   const colors = usePalette()
   const [open, setOpen] = useState(false)
   const openRef = useRef(false), epochRef = useRef(0), selectionRef = useRef<symbol | null>(null)
-  const selected = options.find(option => option.value === value)
-  const optionsKey = JSON.stringify(options)
+  const nativeOpenRef = useRef(false)
+  const choices = options.filter((option, index) => options.findIndex(candidate => candidate.value === option.value) === index)
+  const selected = choices.find(option => option.value === value)
+  const optionsKey = JSON.stringify(choices)
   const bindingKey = JSON.stringify([scopeKey, value, optionsKey])
   const liveBinding = useRef(bindingKey); liveBinding.current = bindingKey
+  const liveDisabled = useRef(disabled); liveDisabled.current = disabled
   const epoch = epochRef.current
-  const close = () => { openRef.current = false; epochRef.current++; setOpen(false) }
+  const retire = () => {
+    openRef.current = false; epochRef.current++
+    if (nativeOpenRef.current) { nativeOpenRef.current = false; ActionSheetIOS.dismissActionSheet() }
+  }
+  const close = () => { retire(); setOpen(false) }
   useEffect(() => {
     close(); selectionRef.current = null
-    return () => { openRef.current = false; epochRef.current++; selectionRef.current = null }
+    return () => { retire(); selectionRef.current = null }
   }, [scopeKey, optionsKey])
-  const select = async (option: RuntimeOption) => {
-    if (!openRef.current || epochRef.current !== epoch || liveBinding.current !== bindingKey
-      || disabled || option.locked || selectionRef.current) return
+  useEffect(() => { if (disabled && nativeOpenRef.current) close() }, [disabled])
+  const select = async (option: RuntimeOption, selectionEpoch = epoch) => {
+    if (!openRef.current || epochRef.current !== selectionEpoch || liveBinding.current !== bindingKey
+      || liveDisabled.current || option.locked || selectionRef.current) return
     const token = Symbol(); selectionRef.current = token
     try {
       const saved = await onChange(option.value)
-      if (saved && selectionRef.current === token && epochRef.current === epoch && openRef.current) close()
+      if (saved && selectionRef.current === token && epochRef.current === selectionEpoch && openRef.current) close()
     } finally { if (selectionRef.current === token) selectionRef.current = null }
   }
   return <View>
-    <Pressable testID={testID} accessibilityRole="button" accessibilityLabel={`${label}: ${selected?.label ?? (value || 'Server default')}`} accessibilityState={{ expanded: open, disabled }} disabled={disabled} onPress={() => {
-      if (disabled || liveBinding.current !== bindingKey) return
+    <Pressable testID={testID} accessibilityRole="button" accessibilityLabel={`${label}: ${selected?.label ?? (value || 'Server default')}`} accessibilityState={{ expanded: open, disabled }} disabled={disabled} onPress={event => {
+      if (liveDisabled.current || liveBinding.current !== bindingKey) return
       if (openRef.current) close()
-      else { openRef.current = true; epochRef.current++; setOpen(true); requestAnimationFrame(dismissAppKeyboard) }
+      else {
+        openRef.current = true; const presentationEpoch = ++epochRef.current; setOpen(true)
+        if (Platform.OS === 'ios') {
+          dismissAppKeyboard()
+          const cancelButtonIndex = choices.length
+          const anchor = Number(event.nativeEvent.target)
+          nativeOpenRef.current = true
+          ActionSheetIOS.showActionSheetWithOptions({
+            title: label,
+            message: selected?.label ? `Current: ${selected.label}` : undefined,
+            options: [...choices.map(option => option.locked ? `${option.label} (upgrade required)` : option.label), 'Cancel'],
+            cancelButtonIndex,
+            disabledButtonIndices: choices.flatMap((option, index) => option.locked ? [index] : []),
+            anchor: Number.isFinite(anchor) && anchor > 0 ? anchor : undefined,
+          }, buttonIndex => {
+            if (!nativeOpenRef.current || !openRef.current || epochRef.current !== presentationEpoch) return
+            nativeOpenRef.current = false
+            const option = buttonIndex === cancelButtonIndex ? undefined : choices[buttonIndex]
+            if (option) void select(option, presentationEpoch)
+            close()
+          })
+        } else requestAnimationFrame(dismissAppKeyboard)
+      }
     }} style={[styles.choice, { borderColor: colors.border, backgroundColor: colors.surface, opacity: disabled ? 0.45 : 1 }]}>
       <Text style={{ flex: 1, color: colors.text, fontSize: 12 }} numberOfLines={1}>{selected?.label ?? (value || 'Server default')}</Text><ChevronDown size={14} color={colors.muted} />
     </Pressable>
-    {open ? <View testID={`${testID}-options`} onAccessibilityEscape={close} style={[styles.choiceMenu, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+    {Platform.OS !== 'ios' && open ? <View testID={`${testID}-options`} onAccessibilityEscape={close} style={[styles.choiceMenu, { backgroundColor: colors.surface, borderColor: colors.border }]}>
       <Pressable testID={`${testID}-close`} accessibilityRole="button" accessibilityLabel={`Close ${label.toLowerCase()} choices`} onPress={close} style={styles.choiceClose}><Text style={{ flex: 1, color: colors.text, fontSize: 12 }}>{label}</Text><Text style={{ color: colors.blue }}>Close</Text></Pressable>
       <ScrollView testID={`${testID}-list`} style={styles.choiceList} keyboardShouldPersistTaps="always" nestedScrollEnabled>
-        {options.map(option => <Pressable key={option.value || '__default'} accessibilityRole="button" accessibilityLabel={option.locked ? `${option.label}, upgrade required` : option.label} accessibilityHint={option.locked ? option.locked_reason ?? undefined : undefined} accessibilityState={{ disabled: disabled || option.locked === true, selected: option.value === value }} disabled={disabled || option.locked === true} onPress={() => { void select(option) }} style={[styles.choiceOption, { backgroundColor: option.value === value ? colors.raised : 'transparent', opacity: disabled || option.locked ? 0.45 : 1 }]}><Text style={{ color: colors.text }}>{option.label}{option.locked ? ' (upgrade required)' : ''}</Text></Pressable>)}
+        {choices.map(option => <Pressable key={option.value || '__default'} accessibilityRole="button" accessibilityLabel={option.locked ? `${option.label}, upgrade required` : option.label} accessibilityHint={option.locked ? option.locked_reason ?? undefined : undefined} accessibilityState={{ disabled: disabled || option.locked === true, selected: option.value === value }} disabled={disabled || option.locked === true} onPress={() => { void select(option) }} style={[styles.choiceOption, { backgroundColor: option.value === value ? colors.raised : 'transparent', opacity: disabled || option.locked ? 0.45 : 1 }]}><Text style={{ color: colors.text }}>{option.label}{option.locked ? ' (upgrade required)' : ''}</Text></Pressable>)}
       </ScrollView>
     </View> : null}
   </View>

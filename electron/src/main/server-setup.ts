@@ -12,32 +12,7 @@ import type {
   ServerSetupResult
 } from '../shared/types'
 import { appLog } from './logger'
-
-export interface PinnedServerRelease {
-  track: 'stable' | 'beta'
-  version: string
-  url: string
-  sha256: string
-}
-
-// Keep each release triple together. Guided setup must never download a
-// mutable branch or infer one channel from the other.
-export const PINNED_STABLE_SERVER_RELEASE: PinnedServerRelease = Object.freeze({
-  track: 'stable',
-  version: '0.1.25',
-  url: 'https://github.com/ZhengyiLuo/AgentsServer/releases/download/v0.1.25/agents-server-0.1.25.tar.gz',
-  sha256: 'a5d8768d17715b0bfbd0f4b7d5fb85052e9baf46a3d3dda51975e4c21b2933e9'
-})
-export const PINNED_BETA_SERVER_RELEASE: PinnedServerRelease = Object.freeze({
-  track: 'beta',
-  version: '0.1.26-beta.46',
-  url: 'https://github.com/ZhengyiLuo/AgentsServer/releases/download/v0.1.26-beta.46/agents-server-0.1.26-beta.46.tar.gz',
-  sha256: '5928e3c58406bf8beb4862510d71935b9846e61181504d0645781d04136d4b51'
-})
-// Compatibility aliases describe the default (Stable) guided setup release.
-export const PINNED_SERVER_RELEASE_VERSION = PINNED_STABLE_SERVER_RELEASE.version
-export const PINNED_SERVER_RELEASE_URL = PINNED_STABLE_SERVER_RELEASE.url
-export const PINNED_SERVER_RELEASE_SHA256 = PINNED_STABLE_SERVER_RELEASE.sha256
+import { resolveServerSetupRelease, serverSetupVersionGuard, type PinnedServerRelease } from './server-setup-release'
 const RESULT_PREFIX = 'AGENTSDOCK_SETUP_RESULT='
 const PREFLIGHT_ERROR_PREFIX = 'AGENTSDOCK_PREFLIGHT_ERROR='
 const PREFLIGHT_WARNING_PREFIX = 'AGENTSDOCK_PREFLIGHT_WARNING='
@@ -175,7 +150,6 @@ test "\$(tr -d '[:space:]' < "\$SOURCE/VERSION")" = "\$VERSION"
 mv "\$SOURCE" "\$DESTINATION"
 `
 }
-export const LOCAL_RELEASE_BOOTSTRAP = localReleaseBootstrap(PINNED_STABLE_SERVER_RELEASE)
 
 export function remoteReleaseBootstrap(release: PinnedServerRelease): string {
   return `set -eu
@@ -232,7 +206,6 @@ INSTALL_PID=""
 exit "\$INSTALL_STATUS"
 `
 }
-export const REMOTE_BOOTSTRAP = remoteReleaseBootstrap(PINNED_STABLE_SERVER_RELEASE)
 
 export function serverSetupCapabilities(): ServerSetupCapabilities {
   const supportedPlatform = process.platform === 'darwin' || process.platform === 'linux'
@@ -247,17 +220,11 @@ export function serverSetupCapabilities(): ServerSetupCapabilities {
   }
 }
 
-export function pinnedServerRelease(track: ServerSetupInput['track'] = 'stable'): PinnedServerRelease {
-  if (track === 'stable') return PINNED_STABLE_SERVER_RELEASE
-  if (track === 'beta') return PINNED_BETA_SERVER_RELEASE
-  throw new Error('Choose the Stable or Beta AgentsServer channel.')
-}
-
 export function validateServerSetupInput(input: ServerSetupInput): Required<Pick<ServerSetupInput, 'target' | 'port' | 'track'>> & Pick<ServerSetupInput, 'teamHubHost'> & { sshHost?: string } {
   const target = input.target
   if (target !== 'local' && target !== 'ssh') throw new Error('Choose where to install AgentsServer.')
   const track = input.track ?? 'stable'
-  pinnedServerRelease(track)
+  if (track !== 'stable' && track !== 'beta') throw new Error('Choose the Stable or Beta AgentsServer channel.')
   const teamHubHost = input.teamHubHost
   if (teamHubHost !== undefined && typeof teamHubHost !== 'boolean') {
     throw new Error('Choose whether this server should start a Team Network.')
@@ -354,6 +321,7 @@ export function isRetryableLaunchdSetupFailure(error: unknown): boolean {
 
 export class ServerSetupManager {
   private active: ChildProcessWithoutNullStreams | null = null
+  private releaseAbort: AbortController | null = null
   private cancelRequested = false
   private overallDeadlineAt = 0
   private state: ServerSetupDiagnostics['state'] = 'idle'
@@ -362,7 +330,10 @@ export class ServerSetupManager {
   private updatedAt?: string
   private target?: ServerSetupInput['target']
 
-  constructor(private readonly timings: ServerSetupTimings = DEFAULT_TIMINGS) {}
+  constructor(
+    private readonly timings: ServerSetupTimings = DEFAULT_TIMINGS,
+    private readonly resolveRelease: typeof resolveServerSetupRelease = resolveServerSetupRelease
+  ) {}
 
   capabilities(): ServerSetupCapabilities { return serverSetupCapabilities() }
 
@@ -382,6 +353,7 @@ export class ServerSetupManager {
     this.cancelRequested = true
     this.updatedAt = new Date().toISOString()
     this.recordDiagnostic('Cancellation requested by the user.')
+    this.releaseAbort?.abort()
     if (this.active) terminateProcessTree(this.active, this.timings.terminateGraceMs)
     return true
   }
@@ -391,7 +363,6 @@ export class ServerSetupManager {
     if (!capability.available) throw new Error(capability.reason || 'One-click server setup is unavailable in this build.')
     if (this.state === 'running') throw new Error('AgentsServer setup is already running.')
     const validated = validateServerSetupInput(input)
-    const release = pinnedServerRelease(validated.track)
     this.cancelRequested = false
     this.state = 'running'
     this.target = validated.target
@@ -399,9 +370,13 @@ export class ServerSetupManager {
     this.updatedAt = this.startedAt
     this.overallDeadlineAt = Date.now() + this.timings.overallTimeoutMs
     this.diagnosticTail = []
-    this.recordDiagnostic(`Setup started (${validated.target}, port ${validated.port}, ${release.track} AgentsServer ${release.version}).`)
-    appLog('server-setup', 'setup started', { target: validated.target, port: validated.port, track: release.track, version: release.version })
+    this.releaseAbort = new AbortController()
     try {
+      this.emitProgress(progress, { phase: 'download', message: `Checking the latest ${validated.track === 'beta' ? 'Beta' : 'Stable'} AgentsServer release…` })
+      const release = await this.resolveRelease(validated.track, this.releaseAbort.signal)
+      this.throwIfCancelled()
+      this.recordDiagnostic(`Setup started (${validated.target}, port ${validated.port}, ${release.track} AgentsServer ${release.version}).`)
+      appLog('server-setup', 'setup started', { target: validated.target, port: validated.port, track: release.track, version: release.version })
       const result = validated.target === 'local'
         ? await this.runLocal(validated.port, progress, validated.teamHubHost, release)
         : await this.runRemote(validated.sshHost!, validated.port, progress, validated.teamHubHost, release)
@@ -419,6 +394,7 @@ export class ServerSetupManager {
       appLog('server-setup', 'setup failed', { target: validated.target, message: normalized.message, cancelled: this.cancelRequested })
       throw normalized
     } finally {
+      this.releaseAbort = null
       this.active = null
       this.overallDeadlineAt = 0
     }
@@ -428,10 +404,10 @@ export class ServerSetupManager {
     port: number,
     progress: (value: ServerSetupProgress) => void,
     teamHubHost = false,
-    release: PinnedServerRelease = PINNED_STABLE_SERVER_RELEASE
+    release: PinnedServerRelease
   ): Promise<ServerSetupResult> {
     this.emitProgress(progress, { phase: 'runtime', message: 'Checking local setup prerequisites…' })
-    await this.runProcess('/bin/sh', ['-s', '--'], SERVER_SETUP_PREFLIGHT_SCRIPT, progress, false, {
+    await this.runProcess('/bin/sh', ['-s', '--'], SERVER_SETUP_PREFLIGHT_SCRIPT + serverSetupVersionGuard(release), progress, false, {
       phase: 'runtime',
       message: 'Checking local setup prerequisites…'
     })
@@ -465,14 +441,14 @@ export class ServerSetupManager {
     port: number,
     progress: (value: ServerSetupProgress) => void,
     teamHubHost = false,
-    release: PinnedServerRelease = PINNED_STABLE_SERVER_RELEASE
+    release: PinnedServerRelease
   ): Promise<ServerSetupResult> {
     const resolvedHost = await resolveSSHConfigHost(sshHost)
     if (resolvedHost !== sshHost.slice(sshHost.lastIndexOf('@') + 1)) {
       this.recordDiagnostic(`Resolved the SSH destination to ${resolvedHost}.`, 'connect')
     }
     this.emitProgress(progress, { phase: 'connect', message: `Connecting to ${sshHost}…` })
-    await this.runProcess(sshCommand(), remoteShellArgs(sshHost, 'sh'), SERVER_SETUP_PREFLIGHT_SCRIPT, progress, false, {
+    await this.runProcess(sshCommand(), remoteShellArgs(sshHost, 'sh'), SERVER_SETUP_PREFLIGHT_SCRIPT + serverSetupVersionGuard(release), progress, false, {
       phase: 'connect',
       message: `Connecting to ${sshHost}…`
     })

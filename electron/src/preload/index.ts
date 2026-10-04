@@ -2,8 +2,47 @@ import { contextBridge, ipcRenderer, webUtils } from 'electron'
 import type { AgentsDockAPI } from '../shared/ipc'
 import type { AppEventMap } from '../shared/types'
 import { buildMediaURL, buildWorkspaceMediaURL } from '../shared/media-url'
+import {
+  NativeFileSelectionGate,
+  nativeFileDropTarget,
+  nativeFilePasteTarget
+} from './native-file-selection'
+
+const nativeFileSelections = new NativeFileSelectionGate(file => webUtils.getPathForFile(file))
+
+window.addEventListener('drop', event => {
+  if (nativeFileDropTarget(event)) nativeFileSelections.authorize(event.dataTransfer?.files, event.isTrusted)
+}, true)
+window.addEventListener('paste', event => {
+  if (nativeFilePasteTarget(event)) nativeFileSelections.authorize(event.clipboardData?.files, event.isTrusted)
+}, true)
+
+async function stageNativeFiles(files: File[]): Promise<Array<import('../shared/types').NativeFileRef | null>> {
+  const paths = nativeFileSelections.consumeBatch(files)
+  const nativePaths = paths.filter((path): path is string => Boolean(path))
+  if (!nativePaths.length) return paths.map(() => null)
+  const refs = await ipcRenderer.invoke('files:stage-native-batch', nativePaths) as import('../shared/types').NativeFileRef[]
+  if (refs.length !== nativePaths.length) throw new Error('The selected files could not be staged safely.')
+  let nativeIndex = 0
+  return paths.map(path => path ? refs[nativeIndex++] : null)
+}
 
 const api: AgentsDockAPI = {
+  workspaceGit: {
+    status: (scope, sessionId) => ipcRenderer.invoke('workspace-git:status', scope, sessionId),
+    diff: (scope, sessionId, path, view) => ipcRenderer.invoke('workspace-git:diff', scope, sessionId, path, view),
+    conflict: (scope, sessionId, path) => ipcRenderer.invoke('workspace-git:conflict', scope, sessionId, path),
+    action: (scope, sessionId, input) => ipcRenderer.invoke('workspace-git:action', scope, sessionId, input)
+  },
+  sideQuestions: {
+    read: (scope, sessionId) => ipcRenderer.invoke('side-chat:read', scope, sessionId),
+    submit: (scope, sessionId, input) => ipcRenderer.invoke('side-chat:submit', scope, sessionId, input),
+    stop: (scope, sessionId, requestId) => ipcRenderer.invoke('side-chat:stop', scope, sessionId, requestId),
+    clear: (scope, sessionId, sideChatId) => ipcRenderer.invoke('side-chat:clear', scope, sessionId, sideChatId),
+    ask: (scope, sessionId, input) => ipcRenderer.invoke('side-questions:ask', scope, sessionId, input),
+    cancel: (scope, sessionId, requestId) => ipcRenderer.invoke('side-questions:cancel', scope, sessionId, requestId),
+    close: (scope, sessionId, sideChatId) => ipcRenderer.invoke('side-questions:close', scope, sessionId, sideChatId)
+  },
   chatShares: {
     preview: (scope, sessionId) => ipcRenderer.invoke('chat-shares:preview', scope, sessionId),
     list: (scope, sessionId, mode) => ipcRenderer.invoke('chat-shares:list', scope, sessionId, mode),
@@ -49,6 +88,7 @@ const api: AgentsDockAPI = {
     postMessage: (scope, input) => ipcRenderer.invoke('team-hub:message:post', scope, input),
     networkCapabilities: scope => ipcRenderer.invoke('team-hub:network:capabilities', scope),
     network: (scope, query) => ipcRenderer.invoke('team-hub:network:get', scope, query),
+    renameNetworkServer: (scope, input) => ipcRenderer.invoke('team-hub:network:server:rename', scope, input),
     registerNetworkAgent: (scope, input) => ipcRenderer.invoke('team-hub:network:agent:register', scope, input),
     bulletin: (scope, query) => ipcRenderer.invoke('team-hub:network:bulletin:list', scope, query),
     postBulletin: (scope, input) => ipcRenderer.invoke('team-hub:network:bulletin:post', scope, input),
@@ -97,6 +137,7 @@ const api: AgentsDockAPI = {
     activateSecurePeerPairing: (scope, input) => ipcRenderer.invoke('team-hub:secure-peer:activate', scope, input),
     deactivateSecurePeerConnection: (scope, input) => ipcRenderer.invoke('team-hub:secure-peer:connection:deactivate', scope, input),
     forgetSecurePeerConnection: (scope, input) => ipcRenderer.invoke('team-hub:secure-peer:connection:forget', scope, input),
+    updateSecurePeerConnectionEndpoint: (scope, input) => ipcRenderer.invoke('team-hub:secure-peer:connection:endpoint', scope, input),
     securePeers: (scope, teamId) => ipcRenderer.invoke('team-hub:secure-peer:list', scope, teamId),
     approveSecurePeerPairing: (scope, input) => ipcRenderer.invoke('team-hub:secure-peer:approve', scope, input),
     rejectSecurePeerPairing: (scope, input) => ipcRenderer.invoke('team-hub:secure-peer:reject', scope, input),
@@ -108,6 +149,8 @@ const api: AgentsDockAPI = {
     status: () => ipcRenderer.invoke('updates:status'),
     check: () => ipcRenderer.invoke('updates:check'),
     install: () => ipcRenderer.invoke('updates:install'),
+    cancel: () => ipcRenderer.invoke('updates:cancel'),
+    retryServers: profileId => ipcRenderer.invoke('updates:retry-servers', profileId),
     setTrack: track => ipcRenderer.invoke('updates:set-track', track)
   },
   settings: {
@@ -147,9 +190,10 @@ const api: AgentsDockAPI = {
     list: () => ipcRenderer.invoke('sessions:list'),
     create: input => ipcRenderer.invoke('sessions:create', input),
     resume: input => ipcRenderer.invoke('sessions:resume', input),
-    update: (sessionId, patch) => ipcRenderer.invoke('sessions:update', sessionId, patch),
+    update: (sessionId, patch, expectedScope) => ipcRenderer.invoke('sessions:update', sessionId, patch, ...(expectedScope ? [expectedScope] : [])),
     reloadProvider: sessionId => ipcRenderer.invoke('sessions:provider:reload', sessionId),
     remove: sessionId => ipcRenderer.invoke('sessions:remove', sessionId),
+    discardEmpty: (scope, sessionId, updatedAt) => ipcRenderer.invoke('sessions:discard-empty', scope, sessionId, updatedAt),
     fork: sessionId => ipcRenderer.invoke('sessions:fork', sessionId),
     reorder: (sessionId, relativeTo, placement, targetFolder) => ipcRenderer.invoke('sessions:reorder', sessionId, relativeTo, placement, targetFolder),
     searchHistory: (query, limit) => ipcRenderer.invoke('sessions:search-history', query, limit),
@@ -185,8 +229,25 @@ const api: AgentsDockAPI = {
     send: input => ipcRenderer.invoke('turns:send', input),
     stop: sessionId => ipcRenderer.invoke('turns:stop', sessionId)
   },
+  providerConnections: {
+    request: (scope, backend, action, input) => ipcRenderer.invoke('provider-connections:request', scope, backend, action, input)
+  },
+  providerAccounts: {
+    read: (scope, backend) => ipcRenderer.invoke('provider-accounts:read', scope, backend)
+  },
+  customModels: {
+    read: (scope, backend, sessionId) => ipcRenderer.invoke('custom-models:read', scope, backend, sessionId),
+    save: (scope, backend, input) => ipcRenderer.invoke('custom-models:save', scope, backend, input)
+  },
   codex: {
     serverGoals: () => ipcRenderer.invoke('codex:server-goals:get'),
+    auth: scope => ipcRenderer.invoke('codex:auth:get', scope),
+    provider: scope => ipcRenderer.invoke('codex:provider:get', scope),
+    providerModels: (scope, sessionId) => ipcRenderer.invoke('codex:provider:models', scope, sessionId),
+    testProvider: (scope, input) => ipcRenderer.invoke('codex:provider:test', scope, input),
+    testProviderModel: (scope, input) => ipcRenderer.invoke('codex:provider:test-model', scope, input),
+    setProvider: (scope, input) => ipcRenderer.invoke('codex:provider:set', scope, input),
+    resetProvider: scope => ipcRenderer.invoke('codex:provider:reset', scope),
     setServerGoals: enabled => ipcRenderer.invoke('codex:server-goals:set', enabled),
     serverSubagents: scope => ipcRenderer.invoke('codex:server-subagents:get', scope),
     setServerSubagents: (scope, limit) => ipcRenderer.invoke('codex:server-subagents:set', scope, limit),
@@ -213,6 +274,8 @@ const api: AgentsDockAPI = {
   },
   claude: {
     runtime: sessionId => ipcRenderer.invoke('claude:runtime', sessionId),
+    setGoal: (sessionId, condition) => ipcRenderer.invoke('claude:goal:set', sessionId, condition),
+    clearGoal: sessionId => ipcRenderer.invoke('claude:goal:clear', sessionId),
     refreshContextUsage: sessionId => ipcRenderer.invoke('claude:context-usage:refresh', sessionId),
     mcp: sessionId => ipcRenderer.invoke('claude:mcp', sessionId),
     controlMcp: (sessionId, input) => ipcRenderer.invoke('claude:mcp:control', sessionId, input),
@@ -274,10 +337,8 @@ const api: AgentsDockAPI = {
   files: {
     choose: () => ipcRenderer.invoke('files:choose'),
     pathForFile: file => webUtils.getPathForFile(file),
-    stageNativeFile: file => {
-      const path = webUtils.getPathForFile(file)
-      return path ? ipcRenderer.invoke('files:stage-native', path) : Promise.resolve(null)
-    },
+    stageNativeFile: async file => (await stageNativeFiles([file]))[0],
+    stageNativeFiles,
     stageClipboardImage: (data, name, type) => ipcRenderer.invoke('files:stage-clipboard', data, name, type),
     upload: (sessionId, paths) => ipcRenderer.invoke('files:upload', sessionId, paths),
     list: (sessionId, offset, limit, contentPrefix) => ipcRenderer.invoke('files:list', sessionId, offset, limit, contentPrefix),
@@ -315,7 +376,10 @@ const api: AgentsDockAPI = {
     preview: input => ipcRenderer.invoke('digest:preview', input),
     send: input => ipcRenderer.invoke('digest:send', input)
   },
-  runtime: { catalog: refresh => ipcRenderer.invoke('runtime:catalog', refresh) },
+  runtime: {
+    catalog: refresh => ipcRenderer.invoke('runtime:catalog', refresh),
+    usage: (scope, backend, sessionId, refresh) => ipcRenderer.invoke('runtime:usage', scope, backend, sessionId, refresh)
+  },
   processes: {
     list: sessionId => ipcRenderer.invoke('processes:list', sessionId),
     tail: (sessionId, path, lines) => ipcRenderer.invoke('processes:tail', sessionId, path, lines)
@@ -358,6 +422,7 @@ const api: AgentsDockAPI = {
     setScoped: (scope, key, value) => ipcRenderer.invoke('preferences:set-scoped', scope, key, value)
   },
   native: {
+    issueReportEnvironment: () => ipcRenderer.invoke('native:issue-report-environment'),
     analyticsDisabled: process.env.AGENTSDOCK_DISABLE_ANALYTICS === '1',
     openExternal: url => ipcRenderer.invoke('native:open-external', url),
     showItemInFolder: path => ipcRenderer.invoke('native:show-item', path),

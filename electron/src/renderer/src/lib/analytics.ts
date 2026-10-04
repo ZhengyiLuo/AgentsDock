@@ -110,38 +110,99 @@ function safeEventProps(props?: AnalyticsEventProps): Record<string, boolean> {
 }
 
 /** The complete set of analytics events tracked in this app. Extend deliberately. */
-export type AnalyticsEvent =
-  | 'app_launched'
-  | 'terminal_opened'
-  | 'file_view_opened'
-  | 'job_schedule_opened'
-  | 'scheduled_job_created'
-  | 'scheduled_job_updated'
-  | 'scheduled_job_deleted'
-  | 'scheduled_job_paused'
-  | 'scheduled_job_resumed'
-  | 'scheduled_job_run_requested'
-  | 'scheduled_job_run_cancelled'
-  | 'chat_created'
-  | 'chats_bulk_imported'
-  | 'chat_resumed'
-  | 'chat_opened'
-  | 'message_sent'
-  | 'slash_skill_used'
-  | 'slash_command_used'
-  | 'chat_reference_sent'
-  | 'team_reference_sent'
-  | 'folder_created'
-  | 'folder_deleted'
-  | 'folder_reordered'
-  | 'chat_moved_to_folder'
-  | 'working_directory_changed'
-  | 'digest_opened'
-  | 'search_opened'
-  | 'open_file_clicked'
-  | 'connection_tested'
-  | 'server_added'
-  | 'server_switched'
+export const ANALYTICS_EVENTS = [
+  'app_launched',
+  'terminal_opened',
+  'file_view_opened',
+  'job_schedule_opened',
+  'scheduled_job_created',
+  'scheduled_job_updated',
+  'scheduled_job_deleted',
+  'scheduled_job_paused',
+  'scheduled_job_resumed',
+  'scheduled_job_run_requested',
+  'scheduled_job_run_cancelled',
+  'chat_created',
+  'chats_bulk_imported',
+  'chat_resumed',
+  'chat_opened',
+  'chat_share_opened',
+  'chat_share_snapshot_created',
+  'chat_share_interactive_created',
+  'chat_share_revoked',
+  'split_view_opened',
+  'chat_forked',
+  'chat_reordered',
+  'team_network_opened',
+  'message_sent',
+  'message_queued',
+  'message_steered',
+  'side_chat_opened',
+  'side_chat_message_submitted',
+  'side_chat_stop_requested',
+  'provider_settings_opened',
+  'provider_connection_tested',
+  'provider_connection_saved',
+  'provider_connection_forgotten',
+  'provider_default_model_saved',
+  'goal_saved',
+  'goal_cleared',
+  'goal_paused',
+  'goal_resumed',
+  'workspace_file_saved',
+  'workspace_changes_opened',
+  'workspace_git_staged',
+  'workspace_git_unstaged',
+  'workspace_git_committed',
+  'workspace_git_conflict_resolved',
+  'workspace_git_continued',
+  'workspace_git_aborted',
+  'attachment_uploaded',
+  'app_update_checked',
+  'app_update_channel_changed',
+  'app_update_install_requested',
+  'app_update_cancelled',
+  'server_update_checked',
+  'server_update_requested',
+  'server_update_now_requested',
+  'server_update_cancelled',
+  'server_update_retry_requested',
+  'slash_skill_used',
+  'slash_command_used',
+  'builtin_slash_command_used',
+  'chat_reference_sent',
+  'team_reference_sent',
+  'folder_created',
+  'folder_deleted',
+  'folder_reordered',
+  'chat_moved_to_folder',
+  'working_directory_changed',
+  'digest_opened',
+  'search_opened',
+  'open_file_clicked',
+  'connection_tested',
+  'server_added',
+  'server_switched'
+] as const
+
+export type AnalyticsEvent = typeof ANALYTICS_EVENTS[number]
+
+/** One explicit operation, not a subscription/replay. Never serialize its input,
+ * result or error; success means this request resolved, not eventual completion. */
+export async function trackOperation<T>(
+  name: AnalyticsEvent,
+  operation: () => Promise<T>,
+  succeeded: (result: T) => boolean = () => true
+): Promise<T> {
+  try {
+    const result = await operation()
+    trackEvent(name, { success: succeeded(result) })
+    return result
+  } catch (error) {
+    trackEvent(name, { success: false })
+    throw error
+  }
+}
 
 export function trackEvent(name: AnalyticsEvent, props?: AnalyticsEventProps): void {
   const invokedRevision = consentRevision

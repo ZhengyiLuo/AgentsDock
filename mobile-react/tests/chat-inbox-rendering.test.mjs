@@ -25,6 +25,7 @@ const mocks = {
     export const Pressable = props => createElement('Pressable', props, typeof props.children === 'function' ? props.children({ pressed: false }) : props.children);
     export const StyleSheet = { create: value => value, absoluteFill: {}, hairlineWidth: 0.5, flatten: value => Object.assign({}, ...[value].flat(Infinity).filter(Boolean)) };
     export const Platform = { OS: 'ios', select: values => values.ios ?? values.default };
+    export const UIManager = { hasViewManagerConfig: () => true };
     export const Linking = { openURL: async url => { globalThis.__chatInboxFixture.links.push(url); } };
     export const useColorScheme = () => globalThis.__chatInboxFixture.theme;
     export const AccessibilityInfo = { announceForAccessibility() {} };`,

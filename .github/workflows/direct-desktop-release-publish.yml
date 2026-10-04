@@ -1,0 +1,569 @@
+name: Publish direct desktop release
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Existing draft SemVer version, without a leading v
+        required: true
+        type: string
+      track:
+        description: Track used when preparing the draft
+        required: true
+        default: stable
+        type: choice
+        options:
+          - stable
+          - beta
+      allow_unsigned_windows:
+        description: Explicitly approve publishing a stable draft with an unsigned Windows installer
+        required: true
+        default: false
+        type: boolean
+      migration_qa_sha:
+        description: Full reviewed public QA commit for native updater migration (required for stable 1.0.0)
+        required: false
+        default: ''
+        type: string
+      legacy_tag:
+        description: Optional exact legacy-only immutable-tag recovery alias (stable 1.0.0 only)
+        required: false
+        default: ''
+        type: string
+
+concurrency:
+  group: agentsdock-direct-release
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  inspect-draft:
+    if: github.event_name == 'workflow_dispatch' && github.repository == 'ZhengyiLuo/AgentsDock' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/release/'))
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    environment: direct-production
+    outputs:
+      coordinated_updates: ${{ steps.inspect.outputs.coordinated_updates }}
+      source_sha: ${{ steps.inspect.outputs.source_sha }}
+      source_ref: ${{ steps.inspect.outputs.source_ref }}
+      manifest_sha256: ${{ steps.inspect.outputs.manifest_sha256 }}
+      windows_signing_policy: ${{ steps.inspect.outputs.windows_signing_policy }}
+    steps:
+      - name: Require the canonical manual trusted release line
+        run: |
+          test "$GITHUB_EVENT_NAME" = workflow_dispatch
+          test "$GITHUB_REPOSITORY" = ZhengyiLuo/AgentsDock
+          [[ "$GITHUB_REF" = refs/heads/main || "$GITHUB_REF" = refs/heads/release/* ]] || { echo "Release workflow requires main or release/*." >&2; exit 1; }
+          git check-ref-format "$GITHUB_REF"
+
+      - name: Validate the optional independently pinned migration QA
+        env:
+          MIGRATION_QA_SHA: ${{ inputs.migration_qa_sha }}
+          RELEASE_VERSION: ${{ inputs.version }}
+          RELEASE_TRACK: ${{ inputs.track }}
+          LEGACY_RELEASE_TAG: ${{ inputs.legacy_tag }}
+        run: |
+          if [[ -n "$LEGACY_RELEASE_TAG" ]]; then
+            [[ "$LEGACY_RELEASE_TAG" = 1.0.0 && "$RELEASE_VERSION" = 1.0.0 && "$RELEASE_TRACK" = stable ]] || { echo "Unsupported legacy release tag override." >&2; exit 1; }
+          fi
+          if [[ "$RELEASE_VERSION" = 1.0.0 && "$RELEASE_TRACK" = stable && -z "$MIGRATION_QA_SHA" ]]; then
+            echo "Stable 1.0.0 requires a reviewed native migration QA commit." >&2
+            exit 1
+          fi
+          if [[ -n "$MIGRATION_QA_SHA" ]]; then
+            [[ "$MIGRATION_QA_SHA" =~ ^[0-9a-f]{40}$ ]] || { echo "Migration QA requires a full lowercase reviewed source SHA." >&2; exit 1; }
+            if ! { [[ "$RELEASE_VERSION" = 1.0.0-beta.1 && "$RELEASE_TRACK" = beta ]] || [[ "$RELEASE_VERSION" = 1.0.0 && "$RELEASE_TRACK" = stable ]]; }; then
+              echo "Migration QA is scoped to the beta bridge or stable 1.0.0." >&2
+              exit 1
+            fi
+          fi
+
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+        with:
+          persist-credentials: false
+
+      - id: inspect
+        name: Validate draft identity and exact asset set
+        env:
+          GH_TOKEN: ${{ secrets.AGENTSDOCK_RELEASE_TOKEN }}
+          RELEASE_VERSION: ${{ inputs.version }}
+          RELEASE_TRACK: ${{ inputs.track }}
+          ALLOW_UNSIGNED_WINDOWS: ${{ inputs.allow_unsigned_windows }}
+          LEGACY_RELEASE_TAG: ${{ inputs.legacy_tag }}
+        run: |
+          node scripts/direct-release-mirror.mjs inspect \
+            --version "$RELEASE_VERSION" --track "$RELEASE_TRACK" \
+            --allow-unsigned-windows "$ALLOW_UNSIGNED_WINDOWS" \
+            --legacy-tag "$LEGACY_RELEASE_TAG" \
+            --assets "$RUNNER_TEMP/release" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: AgentsDock-${{ inputs.version }}-draft-replay
+          path: ${{ runner.temp }}/release/*
+          if-no-files-found: error
+          retention-days: 1
+
+  verify-macos:
+    if: github.event_name == 'workflow_dispatch' && github.repository == 'ZhengyiLuo/AgentsDock' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/release/'))
+    needs: inspect-draft
+    runs-on: macos-15
+    timeout-minutes: 20
+    outputs:
+      manifest_sha256: ${{ steps.seal.outputs.manifest_sha256 }}
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+        with:
+          repository: ZhengyiLuo/AgentsDock
+          persist-credentials: false
+          fetch-depth: 0
+          ref: ${{ needs.inspect-draft.outputs.source_sha }}
+
+      - name: Confirm the pinned public source belongs to its reviewed branch
+        env:
+          SOURCE_SHA: ${{ needs.inspect-draft.outputs.source_sha }}
+          SOURCE_REF: ${{ needs.inspect-draft.outputs.source_ref }}
+        run: |
+          test "$(git rev-parse HEAD)" = "$SOURCE_SHA"
+          git fetch --no-tags origin "refs/heads/$SOURCE_REF:refs/remotes/origin/reviewed-release"
+          git merge-base --is-ancestor "$SOURCE_SHA" refs/remotes/origin/reviewed-release
+
+      - uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v6
+        with:
+          version: 11.9.0
+          run_install: false
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        with:
+          node-version: 24
+          cache: pnpm
+          cache-dependency-path: electron/pnpm-lock.yaml
+
+      - name: Install audit dependencies
+        working-directory: electron
+        run: pnpm install --frozen-lockfile
+
+      - uses: actions/download-artifact@018cc2cf5baa6db3ef3c5f8a56943fffe632ef53 # v6
+        with:
+          name: AgentsDock-${{ inputs.version }}-draft-replay
+          path: ${{ runner.temp }}/release
+
+      - name: Bind sealed coordinated descriptor to native verification
+        if: ${{ needs.inspect-draft.outputs.coordinated_updates == 'true' }}
+        run: |
+          echo "AGENTSDOCK_COORDINATED_MANIFEST=$RUNNER_TEMP/release/agents-server-npm-manifest.json" >> "$GITHUB_ENV"
+          echo "AGENTSDOCK_COORDINATED_SIGNATURE=$RUNNER_TEMP/release/agents-server-npm-manifest.sig" >> "$GITHUB_ENV"
+
+      - name: Verify macOS draft assets
+        env:
+          RELEASE_VERSION: ${{ inputs.version }}
+          RELEASE_TRACK: ${{ inputs.track }}
+        run: |
+          cd "$RUNNER_TEMP/release"
+          find . -maxdepth 1 -type f ! -name SHA256SUMS -print | sed 's#^\./##' | sort > "$RUNNER_TEMP/actual-checksum-assets.txt"
+          awk '{ name=$2; sub(/^\*/, "", name); print name }' SHA256SUMS | sort > "$RUNNER_TEMP/manifest-assets.txt"
+          diff -u "$RUNNER_TEMP/actual-checksum-assets.txt" "$RUNNER_TEMP/manifest-assets.txt"
+          shasum -a 256 -c SHA256SUMS
+          "$GITHUB_WORKSPACE/scripts/verify_electron_release.sh" "$RUNNER_TEMP/release" "$RELEASE_VERSION" "$RELEASE_TRACK"
+
+      - id: seal
+        name: Record verified checksum-manifest identity
+        run: echo "manifest_sha256=$(shasum -a 256 "$RUNNER_TEMP/release/SHA256SUMS" | awk '{print $1}')" >> "$GITHUB_OUTPUT"
+
+  verify-linux-x64:
+    if: github.event_name == 'workflow_dispatch' && github.repository == 'ZhengyiLuo/AgentsDock' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/release/'))
+    needs: inspect-draft
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    outputs:
+      manifest_sha256: ${{ steps.seal.outputs.manifest_sha256 }}
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+        with:
+          repository: ZhengyiLuo/AgentsDock
+          persist-credentials: false
+          fetch-depth: 0
+          ref: ${{ needs.inspect-draft.outputs.source_sha }}
+
+      - name: Confirm the pinned public source belongs to its reviewed branch
+        env:
+          SOURCE_SHA: ${{ needs.inspect-draft.outputs.source_sha }}
+          SOURCE_REF: ${{ needs.inspect-draft.outputs.source_ref }}
+        run: |
+          test "$(git rev-parse HEAD)" = "$SOURCE_SHA"
+          git fetch --no-tags origin "refs/heads/$SOURCE_REF:refs/remotes/origin/reviewed-release"
+          git merge-base --is-ancestor "$SOURCE_SHA" refs/remotes/origin/reviewed-release
+
+      - uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v6
+        with:
+          version: 11.9.0
+          run_install: false
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        with:
+          node-version: 24
+          cache: pnpm
+          cache-dependency-path: electron/pnpm-lock.yaml
+
+      - name: Install Linux audit dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y xvfb
+          cd electron
+          pnpm install --frozen-lockfile
+
+      - uses: actions/download-artifact@018cc2cf5baa6db3ef3c5f8a56943fffe632ef53 # v6
+        with:
+          name: AgentsDock-${{ inputs.version }}-draft-replay
+          path: ${{ runner.temp }}/release
+
+      - name: Bind sealed coordinated descriptor to native verification
+        if: ${{ needs.inspect-draft.outputs.coordinated_updates == 'true' }}
+        run: |
+          echo "AGENTSDOCK_COORDINATED_MANIFEST=$RUNNER_TEMP/release/agents-server-npm-manifest.json" >> "$GITHUB_ENV"
+          echo "AGENTSDOCK_COORDINATED_SIGNATURE=$RUNNER_TEMP/release/agents-server-npm-manifest.sig" >> "$GITHUB_ENV"
+
+      - name: Verify Linux x64 draft assets
+        env:
+          RELEASE_VERSION: ${{ inputs.version }}
+          RELEASE_TRACK: ${{ inputs.track }}
+        run: |
+          cd "$RUNNER_TEMP/release"
+          find . -maxdepth 1 -type f ! -name SHA256SUMS -printf '%f\n' | sort > "$RUNNER_TEMP/actual-checksum-assets.txt"
+          awk '{ name=$2; sub(/^\*/, "", name); print name }' SHA256SUMS | sort > "$RUNNER_TEMP/manifest-assets.txt"
+          diff -u "$RUNNER_TEMP/actual-checksum-assets.txt" "$RUNNER_TEMP/manifest-assets.txt"
+          sha256sum -c SHA256SUMS
+          chmod +x "AgentsDock-${RELEASE_VERSION}-linux-x86_64.AppImage"
+          "$GITHUB_WORKSPACE/scripts/verify_electron_linux.sh" "$RUNNER_TEMP/release" "$RELEASE_VERSION" "$RELEASE_TRACK" x64
+
+      - id: seal
+        name: Record verified checksum-manifest identity
+        run: echo "manifest_sha256=$(sha256sum "$RUNNER_TEMP/release/SHA256SUMS" | awk '{print $1}')" >> "$GITHUB_OUTPUT"
+
+  verify-linux-arm64:
+    if: github.event_name == 'workflow_dispatch' && github.repository == 'ZhengyiLuo/AgentsDock' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/release/'))
+    needs: inspect-draft
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 20
+    outputs:
+      manifest_sha256: ${{ steps.seal.outputs.manifest_sha256 }}
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+        with:
+          repository: ZhengyiLuo/AgentsDock
+          persist-credentials: false
+          fetch-depth: 0
+          ref: ${{ needs.inspect-draft.outputs.source_sha }}
+
+      - name: Confirm the pinned public source belongs to its reviewed branch
+        env:
+          SOURCE_SHA: ${{ needs.inspect-draft.outputs.source_sha }}
+          SOURCE_REF: ${{ needs.inspect-draft.outputs.source_ref }}
+        run: |
+          test "$(uname -m)" = aarch64
+          test "$(git rev-parse HEAD)" = "$SOURCE_SHA"
+          git fetch --no-tags origin "refs/heads/$SOURCE_REF:refs/remotes/origin/reviewed-release"
+          git merge-base --is-ancestor "$SOURCE_SHA" refs/remotes/origin/reviewed-release
+
+      - uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v6
+        with:
+          version: 11.9.0
+          run_install: false
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        with:
+          node-version: 24
+          cache: pnpm
+          cache-dependency-path: electron/pnpm-lock.yaml
+
+      - name: Install Linux audit dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y xvfb
+          cd electron
+          pnpm install --frozen-lockfile
+
+      - uses: actions/download-artifact@018cc2cf5baa6db3ef3c5f8a56943fffe632ef53 # v6
+        with:
+          name: AgentsDock-${{ inputs.version }}-draft-replay
+          path: ${{ runner.temp }}/release
+
+      - name: Bind sealed coordinated descriptor to native verification
+        if: ${{ needs.inspect-draft.outputs.coordinated_updates == 'true' }}
+        run: |
+          echo "AGENTSDOCK_COORDINATED_MANIFEST=$RUNNER_TEMP/release/agents-server-npm-manifest.json" >> "$GITHUB_ENV"
+          echo "AGENTSDOCK_COORDINATED_SIGNATURE=$RUNNER_TEMP/release/agents-server-npm-manifest.sig" >> "$GITHUB_ENV"
+
+      - name: Verify Linux arm64 draft assets
+        env:
+          RELEASE_VERSION: ${{ inputs.version }}
+          RELEASE_TRACK: ${{ inputs.track }}
+        run: |
+          cd "$RUNNER_TEMP/release"
+          find . -maxdepth 1 -type f ! -name SHA256SUMS -printf '%f\n' | sort > "$RUNNER_TEMP/actual-checksum-assets.txt"
+          awk '{ name=$2; sub(/^\*/, "", name); print name }' SHA256SUMS | sort > "$RUNNER_TEMP/manifest-assets.txt"
+          diff -u "$RUNNER_TEMP/actual-checksum-assets.txt" "$RUNNER_TEMP/manifest-assets.txt"
+          sha256sum -c SHA256SUMS
+          chmod +x "AgentsDock-${RELEASE_VERSION}-linux-arm64.AppImage"
+          "$GITHUB_WORKSPACE/scripts/verify_electron_linux.sh" "$RUNNER_TEMP/release" "$RELEASE_VERSION" "$RELEASE_TRACK" arm64
+
+      - id: seal
+        name: Record verified checksum-manifest identity
+        run: echo "manifest_sha256=$(sha256sum "$RUNNER_TEMP/release/SHA256SUMS" | awk '{print $1}')" >> "$GITHUB_OUTPUT"
+
+  verify-windows-x64:
+    if: github.event_name == 'workflow_dispatch' && github.repository == 'ZhengyiLuo/AgentsDock' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/release/'))
+    needs: inspect-draft
+    environment: direct-production
+    runs-on: windows-2025
+    timeout-minutes: 25
+    outputs:
+      manifest_sha256: ${{ steps.seal.outputs.manifest_sha256 }}
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+        with:
+          repository: ZhengyiLuo/AgentsDock
+          persist-credentials: false
+          fetch-depth: 0
+          ref: ${{ needs.inspect-draft.outputs.source_sha }}
+
+      - name: Confirm the pinned public source belongs to its reviewed branch
+        env:
+          SOURCE_SHA: ${{ needs.inspect-draft.outputs.source_sha }}
+          SOURCE_REF: ${{ needs.inspect-draft.outputs.source_ref }}
+        shell: pwsh
+        run: |
+          if ((git rev-parse HEAD) -ne $env:SOURCE_SHA) { throw 'Checked-out source does not match the draft.' }
+          git fetch --no-tags origin "refs/heads/$($env:SOURCE_REF):refs/remotes/origin/reviewed-release"
+          if ($LASTEXITCODE -ne 0) { throw 'The reviewed public source branch is unavailable.' }
+          git merge-base --is-ancestor $env:SOURCE_SHA refs/remotes/origin/reviewed-release
+          if ($LASTEXITCODE -ne 0) { throw 'Draft source is not an ancestor of the reviewed public branch.' }
+
+      - uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v6
+        with:
+          version: 11.9.0
+          run_install: false
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        with:
+          node-version: 24
+          cache: pnpm
+          cache-dependency-path: electron/pnpm-lock.yaml
+
+      - name: Install Windows audit dependencies
+        working-directory: electron
+        run: pnpm install --frozen-lockfile
+
+      - uses: actions/download-artifact@018cc2cf5baa6db3ef3c5f8a56943fffe632ef53 # v6
+        with:
+          name: AgentsDock-${{ inputs.version }}-draft-replay
+          path: ${{ runner.temp }}/release
+
+      - name: Bind sealed coordinated descriptor to native verification
+        if: ${{ needs.inspect-draft.outputs.coordinated_updates == 'true' }}
+        shell: pwsh
+        run: |
+          "AGENTSDOCK_COORDINATED_MANIFEST=$env:RUNNER_TEMP/release/agents-server-npm-manifest.json" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "AGENTSDOCK_COORDINATED_SIGNATURE=$env:RUNNER_TEMP/release/agents-server-npm-manifest.sig" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
+      - name: Verify Windows x64 draft assets
+        env:
+          RELEASE_TRACK: ${{ inputs.track }}
+          WINDOWS_SIGNING_POLICY: ${{ needs.inspect-draft.outputs.windows_signing_policy }}
+          WINDOWS_EXPECTED_PUBLISHER: ${{ secrets.WINDOWS_EXPECTED_PUBLISHER }}
+        shell: pwsh
+        run: |
+          Get-ChildItem -LiteralPath "$env:RUNNER_TEMP/release" -File | Where-Object Name -ne 'SHA256SUMS' | Sort-Object Name | ForEach-Object Name | Set-Content "$env:RUNNER_TEMP/actual-checksum-assets.txt"
+          Get-Content "$env:RUNNER_TEMP/release/SHA256SUMS" | ForEach-Object { ($_ -split '\s+', 2)[1].TrimStart('*') } | Sort-Object | Set-Content "$env:RUNNER_TEMP/manifest-assets.txt"
+          if (Compare-Object (Get-Content "$env:RUNNER_TEMP/actual-checksum-assets.txt") (Get-Content "$env:RUNNER_TEMP/manifest-assets.txt")) {
+            throw 'Windows replay asset set differs from SHA256SUMS.'
+          }
+          Push-Location "$env:RUNNER_TEMP/release"
+          try {
+            Get-Content SHA256SUMS | ForEach-Object {
+              $Parts = $_ -split '\s+', 2
+              $Expected = $Parts[0]
+              $Name = $Parts[1].TrimStart('*')
+              $Actual = (Get-FileHash -Algorithm SHA256 -LiteralPath $Name).Hash.ToLowerInvariant()
+              if ($Actual -ne $Expected.ToLowerInvariant()) { throw "SHA-256 mismatch for $Name" }
+            }
+          } finally {
+            Pop-Location
+          }
+          ./scripts/verify_electron_windows.ps1 "$env:RUNNER_TEMP/release" "${{ inputs.version }}" "$env:RELEASE_TRACK" x64 "$env:WINDOWS_SIGNING_POLICY" "$env:WINDOWS_EXPECTED_PUBLISHER"
+
+      - id: seal
+        name: Record verified checksum-manifest identity
+        shell: pwsh
+        run: |
+          $Hash = (Get-FileHash -Algorithm SHA256 -LiteralPath "$env:RUNNER_TEMP/release/SHA256SUMS").Hash.ToLowerInvariant()
+          "manifest_sha256=$Hash" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+
+  publish:
+    if: github.event_name == 'workflow_dispatch' && github.repository == 'ZhengyiLuo/AgentsDock' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/release/'))
+    needs:
+      - inspect-draft
+      - verify-macos
+      - verify-linux-x64
+      - verify-linux-arm64
+      - verify-windows-x64
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    environment: direct-production
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+        with:
+          persist-credentials: false
+
+      - name: Revalidate the sealed draft immediately before publication
+        env:
+          GH_TOKEN: ${{ secrets.AGENTSDOCK_RELEASE_TOKEN }}
+          RELEASE_VERSION: ${{ inputs.version }}
+          RELEASE_TRACK: ${{ inputs.track }}
+          SOURCE_SHA: ${{ needs.inspect-draft.outputs.source_sha }}
+          SOURCE_REF: ${{ needs.inspect-draft.outputs.source_ref }}
+          INSPECT_MANIFEST_SHA256: ${{ needs.inspect-draft.outputs.manifest_sha256 }}
+          MAC_MANIFEST_SHA256: ${{ needs.verify-macos.outputs.manifest_sha256 }}
+          LINUX_MANIFEST_SHA256: ${{ needs.verify-linux-x64.outputs.manifest_sha256 }}
+          LINUX_ARM64_MANIFEST_SHA256: ${{ needs.verify-linux-arm64.outputs.manifest_sha256 }}
+          WINDOWS_MANIFEST_SHA256: ${{ needs.verify-windows-x64.outputs.manifest_sha256 }}
+        run: |
+          test "$INSPECT_MANIFEST_SHA256" = "$MAC_MANIFEST_SHA256" && test "$MAC_MANIFEST_SHA256" = "$LINUX_MANIFEST_SHA256" && test "$LINUX_MANIFEST_SHA256" = "$LINUX_ARM64_MANIFEST_SHA256" && test "$LINUX_ARM64_MANIFEST_SHA256" = "$WINDOWS_MANIFEST_SHA256" || { echo "Draft inspection and platform verifiers observed different checksum manifests." >&2; exit 1; }
+
+      - name: Publish reviewed release and exact legacy mirror
+        env:
+          GH_TOKEN: ${{ secrets.AGENTSDOCK_RELEASE_TOKEN }}
+          RELEASE_VERSION: ${{ inputs.version }}
+          RELEASE_TRACK: ${{ inputs.track }}
+          SOURCE_SHA: ${{ needs.inspect-draft.outputs.source_sha }}
+          SOURCE_REF: ${{ needs.inspect-draft.outputs.source_ref }}
+          MANIFEST_SHA256: ${{ needs.inspect-draft.outputs.manifest_sha256 }}
+          COORDINATED_UPDATES: ${{ needs.inspect-draft.outputs.coordinated_updates }}
+          WINDOWS_SIGNING_POLICY: ${{ needs.inspect-draft.outputs.windows_signing_policy }}
+          ALLOW_UNSIGNED_WINDOWS: ${{ inputs.allow_unsigned_windows }}
+          LEGACY_RELEASE_TAG: ${{ inputs.legacy_tag }}
+        run: |
+          case "$WINDOWS_SIGNING_POLICY" in
+            require-signed) WINDOWS_SIGNING=signed ;;
+            allow-unsigned) WINDOWS_SIGNING=unsigned ;;
+            *) echo "Unrecognized verified Windows signing policy." >&2; exit 1 ;;
+          esac
+          node scripts/direct-release-mirror.mjs publish \
+            --version "$RELEASE_VERSION" --track "$RELEASE_TRACK" \
+            --source-sha "$SOURCE_SHA" --source-ref "$SOURCE_REF" \
+            --windows-signing "$WINDOWS_SIGNING" \
+            --manifest-sha256 "$MANIFEST_SHA256" \
+            --coordinated-updates "$COORDINATED_UPDATES" \
+            --allow-unsigned-windows "$ALLOW_UNSIGNED_WINDOWS" \
+            --legacy-tag "$LEGACY_RELEASE_TAG"
+
+      - name: Verify public updater metadata
+        env:
+          GH_TOKEN: ${{ secrets.AGENTSDOCK_RELEASE_TOKEN }}
+          RELEASE_VERSION: ${{ inputs.version }}
+          RELEASE_TRACK: ${{ inputs.track }}
+          LEGACY_RELEASE_TAG: ${{ inputs.legacy_tag }}
+        run: |
+          for RELEASE_REPOSITORY in ZhengyiLuo/AgentsDock ZhengyiLuo/AgentsDock-Releases; do
+            RELEASE_TAG="v${RELEASE_VERSION}"
+            if [[ "$RELEASE_REPOSITORY" = ZhengyiLuo/AgentsDock-Releases && -n "$LEGACY_RELEASE_TAG" ]]; then
+              [[ "$LEGACY_RELEASE_TAG" = 1.0.0 && "$RELEASE_VERSION" = 1.0.0 && "$RELEASE_TRACK" = stable ]] || exit 1
+              RELEASE_TAG="$LEGACY_RELEASE_TAG"
+            fi
+            VERIFIED=false
+            for attempt in 1 2 3 4 5 6; do
+            IS_PRERELEASE="$(gh release view "$RELEASE_TAG" --repo $RELEASE_REPOSITORY --json isPrerelease --jq .isPrerelease)" || true
+            LATEST_TAG="$(gh api repos/$RELEASE_REPOSITORY/releases/latest --jq .tag_name)" || true
+            if [[ "$RELEASE_TRACK" = beta ]]; then
+              MAC_URL="https://github.com/$RELEASE_REPOSITORY/releases/download/v${RELEASE_VERSION}/beta-mac.yml"
+              LINUX_URL="https://github.com/$RELEASE_REPOSITORY/releases/download/v${RELEASE_VERSION}/beta-linux.yml"
+              LINUX_ARM64_URL="https://github.com/$RELEASE_REPOSITORY/releases/download/v${RELEASE_VERSION}/beta-linux-arm64.yml"
+              WINDOWS_URL="https://github.com/$RELEASE_REPOSITORY/releases/download/v${RELEASE_VERSION}/beta.yml"
+              EXPECTED_PRERELEASE=true
+              DISCOVERED_VERSION="$(curl -fsSL https://github.com/$RELEASE_REPOSITORY/releases.atom | node "$GITHUB_WORKSPACE/scripts/select_electron_beta_release.mjs")" || true
+              DISCOVERED_MAC_VERSION="$(curl -fsSL "https://github.com/$RELEASE_REPOSITORY/releases/download/v${DISCOVERED_VERSION}/beta-mac.yml" | awk '/^version:/ && !found { value=$2; found=1 } END { print value }' | tr -d '\"\047')" || true
+              DISCOVERED_LINUX_ARM64_VERSION="$(curl -fsSL "https://github.com/$RELEASE_REPOSITORY/releases/download/v${DISCOVERED_VERSION}/beta-linux-arm64.yml" | awk '/^version:/ && !found { value=$2; found=1 } END { print value }' | tr -d '\"\047')" || true
+              DISCOVERED_WINDOWS_VERSION="$(curl -fsSL "https://github.com/$RELEASE_REPOSITORY/releases/download/v${DISCOVERED_VERSION}/beta.yml" | awk '/^version:/ && !found { value=$2; found=1 } END { print value }' | tr -d '\"\047')" || true
+            else
+              MAC_URL="https://github.com/$RELEASE_REPOSITORY/releases/latest/download/latest-mac.yml"
+              LINUX_URL="https://github.com/$RELEASE_REPOSITORY/releases/latest/download/latest-linux.yml"
+              LINUX_ARM64_URL="https://github.com/$RELEASE_REPOSITORY/releases/latest/download/latest-linux-arm64.yml"
+              WINDOWS_URL="https://github.com/$RELEASE_REPOSITORY/releases/latest/download/latest.yml"
+              EXPECTED_PRERELEASE=false
+              DISCOVERED_VERSION="$RELEASE_VERSION"
+              DISCOVERED_MAC_VERSION="$RELEASE_VERSION"
+              DISCOVERED_LINUX_ARM64_VERSION="$RELEASE_VERSION"
+              DISCOVERED_WINDOWS_VERSION="$RELEASE_VERSION"
+            fi
+            MAC_VERSION="$(curl -fsSL "$MAC_URL" | awk '/^version:/ && !found { value=$2; found=1 } END { print value }' | tr -d '\"\047')" || true
+            LINUX_VERSION="$(curl -fsSL "$LINUX_URL" | awk '/^version:/ && !found { value=$2; found=1 } END { print value }' | tr -d '\"\047')" || true
+            LINUX_ARM64_VERSION="$(curl -fsSL "$LINUX_ARM64_URL" | awk '/^version:/ && !found { value=$2; found=1 } END { print value }' | tr -d '\"\047')" || true
+            WINDOWS_VERSION="$(curl -fsSL "$WINDOWS_URL" | awk '/^version:/ && !found { value=$2; found=1 } END { print value }' | tr -d '\"\047')" || true
+            if test "$MAC_VERSION" = "$RELEASE_VERSION" && test "$LINUX_VERSION" = "$RELEASE_VERSION" && test "$LINUX_ARM64_VERSION" = "$RELEASE_VERSION" && test "$WINDOWS_VERSION" = "$RELEASE_VERSION" && test "$DISCOVERED_VERSION" = "$RELEASE_VERSION" && test "$DISCOVERED_MAC_VERSION" = "$RELEASE_VERSION" && test "$DISCOVERED_LINUX_ARM64_VERSION" = "$RELEASE_VERSION" && test "$DISCOVERED_WINDOWS_VERSION" = "$RELEASE_VERSION" && test "$IS_PRERELEASE" = "$EXPECTED_PRERELEASE"; then
+              if [[ "$RELEASE_TRACK" = beta && "$LATEST_TAG" != "$RELEASE_TAG" ]]; then VERIFIED=true; break; fi
+              if [[ "$RELEASE_TRACK" = stable && "$LATEST_TAG" = "$RELEASE_TAG" ]]; then VERIFIED=true; break; fi
+            fi
+            sleep 10
+            done
+            test "$VERIFIED" = true || { echo "$RELEASE_REPOSITORY metadata or beta discovery did not resolve to $RELEASE_VERSION" >&2; exit 1; }
+          done
+
+  verify-native-migration:
+    needs: [inspect-draft, publish]
+    if: ${{ github.event_name == 'workflow_dispatch' && github.repository == 'ZhengyiLuo/AgentsDock' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/release/')) && inputs.migration_qa_sha != '' }}
+    strategy:
+      fail-fast: false
+      matrix:
+        journey: ${{ fromJSON(inputs.track == 'stable' && '[{"from":"0.2.12","track":"stable"},{"from":"1.0.0-beta.2","track":"beta"}]' || '[{"from":"0.2.13-beta.33","track":"beta"}]') }}
+    runs-on: macos-15
+    timeout-minutes: 35
+    # This QA commit is separate from the immutable signed application source.
+    # No signing or publication secrets are exposed to the installer smoke job.
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+        with:
+          repository: ZhengyiLuo/AgentsDock
+          ref: ${{ inputs.migration_qa_sha }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Verify the separately reviewed public QA commit
+        env:
+          MIGRATION_QA_SHA: ${{ inputs.migration_qa_sha }}
+          SOURCE_REF: ${{ needs.inspect-draft.outputs.source_ref }}
+        run: |
+          test "$(git rev-parse HEAD)" = "$MIGRATION_QA_SHA"
+          git fetch --no-tags origin "refs/heads/$SOURCE_REF:refs/remotes/origin/reviewed-release"
+          git merge-base --is-ancestor "$MIGRATION_QA_SHA" refs/remotes/origin/reviewed-release
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        with:
+          node-version: 24
+
+      - name: Verify migration smoke safety guards
+        run: node --test scripts/tests/verify_electron_migration.test.mjs
+
+      - name: Exercise the published legacy-to-canonical native updater
+        env:
+          RELEASE_VERSION: ${{ inputs.version }}
+          MIGRATION_FROM: ${{ matrix.journey.from }}
+          MIGRATION_TRACK: ${{ matrix.journey.track }}
+        run: |
+          node scripts/verify_electron_migration.mjs \
+            --from-version "$MIGRATION_FROM" --to-version "$RELEASE_VERSION" \
+            --track "$MIGRATION_TRACK" \
+            --output "$RUNNER_TEMP/agentsdock-migration"
+
+      - name: Retain isolated migration acceptance evidence
+        if: ${{ always() }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: AgentsDock-${{ inputs.version }}-native-migration-${{ matrix.journey.from }}-${{ matrix.journey.track }}
+          path: |
+            ${{ runner.temp }}/agentsdock-migration/receipt.json
+            ${{ runner.temp }}/agentsdock-migration/*.png
+            ${{ runner.temp }}/agentsdock-migration/app.log
+          if-no-files-found: warn
+          retention-days: 14

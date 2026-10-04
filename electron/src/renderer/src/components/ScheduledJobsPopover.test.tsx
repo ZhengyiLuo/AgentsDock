@@ -203,6 +203,28 @@ describe('ScheduledJobsPopover', () => {
     await waitFor(() => expect(update).toHaveBeenCalledWith(job.id, { enabled: false }))
   })
 
+  it.each(['chat', 'standalone'] as const)('uses the custom endpoint readiness for %s job run and resume actions', async contextMode => {
+    const customSession: Session = { ...session, codex_provider: 'custom', model: 'shared-model' }
+    useAppStore.setState({ sessions: [customSession], jobs: [{ ...useAppStore.getState().jobs[0], enabled: false, context_mode: contextMode, backend: 'codex' }],
+      health: { ok: true, capabilities: { codex_provider_v1: { per_chat: true, per_chat_models: true } } }, runtimeCatalog: { backends: { codex: {
+        models: [{ value: 'shared-model', label: 'Normal model', locked: true, locked_reason: 'Normal account model locked' }], efforts: [],
+        custom_provider: { configured: true, available: true, model: 'shared-model', base_url: 'https://inference.example/v1' }
+      } } }
+    })
+    const user = userEvent.setup()
+    const { rerender } = render(<ScheduledJobsPopover session={customSession} />)
+    await user.click(screen.getByRole('button', { name: 'Scheduled jobs' }))
+    fireEvent.contextMenu(screen.getByRole('button', { name: 'Status, Every 1h, Disabled' }))
+    expect(await screen.findByRole('menuitem', { name: 'Run once' })).not.toHaveAttribute('aria-disabled', 'true')
+    expect(screen.getByRole('menuitem', { name: 'Resume schedule' })).not.toHaveAttribute('aria-disabled', 'true')
+    useAppStore.setState(state => ({ runtimeCatalog: { backends: { codex: {
+      ...state.runtimeCatalog!.backends.codex, custom_provider: { configured: false, available: false, model: null, base_url: null }
+    } } } }))
+    rerender(<ScheduledJobsPopover session={customSession} />)
+    expect(screen.getByRole('menuitem', { name: 'Run once' })).toHaveAttribute('aria-disabled', 'true')
+    expect(screen.getByRole('menuitem', { name: 'Resume schedule' })).toHaveAttribute('aria-disabled', 'true')
+  })
+
   it('offers confirmed deletion when an existing job is right-clicked', async () => {
     const remove = vi.fn().mockResolvedValue(true)
     Object.defineProperty(window, 'agentsDock', {

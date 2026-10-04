@@ -4,6 +4,7 @@ import { useLocale } from '../lib/i18n'
 import * as DropdownMenu from '@radix-ui/react-dropdown-menu'
 import { Check, ChevronDown, LoaderCircle, Plus, Settings } from 'lucide-react'
 import type { PublicServerProfile, ServerConnectionState } from '@shared/types'
+import { trackEvent } from '../lib/analytics'
 import { useAppStore } from '../store/app-store'
 import { ShortcutTooltip } from './ShortcutTooltip'
 
@@ -22,7 +23,11 @@ export function ServerSelector() {
 
   const chooseProfile = (profileId: string) => {
     if (profileId === activeProfileId || profileId === switchingProfileId) return
-    void Promise.resolve(switchServer(profileId)).catch(error => {
+    void Promise.resolve(switchServer(profileId)).then(switched => {
+      if (!switched || useAppStore.getState().activeProfileId !== profileId) return
+      trackEvent('server_switched', { success: true })
+    }).catch(error => {
+      trackEvent('server_switched', { success: false })
       useAppStore.getState().setError(error instanceof Error ? error.message : String(error))
     })
   }

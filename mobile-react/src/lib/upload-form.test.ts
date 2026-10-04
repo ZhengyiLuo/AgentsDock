@@ -21,12 +21,12 @@ try {
 
   // An unreadable iOS/iCloud URI must surface a clear, retry-able error rather
   // than an opaque reject that (before the fix) could strand the chip.
-  const unreadable = createUploadFormData({ uri: 'file:///tmp/photo.jpg#unreadable', name: 'photo.jpg' })
+  const unreadable = createUploadFormData({ uri: 'file:///tmp/clip.mp4#unreadable', name: 'clip.mp4', type: 'video/mp4' })
   const unreadablePart = (unreadable as unknown as RawFormData).get('file') as FormPart
   await assert.rejects(
     unreadablePart.bytes(),
-    /Couldn.t read .*photo\.jpg.*iCloud/i,
-    'an unreadable photo URI fails with a readable, actionable message',
+    /Couldn.t read .*clip\.mp4.*photo or video.*iCloud/i,
+    'an unreadable media URI fails with a readable, actionable message',
   )
 } finally {
   globalThis.FormData = originalFormData

@@ -1,5 +1,6 @@
 import type { LanguagePreference } from './i18n'
 import type { SharedChatAttribution } from './chat-shares'
+import type { SideQuestionsCapability } from './side-questions'
 import type { MailHintProjection, TeamMailHintsCapability } from './team-mail-hints'
 import type { TeamActivityHintsCapability } from './team-bulletin-hints'
 
@@ -11,7 +12,8 @@ export interface LanguageSettingsSnapshot {
 export type JsonPrimitive = string | number | boolean | null
 export type JsonValue = JsonPrimitive | JsonValue[] | { [key: string]: JsonValue }
 
-export type Backend = 'claude' | 'codex' | 'cursor'
+export type Backend = 'claude' | 'codex' | 'cursor' | 'opencode'
+export type CodexProvider = 'default' | 'custom'
 export type ChatSyncStatus = 'idle' | 'cached' | 'syncing' | 'live' | 'reconnecting' | 'offline' | 'error'
 export type ServerConnectionState = 'online' | 'degraded' | 'connecting' | 'retrying' | 'offline' | 'cached'
 
@@ -20,6 +22,7 @@ export type CodexSandboxMode = 'read-only' | 'workspace-write' | 'danger-full-ac
 export type CodexApprovalsReviewer = 'user' | 'auto_review' | 'guardian_subagent'
 export type ClaudePermissionMode = 'default' | 'acceptEdits' | 'plan' | 'bypassPermissions' | 'dontAsk' | 'auto'
 export type CursorPermissionMode = 'default' | 'full_access' | 'plan'
+export type OpenCodePermissionMode = 'default' | 'full_access' | 'plan'
 export type CodexGoalStatus = 'active' | 'paused' | 'blocked' | 'usageLimited' | 'budgetLimited' | 'complete'
 export type CodexThreadActiveFlag = 'waitingOnApproval' | 'waitingOnUserInput'
 export type CodexThreadStatus =
@@ -88,6 +91,20 @@ export interface ClaudeRuntimeFeatures {
   context_usage_refresh?: boolean
   /** Native Claude Agent SDK MCP status and control endpoints are available. */
   mcp_management?: boolean
+  /** Native Claude completion-condition goals, with authoritative provider state. */
+  goals?: boolean
+}
+
+export interface ClaudeGoal {
+  condition: string
+  status: 'active' | 'achieved' | 'cleared' | 'failed'
+  iterations?: number
+  /** Native goal timestamp in milliseconds since the epoch. */
+  set_at?: number
+  tokens_at_start?: number
+  last_reason?: string
+  duration_ms?: number
+  tokens?: number
 }
 
 export interface ClaudeRuntimeSnapshot {
@@ -112,6 +129,12 @@ export interface ClaudeRuntimeSnapshot {
   usage_generation?: number | null
   /** True when this response includes a newly sampled SDK context value. */
   context_usage_refreshed?: boolean
+  /** Native Claude current/latest goal; absent on older servers. */
+  goal?: ClaudeGoal | null
+  /** Native command accepted; awaiting an authoritative goal status record. */
+  goal_starting?: boolean
+  /** The initial provider transcript goal projection is still loading. */
+  goal_loading?: boolean
 }
 
 export type ClaudeTokenUsage = Record<string, JsonValue>
@@ -253,6 +276,71 @@ export interface CodexGoalsConfiguration {
 /** Server selection displayed by the caller, checked before sending an admin request. */
 export type CodexServerSettingsScope = Pick<WorkspaceProfileScope, 'profileId' | 'profileGeneration'>
 
+/** Native Codex account metadata only. Credentials never cross back to the renderer. */
+export interface CodexAuthStatus {
+  available: boolean
+  auth_mode: 'apiKey' | 'chatgpt' | 'other' | 'none'
+  email: string | null
+  plan_type: string | null
+  requires_openai_auth: boolean
+}
+
+/** Custom Responses provider; never contains stored credentials. */
+export interface CodexProviderConfiguration {
+  connection_verified?: boolean
+  connection_check_available?: boolean
+  available: boolean
+  configured: boolean
+  base_url: string | null
+  model: string | null
+  has_api_key: boolean
+  wire_api: 'responses'
+  credential_id?: string
+}
+
+/** Transient input sent only to the selected server's native admin route. */
+export interface CodexProviderInput {
+  verify_connection?: boolean
+  base_url: string
+  model?: string
+  api_key: string
+}
+
+export interface CodexProviderTestResult {
+  ok: boolean
+  status: 'ready' | 'unsupported' | 'unsupported_parameter' | 'inconclusive' | 'authentication_failed' | 'connection_failed' | 'model_unavailable' | 'failed'
+  message: string
+  model?: string
+  compatibility?: 'unverified' | 'verified' | 'unsupported'
+  scope?: 'isolated_native_tools_and_continuation'
+  checks?: { native_tool_call: boolean; tool_roundtrip: boolean; continuation: boolean }
+  reasoning_summary_supported?: boolean | null
+  summary_check?: 'supported' | 'unsupported' | 'inconclusive' | 'not_checked'
+}
+
+export interface CodexProviderModelTestInput {
+  model: string
+  session_id?: string
+  credential_id?: string
+}
+
+export interface RuntimeModelCapability {
+  kind: 'chat' | 'unknown'
+  compatibility: 'unverified' | 'verified' | 'unsupported'
+  reasoning_efforts: string[]
+  reasoning_supported: boolean | null
+  reasoning_summary_supported?: boolean | null
+}
+
+export interface CodexProviderModels {
+  models: RuntimeModelOption[]
+  efforts: RuntimeOption[]
+  model_efforts?: Record<string, RuntimeOption[]>
+  model_capabilities?: Record<string, RuntimeModelCapability>
+  default_model: string | null
+  default_effort: string | null
+}
+
 /** Server override, not the provider's resolved or currently running limit. */
 export interface CodexSubagentsConfiguration {
   configurable: boolean
@@ -328,15 +416,33 @@ export interface CodexBackgroundTerminalsCleanInput {
   confirmed: boolean
 }
 
+export interface SessionSubagentLimitControl {
+  supported: boolean
+  /** Default fields may be omitted from compact session-list responses. */
+  scope?: 'chat'
+  mode?: 'native_concurrent'
+  applies_to?: 'new_or_reloaded_threads' | 'next_idle_provider_start' | 'next_provider_process_start'
+  reason?: string | null
+  message?: string
+}
+
 export interface Session {
   id: string
   title: string
   folder?: string | null
   cwd?: string | null
   backend: Backend
+  /** Missing on older sessions means native Codex's default provider. */
+  codex_provider?: CodexProvider
+  provider_connection?: CodexProvider
+  /** Safe catalog for this chat's retained endpoint credentials. */
+  codex_provider_catalog?: RuntimeBackendCatalog['custom_provider']
+  provider_connection_catalog?: RuntimeBackendCatalog['custom_provider']
   model?: string | null
   effort?: string | null
   system_prompt?: string | null
+  subagent_limit?: number | null
+  subagent_limit_control?: SessionSubagentLimitControl
   /** Durable server-side fence set when the first ordinary chat turn is admitted. */
   backend_locked?: boolean | null
   session_id?: string | null
@@ -355,6 +461,8 @@ export interface Session {
   claude_permission_mode?: ClaudePermissionMode | null
   cursor_session_id?: string | null
   cursor_permission_mode?: CursorPermissionMode | null
+  opencode_session_id?: string | null
+  opencode_permission_mode?: OpenCodePermissionMode | null
   /** Server-enforced scheduled-job access granted to this chat's agent. */
   provider_jobs_access?: ProviderJobsAccess | null
   claude_pending_interaction_count?: number | null
@@ -426,16 +534,33 @@ export interface RuntimeDiagnostic {
   last_error_at?: string | null
 }
 export interface RuntimeBackendCatalog {
+  native_credentials_present?: boolean
+  /** Safe metadata only; credentials stay on the server. */
+  custom_provider?: {
+    configured: boolean
+    available: boolean
+    model: string | null
+    base_url: string | null
+    models?: RuntimeModelOption[]
+    efforts?: RuntimeOption[]
+    model_efforts?: Record<string, RuntimeOption[]>
+    model_capabilities?: Record<string, RuntimeModelCapability>
+    default_model?: string | null
+    default_effort?: string | null
+  }
   /** Explicit backend availability; required before optional backends are selectable. */
   available?: boolean
   models: RuntimeModelOption[]
   efforts: RuntimeOption[]
   model_efforts?: Record<string, RuntimeOption[]>
+  model_capabilities?: Record<string, RuntimeModelCapability>
   model_source?: string | null
   effort_source?: string | null
   default_model?: string | null
   default_effort?: string | null
   diagnostic?: RuntimeDiagnostic | null
+  permission_modes?: OpenCodePermissionMode[]
+  default_permission_mode?: OpenCodePermissionMode
 }
 export interface RuntimeCatalog {
   backends: Record<string, RuntimeBackendCatalog>
@@ -897,6 +1022,10 @@ export interface Event extends SharedChatAttribution {
   provider_generated?: boolean | null
   provider_input_sha256?: string | null
   phase?: string | null
+  /** Durable summary placement at its first streamed section, without changing its ledger sequence. */
+  reasoning_after_seq?: number
+  /** Provider-supplied reasoning retained when its native item ended without authoritative completion. */
+  partial?: boolean
   /** Provider message identity when supplied by native output or history. */
   provider_message_id?: string | null
   /** True only for transcript records recovered by AgentsServer history import. */
@@ -1000,6 +1129,7 @@ export interface Event extends SharedChatAttribution {
   stopped?: boolean | null
   is_error?: boolean | null
   provider_session_id?: string | null
+  previous_provider_session_id?: string | null
   /** Codex thread identity on native turn lifecycle events. */
   provider_thread_id?: string | null
   tool_id?: string | null
@@ -1300,6 +1430,11 @@ export interface CursorBackendCapability extends ServerCapability {
   permission_modes?: CursorPermissionMode[]
 }
 
+export interface OpenCodeBackendCapability extends ServerCapability {
+  version: 1
+  permission_modes?: OpenCodePermissionMode[]
+}
+
 export interface AgentTeamMailCapability extends ServerCapability {
   version: 1
   explicit_command?: '/mail'
@@ -1578,6 +1713,11 @@ export interface SessionForkCompletedPrefixCapability {
 }
 
 export interface HealthCapabilities {
+  provider_usage?: { available: boolean; version: number; backends?: Backend[] }
+  subagent_limit_v1?: { version: number; backends?: Backend[] }
+  codex_provider_v1?: { available?: boolean; version?: number; per_chat?: boolean; per_chat_models?: boolean; model_discovery?: boolean; model_compatibility?: boolean }
+  provider_connections_v1?: { available?: boolean; per_chat?: boolean; backends?: Backend[] }
+  side_questions?: SideQuestionsCapability
   tmux?: ServerCapability
   workspace_files?: WorkspaceFilesCapability
   working_directory_completion?: WorkingDirectoryCompletionCapability
@@ -1585,6 +1725,8 @@ export interface HealthCapabilities {
   codex_controls?: InteractiveProviderCapability
   claude_controls?: InteractiveProviderCapability
   cursor_backend?: CursorBackendCapability
+  opencode_backend?: OpenCodeBackendCapability
+  local_provider_commands_v1?: ServerCapability & { version?: number; supported_backends?: Backend[] }
   agent_team_mail_v1?: AgentTeamMailCapability
   agent_team_messages_v1?: AgentTeamMessagesCapability
   agent_team_mail_routes_v1?: { available: boolean; version: 1; max_routes: number }
@@ -1603,7 +1745,25 @@ export interface HealthCapabilities {
   pinned_items?: PinnedItemsCapability
   port_forwarding_v1?: PortForwardingCapability
   websocket_auth_v1?: ServerCapability
-  [key: string]: ServerCapability | ServerRestartCapability | TeamHubV1Capability | TeamHubHostControlCapability | LocalSessionImportCapability | SessionForkCompletedPrefixCapability | AgentEmergencyAlertsCapability | TeamMailHintsCapability | TeamActivityHintsCapability | AgentTeamMailCapability | AgentTeamMessagesCapability | TeamBulletinAliasCapability | TeamAllServersAliasCapability | PinnedItemsCapability | JsonValue | undefined
+  [key: string]: SideQuestionsCapability | ServerCapability | ServerRestartCapability | TeamHubV1Capability | TeamHubHostControlCapability | LocalSessionImportCapability | SessionForkCompletedPrefixCapability | AgentEmergencyAlertsCapability | TeamMailHintsCapability | TeamActivityHintsCapability | AgentTeamMailCapability | AgentTeamMessagesCapability | TeamBulletinAliasCapability | TeamAllServersAliasCapability | PinnedItemsCapability | JsonValue | undefined
+}
+
+export type ServerComponentHealth = {
+  protocol: number
+  instance_id: string
+  pid: number
+  version: string
+}
+
+export type ExecutionServiceHealth = ServerComponentHealth & {
+  worker_upgrade_policy: 'when_idle'
+  rolling_worker_upgrade: boolean
+  /** A healthy candidate can still be held until its installer commits. */
+  maintenance_held?: boolean
+}
+
+export type GatewayHealth = ServerComponentHealth & {
+  restart_preserves_execution: boolean
 }
 
 export interface Health {
@@ -1614,6 +1774,9 @@ export interface Health {
   /** Opaque boot identifier. A successful managed restart must change it. */
   server_instance_id?: string
   server_version?: string
+  /** Separate component versions; server_version still describes execution. */
+  gateway?: GatewayHealth
+  execution_service?: ExecutionServiceHealth
   api_contract_version?: number
   active?: string[]
   active_sessions?: string[]
@@ -1715,6 +1878,10 @@ export interface ProviderRuntimeChanged {
   context_usage?: CodexTokenUsage | ClaudeTokenUsage | null
 }
 export interface ProfileProviderRuntimeEvent extends ProfileEventContext { event: ProviderRuntimeChanged }
+export interface ProfileReasoningStreamEvent extends ProfileEventContext {
+  sessionId: string
+  snapshot: ReasoningSummaryStreamSnapshot | null
+}
 export interface ProfileJobsEvent extends ProfileEventContext { jobs: Job[] }
 export interface ProfileRuntimeEvent extends ProfileEventContext { runtimeCatalog: RuntimeCatalog }
 export interface ProfileFilesEvent extends ProfileEventContext { sessionId: string; files: AgentFile[]; total: number }
@@ -1813,6 +1980,8 @@ export interface ServerUpdateStatus {
   /** Pending reservations can be cancelled until the detached updater starts. */
   cancelable?: boolean
   pending_at?: string
+  /** Preparation keeps phase pending and allows existing and manual work. */
+  preparation_phase?: 'checking' | 'downloading' | 'staging' | 'ready'
   blocker_counts?: ServerUpdateBlockerCounts
   message?: string
   /** Stable public failure code for actionable managed-update recovery. */
@@ -1829,6 +1998,23 @@ export interface ServerUpdateStatus {
 export type AppUpdateState = 'disabled' | 'idle' | 'checking' | 'available' | 'downloading' | 'downloaded' | 'installing' | 'not-available' | 'error'
 export type AppUpdateChannel = 'development' | 'direct' | 'app-store'
 export type AppUpdateTrack = 'stable' | 'beta'
+export interface CoordinatedServerUpdate {
+  profileId: string
+  name: string
+  serverIdentity: string | null
+  targetVersion: string
+  phase: 'checking' | 'pending' | 'updating' | 'current' | 'offline' | 'blocked' | 'failed'
+  message: string
+  apiContractVersion?: number
+  serverInstanceId?: string
+  gatewayVersion?: string
+  executionVersion?: string
+  operationId?: string
+  scheduleId?: string
+  operationTargetVersion?: string
+  operationOwned?: boolean
+  paused?: boolean
+}
 export interface AppUpdateStatus {
   state: AppUpdateState
   channel: AppUpdateChannel
@@ -1839,6 +2025,10 @@ export interface AppUpdateStatus {
   message?: string
   checkedAt?: string
   downloadedAt?: string
+  /** Whether the pending app update can still be canceled before native installation. */
+  cancelable?: boolean
+  serverUpdates?: CoordinatedServerUpdate[]
+  serverUpdateMessage?: string
 }
 
 export interface TimelinePage {
@@ -2053,11 +2243,32 @@ export interface SessionSnapshot {
   generation?: number
   /** Renderer-only epoch for a genuinely disjoint authoritative timeline replacement. */
   timelineListGeneration?: number
+  /** Renderer-only provider reasoning channels; never part of the durable event/cache cursor. */
+  reasoningStream?: ReasoningSummaryStreamSnapshot
+}
+
+export interface ReasoningSummaryStreamItem extends Omit<Partial<Event>, 'seq' | 'id' | 'session_id' | 'type' | 'run_id' | 'item_id' | 'backend' | 'phase' | 'text' | 'ts'> {
+  run_id: string
+  item_id: string
+  backend: 'codex'
+  phase: 'summary' | 'reasoning'
+  text: string
+  ts: string
+  after_seq: number
+}
+
+export interface ReasoningSummaryStreamSnapshot {
+  type: 'reasoning_summary_stream'
+  session_id: string
+  instance_id: string
+  revision: number
+  items: ReasoningSummaryStreamItem[]
 }
 
 export interface ViewState {
   sessionId: string
   topItemId?: string | null
+  topItemSeq?: number | null
   topOffset?: number
   distanceFromBottom?: number
   atBottom?: boolean
@@ -2145,15 +2356,19 @@ export interface CreateSessionInput {
   folder: string
   cwd: string
   backend: Backend
+  codex_provider?: CodexProvider
+  provider_connection?: CodexProvider
   model?: string | null
   effort?: string | null
   system_prompt?: string | null
+  subagent_limit?: number | null
   codex_approval_policy?: CodexApprovalPolicy | null
   codex_sandbox_mode?: CodexSandboxMode | null
   codex_permission_profile?: string | null
   codex_approvals_reviewer?: CodexApprovalsReviewer | null
   claude_permission_mode?: ClaudePermissionMode | null
   cursor_permission_mode?: CursorPermissionMode | null
+  opencode_permission_mode?: OpenCodePermissionMode | null
 }
 export interface ResumeSessionInput extends CreateSessionInput { providerId: string }
 export interface LocalSessionCandidate {
@@ -2183,15 +2398,19 @@ export interface UpdateSessionInput {
   folder?: string
   cwd?: string
   backend?: Backend
+  codex_provider?: CodexProvider
+  provider_connection?: CodexProvider
   model?: string | null
   effort?: string | null
   system_prompt?: string | null
+  subagent_limit?: number | null
   codex_approval_policy?: CodexApprovalPolicy | null
   codex_sandbox_mode?: CodexSandboxMode | null
   codex_permission_profile?: string | null
   codex_approvals_reviewer?: CodexApprovalsReviewer | null
   claude_permission_mode?: ClaudePermissionMode | null
   cursor_permission_mode?: CursorPermissionMode | null
+  opencode_permission_mode?: OpenCodePermissionMode | null
   provider_jobs_access?: ProviderJobsAccess
   pinned?: boolean
   archived?: boolean
@@ -2200,6 +2419,8 @@ export interface SendTurnInput {
   sessionId: string
   prompt: string
   fileIds: string[]
+  /** Browser-local correlation with the shared chat's existing acceptance receipt. */
+  sharedChatRequestId?: string
   model?: string | null
   effort?: string | null
   clientCapabilities?: string[]
@@ -2260,6 +2481,8 @@ export interface NativeFileRef {
 }
 
 export interface AppEventMap {
+  'provider-usage:changed': { profileId: string; profileGeneration: number; serverIdentity?: string | null; sessionId: string; backend: 'codex' | 'claude' }
+  'side-chat:changed': { profileId: string; profileGeneration: number; sessionId: string; revision: number }
   'app:storage': { full: boolean }
   'team:mail-hints': MailHintProjection
   'app:language': LanguageSettingsSnapshot
@@ -2271,6 +2494,7 @@ export interface AppEventMap {
   'server:sessions': ProfileSessionsEvent
   'server:event': ProfileAgentEvent
   'server:provider-runtime': ProfileProviderRuntimeEvent
+  'server:reasoning-stream': ProfileReasoningStreamEvent
   'server:jobs': ProfileJobsEvent
   'server:runtime': ProfileRuntimeEvent
   'server:pins': ProfilePinsEvent

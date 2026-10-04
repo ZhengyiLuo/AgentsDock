@@ -6,7 +6,7 @@ import test from 'node:test'
 const composer = fs.readFileSync(path.resolve('src/components/Composer.tsx'), 'utf8')
 
 test('touch-first composer offers a searchable adaptive target-chat picker', () => {
-  assert.match(composer, /const options = \['Reference another chat', 'Photo Library', 'Files', 'Reference a server \(@@\)', 'Cancel'\]/)
+  assert.match(composer, /const options = \['Reference another chat', 'Photos and Videos', 'Files', 'Reference a server \(@@\)', 'Cancel'\]/)
   assert.match(composer, /chatMentionTrigger\(draftRef\.current, selection\.start, referencesRef\.current\)/)
   assert.doesNotMatch(composer, /trigger\.kind === '@' && !trigger\.query\.trim\(\)/)
   const picker = composer.slice(composer.indexOf('export function ChatTargetPicker'), composer.indexOf('function availableChatReferenceActions'))

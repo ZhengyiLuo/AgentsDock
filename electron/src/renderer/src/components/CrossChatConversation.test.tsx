@@ -39,6 +39,49 @@ describe('cross-chat message lifecycle', () => {
     })
   })
 
+  it.each([
+    { label: 'plain text and soft line breaks', text: 'Run on 20 episodes.\nOperator body: mean 0.06 degrees.', rendered: 'Run on 20 episodes.\nOperator body: mean 0.06 degrees.' },
+    { label: 'adjacent Markdown and inline code', text: 'Run on **20** `episodes`.\n**Operator** `body`: mean **0.06** degrees.', rendered: 'Run on 20 episodes.\nOperator body: mean 0.06 degrees.' },
+    { label: 'link boundaries', text: 'Run on [20 episodes](report.md).\nOperator [body](src/body.ts): mean 0.06 degrees.', rendered: 'Run on 20 episodes.\nOperator body: mean 0.06 degrees.' },
+    { label: 'intentionally joined source text', text: 'Run on20episodes.\nOperatorbody:mean.0608641,max.7392861.', rendered: 'Run on20episodes.\nOperatorbody:mean.0608641,max.7392861.' }
+  ])('preserves authored spacing in $label through cross-chat preview and expansion', ({ text, rendered }) => {
+    const body = `${text}\n\n${'Detailed unchanged context. '.repeat(32)}Full message end.`
+    const event: Event = {
+      id: 'spacing-message', session_id: 'chat-1', seq: 10, ts: '2026-09-04T01:00:00Z',
+      type: 'chat_conversation_message_registered', conversation_mode: 'async_route_v1',
+      conversation_id: 'spacing-conversation', message_id: 'spacing-handoff', handoff_id: 'spacing-handoff',
+      source_session_id: 'chat-1', target_session_id: 'chat-2', source_title: 'Source', target_title: 'Reviewer',
+      handoff_preview: body, handoff_body_chars: body.length, handoff_body_truncated: false
+    }
+    const item: SystemItem = { kind: 'system', id: event.id, key: event.id, seq: event.seq, event, crossChatMessage: true }
+    const { container } = render(<TimelineRowView item={item} sessionId="chat-1" profileScope={profileScope} onFindFile={() => {}} pinnedItemIds={new Set()} />)
+    const paragraph = () => container.querySelector('.cross-chat-message .markdown p')
+    expect(paragraph()?.textContent).toBe(rendered)
+    expect(container).not.toHaveTextContent('Full message end.')
+    fireEvent.click(screen.getByRole('button', { name: 'View message' }))
+    expect(paragraph()?.textContent).toBe(rendered)
+    expect(container).toHaveTextContent('Full message end.')
+    fireEvent.click(screen.getByRole('button', { name: 'Show less' }))
+    expect(paragraph()?.textContent).toBe(rendered)
+    expect(event.handoff_preview).toBe(body)
+    expect(loadExchange).not.toHaveBeenCalled()
+  })
+
+  it('preserves explicit Markdown line breaks between cross-chat text and code spans', () => {
+    const event: Event = {
+      id: 'line-break-message', session_id: 'chat-1', seq: 10, ts: '2026-09-04T01:00:00Z',
+      type: 'chat_conversation_message_registered', conversation_mode: 'async_route_v1',
+      conversation_id: 'line-break-conversation', message_id: 'line-break-handoff',
+      source_session_id: 'chat-1', target_session_id: 'chat-2', target_title: 'Reviewer',
+      handoff_preview: 'Run on **20**  \nepisodes.\n\nOperator  \n`body`: mean 0.06 degrees.'
+    }
+    const item: SystemItem = { kind: 'system', id: event.id, key: event.id, seq: event.seq, event, crossChatMessage: true }
+    const { container } = render(<TimelineRowView item={item} sessionId="chat-1" profileScope={profileScope} onFindFile={() => {}} pinnedItemIds={new Set()} />)
+    expect(container.querySelectorAll('.cross-chat-message .markdown p')).toHaveLength(2)
+    expect(container.querySelectorAll('.cross-chat-message .markdown br')).toHaveLength(2)
+    expect(container.querySelector('.cross-chat-message code')).toHaveTextContent('body')
+  })
+
   it.each(['cross_chat_exchange_leg_delivered', 'cross_chat_received'])('opens the exact peer from older %s headings without loading message details', type => {
     const selectSession = vi.fn().mockResolvedValue(undefined)
     useAppStore.setState({ selectSession })

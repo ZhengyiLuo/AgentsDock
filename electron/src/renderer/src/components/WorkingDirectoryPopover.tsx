@@ -168,6 +168,7 @@ export function WorkingDirectoryPopover({ session }: { session: Session }) {
               ><Folder size={15} aria-hidden="true" /><span>{folder.name}</span><ChevronRight size={14} aria-hidden="true" /></button>)}
               {!loading && !error && completion && folders.length === 0 && <p className="cwd-popover-status muted">{t("ui.WorkingDirectoryPopover.WorkingDirectoryPopover.no_folders_inside_this_directory_741deb5")}</p>}
             </div>
+            {session.backend === 'opencode' && <p className="codex-permission-hint">{t('opencode.cwdReset')}</p>}
             <div className="cwd-popover-footer">
               <span className="cwd-popover-target" title={currentPath}>{cwdChipLabel(currentPath)}</span>
               <button type="button" className="cwd-popover-choose" disabled={!currentPath || loading || saving || !completion?.exists} onClick={() => void choose()}>{saving ? t("ui.WorkingDirectoryPopover.WorkingDirectoryPopover.saving_23e3929") : 'Choose'}</button>

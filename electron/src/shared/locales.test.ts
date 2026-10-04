@@ -70,6 +70,19 @@ describe('localization catalog integrity', () => {
     expect(chinese['ui.composer.changeAgent']).toBe('更改 Agent')
   })
 
+  it('uses My Agents consistently and translates the connection UI without English fallback', () => {
+    expect(translationPair('settings.aiProviders')).toEqual(['My Agents', '我的 Agent'])
+    expect(english['connections.noneReady']).toContain('Settings → My Agents')
+    expect(chinese['connections.noneReady']).toContain('设置 → 我的 Agent')
+    for (const key of Object.keys(english).filter(key => /^(connections\.|customModels\.|settings\.providers)/.test(key))) {
+      expect(chinese[key], key).toMatch(/[\u3400-\u9fff]/)
+      expect(chinese[key], key).not.toMatch(/AI Providers|AI 服务商|\bendpoint\b|\bCLI Login\b/)
+    }
+    for (const key of ['ui.ChatHeader.ChatHeader.delete_chat_93291d9', 'ui.Sidebar.SessionContextMenu.delete_chat_19f9176', 'ui.Dialogs.ConfirmDeleteDialog.delete_chat_93291d9']) {
+      expect(translationPair(key)).toEqual(['Delete from AgentsDock', '从 AgentsDock 删除'])
+    }
+  })
+
   it('retains the screenshot-review terminology across labels, actions, and help text', () => {
     for (const [key, source] of Object.entries(english)) {
       const translated = chinese[key]

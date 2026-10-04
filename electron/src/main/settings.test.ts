@@ -78,10 +78,161 @@ function stored(path: string): StoredSettingsV2 {
 }
 
 afterEach(() => {
+  vi.restoreAllMocks()
   credentialProcesses.execFile.mockReset()
   credentialProcesses.execFileSync.mockClear()
   delete process.env.AGENTSDOCK_MIGRATE_SAFE_STORAGE
   while (temporaryDirectories.length) rmSync(temporaryDirectories.pop()!, { recursive: true, force: true })
+})
+
+describe('direct macOS credential saves', () => {
+  it('adds and replaces remote tokens without touching synchronous OSCrypt, then reconnects after reload', async () => {
+    vi.spyOn(process, 'platform', 'get').mockReturnValue('darwin')
+    const path = settingsPath(), keychain = new MemoryKeychain()
+    const blocked = vi.fn(() => { throw new Error('Main-thread OSCrypt must not be called') })
+    const options = { path, keychain, safeStorage: {
+      isEncryptionAvailable: blocked, encryptString: blocked, decryptString: blocked
+    }, isMacAppStoreBuild: () => false }
+    const store = new SettingsStore(options)
+    const remote = store.addProfile({ name: 'My remote server', serverUrl: 'https://remote.example', accessToken: 'test-token-one' })
+    store.updateProfile(remote.id, { accessToken: 'test-token-two' })
+    const reopened = new SettingsStore(options)
+    expect(await reopened.accessTokenForConnectionAsync(remote.id)).toBe('test-token-two')
+    expect(reopened.getProfile(remote.id)?.name).toBe('My remote server')
+    expect(stored(path).profiles.find(p => p.id === remote.id)?.encryptedAccessToken).toBeUndefined()
+    expect(readFileSync(path, 'utf8')).not.toContain('test-token')
+    expect(blocked).not.toHaveBeenCalled()
+  })
+
+  it('fails closed on Keychain failure without adding a profile or changing old credentials, and permits retry', () => {
+    vi.spyOn(process, 'platform', 'get').mockReturnValue('darwin')
+    const path = settingsPath(), keychain = new MemoryKeychain()
+    const blocked = vi.fn(() => { throw new Error('No synchronous fallback') })
+    const store = new SettingsStore({ path, keychain, safeStorage: {
+      isEncryptionAvailable: blocked, encryptString: blocked, decryptString: blocked
+    }, isMacAppStoreBuild: () => false })
+    const remote = store.addProfile({ name: 'Keep my name', serverUrl: 'https://remote.example', accessToken: 'old-test-token' })
+    const before = readFileSync(path, 'utf8')
+    keychain.writeEnabled = false
+    expect(() => store.addProfile({ serverUrl: 'https://second.example', accessToken: 'new-test-token' })).toThrow('Unlock your macOS login Keychain')
+    expect(() => store.updateProfile(remote.id, { accessToken: 'replacement-test-token' })).toThrow('Unlock your macOS login Keychain')
+    expect(readFileSync(path, 'utf8')).toBe(before)
+    expect(store.accessToken(remote.id)).toBe('old-test-token')
+    keychain.writeEnabled = true
+    expect(store.addProfile({ serverUrl: 'https://second.example', accessToken: 'new-test-token' }).name).toBe('second.example')
+    expect(blocked).not.toHaveBeenCalled()
+  })
+
+  it('can replace legacy ciphertext without decrypting it and preserves it after a failed disk write', () => {
+    vi.spyOn(process, 'platform', 'get').mockReturnValue('darwin')
+    const path = settingsPath(), keychain = new MemoryKeychain()
+    const store = new SettingsStore({ path, keychain, safeStorage: memorySafeStorage })
+    const snapshot = stored(path), profile = snapshot.profiles[0]
+    profile.encryptedAccessToken = encrypted('old-test-token')
+    profile.keychainAccessToken = false
+    writeFileSync(path, JSON.stringify(snapshot))
+    const blocked = vi.fn(() => { throw new Error('Do not decrypt legacy ciphertext while saving') })
+    const reopened = new SettingsStore({ path, keychain, safeStorage: { ...memorySafeStorage, decryptString: blocked } })
+    const persist = vi.spyOn(reopened as unknown as { persist(): void }, 'persist').mockImplementation(() => { throw new Error('disk write failed') })
+    const before = readFileSync(path, 'utf8')
+    expect(() => reopened.updateProfile(profile.id, { accessToken: 'replacement-test-token' })).toThrow('disk write failed')
+    expect(readFileSync(path, 'utf8')).toBe(before)
+    expect(keychain.values.has(`agent-access-token:${profile.id}`)).toBe(false)
+    persist.mockRestore()
+    reopened.updateProfile(profile.id, { accessToken: 'replacement-test-token' })
+    expect(reopened.accessToken(profile.id)).toBe('replacement-test-token')
+    expect(blocked).not.toHaveBeenCalled()
+  })
+
+  it('keeps the sandboxed Mac App Store encryption path', () => {
+    vi.spyOn(process, 'platform', 'get').mockReturnValue('darwin')
+    const path = settingsPath(), keychain = new MemoryKeychain()
+    const store = new SettingsStore({ path, keychain, safeStorage: memorySafeStorage, isMacAppStoreBuild: () => true })
+    const remote = store.addProfile({ serverUrl: 'https://remote.example', accessToken: 'mas-test-token' })
+    expect(store.accessToken(remote.id)).toBe('mas-test-token')
+    expect(stored(path).profiles.find(p => p.id === remote.id)?.encryptedAccessToken).toBe(encrypted('mas-test-token'))
+    expect(keychain.writes).toEqual([])
+  })
+})
+
+it('keeps automatic local discovery in Keychain without entering startup OSCrypt', () => {
+  const path = settingsPath()
+  const keychain = new MemoryKeychain()
+  const encrypt = vi.fn(() => { throw new Error('Startup must not enter OSCrypt') })
+  const settings = new SettingsStore({ path, keychain, safeStorage: { ...memorySafeStorage, encryptString: encrypt } })
+  const profile = settings.addProfile({ name: 'Local fixture', serverUrl: 'http://127.0.0.1:7860', accessToken: 'synthetic-token' }, true)
+  expect(encrypt).not.toHaveBeenCalled()
+  expect(settings.accessToken(profile.id)).toBe('synthetic-token')
+  expect(readFileSync(path, 'utf8')).not.toContain('synthetic-token')
+  keychain.writeEnabled = false
+  expect(() => settings.addProfile({ name: 'Denied', serverUrl: 'http://127.0.0.1:7861', accessToken: 'synthetic-other-token' }, true)).toThrow('Secure token storage')
+  expect(readFileSync(path, 'utf8')).not.toContain('synthetic-other-token')
+  expect(settings.listProfiles().some(item => item.name === 'Denied')).toBe(false)
+})
+
+describe('server profile default names', () => {
+  it.each([
+    ['http://127.0.0.1:7854', '127.0.0.1:7854'],
+    ['https://agents.example:9443/prefix?ignored=yes', 'agents.example:9443'],
+    ['https://agents.example', 'agents.example'],
+    ['http://[::1]:7854', '[::1]:7854']
+  ])('uses the host and port for an unnamed %s, not its identity', (serverUrl, expected) => {
+    const path = settingsPath()
+    const options = { path, keychain: new MemoryKeychain(), safeStorage: memorySafeStorage }
+    const store = new SettingsStore(options)
+    const added = store.addProfile({ name: '  ', serverUrl, serverIdentity: '1234567890abcdef12345678' })
+    expect(added.name).toBe(expected)
+    expect(new SettingsStore(options).getProfile(added.id)?.name).toBe(expected)
+    expect(stored(path).profiles.find(profile => profile.id === added.id)?.nameSource).toBe('url')
+  })
+
+  it('keeps unnamed ports distinct and follows URL edits without renaming custom labels', () => {
+    const store = new SettingsStore({ path: settingsPath(), keychain: new MemoryKeychain(), safeStorage: memorySafeStorage })
+    expect(store.getActiveProfile().name).toBe('127.0.0.1:7850')
+    const automatic = store.addProfile({ serverUrl: 'http://127.0.0.1:7854' })
+    expect(automatic.name).toBe('127.0.0.1:7854')
+    expect(store.updateProfile(automatic.id, { serverIdentity: 'opaque-server-id' }).name).toBe('127.0.0.1:7854')
+    expect(store.updateProfile(automatic.id, { serverUrl: 'https://other.example:9443' }).name).toBe('other.example:9443')
+    store.updateProfile(automatic.id, { name: 'My server' })
+    expect(store.updateProfile(automatic.id, { serverUrl: 'https://renamed.example' }).name).toBe('My server')
+  })
+
+  it('repairs exact legacy defaults on reload without touching identity, credentials, or custom names', () => {
+    const path = settingsPath()
+    const options = { path, keychain: new MemoryKeychain(), safeStorage: memorySafeStorage }
+    const store = new SettingsStore(options)
+    const legacy = store.addProfile({ serverUrl: 'http://legacy.example:7854', serverIdentity: '1234567890abcdef12345678', accessToken: 'retained-test-token' })
+    const custom = store.addProfile({ name: 'My server', serverUrl: 'http://custom.example:7854' })
+    const similar = store.addProfile({ name: 'abcdef1234567890abcdef12', serverUrl: 'http://similar.example:7854', serverIdentity: 'different-server-id' })
+    const snapshot = stored(path)
+    for (const profile of snapshot.profiles) delete profile.nameSource
+    snapshot.profiles.find(profile => profile.id === legacy.id)!.name = legacy.serverIdentity!
+    snapshot.profiles[0].name = '127.0.0.1'
+    writeFileSync(path, JSON.stringify(snapshot))
+    const reopened = new SettingsStore(options)
+    expect(reopened.getActiveProfile().name).toBe('127.0.0.1:7850')
+    expect(reopened.getProfile(legacy.id)).toMatchObject({ name: 'legacy.example:7854', serverIdentity: legacy.serverIdentity, hasAccessToken: true })
+    expect(reopened.accessToken(legacy.id)).toBe('retained-test-token')
+    expect(reopened.getProfile(custom.id)?.name).toBe('My server')
+    expect(reopened.getProfile(similar.id)?.name).toBe(similar.name)
+    expect(stored(path).profiles.find(profile => profile.id === legacy.id)).toMatchObject({
+      ...snapshot.profiles.find(profile => profile.id === legacy.id), name: 'legacy.example:7854', nameSource: 'url'
+    })
+    const normalized = readFileSync(path, 'utf8')
+    new SettingsStore(options)
+    expect(readFileSync(path, 'utf8')).toBe(normalized)
+  })
+
+  it('preserves explicitly chosen names even when they equal the identity or hostname', () => {
+    const options = { path: settingsPath(), keychain: new MemoryKeychain(), safeStorage: memorySafeStorage }
+    const store = new SettingsStore(options)
+    const identity = '1234567890abcdef12345678'
+    const named = store.addProfile({ name: identity, serverUrl: 'http://named.example:7854', serverIdentity: identity })
+    const host = store.addProfile({ name: 'host.example', serverUrl: 'http://host.example:7854' })
+    const reopened = new SettingsStore(options)
+    expect(reopened.getProfile(named.id)?.name).toBe(identity)
+    expect(reopened.getProfile(host.id)?.name).toBe('host.example')
+  })
 })
 
 describe('SettingsStore schema v2 migration', () => {
@@ -134,7 +285,8 @@ describe('SettingsStore schema v2 migration', () => {
       activeProfileId: 'profile-alpha',
       profiles: [{
         id: 'profile-alpha',
-        name: 'server-alpha',
+        name: 'server.example:7850',
+        nameSource: 'url',
         serverUrl: 'http://server.example:7850',
         serverIdentity: 'server-alpha',
         encryptedAccessToken: legacy.encryptedAccessToken,
@@ -375,7 +527,8 @@ describe('SettingsStore profile operations', () => {
     expect(keychain.readAsync).toHaveBeenCalledTimes(2)
   })
 
-  it('falls back to safeStorage when Keychain rejects an access token', () => {
+  it('retains secure safeStorage fallback on Linux when Keychain is unavailable', () => {
+    vi.spyOn(process, 'platform', 'get').mockReturnValue('linux')
     const path = settingsPath()
     const keychain = new MemoryKeychain()
     keychain.writeEnabled = false

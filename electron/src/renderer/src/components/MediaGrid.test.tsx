@@ -106,12 +106,13 @@ describe('MediaPreviewDialog', () => {
 
 describe('shared browser video controls', () => {
   afterEach(() => { cleanup(); resetTransientCloseStackForTests() })
-  it('reuses playback and gallery controls without native file actions or dragging', () => {
+  it('reuses playback, download and gallery controls without native workspace actions or dragging', () => {
     const blocked = vi.fn().mockRejectedValue(new Error('Native operation must not run'))
+    const save = vi.fn().mockResolvedValue('browser-download')
     const mediaURL = vi.fn((_profile: string, _generation: number, _session: string, id: string) => `/interactive-chat/interactive_${'a'.repeat(32)}/media/${id}`)
     Object.defineProperty(window, 'agentsDock', { configurable: true, value: {
       sharedChat: true, native: { analyticsDisabled: true },
-      files: { mediaURL, beginDrag: blocked, open: blocked, reveal: blocked, save: blocked },
+      files: { mediaURL, beginDrag: blocked, open: blocked, reveal: blocked, save },
       pins: { put: blocked, remove: blocked }
     } as unknown as AgentsDockAPI })
     useAppStore.setState({ activeProfileId: 'shared-chat', profileGeneration: 1, sessions: [{ id: 'shared-one', title: 'Synthetic shared chat', backend: 'codex' }] })
@@ -120,13 +121,16 @@ describe('shared browser video controls', () => {
     expect(view.container.querySelector('.media-tile')).toHaveAttribute('draggable', 'false')
     expect(view.container.querySelector('[data-native-file-drag]')).toBeNull()
     fireEvent.dragStart(view.container.querySelector('.media-tile')!)
-    for (const name of ['Open in Editor', 'Download', 'Show in Folder', 'Open', 'Pin file', 'Find in Chat']) expect(screen.queryByTitle(name)).toBeNull()
+    for (const name of ['Open in Editor', 'Show in Folder', 'Open', 'Pin file', 'Find in Chat']) expect(screen.queryByTitle(name)).toBeNull()
+    fireEvent.click(screen.getAllByTitle('Download')[0])
+    expect(save).toHaveBeenLastCalledWith('shared-one', files[0])
     fireEvent.click(view.container.querySelector('.media-preview')!)
     const player = document.querySelector('.media-dialog video')!
     expect(player).toHaveAttribute('src', `/interactive-chat/interactive_${'a'.repeat(32)}/media/${files[0].id}`)
     expect(player).toHaveAttribute('controls'); expect(player).toHaveAttribute('playsinline')
-    expect(player).toHaveAttribute('controlslist', 'nodownload')
-    expect(screen.queryByRole('button', { name: 'Download' })).toBeNull()
+    expect(player).not.toHaveAttribute('controlslist', 'nodownload')
+    fireEvent.click(screen.getByRole('button', { name: 'Download' }))
+    expect(save).toHaveBeenCalledTimes(2)
     expect(screen.queryByRole('button', { name: 'Open' })).toBeNull()
     fireEvent.click(screen.getByRole('button', { name: 'Next media' }))
     expect(document.querySelector('.media-dialog video')).toHaveAttribute('src', expect.stringContaining(files[1].id))
@@ -135,6 +139,36 @@ describe('shared browser video controls', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Close media preview' }))
     expect(document.querySelector('.media-dialog')).toBeNull()
     expect(blocked).not.toHaveBeenCalled()
+  })
+  it('downloads documents from their title or button instead of opening a native editor', () => {
+    const save = vi.fn().mockResolvedValue('browser-download')
+    const blocked = vi.fn().mockRejectedValue(new Error('Native operation must not run'))
+    Object.defineProperty(window, 'agentsDock', { configurable: true, value: {
+      sharedChat: true, files: { mediaURL: vi.fn(() => ''), save, open: blocked }
+    } as unknown as AgentsDockAPI })
+    const file = { id: `shared_file_YXR0YWNobWVudA.${'a'.repeat(64)}`, session_id: 'shared-one', filename: 'report.md', content_type: 'text/markdown', size: 12 }
+    useAppStore.setState({ activeProfileId: 'shared-chat', profileGeneration: 1, sessions: [{ id: 'shared-one', title: 'Synthetic shared chat', backend: 'codex' }] })
+    render(<MediaGrid files={[file]} sessionId="shared-one" profileScope={{ profileId: 'shared-chat', profileGeneration: 1, serverIdentity: 'synthetic-share' }} />)
+    fireEvent.click(screen.getByRole('button', { name: /report\.md/ }))
+    fireEvent.click(screen.getByTitle('Download'))
+    expect(save).toHaveBeenCalledTimes(2)
+    expect(save).toHaveBeenLastCalledWith('shared-one', file)
+    expect(blocked).not.toHaveBeenCalled()
+    expect(screen.queryByTitle('Open in Editor')).toBeNull()
+  })
+  it('keeps download-only image formats out of the shared preview gallery', () => {
+    const files = [
+      { id: 'previewable', filename: 'image.png', content_type: 'image/png', size: 12 },
+      { id: 'download-only', filename: 'vector.svg', content_type: 'image/svg+xml', size: 20 }
+    ]
+    Object.defineProperty(window, 'agentsDock', { configurable: true, value: {
+      sharedChat: true, files: { mediaURL: vi.fn((_profile, _generation, _session, id) => id === 'previewable' ? '/scoped/image' : ''), save: vi.fn() }
+    } as unknown as AgentsDockAPI })
+    useAppStore.setState({ activeProfileId: 'shared-chat', profileGeneration: 1 })
+    render(<MediaPreviewDialog sessionId="shared-one" file={files[0]} files={files} onSelect={vi.fn()} onClose={vi.fn()} />)
+    expect(screen.getByRole('img', { name: 'image.png' })).toHaveAttribute('src', '/scoped/image')
+    expect(screen.queryByRole('button', { name: 'Next media' })).toBeNull()
+    expect(screen.getByRole('button', { name: 'Download' })).toBeInTheDocument()
   })
 })
 

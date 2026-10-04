@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import type { Event } from '@shared/types'
 import { projectTimeline, renderTimelineItems } from '../lib/timeline'
-import { isSharedVideoId, projectSharedVideoEvents } from './videos'
+import { isSharedFileId, isSharedVideoId, projectSharedVideoEvents } from './videos'
 
 const video = { id: `video_c3ludGhldGljLW9ubHk.${'a'.repeat(64)}`, filename: 'synthetic clip.mp4', content_type: 'video/mp4', size: 1234 }
 const event = (type: string, shared_videos: unknown = [video]) => ({
@@ -52,10 +52,10 @@ describe('shared video descriptors', () => {
     expect(projected.files[0].session_id).toBe('shared-one')
     expect(renderTimelineItems(projectTimeline(projected.events, projected.files)).some(row => row.kind === 'media' && row.files[0]?.id === video.id)).toBe(true)
   })
-  it('rejects an over-limit descriptor array before mapping it', () => {
+  it('preserves attachments beyond the old shared-chat-only count limit', () => {
     const descriptors = Array.from({ length: 33 }, () => video)
     const projected = projectSharedVideoEvents([event('turn_started', descriptors)], 'shared-one')
-    expect(projected.files).toEqual([]); expect(projected.events[0].file_ids).toBeUndefined()
+    expect(projected.files).toHaveLength(1); expect(projected.events[0].file_ids).toEqual([video.id])
     expect(projectSharedVideoEvents([event('turn_started', descriptors.slice(0, 32))], 'shared-one').files).toHaveLength(1)
   })
   it('rejects multiple artifact descriptors instead of inventing chronology', () => {
@@ -78,5 +78,27 @@ describe('shared video descriptors', () => {
   it('bounds the opaque identifier without requiring native file_ identifiers', () => {
     expect(isSharedVideoId(`video_${'a'.repeat(953)}.${'b'.repeat(64)}`)).toBe(true)
     expect(isSharedVideoId(`video_${'a'.repeat(954)}.${'b'.repeat(64)}`)).toBe(false)
+  })
+
+  it.each(['text/plain', 'application/pdf', 'application/zip', 'image/png', 'text/html'])('projects sent %s files into native attachments and published artifacts', content_type => {
+    const file = { id: `shared_file_YXR0YWNobWVudA.${'c'.repeat(64)}`, filename: 'attachment.bin', content_type, size: 0 }
+    for (const type of ['turn_started', 'turn_steered', 'artifact_created']) {
+      const input = { ...event(type, []), shared_files: [file] } as Event
+      const projected = projectSharedVideoEvents([input], 'shared-one')
+      expect(projected.files).toEqual([{ ...file, session_id: 'shared-one' }])
+      expect(projected.events[0]).not.toHaveProperty('shared_files')
+      if (type === 'artifact_created') expect(projected.events[0].artifact).toEqual(projected.files[0])
+      else expect(projected.events[0].file_ids).toEqual([file.id])
+    }
+  })
+
+  it('only accepts scoped file descriptors, never native IDs or paths', () => {
+    const file = { id: `shared_file_YXR0YWNobWVudA.${'c'.repeat(64)}`, filename: 'attachment.txt', content_type: 'text/plain', size: 12 }
+    expect(isSharedFileId(file.id)).toBe(true)
+    for (const invalid of [{ ...file, id: 'file_native' }, { ...file, path: '/private/file' },
+      { ...file, filename: '../private' }, { ...file, content_type: 'text/plain\r\nHeader: value' }]) {
+      expect(projectSharedVideoEvents([{ ...event('turn_started', []), shared_files: [invalid] } as Event], 'shared-one').files).toEqual([])
+    }
+    expect(projectSharedVideoEvents([{ ...event('file_uploaded', []), shared_files: [file] } as Event], 'shared-one').files).toEqual([])
   })
 })

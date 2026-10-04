@@ -15,6 +15,18 @@ const context = (seq: number, patch: Partial<Event> = {}): Event => event(seq, '
 })
 
 describe('goal-runtime timeline projection', () => {
+  it('keeps Claude goal refresh events out of the visible conversation', () => {
+    const rows = renderTimelineItems(projectTimeline([
+      event(1, 'turn_started', { backend: 'claude', run_id: 'goal-run', prompt: '/goal Complete the task' }),
+      event(2, 'claude_goal_changed', { backend: 'claude' }),
+      event(3, 'assistant_text', { backend: 'claude', run_id: 'goal-run', text: 'The task is complete.' }),
+      event(4, 'turn_finished', { backend: 'claude', run_id: 'goal-run' })
+    ], []))
+    expect(rows.filter(row => row.kind === 'message').map(row => messageItemText(row)))
+      .toEqual(['/goal Complete the task', 'The task is complete.'])
+    expect(rows.some(row => row.kind === 'system')).toBe(false)
+  })
+
   it('ends only the echoed import slice when a new goal continuation follows it', () => {
     const suffix = '\n\n[AgentsDock provider authority]\n'
       + 'authority-file=/Users/test/.agentsdock/cross_chat_authority/run_aaaaaaaaaaaaaaaa-bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb.json chat-id=sess_4f43bf0478084d9c (bound to this server, chat, and live run)\n'

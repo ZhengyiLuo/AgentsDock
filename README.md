@@ -7,10 +7,10 @@
       alt="AgentsDock website"
     />
   </a>
-  <a href="https://github.com/ZhengyiLuo/AgentsDock/releases/tag/v1.0.0">
+  <a href="https://github.com/ZhengyiLuo/AgentsDock/releases/tag/v1.0.9">
     <img
-      src="https://img.shields.io/badge/desktop-v1.0.0-EA7233"
-      alt="Desktop 1.0.0 stable"
+      src="https://img.shields.io/badge/desktop-v1.0.9-EA7233"
+      alt="Desktop 1.0.9 stable"
     />
   </a>
   <a href="https://discord.gg/ZGDrhEWqPt">
@@ -19,12 +19,10 @@
       alt="Join the AgentsDock Discord"
     />
   </a>
-  <a href="https://github.com/ZhengyiLuo/AgentsServer">
-    <img
-      src="https://img.shields.io/badge/backend-self--hosted-2563EB"
-      alt="Self-hosted backend"
-    />
-  </a>
+  <img
+    src="https://img.shields.io/badge/backend-self--hosted-2563EB"
+    alt="Self-hosted backend"
+  />
   <a href="CONTRIBUTING.md">
     <img
       src="https://img.shields.io/badge/contributions-welcome-brightgreen.svg"
@@ -44,24 +42,24 @@
 </p>
 
 <div align="center">
-  AgentsDock currently supports <strong>Claude Code</strong>,
-  <strong>Codex</strong>, and <strong>Cursor</strong> in one desktop and mobile
-  workspace. Use your agents for coding, research, and long-running work
+  AgentsDock brings <strong>Claude Code</strong>, <strong>Codex</strong>,
+  <strong>Cursor</strong>, and <strong>OpenCode</strong> into one desktop and
+  mobile workspace. Use your agents for coding, research, and long-running work
   without living in a terminal. Easily review files and rich media.
   <br />
   <br />
-  <strong>Desktop stable 1.0.0:</strong>
-  <a href="https://github.com/ZhengyiLuo/AgentsDock/releases/download/v1.0.0/AgentsDock-1.0.0-mac-universal.dmg">macOS</a>
+  <strong>Desktop stable 1.0.9:</strong>
+  <a href="https://github.com/ZhengyiLuo/AgentsDock/releases/download/v1.0.9/AgentsDock-1.0.9-mac-universal.dmg">macOS</a>
   ·
-  <a href="https://github.com/ZhengyiLuo/AgentsDock/releases/download/v1.0.0/AgentsDock-1.0.0-linux-x86_64.AppImage">Linux x86_64</a>
+  <a href="https://github.com/ZhengyiLuo/AgentsDock/releases/download/v1.0.9/AgentsDock-1.0.9-linux-x86_64.AppImage">Linux x86_64</a>
   ·
-  <a href="https://github.com/ZhengyiLuo/AgentsDock/releases/download/v1.0.0/AgentsDock-1.0.0-linux-arm64.AppImage">Linux ARM64</a>
+  <a href="https://github.com/ZhengyiLuo/AgentsDock/releases/download/v1.0.9/AgentsDock-1.0.9-linux-arm64.AppImage">Linux ARM64</a>
   ·
-  <a href="https://github.com/ZhengyiLuo/AgentsDock/releases/download/v1.0.0/AgentsDock-1.0.0-win-x64.exe">Windows (unsigned installer)</a>
+  <a href="https://github.com/ZhengyiLuo/AgentsDock/releases/download/v1.0.9/AgentsDock-1.0.9-win-x64.exe">Windows (unsigned installer)</a>
   ·
   <a href="https://github.com/ZhengyiLuo/AgentsDock/releases">Release page</a>
   ·
-  <a href="https://github.com/ZhengyiLuo/AgentsDock/releases/tag/v1.0.0">1.0.0 release notes</a>
+  <a href="https://github.com/ZhengyiLuo/AgentsDock/releases/tag/v1.0.9">1.0.9 release notes</a>
   <br />
   <strong>Mobile:</strong>
   <a href="https://apps.apple.com/us/app/agentsdock/id6769275751">iPhone &amp; iPad</a>
@@ -70,9 +68,7 @@
   <br />
   <br />
   <strong>
-    AgentsDock is the client;
-    <a href="https://github.com/ZhengyiLuo/AgentsServer">AgentsServer</a>
-    is the self-hosted backend.
+    AgentsDock is the client; AgentsServer is the self-hosted backend.
   </strong>
 </div>
 
@@ -80,6 +76,8 @@
 
 - **Work with your agents:** start and resume chats, follow live activity, and
   queue the next task.
+- **Ask a side question:** Codex Side chat has independent model and reasoning
+  controls, live activity, and Stop/Clear actions alongside your main chat.
 - **Review the results:** view images and videos inline, browse files, inspect
   code changes, and download artifacts.
 - **Keep long-running work organized:** group chats, search history, create
@@ -91,30 +89,49 @@
 
 ## How it works
 
-**AgentsDock is the client. [AgentsServer](https://github.com/ZhengyiLuo/AgentsServer)
-is the backend.** Install the server on the machine that has your projects and
-agent CLIs. That can be the same computer as the desktop app or a remote
-machine you control. The desktop and mobile apps connect to it to send tasks
-and display results.
+**AgentsDock is the client. AgentsServer is the self-hosted backend.** Install
+the server on the machine that has your projects and agent CLIs. That can be
+the same computer as the desktop app or a remote machine you control. The
+desktop and mobile apps connect to it to send tasks and display results.
 
 The agent CLIs must be installed and authenticated **on the server**, not on
 your phone. Self-hosting gives you control of the server and stored history;
 it does not make the models local. Your selected provider still processes
-model requests, and clients may cache content on your devices.
+model requests, and clients may cache content on your devices. Available
+providers and features depend on the client and server version.
 
 ## Get started
 
 1. **Install the app.** Get a desktop build from
    [public GitHub Releases](https://github.com/ZhengyiLuo/AgentsDock/releases)
-   ([current stable](https://github.com/ZhengyiLuo/AgentsDock/releases/tag/v1.0.0)),
+   ([current stable: 1.0.9](https://github.com/ZhengyiLuo/AgentsDock/releases/tag/v1.0.9)),
    or find the current iPhone/iPad distribution link on
    [the website](https://agentsdock.net/#downloads).
 2. **Set up AgentsServer.** Direct macOS and Linux builds provide
-   **Set up AgentsServer**. For other clients or manual installation, follow
-   [the server's installation instructions](https://github.com/ZhengyiLuo/AgentsServer#guided-setup).
-   Install and sign in to the agent CLI you want to use on that machine.
+   **Set up AgentsServer**. For a fresh manual installation on Linux or Apple
+   silicon macOS, install Node.js/npm and
+   [`uv`](https://docs.astral.sh/uv/getting-started/installation/), then run:
+
+   ```sh
+   npx @agentsdock/server install
+   ```
+
+   This installs the latest stable server, normally on port **7850**. Run it as
+   the user who will own the server, without `sudo`. Existing installations
+   use the app's managed updates; this command refuses existing server state.
+   See [server setup and prerequisites](server/README.md#get-started).
 3. **Connect and start a chat.** Add the server connection in AgentsDock,
-   choose an agent and a working directory on the server, and send a task.
+   using the URL and access token printed by the installer. Install the agent
+   CLI you want on the server, then sign in or configure a supported API
+   connection in **Settings → My Agents** on desktop. Choose an agent and a
+   working directory on the server, and send a task.
+
+**Already using AgentsDock?** Update the desktop app from Settings. After
+relaunch, 1.0.9 coordinates each supported server's matching signed update;
+busy servers wait until idle, and offline servers resume after reconnecting.
+The signed 1.0.9 server bridge remains available for supported older
+installations. See the [release notes](https://github.com/ZhengyiLuo/AgentsDock/releases/tag/v1.0.9)
+for upgrade validation limits.
 
 For remote access, use a private network such as Tailscale rather than exposing
 the server directly to the internet. The server needs `tmux` for persistent
@@ -175,18 +192,6 @@ Use a simulator or your own signing configuration. Read the
 device: using the existing bundle identifier can replace your installed app.
 Android development requires the Android toolchain.
 
-### Website
-
-The product site is plain HTML, CSS, and JavaScript. With Python 3 installed,
-run this from the repository root:
-
-```bash
-cd website
-npm run dev
-```
-
-Open `http://localhost:4175`. No website dependency installation is needed.
-
 ## Where things live
 
 | Directory | Purpose |
@@ -196,12 +201,13 @@ Open `http://localhost:4175`. No website dependency installation is needed.
 | [`website/`](website/) | Product website and user guides |
 | [`team-hub/`](team-hub/) | Team Hub service code and tests |
 | [`docs/`](docs/) | Architecture, development notes, and release-channel documentation |
-| [`server/`](server/) | Frozen compatibility fixtures for cross-stack tests, **not the deployable server** |
+| [`server/`](server/) | Maintained AgentsServer runtime, installer, and server-only tests |
 | `Sources/`, `Apps/`, `ZenithDock.xcodeproj` | Legacy Swift clients, not the current Electron or React Native apps |
 
-The maintained backend is in the separate
-[AgentsServer repository](https://github.com/ZhengyiLuo/AgentsServer). Do not
-deploy the `server/` directory from this repository.
+The maintained backend lives in `server/`. Its Python dependencies and installer
+are self-contained; server users do not need to build either client. See
+[the source migration notes](docs/SERVER_SOURCE_MIGRATION.md) before exporting
+changes or preparing a coordinated release.
 
 ## Contributing
 

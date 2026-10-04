@@ -39,6 +39,96 @@ function peerPairingResponse(status = 'pending_approval') {
   }
 }
 
+describe('TeamHubClient indexed message search', () => {
+  const search = { available: true, version: 1, fields: ['subject', 'body', 'sender'], max_query_chars: 200 }
+  const health = { ok: true, service: 'agentsdock-team-hub', api_version: 1, hub_id: 'hub-1', instance_id: 'instance-1',
+    bootstrapped: true, bootstrap_required: false }
+  const page = { box: 'sent', address: null, messages: [], next_after_sequence: 7, has_more: false }
+
+  it('forwards negotiated literal search and pagination on both revision-compatible reads', async () => {
+    const fetch = vi.fn()
+      .mockResolvedValueOnce(response({ ...health, capabilities: { team_message_search_v1: search } }))
+      .mockResolvedValueOnce(response({ error: { code: 'invalid_request', message: 'revision unsupported' } }, 422))
+      .mockResolvedValueOnce(response(page))
+    const client = new TeamHubClient('http://127.0.0.1:7850/api/team-hub', { fetch })
+    await expect(client.health()).resolves.toHaveProperty('capabilities.team_message_search_v1', search)
+    await client.teamMessages('access', 'team/one', { box: 'sent', q: '  部署 & "owner" + 😀  ', afterSequence: 7, limit: 20,
+      fromKind: 'server', fromId: 'sender/one' })
+    expect(fetch).toHaveBeenCalledTimes(3)
+    for (const [url, init] of fetch.mock.calls.slice(1)) {
+      const parsed = new URL(String(url))
+      expect(parsed.pathname).toBe('/api/team-hub/v1/teams/team%2Fone/network/messages')
+      expect(parsed.searchParams.get('q')).toBe('部署 & "owner" + 😀')
+      expect(parsed.searchParams.get('after_sequence')).toBe('7')
+      expect(parsed.searchParams.get('from_id')).toBe('sender/one')
+      expect(parsed.searchParams.get('limit')).toBe('20')
+      expect(new Headers(init.headers).get('Authorization')).toBe('Bearer access')
+    }
+    expect(new URL(String(fetch.mock.calls[2][0])).searchParams.has('include_revision')).toBe(false)
+  })
+
+  it.each([undefined, null, { ...search, available: false }, { ...search, version: 2 },
+    { ...search, fields: ['body'] }, { ...search, max_query_chars: 201 }, { ...search, extra: true }
+  ])('keeps legacy reads usable and blocks search after unsupported negotiation %j', async advertised => {
+    const fetch = vi.fn()
+      .mockResolvedValueOnce(response({ ...health, capabilities: { team_message_search_v1: search } }))
+      .mockResolvedValueOnce(response({ ...health, capabilities: { team_message_search_v1: advertised } }))
+      .mockResolvedValueOnce(response(page))
+    const client = new TeamHubClient('http://127.0.0.1:7850/api/team-hub', { fetch })
+    await client.health()
+    expect((await client.health()).capabilities?.team_message_search_v1).toBeUndefined()
+    await expect(client.teamMessages('access', 'team-1', { box: 'sent', q: 'needle' })).rejects.toThrow('does not support message search')
+    expect(fetch).toHaveBeenCalledTimes(2)
+    await client.teamMessages('access', 'team-1', { box: 'sent', q: '  ' })
+    expect(new URL(String(fetch.mock.calls[2][0])).searchParams.has('q')).toBe(false)
+  })
+
+  it('rejects malformed search and coverage combinations before issuing a request', async () => {
+    const fetch = vi.fn().mockResolvedValue(response({ ...health, capabilities: { team_message_search_v1: search } }))
+    const client = new TeamHubClient('http://127.0.0.1:7850/api/team-hub', { fetch })
+    await client.health()
+    for (const q of ['a'.repeat(201), '\ud800', 'a\nb']) {
+      await expect(client.teamMessages('access', 'team-1', { box: 'sent', q })).rejects.toThrow('search')
+    }
+    await expect(client.teamMessages('access', 'team-1', { box: 'inbox', q: 'needle', includeMailboxCoverage: true })).rejects.toThrow('unfiltered')
+    expect(fetch).toHaveBeenCalledTimes(1)
+  })
+
+  it('explains an old connected-server proxy rejection without dropping q or retrying unfiltered', async () => {
+    const fetch = vi.fn()
+      .mockResolvedValueOnce(response({ ...health, capabilities: { team_message_search_v1: search } }))
+      .mockResolvedValueOnce(response({ error: { code: 'invalid_request', message: 'Proxy query is invalid' } }, 422))
+    const client = new TeamHubClient('http://127.0.0.1:7850/api/team-hub-secure/09d7bb2e-3b47-4be7-89fc-2cecd90f4434', { fetch })
+    await client.health()
+    await expect(client.teamMessages('access', 'team-1', { box: 'sent', q: 'needle' })).rejects.toThrow('Update the connected server')
+    expect(fetch).toHaveBeenCalledTimes(2)
+    expect(new URL(String(fetch.mock.calls[1][0])).searchParams.get('q')).toBe('needle')
+  })
+
+  it('does not relabel actual search validation errors as transport incompatibility', async () => {
+    const fetch = vi.fn()
+      .mockResolvedValueOnce(response({ ...health, capabilities: { team_message_search_v1: search } }))
+      .mockImplementation(async () => response({ error: { code: 'invalid_request', message: 'Search query is invalid' } }, 422))
+    const client = new TeamHubClient('http://127.0.0.1:7850/api/team-hub', { fetch })
+    await client.health()
+    await expect(client.teamMessages('access', 'team-1', { box: 'sent', q: 'needle' })).rejects.toThrow('Search query is invalid')
+    for (const [url] of fetch.mock.calls.slice(1)) expect(new URL(String(url)).searchParams.get('q')).toBe('needle')
+  })
+
+  it('does not carry a search grant across client instances or a failed health refresh', async () => {
+    const fetch = vi.fn()
+      .mockResolvedValueOnce(response({ ...health, capabilities: { team_message_search_v1: search } }))
+      .mockRejectedValueOnce(new TypeError('offline'))
+    const client = new TeamHubClient('http://127.0.0.1:7850/api/team-hub', { fetch })
+    await client.health()
+    await expect(client.health()).rejects.toThrow()
+    await expect(client.teamMessages('access', 'team-1', { box: 'sent', q: 'needle' })).rejects.toThrow('does not support message search')
+    const next = new TeamHubClient('http://127.0.0.1:7852/api/team-hub', { fetch })
+    await expect(next.teamMessages('access', 'team-1', { box: 'sent', q: 'needle' })).rejects.toThrow('does not support message search')
+    expect(fetch).toHaveBeenCalledTimes(2)
+  })
+})
+
 describe('TeamHubClient', () => {
   it.each([undefined, null, { available: false, version: 1 }, { available: true, version: 2 },
     { available: true, version: 1, extra: true }, { available: true, version: 1 }])('accepts only the exact optional host deletion capability %j', async advertised => {

@@ -272,9 +272,9 @@ describe('chat references', () => {
         message: 'Cursor ready',
         action: null,
         version: 7,
-        supported_target_backends: ['codex', 'cursor', 'unknown' as never]
+        supported_target_backends: ['codex', 'cursor', 'opencode', 'unknown' as never]
       }
-    } })).toEqual(['codex', 'cursor'])
+    } })).toEqual(['codex', 'cursor', 'opencode'])
     expect(supportedCrossChatTargetBackends({ ok: true, capabilities: {
       cross_chat_handoffs_v1: {
         available: true,

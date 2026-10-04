@@ -8,13 +8,17 @@ import { updateQueuedTurns as reduceQueuedTurns } from '@shared/queue'
 import type { TeamHubScope } from '@shared/team-hub'
 import { mailHintPending, type MailArrivalCursor, type MailboxCoverage, type MailHintProjection, type MailHintScope } from '@shared/team-mail-hints'
 import { bulletinHintPending, type BulletinHintRefresh } from '@shared/team-bulletin-hints'
-import { runtimeSelectionError, selectableChatBackends } from '@shared/runtime-catalog'
+import { applyOpenCodeSessionEvent, openCodeProviderCommandsAvailable } from '@shared/opencode'
+import { t } from '@shared/i18n'
+import { chatBackendChoice, runtimeSelectionError, runtimeSendAdmissionError, selectableChatBackendChoices } from '@shared/runtime-catalog'
 import { isAsyncCrossChatMessage, isNativeGoalSteerEvent, isNativeSteerTransitionStop, timelineSemanticUnits } from '@shared/semantic-timeline'
 import { turnSendErrorMessage } from '@shared/server-errors'
 import { completedPrefixForkAvailable, RUNNING_FORK_UNAVAILABLE } from '@shared/session-fork'
 import { agentFileBelongsToSession, isolateSessionEvent, isolateSessionSnapshot } from '@shared/session-files'
 import { isImportedClaudeControlCompanion, isImportedCodexRuntimeContext, isImportedHistoryRecord, isImportedProviderControlMetadata, isImportedProviderInterruption, mergeProviderInterruptionEvent } from '@shared/provider-origin'
+import { isReasoningSummaryStream } from '@shared/reasoning-stream'
 import { trackEvent } from '../lib/analytics'
+import { secureRandomUUID } from '../lib/browser-crypto'
 import { nudgeChatFontSize, setChatFontFamily, setChatFontSize } from '../lib/chat-font'
 import { activeEmergencyAlert } from '../lib/emergency-alert'
 import { isUntouchedNewChat, navigableSessions } from '../lib/sessions'
@@ -82,6 +86,29 @@ interface SendPromptOptions {
   teamReferences?: TeamReference[]
   skillSelection?: ProviderCommandSelection
   confirmSteer?: () => boolean
+}
+
+interface PendingTurnSubmissionInput {
+  prompt: string
+  steer?: boolean
+  consumeComposer?: boolean
+  chatReferences?: ChatReference[]
+  teamReferences?: TeamReference[]
+}
+
+export interface PendingTurnSubmission {
+  token: string
+  sharedChatRequestId?: string
+  prompt: string
+  files: AgentFile[]
+  uploadPaths: NativeFileRef[]
+  chatReferences: ChatReference[]
+  teamReferences: TeamReference[]
+  createdAt: number
+  afterSeq: number
+  mode: 'start' | 'queue' | 'steer'
+  phase: 'preflight' | 'submitting' | 'submitted'
+  consumeComposer: boolean
 }
 
 interface SessionSyncState {
@@ -187,6 +214,8 @@ interface AppState {
   inspectorVisible: boolean
   activeSessionIds: Set<string>
   turnAdmissionTokens: Record<string, string>
+  discardingEmptyChats: Record<string, string>
+  pendingTurnSubmissions: Record<string, PendingTurnSubmission>
   stoppingSessionIds: Set<string>
   storageFull: boolean
   error: string | null
@@ -202,8 +231,8 @@ interface AppState {
   selectAdjacentServer(direction: 1 | -1): Promise<void>
   openNotificationRoute(route: ProfileNotificationRoute): Promise<boolean>
   selectSession(sessionId: string, force?: boolean): Promise<void>
-  selectSessionInPane(sessionId: string, pane: ChatPane, force?: boolean, focus?: boolean): Promise<void>
-  reloadSession(sessionId: string): Promise<void>
+  selectSessionInPane(sessionId: string, pane: ChatPane, force?: boolean, focus?: boolean, suppressErrors?: boolean): Promise<void>
+  reloadSession(sessionId: string, suppressErrors?: boolean): Promise<void>
   openSessionInSplit(sessionId: string, force?: boolean): Promise<void>
   focusChatPane(pane: ChatPane): void
   closeChatPane(pane: ChatPane): void
@@ -218,6 +247,8 @@ interface AppState {
   revokeAgentRoute(sessionId: string, routeId: string, expectedRevision: string): Promise<boolean>
   beginTurnAdmission(sessionId: string): string | null
   endTurnAdmission(sessionId: string, token: string): void
+  stagePendingTurnSubmission(sessionId: string, token: string, input: PendingTurnSubmissionInput): boolean
+  rollbackPendingTurnSubmission(sessionId: string, token: string): void
   sendPrompt(promptOverride?: string, steer?: boolean, options?: SendPromptOptions): Promise<boolean>
   sendPromptForSession(sessionId: string, promptOverride?: string, steer?: boolean, options?: SendPromptOptions): Promise<boolean>
   stopTurn(): Promise<void>
@@ -226,7 +257,7 @@ interface AppState {
   attachPathsForSession(sessionId: string, files: NativeFileRef[]): Promise<void>
   removeUpload(fileId: string): void
   removeUploadForSession(sessionId: string, fileId: string): void
-  refreshSessions(): Promise<void>
+  refreshSessions(cleanupEmpty?: boolean): Promise<void>
   requestNewChat(): Promise<void>
   updateSession(
     sessionId: string,
@@ -262,16 +293,20 @@ export interface NewChatDefaults {
   folder: string
   cwd: string
   backend: Backend
+  codex_provider?: CreateSessionInput['codex_provider']
+  provider_connection?: CreateSessionInput['provider_connection']
   model: string | null
   effort: string | null
 }
 
-function normalizedNewChatDefaults(input: Pick<CreateSessionInput, 'folder' | 'cwd' | 'backend' | 'model' | 'effort'>): NewChatDefaults {
+function normalizedNewChatDefaults(input: Pick<CreateSessionInput, 'folder' | 'cwd' | 'backend' | 'codex_provider' | 'provider_connection' | 'model' | 'effort'>): NewChatDefaults {
   return {
     version: 1,
     folder: input.folder.trim() || 'General',
     cwd: input.cwd.trim(),
     backend: input.backend,
+    ...(input.backend === 'codex' && input.codex_provider === 'custom' ? { codex_provider: 'custom' as const } : {}),
+    ...(input.provider_connection === 'custom' ? { provider_connection: 'custom' as const } : {}),
     model: input.model?.trim() || null,
     effort: input.effort?.trim() || null
   }
@@ -282,7 +317,9 @@ function parseNewChatDefaults(value: unknown): NewChatDefaults | null {
   const candidate = value as Partial<NewChatDefaults>
   if (
     candidate.version !== 1
-    || !['claude', 'codex', 'cursor'].includes(String(candidate.backend))
+    || !['claude', 'codex', 'cursor', 'opencode'].includes(String(candidate.backend))
+    || candidate.codex_provider !== undefined && !['default', 'custom'].includes(candidate.codex_provider)
+    || candidate.provider_connection !== undefined && !['default', 'custom'].includes(candidate.provider_connection)
     || typeof candidate.folder !== 'string'
     || typeof candidate.cwd !== 'string'
     || candidate.model !== null && typeof candidate.model !== 'string'
@@ -307,12 +344,14 @@ function sessionNewChatDefaults(session: Session, defaultCwd: string): NewChatDe
     folder: session.folder || 'General',
     cwd: session.cwd || defaultCwd,
     backend: session.backend,
+    codex_provider: session.codex_provider,
+    provider_connection: session.provider_connection,
     model: session.model,
     effort: session.effort
   })
 }
 
-export function saveNewChatDefaults(scope: WorkspaceProfileScope | null, input: Pick<CreateSessionInput, 'folder' | 'cwd' | 'backend' | 'model' | 'effort'>): Promise<void> {
+export function saveNewChatDefaults(scope: WorkspaceProfileScope | null, input: Pick<CreateSessionInput, 'folder' | 'cwd' | 'backend' | 'codex_provider' | 'provider_connection' | 'model' | 'effort'>): Promise<void> {
   try {
     return setWorkspacePreference(scope, NEW_CHAT_DEFAULTS_PREFERENCE_KEY, normalizedNewChatDefaults(input))
   } catch (error) {
@@ -331,6 +370,8 @@ function directChatPlaceholderFingerprint(session: Session): string {
     folder: session.folder?.trim() || 'General',
     cwd: session.cwd?.trim() || '',
     backend: session.backend,
+    ...(session.provider_connection === 'custom' ? { providerConnection: 'custom' } : {}),
+    ...(session.backend === 'codex' && (session.provider_connection === 'custom' ? 'custom' : session.codex_provider) === 'custom' ? { codexProvider: 'custom' } : {}),
     model: session.model?.trim() || null,
     effort: session.effort?.trim() || null,
     systemPrompt: session.system_prompt ?? null,
@@ -340,12 +381,17 @@ function directChatPlaceholderFingerprint(session: Session): string {
     codexApprovalsReviewer: session.codex_approvals_reviewer ?? null,
     claudePermissionMode: session.claude_permission_mode ?? null,
     cursorPermissionMode: session.cursor_permission_mode ?? null,
+    ...(session.backend === 'opencode' ? { opencodePermissionMode: session.opencode_permission_mode ?? null } : {}),
     providerJobsAccess: session.provider_jobs_access ?? null
   })
 }
 
 function directChatPlaceholderMarker(session: Session): DirectChatPlaceholderMarker {
   return { version: 1, fingerprint: directChatPlaceholderFingerprint(session) }
+}
+
+export async function markNewChatPlaceholder(scope: WorkspaceProfileScope | null, session: Session): Promise<void> {
+  if (scope && session.title === 'New chat') await setWorkspacePreference(scope, directChatPlaceholderKey(session.id), directChatPlaceholderMarker(session))
 }
 
 function isDirectChatPlaceholderMarker(value: unknown): value is DirectChatPlaceholderMarker {
@@ -472,6 +518,8 @@ export const useAppStore = create<AppState>((set, get) => ({
   inspectorVisible: false,
   activeSessionIds: new Set(),
   turnAdmissionTokens: {},
+  discardingEmptyChats: {},
+  pendingTurnSubmissions: {},
   stoppingSessionIds: new Set(),
   error: null,
   creatingChat: false,
@@ -642,6 +690,11 @@ export const useAppStore = create<AppState>((set, get) => ({
       window.agentsDock.events.on('server:sync', payload => {
         const current = get()
         if (!profileEventMatches(payload, current)) return
+        if (payload.state !== 'live' && current.snapshots[payload.sessionId]?.reasoningStream) {
+          set(state => ({ snapshots: { ...state.snapshots, [payload.sessionId]: {
+            ...state.snapshots[payload.sessionId], reasoningStream: undefined
+          } } }))
+        }
         if (!visibleChatSessionIds(current.chatPanes).includes(payload.sessionId)) return
         const compatible = healthIsCompatible(current.health)
         const websocketUnavailable = current.health?.websocket_runtime === false
@@ -809,7 +862,7 @@ export const useAppStore = create<AppState>((set, get) => ({
         if (current.switchingProfileId || payload.activeProfileId !== current.activeProfileId || payload.profileGeneration < current.profileGeneration) return
         if (payload.profileGeneration !== current.profileGeneration) {
           clearProfileVolatileState()
-          set({ profiles: payload.profiles, profileGeneration: payload.profileGeneration, mailHints: consumeBufferedMailHints({ ...current, profiles: payload.profiles, profileGeneration: payload.profileGeneration }, current.mailHints), forwardedPorts: [], forwardedPortsRevision: 0, loadingSessionIds: new Set(), loadingSessionId: null, syncBySession: {}, turnAdmissionTokens: {}, stoppingSessionIds: new Set() })
+          set({ profiles: payload.profiles, profileGeneration: payload.profileGeneration, mailHints: consumeBufferedMailHints({ ...current, profiles: payload.profiles, profileGeneration: payload.profileGeneration }, current.mailHints), forwardedPorts: [], forwardedPortsRevision: 0, loadingSessionIds: new Set(), loadingSessionId: null, syncBySession: {}, turnAdmissionTokens: {}, pendingTurnSubmissions: {}, stoppingSessionIds: new Set() })
           queueMicrotask(() => void hydrateVisibleChatPanes(get))
         } else {
           const before = current.profiles.find(profile => profile.id === current.activeProfileId)
@@ -858,8 +911,12 @@ export const useAppStore = create<AppState>((set, get) => ({
             ? replaceSnapshot(state.snapshots[sessionId], snapshot)
             : mergeSnapshots(state.snapshots[sessionId], snapshot)
           const loadingSessionIds = withoutSessionId(state.loadingSessionIds, sessionId)
+          const pending = state.pendingTurnSubmissions[sessionId]
           return {
             snapshots: cacheSnapshot(state.snapshots, sessionId, incoming, visibleChatSessionIds(currentChatPaneLayout(state).panes)),
+            pendingTurnSubmissions: pending && pendingTurnSubmissionAccepted(pending, incoming.events)
+              ? removePendingTurnSubmission(state.pendingTurnSubmissions, sessionId, pending.token)
+              : state.pendingTurnSubmissions,
             loadingSessionIds,
             loadingSessionId: focusedLoadingSessionId(state.selectedSessionId, loadingSessionIds)
           }
@@ -871,6 +928,26 @@ export const useAppStore = create<AppState>((set, get) => ({
           typeof payload.activeSession === 'boolean'
             ? { active: payload.activeSession, runId: payload.activeRunId }
             : undefined)
+      }),
+      window.agentsDock.events.on('server:reasoning-stream', payload => {
+        if (!profileEventMatches(payload, get())) return
+        const stream = payload.snapshot
+        if (stream && (!isReasoningSummaryStream(stream) || stream.session_id !== payload.sessionId)) return
+        const previous = get().snapshots[payload.sessionId]?.reasoningStream
+        if (previous && stream && previous.instance_id === stream.instance_id
+          && stream.revision <= previous.revision) return
+        // Deliver preceding durable completions before removing their live
+        // snapshots, even when normal timeline events are batched for typing.
+        if (previous?.items.some(item => !stream?.items.some(next => (
+          next.run_id === item.run_id && next.item_id === item.item_id && next.phase === item.phase
+        )))) flushLiveEvents(true)
+        set(state => {
+          const snapshot = state.snapshots[payload.sessionId]
+          if (!snapshot) return state
+          return { snapshots: { ...state.snapshots, [payload.sessionId]: {
+            ...snapshot, reasoningStream: stream ?? undefined
+          } } }
+        })
       }),
       window.agentsDock.events.on('native:notification', route => {
         void openProfileNotificationRoute(route, get).catch(error => get().setError(errorMessage(error)))
@@ -943,6 +1020,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       switchingProfileId: profileId,
       creatingChat: false,
       turnAdmissionTokens: {},
+      pendingTurnSubmissions: {},
       stoppingSessionIds: new Set(),
       error: null,
       modals: {
@@ -1031,6 +1109,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       switchingProfileId: profileId,
       creatingChat: false,
       turnAdmissionTokens: {},
+      pendingTurnSubmissions: {},
       stoppingSessionIds: new Set(),
       error: null,
       modals: {
@@ -1111,9 +1190,17 @@ export const useAppStore = create<AppState>((set, get) => ({
     await state.selectSessionInPane(sessionId, pane, force)
   },
 
-  async selectSessionInPane(sessionId, pane, force = false, focus = true) {
+  async selectSessionInPane(sessionId, pane, force = false, focus = true, suppressErrors = false) {
     if (get().switchingProfileId || !get().sessions.some(session => session.id === sessionId)) return
     const scope = captureProfileScope(get())
+    const previousSync = get().syncBySession[sessionId]
+    const previousFocusedSync = get().selectedSessionId === sessionId
+      ? {
+          syncSessionId: get().syncSessionId,
+          syncStatus: get().syncStatus,
+          syncError: get().syncError
+        }
+      : null
     const beforeLayout = currentChatPaneLayout(get())
     const selectedLayout = selectChatInPane(beforeLayout, sessionId, pane)
     const layout = focus
@@ -1182,15 +1269,22 @@ export const useAppStore = create<AppState>((set, get) => ({
       )
       if (!selectionRequestMatches(request, sessionId, scope)) return
       if (cached && !forceRemote && !snapshotNeedsAuthoritativeTail(cached)) {
-        set(state => ({
-          ...clearSessionLoading(state, sessionId),
-          snapshots: cacheSnapshot(
-            state.snapshots,
-            sessionId,
-            mergeSnapshots(state.snapshots[sessionId], cached),
-            visibleChatSessionIds(currentChatPaneLayout(state).panes)
-          )
-        }))
+        set(state => {
+          const incoming = mergeSnapshots(state.snapshots[sessionId], cached)
+          const pending = state.pendingTurnSubmissions[sessionId]
+          return {
+            ...clearSessionLoading(state, sessionId),
+            snapshots: cacheSnapshot(
+              state.snapshots,
+              sessionId,
+              incoming,
+              visibleChatSessionIds(currentChatPaneLayout(state).panes)
+            ),
+            pendingTurnSubmissions: pending && pendingTurnSubmissionAccepted(pending, incoming.events)
+              ? removePendingTurnSubmission(state.pendingTurnSubmissions, sessionId, pending.token)
+              : state.pendingTurnSubmissions
+          }
+        })
         subscribeToTimeline(sessionId, cached.events.at(-1)?.seq ?? 0, request, scope)
         logTimelineSelection('selection painted from disk cache', { sessionId, pane, request, events: cached.events.length })
         return
@@ -1242,6 +1336,7 @@ export const useAppStore = create<AppState>((set, get) => ({
           ? replaceSnapshot(state.snapshots[sessionId], snapshot, true)
           : mergeSnapshots(state.snapshots[sessionId], snapshot)
         const accepted = deferredOverflowed ? { ...incoming, historyDiscontinuity: true } : incoming
+        const pending = state.pendingTurnSubmissions[sessionId]
         return {
           ...clearSessionLoading(state, sessionId),
           snapshots: cacheSnapshot(
@@ -1249,7 +1344,10 @@ export const useAppStore = create<AppState>((set, get) => ({
             sessionId,
             accepted,
             visibleChatSessionIds(currentChatPaneLayout(state).panes)
-          )
+          ),
+          pendingTurnSubmissions: pending && pendingTurnSubmissionAccepted(pending, accepted.events)
+            ? removePendingTurnSubmission(state.pendingTurnSubmissions, sessionId, pending.token)
+            : state.pendingTurnSubmissions
         }
       })
       logTimelineSelection('cold timeline open completed', { sessionId, pane, request, events: snapshot.events.length })
@@ -1264,6 +1362,19 @@ export const useAppStore = create<AppState>((set, get) => ({
         return
       }
       logTimelineSelection('cold timeline open failed', { sessionId, pane, request, error: errorMessage(error) })
+      if (suppressErrors) {
+        set(state => {
+          const syncBySession = { ...state.syncBySession }
+          if (previousSync) syncBySession[sessionId] = previousSync
+          else delete syncBySession[sessionId]
+          return {
+            ...clearSessionLoading(state, sessionId),
+            syncBySession,
+            ...(state.selectedSessionId === sessionId && previousFocusedSync ? previousFocusedSync : {})
+          }
+        })
+        return
+      }
       set(state => {
         const snapshots = { ...state.snapshots }
         if (snapshotNeedsAuthoritativeTail(snapshots[sessionId]) && !snapshots[sessionId]?.historyDiscontinuity) {
@@ -1282,11 +1393,20 @@ export const useAppStore = create<AppState>((set, get) => ({
   },
 
   async openSessionInSplit(sessionId, force = false) {
-    const pane: ChatPane = get().chatPanes.primary ? 'secondary' : 'primary'
-    await get().selectSessionInPane(sessionId, pane, force)
+    const scope = captureProfileScope(get())
+    const before = get().chatPanes
+    const pane: ChatPane = before.primary ? 'secondary' : 'primary'
+    const selection = get().selectSessionInPane(sessionId, pane, force)
+    if (profileScopeMatches(scope, get())) {
+      const after = get().chatPanes
+      const previouslySplit = Boolean(before.primary && before.secondary && before.primary !== before.secondary)
+      const nowSplit = Boolean(after.primary && after.secondary && after.primary !== after.secondary)
+      if (!previouslySplit && nowSplit) trackEvent('split_view_opened')
+    }
+    await selection
   },
 
-  async reloadSession(sessionId) {
+  async reloadSession(sessionId, suppressErrors = false) {
     const state = get()
     const pane: ChatPane | null = state.chatPanes.primary === sessionId
       ? 'primary'
@@ -1296,7 +1416,7 @@ export const useAppStore = create<AppState>((set, get) => ({
     if (!pane) return
     // Background continuity repair must not steal keyboard focus from the
     // other visible pane.
-    await state.selectSessionInPane(sessionId, pane, true, false)
+    await state.selectSessionInPane(sessionId, pane, true, false, suppressErrors)
   },
 
   focusChatPane(pane) {
@@ -1384,7 +1504,9 @@ export const useAppStore = create<AppState>((set, get) => ({
 
   async refreshAgentRoutes(sessionId) {
     const current = get()
-    if (!agentCrossChatRoutesAvailable(current.health)) {
+    if (!agentCrossChatRoutesAvailable(current.health)
+      || (current.sessions.find(session => session.id === sessionId)?.backend === 'opencode'
+        && !supportedCrossChatTargetBackends(current.health).includes('opencode'))) {
       set(state => {
         const agentRoutesBySession = { ...state.agentRoutesBySession }
         const agentRouteErrorsBySession = { ...state.agentRouteErrorsBySession }
@@ -1496,6 +1618,7 @@ export const useAppStore = create<AppState>((set, get) => ({
 
   beginTurnAdmission(sessionId) {
     const current = get()
+    if (current.discardingEmptyChats[sessionId] === `${current.activeProfileId}:${current.profileGeneration}`) return null
     if (current.switchingProfileId || current.turnAdmissionTokens[sessionId]) return null
     const token = `${current.activeProfileId ?? 'local'}:${current.profileGeneration}:${++turnAdmissionCounter}`
     let admitted = false
@@ -1516,6 +1639,34 @@ export const useAppStore = create<AppState>((set, get) => ({
     })
   },
 
+  stagePendingTurnSubmission(sessionId, token, input) {
+    let staged = false
+    set(state => {
+      if (state.turnAdmissionTokens[sessionId] !== token) return state
+      const pending = pendingTurnSubmissionFromState(state, sessionId, token, input)
+      staged = true
+      return {
+        ...(pending.consumeComposer ? {
+          drafts: { ...state.drafts, [sessionId]: '' },
+          chatReferencesBySession: { ...state.chatReferencesBySession, [sessionId]: [] },
+          teamReferencesBySession: { ...state.teamReferencesBySession, [sessionId]: [] },
+          uploadsBySession: { ...state.uploadsBySession, [sessionId]: [] },
+          uploadPathsBySession: { ...state.uploadPathsBySession, [sessionId]: [] }
+        } : {}),
+        pendingTurnSubmissions: {
+          ...state.pendingTurnSubmissions,
+          [sessionId]: pending
+        }
+      }
+    })
+    if (staged) window.dispatchEvent(new CustomEvent('agentsdock:local-send', { detail: { sessionId } }))
+    return staged
+  },
+
+  rollbackPendingTurnSubmission(sessionId, token) {
+    set(state => rollbackPendingTurnSubmissionState(state, sessionId, token))
+  },
+
   async sendPrompt(promptOverride, steer = false, options) {
     const sessionId = get().selectedSessionId
     if (!sessionId) return false
@@ -1528,18 +1679,26 @@ export const useAppStore = create<AppState>((set, get) => ({
     if (!target || target.archived || !visibleChatSessionIds(currentChatPaneLayout(get()).panes).includes(sessionId)) return false
     const scope = captureProfileScope(get())
     const steeringScope = captureSteeringScope(sessionId, get())
-    const rawPrompt = promptOverride ?? get().drafts[sessionId] ?? ''
+    const preflightSubmission = options?.admissionToken
+      && get().pendingTurnSubmissions[sessionId]?.token === options.admissionToken
+      ? get().pendingTurnSubmissions[sessionId]
+      : undefined
+    const rawPrompt = preflightSubmission?.prompt ?? promptOverride ?? get().drafts[sessionId] ?? ''
     const leadingWhitespace = rawPrompt.length - rawPrompt.trimStart().length
     const prompt = rawPrompt.trim()
-    const consumeComposer = options?.consumeComposer ?? true
-    const requestedReferences = (consumeComposer
+    const consumeComposer = preflightSubmission?.consumeComposer ?? options?.consumeComposer ?? true
+    const requestedReferences = (preflightSubmission
+      ? preflightSubmission.chatReferences
+      : consumeComposer
       ? options?.chatReferences ?? get().chatReferencesBySession[sessionId] ?? []
       : []).map(reference => ({
         ...reference,
         source_text_start: reference.source_text_start - leadingWhitespace,
         source_text_end: reference.source_text_end - leadingWhitespace
       }))
-    const requestedTeamReferences = (consumeComposer
+    const requestedTeamReferences = (preflightSubmission
+      ? preflightSubmission.teamReferences
+      : consumeComposer
       ? options?.teamReferences ?? get().teamReferencesBySession[sessionId] ?? []
       : []).map(reference => ({
         ...reference,
@@ -1558,6 +1717,10 @@ export const useAppStore = create<AppState>((set, get) => ({
     )
     const chatReferences = validatedReferences.chatReferences
     const teamReferences = validatedReferences.teamReferences
+    if (chatReferences.length && get().sessions.find(session => session.id === sessionId)?.backend === 'opencode'
+      && !supportedCrossChatTargetBackends(get().health).includes('opencode')) {
+      set({ error: t('opencode.crossChatUnavailable') }); return false
+    }
     if (requestedReferences.length !== chatReferences.length) {
       set({ error: 'A chat reference was edited or is no longer valid. Remove it and select the chat again.' })
       return false
@@ -1621,50 +1784,103 @@ export const useAppStore = create<AppState>((set, get) => ({
         return false
       }
     }
-    const uploads = consumeComposer ? get().uploadsBySession[sessionId] ?? [] : []
-    const uploadPaths = consumeComposer ? get().uploadPathsBySession[sessionId] ?? [] : []
+    const uploads = preflightSubmission?.files ?? (consumeComposer ? get().uploadsBySession[sessionId] ?? [] : [])
+    const uploadPaths = preflightSubmission?.uploadPaths ?? (consumeComposer ? get().uploadPathsBySession[sessionId] ?? [] : [])
     if ((!prompt && uploads.length === 0) || uploadPaths.length > 0) return false
     const currentTarget = get().sessions.find(session => session.id === sessionId)
     if (!currentTarget) {
       set({ error: 'The selected chat is no longer available.' })
       return false
     }
-    const runtimeError = runtimeSelectionError(get().health, get().runtimeCatalog, currentTarget.backend, currentTarget.model)
+    const runtimeError = runtimeSendAdmissionError(get().health, currentTarget.backend, currentTarget.provider_connection === 'custom' ? 'custom' : currentTarget.codex_provider)
     if (runtimeError) {
       set({ error: runtimeError })
       return false
+    }
+    if (steer && currentTarget.backend === 'opencode' && get().activeSessionIds.has(sessionId)) {
+      set({ error: t('opencode.steerUnavailable') }); return false
     }
     const admissionToken = options?.admissionToken ?? get().beginTurnAdmission(sessionId)
     if (!admissionToken || get().turnAdmissionTokens[sessionId] !== admissionToken) return false
     const session = currentTarget
     const queuedBeforeSend = new Set((get().snapshots[sessionId]?.queuedTurns ?? []).map(turn => turn.queued_id))
-    if (consumeComposer) {
-      set(state => ({
+    const currentState = get()
+    const stagedSubmission = currentState.pendingTurnSubmissions[sessionId]?.token === admissionToken
+      ? currentState.pendingTurnSubmissions[sessionId]
+      : undefined
+    const pendingSubmission: PendingTurnSubmission = stagedSubmission ? {
+      ...stagedSubmission,
+      phase: 'submitting'
+    } : {
+      token: admissionToken,
+      ...(window.agentsDock.sharedChat ? { sharedChatRequestId: secureRandomUUID() } : {}),
+      prompt,
+      files: uploads.map(file => ({ ...file })),
+      uploadPaths: uploadPaths.map(file => ({ ...file })),
+      chatReferences: chatReferences.map(reference => ({ ...reference })),
+      teamReferences: teamReferences.map(reference => ({ ...reference })),
+      createdAt: Date.now(),
+      afterSeq: (currentState.snapshots[sessionId]?.events ?? []).reduce(
+        (latest, event) => Math.max(latest, event.seq),
+        session.latest_event_seq ?? 0
+      ),
+      mode: steer ? 'steer' : currentState.activeSessionIds.has(sessionId) ? 'queue' : 'start',
+      phase: 'submitting',
+      consumeComposer
+    }
+    set(state => ({
+      ...(consumeComposer && !stagedSubmission?.consumeComposer ? {
         drafts: { ...state.drafts, [sessionId]: '' },
         chatReferencesBySession: { ...state.chatReferencesBySession, [sessionId]: [] },
         teamReferencesBySession: { ...state.teamReferencesBySession, [sessionId]: [] },
         uploadsBySession: { ...state.uploadsBySession, [sessionId]: [] },
         uploadPathsBySession: { ...state.uploadPathsBySession, [sessionId]: [] }
-      }))
-    }
+      } : {}),
+      pendingTurnSubmissions: { ...state.pendingTurnSubmissions, [sessionId]: pendingSubmission },
+      error: null,
+    }))
+    if (!stagedSubmission) window.dispatchEvent(new CustomEvent('agentsdock:local-send', { detail: { sessionId } }))
     try {
       const response = await window.agentsDock.turns.send({
         sessionId,
         prompt,
         fileIds: uploads.map(file => file.id),
+        ...(pendingSubmission.sharedChatRequestId ? { sharedChatRequestId: pendingSubmission.sharedChatRequestId } : {}),
         model: session?.model,
         effort: session?.effort,
-        clientCapabilities: interactiveClientCapabilities(session, get().health),
+        clientCapabilities: interactiveClientCapabilities(session, get().health, Boolean(options?.skillSelection)),
         chatReferences,
         teamReferences,
         ...(options?.skillSelection ? { skillSelection: options.skillSelection } : {})
+      }).catch(error => {
+        if (!profileScopeMatches(scope, get())) throw error
+        // The live stream can acknowledge a turn before its HTTP reply is
+        // lost. Use that receipt through the normal path, including steering.
+        flushLiveEvents(true)
+        const accepted = get().snapshots[sessionId]?.events.findLast(event => pendingTurnSubmissionAccepted(pendingSubmission, [event]))
+        if (!accepted) throw error
+        return {
+          session: get().sessions.find(candidate => candidate.id === sessionId) ?? session,
+          event: accepted,
+          queued: accepted.type === 'turn_queued',
+          queued_id: accepted.type === 'turn_queued' ? accepted.queued_id : undefined
+        }
       })
       if (!profileScopeMatches(scope, get())) return false
       if (response.event && eventAffectsQueuedTurns(response.event)) {
         invalidateQueuedTurnsRequests(sessionId)
       }
+      const responseQueued = Boolean(response.queued || response.queued_id || response.event?.type === 'turn_queued')
+      // Use the server receipt, not the optimistic busy state. A queue request
+      // can start immediately and steering can require a second admission.
+      if (responseQueued) trackEvent('message_queued')
+      else if (steer) trackEvent('message_steered')
       set(state => {
         const snapshot = state.snapshots[sessionId]
+        const authoritativeQueuedReceipt = Boolean(
+          response.queued_id
+          && snapshot?.queuedTurns.some(turn => turn.queued_id === response.queued_id)
+        )
         const nextEvents = response.event && snapshot ? upsertEvent(snapshot.events, response.event) : null
         const nextSnapshot = response.event && snapshot && nextEvents
           ? {
@@ -1682,12 +1898,21 @@ export const useAppStore = create<AppState>((set, get) => ({
         return {
           sessions: state.sessions.map(candidate => candidate.id === reconciledSession.id ? reconciledSession : candidate),
           activeSessionIds: response.event ? updateActiveSessions(state.activeSessionIds, response.event) : state.activeSessionIds,
+          pendingTurnSubmissions: response.event || authoritativeQueuedReceipt
+            ? removePendingTurnSubmission(state.pendingTurnSubmissions, sessionId, admissionToken)
+            : updatePendingTurnSubmissionPhase(
+                state.pendingTurnSubmissions,
+                sessionId,
+                admissionToken,
+                'submitted',
+                responseQueued && !steer ? 'queue' : undefined
+              ),
           snapshots: nextSnapshot
             ? cacheSnapshot(state.snapshots, sessionId, nextSnapshot, visibleChatSessionIds(currentChatPaneLayout(state).panes))
             : state.snapshots
         }
       })
-      const responseQueued = Boolean(response.queued || response.queued_id || response.event?.type === 'turn_queued')
+      if (!response.event) void get().reloadSession(sessionId, true).catch(() => undefined)
       if (steer && responseQueued) {
         try {
           const queuedId = response.queued_id
@@ -1699,6 +1924,7 @@ export const useAppStore = create<AppState>((set, get) => ({
           const turns = await steerQueuedTurn(steeringScope, queuedId, options?.confirmSteer)
           if (!profileScopeMatches(scope, get())) return false
           get().applyQueuedTurnsResponse(sessionId, request, turns)
+          trackEvent('message_steered')
         } catch (error) {
           if (!isSteeringCancellation(error) && profileScopeMatches(scope, get())) set({ error: errorMessage(error) })
         }
@@ -1707,31 +1933,11 @@ export const useAppStore = create<AppState>((set, get) => ({
       if (chatReferences.some(reference => reference.target_kind !== 'secure_peer' && reference.grant_intent === true)) {
         void get().refreshAgentRoutes(sessionId)
       }
-      window.dispatchEvent(new CustomEvent('agentsdock:local-send', { detail: { sessionId } }))
       return true
     } catch (error) {
       if (!profileScopeMatches(scope, get())) return false
-      if (consumeComposer) {
-        set(state => {
-          const newerDraftExists = Boolean(state.drafts[sessionId]?.trim())
-          return {
-            drafts: { ...state.drafts, [sessionId]: newerDraftExists ? state.drafts[sessionId] : prompt },
-            chatReferencesBySession: {
-              ...state.chatReferencesBySession,
-              [sessionId]: newerDraftExists ? state.chatReferencesBySession[sessionId] ?? [] : chatReferences
-            },
-            teamReferencesBySession: {
-              ...state.teamReferencesBySession,
-              [sessionId]: newerDraftExists ? state.teamReferencesBySession[sessionId] ?? [] : teamReferences
-            },
-            uploadsBySession: { ...state.uploadsBySession, [sessionId]: mergeFiles(state.uploadsBySession[sessionId] ?? [], uploads) },
-            uploadPathsBySession: { ...state.uploadPathsBySession, [sessionId]: mergeUploadPaths(state.uploadPathsBySession[sessionId] ?? [], uploadPaths) },
-            error: turnSendErrorMessage(error)
-          }
-        })
-      } else {
-        set({ error: turnSendErrorMessage(error) })
-      }
+      get().rollbackPendingTurnSubmission(sessionId, admissionToken)
+      set({ error: turnSendErrorMessage(error) })
       return false
     } finally {
       get().endTurnAdmission(sessionId, admissionToken)
@@ -1797,6 +2003,7 @@ export const useAppStore = create<AppState>((set, get) => ({
     } }))
     try {
       const uploaded = await window.agentsDock.files.upload(id, files.map(file => file.path))
+      trackEvent('attachment_uploaded', { success: uploaded.length === files.length })
       if (!profileScopeMatches(scope, get())) return
       set(state => {
         const snapshot = state.snapshots[id]
@@ -1818,6 +2025,7 @@ export const useAppStore = create<AppState>((set, get) => ({
         }
       })
     } catch (error) {
+      trackEvent('attachment_uploaded', { success: false })
       if (!profileScopeMatches(scope, get())) return
       set(state => ({
         uploadPathsBySession: {
@@ -1840,12 +2048,20 @@ export const useAppStore = create<AppState>((set, get) => ({
       [id]: (state.uploadsBySession[id] ?? []).filter(file => file.id !== fileId)
     } }))
   },
-  async refreshSessions() {
+  async refreshSessions(cleanupEmpty = false) {
     if (get().switchingProfileId) return
     const scope = captureProfileScope(get())
     try {
-      const incoming = applyPendingSessionPatches(await window.agentsDock.sessions.list())
+      let incoming = applyPendingSessionPatches(await window.agentsDock.sessions.list())
       if (!profileScopeMatches(scope, get())) return
+      if (cleanupEmpty && !get().creatingChat) {
+        const state = get()
+        const payload = { activeProfileId: state.activeProfileId ?? undefined, profileGeneration: state.profileGeneration,
+          profiles: state.profiles, sessions: incoming, jobs: state.jobs }
+        const cleanup = startupChatCleanupFromBootstrap(payload)
+        if (cleanup) incoming = (await removeUntouchedStartupChats(payload, cleanup, () => profileScopeMatches(scope, get()))).sessions
+        if (!profileScopeMatches(scope, get())) return
+      }
       set(state => {
         const sessions = reconcileSessions(state.sessions, incoming)
         return sessions === state.sessions ? state : { sessions }
@@ -1897,8 +2113,8 @@ export const useAppStore = create<AppState>((set, get) => ({
         cwd: lastOpenedCwd ?? (defaults.cwd || defaultCwd)
       }
       if (
-        !selectableChatBackends(current.health, current.runtimeCatalog).includes(defaults.backend)
-        || runtimeSelectionError(current.health, current.runtimeCatalog, defaults.backend, defaults.model)
+        !selectableChatBackendChoices(current.health, current.runtimeCatalog).includes(chatBackendChoice(defaults))
+        || runtimeSelectionError(current.health, current.runtimeCatalog, defaults.backend, defaults.model, defaults.provider_connection === 'custom' ? 'custom' : defaults.codex_provider)
       ) {
         set({ creatingChat: false })
         current.setModal('newChat', true)
@@ -1909,17 +2125,20 @@ export const useAppStore = create<AppState>((set, get) => ({
         folder: defaults.folder,
         cwd: defaults.cwd,
         backend: defaults.backend,
+        ...(defaults.codex_provider === 'custom' ? { codex_provider: 'custom' as const } : {}),
+        ...(defaults.provider_connection === 'custom' ? { provider_connection: 'custom' as const } : {}),
         model: defaults.model,
         effort: defaults.effort,
         system_prompt: null,
-        cursor_permission_mode: defaults.backend === 'cursor' ? 'default' : null
+        cursor_permission_mode: defaults.backend === 'cursor' ? 'default' : null,
+        opencode_permission_mode: defaults.backend === 'opencode' ? 'default' : null
       }
       const session = await window.agentsDock.sessions.create(input)
       if (!workspaceScopeMatches(preferenceScope, get()) || !profileScopeMatches(profileScope, get())) return
       trackEvent('chat_created')
       await Promise.all([
         saveNewChatDefaults(preferenceScope, input),
-        setWorkspacePreference(preferenceScope, directChatPlaceholderKey(session.id), directChatPlaceholderMarker(session))
+        markNewChatPlaceholder(preferenceScope, session)
       ]).catch(() => undefined)
       if (!workspaceScopeMatches(preferenceScope, get()) || !profileScopeMatches(profileScope, get())) return
       await get().refreshSessions()
@@ -2015,6 +2234,7 @@ export const useAppStore = create<AppState>((set, get) => ({
     const current = get()
     if (current.switchingProfileId) return
     const source = current.sessions.find(session => session.id === sessionId)
+    if (source?.backend === 'opencode') { set({ error: t('opencode.forkUnavailable') }); return }
     if ((current.activeSessionIds.has(sessionId) || current.turnAdmissionTokens[sessionId])
       && !completedPrefixForkAvailable(current.health, source?.backend)) {
       set({ error: RUNNING_FORK_UNAVAILABLE })
@@ -2023,6 +2243,7 @@ export const useAppStore = create<AppState>((set, get) => ({
     const scope = captureProfileScope(get())
     try {
       const session = await window.agentsDock.sessions.fork(sessionId)
+      trackEvent('chat_forked')
       if (!profileScopeMatches(scope, get())) return
       await get().refreshSessions()
       if (!profileScopeMatches(scope, get())) return
@@ -2171,6 +2392,9 @@ export const useAppStore = create<AppState>((set, get) => ({
   },
   async importHistory(sessionId) {
     if (get().switchingProfileId) return
+    if (get().sessions.find(session => session.id === sessionId)?.backend === 'opencode') {
+      set({ error: t('opencode.importUnavailable') }); return
+    }
     const scope = captureProfileScope(get())
     try {
       // Refresh is incremental by default. A forced import can replay an
@@ -2757,6 +2981,7 @@ function workspaceStateFromBootstrap(
     inspectorVisible: payload.inspectorVisible,
     activeSessionIds: healthActiveSessionIDs(payload.health),
     turnAdmissionTokens: {},
+    pendingTurnSubmissions: {},
     stoppingSessionIds: new Set(),
     creatingChat: false,
     error: 'profileTransitionWarning' in payload ? payload.profileTransitionWarning ?? null : null
@@ -2958,7 +3183,9 @@ async function runProfileRefresh(
   }
 }
 
-function startupChatCleanupFromBootstrap(payload: BootstrapPayload): StartupChatCleanup | null {
+type CleanupSnapshot = Pick<BootstrapPayload, 'activeProfileId' | 'profileGeneration' | 'profiles' | 'sessions' | 'jobs'>
+
+function startupChatCleanupFromBootstrap(payload: CleanupSnapshot): StartupChatCleanup | null {
   if (!payload.activeProfileId || !payload.profiles) return null
   const serverIdentity = payload.profiles?.find(profile => profile.id === payload.activeProfileId)?.serverIdentity?.trim()
   if (!serverIdentity) return null
@@ -2974,11 +3201,12 @@ function startupChatCleanupFromBootstrap(payload: BootstrapPayload): StartupChat
   } : null
 }
 
-async function removeUntouchedStartupChats(
-  payload: BootstrapPayload,
+async function removeUntouchedStartupChats<T extends CleanupSnapshot>(
+  payload: T,
   cleanup: StartupChatCleanup,
   profileScopeIsCurrent: () => boolean
-): Promise<BootstrapPayload> {
+): Promise<T> {
+  if (!window.agentsDock.sessions.discardEmpty) return payload
   if (!profileScopeIsCurrent()) return payload
   if (payload.activeProfileId !== cleanup.profileId || (payload.profileGeneration ?? 0) !== cleanup.profileGeneration) return payload
   const serverIdentity = payload.profiles?.find(profile => profile.id === payload.activeProfileId)?.serverIdentity?.trim()
@@ -3006,11 +3234,26 @@ async function removeUntouchedStartupChats(
 
     for (const [sessionId, marker] of markers) {
       if (!profileScopeIsCurrent()) return payload
+      const hasLocalWork = () => {
+        const state = useAppStore.getState()
+        return Boolean(state.drafts[sessionId]?.length || state.uploadsBySession[sessionId]?.length
+          || state.uploadPathsBySession[sessionId]?.length || state.pendingTurnSubmissions[sessionId]
+          || state.chatReferencesBySession[sessionId]?.length || state.teamReferencesBySession[sessionId]?.length)
+      }
       const session = liveSessions.find(candidate => candidate.id === sessionId)
       if (!session || !isUntouchedNewChat(session)) continue
       if (liveJobs.some(job => job.session_id === sessionId) || livePorts.some(port => port.sessionId === sessionId)) continue
 
+      const cleanupOwner = `${cleanup.profileId}:${cleanup.profileGeneration}`
+      if (useAppStore.getState().discardingEmptyChats[sessionId]) continue
+      useAppStore.setState(state => ({ discardingEmptyChats: { ...state.discardingEmptyChats, [sessionId]: cleanupOwner } }))
       try {
+        // The editor deliberately keeps typing local until its debounce. Flush
+        // its live refs, not just disk/store state, and freeze editing while the
+        // conditional discard is in flight so a new draft cannot be stranded.
+        await flushActiveWorkspace()
+        if (!profileScopeIsCurrent()) return payload
+        if (hasLocalWork()) continue
         const [draft, chatReferences, teamReferences, timeline, queuedTurns, files, terminal] = await Promise.all([
           getWorkspacePreference<unknown>(preferenceScope, `draft:${sessionId}`, ''),
           getWorkspacePreference<unknown>(preferenceScope, chatReferencesPreferenceKey(sessionId), []),
@@ -3036,8 +3279,8 @@ async function removeUntouchedStartupChats(
           || terminal.exists
         ) continue
 
-        // Re-read the remotely authoritative records immediately before the
-        // unconditional legacy DELETE. Any uncertainty preserves the chat.
+        // Re-read before the server's conditional discard. The server repeats
+        // its proof under the lifecycle lock; never fall back to ordinary DELETE.
         ;[liveSessions, liveJobs, livePorts] = await Promise.all([
           window.agentsDock.sessions.list(),
           window.agentsDock.jobs.list(),
@@ -3052,11 +3295,10 @@ async function removeUntouchedStartupChats(
           || liveJobs.some(job => job.session_id === sessionId)
           || livePorts.some(port => port.sessionId === sessionId)
         ) continue
-        // `sessions.remove` targets the main process' active profile. Keep this
-        // guard adjacent to the destructive IPC so a profile transition during
-        // any of the awaited proof reads cannot delete from the new workspace.
+        // Keep the renderer guard adjacent to the scope-bound conditional IPC.
         if (!profileScopeIsCurrent()) return payload
-        if (await window.agentsDock.sessions.remove(sessionId)) {
+        if (hasLocalWork() || !confirmed.updated_at) continue
+        if (await window.agentsDock.sessions.discardEmpty(preferenceScope, sessionId, confirmed.updated_at)) {
           removed.add(sessionId)
           await setWorkspacePreference(preferenceScope, directChatPlaceholderKey(sessionId), false).catch(() => undefined)
         }
@@ -3065,6 +3307,13 @@ async function removeUntouchedStartupChats(
           sessionId,
           error: errorMessage(error)
         }).catch(() => undefined)
+      } finally {
+        useAppStore.setState(state => {
+          if (state.discardingEmptyChats[sessionId] !== cleanupOwner) return state
+          const discardingEmptyChats = { ...state.discardingEmptyChats }
+          delete discardingEmptyChats[sessionId]
+          return { discardingEmptyChats }
+        })
       }
     }
 
@@ -3137,6 +3386,7 @@ function releaseFailedNamespaceAdoption(
     agentRouteErrorsBySession: {},
     revokingAgentRouteIds: new Set(),
     turnAdmissionTokens: {},
+    pendingTurnSubmissions: {},
     stoppingSessionIds: new Set(),
     syncSessionId: selectedSessionId,
     syncStatus: selectedSessionId ? (current.connected ? 'cached' : 'offline') : 'idle',
@@ -3420,7 +3670,8 @@ export function mergeSnapshots(previous: SessionSnapshot | undefined, next: Sess
     nextTimelineBefore,
     semanticPaging,
     generation: nextTimelineGeneration(previous, events, eventPrefixStable),
-    timelineListGeneration: previous.timelineListGeneration ?? 0
+    timelineListGeneration: previous.timelineListGeneration ?? 0,
+    reasoningStream: previous.reasoningStream
   }
 }
 
@@ -3466,6 +3717,7 @@ export function replaceSnapshot(
     ...next,
     events,
     historyDiscontinuity: false,
+    reasoningStream: previous?.reasoningStream,
     hasMoreEvents: retainedPrefix.length
       ? previous!.hasMoreEvents
       : next.hasMoreEvents,
@@ -3714,6 +3966,137 @@ function upsertEvent(events: Event[], event: Event): Event[] {
   const last = events.at(-1)
   if (!last || last.seq <= event.seq) return [...events, event]
   return mergeEvents(events, [event])
+}
+function pendingTurnSubmissionFromState(
+  state: AppState,
+  sessionId: string,
+  token: string,
+  input: PendingTurnSubmissionInput
+): PendingTurnSubmission {
+  const rawPrompt = input.prompt
+  const leadingWhitespace = rawPrompt.length - rawPrompt.trimStart().length
+  const consumeComposer = input.consumeComposer ?? true
+  const session = state.sessions.find(candidate => candidate.id === sessionId)
+  return {
+    token,
+    ...(window.agentsDock.sharedChat ? { sharedChatRequestId: secureRandomUUID() } : {}),
+    prompt: rawPrompt.trim(),
+    files: (consumeComposer ? state.uploadsBySession[sessionId] ?? [] : []).map(file => ({ ...file })),
+    uploadPaths: (consumeComposer ? state.uploadPathsBySession[sessionId] ?? [] : []).map(file => ({ ...file })),
+    chatReferences: (consumeComposer ? input.chatReferences ?? state.chatReferencesBySession[sessionId] ?? [] : []).map(reference => ({
+      ...reference,
+      source_text_start: reference.source_text_start - leadingWhitespace,
+      source_text_end: reference.source_text_end - leadingWhitespace
+    })),
+    teamReferences: (consumeComposer ? input.teamReferences ?? state.teamReferencesBySession[sessionId] ?? [] : []).map(reference => ({
+      ...reference,
+      source_text_start: reference.source_text_start - leadingWhitespace,
+      source_text_end: reference.source_text_end - leadingWhitespace
+    })),
+    createdAt: Date.now(),
+    afterSeq: (state.snapshots[sessionId]?.events ?? []).reduce(
+      (latest, event) => Math.max(latest, event.seq),
+      session?.latest_event_seq ?? 0
+    ),
+    mode: input.steer ? 'steer' : state.activeSessionIds.has(sessionId) ? 'queue' : 'start',
+    phase: 'preflight',
+    consumeComposer
+  }
+}
+const PENDING_TURN_ACCEPTANCE_TYPES = new Set(['turn_started', 'turn_queued', 'turn_queue_run_now'])
+export function pendingTurnSubmissionAccepted(pending: PendingTurnSubmission, events: readonly Event[]): boolean {
+  // No server event can acknowledge this client submission until preflight
+  // has completed and the IPC request has actually been dispatched.
+  if (pending.phase === 'preflight') return false
+  const pendingFileIds = pending.files.map(file => file.id).sort()
+  return events.some(event => {
+    if (event.seq <= pending.afterSeq || !PENDING_TURN_ACCEPTANCE_TYPES.has(event.type)) return false
+    // Shared attachment handles intentionally differ from temporary upload
+    // IDs. The server echoes this exact browser request identity on its event.
+    if (pending.sharedChatRequestId) return event.shared_chat_request_id === pending.sharedChatRequestId
+    const prompt = (event.prompt ?? event.message ?? '').trim()
+    const fileIds = [...(event.file_ids ?? [])].sort()
+    return prompt === pending.prompt
+      && fileIds.length === pendingFileIds.length
+      && fileIds.every((id, index) => id === pendingFileIds[index])
+  })
+}
+function removePendingTurnSubmission(
+  pending: Record<string, PendingTurnSubmission>,
+  sessionId: string,
+  token: string
+): Record<string, PendingTurnSubmission> {
+  if (pending[sessionId]?.token !== token) return pending
+  const next = { ...pending }
+  delete next[sessionId]
+  return next
+}
+function updatePendingTurnSubmissionPhase(
+  pending: Record<string, PendingTurnSubmission>,
+  sessionId: string,
+  token: string,
+  phase: PendingTurnSubmission['phase'],
+  mode?: PendingTurnSubmission['mode']
+): Record<string, PendingTurnSubmission> {
+  const current = pending[sessionId]
+  if (!current || current.token !== token) return pending
+  const nextMode = mode ?? current.mode
+  if (current.phase === phase && current.mode === nextMode) return pending
+  return { ...pending, [sessionId]: { ...current, phase, mode: nextMode } }
+}
+function rollbackPendingTurnSubmissionState(
+  state: AppState,
+  sessionId: string,
+  token: string
+): AppState | Partial<AppState> {
+  const pending = state.pendingTurnSubmissions[sessionId]
+  if (!pending || pending.token !== token) return state
+  const pendingTurnSubmissions = removePendingTurnSubmission(state.pendingTurnSubmissions, sessionId, token)
+  if (!pending.consumeComposer) return { pendingTurnSubmissions }
+  const newerDraft = state.drafts[sessionId] ?? ''
+  const hasNewerDraft = Boolean(newerDraft.trim())
+  // The user may have already retyped the failed prompt. Keep that draft and
+  // its current reference selections instead of inserting the same text twice.
+  const sameDraft = hasNewerDraft && newerDraft.trim() === pending.prompt
+  const separator = pending.prompt && hasNewerDraft ? '\n\n' : ''
+  const restoredDraft = sameDraft ? newerDraft : hasNewerDraft
+    ? `${pending.prompt}${separator}${newerDraft}`
+    : pending.prompt
+  const newerReferenceOffset = pending.prompt.length + separator.length
+  const chatReferences = sameDraft ? state.chatReferencesBySession[sessionId] ?? [] : hasNewerDraft
+    ? [
+        ...pending.chatReferences,
+        ...(state.chatReferencesBySession[sessionId] ?? []).map(reference => ({
+          ...reference,
+          source_text_start: reference.source_text_start + newerReferenceOffset,
+          source_text_end: reference.source_text_end + newerReferenceOffset
+        }))
+      ]
+    : pending.chatReferences
+  const teamReferences = sameDraft ? state.teamReferencesBySession[sessionId] ?? [] : hasNewerDraft
+    ? [
+        ...pending.teamReferences,
+        ...(state.teamReferencesBySession[sessionId] ?? []).map(reference => ({
+          ...reference,
+          source_text_start: reference.source_text_start + newerReferenceOffset,
+          source_text_end: reference.source_text_end + newerReferenceOffset
+        }))
+      ]
+    : pending.teamReferences
+  return {
+    drafts: { ...state.drafts, [sessionId]: restoredDraft },
+    chatReferencesBySession: { ...state.chatReferencesBySession, [sessionId]: chatReferences },
+    teamReferencesBySession: { ...state.teamReferencesBySession, [sessionId]: teamReferences },
+    uploadsBySession: {
+      ...state.uploadsBySession,
+      [sessionId]: mergeFiles(state.uploadsBySession[sessionId] ?? [], pending.files)
+    },
+    uploadPathsBySession: {
+      ...state.uploadPathsBySession,
+      [sessionId]: mergeUploadPaths(state.uploadPathsBySession[sessionId] ?? [], pending.uploadPaths)
+    },
+    pendingTurnSubmissions
+  }
 }
 function mergeFiles(a: AgentFile[], b: AgentFile[]): AgentFile[] {
   if (!b.length) return a
@@ -4161,8 +4544,10 @@ function flushLiveEvents(forceAll = false): void {
   }
   useAppStore.setState(state => {
     let activeSessionIds = state.activeSessionIds
+    let sessions = state.sessions
     let health = state.health
     let snapshots = state.snapshots
+    let pendingTurnSubmissions = state.pendingTurnSubmissions
     let connected = state.connected
     let connectionError = state.connectionError
     let syncStatus = state.syncStatus
@@ -4181,6 +4566,17 @@ function flushLiveEvents(forceAll = false): void {
         if (epoch !== undefined) liveEventActivityEpochs.set(merged, epoch)
         return merged
       })
+      const pendingSubmission = pendingTurnSubmissions[sessionId]
+      const owner = sessions.find(session => session.id === sessionId)
+      const updatedOwner = owner ? events.reduce(applyOpenCodeSessionEvent, owner) : undefined
+      if (updatedOwner && updatedOwner !== owner) sessions = sessions.map(session => session.id === sessionId ? updatedOwner : session)
+      if (pendingSubmission && pendingTurnSubmissionAccepted(pendingSubmission, events)) {
+        pendingTurnSubmissions = removePendingTurnSubmission(
+          pendingTurnSubmissions,
+          sessionId,
+          pendingSubmission.token
+        )
+      }
       if (
         sessionId === state.selectedSessionId
         && healthIsCompatible(state.health)
@@ -4234,6 +4630,7 @@ function flushLiveEvents(forceAll = false): void {
       ) continue
       const nextSnapshot = {
         ...snapshot,
+        ...(updatedOwner && updatedOwner !== owner ? { session: updatedOwner } : {}),
         events: mergedEvents,
         generation: nextTimelineGeneration(
           snapshot,
@@ -4256,8 +4653,10 @@ function flushLiveEvents(forceAll = false): void {
       : state.connectionGeneration
     if (
       activeSessionIds === state.activeSessionIds
+      && sessions === state.sessions
       && health === state.health
       && snapshots === state.snapshots
+      && pendingTurnSubmissions === state.pendingTurnSubmissions
       && connected === state.connected
       && connectionGeneration === state.connectionGeneration
       && connectionError === state.connectionError
@@ -4266,8 +4665,10 @@ function flushLiveEvents(forceAll = false): void {
     ) return state
     return {
       activeSessionIds,
+      sessions,
       health,
       snapshots,
+      pendingTurnSubmissions,
       connected,
       connectionGeneration,
       connectionError,
@@ -4435,7 +4836,7 @@ export function isSupersededTimelineSelection(error: unknown): boolean {
   return /Timeline selection superseded/.test(errorMessage(error))
 }
 function forkErrorMessage(error: unknown): string {
-  const message = errorMessage(error)
+  const message = errorMessage(error).replace(/^Error invoking remote method 'sessions:fork': (?:Error: )?/, '')
   return message.toLocaleLowerCase().includes('active turn before forking')
     ? RUNNING_FORK_UNAVAILABLE
     : message
@@ -4478,7 +4879,7 @@ function eventMayRenderInTimeline(event: Event): boolean {
   if (event.type === 'turn_started' || isNativeGoalSteerEvent(event)) return Boolean(event.prompt?.trim() || event.file_ids?.length)
   if (event.type === 'assistant_text') return Boolean(event.text?.trim())
   if (event.type === 'turn_finished') return Boolean(event.result_text?.trim())
-  if (event.type === 'reasoning_summary') return Boolean((event.text || String(event.message || '')).trim())
+  if (event.type === 'reasoning_summary' || event.type === 'reasoning_text') return Boolean((event.text || String(event.message || '')).trim())
   if (event.type === 'tool_started' || event.type === 'tool_finished') return true
   if (event.type === 'artifact_created' || event.type === 'file_uploaded' || event.type === 'code_diff') return true
   if (event.type.startsWith('handoff_digest_') || event.type.startsWith('job_')) return true
@@ -4492,15 +4893,19 @@ function normalizeSessionPatch(patch: Partial<Session>) { return {
   folder: patch.folder ?? undefined,
   cwd: patch.cwd ?? undefined,
   backend: patch.backend,
+  codex_provider: patch.codex_provider,
+  provider_connection: patch.provider_connection,
   model: patch.model,
   effort: patch.effort,
   system_prompt: patch.system_prompt,
+  subagent_limit: patch.subagent_limit,
   codex_approval_policy: patch.codex_approval_policy,
   codex_sandbox_mode: patch.codex_sandbox_mode,
   codex_permission_profile: patch.codex_permission_profile,
   codex_approvals_reviewer: patch.codex_approvals_reviewer,
   claude_permission_mode: patch.claude_permission_mode,
   cursor_permission_mode: patch.cursor_permission_mode,
+  opencode_permission_mode: patch.opencode_permission_mode,
   provider_jobs_access: patch.provider_jobs_access ?? undefined,
   pinned: patch.pinned ?? undefined,
   archived: patch.archived ?? undefined
@@ -4508,9 +4913,14 @@ function normalizeSessionPatch(patch: Partial<Session>) { return {
 
 export function interactiveClientCapabilities(
   session: Session | undefined,
-  health: Health | null
+  health: Health | null,
+  selectedSkill = false
 ): string[] {
-  const capabilities = ['codex_interactive_v1', 'codex_goal_steer_v1']
+  const opencode = session?.backend === 'opencode'
+  const capabilities = opencode
+    ? selectedSkill && openCodeProviderCommandsAvailable(health) ? ['opencode_provider_commands_v1'] : []
+    : ['codex_interactive_v1', 'codex_goal_steer_v1']
+  if (opencode && !supportedCrossChatTargetBackends(health).includes('opencode')) return capabilities
   if (crossChatHandoffsAvailable(health)) capabilities.push('cross_chat_handoffs_v1')
   if (
     crossChatHandoffsAvailable(health)

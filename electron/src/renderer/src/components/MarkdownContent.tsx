@@ -14,6 +14,7 @@ import { internalWorkspaceLinkURL } from '@shared/workspace-link-url'
 import { normalizeSecurePeerJoinTarget } from '@shared/secure-peer'
 import type { AgentFile, ChatReference, TeamReference } from '@shared/types'
 import { chatReferenceDisplayText, parseStoredChatReferences } from '../lib/chat-references'
+import { saveAgentFile } from '../lib/file-actions'
 import { parseStoredTeamReferences, teamReferenceText } from '../lib/team-references'
 import { openTeamMessageLink, parseTeamMessageLink } from '../lib/team-message-links'
 import {
@@ -107,7 +108,8 @@ export const MarkdownContent = memo(function MarkdownContent({
     ))
     if (file) {
       if (!sessionId) return
-      if (isEditorTextFile(file)) requestOpenAgentFile(sessionId, file, reference ?? {})
+      if (window.agentsDock.sharedChat) void saveAgentFile(sessionId, file)
+      else if (isEditorTextFile(file)) requestOpenAgentFile(sessionId, file, reference ?? {})
       else void window.agentsDock.files.open(sessionId, file)
       return
     }

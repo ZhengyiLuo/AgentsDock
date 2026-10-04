@@ -1,5 +1,4 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { UITextView as SelectableText } from '@bsky.app/react-native-uitextview'
 import { Image } from 'expo-image'
 import { ActivityIndicator, Alert, Linking, Platform, Pressable, ScrollView, StyleSheet, View } from 'react-native'
 import { WebView } from 'react-native-webview'
@@ -19,6 +18,7 @@ import { usePalette } from '../../theme'
 import { Text, TextInput } from '../AppText'
 import { SwipeDismissImage } from '../FullscreenImageViewer'
 import { MarkdownContent } from '../MarkdownContent'
+import { SelectableText } from '../SelectableText'
 
 export interface LoadedFileText {
   content: string

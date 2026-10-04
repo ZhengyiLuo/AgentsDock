@@ -2,8 +2,10 @@
 import { t, getLocale } from '@shared/i18n'
 import { useLocale } from '../lib/i18n'
 import { AlertTriangle, CheckCircle2, CircleHelp, RefreshCw, XCircle } from 'lucide-react'
-import type { Backend, Event, RuntimeCatalog, RuntimeDiagnostic } from '@shared/types'
+import type { Backend, CodexProvider, Event, RuntimeCatalog, RuntimeDiagnostic } from '@shared/types'
 import {
+  opencodeBackendAvailable,
+  opencodeBackendUnavailableReason,
   cursorBackendAvailable,
   cursorBackendUnavailableReason,
   runtimeDiagnosticCurrentError,
@@ -15,11 +17,13 @@ import {
 import { memo, useState } from 'react'
 import { useAppStore } from '../store/app-store'
 import { eventErrorText, isTimelineError } from '../lib/timeline'
+import { NativeProviderSignIn } from './NativeProviderSignIn'
+import { openAIProviderSettings } from '../lib/provider-settings'
 
-export const RuntimeHealthNotice = memo(function RuntimeHealthNotice({ backend, sessionId }: { backend: Backend; sessionId: string }) {
+export const RuntimeHealthNotice = memo(function RuntimeHealthNotice({ backend, sessionId, codexProvider, admissionError }: { backend: Backend; sessionId: string; codexProvider?: CodexProvider; admissionError?: string }) {
   useLocale()
   const { refreshing, recheck } = useRuntimeRecheck()
-  return <RuntimeStatus backend={backend} compact sessionId={sessionId} refreshing={refreshing} onRecheck={recheck} />
+  return <RuntimeStatus backend={backend} codexProvider={codexProvider} admissionError={admissionError} compact sessionId={sessionId} refreshing={refreshing} onRecheck={recheck} />
 })
 
 export function RuntimeHealthPanel() {
@@ -30,7 +34,7 @@ export function RuntimeHealthPanel() {
   ))
   return <section className="runtime-health-panel">
     <header>
-      <div><strong>{t("ui.RuntimeHealth.RuntimeHealthPanel.runtimes_prerequisites_52df820")}</strong><small>{t("ui.RuntimeHealth.RuntimeHealthPanel.server_prerequisites_and_provider_readines_2793356")}</small></div>
+      <div><strong>{t('connections.nativeTitle')}</strong><small>{t('connections.nativeHelp')}</small></div>
       <button type="button" className="quiet-button" disabled={refreshing} onClick={() => void recheck()}>
         <RefreshCw className={refreshing ? 'spin' : ''} size={13} />{" "}{t("ui.RuntimeHealth.RuntimeHealthPanel.recheck_clis_a388594")}</button>
     </header>
@@ -39,11 +43,12 @@ export function RuntimeHealthPanel() {
       <RuntimeStatus backend="claude" />
       <RuntimeStatus backend="codex" />
       {cursorAdvertised && <RuntimeStatus backend="cursor" />}
+      <RuntimeStatus backend="opencode" />
     </div>
   </section>
 }
 
-function useRuntimeRecheck() {
+export function useRuntimeRecheck() {
   const [refreshing, setRefreshing] = useState(false)
   const recheck = async () => {
     setRefreshing(true)
@@ -109,12 +114,16 @@ function TmuxStatus() {
 
 function RuntimeStatus({
   backend,
+  codexProvider,
+  admissionError,
   compact = false,
   sessionId,
   refreshing = false,
   onRecheck,
 }: {
   backend: Backend
+  codexProvider?: CodexProvider
+  admissionError?: string
   compact?: boolean
   sessionId?: string
   refreshing?: boolean
@@ -123,34 +132,52 @@ function RuntimeStatus({
   useLocale()
   const health = useAppStore(state => state.health)
   const catalog = useAppStore(state => state.runtimeCatalog)
-  const cursorCapability = health?.capabilities?.cursor_backend
+  const connected = useAppStore(state => state.connected)
+  const profileId = useAppStore(state => state.activeProfileId)
+  const profileGeneration = useAppStore(state => state.profileGeneration)
+  const cursorCapability = backend === 'opencode' ? health?.capabilities?.opencode_backend : health?.capabilities?.cursor_backend
   // Keep compact notices independent from ordinary live timeline growth. The
   // selector still observes a newly relevant run error, but its stable string
   // prevents every event append from rerendering this subtree.
   const chatError = useAppStore(state => (
     compact && sessionId ? latestChatRunError(state.snapshots[sessionId]?.events, backend) : ''
   ))
-  const diagnostic = runtimeDiagnosticFor(health, catalog, backend)
-  const cursorUnavailable = backend === 'cursor' && !cursorBackendAvailable(health, catalog)
+  const customCatalog = useAppStore(state => { const session = state.sessions.find(item => item.id === sessionId); return session?.provider_connection_catalog ?? session?.codex_provider_catalog })
+  const diagnostic = runtimeDiagnosticFor(health, catalog, backend, codexProvider, customCatalog)
+  const cursorUnavailable = codexProvider !== 'custom' && (backend === 'cursor' && !cursorBackendAvailable(health, catalog) || backend === 'opencode' && !opencodeBackendAvailable(health, catalog))
   // Provider last_error is backend-wide, not session-scoped. Keep it in the
   // full Settings panel so a failure from one chat cannot leak into another
   // chat's compact composer notice.
+  // Claude checks authentication during a real send. Unknown readiness, or
+  // another chat's cached login failure, is not a reason to warn up front.
+  // Keep installation failures visible; only show passive auth diagnostics
+  // alongside an actual error from this chat's latest run.
+  const passiveClaudeAuth = backend === 'claude'
+    && (diagnostic?.status === 'unknown' || diagnostic?.status === 'unauthenticated')
   const providerNeedsAttention = compact
-    ? cursorUnavailable || Boolean(diagnostic && diagnostic.status !== 'ready')
+    ? cursorUnavailable || Boolean(diagnostic && diagnostic.status !== 'ready' && (!passiveClaudeAuth || chatError))
     : cursorUnavailable || runtimeDiagnosticNeedsAttention(diagnostic)
-  if (compact && !chatError && !providerNeedsAttention) return null
-  const tone = chatError ? 'warning' : cursorUnavailable ? 'error' : runtimeDiagnosticTone(diagnostic)
+  // Only an actual failed send/run belongs above the composer. Cached login
+  // status can outlive reconnection and must never demand configuration here.
+  if (compact && !chatError && !admissionError) return null
+  const tone = chatError ? 'warning' : !compact && diagnostic?.installed !== false
+    ? connected && diagnostic?.authenticated === true && diagnostic.status === 'ready' ? 'ready' : 'unknown'
+    : cursorUnavailable ? 'error' : runtimeDiagnosticTone(diagnostic)
   const Icon = tone === 'ready' ? CheckCircle2 : tone === 'error' ? XCircle : tone === 'warning' ? AlertTriangle : CircleHelp
-  const provider = backend === 'claude' ? 'Claude Code' : backend === 'cursor' ? 'Cursor' : 'Codex'
+  const provider = backend === 'claude' ? 'Claude Code' : backend === 'cursor' ? 'Cursor' : backend === 'opencode' ? 'OpenCode' : codexProvider === 'custom' ? t('codexProvider.label') : 'Codex'
   const cursorUnavailableDetail = cursorUnavailable
-    ? cursorBackendUnavailableReason(health, catalog) || ''
+    ? (backend === 'opencode' ? opencodeBackendUnavailableReason(health, catalog) : cursorBackendUnavailableReason(health, catalog)) || ''
     : ''
-  const detail = chatError
+  const detail = admissionError
+    || chatError
     || cursorUnavailableDetail
     || (!compact ? runtimeDiagnosticCurrentError(diagnostic) : '')
     || diagnostic?.message
     || `${provider} has not been checked yet.`
-  const label = compact && chatError ? 'Latest chat error' : cursorUnavailable ? 'Unavailable' : runtimeDiagnosticLabel(diagnostic)
+  const label = !compact && !connected ? t('connections.unavailable')
+    : !compact && diagnostic?.installed !== false
+      ? tone === 'ready' ? t('connections.signedIn') : diagnostic?.authenticated === false ? t('codexAuth.signedOut') : t('connections.loginUnknown')
+      : compact && admissionError ? t('connections.checkFailed') : compact && chatError ? 'Latest chat error' : cursorUnavailable ? 'Unavailable' : runtimeDiagnosticLabel(diagnostic)
   const cursorAction = diagnostic?.action?.trim() || cursorCapability?.action?.trim()
   const action = cursorUnavailable
     ? cursorAction && !cursorUnavailableDetail.includes(cursorAction) ? cursorAction : undefined
@@ -161,8 +188,10 @@ function RuntimeStatus({
       <strong>{provider} <span>{label}</span></strong>
       <small>{detail}</small>
       {action ? <small className="runtime-action">{action}</small> : null}
+      {!compact && tone !== 'ready' && <NativeProviderSignIn key={`${backend}:${profileId}:${profileGeneration}`} backend={backend} disabled={!connected} />}
     </div>
-    {compact && providerNeedsAttention && onRecheck
+    {compact && codexProvider === 'custom' && <button type="button" className="quiet-button runtime-recheck-button" onClick={() => openAIProviderSettings(backend)}>{t('connections.configure')}</button>}
+    {compact && codexProvider !== 'custom' && providerNeedsAttention && onRecheck
       ? <button
           type="button"
           className="quiet-button runtime-recheck-button"

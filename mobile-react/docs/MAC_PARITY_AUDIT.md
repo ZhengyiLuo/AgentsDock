@@ -1,4 +1,15 @@
-# Mobile / Mac parity — 2026-10-02
+# Mobile / Mac parity — 2026-10-04
+
+## Main integration — unreleased
+
+Main through `3964cf80` is integrated with the pending mobile changes below.
+Its native iOS Chat Details choices retain mobile's validation and request
+ownership protections. Keyboard-hide settlement, adaptive iPad details and
+video-library changes are included. Main does not change the mobile goal
+editor components; actual goal-button acceptance is still required. The fresh
+external simulator creation failed before app boot, so native verification and
+TestFlight availability remain pending. Server source is now maintained in
+this repository's `server/`, as specified by the updated project playbook.
 
 ## Unreleased: goal editor interaction and recovery
 
@@ -17,8 +28,8 @@
 - Match committed desktop `adb5fea`'s reasoning availability during active
   work: model-scoped choices remain separate from reload/backend restrictions.
   Keep save/error feedback visible and reject obsolete choice callbacks.
-- Chat details uses inline runtime choices with an explicit close action;
-  failures are shown within that screen rather than behind its native sheet.
+- Chat details uses native iOS choices and inline choices elsewhere, with
+  explicit cancellation and failures shown within the originating screen.
 - Input clearing follows exact composer consumption, including delayed
   preflight, never a late response that could erase a subsequent draft.
 - A received successful turn response cannot be rolled back into an unsent

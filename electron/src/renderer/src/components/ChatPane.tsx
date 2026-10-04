@@ -1,7 +1,7 @@
 // Localized display strings use semantic catalog keys.
 import { t } from '@shared/i18n'
 import { useLocale } from '../lib/i18n'
-import { memo, useCallback, useEffect, useRef, useState, type DragEvent as ReactDragEvent, type KeyboardEvent as ReactKeyboardEvent } from 'react'
+import { memo, useCallback, useEffect, useRef, useState, type ReactNode, type DragEvent as ReactDragEvent, type KeyboardEvent as ReactKeyboardEvent } from 'react'
 import type { Session } from '@shared/types'
 import type { ChatPane as ChatPaneId } from '../lib/chat-panes'
 import { nativeFileRefsFromFiles } from '../lib/native-files'
@@ -24,6 +24,7 @@ const AVAILABLE_CLAUDE_CONTROLS = Object.freeze({
 export const ChatPane = memo(function ChatPane({
   pane,
   session,
+  sideChat,
   focused,
   split,
   sidebarVisible = true,
@@ -33,6 +34,7 @@ export const ChatPane = memo(function ChatPane({
 }: {
   pane: ChatPaneId
   session: Session
+  sideChat?: ReactNode
   focused: boolean
   split: boolean
   sidebarVisible?: boolean
@@ -166,9 +168,12 @@ export const ChatPane = memo(function ChatPane({
         <ClaudeInteractionShelf />
       </div>
       <EmergencyTimelineDock sessionId={session.id} focused={focused} />
-      {session.archived
-        ? <div className="composer disabled"><span>{t("ui.ChatPane.ChatPane.archived_chat_unarchive_it_to_send_a_messa_1b14da3")}</span></div>
-        : <Composer sessionId={session.id} dropActive={dropActive} />}
+      <div className="chat-workspace-composer">
+        {sideChat}
+        {session.archived
+          ? <div className="composer disabled"><span>{t("ui.ChatPane.ChatPane.archived_chat_unarchive_it_to_send_a_messa_1b14da3")}</span></div>
+          : <Composer sessionId={session.id} dropActive={dropActive} />}
+      </div>
     </div>
   </>
 

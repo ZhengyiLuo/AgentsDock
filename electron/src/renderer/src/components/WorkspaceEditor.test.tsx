@@ -2834,6 +2834,29 @@ describe('WorkspaceEditor', () => {
     expect(screen.getByRole('tab', { name: 'App.tsx' })).toHaveAttribute('aria-selected', 'true')
   })
 
+  it('includes Changes in workspace tab navigation without acting on a hidden editor', async () => {
+    window.agentsDock.workspaceGit = {
+      status: vi.fn().mockResolvedValue({ root: '/work/project', branch: 'main', head: 'head', revision: 'rev', operation: null, files: [], staged_count: 0, conflict_count: 0 }),
+      diff: vi.fn(), conflict: vi.fn(), action: vi.fn()
+    }
+    renderEditor()
+    act(() => window.dispatchEvent(new CustomEvent('agentsdock:open-workspace-path', { detail: { sessionId: 'chat-a', path: 'src/App.tsx' } })))
+    await screen.findByRole('textbox', { name: 'Contents of src/App.tsx' })
+    fireEvent.keyDown(window, { key: '2', metaKey: true })
+    expect(await screen.findByRole('region', { name: 'Workspace changes' })).toBeVisible()
+    expect(screen.getByRole('button', { name: 'Changes' })).toHaveAttribute('aria-pressed', 'true')
+    expect(screen.getByRole('tab', { name: 'App.tsx' })).toHaveAttribute('aria-selected', 'false')
+    fireEvent.keyDown(window, { key: 'Tab', ctrlKey: true })
+    expect(screen.getByRole('tab', { name: 'App.tsx' })).toHaveAttribute('aria-selected', 'true')
+    fireEvent.keyDown(window, { key: 'Tab', ctrlKey: true, shiftKey: true })
+    expect(screen.getByRole('button', { name: 'Changes' })).toHaveAttribute('aria-pressed', 'true')
+    const close = new Event('agentsdock:workspace-close-active', { cancelable: true })
+    act(() => window.dispatchEvent(close))
+    expect(close.defaultPrevented).toBe(true)
+    expect(screen.getByRole('button', { name: /Chat.*pinned/i })).toHaveAttribute('aria-pressed', 'true')
+    expect(screen.getByRole('tab', { name: 'App.tsx' })).toBeInTheDocument()
+  })
+
   it('navigates quick-open results with the keyboard', async () => {
     renderEditor()
     fireEvent.keyDown(window, { key: 'o', metaKey: true })

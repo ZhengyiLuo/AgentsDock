@@ -16,6 +16,32 @@ const baseItem = {
 const available = { id: 'delivery-1', state: 'available', available_at: now, delivered_at: null, read_at: null }
 
 describe('TeamHubClient Team Network V1', () => {
+  it('renames only the authenticated server profile with no selectable target on the wire', async () => {
+    const server = { id: 'node-1', server_identity: 'identity-1', display_name: 'New name' }
+    const fetch = vi.fn().mockResolvedValue(json({ server }))
+    const client = new TeamHubClient('http://127.0.0.1:7850/api/team-hub', { fetch })
+    await expect(client.renameNetworkServer('access', 'team/one', 'New name')).resolves.toEqual({ server })
+    expect(fetch).toHaveBeenCalledTimes(1)
+    const [url, init] = fetch.mock.calls[0]
+    expect(String(url)).toBe('http://127.0.0.1:7850/api/team-hub/v1/teams/team%2Fone/network/server-profile')
+    expect(init.method).toBe('POST')
+    expect(JSON.parse(init.body)).toEqual({ display_name: 'New name' })
+    expect(new Headers(init.headers).get('Authorization')).toBe('Bearer access')
+    expect(init.redirect).toBe('error')
+  })
+
+  it('rejects unsupported or widened rename responses without retry', async () => {
+    for (const response of [new Response(JSON.stringify({ error: { code: 'not_found', message: 'Unavailable' } }),
+      { status: 404, headers: { 'Content-Type': 'application/json' } }), json({ server: {
+      id: 'node-1', server_identity: 'identity-1', display_name: 'New name', owned_by_caller: true
+    } })]) {
+      const fetch = vi.fn().mockResolvedValue(response)
+      const client = new TeamHubClient('http://127.0.0.1:7850/api/team-hub', { fetch })
+      await expect(client.renameNetworkServer('access', 'team-1', 'New name')).rejects.toThrow()
+      expect(fetch).toHaveBeenCalledTimes(1)
+    }
+  })
+
   it('parses the capability gate from health', async () => {
     const fetch = vi.fn().mockResolvedValue(json({
       ok: true, service: 'agentsdock-team-hub', api_version: 1, hub_id: 'hub-1', instance_id: 'instance-1',

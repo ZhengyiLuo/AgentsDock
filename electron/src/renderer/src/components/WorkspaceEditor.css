@@ -170,6 +170,8 @@
   font-weight: var(--text-weight-label);
 }
 
+.workspace-editor-command-button > svg { flex-shrink: 0; }
+
 .workspace-editor-command-button kbd,
 .workspace-editor-palette-result kbd {
   padding: 1px 4px;
@@ -1732,7 +1734,8 @@
     overflow: hidden;
   }
 
-  .workspace-editor-command-button kbd { display: none; }
+  .workspace-editor-command-button kbd,
+  .workspace-editor-open-label { display: none; }
   .workspace-editor-breadcrumb-parent { display: none; }
   .workspace-editor-breadcrumb-name { max-width: 100%; }
 }

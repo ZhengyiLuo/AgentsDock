@@ -151,6 +151,7 @@ try {
   $AsarExtract = Join-Path $TemporaryRoot 'asar'
   New-Item -ItemType Directory -Force -Path $AsarExtract | Out-Null
   Invoke-Checked node $AsarCli extract $Asar $AsarExtract
+  Invoke-Checked node (Join-Path $Root 'scripts/verify_coordinated_resources.mjs') $Resources (Join-Path $AsarExtract 'package.json')
   $PackageJson = Get-Content -LiteralPath (Join-Path $AsarExtract 'package.json') -Raw | ConvertFrom-Json
   Assert-Condition ($PackageJson.name -eq 'agentsdock-electron') 'ASAR package identity is not AgentsDock'
   Assert-Condition ($PackageJson.version -eq $ExpectedVersion) "ASAR package version does not match $ExpectedVersion"

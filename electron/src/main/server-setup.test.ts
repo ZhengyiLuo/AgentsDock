@@ -24,19 +24,11 @@ vi.mock('node:fs/promises', async importOriginal => {
 import {
   createLineConsumer,
   isRetryableLaunchdSetupFailure,
-  LOCAL_RELEASE_BOOTSTRAP,
   localReleaseBootstrap,
   parseServerSetupResult,
   parseSSHConfigHostname,
-  PINNED_BETA_SERVER_RELEASE,
-  PINNED_SERVER_RELEASE_SHA256,
-  PINNED_SERVER_RELEASE_URL,
-  PINNED_SERVER_RELEASE_VERSION,
-  PINNED_STABLE_SERVER_RELEASE,
-  pinnedServerRelease,
   redactServerSetupLogLine,
   remoteFallbackURL,
-  REMOTE_BOOTSTRAP,
   remoteReleaseBootstrap,
   remoteShellArgs,
   serverSetupCapabilities,
@@ -48,6 +40,14 @@ import {
   serverSetupProcessPath,
   validateServerSetupInput
 } from './server-setup'
+
+// Signed-release resolution has separate coverage. Bootstrap tests use explicit fixtures.
+const STABLE_RELEASE = { track: 'stable' as const, version: '1.0.3',
+  url: 'https://github.com/ZhengyiLuo/AgentsServer/releases/download/v1.0.3/agents-server-1.0.3.tar.gz', sha256: 'a'.repeat(64) }
+const BETA_RELEASE = { track: 'beta' as const, version: '1.0.7-beta.1',
+  url: 'https://github.com/ZhengyiLuo/AgentsServer/releases/download/v1.0.7-beta.1/agents-server-1.0.7-beta.1.tar.gz', sha256: 'b'.repeat(64) }
+const LOCAL_RELEASE_BOOTSTRAP = localReleaseBootstrap(STABLE_RELEASE)
+const REMOTE_BOOTSTRAP = remoteReleaseBootstrap(STABLE_RELEASE)
 
 function deferred<T>() {
   let resolve!: (value: T) => void
@@ -124,42 +124,23 @@ describe('server setup', () => {
     }
   })
 
-  it('selects immutable Stable and Beta release triples without mixing channels', () => {
-    expect(pinnedServerRelease()).toBe(PINNED_STABLE_SERVER_RELEASE)
-    expect(pinnedServerRelease('stable')).toBe(PINNED_STABLE_SERVER_RELEASE)
-    expect(pinnedServerRelease('beta')).toBe(PINNED_BETA_SERVER_RELEASE)
-    expect(PINNED_BETA_SERVER_RELEASE).toEqual({
-      track: 'beta',
-      version: '0.1.26-beta.46',
-      url: 'https://github.com/ZhengyiLuo/AgentsServer/releases/download/v0.1.26-beta.46/agents-server-0.1.26-beta.46.tar.gz',
-      sha256: '5928e3c58406bf8beb4862510d71935b9846e61181504d0645781d04136d4b51'
-    })
-    expect(PINNED_STABLE_SERVER_RELEASE).toEqual({
-      track: 'stable',
-      version: '0.1.25',
-      url: 'https://github.com/ZhengyiLuo/AgentsServer/releases/download/v0.1.25/agents-server-0.1.25.tar.gz',
-      sha256: 'a5d8768d17715b0bfbd0f4b7d5fb85052e9baf46a3d3dda51975e4c21b2933e9'
-    })
-    expect(PINNED_SERVER_RELEASE_VERSION).toBe('0.1.25')
-    expect(PINNED_SERVER_RELEASE_URL).toBe(PINNED_STABLE_SERVER_RELEASE.url)
-    expect(PINNED_SERVER_RELEASE_SHA256).toBe(PINNED_STABLE_SERVER_RELEASE.sha256)
-
-    const stableLocal = localReleaseBootstrap(PINNED_STABLE_SERVER_RELEASE)
-    const betaLocal = localReleaseBootstrap(PINNED_BETA_SERVER_RELEASE)
-    const stableRemote = remoteReleaseBootstrap(PINNED_STABLE_SERVER_RELEASE)
-    const betaRemote = remoteReleaseBootstrap(PINNED_BETA_SERVER_RELEASE)
-    expect(stableLocal).toContain(`VERSION="${PINNED_STABLE_SERVER_RELEASE.version}"`)
-    expect(stableLocal).toContain(PINNED_STABLE_SERVER_RELEASE.url)
-    expect(stableLocal).toContain(PINNED_STABLE_SERVER_RELEASE.sha256)
-    expect(stableLocal).not.toContain(PINNED_BETA_SERVER_RELEASE.url)
-    expect(betaLocal).toContain(`VERSION="${PINNED_BETA_SERVER_RELEASE.version}"`)
-    expect(betaLocal).toContain(PINNED_BETA_SERVER_RELEASE.url)
-    expect(betaLocal).toContain(PINNED_BETA_SERVER_RELEASE.sha256)
-    expect(betaLocal).not.toContain(PINNED_STABLE_SERVER_RELEASE.url)
-    expect(stableRemote).toContain(PINNED_STABLE_SERVER_RELEASE.url)
-    expect(stableRemote).not.toContain(PINNED_BETA_SERVER_RELEASE.url)
-    expect(betaRemote).toContain(PINNED_BETA_SERVER_RELEASE.url)
-    expect(betaRemote).not.toContain(PINNED_STABLE_SERVER_RELEASE.url)
+  it('uses the resolved immutable release without mixing channels', () => {
+    const stableLocal = localReleaseBootstrap(STABLE_RELEASE)
+    const betaLocal = localReleaseBootstrap(BETA_RELEASE)
+    const stableRemote = remoteReleaseBootstrap(STABLE_RELEASE)
+    const betaRemote = remoteReleaseBootstrap(BETA_RELEASE)
+    expect(stableLocal).toContain(`VERSION="${STABLE_RELEASE.version}"`)
+    expect(stableLocal).toContain(STABLE_RELEASE.url)
+    expect(stableLocal).toContain(STABLE_RELEASE.sha256)
+    expect(stableLocal).not.toContain(BETA_RELEASE.url)
+    expect(betaLocal).toContain(`VERSION="${BETA_RELEASE.version}"`)
+    expect(betaLocal).toContain(BETA_RELEASE.url)
+    expect(betaLocal).toContain(BETA_RELEASE.sha256)
+    expect(betaLocal).not.toContain(STABLE_RELEASE.url)
+    expect(stableRemote).toContain(STABLE_RELEASE.url)
+    expect(stableRemote).not.toContain(BETA_RELEASE.url)
+    expect(betaRemote).toContain(BETA_RELEASE.url)
+    expect(betaRemote).not.toContain(STABLE_RELEASE.url)
   })
 
   it('parses the private installer result without exposing it as progress', () => {
@@ -258,7 +239,7 @@ port 22
       .mockResolvedValueOnce(null)
       .mockReturnValueOnce(installer.promise)
 
-    const setup = manager.runLocal(7850, vi.fn(), true)
+    const setup = manager.runLocal(7850, vi.fn(), true, STABLE_RELEASE)
     await vi.waitFor(() => expect(runProcess).toHaveBeenCalledTimes(3))
 
     expect(runProcess.mock.calls[0]).toEqual([
@@ -294,7 +275,7 @@ port 22
     const manager = new ServerSetupManager() as unknown as ServerSetupManagerHarness
     const runProcess = vi.spyOn(manager, 'runProcess').mockRejectedValueOnce(new Error('Install tmux, then retry guided setup.'))
 
-    await expect(manager.runLocal(7850, vi.fn())).rejects.toThrow('Install tmux')
+    await expect(manager.runLocal(7850, vi.fn(), false, STABLE_RELEASE)).rejects.toThrow('Install tmux')
 
     expect(runProcess).toHaveBeenCalledOnce()
     expect(runProcess.mock.calls[0]?.slice(0, 3)).toEqual(['/bin/sh', ['-s', '--'], SERVER_SETUP_PREFLIGHT_SCRIPT])
@@ -314,7 +295,7 @@ port 22
       .mockResolvedValueOnce(null)
       .mockResolvedValueOnce(result)
 
-    await expect(manager.runRemote('user@server', 7850, vi.fn(), true)).resolves.toEqual(result)
+    await expect(manager.runRemote('user@server', 7850, vi.fn(), true, STABLE_RELEASE)).resolves.toEqual(result)
 
     expect(runProcess).toHaveBeenCalledTimes(2)
     expect(runProcess.mock.calls[0]?.[1]).toEqual(remoteShellArgs('user@server', 'sh'))
@@ -332,7 +313,7 @@ port 22
     const manager = new ServerSetupManager() as unknown as ServerSetupManagerHarness
     const runProcess = vi.spyOn(manager, 'runProcess').mockRejectedValueOnce(new Error('The systemctl --user session is unavailable.'))
 
-    await expect(manager.runRemote('user@server', 7850, vi.fn())).rejects.toThrow('systemctl --user')
+    await expect(manager.runRemote('user@server', 7850, vi.fn(), false, STABLE_RELEASE)).rejects.toThrow('systemctl --user')
 
     expect(runProcess).toHaveBeenCalledOnce()
     expect(runProcess.mock.calls[0]?.[1]).toEqual(remoteShellArgs('user@server', 'sh'))
@@ -388,7 +369,8 @@ port 22
   })
 
   it('carries the validated Team Network host choice into the selected installer path', async () => {
-    const actual = new ServerSetupManager()
+    const resolveRelease = vi.fn().mockResolvedValue(STABLE_RELEASE)
+    const actual = new ServerSetupManager(undefined, resolveRelease)
     const manager = actual as unknown as ServerSetupManagerHarness
     const progress = vi.fn()
     const result: ServerSetupResult = {
@@ -401,28 +383,53 @@ port 22
 
     await expect(actual.run({ target: 'local', port: 7850, teamHubHost: true }, progress)).resolves.toEqual(result)
 
-    expect(runLocal).toHaveBeenCalledWith(7850, progress, true, PINNED_STABLE_SERVER_RELEASE)
+    expect(runLocal).toHaveBeenCalledWith(7850, progress, true, STABLE_RELEASE)
+    expect(resolveRelease).toHaveBeenCalledExactlyOnceWith('stable', expect.any(AbortSignal))
+  })
+
+  it('does not connect or install when release verification fails', async () => {
+    const actual = new ServerSetupManager(undefined, async () => { throw new Error('Invalid release signature') })
+    const runRemote = vi.spyOn(actual as unknown as ServerSetupManagerHarness, 'runRemote')
+    await expect(actual.run({ target: 'ssh', sshHost: 'qa-server' }, vi.fn())).rejects.toThrow('Invalid release signature')
+    expect(runRemote).not.toHaveBeenCalled()
+    expect(actual.diagnostics().state).toBe('failed')
+  })
+
+  it('cancels release discovery before starting an installer', async () => {
+    let signal: AbortSignal | undefined
+    const actual = new ServerSetupManager(undefined, async (_track, discoverySignal) => {
+      signal = discoverySignal
+      await new Promise((_, reject) => discoverySignal!.addEventListener('abort', () => reject(new Error('aborted')), { once: true }))
+      return STABLE_RELEASE
+    })
+    const runLocal = vi.spyOn(actual as unknown as ServerSetupManagerHarness, 'runLocal')
+    const pending = actual.run({ target: 'local' }, vi.fn())
+    expect(actual.cancel()).toBe(true)
+    await expect(pending).rejects.toThrow(/cancelled/)
+    expect(signal?.aborted).toBe(true)
+    expect(runLocal).not.toHaveBeenCalled()
+    expect(actual.diagnostics().state).toBe('cancelled')
   })
 
   it('verifies and extracts the pinned release archive before exposing it to the installer', () => {
     const directory = mkdtempSync(join(tmpdir(), 'agentsdock-release-bootstrap-'))
-    const source = join(directory, `agents-server-${PINNED_SERVER_RELEASE_VERSION}`)
+    const source = join(directory, `agents-server-${STABLE_RELEASE.version}`)
     const archive = join(directory, 'release.tar.gz')
     const destination = join(directory, 'verified-release')
     mkdirSync(source)
-    writeFileSync(join(source, 'VERSION'), `${PINNED_SERVER_RELEASE_VERSION}\n`)
+    writeFileSync(join(source, 'VERSION'), `${STABLE_RELEASE.version}\n`)
     writeFileSync(join(source, 'install.sh'), '#!/bin/sh\nexit 0\n')
-    execFileSync('tar', ['-czf', archive, '-C', directory, `agents-server-${PINNED_SERVER_RELEASE_VERSION}`])
+    execFileSync('tar', ['-czf', archive, '-C', directory, `agents-server-${STABLE_RELEASE.version}`])
     const sha256 = createHash('sha256').update(readFileSync(archive)).digest('hex')
     const script = LOCAL_RELEASE_BOOTSTRAP
-      .replace(PINNED_SERVER_RELEASE_URL, `file://${archive}`)
-      .replace(PINNED_SERVER_RELEASE_SHA256, sha256)
+      .replace(STABLE_RELEASE.url, `file://${archive}`)
+      .replace(STABLE_RELEASE.sha256, sha256)
     try {
       execFileSync('/bin/sh', ['-s', '--', destination], {
         input: script,
         env: { ...process.env, HOME: directory, AGENTS_SERVER_CONFIG_DIR: join(directory, 'config') }
       })
-      expect(readFileSync(join(destination, 'VERSION'), 'utf8').trim()).toBe(PINNED_SERVER_RELEASE_VERSION)
+      expect(readFileSync(join(destination, 'VERSION'), 'utf8').trim()).toBe(STABLE_RELEASE.version)
       expect(existsSync(join(destination, 'install.sh'))).toBe(true)
 
       const rejected = join(directory, 'rejected-release')
@@ -571,7 +578,7 @@ port 22
   })
 
   it('cancels the active process tree and records a cancelled state', async () => {
-    const actual = new ServerSetupManager(testTimings())
+    const actual = new ServerSetupManager(testTimings(), async () => STABLE_RELEASE)
     const manager = actual as unknown as ServerSetupManagerHarness
     vi.spyOn(manager, 'runLocal').mockImplementation((_port, progress) =>
       manager.runProcess(

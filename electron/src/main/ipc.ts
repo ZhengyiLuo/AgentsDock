@@ -8,6 +8,7 @@ import type { LazyTeamHubService } from './team-hub-lazy-service'
 import { LOCAL_SESSION_IMPORT_HARD_LIST_LIMIT, parseBulkImportSessionItems } from '../shared/local-session-import'
 import type { LanguageSettings } from './language'
 import { reportStorageError } from './storage-health'
+import { issueReportEnvironment } from './issue-report'
 
 export interface RegisterIpcOptions {
   language?: Pick<LanguageSettings, 'get' | 'set'>
@@ -41,6 +42,17 @@ export function registerIpc(
   }
 
   handle('app:bootstrap', () => service.bootstrap())
+  handle('workspace-git:status', (scope, sessionId) => service.workspaceGitStatus(scope, sessionId))
+  handle('workspace-git:diff', (scope, sessionId, path, view) => service.workspaceGitDiff(scope, sessionId, path, view))
+  handle('workspace-git:conflict', (scope, sessionId, path) => service.workspaceGitConflict(scope, sessionId, path))
+  handle('workspace-git:action', (scope, sessionId, input) => service.workspaceGitAction(scope, sessionId, input))
+  handle('side-chat:read', (scope, sessionId) => service.readSyncedSideChat(scope, sessionId))
+  handle('side-chat:submit', (scope, sessionId, input) => service.submitSyncedSideChat(scope, sessionId, input))
+  handle('side-chat:stop', (scope, sessionId, requestId) => service.stopSyncedSideChat(scope, sessionId, requestId))
+  handle('side-chat:clear', (scope, sessionId, sideChatId) => service.clearSyncedSideChat(scope, sessionId, sideChatId))
+  handle('side-questions:ask', (scope, sessionId, input) => service.askSideQuestion(scope, sessionId, input))
+  handle('side-questions:cancel', (scope, sessionId, requestId) => service.cancelSideQuestion(scope, sessionId, requestId))
+  handle('side-questions:close', (scope, sessionId, sideChatId) => service.closeSideChat(scope, sessionId, sideChatId))
   handle('chat-shares:preview', (scope, sessionId) => service.previewChatShare(scope, sessionId))
   handle('chat-shares:list', (scope, sessionId, mode) => service.listChatShares(scope, sessionId, mode))
   handle('chat-shares:create', (scope, sessionId, input) => service.createChatShare(scope, sessionId, input))
@@ -81,6 +93,7 @@ export function registerIpc(
     handle('team-hub:message:post', (scope, input) => teamHub.postMessage(scope, input))
     handle('team-hub:network:capabilities', scope => teamHub.networkCapabilities(scope))
     handle('team-hub:network:get', (scope, query) => teamHub.network(scope, query))
+    handle('team-hub:network:server:rename', (scope, input) => teamHub.renameNetworkServer(scope, input))
     handle('team-hub:network:agent:register', (scope, input) => teamHub.registerNetworkAgent(scope, input))
     handle('team-hub:network:bulletin:list', (scope, query) => teamHub.bulletin(scope, query))
     handle('team-hub:network:bulletin:post', (scope, input) => teamHub.postBulletin(scope, input))
@@ -182,6 +195,7 @@ export function registerIpc(
     handle('team-hub:secure-peer:activate', (scope, input) => teamHub.activateSecurePeerPairing(scope, input))
     handle('team-hub:secure-peer:connection:deactivate', (scope, input) => teamHub.deactivateSecurePeerConnection(scope, input))
     handle('team-hub:secure-peer:connection:forget', (scope, input) => teamHub.forgetSecurePeerConnection(scope, input))
+    handle('team-hub:secure-peer:connection:endpoint', (scope, input) => teamHub.updateSecurePeerConnectionEndpoint(scope, input))
     handle('team-hub:secure-peer:list', (scope, teamId) => teamHub.securePeers(scope, teamId))
     handle('team-hub:secure-peer:approve', (scope, input) => teamHub.approveSecurePeerPairing(scope, input))
     handle('team-hub:secure-peer:reject', (scope, input) => teamHub.rejectSecurePeerPairing(scope, input))
@@ -192,6 +206,8 @@ export function registerIpc(
   handle('updates:status', () => updater.status())
   handle('updates:check', () => updater.check(true))
   handle('updates:install', () => updater.install())
+  handle('updates:cancel', () => updater.cancel())
+  handle('updates:retry-servers', profileId => updater.retryServers(profileId))
   handle('updates:set-track', track => updater.setTrack(track))
   handle('settings:get', () => service.publicSettings())
   handle('settings:apply', settings => service.applySettings(settings))
@@ -232,9 +248,10 @@ export function registerIpc(
   handle('sessions:list', () => service.listSessions())
   handle('sessions:create', input => service.createSession(input))
   handle('sessions:resume', input => service.resumeSession(input))
-  handle('sessions:update', (sessionId, patch) => service.updateSession(sessionId, patch))
+  handle('sessions:update', (sessionId, patch, expectedScope) => service.updateSession(sessionId, patch, expectedScope))
   handle('sessions:provider:reload', sessionId => service.reloadProvider(sessionId))
   handle('sessions:remove', sessionId => service.removeSession(sessionId))
+  handle('sessions:discard-empty', (scope, sessionId, updatedAt) => service.discardEmptySession(scope, sessionId, updatedAt))
   handle('sessions:fork', sessionId => service.forkSession(sessionId))
   handle('sessions:reorder', (sessionId, relativeTo, placement, targetFolder) => service.reorderSession(sessionId, relativeTo, placement, targetFolder))
   handle('sessions:search-history', (query, limit) => service.searchSessions(query, limit))
@@ -267,6 +284,17 @@ export function registerIpc(
   handle('turns:stop', sessionId => service.stopTurn(sessionId))
 
   handle('codex:server-goals:get', () => service.codexServerGoals())
+  handle('provider-connections:request', (scope, backend, action, input) => service.providerConnectionRequest(scope, backend, action, input))
+  handle('provider-accounts:read', (scope, backend) => service.providerAccount(scope, backend))
+  handle('custom-models:read', (scope, backend, sessionId) => service.customModels(scope, backend, undefined, sessionId))
+  handle('custom-models:save', (scope, backend, input) => service.customModels(scope, backend, input))
+  handle('codex:auth:get', scope => service.codexAuth(scope))
+  handle('codex:provider:get', scope => service.codexProvider(scope))
+  handle('codex:provider:models', (scope, sessionId) => service.codexProviderModels(scope, sessionId))
+  handle('codex:provider:test', (scope, input) => service.testCodexProvider(scope, input))
+  handle('codex:provider:test-model', (scope, input) => service.testCodexProviderModel(scope, input))
+  handle('codex:provider:set', (scope, input) => service.setCodexProvider(scope, input))
+  handle('codex:provider:reset', scope => service.resetCodexProvider(scope))
   handle('codex:server-goals:set', enabled => service.setCodexServerGoals(Boolean(enabled)))
   handle('codex:server-subagents:get', scope => service.codexServerSubagents(scope))
   handle('codex:server-subagents:set', (scope, limit) => service.setCodexServerSubagents(scope, limit))
@@ -292,6 +320,8 @@ export function registerIpc(
   ))
 
   handle('claude:runtime', sessionId => service.claudeRuntime(sessionId))
+  handle('claude:goal:set', (sessionId, condition) => service.setClaudeGoal(sessionId, condition))
+  handle('claude:goal:clear', sessionId => service.clearClaudeGoal(sessionId))
   handle('claude:context-usage:refresh', sessionId => service.refreshClaudeContextUsage(sessionId))
   handle('claude:mcp', sessionId => service.claudeMcp(sessionId))
   handle('claude:mcp:control', (sessionId, input) => service.controlClaudeMcp(sessionId, input))
@@ -336,7 +366,7 @@ export function registerIpc(
   handle('jobs:run', jobId => service.runJob(jobId))
 
   handleWithEvent('files:choose', event => service.chooseFiles(event.sender.id))
-  handleWithEvent('files:stage-native', (event, path) => service.stageNativeFile(event.sender.id, path))
+  handleWithEvent('files:stage-native-batch', (event, paths) => service.stageNativeFiles(event.sender.id, paths))
   handleWithEvent('files:stage-clipboard', (event, data, name, type) => service.stageClipboardImage(event.sender.id, data, name, type))
   handleWithEvent('files:upload', (event, sessionId, paths) => service.uploadFiles(event.sender.id, sessionId, paths))
   handle('files:list', (sessionId, offset, limit, contentPrefix) => service.listFiles(sessionId, offset, limit, contentPrefix))
@@ -394,6 +424,7 @@ export function registerIpc(
   handle('digest:preview', input => service.previewDigest(input))
   handle('digest:send', input => service.sendDigest(input))
   handle('runtime:catalog', refresh => service.runtime(Boolean(refresh)))
+  handle('runtime:usage', (scope, backend, sessionId, refresh) => service.providerUsage(scope, backend, sessionId, Boolean(refresh)))
   handle('processes:list', sessionId => service.processes(sessionId))
   handle('processes:tail', (sessionId, path, lines) => service.processLog(sessionId, path, lines))
   handle('tmux:list', (sessionId, includeAll) => service.tmux(sessionId, includeAll))
@@ -433,6 +464,7 @@ export function registerIpc(
   handle('preferences:get-scoped', (scope, key, fallback) => service.scopedPreference(scope, key, fallback))
   handle('preferences:set-scoped', (scope, key, value) => service.putScopedPreference(scope, key, value))
 
+  handle('native:issue-report-environment', issueReportEnvironment)
   handle('native:open-external', async url => {
     const parsed = new URL(url)
     if (!['http:', 'https:', 'mailto:'].includes(parsed.protocol)) throw new Error('Unsupported external URL')

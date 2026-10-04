@@ -92,6 +92,7 @@ Light preset in light mode, whose content canvas is already white/cool gray.
 | --- | --- | --- |
 | `--font-ui` | `system-ui`, Apple/Segoe UI fallbacks | Native system font; no downloaded font |
 | `--font-mono` | system monospace stack | Paths, commands, and technical metadata |
+| `--text-size-micro` | 9px | Non-interactive app-version metadata beside the brand only |
 | `--text-size-caption` | 11px | Tiny counts and status badges only |
 | `--text-size-meta` | 12px | Supporting text, hints, timestamps, compact context controls |
 | `--text-size-label` | 13px | Dense tree labels, tabs, compact toolbar controls |

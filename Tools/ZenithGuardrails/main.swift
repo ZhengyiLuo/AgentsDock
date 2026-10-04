@@ -1,6 +1,9 @@
 import Foundation
 import ZenithCore
 
+// Server source-text assertions were retired with the frozen snapshot.
+// Maintained server behavior is verified by the server Python test suite.
+
 enum GuardrailFailure: Error, CustomStringConvertible {
     case failed(String)
 
@@ -117,10 +120,8 @@ func checkEndpointCacheKeysAreServerScoped() throws {
     try assert(identity == "server_abc123", "server identity namespaces must be stable and URL independent")
 
     let cwd = URL(fileURLWithPath: FileManager.default.currentDirectoryPath, isDirectory: true)
-    let server = try String(contentsOf: cwd.appendingPathComponent("server/agent_server.py"), encoding: .utf8)
     let macStore = try String(contentsOf: cwd.appendingPathComponent("Sources/ZenithDock/State/AppStore.swift"), encoding: .utf8)
     let mobileStore = try String(contentsOf: cwd.appendingPathComponent("Sources/ZenithDockIOS/State/MobileAppStore.swift"), encoding: .utf8)
-    try assert(server.contains("\"server_identity\": server_identity()"), "Health endpoint must expose a stable opaque server identity")
     try assert(macStore.contains("adoptServerIdentity(res.server_identity)"), "Mac app must adopt server identity from health")
     try assert(macStore.contains("migrateLocalServerState(from: oldNamespace, to: newNamespace)"), "Mac app must migrate URL-scoped local state to server-identity scoped state")
     try assert(mobileStore.contains("adoptServerIdentity(res.server_identity)"), "iOS app must adopt server identity from health")
@@ -152,39 +153,8 @@ func checkRuntimeDefaultLabels() throws {
     try assert(fallbackCatalog.models(for: "claude").contains { $0.value == "claude-opus-4-8[1m]" && $0.label == "Opus 4.8 1M" }, "Claude fallback catalog must include Opus 4.8 1M")
 
     let cwd = URL(fileURLWithPath: FileManager.default.currentDirectoryPath, isDirectory: true)
-    let server = try String(contentsOf: cwd.appendingPathComponent("server/agent_server.py"), encoding: .utf8)
     let macStore = try String(contentsOf: cwd.appendingPathComponent("Sources/ZenithDock/State/AppStore.swift"), encoding: .utf8)
     let mobileStore = try String(contentsOf: cwd.appendingPathComponent("Sources/ZenithDockIOS/State/MobileAppStore.swift"), encoding: .utf8)
-    try assert(server.contains("runtime_option(\"fable\", \"Fable\")"), "Server runtime catalog must advertise Claude Fable")
-    try assert(server.contains("runtime_option(\"claude-fable-5\", \"Fable 5\")"), "Server runtime catalog must advertise Claude Fable 5")
-    try assert(server.contains("\"claude-fable-5\": \"Fable 5\""), "Server default labels must render Claude Fable 5 cleanly")
-    try assert(server.contains("runtime_option(\"claude-opus-4-8\", \"Opus 4.8\")"), "Server runtime catalog must advertise Claude Opus 4.8")
-    try assert(server.contains("runtime_option(\"opus[1m]\", \"Opus 1M\")"), "Server runtime catalog must advertise Claude Opus 1M")
-    try assert(server.contains("runtime_option(\"claude-opus-4-8[1m]\", \"Opus 4.8 1M\")"), "Server runtime catalog must advertise Claude Opus 4.8 1M")
-    try assert(server.contains("\"claude-opus-4-8[1m]\": \"Opus 4.8 1M\""), "Server default labels must render Claude Opus 4.8 1M cleanly")
-    try assert(server.contains("codex_user_config_defaults()") && server.contains("discovered_codex_default_model(visible_models, configured_model)"), "Server Codex catalog must honor the active CLI configuration")
-    try assert(server.contains("CODEX_DEFAULT_EFFORT = \"xhigh\""), "Server Codex catalog must not regress GPT-5.5 default effort below XHigh")
-    try assert(server.contains("\"max\", \"ultra\""), "Server must preserve GPT-5.6 Max and Ultra effort options")
-    try assert(server.contains("\"gpt-5.6-sol\": \"priority\""), "Server must launch GPT-5.6 Sol on the required priority service tier")
-    try assert(server.contains("except ModuleNotFoundError:  # Python 3.10 agent hosts") && server.contains("load_codex_user_config(path)"), "Server config discovery must remain compatible with Python 3.10 agent hosts")
-    try assert(server.contains("is_codex_compaction_failure(terminal_error)") && server.contains("allow_compaction_rollover=False"), "Codex remote-compaction failures must retry at most once on a fresh provider thread")
-    try assert(
-        server.contains("produced_activity = bool(")
-            && server.contains("or seen_reasoning")
-            && server.contains("or started_tool_ids")
-            && server.contains("or finished_tool_ids")
-            && server.contains("or seen_artifacts")
-            && server.contains("produced_activity=produced_activity"),
-        "Codex provider rollover must never replay a turn after visible output or side effects"
-    )
-    try assert(server.contains("exclude_run_id=run_id") && server.contains("old_provider_session_id"), "Codex provider rollover memory must exclude the failed turn and retain provider audit metadata")
-    try assert(server.contains("not sess.get(\"memory_seed_used\") or not session_provider_id(sess)"), "A failed fresh-thread launch must be able to reapply its saved memory seed")
-    try assert(server.contains("normalize_runtime_effort(backend, req.effort, strict=True)"), "New sessions must validate effort against the selected backend")
-    try assert(server.contains("normalized_effort = normalize_runtime_effort(") && server.contains("sess.get(\"effort\") or configured_effort or CODEX_DEFAULT_EFFORT"), "Codex launch must normalize persisted effort and explicitly apply its advertised default")
-    try assert(!server.contains("f\"model_reasoning_effort={sess['effort']}\""), "Codex launch must not pass unvalidated session effort directly to the CLI")
-    try assert(server.contains("if \"effort\" not in patch:\n                        sess[\"effort\"] = None"), "Backend changes must clear effort unless the request explicitly supplies a compatible replacement")
-    try assert(server.contains("cmd.extend([\"--model\", str(sess[\"model\"])])"), "Claude launcher must pass selected models with --model")
-    try assert(server.contains("model_fields_set"), "Server turns must distinguish omitted runtime fields from explicit default resets")
     try assert(macStore.contains("pendingRuntimeBySessionID") && mobileStore.contains("pendingRuntimeBySessionID"), "Runtime saves must protect staged values from stale session responses")
     try assert(macStore.contains("sessionWithPendingRuntime(_ session: ZSession)") && mobileStore.contains("sessionWithPendingRuntime(_ session: ZSession)"), "Server session merges must preserve pending runtime selections")
     try assert(macStore.contains("pendingRuntimePatchTimeout") && mobileStore.contains("pendingRuntimePatchTimeout"), "Pending runtime overrides must expire so stale local state cannot mask server truth")
@@ -214,7 +184,6 @@ func checkBackendLocksAfterProviderStart() throws {
     let emptySessionData = Data(#"{"id":"new","title":"Chat","backend":"codex"}"#.utf8)
     let emptySession = try JSONDecoder().decode(ZSession.self, from: emptySessionData)
     let cwd = URL(fileURLWithPath: FileManager.default.currentDirectoryPath, isDirectory: true)
-    let server = try String(contentsOf: cwd.appendingPathComponent("server/agent_server.py"), encoding: .utf8)
     let composer = try String(contentsOf: cwd.appendingPathComponent("Sources/ZenithDock/Views/ComposerView.swift"), encoding: .utf8)
     let inspector = try String(contentsOf: cwd.appendingPathComponent("Sources/ZenithDock/Views/InspectorView.swift"), encoding: .utf8)
     let mobileOptions = try String(contentsOf: cwd.appendingPathComponent("Sources/ZenithDockIOS/Views/MobileChatOptionsView.swift"), encoding: .utf8)
@@ -222,53 +191,11 @@ func checkBackendLocksAfterProviderStart() throws {
 
     try assert(activeSession.isBackendLocked, "Provider-backed sessions must lock backend switching")
     try assert(!emptySession.isBackendLocked, "New sessions without provider IDs must allow backend selection")
-    try assert(server.contains("session_backend_locked(sess)"), "Server must enforce backend lock")
-    try assert(server.contains("status_code=409"), "Backend lock violation should return a conflict")
     try assert(composer.contains("if session.isBackendLocked"), "Mac composer backend picker must switch to a read-only chip after chat starts")
     try assert(!composer.contains(".disabled(session.isBackendLocked)"), "Mac composer backend chip must not dim the icon when locked")
     try assert(inspector.contains(".disabled(session.isBackendLocked)"), "Mac inspector backend picker must disable after chat starts")
     try assert(mobileOptions.contains(".disabled(session.isBackendLocked)"), "iOS options backend picker must disable after chat starts")
     try assert(mobileTimeline.contains(".disabled(session.isBackendLocked)"), "iOS timeline backend picker must disable after chat starts")
-}
-
-func checkClaudeResumeFailureDoesNotPoisonSession() throws {
-    let cwd = URL(fileURLWithPath: FileManager.default.currentDirectoryPath, isDirectory: true)
-    let server = try String(contentsOf: cwd.appendingPathComponent("server/agent_server.py"), encoding: .utf8)
-
-    try assert(server.contains("def claude_result_error(event: dict[str, Any]) -> str | None:"), "Server must classify Claude result failures before saving resume IDs")
-    try assert(server.contains("event.get(\"subtype\") == \"error_during_execution\""), "Claude error_during_execution results must be treated as failed resumes")
-    try assert(server.contains("result_error = claude_result_error(event)"), "Claude runner must inspect result events for provider errors")
-    try assert(server.contains("provider_id = None\n                    await append_event(session_id, \"error\""), "Claude failed-result session IDs must be discarded and surfaced as errors")
-    try assert(server.contains("if provider_id and not result_error:"), "Claude provider session must only save after a successful result")
-    try assert(server.contains("Avoid Markdown heading markers like `#`, `##`, or `###`"), "Claude prompt should avoid noisy Markdown heading markers")
-    try assert(server.contains("The server captures the complete per-turn Git diff directly") && server.contains("await publish_turn_code_diff("), "Server should capture complete code diffs without asking Claude to print bounded traces")
-    try assert(server.contains("This is not a persistent live chat process"), "Claude prompt must explain that turns are not persistent live sessions")
-    try assert(server.contains("Claude Code's native Agent tool is available"), "Claude prompt must enable bounded native subagent work")
-    try assert(server.contains("join it with `TaskOutput` using a blocking wait"), "Claude prompt must require joining background subagents before turn completion")
-    try assert(server.contains("stay alive in this turn until it completes"), "Claude prompt must keep requested render and sweep deliverables inside the active turn")
-    try assert(server.contains("Do not say \"monitor armed\""), "Claude prompt must forbid fake future monitor delivery")
-    try assert(server.contains("cannot\n  resume this Claude turn"), "Claude prompt must explain that tmux alone cannot deliver a later turn result")
-    try assert(server.contains("create a real durable mechanism"), "Claude prompt must require durable mechanisms for background monitoring")
-    try assert(server.contains("Check skills and project playbooks before claiming an environment or remote path is unavailable."), "Provider prompts must tell agents to check installed skills/playbooks")
-    try assert(server.contains("Check installed skills and project playbooks before claiming a specialized environment or remote path is unavailable."), "Provider prompts must avoid unsupported remote-path availability claims")
-    try assert(server.contains("def resolve_claude_resume_provider(sess: dict[str, Any], cwd: str)"), "Server must verify Claude resume IDs against the current cwd before launching")
-    try assert(server.contains("claude_resume_file_for_cwd(provider_id, cwd)"), "Claude resume preflight must check the cwd-scoped transcript file")
-    try assert(server.contains("resume_provider_id, resume_skip_message = resolve_claude_resume_provider(sess, cwd)"), "Claude launches must use the cwd-scoped resume preflight")
-    try assert(server.contains("cwd=cwd"), "Saved Claude provider sessions must remember their launch cwd")
-    try assert(!server.contains("provider_id = event[\"session_id\"]\n                await STORE.save_provider_session(session_id, provider_id, BACKEND_CLAUDE)"), "Claude streamed session IDs must not be saved before the result succeeds")
-    try assert(server.contains("def codex_result_error(event: dict[str, Any]) -> str | None:"), "Server must classify Codex JSON error and turn.failed events")
-    try assert(server.contains("event_type == \"turn.failed\""), "Codex turn.failed events must be surfaced as visible errors")
-    try assert(server.contains("def is_codex_reconnect_notice(message: str) -> bool:"), "Server must identify Codex transient reconnect packets")
-    try assert(server.contains("return None if is_codex_reconnect_notice(message) else message"), "Transient Codex reconnect packets must not become fatal timeline errors")
-    try assert(server.contains("if codex_error:\n            await append_event") && server.contains("elif stderr:\n            await append_event"), "Structured Codex failures must take precedence over duplicate stderr error cards")
-    try assert(server.contains("CODEX_DEFAULT_MODEL = agentsdock_setting(\"CODEX_MODEL\", \"gpt-5.5\")"), "Server must define the runtime default it advertises to clients")
-    try assert(server.contains("sess.get(\"effort\") or configured_effort or CODEX_DEFAULT_EFFORT"), "Fresh Codex turns must pass the advertised default effort explicitly")
-    try assert(server.contains("if provider_id:\n        cmd.append(\"resume\")\n    if model:"), "Resumed Codex runtime flags must be attached to the resume subcommand")
-    try assert(server.contains("effective_service_tier = configured_service_tier or codex_default_service_tier(model)"), "Normal Codex turns must resolve the model service tier")
-    try assert(server.contains("cmd.extend([\"-c\", f\"service_tier={effective_service_tier}\"])") , "Codex launches must pass the resolved service tier")
-    try assert(!server.contains("CODEX_STREAM_FALLBACK_MODEL"), "Sol failures must not silently replace the selected model with Terra")
-    try assert(server.contains("cmd.extend([\"--disable\", \"image_generation\"])"), "Server-launched Codex turns must disable the currently broken image_generation tool")
-    try assert(server.contains("Codex exited {proc.returncode} without error output."), "Codex nonzero exits without stderr must still show a visible error")
 }
 
 func checkServerURLNormalization() throws {
@@ -369,7 +296,6 @@ func checkArchiveSessionBehavior() throws {
     let mobileSidebar = try String(contentsOf: cwd.appendingPathComponent("Sources/ZenithDockIOS/Views/MobileSidebarView.swift"), encoding: .utf8)
     let macDigest = try String(contentsOf: cwd.appendingPathComponent("Sources/ZenithDock/Views/SessionManagementSheets.swift"), encoding: .utf8)
     let mobileDigest = try String(contentsOf: cwd.appendingPathComponent("Sources/ZenithDockIOS/Views/MobileChatOptionsView.swift"), encoding: .utf8)
-    let server = try String(contentsOf: cwd.appendingPathComponent("server/agent_server.py"), encoding: .utf8)
 
     try assert(macStore.contains("sessions.filter { $0.archived != true }"), "Mac active session lists must filter archived chats")
     try assert(mobileStore.contains("sessions.filter { $0.archived != true }"), "iOS active session lists must filter archived chats")
@@ -426,16 +352,6 @@ func checkArchiveSessionBehavior() throws {
     try assert(mobileForkBody.contains("insertForkedSession(res.session, after: sid)"), "iOS forks must still fall back to local beside-parent insertion for older servers")
     try assert(!macForkBody.contains("sessions.insert(res.session, at: 0)"), "Mac forks must not jump to the top of the sidebar")
     try assert(!mobileForkBody.contains("sessions.insert(res.session, at: 0)"), "iOS forks must not jump to the top of the sidebar")
-    try assert(server.contains("archived: bool | None = None"), "Server session update API must accept archived state")
-    try assert(server.contains("\"archived\", \"archived_at\", \"sort_order\""), "Server public sessions must expose archived state and stable order")
-    try assert(server.contains("def sorted_sessions("), "Server session list must use explicit sort_order instead of updated_at recency")
-    try assert(server.contains("@app.post(\"/api/sessions/{session_id}/order\")"), "Server must expose manual session reorder endpoint")
-    try assert(server.contains("target_id: str | None = None") && server.contains("placement: str | None = None"), "Server reorder endpoint must accept target placement for drag/drop")
-    try assert(server.contains("reordered = peers[:insert_index] + [sess] + peers[insert_index:]"), "Server drag/drop reorder must compute one final order")
-    try assert(server.contains("req.direction, req.target_id, req.placement"), "Server reorder route must pass target placement to the store")
-    try assert(server.contains("pinned=bool(parent.get(\"pinned\"))") && server.contains("archived=bool(parent.get(\"archived\"))"), "Server forks must preserve parent sidebar section metadata")
-    try assert(server.contains("ordered_sessions = await STORE.reorder(child[\"id\"], target_id=session_id, placement=\"after\")"), "Server forks must place the child directly after the parent")
-    try assert(server.contains("\"sessions\": [public_session(sess) for sess in ordered_sessions]"), "Server fork response must return authoritative sidebar order")
 }
 
 func checkFolderSectionControls() throws {
@@ -497,7 +413,6 @@ func checkTimelineRevealWaitsForLatestSnapshot() throws {
     let inspector = try String(contentsOf: cwd.appendingPathComponent("Sources/ZenithDock/Views/InspectorView.swift"), encoding: .utf8)
     let eventViews = try String(contentsOf: cwd.appendingPathComponent("Sources/ZenithDock/Views/EventViews.swift"), encoding: .utf8)
     let mobileTimeline = try String(contentsOf: cwd.appendingPathComponent("Sources/ZenithDockIOS/Views/MobileTimelineView.swift"), encoding: .utf8)
-    let server = try String(contentsOf: cwd.appendingPathComponent("server/agent_server.py"), encoding: .utf8)
 
     try assert(macStore.contains("@Published var isSelectingSession = false"), "Mac store must publish session selection/loading state")
     try assert(macStore.contains("@Published var isRefreshingCachedDelta = false"), "Mac store must publish warm-cache delta refresh state")
@@ -710,15 +625,10 @@ func checkTimelineRevealWaitsForLatestSnapshot() throws {
     try assert(!mobileStore[mobileSelectRange.lowerBound..<mobileLoadOlderRange.lowerBound].contains("scrollRevision += 1"), "iOS chat open must not fire the send-style bottom scroll revision after loading history")
     try assert(macStore.contains("URLQueryItem(name: \"after\", value: \"\\(cachedLastSeq)\")") && macStore.contains("URLQueryItem(name: \"tail\", value: \"false\")"), "Mac warm-cache chat open must use a bounded ordered delta instead of downloading the full tail")
     try assert(!mobileStore.contains("URLQueryItem(name: \"tail\", value: \"false\")"), "iOS chat open must not request a non-tail catch-up page")
-    try assert(server.contains("API_CONTRACT_VERSION = 6"), "Server visible-history and complete-diff transport must remain on the v6 API contract")
-    try assert(server.contains("visible: bool = False") && server.contains("is_visible_timeline_event"), "Server session endpoint must support visible timeline event paging")
-    try assert(server.contains("read_visible_events_page(") && server.contains("visible_count - len(events)"), "Server visible-history paging must report visible omitted counts, not raw seq gaps")
-    try assert(server.contains("read_visible_events_after_page(") && server.contains("mmap.mmap("), "Server cached-tail deltas must read backward from the append-only transcript instead of rescanning it")
 }
 
 func checkConnectionFailuresDoNotModal() throws {
     let cwd = URL(fileURLWithPath: FileManager.default.currentDirectoryPath, isDirectory: true)
-    let server = try String(contentsOf: cwd.appendingPathComponent("server/agent_server.py"), encoding: .utf8)
     let macStore = try String(contentsOf: cwd.appendingPathComponent("Sources/ZenithDock/State/AppStore.swift"), encoding: .utf8)
     let mobileStore = try String(contentsOf: cwd.appendingPathComponent("Sources/ZenithDockIOS/State/MobileAppStore.swift"), encoding: .utf8)
 
@@ -726,7 +636,6 @@ func checkConnectionFailuresDoNotModal() throws {
     try assert(macStore.contains("if isConnectionError(error)"), "Mac network failures must be separated from blocking alerts")
     try assert(macStore.contains("connectionProblemText = message"), "Mac connection failure should populate inline connection text")
     try assert(macStore.contains("} else {\n            return\n        }"), "Mac refresh should not keep loading sessions/jobs after health is offline")
-    try assert(server.contains("\"api_contract_version\": API_CONTRACT_VERSION"), "Server health must expose API contract version")
     try assert(macStore.contains("minimumAgentAPIContractVersion"), "Mac app must define a minimum server API contract")
     try assert(macStore.contains("markServerUpgradeRequired(version:"), "Mac app must show server-upgrade-required state")
     try assert(mobileStore.contains("minimumAgentAPIContractVersion"), "iOS app must define a minimum server API contract")
@@ -735,13 +644,11 @@ func checkConnectionFailuresDoNotModal() throws {
 
 func checkLaunchDeferredIsInline() throws {
     let cwd = URL(fileURLWithPath: FileManager.default.currentDirectoryPath, isDirectory: true)
-    let server = try String(contentsOf: cwd.appendingPathComponent("server/agent_server.py"), encoding: .utf8)
     let macStore = try String(contentsOf: cwd.appendingPathComponent("Sources/ZenithDock/State/AppStore.swift"), encoding: .utf8)
     let mobileStore = try String(contentsOf: cwd.appendingPathComponent("Sources/ZenithDockIOS/State/MobileAppStore.swift"), encoding: .utf8)
     let macTimeline = try String(contentsOf: cwd.appendingPathComponent("Sources/ZenithDock/Views/TimelineView.swift"), encoding: .utf8)
     let mobileTimeline = try String(contentsOf: cwd.appendingPathComponent("Sources/ZenithDockIOS/Views/MobileTimelineView.swift"), encoding: .utf8)
 
-    try assert(server.contains("MAX_ACTIVE_AGENT_RUNS = int(agentsdock_setting(\"MAX_ACTIVE_AGENT_RUNS\", \"10\"))"), "Server default manual-agent concurrency cap should be 10")
     try assert(macStore.contains("@Published var launchDeferredText: String?"), "Mac store must keep launch-deferred state separate from modal errors")
     try assert(macStore.contains("isAgentLaunchDeferred(error, message: message)"), "Mac store must classify launch-deferred API responses")
     try assert(macStore.contains("launchDeferredText = message"), "Mac launch-deferred responses must become inline status")
@@ -763,10 +670,7 @@ func checkVideoMetadataIsNotHiddenByMixedFilePaging() throws {
     let inspector = try String(contentsOf: cwd.appendingPathComponent("Sources/ZenithDock/Views/InspectorView.swift"), encoding: .utf8)
     let eventViews = try String(contentsOf: cwd.appendingPathComponent("Sources/ZenithDock/Views/EventViews.swift"), encoding: .utf8)
     let mobileEvents = try String(contentsOf: cwd.appendingPathComponent("Sources/ZenithDockIOS/Views/MobileEventViews.swift"), encoding: .utf8)
-    let server = try String(contentsOf: cwd.appendingPathComponent("server/agent_server.py"), encoding: .utf8)
 
-    try assert(server.contains("content_prefix: str | None = Query(default=None)"), "Server files API must support content-type prefix filtering")
-    try assert(server.contains("str(rec.get(\"content_type\") or \"\").lower().startswith(prefix)"), "Server files API must filter records before paging")
     try assert(macStore.contains("@Published var sessionVideoFiles: [ZFile] = []"), "Mac store must keep video metadata separate from mixed file pages")
     try assert(macStore.contains("@Published var sessionImageFiles: [ZFile] = []"), "Mac store must keep image metadata separate from mixed file pages")
     try assert(macStore.contains("URLQueryItem(name: \"content_prefix\", value: \"video/\")"), "Mac store must fetch videos independently of mixed file paging")
@@ -851,7 +755,6 @@ func checkJobIntervalPresets() throws {
     let mobileOptions = try String(contentsOf: cwd.appendingPathComponent("Sources/ZenithDockIOS/Views/MobileChatOptionsView.swift"), encoding: .utf8)
     let macStore = try String(contentsOf: cwd.appendingPathComponent("Sources/ZenithDock/State/AppStore.swift"), encoding: .utf8)
     let mobileStore = try String(contentsOf: cwd.appendingPathComponent("Sources/ZenithDockIOS/State/MobileAppStore.swift"), encoding: .utf8)
-    let server = try String(contentsOf: cwd.appendingPathComponent("server/agent_server.py"), encoding: .utf8)
 
     try assert(inspector.contains("private struct JobIntervalControl"), "Mac job scheduling must use the reusable interval preset control")
     try assert(inspector.contains("private let jobIntervalPresets"), "Mac job scheduling must define interval presets")
@@ -878,11 +781,6 @@ func checkJobIntervalPresets() throws {
     try assert(mobileStore.contains("first_run_at: String?"), "iOS job create payload must stay compatible with first_run_at")
     try assert(mobileStore.contains("max_runs: Int?"), "iOS job payloads must support fixed run counts")
     try assert(mobileOptions.contains("maxRunsText"), "iOS job sheets must expose fixed run-count controls")
-    try assert(server.contains("first_run_at: str | None = None"), "Server job create model must accept first_run_at")
-    try assert(server.contains("next_run_at: str | None = None"), "Server job update model must accept next_run_at")
-    try assert(server.contains("max_runs: int | None = None"), "Server job models must accept max_runs")
-    try assert(server.contains("finite_has_more"), "Server scheduler must keep finite jobs running until max_runs is reached")
-    try assert(server.contains("parse_job_timestamp"), "Server must parse explicit job timestamps")
 }
 
 func allPickersHideLabels(named name: String, binding: String, in source: String) -> Bool {
@@ -899,7 +797,6 @@ func checkTimelineCombinesRunTraces() throws {
     let cwd = URL(fileURLWithPath: FileManager.default.currentDirectoryPath, isDirectory: true)
     let macTimeline = try String(contentsOf: cwd.appendingPathComponent("Sources/ZenithDock/Views/TimelineView.swift"), encoding: .utf8)
     let mobileTimeline = try String(contentsOf: cwd.appendingPathComponent("Sources/ZenithDockIOS/Views/MobileTimelineView.swift"), encoding: .utf8)
-    let server = try String(contentsOf: cwd.appendingPathComponent("server/agent_server.py"), encoding: .utf8)
 
     try assert(macTimeline.contains("activeAssistantEvents: [ZEvent]"), "Mac timeline must collect assistant chunks per run")
     try assert(macTimeline.contains("activeArtifactEvents: [ZEvent]"), "Mac timeline must collect run artifacts so videos render after assistant text")
@@ -914,20 +811,11 @@ func checkTimelineCombinesRunTraces() throws {
     try assert(mobileTimeline.contains("if event.type == \"artifact_created\""), "iOS timeline must special-case artifacts before the generic row path")
     try assert(mobileTimeline.contains("if activeRunID != nil {\n                    activeArtifactEvents.append(event)"), "iOS timeline must group old nil-run manifest artifacts with the active run")
     try assert(mobileTimeline.contains("trace-run-\\(activeRunID"), "iOS timeline trace rows must be run-scoped")
-    try assert(server.contains("async def collect_manifest("), "Server manifest collection must know the active run id")
-    try assert(server.contains("async def watch_manifest_artifacts"), "Server must watch manifests during a running turn so artifacts can appear before turn end")
-    try assert(server.contains("async def collect_recent_leftover_manifests"), "Server must recover recent stale-run manifests written by resumed agents")
-    try assert(server.contains("max_age_seconds: int = 6 * 60 * 60"), "Stale manifest recovery must be bounded to recent manifests")
-    try assert(server.contains("live_manifest_entry_ready"), "Live manifest watcher must wait for stable files before publishing artifacts")
-    try assert(server.contains("manifest_watch_task = asyncio.create_task(watch_manifest_artifacts"), "Claude and Codex runs must start live manifest watcher tasks")
-    try assert(server.components(separatedBy: "collect_recent_leftover_manifests").count >= 4, "Both Claude and Codex runs must sweep recent leftover manifests after the primary manifest")
-    try assert(server.contains("\"artifact_created\", {\"run_id\": run_id, \"artifact\": rec}"), "Server artifact_created events must include run_id so videos render after assistant text")
 }
 
 func checkFlexibleEventOutputDecoding() throws {
     let cwd = URL(fileURLWithPath: FileManager.default.currentDirectoryPath, isDirectory: true)
     let core = try String(contentsOf: cwd.appendingPathComponent("Sources/ZenithCore/ZenithCore.swift"), encoding: .utf8)
-    let server = try String(contentsOf: cwd.appendingPathComponent("server/agent_server.py"), encoding: .utf8)
     let json = """
     {
       "seq": 1,
@@ -945,9 +833,6 @@ func checkFlexibleEventOutputDecoding() throws {
     try assert(event.output?.contains("hello") == true, "ZEvent must decode Claude array-style tool output into text")
     try assert(event.output?.contains("[image result]") == true, "ZEvent must summarize image output blocks instead of failing decode")
     try assert(core.contains("decodeStringLike") && core.contains("stringLikeText"), "Core event decoder must keep flexible output decoding")
-    try assert(server.contains("def event_output_text") && server.contains("def client_safe_event"), "Server must sanitize legacy non-string tool output when serving history")
-    try assert(server.contains("event = client_safe_event(event)"), "Server read_events must normalize legacy event output before API responses")
-    try assert(server.contains("content = event_output_text(block.get(\"content\", \"\"))"), "Claude stream ingestion must write tool output as text")
 }
 
 func checkInlineVideoPlayAutoplays() throws {
@@ -1050,20 +935,11 @@ func checkUnreadMessageMarker() throws {
     let macNotifications = try String(contentsOf: cwd.appendingPathComponent("Sources/ZenithDock/Support/UnreadNotificationController.swift"), encoding: .utf8)
     let mobileNotifications = try String(contentsOf: cwd.appendingPathComponent("Sources/ZenithDockIOS/Support/UnreadNotificationController.swift"), encoding: .utf8)
     let mobileApp = try String(contentsOf: cwd.appendingPathComponent("Sources/ZenithDockIOS/App/ZenithDockIOSApp.swift"), encoding: .utf8)
-    let server = try String(contentsOf: cwd.appendingPathComponent("server/agent_server.py"), encoding: .utf8)
     let timeline = try String(contentsOf: cwd.appendingPathComponent("Sources/ZenithDock/Views/TimelineView.swift"), encoding: .utf8)
 
     try assert(core.contains("latest_agent_event_seq"), "Shared session model must decode latest visible agent event seq")
     try assert(core.contains("last_read_agent_event_seq"), "Shared session model must decode server-backed read cursor")
     try assert(core.contains("manual_unread"), "Shared session model must decode server-backed manual unread state")
-    try assert(server.contains("latest_agent_event_seq"), "Server public sessions must expose latest visible agent event seq")
-    try assert(server.contains("last_read_agent_event_seq"), "Server public sessions must expose server-backed read cursor")
-    try assert(server.contains("manual_unread"), "Server public sessions must expose manual unread state")
-    try assert(server.contains("sess[\"latest_agent_event_seq\"] = requested"), "Server read marks must repair stale latest agent seq metadata")
-    try assert(server.contains("@app.post(\"/api/sessions/{session_id}/read\")"), "Server must expose a read-state endpoint for cross-device unread sync")
-    try assert(server.contains("@app.post(\"/api/sessions/{session_id}/unread\")"), "Server must expose a manual unread endpoint for cross-device unread sync")
-    try assert(server.contains("\"job_ran\", \"job_error\""), "Server must treat scheduled-job output as visible agent output")
-    try assert(server.contains("update_session_event_metadata(session_id, event)"), "Server must update session event metadata as events are appended")
     try assert(macStore.contains("firstUnreadAgentSeqBySessionID"), "Mac store must remember the first unread agent event seq")
     try assert(macStore.contains("selectedTimelineAtBottom"), "Mac store must track whether the selected timeline is actually at bottom")
     try assert(macStore.contains("lastReadAgentSeqBySessionID"), "Mac unread state must compare server latest seq against local last-read seq")
@@ -1305,7 +1181,6 @@ func checkQueuedRemovalDisappears() throws {
     let cwd = URL(fileURLWithPath: FileManager.default.currentDirectoryPath, isDirectory: true)
     let macStore = try String(contentsOf: cwd.appendingPathComponent("Sources/ZenithDock/State/AppStore.swift"), encoding: .utf8)
     let mobileStore = try String(contentsOf: cwd.appendingPathComponent("Sources/ZenithDockIOS/State/MobileAppStore.swift"), encoding: .utf8)
-    let server = try String(contentsOf: cwd.appendingPathComponent("server/agent_server.py"), encoding: .utf8)
 
     try assert(macStore.contains("var pendingQueuedTurns: [ZQueuedTurn]"), "Mac queue shelf must use authoritative queued turns instead of timeline event inference")
     try assert(macStore.contains("queuedTurnsBySessionID"), "Mac store must keep queue state separate from the timeline window")
@@ -1336,13 +1211,6 @@ func checkQueuedRemovalDisappears() throws {
     try assert(mobileStore.contains("let event: ZEvent?"), "iOS turn responses must decode accepted timeline events")
     try assert(mobileStore.contains("applyAcceptedTurnEvent(res.event, sessionID:"), "iOS sends must render accepted queued/started events without waiting for websocket delivery")
     try assert(mobileStore.contains("clearSubmittedPromptIfCurrent(submittedPrompt: submittedPrompt, trimmed: trimmed)"), "iOS send success must clear a stale submitted draft after queued sends")
-    try assert(server.contains("RUN_NOW_TURNS"), "Server Send Now must reserve the exact queued item instead of relying on queue order")
-    try assert(server.contains("stop_turn(session_id, emit_event=False, schedule_queue=False)"), "Server Send Now must silently interrupt without appending visible stop cards")
-    try assert(server.contains("\"event\": queued_event"), "Server queued sends must return the turn_queued event to the app")
-    try assert(server.contains("\"event\": started_event"), "Server started sends must return the turn_started event to the app")
-    try assert(server.contains("\"queued_turns\": await queued_turns_snapshot(session_id)"), "Server session responses must include authoritative pending queue state")
-    try assert(server.contains("schedule_rebuilt_queued_turns") && server.contains("queue_drains"), "Server startup must schedule rebuilt queues to drain")
-    try assert(server.contains("def should_schedule_queue_after_finish") && server.contains("return not stopped or session_id in RUN_NOW_TURNS"), "Server plain Stop must leave queued turns pending while Send Now still drains the reserved item")
 }
 
 func checkPromptImageAttachments() throws {
@@ -1395,19 +1263,9 @@ func checkTmuxSubmitterVisualizer() throws {
     let core = try String(contentsOf: cwd.appendingPathComponent("Sources/ZenithCore/ZenithCore.swift"), encoding: .utf8)
     let macStore = try String(contentsOf: cwd.appendingPathComponent("Sources/ZenithDock/State/AppStore.swift"), encoding: .utf8)
     let inspector = try String(contentsOf: cwd.appendingPathComponent("Sources/ZenithDock/Views/InspectorView.swift"), encoding: .utf8)
-    let server = try String(contentsOf: cwd.appendingPathComponent("server/agent_server.py"), encoding: .utf8)
 
     try assert(core.contains("struct ZTmuxPane"), "Core must model tmux pane rows")
     try assert(core.contains("struct ZTmuxCapture"), "Core must model captured tmux pane output")
-    try assert(server.contains("@app.get(\"/api/sessions/{session_id}/tmux\")"), "Server must expose a tmux pane listing endpoint")
-    try assert(server.contains("@app.get(\"/api/sessions/{session_id}/tmux/capture\")"), "Server must expose a tmux pane capture endpoint")
-    try assert(server.contains("TMUX_SUBMITTER_KEYWORDS"), "Server tmux listing must identify likely submitter panes")
-    try assert(server.contains("meaningful_chat_cwd"), "Server tmux listing must ignore broad home/default cwd matches")
-    try assert(server.contains("TMUX_CHAT_MATCH_LABELS"), "Server tmux listing must distinguish chat-linked panes from machine-wide panes")
-    try assert(server.contains("TMUX_CHAT_MATCH_LABELS = {\"chat tmux\", \"chat target\"}"), "Default tmux listing must not treat shared cwd as a chat link")
-    try assert(server.contains("tmux_explicit_chat_targets"), "Server tmux listing must derive default matches from explicit tmux targets")
-    try assert(!server.contains("TMUX_CONTEXT_TOKEN_RE"), "Default tmux listing must not mine broad chat text tokens")
-    try assert(server.contains("if not include_all and not chat_linked"), "Default tmux listing must not include unrelated submitters")
     try assert(macStore.contains("refreshSelectedTmuxPanes"), "Mac store must load tmux panes on demand")
     try assert(macStore.contains("captureTmuxPane"), "Mac store must capture tmux pane output on demand")
     try assert(inspector.contains("TmuxSubmitterInspector"), "Mac inspector must render the tmux submitter visualizer")
@@ -1509,7 +1367,6 @@ func checkMacChatSearchPalette() throws {
 
 func checkHandoffDigestUsesLLM() throws {
     let cwd = URL(fileURLWithPath: FileManager.default.currentDirectoryPath, isDirectory: true)
-    let server = try String(contentsOf: cwd.appendingPathComponent("server/agent_server.py"), encoding: .utf8)
     let macStore = try String(contentsOf: cwd.appendingPathComponent("Sources/ZenithDock/State/AppStore.swift"), encoding: .utf8)
     let mobileStore = try String(contentsOf: cwd.appendingPathComponent("Sources/ZenithDockIOS/State/MobileAppStore.swift"), encoding: .utf8)
     let macSheet = try String(contentsOf: cwd.appendingPathComponent("Sources/ZenithDock/Views/SessionManagementSheets.swift"), encoding: .utf8)
@@ -1517,17 +1374,6 @@ func checkHandoffDigestUsesLLM() throws {
     let macEvents = try String(contentsOf: cwd.appendingPathComponent("Sources/ZenithDock/Views/EventViews.swift"), encoding: .utf8)
     let mobileEvents = try String(contentsOf: cwd.appendingPathComponent("Sources/ZenithDockIOS/Views/MobileEventViews.swift"), encoding: .utf8)
 
-    try assert(server.contains("async def build_handoff_digest("), "Server handoff digest must be async so it can run an LLM summarizer")
-    try assert(server.contains("build_handoff_source_pack"), "Server may build a source pack, but only as LLM input")
-    try assert(server.contains("run_claude_handoff_summarizer") && server.contains("run_codex_handoff_summarizer"), "Server digest must support real LLM summarizers")
-    try assert(server.contains("return await build_handoff_digest("), "Digest endpoint must await the LLM digest path")
-    try assert(server.contains("@app.post(\"/api/sessions/{session_id}/digest/send\")"), "Server must expose a background digest-send endpoint")
-    try assert(server.contains("asyncio.create_task(run_handoff_digest_send"), "Digest send must run in a server-owned background task")
-    try assert(server.contains("purpose=\"handoff_digest\""), "Digest send must create a tagged source-chat turn")
-    try assert(server.contains("wait_for_digest_turn_result"), "Digest send must wait for the source-chat digest turn before forwarding")
-    try assert(server.contains("source_digest_display_prompt"), "Digest send must use a short visible source-chat prompt instead of dumping internal instructions into the timeline")
-    try assert(server.contains("\"handoff_digest_sent\"") && server.contains("\"handoff_digest_error\""), "Server must emit source-chat digest completion/error events")
-    try assert(!server.contains("return build_handoff_digest(session_id, detail=req.detail, user_prompt=req.user_prompt)"), "Digest endpoint must not return the deterministic source pack directly")
     try assert(macStore.contains("target_session_id: targetSessionID"), "Mac digest requests must pass the selected target chat")
     try assert(mobileStore.contains("target_session_id: targetSessionID"), "iOS digest requests must pass the selected target chat")
     try assert(macStore.contains("\"/api/sessions/\\(sourceSessionID)/digest/send\""), "Mac Send to Chat must call the background digest-send endpoint")
@@ -1798,7 +1644,6 @@ do {
     try checkEndpointCacheKeysAreServerScoped()
     try checkRuntimeDefaultLabels()
     try checkBackendLocksAfterProviderStart()
-    try checkClaudeResumeFailureDoesNotPoisonSession()
     try checkServerURLNormalization()
     try checkShellCopyNormalization()
     try checkCodeBlockCopyUsesFullText()

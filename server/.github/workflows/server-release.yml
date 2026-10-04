@@ -1,0 +1,150 @@
+name: Server release
+
+on:
+  # This compatibility workflow becomes active when server/ is exported to the
+  # standalone repository. Only explicit dispatch may publish the legacy bridge;
+  # a subtree export or a unified app release tag must not publish it twice.
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing or new release tag matching VERSION (for example v0.1.0)
+        required: true
+        type: string
+      prepare_only:
+        description: Test, package and sign for manual verification without publishing
+        required: false
+        default: false
+        type: boolean
+      npm_source_sha:
+        description: Optional reviewed canonical SHA to also prepare a signed npm candidate; requires prepare_only
+        required: false
+        type: string
+      npm_source_ref:
+        description: Canonical main or release/* branch containing npm_source_sha; supply all three npm inputs together
+        required: false
+        type: string
+      npm_version:
+        description: Exact npm and app version, matching tag without v; supply all three npm inputs together
+        required: false
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  validate-inputs:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Require prepare-only mode for coordinated signing
+        env:
+          PREPARE_ONLY: ${{ inputs.prepare_only }}
+          NPM_SOURCE_SHA: ${{ inputs.npm_source_sha }}
+          NPM_SOURCE_REF: ${{ inputs.npm_source_ref }}
+          NPM_VERSION: ${{ inputs.npm_version }}
+          RELEASE_TAG: ${{ inputs.tag }}
+        shell: bash
+        run: |
+          if [[ -n "$NPM_SOURCE_SHA" || -n "$NPM_SOURCE_REF" || -n "$NPM_VERSION" ]]; then
+            test "$PREPARE_ONLY" = true
+            [[ "$NPM_SOURCE_SHA" =~ ^[0-9a-f]{40}$ ]] || exit 1
+            [[ "$NPM_SOURCE_REF" == main || "$NPM_SOURCE_REF" =~ ^release/[A-Za-z0-9][A-Za-z0-9._/-]*$ ]] || exit 1
+            git check-ref-format "refs/heads/$NPM_SOURCE_REF"
+            [[ "$NPM_VERSION" =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-beta\.[1-9][0-9]*)?$ ]] || exit 1
+            test "$RELEASE_TAG" = "v$NPM_VERSION"
+          fi
+  test:
+    needs: validate-inputs
+    name: Tests (${{ matrix.shard }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [0, 1, 2, 3, 4, 5, 6, 7]
+    env:
+      PYTHONDONTWRITEBYTECODE: "1"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: "3.13"
+      - name: Lock and test assigned cases
+        run: |
+          uv lock --check
+          ulimit -s 65536
+          PYTHONFAULTHANDLER=1 uv run --python 3.13 python -X faulthandler scripts/run_test_shard.py --index ${{ matrix.shard }} --count 8
+  npm-candidate:
+    needs: test
+    if: inputs.prepare_only && inputs.npm_source_sha != ''
+    permissions:
+      contents: read
+    uses: ./.github/workflows/server-npm-candidate.yml
+    with:
+      source_sha: ${{ inputs.npm_source_sha }}
+      source_ref: ${{ inputs.npm_source_ref }}
+      version: ${{ inputs.npm_version }}
+    secrets:
+      AGENTS_SERVER_RELEASE_PRIVATE_KEY_B64: ${{ secrets.AGENTS_SERVER_RELEASE_PRIVATE_KEY_B64 }}
+  release:
+    needs: test
+    runs-on: ubuntu-latest
+    env:
+      RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
+      PYTHONDONTWRITEBYTECODE: "1"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: "3.13"
+      - name: Validate version tag
+        shell: bash
+        run: |
+          test "v$(cat VERSION)" = "$RELEASE_TAG"
+          test "${RELEASE_TAG#v}" != "$RELEASE_TAG"
+          [[ "${RELEASE_TAG#v}" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]]
+      - name: Build release assets
+        run: |
+          rm -rf dist
+          uv run python scripts/package_release.py
+      - name: Sign release manifest
+        env:
+          RELEASE_KEY_B64: ${{ secrets.AGENTS_SERVER_RELEASE_PRIVATE_KEY_B64 }}
+        shell: bash
+        run: |
+          test -n "$RELEASE_KEY_B64"
+          printf '%s' "$RELEASE_KEY_B64" | base64 --decode > "$RUNNER_TEMP/agents-server-release.pem"
+          openssl pkeyutl -sign -rawin \
+            -inkey "$RUNNER_TEMP/agents-server-release.pem" \
+            -in dist/agents-server-manifest.json \
+            -out dist/agents-server-manifest.sig
+      - name: Hold signed assets for manual verification
+        if: github.event_name == 'workflow_dispatch' && inputs.prepare_only
+        uses: actions/upload-artifact@v4
+        with:
+          name: server-release-${{ github.sha }}
+          path: dist/*
+          if-no-files-found: error
+          retention-days: 7
+      - name: Publish GitHub release
+        if: github.event_name != 'workflow_dispatch' || !inputs.prepare_only
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          release_args=()
+          if [[ "${RELEASE_TAG#v}" == *-* ]]; then
+            release_args+=(--prerelease)
+          fi
+          notes_file="docs/RELEASE_${RELEASE_TAG#v}.md"
+          if [[ -s "$notes_file" ]]; then
+            release_args+=(--notes-file "$notes_file")
+          else
+            release_args+=(--generate-notes)
+          fi
+          gh release create "$RELEASE_TAG" dist/* "${release_args[@]}" \
+            --title "AgentsServer $RELEASE_TAG" \
+            --target "$GITHUB_SHA"

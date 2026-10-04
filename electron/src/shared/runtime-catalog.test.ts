@@ -1,6 +1,10 @@
 import { describe, expect, it } from 'vitest'
 import type { Health, RuntimeCatalog, RuntimeDiagnostic } from './types'
 import {
+  chatBackendChoice,
+  chatBackendSelection,
+  codexCustomProviderAvailable,
+  selectableChatBackendChoices,
   cursorBackendAvailable,
   cursorBackendSupported,
   runtimeCatalogHasSelectableModels,
@@ -23,7 +27,140 @@ const validCatalog: RuntimeCatalog = {
   }
 }
 
+describe('passive Claude authentication status from the server', () => {
+  it.each(['unknown', 'unauthenticated'] as const)('allows a native retry while reporting %s honestly', status => {
+    const diagnostic: RuntimeDiagnostic = {
+      backend: 'claude', status, available: false, installed: true,
+      authenticated: status === 'unauthenticated' ? false : null,
+      message: status === 'unknown'
+        ? 'Claude will check authentication when you send a message.'
+        : 'The last Claude request failed authentication.'
+    }
+    const catalog: RuntimeCatalog = { backends: { ...validCatalog.backends,
+      claude: { ...validCatalog.backends.claude, available: false, diagnostic }
+    } }
+    const health: Health = { ok: true, runtimes: { claude: diagnostic } }
+    expect(runtimeCatalogHasSelectableModels(catalog)).toBe(true)
+    expect(selectableChatBackends(health, catalog)).toContain('claude')
+    expect(runtimeSelectionError(health, catalog, 'claude', 'sonnet')).toBeNull()
+    expect(runtimeDiagnosticLabel(runtimeDiagnosticFor(health, catalog, 'claude')))
+      .toBe(status === 'unknown' ? 'Not checked' : 'Sign-in required')
+  })
+})
+
+describe('per-chat Codex provider selection', () => {
+  const health: Health = { ok: true, capabilities: { codex_provider_v1: { per_chat: true, per_chat_models: true } }, runtimes: {
+    codex: { backend: 'codex', status: 'unauthenticated', available: false, message: 'OpenAI sign-in required' }
+  } }
+  const catalog: RuntimeCatalog = { backends: { ...validCatalog.backends, codex: { ...validCatalog.backends.codex,
+    custom_provider: { configured: true, available: true, model: 'gpt-6-astra', base_url: 'https://inference.example/v1' }
+  } } }
+
+  it('adds exactly one choice while preserving native Codex identity and legacy defaults', () => {
+    expect(selectableChatBackendChoices(health, catalog)).toEqual(['codex-custom'])
+    expect(chatBackendChoice({ backend: 'codex' })).toBe('codex')
+    expect(chatBackendChoice({ backend: 'codex', codex_provider: 'custom' })).toBe('codex-custom')
+    expect(chatBackendSelection('codex-custom')).toEqual({ backend: 'codex', codex_provider: 'custom', provider_connection: 'default' })
+    expect(chatBackendSelection('codex')).toEqual({ backend: 'codex', codex_provider: 'default', provider_connection: 'default' })
+  })
+
+  it('requires the per-chat capability and a configured ready endpoint', () => {
+    expect(codexCustomProviderAvailable(health, catalog)).toBe(true)
+    expect(codexCustomProviderAvailable({ ok: true }, catalog)).toBe(false)
+    expect(codexCustomProviderAvailable(health, validCatalog)).toBe(false)
+    expect(runtimeSelectionError({ ok: true }, catalog, 'codex', null, 'custom')).toContain('Update AgentsServer')
+    expect(runtimeSelectionError(health, validCatalog, 'codex', null, 'custom')).toContain('Settings')
+  })
+
+  it('admits custom independently of normal Codex login without replacing its model catalog', () => {
+    expect(runtimeDiagnosticFor(health, catalog, 'codex')?.status).toBe('unauthenticated')
+    expect(runtimeDiagnosticFor(health, catalog, 'codex', 'custom')?.status).toBe('ready')
+    expect(runtimeSelectionError(health, catalog, 'codex', null, 'custom')).toBeNull()
+    expect(runtimeSelectionError(health, catalog, 'codex', 'gpt-6-astra', 'custom')).toBeNull()
+    expect(runtimeSelectionError(health, catalog, 'codex', 'another-model', 'custom')).toBeNull()
+    expect(runtimeCatalogOptions(catalog, 'codex', 'models')).toContainEqual({ value: 'gpt-5.6-sol', label: 'GPT-5.6-Sol' })
+    expect(runtimeCatalogOptions(catalog, 'codex', 'models', null, 'custom').some(option => option.value === 'gpt-5.6-sol')).toBe(false)
+    expect(runtimeEffortOptions(catalog, 'codex', null, 'high', 'custom')).toEqual([{ value: '', label: 'Server default' }])
+  })
+
+  it('uses discovered endpoint models and model-specific effort without pinning a configured model', () => {
+    const discovered: RuntimeCatalog = { backends: { ...catalog.backends, codex: { ...catalog.backends.codex, custom_provider: {
+      configured: true, available: true, model: null, base_url: 'https://inference.example/v1',
+      models: [{ value: 'provider/fast', label: 'Fast' }, { value: 'provider/deep', label: 'Deep' }],
+      efforts: [{ value: 'low', label: 'Low' }, { value: 'high', label: 'High' }],
+      model_efforts: { 'provider/fast': [{ value: 'low', label: 'Low' }] }, default_model: 'provider/deep'
+    } } } }
+    expect(codexCustomProviderAvailable(health, discovered)).toBe(true)
+    expect(runtimeCatalogOptions(discovered, 'codex', 'models', null, 'custom')).toContainEqual({ value: 'provider/fast', label: 'Fast · Unverified' })
+    expect(runtimeCatalogOptions(discovered, 'codex', 'models', null, 'custom').some(option => option.value === 'gpt-5.6-sol')).toBe(false)
+    expect(runtimeEffortOptions(discovered, 'codex', 'provider/deep', null, 'custom')).toEqual([{ value: '', label: 'Server default' }])
+    expect(runtimeEffortAfterModelChange(discovered, 'codex', 'provider/fast', 'high', 'custom')).toBe('low')
+    expect(runtimeEffortAfterModelChange(discovered, 'codex', 'unlisted-model', 'high', 'custom')).toBeNull()
+    expect(runtimeSelectionError(health, discovered, 'codex', 'unlisted-model', 'custom')).toBeNull()
+  })
+  it('blocks a retained chat after endpoint removal without borrowing native models', () => {
+    const retained = { configured: true, available: true, model: null, base_url: 'https://first.example/v1',
+      models: [{ value: 'first/model', label: 'First' }], efforts: [{ value: 'high', label: 'High' }] }
+    const removed: RuntimeCatalog = { backends: { codex: { models: [], efforts: [], custom_provider: {
+      configured: false, available: false, model: null, base_url: null
+    } } } }
+    expect(runtimeSelectionError(health, removed, 'codex', 'first/model', 'custom', retained)).not.toBeNull()
+    expect(runtimeDiagnosticFor(health, removed, 'codex', 'custom', retained)?.available).toBe(false)
+    expect(runtimeCatalogOptions(catalog, 'codex', 'models', null, 'custom', retained)).toContainEqual({ value: 'first/model', label: 'First · Unverified' })
+    expect(runtimeCatalogOptions(catalog, 'codex', 'models', null, 'custom', retained).some(option => option.value === 'gpt-6-astra')).toBe(false)
+  })
+
+  it('honors explicit empty efforts and distinguishes unverified, checked and unsupported models', () => {
+    const custom = { configured: true, available: true, model: null, base_url: 'https://endpoint.example/v1',
+      models: [{ value: 'vendor/chat', label: 'Chat' }, { value: 'vendor/other', label: 'Other' }, { value: 'vendor/unknown', label: 'Unknown' }],
+      efforts: [{ value: 'high', label: 'High' }], default_effort: 'high', model_efforts: { 'vendor/chat': [] },
+      model_capabilities: {
+        'vendor/chat': { kind: 'chat' as const, compatibility: 'verified' as const, reasoning_efforts: [], reasoning_supported: null },
+        'vendor/other': { kind: 'unknown' as const, compatibility: 'unsupported' as const, reasoning_efforts: [], reasoning_supported: false }
+      } }
+    expect(runtimeEffortOptions(catalog, 'codex', 'vendor/chat', 'high', 'custom', custom)).toEqual([{ value: '', label: 'Server default' }])
+    expect(runtimeEffortAfterModelChange(catalog, 'codex', 'vendor/chat', 'high', 'custom', custom)).toBeNull()
+    const models = runtimeCatalogOptions(catalog, 'codex', 'models', null, 'custom', custom)
+    expect(models.find(item => item.value === 'vendor/chat')?.label).toBe('Chat · Basic check passed')
+    expect(models.find(item => item.value === 'vendor/other')?.locked).toBe(true)
+    expect(models.find(item => item.value === 'vendor/unknown')).toEqual({ value: 'vendor/unknown', label: 'Unknown · Unverified' })
+    expect(runtimeSelectionError(health, catalog, 'codex', 'vendor/other', 'custom', custom)).toContain('compatibility check')
+    expect(runtimeSelectionError(health, catalog, 'codex', 'vendor/unknown', 'custom', custom)).toBeNull()
+    expect(runtimeEffortAfterModelChange({ backends: { codex: { models: [], efforts: custom.efforts, model_efforts: { plain: [] } } } }, 'codex', 'plain', 'high')).toBeNull()
+  })
+})
+
+describe('native and custom API choices', () => {
+  it('shows only connected choices, native before custom, and keeps API models separate', () => {
+    const health: Health = { ok: true, capabilities: { provider_connections_v1: { per_chat: true }, opencode_backend: { available: true, version: 1, required: false, message: '', action: null } } }
+    const custom = { configured: true, available: true, model: 'api/model', base_url: 'https://example.invalid', models: [{ value: 'api/model', label: 'API model' }] }
+    const catalog: RuntimeCatalog = { backends: {
+      claude: { models: [{ value: 'native-model', label: 'Native' }], efforts: [], native_credentials_present: true, custom_provider: custom },
+      codex: { models: [], efforts: [], native_credentials_present: false },
+      opencode: { models: [], efforts: [], native_credentials_present: false, custom_provider: custom }
+    } }
+    expect(selectableChatBackendChoices(health, catalog)).toEqual(['claude', 'claude-custom', 'opencode-custom'])
+    expect(chatBackendSelection('opencode-custom')).toEqual({ backend: 'opencode', codex_provider: 'default', provider_connection: 'custom' })
+    expect(chatBackendChoice({ backend: 'claude', provider_connection: 'custom' })).toBe('claude-custom')
+    expect(runtimeCatalogOptions(catalog, 'claude', 'models', null, 'custom').some(x => x.value === 'native-model')).toBe(false)
+    expect(runtimeSelectionError(health, catalog, 'opencode', 'api/model', 'custom')).toBeNull()
+    expect(runtimeSelectionError({ ok: true }, catalog, 'claude', 'api/model', 'custom')).not.toBeNull()
+    expect(runtimeSelectionError(health, catalog, 'claude', null, 'custom', { ...custom, model: null })).toContain('Choose a model')
+  })
+})
+
 describe('runtimeCatalogHasSelectableModels', () => {
+  it('offers a verified Cursor key separately from native login and removes it after Forget', () => {
+    const health = { ok: true, capabilities: { cursor_backend: { available: true, version: 2 }, provider_connections_v1: { per_chat: true, available: true } } } as Health
+    const custom = { configured: true, available: true, base_url: 'https://api2.cursor.sh', model: 'auto', default_model: 'auto', models: [{ value: 'auto', label: 'Auto' }] }
+    const catalog: RuntimeCatalog = { backends: { ...validCatalog.backends, cursor: { models: [], efforts: [], native_credentials_present: false, custom_provider: custom } } }
+    expect(selectableChatBackendChoices(health, catalog)).toContain('cursor-custom')
+    expect(selectableChatBackendChoices(health, catalog)).not.toContain('cursor')
+    expect(chatBackendSelection('cursor-custom')).toEqual({ backend: 'cursor', codex_provider: 'default', provider_connection: 'custom' })
+    expect(runtimeSelectionError(health, catalog, 'cursor', null, 'custom')).toBeNull()
+    catalog.backends.cursor!.custom_provider = { configured: false, available: false, model: null, base_url: null }
+    expect(selectableChatBackendChoices(health, catalog)).not.toContain('cursor-custom')
+  })
   it('accepts a catalog with concrete choices for both backends', () => {
     expect(runtimeCatalogHasSelectableModels(validCatalog)).toBe(true)
   })

@@ -51,6 +51,8 @@ describe('profile-scoped sidebar position', () => {
     expect(toggleSidebar).toHaveBeenCalledOnce()
     const list = container.querySelector<HTMLDivElement>('.session-list')!
     await waitFor(() => expect(list.scrollTop).toBe(42))
+    expect(screen.getByText('AgentsDock')).toBeInTheDocument()
+    expect(screen.queryByText(/^v\d/)).not.toBeInTheDocument()
 
     list.scrollTop = 91
     fireEvent.scroll(list)

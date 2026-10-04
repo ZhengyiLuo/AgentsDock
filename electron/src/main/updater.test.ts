@@ -3,6 +3,7 @@ import { GenericProvider } from 'electron-updater/out/providers/GenericProvider'
 import { AppUpdater } from 'electron-updater/out/AppUpdater'
 
 interface MockUpdateCheckResult {
+  cancellationToken?: { cancel(): void }
   downloadPromise?: Promise<unknown> | null
 }
 
@@ -97,6 +98,61 @@ describe('AppUpdateManager', () => {
   it('defaults fresh prerelease installs to the beta channel', () => {
     expect(defaultAppUpdateTrack('0.2.7-beta.6')).toBe('beta')
     expect(defaultAppUpdateTrack('0.2.6')).toBe('stable')
+  })
+
+  it('installs the final refreshed app version and joins duplicate Update actions', async () => {
+    Object.defineProperty(process, 'platform', { configurable: true, value: 'linux' })
+    const manager = createManager()
+    mocks.emit('update-downloaded', { version: '1.2.4' })
+    mocks.autoUpdater.checkForUpdates.mockImplementation(async () => {
+      mocks.emit('update-downloaded', { version: '1.2.5' })
+      return null
+    })
+    const first = manager.install()
+    const second = manager.install()
+    expect(first).toBe(second)
+    expect(await first).toBe(true)
+    expect(manager.status().availableVersion).toBe('1.2.5')
+    expect(mocks.autoUpdater.quitAndInstall).toHaveBeenCalledOnce()
+  })
+
+  it.each(['blocked', 'failed', 'offline', 'pending', 'updating'] as const)(
+    'installs the app independently when a saved server update is %s', async phase => {
+    Object.defineProperty(process, 'platform', { configurable: true, value: 'linux' })
+    const manager = createManager()
+    const savedReceipt = {
+      profileId: 'saved-server', name: 'SuperSONIC', serverIdentity: 'server-one', targetVersion: '1.2.4',
+      phase, activationBlocked: true, apiContractVersion: 1,
+      message: 'Server update channel differs from this app release.',
+    }
+    manager.setServerUpdates([savedReceipt])
+    mocks.emit('update-downloaded', { version: '1.2.4' })
+    expect(await manager.install()).toBe(true)
+    expect(manager.status()).toMatchObject({ state: 'installing', availableVersion: '1.2.4' })
+    expect(manager.status().message).not.toContain('SuperSONIC')
+    expect(mocks.autoUpdater.quitAndInstall).toHaveBeenCalledOnce()
+  })
+
+  it('does not restart into a different artifact that arrived during native handoff', async () => {
+    const manager = createManager()
+    mocks.emit('update-downloaded', { version: '1.2.4' })
+    const installation = manager.install()
+    await vi.advanceTimersByTimeAsync(100)
+    mocks.emit('update-downloaded', { version: '1.2.6' })
+    await vi.advanceTimersByTimeAsync(8_000)
+    expect(await installation).toBe(false)
+    expect(mocks.autoUpdater.quitAndInstall).not.toHaveBeenCalled()
+    expect(manager.status()).toMatchObject({ state: 'downloaded', availableVersion: '1.2.6' })
+  })
+
+  it('allows the app to update when paired server metadata needs repair', async () => {
+    Object.defineProperty(process, 'platform', { configurable: true, value: 'linux' })
+    const manager = createManager()
+    manager.setServerUpdateError('Paired server release signature is invalid.')
+    mocks.emit('update-downloaded', { version: '1.2.4' })
+    expect(await manager.install()).toBe(true)
+    expect(mocks.autoUpdater.quitAndInstall).toHaveBeenCalledOnce()
+    expect(manager.status().serverUpdateMessage).toContain('signature is invalid')
   })
 
   it('configures explicit direct updates without installing on ordinary quit', () => {
@@ -561,13 +617,181 @@ describe('AppUpdateManager', () => {
     expect(mocks.autoUpdater.allowDowngrade).toBe(true)
   })
 
-  it('rejects unknown tracks and channel changes while an update is ready', async () => {
+  it('rejects unknown tracks but discards a ready update when changing channels', async () => {
     const manager = createManager()
 
     await expect(manager.setTrack('nightly' as 'beta')).rejects.toThrow('Unknown update channel')
     mocks.emit('update-downloaded', { version: '1.2.4' })
-    await expect(manager.setTrack('beta')).rejects.toThrow('current update operation')
-    expect(mocks.autoUpdater.channel).toBe('latest')
+    mocks.autoUpdater.checkForUpdates.mockImplementation(async () => {
+      mocks.emit('update-not-available', { version: '1.2.3' })
+      return null
+    })
+    await expect(manager.setTrack('beta')).resolves.toMatchObject({ track: 'beta', state: 'not-available', availableVersion: undefined })
+    expect(mocks.autoUpdater.channel).toBe('beta')
+    expect(mocks.autoUpdater.quitAndInstall).not.toHaveBeenCalled()
+  })
+
+  it('discards a downloaded update and suppresses automatic checks until an explicit check', async () => {
+    const manager = createManager()
+    mocks.emit('update-downloaded', { version: '1.2.4' })
+    expect(manager.status().cancelable).toBe(true)
+
+    expect(manager.cancel()).toMatchObject({ state: 'idle', cancelable: false, availableVersion: undefined, downloadedAt: undefined })
+    mocks.emit('update-downloaded', { version: '1.2.4' })
+    mocks.emit('error', new Error('late error'))
+    await vi.advanceTimersByTimeAsync(4 * 60 * 60 * 1000)
+    expect(mocks.autoUpdater.checkForUpdates).not.toHaveBeenCalled()
+    expect(manager.status()).toMatchObject({ state: 'idle', availableVersion: undefined })
+    await expect(manager.install()).resolves.toBe(false)
+    expect(mocks.autoUpdater.autoInstallOnAppQuit).toBe(false)
+
+    mocks.autoUpdater.checkForUpdates.mockImplementation(async () => {
+      mocks.emit('update-downloaded', { version: '1.2.5' })
+      return null
+    })
+    await expect(manager.check(true)).resolves.toMatchObject({ state: 'downloaded', availableVersion: '1.2.5', cancelable: true })
+    expect(mocks.autoUpdater.checkForUpdates).toHaveBeenCalledOnce()
+    expect(mocks.autoUpdater.quitAndInstall).not.toHaveBeenCalled()
+  })
+
+  it('cancels a download and ignores its late progress, completion and rejection', async () => {
+    const manager = createManager()
+    let rejectDownload!: (error: Error) => void
+    const downloadPromise = new Promise((_resolve, reject) => { rejectDownload = reject })
+    const cancel = vi.fn()
+    mocks.autoUpdater.checkForUpdates.mockImplementation(async () => {
+      mocks.emit('update-available', { version: '1.2.4' })
+      return { cancellationToken: { cancel }, downloadPromise }
+    })
+    const check = manager.check(true)
+    await Promise.resolve()
+    mocks.emit('download-progress', { percent: 25 })
+    expect(manager.status()).toMatchObject({ state: 'downloading', cancelable: true })
+
+    manager.cancel()
+    expect(cancel).toHaveBeenCalledOnce()
+    mocks.emit('download-progress', { percent: 75 })
+    mocks.emit('update-downloaded', { version: '1.2.4' })
+    mocks.emit('error', new Error('download canceled'))
+    rejectDownload(new Error('download canceled'))
+    await expect(check).resolves.toMatchObject({ state: 'idle', availableVersion: undefined, cancelable: false })
+    expect(mocks.autoUpdater.quitAndInstall).not.toHaveBeenCalled()
+  })
+
+  it('cancels metadata immediately and serializes a retry behind the late download cleanup', async () => {
+    const manager = createManager()
+    let finishMetadata!: (result: MockUpdateCheckResult) => void
+    let finishDownload!: () => void
+    const downloadPromise = new Promise<void>(resolve => { finishDownload = resolve })
+    const cancel = vi.fn()
+    mocks.autoUpdater.checkForUpdates.mockImplementationOnce(() => new Promise(resolve => { finishMetadata = resolve }))
+    const oldCheck = manager.check(true)
+
+    expect(manager.cancel()).toMatchObject({ state: 'idle', cancelable: false })
+    const retry = manager.check(true)
+    expect(manager.status().cancelable).toBe(true)
+    expect(mocks.autoUpdater.checkForUpdates).toHaveBeenCalledOnce()
+    mocks.emit('update-available', { version: '1.2.4' })
+    finishMetadata({ cancellationToken: { cancel }, downloadPromise })
+    await Promise.resolve()
+    expect(cancel).toHaveBeenCalledOnce()
+    expect(mocks.autoUpdater.checkForUpdates).toHaveBeenCalledOnce()
+    mocks.emit('update-downloaded', { version: '1.2.4' })
+    mocks.autoUpdater.checkForUpdates.mockImplementationOnce(async () => {
+      mocks.emit('update-downloaded', { version: '1.2.5' })
+      return null
+    })
+    finishDownload()
+
+    await Promise.all([oldCheck, retry])
+    expect(mocks.autoUpdater.checkForUpdates).toHaveBeenCalledTimes(2)
+    expect(manager.status()).toMatchObject({ state: 'downloaded', availableVersion: '1.2.5' })
+    expect(mocks.autoUpdater.quitAndInstall).not.toHaveBeenCalled()
+  })
+
+  it('keeps a retry canceled while the prior metadata request finishes', async () => {
+    const manager = createManager()
+    let finish!: () => void
+    mocks.autoUpdater.checkForUpdates.mockImplementationOnce(() => new Promise(resolve => { finish = () => resolve(null) }))
+    const oldCheck = manager.check(true)
+    manager.cancel()
+    const retry = manager.check(true)
+    manager.cancel()
+    finish()
+
+    await Promise.all([oldCheck, retry])
+    expect(manager.status()).toMatchObject({ state: 'idle', cancelable: false })
+    expect(mocks.autoUpdater.checkForUpdates).toHaveBeenCalledOnce()
+  })
+
+  it('cancels a Beta feed lookup without starting its eventual updater download', async () => {
+    const manager = createManager({}, 'beta')
+    let finish!: (response: Response) => void
+    mocks.netFetch.mockImplementationOnce(() => new Promise(resolve => { finish = resolve }))
+    const check = manager.check(true)
+    manager.cancel()
+    finish(new Response('<feed><entry><link href="https://github.com/ZhengyiLuo/AgentsDock/releases/tag/v1.2.6-beta.1" /></entry></feed>'))
+
+    await expect(check).resolves.toMatchObject({ state: 'idle', availableVersion: undefined })
+    expect(mocks.autoUpdater.checkForUpdates).not.toHaveBeenCalled()
+    expect(mocks.autoUpdater.setFeedURL).not.toHaveBeenCalled()
+  })
+
+  it('cancels install preflight even when a later check downloads a valid update', async () => {
+    Object.defineProperty(process, 'platform', { configurable: true, value: 'linux' })
+    const beforeInstall = vi.fn()
+    const manager = createManager({ beforeInstall })
+    mocks.emit('update-downloaded', { version: '1.2.4' })
+    let finish!: () => void
+    mocks.autoUpdater.checkForUpdates.mockImplementationOnce(() => new Promise(resolve => { finish = () => resolve(null) }))
+    const installation = manager.install()
+    expect(manager.status()).toMatchObject({ state: 'checking', cancelable: true })
+    manager.cancel()
+    mocks.autoUpdater.checkForUpdates.mockImplementationOnce(async () => {
+      mocks.emit('update-downloaded', { version: '1.2.5' })
+      return null
+    })
+    const retry = manager.check(true)
+    finish()
+
+    await expect(installation).resolves.toBe(false)
+    await retry
+    expect(manager.status()).toMatchObject({ state: 'downloaded', availableVersion: '1.2.5' })
+    expect(beforeInstall).not.toHaveBeenCalled()
+    expect(mocks.autoUpdater.quitAndInstall).not.toHaveBeenCalled()
+  })
+
+  it('cancels the macOS settle wait before service shutdown or native installation', async () => {
+    const beforeInstall = vi.fn()
+    const installFailed = vi.fn()
+    const manager = createManager({ beforeInstall, installFailed })
+    mocks.emit('update-downloaded', { version: '1.2.4' })
+    const installation = manager.install()
+    await vi.advanceTimersByTimeAsync(100)
+    expect(manager.status()).toMatchObject({ state: 'installing', cancelable: true })
+
+    expect(manager.cancel()).toMatchObject({ state: 'idle', cancelable: false })
+    await expect(installation).resolves.toBe(false)
+    await vi.advanceTimersByTimeAsync(8_000)
+    expect(beforeInstall).not.toHaveBeenCalled()
+    expect(installFailed).not.toHaveBeenCalled()
+    expect(mocks.autoUpdater.quitAndInstall).not.toHaveBeenCalled()
+    expect(manager.status().state).toBe('idle')
+  })
+
+  it('stops advertising cancellation before the irreversible native handoff', async () => {
+    Object.defineProperty(process, 'platform', { configurable: true, value: 'linux' })
+    let manager!: AppUpdateManager
+    const beforeInstall = vi.fn(() => {
+      expect(manager.status()).toMatchObject({ state: 'installing', cancelable: false })
+      expect(manager.cancel()).toMatchObject({ state: 'installing', cancelable: false })
+    })
+    manager = createManager({ beforeInstall })
+    mocks.emit('update-downloaded', { version: '1.2.4' })
+
+    await expect(manager.install()).resolves.toBe(true)
+    expect(beforeInstall).toHaveBeenCalledOnce()
+    expect(mocks.autoUpdater.quitAndInstall).toHaveBeenCalledOnce()
   })
 
   it('suppresses overlapping checks', async () => {
@@ -643,6 +867,33 @@ describe('AppUpdateManager', () => {
     expect(manager.status()).toMatchObject({ state: 'downloaded', availableVersion: '1.2.4', progress: 100 })
     expect(manager.status().message).toContain('still ready')
     expect(manager.status().message).toContain('offline')
+  })
+
+  it('discards a withdrawn cached update when the public feed rolls back', async () => {
+    Object.defineProperty(process, 'platform', { configurable: true, value: 'linux' })
+    mocks.appVersion = '1.0.4'
+    const manager = createManager()
+    mocks.emit('update-downloaded', { version: '1.0.5' })
+    mocks.autoUpdater.checkForUpdates.mockImplementation(async () => {
+      mocks.emit('update-not-available', { version: '1.0.3' })
+      return null
+    })
+
+    await expect(manager.install()).resolves.toBe(false)
+
+    expect(manager.status()).toMatchObject({ state: 'not-available', availableVersion: undefined })
+    expect(manager.status().message).toContain('no longer offered')
+    expect(mocks.autoUpdater.quitAndInstall).not.toHaveBeenCalled()
+  })
+
+  it('retains the downloaded update when the feed still confirms the same version', async () => {
+    const manager = createManager()
+    mocks.emit('update-downloaded', { version: '1.2.4' })
+    mocks.autoUpdater.checkForUpdates.mockImplementation(async () => {
+      mocks.emit('update-not-available', { version: '1.2.4' })
+      return null
+    })
+    await expect(manager.check(true)).resolves.toMatchObject({ state: 'downloaded', availableVersion: '1.2.4' })
   })
 
   it('consumes a failed auto-download during a regular update check', async () => {

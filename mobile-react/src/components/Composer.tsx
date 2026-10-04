@@ -24,7 +24,7 @@ import * as ImagePicker from 'expo-image-picker'
 import * as Clipboard from 'expo-clipboard'
 import { useShallow } from 'zustand/react/shallow'
 import { MenuView, type MenuAction } from '@expo/ui/community/menu'
-import { AlertCircle, ArrowDown, ArrowUp, Check, ChevronDown, CornerDownRight, File as FileIcon, Mail, MessageCircleMore, MessageSquareShare, Paperclip, Search, Send, Square, Trash2, X } from 'lucide-react-native'
+import { AlertCircle, ArrowDown, ArrowUp, Check, ChevronDown, CornerDownRight, File as FileIcon, Mail, MessageCircleMore, MessageSquareShare, Paperclip, Search, Send, Square, Trash2, Video as VideoIcon, X } from 'lucide-react-native'
 import { client, useAppStore } from '../store/useAppStore'
 import {
   COMPOSER_INPUT_MAX_HEIGHT,
@@ -35,10 +35,10 @@ import {
   measuredComposerInputHeight,
 } from '../lib/composer-input-size'
 import { trackEvent } from '../lib/analytics'
-import { backendLabel, formatBytes, isImage } from '../lib/format'
+import { backendLabel, formatBytes, isImage, isVideo } from '../lib/format'
 import { FULLSCREEN_HEADER_GUTTER, FULLSCREEN_HEADER_MIN_HEIGHT, fullscreenModalPadding } from '../lib/fullscreen-modal-layout'
 import { asyncQueuedMessageControlsAvailable, isAsyncQueuedChatMessage, isCrossChatDeliveryQueuedTurn, isUserQueuedTurn, isVisibleQueuedTurn, queuedDeliverySkipIdentity, queuedMoveCrossesDeliveryBarrier, queuedTurnHasEarlierDeliveryBarrier } from '../lib/queue'
-import { isImageUpload, photoAssetsToUploads } from '../lib/uploads'
+import { isImageUpload, isVideoUpload, mediaAssetsToUploads } from '../lib/uploads'
 import { dismissAppKeyboard } from '../lib/app-keyboard'
 import { awaitCodexPermissionUpdates } from '../lib/codex-permission-updates'
 import { awaitClaudePermissionUpdates } from '../lib/claude-permission-updates'
@@ -703,25 +703,33 @@ export function Composer({ sessionId, keyboardVisible, onSent, onOpenMcp }: { se
       if (composerScopeIsCurrent(activeProfileId, profileGeneration, sessionId)) setPickingAttachment(false)
     }
   }
-  const pickPhotos = async () => {
+  const pickMedia = async () => {
     if (attachmentDisabled || !remoteComposerScopeIsCurrent(activeProfileId, profileGeneration, sessionId)) return
     setPickingAttachment(true)
     try {
+      if (Platform.OS === 'ios') {
+        const permission = await ImagePicker.requestMediaLibraryPermissionsAsync(false)
+        if (!permission.granted) {
+          Alert.alert('Photos and videos unavailable', 'Allow AgentsDock to access your photo library in Settings, then try again.')
+          return
+        }
+      }
       const result = await ImagePicker.launchImageLibraryAsync({
-        mediaTypes: ['images'],
+        mediaTypes: ['images', 'videos'],
         allowsMultipleSelection: true,
         orderedSelection: true,
         selectionLimit: 20,
+        shouldDownloadFromNetwork: true,
       })
       if (!result.canceled && remoteComposerScopeIsCurrent(activeProfileId, profileGeneration, sessionId)) {
-        const photos = photoAssetsToUploads(result.assets)
-        if (photos.length) {
+        const media = mediaAssetsToUploads(result.assets)
+        if (media.length) {
           guardSendAfterPicker()
-          void attachFiles(photos, profileGeneration, sessionId)
+          void attachFiles(media, profileGeneration, sessionId)
         }
       }
     } catch (error) {
-      if (composerScopeIsCurrent(activeProfileId, profileGeneration, sessionId)) Alert.alert('Photos unavailable', pickerError(error))
+      if (composerScopeIsCurrent(activeProfileId, profileGeneration, sessionId)) Alert.alert('Photos and videos unavailable', pickerError(error))
     } finally {
       if (composerScopeIsCurrent(activeProfileId, profileGeneration, sessionId)) setPickingAttachment(false)
     }
@@ -730,12 +738,12 @@ export function Composer({ sessionId, keyboardVisible, onSent, onOpenMcp }: { se
     if (attachmentDisabled || !remoteComposerScopeIsCurrent(activeProfileId, profileGeneration, sessionId)) return
     const choose = (index: number) => {
       if (index === 0) openTargetPicker()
-      else if (index === 1) void pickPhotos()
+      else if (index === 1) void pickMedia()
       else if (index === 2) void pickFiles()
       else if (index === 3) openTargetPicker({ kind: '@@', start: Math.min(selectionRef.current.start, selectionRef.current.end), end: Math.max(selectionRef.current.start, selectionRef.current.end), query: '' })
     }
     if (Platform.OS === 'ios' && width < 720) {
-      const options = ['Reference another chat', 'Photo Library', 'Files', 'Reference a server (@@)', 'Cancel']
+      const options = ['Reference another chat', 'Photos and Videos', 'Files', 'Reference a server (@@)', 'Cancel']
       ActionSheetIOS.showActionSheetWithOptions({
         title: 'Add',
         options,
@@ -745,7 +753,7 @@ export function Composer({ sessionId, keyboardVisible, onSent, onOpenMcp }: { se
     }
     Alert.alert('Add', undefined, [
       { text: 'Reference another chat', onPress: () => choose(0) },
-      { text: 'Photo Library', onPress: () => choose(1) },
+      { text: 'Photos and Videos', onPress: () => choose(1) },
       { text: 'Files', onPress: () => choose(2) },
       { text: 'Reference a server (@@)', onPress: () => choose(3) },
       { text: 'Cancel', style: 'cancel' },
@@ -1001,7 +1009,7 @@ export function Composer({ sessionId, keyboardVisible, onSent, onOpenMcp }: { se
           style={[styles.input, constrainedKeyboard && styles.inputConstrained, { color: colors.text, height: displayedInputHeight, maxHeight: viewportLimits.inputMaxHeight }]}
         />
         {!constrainedKeyboard ? <View style={[styles.toolbar, compactToolbar && styles.toolbarCompact, denseToolbar && styles.toolbarDense]}>
-          {!welcome ? <IconButton icon={Paperclip} disabled={attachmentDisabled} onPress={chooseAttachment} label="Add files, photos, or another chat" testID="chat-attach" /> : null}
+          {!welcome ? <IconButton icon={Paperclip} disabled={attachmentDisabled} onPress={chooseAttachment} label="Add files, photos, videos, or another chat" testID="chat-attach" /> : null}
           {runtimeControl}
           {!welcome ? quickMessageControl : null}
           {!welcome && backend === 'codex' ? <CodexPermissionMenu sessionId={sessionId} compact={compactToolbar} /> : null}
@@ -1423,23 +1431,25 @@ function AttachmentShelf({ sessionId, uploads, pending, failed, connectionReady,
   >
     {uploads.map(file => {
       const image = isImage(file)
+      const video = isVideo(file)
       // fileURL/authHeaders intentionally assert a validated connection, so
       // never evaluate them while the app is offline or switching servers.
       const source = image && connectionReady ? { uri: client.fileURL(sessionId, file.id), headers: client.authHeaders() } : null
       return <View key={`ready:${file.id}`} testID={`attachment-ready-${file.id}`} style={[styles.upload, { backgroundColor: colors.raised, borderColor: colors.border }]}>
         <Pressable disabled={!source} accessibilityRole={source ? 'button' : undefined} accessibilityLabel={source ? `Preview ${file.filename}` : file.filename} onPress={() => source && onPreview(file.filename, source)} style={styles.uploadIdentity}>
-          <View style={[styles.fileIconWell, { backgroundColor: colors.surface }]}>{source ? <Image source={source} contentFit="cover" style={StyleSheet.absoluteFill} transition={120} /> : <FileIcon size={21} color={colors.muted} strokeWidth={1.8} />}</View>
-          <View style={styles.uploadText}><Text style={[styles.uploadName, { color: colors.text }]} numberOfLines={1}>{file.filename}</Text><Text style={[styles.uploadMeta, { color: colors.muted }]} numberOfLines={1}>{formatBytes(file.size) || (image ? 'Photo ready' : 'File ready')}</Text></View>
+          <View style={[styles.fileIconWell, { backgroundColor: colors.surface }]}>{source ? <Image source={source} contentFit="cover" style={StyleSheet.absoluteFill} transition={120} /> : video ? <VideoIcon size={21} color={colors.muted} strokeWidth={1.8} /> : <FileIcon size={21} color={colors.muted} strokeWidth={1.8} />}</View>
+          <View style={styles.uploadText}><Text style={[styles.uploadName, { color: colors.text }]} numberOfLines={1}>{file.filename}</Text><Text style={[styles.uploadMeta, { color: colors.muted }]} numberOfLines={1}>{formatBytes(file.size) || (image ? 'Photo ready' : video ? 'Video ready' : 'File ready')}</Text></View>
         </Pressable>
         <IconButton icon={X} size={14} disabled={disabled} onPress={() => onRemove(file.id)} label={`Remove ${file.filename}`} />
       </View>
     })}
     {pending.map((file, index) => {
       const image = isImageUpload(file)
+      const video = isVideoUpload(file)
       const source = image ? { uri: file.uri } : null
       return <View key={`pending:${file.uri}`} testID={`attachment-pending-${index}`} style={[styles.upload, { backgroundColor: colors.raised, borderColor: colors.border }]}>
         <Pressable disabled={!source} accessibilityRole={source ? 'button' : undefined} accessibilityLabel={source ? `Preview ${file.name}` : file.name} onPress={() => source && onPreview(file.name, source)} style={styles.uploadIdentity}>
-          <View style={[styles.fileIconWell, { backgroundColor: colors.surface }]}>{source ? <Image source={source} contentFit="cover" style={StyleSheet.absoluteFill} /> : <FileIcon size={21} color={colors.muted} strokeWidth={1.8} />}<View style={styles.uploadBusy}><ActivityIndicator size="small" color="white" /></View></View>
+          <View style={[styles.fileIconWell, { backgroundColor: colors.surface }]}>{source ? <Image source={source} contentFit="cover" style={StyleSheet.absoluteFill} /> : video ? <VideoIcon size={21} color={colors.muted} strokeWidth={1.8} /> : <FileIcon size={21} color={colors.muted} strokeWidth={1.8} />}<View style={styles.uploadBusy}><ActivityIndicator size="small" color="white" /></View></View>
           <View style={styles.uploadText}><Text style={[styles.uploadName, { color: colors.text }]} numberOfLines={1}>{file.name}</Text><Text style={[styles.uploadMeta, { color: colors.blue }]} numberOfLines={1}>Uploading…</Text></View>
         </Pressable>
         <View style={styles.uploadActionSpacer} />
@@ -1447,7 +1457,7 @@ function AttachmentShelf({ sessionId, uploads, pending, failed, connectionReady,
     })}
     {failed.map((file, index) => <View key={`failed:${file.uri}`} testID={`attachment-failed-${index}`} style={[styles.upload, { backgroundColor: `${colors.red}12`, borderColor: colors.red }]}>
       <Pressable disabled={retryDisabled} accessibilityRole="button" accessibilityLabel={`Retry ${file.name}`} onPress={() => onRetry(file)} style={styles.uploadIdentity}>
-        <View style={[styles.fileIconWell, { backgroundColor: colors.surface }]}>{isImageUpload(file) ? <Image source={{ uri: file.uri }} contentFit="cover" style={StyleSheet.absoluteFill} /> : <FileIcon size={21} color={colors.red} strokeWidth={1.8} />}<View style={styles.uploadError}><AlertCircle size={15} color="white" fill={colors.red} /></View></View>
+        <View style={[styles.fileIconWell, { backgroundColor: colors.surface }]}>{isImageUpload(file) ? <Image source={{ uri: file.uri }} contentFit="cover" style={StyleSheet.absoluteFill} /> : isVideoUpload(file) ? <VideoIcon size={21} color={colors.red} strokeWidth={1.8} /> : <FileIcon size={21} color={colors.red} strokeWidth={1.8} />}<View style={styles.uploadError}><AlertCircle size={15} color="white" fill={colors.red} /></View></View>
         <View style={styles.uploadText}><Text style={[styles.uploadName, { color: colors.text }]} numberOfLines={1}>{file.name}</Text><Text style={[styles.uploadMeta, { color: colors.red }]} numberOfLines={1}>Upload failed · Tap to retry</Text></View>
       </Pressable>
       <IconButton icon={X} size={14} disabled={disabled} onPress={() => onRemoveFailed(file.uri)} label={`Remove ${file.name}`} />

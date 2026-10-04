@@ -222,6 +222,7 @@ export function Sidebar({ hidden = false }: { hidden?: boolean }) {
           operation.targetFolder
         )
         useAppStore.setState({ sessions: next })
+        trackEvent(sidebarReorderAnalyticsEvent(operation))
       } catch (error) { useAppStore.getState().setError(error instanceof Error ? error.message : String(error)) }
     }
   }
@@ -233,7 +234,7 @@ export function Sidebar({ hidden = false }: { hidden?: boolean }) {
         <strong>AgentsDock</strong>
         <div className="toolbar-cluster">
           <ShortcutTooltip shortcut="toggleSidebar" label={t('ui.sidebar.hideChatList')}><button className="icon-button" aria-label={t('ui.sidebar.hideChatList')} onClick={() => window.dispatchEvent(new Event('agentsdock:toggle-sidebar'))}><PanelLeftClose size={15} /></button></ShortcutTooltip>
-          <button className="icon-button" title={connected ? t("ui.Sidebar.Sidebar.refresh_0e91610") : t("ui.Sidebar.Sidebar.reconnect_bf8a9ea")} aria-label={connected ? t("ui.Sidebar.Sidebar.refresh_chats_bf904ec") : t("ui.Sidebar.Sidebar.reconnect_server_558abe3")} disabled={Boolean(switchingProfileId)} onClick={() => void useAppStore.getState().refreshSessions()}><RefreshCw size={15} /></button>
+          <button className="icon-button" title={connected ? t("ui.Sidebar.Sidebar.refresh_0e91610") : t("ui.Sidebar.Sidebar.reconnect_bf8a9ea")} aria-label={connected ? t("ui.Sidebar.Sidebar.refresh_chats_bf904ec") : t("ui.Sidebar.Sidebar.reconnect_server_558abe3")} disabled={Boolean(switchingProfileId)} onClick={() => void useAppStore.getState().refreshSessions(true)}><RefreshCw size={15} /></button>
           <ShortcutTooltip shortcut="newChat"><button className="icon-button" aria-label={t("ui.Sidebar.Sidebar.new_chat_db18382")} disabled={Boolean(switchingProfileId) || creatingChat} onClick={() => void useAppStore.getState().requestNewChat()}><Plus size={17} /></button></ShortcutTooltip>
         </div>
       </div>
@@ -414,7 +415,7 @@ function SessionContextMenu({ session, unread, folders }: { session: Session; un
   const running = useAppStore(state => state.activeSessionIds.has(session.id))
   const admitting = useAppStore(state => Boolean(state.turnAdmissionTokens[session.id]))
   const liveForkSupported = useAppStore(state => completedPrefixForkAvailable(state.health, session.backend))
-  const forkBlocked = (running || admitting) && !liveForkSupported
+  const forkBlocked = session?.backend === 'opencode' || (running || admitting) && !liveForkSupported
   return (
     <ContextMenu.Portal>
       <ContextMenu.Content className="menu-content">
@@ -432,7 +433,7 @@ function SessionContextMenu({ session, unread, folders }: { session: Session; un
           icon={Undo2}
           label={t("ui.Sidebar.SessionContextMenu.fork_chat_bc15630")}
           disabled={forkBlocked}
-          title={forkBlocked ? t('sessionFork.runningUnavailable') : running || admitting ? t('sessionFork.runningDescription') : undefined}
+          title={session?.backend === 'opencode' ? t('opencode.forkUnavailable') : forkBlocked ? t('sessionFork.runningUnavailable') : running || admitting ? t('sessionFork.runningDescription') : undefined}
           onSelect={() => void useAppStore.getState().forkSession(session.id)}
         />
         <MenuItem icon={Trash2} label={t("ui.Sidebar.SessionContextMenu.delete_chat_19f9176")} danger onSelect={() => window.dispatchEvent(new CustomEvent('agentsdock:confirm-delete', { detail: session }))} />
@@ -559,4 +560,10 @@ export function resolveSidebarDrop(
 
 export function sidebarFolderAssignmentPatch(folder: string): Partial<Session> {
   return { folder, archived: false }
+}
+
+export function sidebarReorderAnalyticsEvent(
+  operation: Extract<SidebarDropOperation, { kind: 'reorder-session' }>
+): 'chat_moved_to_folder' | 'chat_reordered' {
+  return operation.targetFolder ? 'chat_moved_to_folder' : 'chat_reordered'
 }

@@ -22,3 +22,13 @@ test('mobile select uses a bounded safe-area sheet with an explicit close target
   assert.match(dialogs, /<SheetCloseButton onPress=\{close\} label=\{`Close \$\{title\.toLocaleLowerCase\(\)\}`\} \/>/)
   assert.match(dialogs, /selectBackdropCompact: \{ justifyContent: 'flex-end'/)
 })
+
+test('chat details choices avoid nested iOS modals inside the page sheet', () => {
+  assert.match(inspector, /ActionSheetIOS\.showActionSheetWithOptions\(/)
+  assert.match(inspector, /if \(Platform\.OS === 'ios'\) \{[\s\S]*?ActionSheetIOS\.showActionSheetWithOptions\(/)
+  assert.match(inspector, /\{Platform\.OS !== 'ios' && open \? <View testID=\{`\$\{testID\}-options`\}/)
+  assert.doesNotMatch(inspector.slice(inspector.indexOf('function ChoiceField('), inspector.indexOf('function nextRunLabel(')), /<Modal/)
+  assert.match(inspector, /const anchor = Number\(event\.nativeEvent\.target\)/)
+  assert.match(inspector, /anchor: Number\.isFinite\(anchor\) && anchor > 0 \? anchor : undefined/)
+  assert.match(inspector, /disabledButtonIndices/)
+})

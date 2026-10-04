@@ -1969,6 +1969,66 @@ describe('projectTimeline', () => {
     })
   })
 
+  it('promotes legacy Claude commentary reports into assistant replies', () => {
+    const report = [
+      '# AgentsDock 数据报告',
+      '',
+      '这是完整报告，应该作为 assistant 正文显示，而不是藏在 Worked for 的展开区域。',
+      '',
+      '| 日期 | 活跃 | 新增 |',
+      '| --- | ---: | ---: |',
+      '| 9/28 | 20 | 10 |',
+      '| 9/29 | 36 | 28 |',
+    ].join('\n')
+    const rows = renderTimelineItems(projectTimeline([
+      event(1, 'turn_started', { run_id: 'claude-run', backend: 'claude', prompt: '生成报告' }),
+      event(2, 'reasoning_summary', {
+        run_id: 'claude-run', backend: 'claude', phase: 'commentary', text: report
+      }),
+      event(3, 'tool_started', {
+        run_id: 'claude-run', backend: 'claude', tool: { id: 'tool-1', name: 'Write' }
+      }),
+      event(4, 'tool_finished', {
+        run_id: 'claude-run', backend: 'claude', tool_id: 'tool-1', output: 'saved'
+      }),
+      event(5, 'turn_finished', {
+        run_id: 'claude-run', backend: 'claude', result_text: '存好了。'
+      })
+    ], []))
+
+    expect(rows.filter(row => row.kind === 'message').map(row => row.kind === 'message' ? messageItemText(row) : '')).toEqual([
+      '生成报告',
+      report,
+      '存好了。'
+    ])
+    const progressRows = rows.filter(row => row.kind === 'progress')
+    expect(progressRows).toHaveLength(1)
+    expect(progressRows[0]).toMatchObject({
+      events: [{ seq: 2 }, { seq: 3 }, { seq: 4 }],
+      promotedCommentaryIds: ['event-2']
+    })
+  })
+
+  it('does not promote a legacy Claude report twice when it is the canonical final answer', () => {
+    const report = '# Detailed report\n\nThe complete findings belong in one reply.'
+    const source = [
+      event(1, 'turn_started', { run_id: 'claude-run', backend: 'claude', prompt: 'Generate a report' }),
+      event(2, 'reasoning_summary', { run_id: 'claude-run', backend: 'claude', phase: 'commentary', text: report }),
+      event(3, 'turn_finished', { run_id: 'claude-run', backend: 'claude', result_text: report })
+    ]
+    const projector = new TimelineProjector([])
+    projector.append(source.slice(0, 2))
+    projector.append(source.slice(2))
+    for (const items of [projector.items, projectTimeline(source, [])]) {
+      const rows = renderTimelineItems(items)
+      expect(rows.filter(row => row.kind === 'message' && row.role === 'assistant')
+        .map(row => messageItemText(row as Extract<RenderTimelineItem, { kind: 'message' }>))).toEqual([report])
+      expect(rows.find(row => row.kind === 'progress')).toMatchObject({
+        events: [], sourceEvents: [{ seq: 2 }], promotedCommentaryIds: []
+      })
+    }
+  })
+
   it('never applies Claude final deduplication to Codex commentary', () => {
     const rows = renderTimelineItems(projectTimeline([
       event(1, 'turn_started', { run_id: 'codex-run', backend: 'codex', prompt: 'Answer it' }),

@@ -51,6 +51,8 @@ import type {
   TeamNetworkProjectionQuery,
   TeamNetworkPublicAddress,
   TeamNetworkServer,
+  TeamNetworkServerProfile,
+  TeamNetworkRenameServerInput,
   TeamAttachmentCacheInput,
   TeamAttachmentCacheResult,
   TeamAttachmentDeclareInput,
@@ -80,6 +82,7 @@ import {
   parseTeamNetworkPostBulletinInput,
   parseTeamNetworkProjectionQuery,
   parseTeamNetworkRegisterAgentInput,
+  parseTeamNetworkRenameServerInput,
   parseTeamNetworkReplyPassiveRequestInput,
   parseTeamNetworkSendMailboxInput,
   requireTeamNetworkBodyWithinCapability,
@@ -110,6 +113,7 @@ import type {
   SecurePeerControlStatus,
   SecurePeerDeactivateInput,
   SecurePeerForgetConnectionInput,
+  SecurePeerUpdateEndpointInput,
   SecurePeerJoinInput,
   SecurePeerPairing,
   SecurePeerPublishRouteInput,
@@ -118,6 +122,7 @@ import type {
   SecurePeerRevokeRouteInput,
   SecurePeerRevokeInput
 } from '../shared/secure-peer'
+import { normalizeSecurePeerEndpoint } from '../shared/secure-peer'
 import {
   TeamHubClient,
   TeamHubClientError,
@@ -184,6 +189,7 @@ export interface TeamHubDiscoveryProvider {
   activateSecurePeerPairing?(expected: SecurePeerProfileScope, input: SecurePeerActivateInput): Promise<SecurePeerControlStatus>
   deactivateSecurePeerConnection?(expected: SecurePeerProfileScope, input: SecurePeerDeactivateInput): Promise<SecurePeerControlStatus>
   forgetSecurePeerConnection?(expected: SecurePeerProfileScope, input: SecurePeerForgetConnectionInput): Promise<SecurePeerControlStatus>
+  updateSecurePeerConnectionEndpoint?(expected: SecurePeerProfileScope, input: SecurePeerUpdateEndpointInput, beforeWrite: () => void): Promise<SecurePeerControlStatus>
   secureTeamHubProxyFetch?(expected: TeamHubServerScope, basePath: string): typeof fetch
   serverTeamHubProxyFetch?(expected: TeamHubServerScope, basePath: string): typeof fetch
   publishSecurePeerRoute?(expected: SecurePeerProfileScope, input: SecurePeerPublishRouteInput): Promise<SecurePeerControlStatus>
@@ -539,6 +545,8 @@ export class TeamHubService {
                   ? { mail_subjects: health.capabilities.team_mail_subjects_v1 } : {}),
                 ...(health.capabilities.team_mail_threads_v1
                   ? { mail_threads: health.capabilities.team_mail_threads_v1 } : {}),
+                ...(health.capabilities.team_message_search_v1
+                  ? { search: health.capabilities.team_message_search_v1 } : {}),
                 ...(health.capabilities.team_mailbox_state_v1
                   ? { mailbox_state: health.capabilities.team_mailbox_state_v1 } : {}) }
             : null
@@ -1220,6 +1228,50 @@ export class TeamHubService {
     return clone(result)
   }
 
+  async renameNetworkServer(scope: TeamHubScope, rawInput: TeamNetworkRenameServerInput): Promise<TeamNetworkServerProfile> {
+    const input = parseTeamNetworkRenameServerInput(rawInput)
+    const requireMember = () => {
+      const teamId = this.requireTeamNetworkTeam(scope, input.teamId)
+      if (!this.peerAuthenticated || this.serverAuthenticated || this.designatedHost
+        || this.transport !== 'secure_peer' || !this.connectionId || !this.hostServerIdentity
+        || !this.principal || !['service', 'node'].includes(this.principal.kind ?? '')) {
+        throw new Error('Only an authenticated paired member can rename its own Team Network server.')
+      }
+      return teamId
+    }
+    const teamId = requireMember()
+    const principalId = this.principal!.id
+    const owned = await this.requireOwnedTeamNetworkContext(scope, teamId)
+    const server = owned.server
+    const requireOwner = () => {
+      requireMember()
+      if (!server.owned_by_caller || server.is_host || server.status !== 'active'
+        || server.id !== input.serverId || server.server_identity !== scope.serverIdentity
+        || this.principal?.id !== principalId) {
+        throw new Error('Select this connection’s own active member server to rename it.')
+      }
+    }
+    requireOwner()
+    try {
+      const result = await this.withAuth(scope, token => {
+        requireOwner()
+        return this.requireClient().renameNetworkServer(token, teamId, input.displayName)
+      }, false)
+      requireOwner()
+      if (result.server.id !== server.id || result.server.server_identity !== server.server_identity
+        || result.server.display_name !== input.displayName) {
+        throw new Error('Team Hub returned a mismatched server rename receipt.')
+      }
+      return clone(result.server)
+    } catch (error) {
+      this.requireScope(scope)
+      if (error instanceof TeamHubClientError && (
+        [404, 405, 501].includes(error.status) || error.status === 403 && error.code === 'route_forbidden'
+      )) throw new Error('This Team Network host does not support renaming member servers. Update the host and try again.')
+      throw error
+    }
+  }
+
   async registerNetworkAgent(scope: TeamHubScope, rawInput: TeamNetworkRegisterAgentInput) {
     const input = parseTeamNetworkRegisterAgentInput(rawInput)
     const teamId = this.requireTeamNetworkTeam(scope, input.teamId)
@@ -1583,6 +1635,9 @@ export class TeamHubService {
   async teamMessages(scope: TeamHubScope, rawQuery: TeamMessageQuery): Promise<import('../shared/team-network').TeamMessagePage> {
     const query = parseTeamMessageQuery(rawQuery)
     const teamId = this.requireTeamMessagesTeam(scope, query.teamId)
+    if (query.q && !this.requireTeamMessagesCapability().search) {
+      throw new Error('This Team Hub does not support message search. Update the Team Network host to search mail.')
+    }
     const coverageScope = () => {
       if (!query.includeMailboxCoverage) return null
       const hint = this.serverScope && this.discovery.currentMailHintScope?.(this.serverScope)
@@ -1599,6 +1654,7 @@ export class TeamHubService {
     )
     const result = await this.withAuth(scope, token => this.requireClient().teamMessages(token, teamId, {
       box: query.box,
+      ...(query.q ? { q: query.q } : {}),
       ...(query.addressKind ? { addressKind: query.addressKind } : {}),
       ...(query.addressId ? { addressId: query.addressId } : {}),
       unread: query.unread,
@@ -2419,6 +2475,50 @@ export class TeamHubService {
     this.requireSameServerScope(server)
     const stillAffectsCurrent = affectsCurrent && secureBindingMatches(this.binding, input)
     if (stillAffectsCurrent) this.dropSecurePeerRuntime(false)
+    return clone(result)
+  }
+
+  async updateSecurePeerConnectionEndpoint(
+    scope: SecurePeerProfileScope,
+    input: SecurePeerUpdateEndpointInput
+  ): Promise<SecurePeerControlStatus> {
+    const server = this.requireSecurePeerProfileScope(scope)
+    if (!this.discovery.updateSecurePeerConnectionEndpoint) throw securePeerUnavailable()
+    const endpoint = normalizeSecurePeerEndpoint(input?.host)
+    if (input.confirmed !== true) throw new Error('Confirm the saved host address change before continuing.')
+    const affectsCurrent = secureBindingMatches(this.binding, input)
+    const affectsSaved = secureBindingMatches(this.savedSecurePeerBinding(server), input)
+    let generation = this.generation
+    let attempt = this.connectAttempt
+    const result = await this.discovery.updateSecurePeerConnectionEndpoint(scope, input, () => {
+      this.requireSameServerScope(server)
+      // The member control preflight has now validated capability, instance,
+      // saved address and trust. Fence only an admitted write, keeping invalid
+      // or unchanged input side-effect free for the current healthy runtime.
+      if (this.generation !== generation || this.connectAttempt !== attempt) return
+      if (affectsCurrent && secureBindingMatches(this.binding, input)) this.dropSecurePeerRuntime(false)
+      generation = this.generation
+      attempt = this.connectAttempt
+    })
+    this.requireSameServerScope(server)
+    this.requireSecurePeerControlScope(result, server)
+    const migrated = result.pairings.filter(pairing => pairing.connectionId === input.connectionId)
+    if (result.serverInstanceId !== input.expectedServerInstanceId || migrated.length !== 1
+      || migrated[0].direction !== 'outgoing' || migrated[0].trustState !== 'approved'
+      || migrated[0].hostServerIdentity !== input.expectedHostServerIdentity
+      || migrated[0].hubIdentity !== input.expectedHubIdentity
+      || migrated[0].remoteEndpoint !== endpoint.endpoint) {
+      throw new Error('AgentsServer returned a mismatched secure host address change.')
+    }
+    if (this.generation === generation && this.connectAttempt === attempt
+      && result.activeConnectionId === input.connectionId
+      && ((affectsCurrent && secureBindingMatches(this.binding, input))
+        || (affectsSaved && !this.binding && secureBindingMatches(this.savedSecurePeerBinding(server), input)))) {
+      // This explicit action permits one normal pinned health/session check.
+      // An inactive saved connection remains inactive; no activation is sent.
+      await this.connect({ transport: 'secure_peer' })
+      this.requireSameServerScope(server)
+    }
     return clone(result)
   }
 

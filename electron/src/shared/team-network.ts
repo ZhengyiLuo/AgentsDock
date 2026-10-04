@@ -62,6 +62,14 @@ export interface TeamNetworkServer {
   owned_by_caller: boolean
 }
 
+export type TeamNetworkServerProfile = Pick<TeamNetworkServer, 'id' | 'server_identity' | 'display_name'>
+
+export interface TeamNetworkRenameServerInput {
+  teamId: string
+  serverId: string
+  displayName: string
+}
+
 export interface TeamNetworkAgent {
   id: string
   server_id: string
@@ -328,6 +336,13 @@ export interface TeamMailboxState {
   version: number
 }
 
+export interface TeamMessageSearchCapability {
+  available: true
+  version: 1
+  fields: ['subject', 'body', 'sender']
+  max_query_chars: 200
+}
+
 export interface TeamMessagesCapability {
   available: true
   version: 1
@@ -342,6 +357,8 @@ export interface TeamMessagesCapability {
   mail_subjects?: TeamMailSubjectsCapability
   mail_threads?: TeamMailThreadsCapability
   mailbox_state?: TeamMailboxStateCapability
+  /** Desktop overlay from the separately negotiated indexed-search capability. */
+  search?: TeamMessageSearchCapability
   /** Desktop overlay derived from the verified Hub's schema, never from message data. */
   skill_announcement_deletion?: true
   /** Desktop overlay from the separately negotiated exact-host moderation capability. */
@@ -529,6 +546,7 @@ export interface TeamMessageSkillInput {
 export interface TeamMessageQuery {
   teamId: string
   box: TeamMessageBox
+  q?: string
   addressKind?: Extract<TeamRecipientKind, 'server' | 'human'>
   addressId?: string
   unread?: boolean
@@ -788,6 +806,20 @@ export function parseTeamMailboxStateInput(value: unknown): TeamMailboxStateInpu
 }
 
 /** Parse the exact additive Team Messages V1 Hub capability. */
+export function parseTeamMessageSearchCapability(value: unknown): TeamMessageSearchCapability {
+  const item = strictRecord(value, 'Team Messages search capability', ['available', 'version', 'fields', 'max_query_chars'])
+  if (item.available !== true || item.version !== 1 || item.max_query_chars !== 200
+    || !exactStringArray(item.fields, ['subject', 'body', 'sender'])) throw invalidContract('Team Messages search capability')
+  return { available: true, version: 1, fields: ['subject', 'body', 'sender'], max_query_chars: 200 }
+}
+
+export function parseTeamMessageSearchQuery(value: unknown): string | undefined {
+  if (value === undefined) return undefined
+  if (typeof value !== 'string' || !isWellFormed(value) || /[\u0000-\u001f\u007f-\u009f]/.test(value)
+    || !hasAtMostCodePoints(value.trim(), 200)) throw new Error('Team Messages search must contain at most 200 characters and no control characters.')
+  return value.trim() || undefined
+}
+
 export function parseTeamMessagesCapability(value: unknown): TeamMessagesCapability {
   const item = strictRecord(value, 'Team Messages capability', [
     'available', 'version', 'kinds', 'recipient_kinds', 'max_body_bytes',
@@ -1155,8 +1187,8 @@ export function parseTeamSkillResponse(value: unknown, teamIdValue: string): { s
 export function parseTeamMessageQuery(value: unknown): Required<Pick<TeamMessageQuery, 'teamId' | 'box' | 'unread' | 'afterSequence' | 'limit'>> & Omit<TeamMessageQuery, 'teamId' | 'box' | 'unread' | 'afterSequence' | 'limit'> {
   const item = strictInputRecord(value, 'Team Messages query', [
     'teamId', 'box', 'addressKind', 'addressId', 'unread', 'fromKind', 'fromId',
-    'since', 'afterSequence', 'limit', 'includeMailboxCoverage', 'afterArrivalId'
-  ], ['addressKind', 'addressId', 'unread', 'fromKind', 'fromId', 'since', 'afterSequence', 'limit', 'includeMailboxCoverage', 'afterArrivalId'])
+    'since', 'afterSequence', 'limit', 'includeMailboxCoverage', 'afterArrivalId', 'q'
+  ], ['addressKind', 'addressId', 'unread', 'fromKind', 'fromId', 'since', 'afterSequence', 'limit', 'includeMailboxCoverage', 'afterArrivalId', 'q'])
   if (item.box !== 'inbox' && item.box !== 'feed' && item.box !== 'sent') {
     throw new Error('Team Messages box is invalid.')
   }
@@ -1169,9 +1201,10 @@ export function parseTeamMessageQuery(value: unknown): Required<Pick<TeamMessage
   const fromId = item.fromId === undefined ? undefined : opaqueId(item.fromId, 'Team Messages sender')
   if ((fromKind === undefined) !== (fromId === undefined)) throw new Error('Team Messages sender filter is invalid.')
   const afterSequence = optionalInteger(item.afterSequence, 'Team Messages sequence', 0, Number.MAX_SAFE_INTEGER, 0)
+  const q = parseTeamMessageSearchQuery(item.q)
   const includeMailboxCoverage = item.includeMailboxCoverage === undefined ? undefined : inputBoolean(item.includeMailboxCoverage, 'Team Mail coverage')
   if (includeMailboxCoverage) {
-    if (item.box !== 'inbox' || addressKind !== 'server' || item.unread === true || fromKind || item.since !== undefined) {
+    if (item.box !== 'inbox' || addressKind !== 'server' || item.unread === true || fromKind || item.since !== undefined || q) {
       throw new Error('Team Mail coverage requires an unfiltered server inbox.')
     }
     parseMailArrivalCursor({ through_sequence: afterSequence, arrival_id: item.afterArrivalId ?? null })
@@ -1179,6 +1212,7 @@ export function parseTeamMessageQuery(value: unknown): Required<Pick<TeamMessage
   return {
     teamId: opaqueId(item.teamId, 'team'),
     box: item.box,
+    ...(q ? { q } : {}),
     ...(addressKind ? { addressKind } : {}),
     ...(addressId ? { addressId } : {}),
     unread: item.unread === undefined ? false : inputBoolean(item.unread, 'Team Messages unread filter'),
@@ -1551,6 +1585,27 @@ export function parseTeamNetworkPassiveRequestDetails(value: unknown): TeamNetwo
     request: parsePassiveRequest(item.request),
     reply: item.reply == null ? null : parseTeamNetworkMailboxEntry(item.reply)
   }
+}
+
+export function parseTeamNetworkRenameServerInput(value: unknown): TeamNetworkRenameServerInput {
+  const item = strictInputRecord(value, 'Server rename', ['teamId', 'serverId', 'displayName'])
+  return {
+    teamId: opaqueId(item.teamId, 'team'),
+    serverId: opaqueId(item.serverId, 'server'),
+    displayName: memberServerName(item.displayName)
+  }
+}
+
+export function parseTeamNetworkServerProfileResponse(value: unknown): { server: TeamNetworkServerProfile } {
+  const response = strictRecord(value, 'server profile response', ['server'])
+  const server = strictRecord(response.server, 'server profile', ['id', 'server_identity', 'display_name'])
+  const name = memberServerName(server.display_name)
+  if (name !== server.display_name) throw invalidContract('server profile name')
+  return { server: {
+    id: opaqueId(server.id, 'server'),
+    server_identity: opaqueId(server.server_identity, 'server identity'),
+    display_name: name
+  } }
 }
 
 export function parseTeamNetworkRegisterAgentInput(value: unknown): TeamNetworkRegisterAgentInput {
@@ -2318,6 +2373,15 @@ function opaqueId(value: unknown, label: string): string {
 
 function nullableId(value: unknown, label: string): string | null {
   return value == null ? null : opaqueId(value, label)
+}
+
+function memberServerName(value: unknown): string {
+  if (typeof value !== 'string' || !isWellFormed(value)
+    || /[\u0000-\u001f\u007f-\u009f]/.test(value)
+    || !value.trim() || Buffer.byteLength(value.trim(), 'utf8') > 160) {
+    throw new Error('Server name must be nonempty, contain no control characters, and use at most 160 UTF-8 bytes.')
+  }
+  return value.trim()
 }
 
 function displayName(value: unknown, label: string): string {

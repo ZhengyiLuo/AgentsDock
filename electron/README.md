@@ -63,11 +63,48 @@ The access token is stored as a generic macOS Keychain password under the
 `com.zhengyiluo.AgentsDock` service. Packaged startup never decrypts legacy
 Electron `safeStorage` data synchronously; that can block before a window exists
 when an ad-hoc signing identity changes.
+Direct macOS builds also use the bounded Keychain helper when manually adding
+servers or replacing tokens. A failed write leaves the existing connection
+intact and reports an error; it never falls back to synchronous OSCrypt or
+plaintext. Sandboxed Mac App Store and other-platform storage is unchanged.
 
 The app uses a local SQLite cache at the same application-support location.
 Server identity scopes sessions, preferences, timeline rows, read state, jobs,
 files, and pins so aliases for one server share data without contaminating a
 different server.
+
+<a id="opencode-optional-beta-backend"></a>
+
+## OpenCode
+
+OpenCode is available in desktop stable 1.0.9 with AgentsServer 1.0.9 and appears
+in the chat backend picker. The server must advertise the OpenCode v1 contract;
+an older server shows an upgrade requirement and cannot silently switch the
+chat to another backend.
+Install the server-supported OpenCode CLI and configure its provider on the
+server host. Settings → My Agents → OpenCode reports readiness and setup
+guidance and supports custom API connections. OpenCode is optional and does not
+block other providers when it is absent. This availability applies to desktop;
+mobile provider support depends on its separately released client.
+
+Choose a server-advertised model, or leave the model empty to use OpenCode's
+native default. Existing AgentsDock chats resume their native OpenCode session
+on subsequent turns. Uploaded attachments use the normal native file flow.
+The Skills menu requires the separate server OpenCode provider-command
+capability; selected skills retain their opaque server-owned identifiers.
+
+Permissions apply to future turns: **OpenCode settings** preserves native
+policy, which may allow shell commands; **Full access** allows tools and
+commands automatically; **Plan only** applies a read-only tool policy, not an
+operating-system sandbox. Changing the permission mode or working directory
+resets native OpenCode context while retaining the visible AgentsDock timeline.
+
+OpenCode supports explicitly authorized cross-chat routes through the run-bound
+AgentsDock tool on matching servers, including tool-capable custom API models.
+The 1.0.9 release does not provide external history import, native session forks,
+side chats, live steering, or native goals for OpenCode.
+Ordinary queued follow-ups and Stop remain available. A copied-memory fork
+is not presented as a native clone.
 
 ## Architecture
 
@@ -78,6 +115,9 @@ different server.
 
 Renderer visual changes follow the token and component guidance in
 [DESIGN_SYSTEM.md](DESIGN_SYSTEM.md).
+All feature work and bug fixes also follow the hands-on acceptance requirements
+in [APP_DEV_OPERATIONS.md](../docs/APP_DEV_OPERATIONS.md). Mocked checks alone
+do not establish that a feature works through the real app/server connection.
 
 The renderer is cache-first. It opens the cached tail immediately, subscribes
 to live events, and performs an `after=<last cached seq>` reconciliation in the
@@ -92,6 +132,20 @@ support is loaded only after a file opens, clean inactive files are evicted
 from memory, and revision-checked saves prevent overwriting agent changes.
 Files above 512 KiB use a lightweight read-only text viewer instead of the
 syntax parser so opening source never competes with the chat renderer.
+
+The **Changes** tab reviews the selected workspace's entire Git worktree, not
+only changes attributed to an agent turn. Open it to inspect staged, unstaged,
+untracked and conflicted files; stage/unstage whole files; review and commit the
+staged set; or resolve text conflicts before continuing an existing merge or
+rebase. Abort requires confirmation. Git reads happen only on opening the tab,
+explicit refresh, file selection and action reconciliation—there is no polling.
+Repository revisions fence mutations against changes made by other agents or
+editors. This requires matching standalone AgentsServer Git endpoints and the
+native operator connection; shared-chat web guests have no Git controls.
+
+This first cut does not create branches/merges, push, or manage PRs/MRs. Binary
+conflicts and repositories requiring executable Git hooks/custom filters may
+need the terminal; the app reports that rather than bypassing repository policy.
 
 See [FEATURE_PARITY.md](FEATURE_PARITY.md) for the implementation contract and
 verification status.
