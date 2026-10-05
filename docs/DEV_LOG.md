@@ -11,11 +11,15 @@
   receipt remains.
 - Regression tests reproduce the failure on the frozen beta.3 source and cover
   forward import, existing history, incomplete steer metadata, wrong turns and
-  ambiguous repeated inputs. Offline native-history replay checks both paths.
+  ambiguous repeated inputs, including equal messages split across committed
+  checkpoints. All 52 native-history tests pass. Offline native-history replay
+  checks both paths.
 - Personally exercised the signed beta.3 desktop app against an isolated
   changed-source server using synthetic history: open the chat, verify the
   original follow-up appears once, reload and verify again. This is real
-  app/server rendering acceptance, not fresh live-provider goal execution or
+  app/server rendering acceptance; a second HTTP import and reload verifies
+  both genuine equal messages remain visible across separate checkpoints.
+  These checks are not fresh live-provider goal execution or
   acceptance of a newly signed server package. No release or live deployment.
 
 ## 2026-10-04 — Prepare matched 1.0.10-beta.3 (unreleased)
