@@ -1,5 +1,35 @@
 # Public development log
 
+## 2026-10-05 — Publish the matched 1.0.10-beta.4 desktop/server release
+
+- Published [desktop beta build 1248](https://github.com/ZhengyiLuo/AgentsDock/releases/tag/v1.0.10-beta.4),
+  its compatibility mirror, `@agentsdock/server@1.0.10-beta.4`, and the
+  [signed legacy server bridge](https://github.com/ZhengyiLuo/AgentsServer/releases/tag/v1.0.10-beta.4)
+  from pinned source `941bc4cda659c1072d405b95a3dcc5629a031f46`.
+  The app pins the matching signed npm runtime descriptor. npm `beta` selects
+  this release; stable 1.0.9, npm `latest`, and stable release assets are unchanged.
+- Reused the existing signing identities and server trust key. macOS universal
+  packages are signed and notarized; Linux x64/ARM64 and Windows x64 packages
+  passed native platform verification. Windows remains explicitly unsigned.
+  [Final desktop verification](https://github.com/ZhengyiLuo/AgentsDock/actions/runs/37363079308/attempts/3)
+  covers inspection, all four native platforms, and the pinned receipt.
+- Native npm installation checks, nine scoped macOS app/server replay cases,
+  and Linux rollback checks were audited against the exact prepared artifacts.
+  Packaged synthetic-history checks also passed. Replay exercises native app
+  replacement/relaunch and automatic server reconciliation using isolated test
+  state; it is not acceptance of every production migration or provider workflow.
+- Anonymous post-publication verification matched all 16 desktop assets in
+  each feed, all three signed bridge assets, the exact npm archive, both Beta
+  feeds, and the unchanged stable baseline. Desktop `SHA256SUMS` SHA-256:
+  `b0df6a301eee3d9829236955a27dd95e17f1f6dd0f4f71dd89703e4afbae5eb2`.
+- Still unverified: fresh live-provider goal/attachment flow, populated native
+  provider-history migration, active/queued provider work during managed update,
+  logout/reboot survival, and the native Windows updater journey. No mobile
+  release or existing-service deployment is part of this release pass.
+- The separate unscoped `agentsdock` convenience CLI remains unpublished;
+  fresh macOS automatic setup through that CLI remains unverified. The
+  published matched server runtime is the scoped `@agentsdock/server` package.
+
 ## 2026-10-03 — Preserve automatic naming across follow-up messages
 
 - Compare effective title runtime settings before and after session updates,
