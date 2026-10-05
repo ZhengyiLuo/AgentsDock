@@ -1,5 +1,23 @@
 # Public development log
 
+## 2026-10-05 — Prevent goal follow-ups from replaying during history sync
+
+- Recognize accepted Codex goal follow-ups as existing user messages when
+  reconciling provider history. Keep the exact native turn identity so an
+  identical message sent in another turn remains visible.
+- Apply the same correction to already-imported duplicates without rewriting
+  original user messages or provider transcripts. Recover earlier goal turns
+  from their public provider message identities when only a later completion
+  receipt remains.
+- Regression tests reproduce the failure on the frozen beta.3 source and cover
+  forward import, existing history, incomplete steer metadata, wrong turns and
+  ambiguous repeated inputs. Offline native-history replay checks both paths.
+- Personally exercised the signed beta.3 desktop app against an isolated
+  changed-source server using synthetic history: open the chat, verify the
+  original follow-up appears once, reload and verify again. This is real
+  app/server rendering acceptance, not fresh live-provider goal execution or
+  acceptance of a newly signed server package. No release or live deployment.
+
 ## 2026-10-04 — Prepare matched 1.0.10-beta.3 (unreleased)
 
 - Prepare the integrated beta line for the direct desktop app, signed npm
