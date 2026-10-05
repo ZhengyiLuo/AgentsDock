@@ -1,5 +1,23 @@
 # Public development log
 
+## 2026-10-05 — Prepare matched 1.0.10-beta.4 (unreleased)
+
+- Carry the reviewed native goal-follow-up history repair into a new matched
+  direct desktop, signed npm server, short CLI and legacy bridge candidate.
+  Preserve stable `1.0.9` and the frozen beta.3 artifacts; do not relabel them.
+- Require verified source-occurrence proof before suppressing replayed goal
+  input. Preserve genuine repeated messages, including equal text arriving in
+  separate import batches. All 52 focused native-history tests pass, including
+  the split-checkpoint and missing-proof regressions.
+- The previous signed client with the changed-source server passed synthetic
+  HTTP import, history rendering and reload checks. These observations do not
+  establish a newly signed package or fresh live-provider acceptance.
+- Commit the versioned source before packaging. Reuse the existing signing
+  identities and server trust key; verify the new native packages, exact npm
+  bytes, signed bridge and update metadata before exposing the release.
+- Availability: release preparation only; publication and exact-package
+  acceptance are recorded separately. Mobile builds are outside this release.
+
 ## 2026-10-05 — Prevent goal follow-ups from replaying during history sync
 
 - Recognize accepted Codex goal follow-ups as existing user messages when
