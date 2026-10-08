@@ -47,8 +47,9 @@ with tarfile.open(sys.argv[1], "r:gz") as archive:
   return JSON.parse(execFileSync('python3', ['-c', program, archive], { encoding: 'utf8', maxBuffer: 65536, timeout: 30000 }))
 }
 
-export function validateCandidate({ directory, sourceSHA, acceptedManifestSHA256, appVersion, release, publicKey = readFileSync(join(ROOT, 'server/release-public-key.pem')) }) {
+export function validateCandidate({ directory, sourceSHA, acceptedManifestSHA256, appVersion, release, expectedLatest, publicKey = readFileSync(join(ROOT, 'server/release-public-key.pem')) }) {
   if (!/^[a-f0-9]{40}$/.test(sourceSHA) || !/^[a-f0-9]{64}$/.test(acceptedManifestSHA256)) throw new Error('Explicit reviewed source and accepted manifest hashes are required.')
+  if (expectedLatest !== undefined && !/^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/.test(expectedLatest)) throw new Error('Runtime latest baseline must be an explicit stable version.')
   const manifest = readRegular(join(directory, MANIFEST), 8192)
   if (hash(manifest) !== acceptedManifestSHA256) throw new Error('Candidate descriptor differs from the accepted manifest hash.')
   const descriptor = validateDescriptor(manifest, readRegular(join(directory, SIGNATURE), 64), publicKey, appVersion)
@@ -60,7 +61,7 @@ export function validateCandidate({ directory, sourceSHA, acceptedManifestSHA256
   const metadata = readPackageMetadata(archive)
   if (metadata.name !== descriptor.npm.name || metadata.version !== descriptor.version || metadata.private || metadata.repository?.url !== 'git+https://github.com/ZhengyiLuo/AgentsDock.git' || metadata.publishConfig?.registry !== `${REGISTRY}/` || metadata.publishConfig?.access !== 'public' || Object.keys(metadata.publishConfig).some(key => !['access', 'registry'].includes(key))) throw new Error('Package identity, repository or publication settings do not match the accepted release.')
   if (metadata.scripts || metadata.dependencies || metadata.optionalDependencies || metadata.peerDependencies || metadata.bundledDependencies || metadata.bundleDependencies) throw new Error('Server package must have no lifecycle scripts or npm dependencies.')
-  return { descriptor, archive, distTag: descriptor.track === 'beta' ? 'beta' : 'latest', manifestSHA256: acceptedManifestSHA256 }
+  return { descriptor, archive, distTag: descriptor.track === 'beta' ? 'beta' : 'latest', manifestSHA256: acceptedManifestSHA256, ...(expectedLatest === undefined ? {} : { expectedRuntimeLatest: expectedLatest }) }
 }
 
 async function requestBytes(url, limit, fetchImpl, allowMissing = false) {
@@ -101,10 +102,17 @@ function advancesVersion(candidate, current) {
 }
 
 function verifyPublishedMetadata(candidate, metadata) {
+  verifyLatestBaseline(candidate, metadata)
   const { descriptor, distTag } = candidate
   const version = metadata.versions[descriptor.version]
   if (!version || version.name !== descriptor.npm.name || version.version !== descriptor.version || version.dist?.integrity !== descriptor.npm.integrity || version.dist?.tarball !== descriptor.archive.url) throw new Error('Published npm version differs from the accepted descriptor or is missing.')
   if (metadata['dist-tags'][distTag] !== descriptor.version) throw new Error('Published dist-tag does not select the accepted version; no tag will be changed automatically.')
+}
+
+function verifyLatestBaseline(candidate, metadata, beforePublication = false) {
+  if (candidate.expectedRuntimeLatest !== undefined && (candidate.distTag === 'beta' || beforePublication) && metadata['dist-tags'].latest !== candidate.expectedRuntimeLatest) {
+    throw new Error('Runtime latest tag differs from the explicit pre-publication stable baseline; no tag will be changed.')
+  }
 }
 
 export async function verifyRegistry(candidate, { fetchImpl = fetch } = {}) {
@@ -124,6 +132,7 @@ export async function publicationPreflight(candidate, { fetchImpl = fetch } = {}
     await verifyRegistry(candidate, { fetchImpl })
     return false
   }
+  verifyLatestBaseline(candidate, metadata, true)
   const current = metadata['dist-tags'][candidate.distTag]
   if (current !== undefined && !advancesVersion(version, current)) throw new Error('Refusing to move the npm dist-tag backward or overwrite its current version.')
   return true
@@ -132,7 +141,7 @@ export async function publicationPreflight(candidate, { fetchImpl = fetch } = {}
 async function main() {
   const [operation, directory, sourceSHA, acceptedManifestSHA256, releasePath] = process.argv.slice(2)
   if (!['inspect', 'preflight', 'verify'].includes(operation) || !releasePath || process.argv.length !== 7) throw new Error('Usage: verify_npm_publication.mjs inspect|preflight|verify DIRECTORY SOURCE_SHA ACCEPTED_MANIFEST_SHA256 DRAFT_RELEASE_JSON')
-  const candidate = validateCandidate({ directory, sourceSHA, acceptedManifestSHA256, appVersion: readFileSync(join(ROOT, 'server/VERSION'), 'utf8').trim(), release: JSON.parse(readRegular(releasePath, 1024 * 1024)) })
+  const candidate = validateCandidate({ directory, sourceSHA, acceptedManifestSHA256, expectedLatest: process.env.EXPECTED_NPM_LATEST, appVersion: readFileSync(join(ROOT, 'server/VERSION'), 'utf8').trim(), release: JSON.parse(readRegular(releasePath, 1024 * 1024)) })
   if (operation === 'inspect') {
     console.log(JSON.stringify({ version: candidate.descriptor.version, distTag: candidate.distTag, archive: candidate.archive, manifestSHA256: candidate.manifestSHA256 }))
   } else if (operation === 'preflight') {

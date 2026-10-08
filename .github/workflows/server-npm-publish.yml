@@ -1,4 +1,4 @@
-name: Prepare or publish reviewed npm server release
+name: Prepare or publish matched npm packages
 
 # Manual only. Descriptor signing and native/migration acceptance happen between
 # prepare and publish. This workflow never creates or publishes a GitHub release.
@@ -30,6 +30,18 @@ on:
         type: string
       accepted_manifest_sha256:
         description: Publish only; SHA-256 of the exact descriptor accepted with the native app
+        type: string
+      cli_candidate_tag:
+        description: Publish only; separate cli-candidate-vVERSION draft containing CLI tarball and receipt
+        type: string
+      accepted_cli_receipt_sha256:
+        description: Publish only; SHA-256 of the exact CLI receipt accepted with the signed runtime
+        type: string
+      expected_cli_latest:
+        description: Publish only; observed agentsdock stable latest, or absent for first publication
+        type: string
+      expected_runtime_latest:
+        description: Publish only; observed scoped runtime stable latest (preserved by beta publication)
         type: string
 
 permissions:
@@ -70,14 +82,23 @@ jobs:
           package-manager-cache: false
       - name: Verify CLI and actual offline npm packaging
         run: |
-          node --test server/npm/cli.test.cjs scripts/tests/stage_coordinated_release.test.mjs scripts/tests/verify_npm_publication.test.mjs
+          node --test server/npm/cli.test.cjs server/npm/agentsdock/*.test.cjs scripts/tests/stage_coordinated_release.test.mjs scripts/tests/verify*publication.test.mjs
           python3 -m unittest discover -s server/tests -t server -p test_npm_release_package.py
+          python3 -m unittest discover -s server/tests -t server -p test_agentsdock_cli_package.py
       - name: Prepare exact unsigned payload for signing and acceptance
         run: python3 server/scripts/package_npm_release.py --output dist/npm-server --require-clean-source
+      - name: Prepare same-source convenience CLI without running its setup hook
+        run: python3 server/scripts/package_agentsdock_cli.py --output dist/agentsdock-cli --require-clean-source
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: unsigned-npm-server-${{ inputs.source_sha }}
           path: dist/npm-server/*
+          if-no-files-found: error
+          retention-days: 14
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: agentsdock-cli-${{ inputs.source_sha }}
+          path: dist/agentsdock-cli/*
           if-no-files-found: error
           retention-days: 14
 
@@ -91,7 +112,7 @@ jobs:
       # GitHub requires write access to read the private accepted release draft.
       contents: write
       id-token: write
-    timeout-minutes: 15
+    timeout-minutes: 30
     env:
       PYTHONDONTWRITEBYTECODE: "1"
       SOURCE_SHA: ${{ inputs.source_sha }}
@@ -99,6 +120,10 @@ jobs:
       REVIEWED_WORKFLOW_SHA: ${{ inputs.workflow_sha || inputs.source_sha }}
       CANDIDATE_TAG: ${{ inputs.candidate_tag }}
       ACCEPTED_MANIFEST_SHA256: ${{ inputs.accepted_manifest_sha256 }}
+      CLI_CANDIDATE_TAG: ${{ inputs.cli_candidate_tag }}
+      ACCEPTED_CLI_RECEIPT_SHA256: ${{ inputs.accepted_cli_receipt_sha256 }}
+      EXPECTED_CLI_LATEST: ${{ inputs.expected_cli_latest }}
+      EXPECTED_NPM_LATEST: ${{ inputs.expected_runtime_latest }}
     steps:
       - name: Require the reviewed workflow and source commit
         env:
@@ -113,6 +138,10 @@ jobs:
           test "$WORKFLOW_REF" = "refs/heads/$SOURCE_REF"
           test "$WORKFLOW_SHA" = "$REVIEWED_WORKFLOW_SHA"
           [[ "$ACCEPTED_MANIFEST_SHA256" =~ ^[0-9a-f]{64}$ ]] || exit 1
+          [[ "$ACCEPTED_CLI_RECEIPT_SHA256" =~ ^[0-9a-f]{64}$ ]] || exit 1
+          stable='^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$'
+          [[ "$EXPECTED_NPM_LATEST" =~ $stable ]] || exit 1
+          [[ "$EXPECTED_CLI_LATEST" == absent || "$EXPECTED_CLI_LATEST" =~ $stable ]] || exit 1
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
         with:
           ref: ${{ inputs.source_sha }}
@@ -135,8 +164,9 @@ jobs:
       - name: Check OIDC-capable npm and focused publication guards
         run: |
           node -e 'const v=require("node:child_process").execFileSync("npm",["--version"],{encoding:"utf8"}).trim().split(".").map(Number);if(v[0]<11||(v[0]===11&&(v[1]<5||(v[1]===5&&v[2]<1))))throw Error("npm >=11.5.1 is required")'
-          node --test server/npm/cli.test.cjs scripts/tests/stage_coordinated_release.test.mjs scripts/tests/verify_npm_publication.test.mjs
+          node --test server/npm/cli.test.cjs server/npm/agentsdock/*.test.cjs scripts/tests/stage_coordinated_release.test.mjs scripts/tests/verify*publication.test.mjs
           python3 -m unittest discover -s server/tests -t server -p test_npm_release_package.py
+          python3 -m unittest discover -s server/tests -t server -p test_agentsdock_cli_package.py
       - name: Download the accepted signed bundle from its separate draft
         env:
           GH_TOKEN: ${{ github.token }}
@@ -148,6 +178,19 @@ jobs:
           mkdir -p "$RUNNER_TEMP/npm-candidate"
           gh release view "$CANDIDATE_TAG" --repo "$GITHUB_REPOSITORY" --json tagName,isDraft,assets > "$RUNNER_TEMP/npm-candidate-release.json"
           gh release download "$CANDIDATE_TAG" --repo "$GITHUB_REPOSITORY" --dir "$RUNNER_TEMP/npm-candidate" --pattern agents-server-npm-manifest.json --pattern agents-server-npm-manifest.sig --pattern "server-$version.tgz"
+      - name: Inspect the paired CLI before publishing either package
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          version="$(cat server/VERSION)"
+          test "$CLI_CANDIDATE_TAG" = "cli-candidate-v$version"
+          mkdir -p "$RUNNER_TEMP/cli-candidate"
+          gh release view "$CLI_CANDIDATE_TAG" --repo "$GITHUB_REPOSITORY" --json tagName,isDraft,assets,targetCommitish > "$RUNNER_TEMP/cli-candidate-release.json"
+          jq -e --arg tag "$CLI_CANDIDATE_TAG" --arg source "$SOURCE_SHA" --arg archive "agentsdock-$version.tgz" \
+            '.isDraft == true and .tagName == $tag and .targetCommitish == $source and ([.assets[].name] | sort) == ([$archive, "agentsdock-cli-receipt.json"] | sort)' "$RUNNER_TEMP/cli-candidate-release.json"
+          gh release download "$CLI_CANDIDATE_TAG" --repo "$GITHUB_REPOSITORY" --dir "$RUNNER_TEMP/cli-candidate" --pattern agentsdock-cli-receipt.json --pattern "agentsdock-$version.tgz"
+          node scripts/verify_agentsdock_cli_publication.mjs inspect "$RUNNER_TEMP/cli-candidate" "$version" "$SOURCE_SHA" "$ACCEPTED_CLI_RECEIPT_SHA256" "$RUNNER_TEMP/npm-candidate" "$ACCEPTED_MANIFEST_SHA256" "$EXPECTED_CLI_LATEST"
       - name: Verify acceptance pin, signature, exact payload and registry preconditions
         id: candidate
         run: node scripts/verify_npm_publication.mjs preflight "$RUNNER_TEMP/npm-candidate" "$SOURCE_SHA" "$ACCEPTED_MANIFEST_SHA256" "$RUNNER_TEMP/npm-candidate-release.json"
@@ -174,4 +217,37 @@ jobs:
             fi
           done
           printf 'Exact registry verification did not succeed within the bounded visibility window.\n' >&2
+          exit 1
+      - name: Verify CLI registry preconditions after the runtime is public
+        id: cli
+        shell: bash
+        run: |
+          version="$(cat server/VERSION)"
+          node scripts/verify_agentsdock_cli_publication.mjs preflight "$RUNNER_TEMP/cli-candidate" "$version" "$SOURCE_SHA" "$ACCEPTED_CLI_RECEIPT_SHA256" "$RUNNER_TEMP/npm-candidate" "$ACCEPTED_MANIFEST_SHA256" "$EXPECTED_CLI_LATEST" > "$RUNNER_TEMP/cli-preflight.json"
+          jq -r '"publish=\(.publish)", "archive=\(.archive)", "dist_tag=\(.distTag)"' "$RUNNER_TEMP/cli-preflight.json" >> "$GITHUB_OUTPUT"
+          if jq -e '.firstPublication == true' "$RUNNER_TEMP/cli-preflight.json" > /dev/null; then
+            printf 'Partial publication: scoped runtime %s is public and verified; agentsdock is not yet public. Owner bootstrap of the accepted CLI tarball is required, then rerun with unchanged pins. This is not a completed matched release.\n' "$version" >> "$GITHUB_STEP_SUMMARY"
+            printf 'First agentsdock publication needs owner bootstrap and its own npm Trusted Publisher. A registry 404 does not prove ownership.\n' >&2
+            exit 1
+          fi
+      - name: Publish the exact convenience CLI with its own trusted publisher
+        if: steps.cli.outputs.publish == 'true'
+        env:
+          ARCHIVE: ${{ steps.cli.outputs.archive }}
+          DIST_TAG: ${{ steps.cli.outputs.dist_tag }}
+        run: npm publish "$ARCHIVE" --ignore-scripts --access public --tag "$DIST_TAG" --registry https://registry.npmjs.org/
+      - name: Verify both public packages and preserved stable defaults
+        timeout-minutes: 11
+        shell: bash
+        run: |
+          version="$(cat server/VERSION)"
+          for ((attempt = 1; attempt <= 61; attempt++)); do
+            if node scripts/verify_npm_publication.mjs verify "$RUNNER_TEMP/npm-candidate" "$SOURCE_SHA" "$ACCEPTED_MANIFEST_SHA256" "$RUNNER_TEMP/npm-candidate-release.json" &&
+               node scripts/verify_agentsdock_cli_publication.mjs verify "$RUNNER_TEMP/cli-candidate" "$version" "$SOURCE_SHA" "$ACCEPTED_CLI_RECEIPT_SHA256" "$RUNNER_TEMP/npm-candidate" "$ACCEPTED_MANIFEST_SHA256" "$EXPECTED_CLI_LATEST"; then
+              printf 'Both exact npm packages verified for %s. No desktop release was published.\n' "$version" >> "$GITHUB_STEP_SUMMARY"
+              exit 0
+            fi
+            if ((attempt < 61)); then sleep 10; fi
+          done
+          printf 'Matched npm registry verification did not succeed; never retry an upload blindly.\n' >&2
           exit 1
