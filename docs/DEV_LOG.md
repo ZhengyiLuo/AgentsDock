@@ -24,6 +24,12 @@
   native authentication with synthetic credentials, not a live provider account.
   Actual App interaction remains blocked by unavailable computer control; local
   packaging and user acceptance do not imply release or merge approval.
+- Full desktop regression: 5,064 pass and five skipped; eight build/license
+  guards pass. Package commit `70af1129` as an audited, ad-hoc signed local App
+  (package metadata `0.2.0`, build 85) with the existing isolated test profile.
+  The designated local test server runs `1.0.10-beta.2.opencode.70af1129` with
+  authenticated health and installed module/source parity verified. The primary
+  server is unchanged. No artifacts are published and merge remains pending.
 
 ## 2026-10-07 — Remember custom API drafts and clarify connection fields
 
