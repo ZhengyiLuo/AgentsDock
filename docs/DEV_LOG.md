@@ -10,7 +10,11 @@
   as success and waiting while the CLI makes repeated requests. Preserve partial
   timeline text and explicit provider HTTP status diagnostics; do not dump raw
   gateway bodies or headers. No additional retry or inference probe is added.
-- Verification: 196 focused tests pass, including URL parity, credential
+- Allow a bounded 256-token output budget for explicit Claude/OpenCode model
+  checks. Reasoning models can consume the former 32/64-token budget before
+  answering; empty or reasoning-only responses still cannot verify a connection.
+  Checks remain single-shot and do not alter runtime token limits.
+- Verification: 198 focused tests pass, including URL parity, credential
   isolation/revocation, catalog discovery, stream errors, lifecycle and MCP.
   Regression cases fail on the prior implementation. Lock validation and
   compilation/package-source checks pass. Existing runner fixtures emit
@@ -18,11 +22,16 @@
 - Four opt-in tests exercise real OpenCode 1.18.29 through the production
   process runner and a synthetic loopback gateway: root URL, explicit `/v1`,
   HTML-200 streaming response and HTTP 401. Disposable home/state and synthetic
-  keys only; no real model inference or external gateway compatibility claim.
+  keys only; no real model inference in these four repeatable smoke tests.
   Run `tests.test_opencode_custom_api_smoke` with `OPENCODE_TEST_EXECUTABLE` set.
-- Desktop interaction is blocked by disabled computer access, so full app and
-  real-gateway acceptance remain pending. This is a local test candidate, not
-  a published release. Per-model protocols and output limits are not included.
+- Separate live OpenCode Zen checks pass for Chat Completions, Anthropic
+  Messages and Responses. Real CLI replies also pass for Anthropic root and
+  `/v1` URLs and Responses. These checks do not establish Go subscription or
+  free-tier compatibility; neither was accepted in this validation.
+- Desktop interaction is blocked by disabled computer access. Full app
+  acceptance remains pending and the PR is held for that check, not merged.
+  This is a local test candidate, not a published release. Per-model protocols
+  and runtime output limits are not included.
 
 ## 2026-10-03 — Preserve automatic naming across follow-up messages
 

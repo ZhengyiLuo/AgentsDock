@@ -25,6 +25,9 @@ from fastapi.responses import JSONResponse
 from codex_provider import validate_selection, validate_model, endpoint_model_catalog, endpoint_api_base_url
 
 MAX_BODY_BYTES = 16 * 1024
+# Reasoning can consume output tokens before the short visible check answer.
+# Keep this explicit probe bounded and single-shot, including for such models.
+MODEL_CHECK_MAX_OUTPUT_TOKENS = 256
 PROTOCOLS = {"claude": {"anthropic"}, "opencode": {"anthropic", "chat_completions", "responses"}, "cursor": {"cursor"}}
 RESULTS = {"verified", "authentication_failed", "rate_limited", "unsupported", "connection_failed", "invalid_response", "model_required", "cli_update_required"}
 
@@ -407,13 +410,13 @@ async def probe(selected: dict) -> str:
     if protocol == "anthropic":
         suffix = "/messages"
         headers["anthropic-version"] = "2023-06-01"
-        body = {"model": selected["model"], "max_tokens": 32, "messages": [{"role": "user", "content": prompt}]}
+        body = {"model": selected["model"], "max_tokens": MODEL_CHECK_MAX_OUTPUT_TOKENS, "messages": [{"role": "user", "content": prompt}]}
     elif protocol == "responses":
         suffix = "/responses"
-        body = {"model": selected["model"], "max_output_tokens": 64, "input": prompt, "store": False}
+        body = {"model": selected["model"], "max_output_tokens": MODEL_CHECK_MAX_OUTPUT_TOKENS, "input": prompt, "store": False}
     else:
         suffix = "/chat/completions"
-        body = {"model": selected["model"], "max_tokens": 32, "messages": [{"role": "user", "content": prompt}]}
+        body = {"model": selected["model"], "max_tokens": MODEL_CHECK_MAX_OUTPUT_TOKENS, "messages": [{"role": "user", "content": prompt}]}
     async def send():
         async with httpx.AsyncClient(timeout=15, follow_redirects=False, trust_env=False) as client:
             async with client.stream("POST", base + suffix, headers=headers, json=body) as response:

@@ -75,9 +75,12 @@ the response content type, so the error does not claim HTML was confirmed.
 Provider error events retain an available HTTP status, without dumping headers
 or raw response bodies. Partial assistant text stays in the timeline.
 
-One custom connection still has one protocol. Model checks use small output
-budgets and do not establish the runtime model's output/context limits. This
-fix does not add per-model protocols or override OpenCode's token limits.
+One custom connection still has one protocol. Explicit Claude/OpenCode model
+checks allow up to 256 output tokens, including reasoning, with no automatic
+retry. Empty or reasoning-only responses still cannot verify a connection;
+models requiring more reasoning may still exhaust this bounded check. Checks
+do not establish the runtime model's output/context limits. This fix does not
+add per-model protocols or override OpenCode's token limits.
 
 Checks happen only on explicit user actions. Optional model checks can incur
 a small charge; default read-only checks do not run inference. Checks

@@ -205,12 +205,14 @@ class WireProbeTests(unittest.IsolatedAsyncioTestCase):
                 self.wfile.write(json.dumps(case.payload).encode())
 
             def do_POST(self):
-                case.calls.append((self.path, dict(self.headers), json.loads(self.rfile.read(int(self.headers["Content-Length"])))))
+                body = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
+                case.calls.append((self.path, dict(self.headers), body))
                 self.send_response(case.status)
                 self.send_header("Content-Type", "application/json")
                 self.send_header("Location", "/credential-leak")
                 self.end_headers()
-                self.wfile.write(json.dumps(case.payload).encode())
+                payload = case.payload(body) if callable(case.payload) else case.payload
+                self.wfile.write(json.dumps(payload).encode())
             def log_message(self, *args):
                 pass
         self.server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
@@ -248,6 +250,41 @@ class WireProbeTests(unittest.IsolatedAsyncioTestCase):
         for payload in ({}, [], {"type": "message", "content": "wrong"}, {"text": "x" * 150000}):
             self.payload = payload
             self.assertEqual(await connections.probe({**INPUT, "base_url": self.base}), "invalid_response")
+
+    async def test_model_check_leaves_a_bounded_reasoning_budget_without_retrying(self):
+        # A live reasoning model used 76 output tokens to answer "OK". At 32
+        # it returned HTTP 200, empty text and finish_reason=length instead.
+        for protocol in ("anthropic", "responses", "chat_completions"):
+            with self.subTest(protocol=protocol):
+                def reply(body):
+                    enough = body.get("max_output_tokens", body.get("max_tokens", 0)) >= 76
+                    if protocol == "anthropic":
+                        return {"type": "message", "content": [{"type": "text", "text": "OK"}] if enough else [], "stop_reason": "end_turn" if enough else "max_tokens"}
+                    if protocol == "responses":
+                        return {"status": "completed" if enough else "incomplete", "output": [{"content": [{"type": "output_text", "text": "OK"}]}] if enough else []}
+                    return {"choices": [{"finish_reason": "stop" if enough else "length", "message": {"content": "OK" if enough else "", "reasoning_content": "bounded reasoning"}}]}
+                self.payload = reply
+                before = len(self.calls)
+                selected = {**INPUT, "base_url": self.base, "protocol": protocol}
+                self.assertEqual(await connections.probe(selected), "verified")
+                self.assertEqual(len(self.calls), before + 1)
+                body = self.calls[-1][2]
+                self.assertEqual(body.get("max_output_tokens", body.get("max_tokens")), 256)
+                self.assertNotIn("tools", body)
+
+    async def test_reasoning_only_or_empty_output_still_cannot_verify(self):
+        cases = [
+            ("chat_completions", {"choices": [{"finish_reason": "length", "message": {"content": "", "reasoning_content": "not an answer"}}]}),
+            ("chat_completions", {"choices": [{"message": {"content": None}}]}),
+            ("anthropic", {"type": "message", "content": [{"type": "thinking", "thinking": "not an answer"}]}),
+            ("responses", {"status": "incomplete", "output": []}),
+        ]
+        for protocol, payload in cases:
+            with self.subTest(protocol=protocol, payload=payload):
+                self.payload = payload
+                before = len(self.calls)
+                self.assertEqual(await connections.probe({**INPUT, "base_url": self.base, "protocol": protocol}), "invalid_response")
+                self.assertEqual(len(self.calls), before + 1)
 
     async def test_anthropic_check_catalog_and_opencode_runtime_share_api_prefix(self):
         for suffix in ("", "/v1", "/proxy/anthropic", "/proxy/anthropic/v1"):
