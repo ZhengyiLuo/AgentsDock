@@ -5,6 +5,7 @@ import type { CodexServerSettingsScope } from '@shared/types'
 import type { ConnectionAction, ConnectionBackend, ConnectionProtocol, ConnectionResult, ProviderConnectionConfiguration } from '@shared/provider-connections'
 import { useLocale } from '../lib/i18n'
 import { trackOperation } from '../lib/analytics'
+import { endpointNeedsModel, flushEndpointDraft, queueEndpointDraft, readEndpointDraft, type EndpointDraft } from '../lib/endpoint-draft'
 import './CodexAuthSettings.css'
 import './ProviderConnectionSettings.css'
 import { CustomModelSettings } from './CustomModelSettings'
@@ -42,6 +43,17 @@ export function ProviderConnectionSettings({ backend, ...props }: Props & { back
     key.current = input
   }, [])
   function clearKey() { if (key.current) key.current.value = ''; setHasKey(false) }
+  function updateDraft(change: Partial<EndpointDraft>) {
+    const next = { baseURL, model, protocol, authHeader, ...change }
+    setBaseURL(next.baseURL); setModel(next.model); setProtocol(next.protocol); setAuthHeader(next.authHeader)
+    setError(null)
+    queueEndpointDraft(props.profileId, backend, next)
+  }
+  useEffect(() => {
+    const flush = () => flushEndpointDraft(props.profileId, backend)
+    window.addEventListener('pagehide', flush)
+    return () => { window.removeEventListener('pagehide', flush); flush() }
+  }, [props.profileId, backend])
   function owns(n: number, scope: CodexServerSettingsScope) {
     return serial.current === n && scopeRef.current.connected && scopeRef.current.profileId === scope.profileId
       && scopeRef.current.profileGeneration === scope.profileGeneration
@@ -64,10 +76,11 @@ export function ProviderConnectionSettings({ backend, ...props }: Props & { back
 
   function configure() {
     clearKey(); setError(null)
-    setBaseURL(saved?.base_url ?? (backend === 'cursor' ? 'https://api2.cursor.sh' : backend === 'claude' ? 'https://api.anthropic.com' : ''))
-    setModel(saved?.model ?? '')
-    setProtocol(saved?.protocol ?? (backend === 'cursor' ? 'cursor' : backend === 'claude' ? 'anthropic' : 'chat_completions'))
-    setAuthHeader(saved?.auth_header ?? (backend === 'claude' ? 'x-api-key' : 'bearer')); setOpen(true)
+    const draft = readEndpointDraft(props.profileId, backend)
+    setBaseURL(backend === 'cursor' ? 'https://api2.cursor.sh' : draft?.baseURL ?? saved?.base_url ?? (backend === 'claude' ? 'https://api.anthropic.com' : ''))
+    setModel(draft?.model ?? saved?.model ?? '')
+    setProtocol(backend === 'cursor' ? 'cursor' : backend === 'claude' ? 'anthropic' : draft?.protocol ?? saved?.protocol ?? 'chat_completions')
+    setAuthHeader(backend === 'cursor' ? 'bearer' : draft?.authHeader ?? saved?.auth_header ?? (backend === 'claude' ? 'x-api-key' : 'bearer')); setOpen(true)
   }
   async function operate(action: Exclude<ConnectionAction, 'get'>) {
     if (busy || !saved || !props.connected || !props.profileId) return
@@ -96,6 +109,7 @@ export function ProviderConnectionSettings({ backend, ...props }: Props & { back
   const verified = props.connected && !busy && !open && !error && saved?.configured === true && saved?.last_result === 'verified'
   useEffect(() => { props.onStatus?.(verified) }, [verified, props.onStatus])
   const unavailable = !props.connected || !saved || Boolean(error)
+  const modelRequired = backend !== 'cursor' && (endpointNeedsModel(baseURL) || error === 'model_required')
   return <section className={`codex-auth-settings provider-connection ${verified ? 'connection-connected' : 'connection-unconfirmed'}`} aria-label={backend === 'cursor' ? t('connections.cursorKey') : t('connections.title', { provider: name })}>
     <div className="codex-auth-settings-icon">{verified ? <CheckCircle2 size={18} /> : <KeyRound size={16} />}</div>
     <div className="codex-auth-settings-copy">
@@ -119,34 +133,35 @@ export function ProviderConnectionSettings({ backend, ...props }: Props & { back
       </>}
       {!open && error && <button type="button" className="quiet-button provider-connection-refresh" disabled={busy || !props.connected} onClick={() => setReload(n => n + 1)}>{t('connections.refresh')}</button>}
       {open && <form className="codex-auth-settings-form" onSubmit={event => { event.preventDefault(); void operate('save') }}>
-        {backend !== 'cursor' && <><label htmlFor={`${id}-url`}>{t('connections.baseURL')}</label>
-        <input id={`${id}-url`} value={baseURL} placeholder="https://…" maxLength={2048} disabled={busy} onChange={e => {
-          setBaseURL(e.target.value)
-          if (backend === 'claude') {
-            try { setAuthHeader(new URL(e.target.value).hostname === 'api.anthropic.com' ? 'x-api-key' : 'bearer') } catch { /* incomplete URL */ }
-          }
-        }} autoComplete="off" spellCheck={false} /></>}
+        <small>{t('connections.draftHelp')}</small>
+        {backend !== 'cursor' && <div className="provider-connection-field"><label htmlFor={`${id}-url`}>{t('connections.baseURL')} <span aria-hidden="true" className="provider-field-requirement">{t('connections.required')}</span></label>
+        <input id={`${id}-url`} aria-label={t('connections.baseURL')} type="url" required value={baseURL} placeholder="https://…" maxLength={2048} disabled={busy}
+          onChange={e => updateDraft({ baseURL: e.target.value })} autoComplete="off" spellCheck={false} /></div>}
         {backend === 'cursor' && <small>{t('connections.cursorHelp')}{' '}<a href="https://cursor.com/dashboard" onClick={event => { event.preventDefault(); void window.agentsDock.native.openExternal('https://cursor.com/dashboard') }}>{t('connections.readMore')}</a></small>}
         {backend === 'opencode' && <small>{t('connections.openCodeEndpointHelp')}{' '}<a href="https://opencode.ai/docs/zen/" onClick={event => { event.preventDefault(); void window.agentsDock.native.openExternal('https://opencode.ai/docs/zen/') }}>{t('connections.readMore')}</a></small>}
-        <label htmlFor={`${id}-key`}>{t('connections.key')}</label>
-        <input id={`${id}-key`} type="password" ref={attachKey} maxLength={4096} disabled={busy} onChange={e => setHasKey(Boolean(e.target.value.trim()))} autoComplete="off" autoCapitalize="none" autoCorrect="off" spellCheck={false} data-1p-ignore data-lpignore="true" />
-        {backend !== 'cursor' && <details className="provider-connection-advanced"><summary>{t('connections.advanced')}</summary>
-        {backend === 'opencode' && <><label htmlFor={`${id}-protocol`}>{t('connections.protocol')}</label>
-          <select id={`${id}-protocol`} value={protocol} disabled={busy} onChange={e => { setProtocol(e.target.value as ConnectionProtocol); setAuthHeader('bearer') }}>
+        {backend !== 'cursor' && <>
+        <div className="provider-connection-field"><label htmlFor={`${id}-protocol`}>{t('connections.protocol')} <span aria-hidden="true" className="provider-field-requirement">{t('connections.required')}</span></label>
+          <select id={`${id}-protocol`} aria-label={t('connections.protocol')} required value={protocol} disabled={busy || backend === 'claude'} onChange={e => updateDraft({ protocol: e.target.value as ConnectionProtocol, authHeader: e.target.value === 'anthropic' ? 'x-api-key' : 'bearer' })}>
             <option value="chat_completions">OpenAI Chat Completions</option><option value="responses">OpenAI Responses</option><option value="anthropic">Anthropic Messages</option>
-          </select></>}
-        {protocol === 'anthropic' && <><label htmlFor={`${id}-auth`}>{t('connections.authHeader')}</label>
-          <select id={`${id}-auth`} value={authHeader} disabled={busy} onChange={e => setAuthHeader(e.target.value as 'bearer' | 'x-api-key')}>
-            <option value="bearer">Bearer</option><option value="x-api-key">x-api-key</option>
-          </select></>}
-        <label htmlFor={`${id}-model`}>{t('connections.model')}</label>
-        <input id={`${id}-model`} value={model} maxLength={256} disabled={busy} onChange={e => setModel(e.target.value)} autoComplete="off" spellCheck={false} />
-        <small>{t('connections.modelHelp')}</small>
-        {model.trim() && <small>{t('connections.cost')}</small>}
-        </details>}
+          </select>
+          {backend === 'opencode' && <small>{t('connections.protocolHelp')}</small>}
+        </div>
+        <div className="provider-connection-field"><label htmlFor={`${id}-auth`}>{t('connections.authHeader')} <span aria-hidden="true" className="provider-field-requirement">{t('connections.required')}</span></label>
+          <select id={`${id}-auth`} aria-label={t('connections.authHeader')} required value={authHeader} disabled={busy || protocol !== 'anthropic'} onChange={e => updateDraft({ authHeader: e.target.value as 'bearer' | 'x-api-key' })}>
+            <option value="bearer">Bearer</option>{protocol === 'anthropic' && <option value="x-api-key">x-api-key</option>}
+          </select>
+        </div></>}
+        <div className="provider-connection-field"><label htmlFor={`${id}-key`}>{t('connections.key')} <span aria-hidden="true" className="provider-field-requirement">{t('connections.required')}</span></label>
+        <input id={`${id}-key`} aria-label={t('connections.key')} required type="password" ref={attachKey} maxLength={4096} disabled={busy} onChange={e => setHasKey(Boolean(e.target.value.trim()))} autoComplete="off" autoCapitalize="none" autoCorrect="off" spellCheck={false} data-1p-ignore data-lpignore="true" /></div>
+        {backend !== 'cursor' && <div className="provider-connection-field">
+        <label htmlFor={`${id}-model`}>{t('connections.model')} <span aria-hidden="true" className="provider-field-requirement">{t(modelRequired ? 'connections.required' : 'connections.optional')}</span></label>
+        <input id={`${id}-model`} aria-label={t('connections.model')} value={model} required={modelRequired} maxLength={256} disabled={busy} onChange={e => updateDraft({ model: e.target.value })} autoComplete="off" spellCheck={false} />
+        <small>{t(modelRequired ? 'connections.modelRequiredHelp' : 'connections.modelHelp')}</small>
+        {(modelRequired || model.trim()) && <small>{t('connections.cost')}</small>}
+        </div>}
         <div className="codex-auth-settings-actions">
-          <button type="submit" className="primary-button" disabled={!editable || !hasKey || !baseURL.trim()}>{t('connections.save')}</button>
-          <button type="button" className="quiet-button" disabled={busy} onClick={() => { clearKey(); setOpen(false); setError(null) }}>{t('connections.cancel')}</button>
+          <button type="submit" className="primary-button" disabled={!editable || !hasKey || !baseURL.trim() || (modelRequired && !model.trim())}>{t('connections.save')}</button>
+          <button type="button" className="quiet-button" disabled={busy} onClick={() => { flushEndpointDraft(props.profileId, backend); clearKey(); setOpen(false); setError(null) }}>{t('connections.cancel')}</button>
         </div>
       </form>}
     </div>

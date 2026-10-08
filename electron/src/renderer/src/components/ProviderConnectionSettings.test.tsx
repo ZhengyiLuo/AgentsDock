@@ -22,7 +22,7 @@ async function fill() {
   fireEvent.change(key, { target: { value: 'synthetic-test-key' } })
   return key
 }
-afterEach(() => { cleanup(); setLocale('en'); vi.restoreAllMocks() })
+afterEach(() => { cleanup(); localStorage.clear(); setLocale('en'); vi.restoreAllMocks() })
 
 it.each(['claude', 'opencode', 'cursor'] as const)('localizes %s configuration and validation errors in Chinese', async backend => {
   const request = bridge().mockResolvedValue({ configuration: { ...empty, backend, scope: 'per_chat' } })
@@ -32,7 +32,8 @@ it.each(['claude', 'opencode', 'cursor'] as const)('localizes %s configuration a
   fireEvent.click(screen.getByRole('button', { name: '配置 API' }))
   expect(screen.getByLabelText('API 密钥')).toBeVisible()
   if (backend !== 'cursor') {
-    expect(screen.getByText('高级选项（可选）')).toBeVisible()
+    expect(screen.getByLabelText('API 协议')).toBeVisible()
+    expect(screen.getByLabelText('认证请求头')).toBeVisible()
     fireEvent.change(screen.getByLabelText('API 基础地址'), { target: { value: 'https://api.example.test' } })
   }
   fireEvent.change(screen.getByLabelText('API 密钥'), { target: { value: 'synthetic-invalid-key' } })
@@ -54,14 +55,18 @@ it('localizes the Cursor forget menu and confirmation without forgetting on canc
   expect(request).toHaveBeenCalledTimes(1)
 })
 
-it('connects with only URL and key by default; advanced fields remain collapsed', async () => {
+it('connects with URL and key using visible fixed protocol and separate authentication fields', async () => {
   const request = bridge()
   render(<ProviderConnectionSettings {...props} />)
   await waitFor(() => expect(screen.getByRole('button', { name: 'Configure API' })).toBeEnabled())
   expect(screen.getByRole('region', { name: 'Claude Code custom endpoint' })).toHaveClass('connection-unconfirmed')
   expect(screen.getByText('Not connected')).toBeVisible()
   fireEvent.click(screen.getByRole('button', { name: 'Configure API' }))
-  expect(screen.getByText('Advanced (optional)').parentElement).not.toHaveAttribute('open')
+  expect(screen.queryByText('Advanced (optional)')).not.toBeInTheDocument()
+  expect(screen.getByLabelText('API protocol')).toHaveValue('anthropic')
+  expect(screen.getByLabelText('API protocol')).toBeDisabled()
+  expect(screen.getByLabelText('Authentication header')).toHaveValue('x-api-key')
+  expect(screen.getByLabelText('Model ID')).not.toBeRequired()
   fireEvent.change(screen.getByLabelText('API key'), { target: { value: 'synthetic-read-only-key' } })
   let sent: unknown
   request.mockImplementationOnce((_scope, _backend, _action, input) => {
@@ -182,4 +187,63 @@ it('does not silently choose OpenRouter for OpenCode', async () => {
   fireEvent.click(screen.getByRole('button', { name: 'Configure API' }))
   expect(screen.getByLabelText('API base URL')).toHaveValue('')
   expect(screen.getByText(/OpenCode Zen and Go are official options/)).toBeVisible()
+})
+
+it('keeps failed non-secret drafts across cancel, reopen and remount without checking again', async () => {
+  const request = bridge()
+  const mounted = render(<ProviderConnectionSettings {...props} />)
+  await fill()
+  fireEvent.change(screen.getByLabelText('API base URL'), { target: { value: 'https://gateway.example/v1' } })
+  fireEvent.change(screen.getByLabelText('Authentication header'), { target: { value: 'bearer' } })
+  request.mockResolvedValueOnce({ ok: false, status: 'authentication_failed' })
+  fireEvent.click(screen.getByRole('button', { name: 'Connect' }))
+  await screen.findByRole('alert')
+  fireEvent.click(screen.getByRole('button', { name: 'Cancel' }))
+  fireEvent.click(screen.getByRole('button', { name: 'Configure API' }))
+  expect(screen.getByLabelText('API base URL')).toHaveValue('https://gateway.example/v1')
+  mounted.unmount()
+  render(<ProviderConnectionSettings {...props} profileGeneration={2} />)
+  await waitFor(() => expect(screen.getByRole('button', { name: 'Configure API' })).toBeEnabled())
+  fireEvent.click(screen.getByRole('button', { name: 'Configure API' }))
+  expect(screen.getByLabelText('API base URL')).toHaveValue('https://gateway.example/v1')
+  expect(screen.getByLabelText('Model ID')).toHaveValue('test/model')
+  expect(screen.getByLabelText('Authentication header')).toHaveValue('bearer')
+  expect(screen.getByLabelText('API key')).toHaveValue('')
+  expect(screen.queryByText('Connected')).not.toBeInTheDocument()
+  expect(request).toHaveBeenCalledTimes(3) // two reads, one explicit save
+  const persisted = Array.from({ length: localStorage.length }, (_, i) => localStorage.getItem(localStorage.key(i)!)).join('')
+  expect(persisted).not.toContain('synthetic-test-key')
+})
+
+it('requires a model for Zen, separates protocol and auth rows, and keeps another server empty', async () => {
+  const request = bridge().mockResolvedValue({ configuration: { ...empty, backend: 'opencode' } })
+  const mounted = render(<ProviderConnectionSettings {...props} backend="opencode" />)
+  await waitFor(() => expect(screen.getByRole('button', { name: 'Configure API' })).toBeEnabled())
+  fireEvent.click(screen.getByRole('button', { name: 'Configure API' }))
+  fireEvent.change(screen.getByLabelText('API base URL'), { target: { value: 'https://opencode.ai/zen/v1' } })
+  fireEvent.change(screen.getByLabelText('API protocol'), { target: { value: 'anthropic' } })
+  const protocol = screen.getByLabelText('API protocol'), auth = screen.getByLabelText('Authentication header')
+  expect(auth).toHaveValue('x-api-key')
+  expect(protocol.closest('.provider-connection-field')).not.toBe(auth.closest('.provider-connection-field'))
+  expect(screen.getByLabelText('API base URL')).toBeRequired()
+  expect(screen.getByLabelText('API key')).toBeRequired()
+  expect(screen.getByLabelText('Model ID')).toBeRequired()
+  fireEvent.change(screen.getByLabelText('API key'), { target: { value: 'synthetic-key' } })
+  expect(screen.getByRole('button', { name: 'Connect' })).toBeDisabled()
+  fireEvent.change(screen.getByLabelText('Model ID'), { target: { value: 'test-model' } })
+  expect(screen.getByRole('button', { name: 'Connect' })).toBeEnabled()
+  expect(request).toHaveBeenCalledTimes(1)
+  mounted.rerender(<ProviderConnectionSettings {...props} backend="opencode" profileId="other" profileGeneration={2} />)
+  await waitFor(() => expect(screen.getByRole('button', { name: 'Configure API' })).toBeEnabled())
+  fireEvent.click(screen.getByRole('button', { name: 'Configure API' }))
+  expect(screen.getByLabelText('API base URL')).toHaveValue('')
+  expect(screen.getByLabelText('API protocol')).toHaveValue('chat_completions')
+  expect(screen.getByLabelText('Authentication header')).toHaveValue('bearer')
+  expect(screen.getByLabelText('API key')).toHaveValue('')
+  mounted.rerender(<ProviderConnectionSettings {...props} backend="opencode" profileGeneration={3} />)
+  await waitFor(() => expect(screen.getByRole('button', { name: 'Configure API' })).toBeEnabled())
+  fireEvent.click(screen.getByRole('button', { name: 'Configure API' }))
+  expect(screen.getByLabelText('API base URL')).toHaveValue('https://opencode.ai/zen/v1')
+  expect(screen.getByLabelText('API protocol')).toHaveValue('anthropic')
+  expect(screen.getByLabelText('Authentication header')).toHaveValue('x-api-key')
 })

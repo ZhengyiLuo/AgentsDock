@@ -1,5 +1,22 @@
 # Public development log
 
+## 2026-10-07 — Remember custom API drafts and clarify connection fields
+
+- Keep non-secret endpoint drafts on this device per server connection and
+  provider, even after failed checks, closing settings or restarting the app.
+  Codex retains its URL too. Keys stay out of drafts; embedded URL credentials,
+  query strings and fragments are not persisted. Typing does not send requests
+  and disk writes are debounced, with a flush on close/page exit.
+- Show protocol and authentication as separate, visible fields. Mark required
+  inputs, keep provider-fixed protocols read-only, and require a model for known
+  public Zen catalogs. Restored drafts never imply a verified connection.
+  Include English and Simplified Chinese copy.
+- Verification: 81 focused component, draft, style and native transport tests
+  pass; TypeScript passes. A separate live Zen model check succeeds, but the
+  reported App authentication rejection has not been reproduced. Computer
+  interaction remains disabled, so actual App acceptance is still pending;
+  this change must not be merged based on component or HTTP checks alone.
+
 ## 2026-10-07 — Align OpenCode custom API checks and runtime routes
 
 - Resolve Anthropic API prefixes consistently for model discovery, connection

@@ -54,11 +54,24 @@ URL, exact model ID and authentication header instead of guessing these.
 A default connection check uses a read-only authenticated route: OpenRouter's
 private `/api/v1/key`, or a protected model catalog for other APIs. A public
 model list alone never produces a verified state. If a gateway cannot check
-keys this way, Claude/OpenCode offer an explicit model request through Advanced.
+keys this way, Claude/OpenCode offer an explicit model request via Model ID.
 A successful check does **not** establish native agent login, tool use,
 streaming, reasoning, context continuity or full runtime compatibility.
 The UI labels this **Connected**, not “logged in”; it records the last explicit
 check, not continuous verification.
+
+Desktop configuration shows URL, protocol and authentication as separate fields,
+with required/optional labels. Provider-fixed protocols remain read-only. Known
+public OpenCode Zen catalogs require a model ID for connection verification;
+other gateways can first try the read-only check. A URL alone does not identify
+which protocol a particular model supports.
+
+Non-secret drafts (URL, protocol, authentication choice and model ID) are kept
+locally per server connection and provider, including failed/cancelled attempts.
+Codex also remembers its endpoint URL. Returning to settings does not reconnect
+or mark a draft verified. API keys and URLs containing credentials, query strings
+or fragments are not persisted in drafts. Keys are still cleared after checks
+and when leaving the form. Draft writes are debounced and flushed on close.
 
 For Anthropic protocol, a root URL or a URL ending in `/v1` resolves to the
 same `/v1/messages` API for model checks and OpenCode runs. Gateway path prefixes
