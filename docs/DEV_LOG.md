@@ -12,10 +12,18 @@
   public Zen catalogs. Restored drafts never imply a verified connection.
   Include English and Simplified Chinese copy.
 - Verification: 81 focused component, draft, style and native transport tests
-  pass; TypeScript passes. A separate live Zen model check succeeds, but the
-  reported App authentication rejection has not been reproduced. Computer
-  interaction remains disabled, so actual App acceptance is still pending;
-  this change must not be merged based on component or HTTP checks alone.
+  pass; TypeScript, eight build/license guards and production compilation pass.
+  Full desktop regression: 5,039 pass, five skipped. Filesystem-sensitive tests
+  use a POSIX temporary directory and the CI-compatible file-creation mask;
+  security checks are unchanged.
+- Package source `3a25c492` as a local ad-hoc test App, audit/sign the bundle and
+  launch it with the existing isolated local-app profile. Packaged main,
+  preload and renderer bytes match the validated build. No release publication
+  or server restart is part of this desktop follow-up.
+- A separate live Zen model check succeeds, but the reported App authentication
+  rejection has not been reproduced. Computer interaction remains disabled,
+  so actual App acceptance is still pending; this change must not be merged
+  based on component or HTTP checks alone.
 
 ## 2026-10-07 — Align OpenCode custom API checks and runtime routes
 
