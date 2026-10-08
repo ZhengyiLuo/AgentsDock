@@ -47,7 +47,27 @@ async function confirmForget() {
   fireEvent.click(await screen.findByRole('menuitem', { name: 'Forget endpoint' }))
   fireEvent.click(await screen.findByRole('button', { name: 'Forget endpoint' }))
 }
-afterEach(() => { cleanup(); setLocale('en'); vi.restoreAllMocks(); vi.useRealTimers() })
+afterEach(() => { cleanup(); localStorage.clear(); setLocale('en'); vi.restoreAllMocks(); vi.useRealTimers() })
+
+it('restores an unconnected Codex URL draft after closing without retaining the key', async () => {
+  const api = bridge()
+  const mounted = render(<CodexAuthSettings {...props} />)
+  const fields = await openCustomForm()
+  fillProvider(fields)
+  mounted.unmount()
+  render(<CodexAuthSettings {...props} />)
+  const restored = await openCustomForm()
+  expect(restored.endpoint).toHaveValue('https://inference.example/v1')
+  expect(restored.key).toHaveValue('')
+  expect(restored.endpoint).toBeRequired()
+  expect(restored.key).toBeRequired()
+  expect(screen.getByLabelText('API protocol')).toHaveValue('responses')
+  expect(screen.getByLabelText('Authentication header')).toHaveValue('bearer')
+  expect(api.testProvider).not.toHaveBeenCalled()
+  expect(api.setProvider).not.toHaveBeenCalled()
+  const persisted = Array.from({ length: localStorage.length }, (_, i) => localStorage.getItem(localStorage.key(i)!)).join('')
+  expect(persisted).not.toContain('synthetic-provider-key')
+})
 
 describe('Codex · Native account settings', () => {
   it('shows the existing account read-only and has one separate endpoint action', async () => {

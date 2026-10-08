@@ -130,6 +130,9 @@ describe('settings-only provider connection native transport', () => {
   })
 
   it('does not treat inconsistent or stale-looking response evidence as a verified API', () => {
+    const pending = { ...config, model: null, last_result: 'model_required' }
+    expect(parseConnectionReply('claude', 'save', { ok: false, status: 'model_required', configuration: pending }))
+      .toEqual({ ok: false, status: 'model_required', configuration: pending })
     for (const configuration of [{ ...config, backend: 'opencode' }, { ...config, last_result: 'authentication_failed' },
       { ...config, checked_at: 'not-time' }, { ...config, scope: 'chat' }]) {
       expect(() => parseConnectionReply('claude', 'save', { ok: true, status: 'verified', configuration })).toThrow('PROVIDER_CONNECTION_RESPONSE')
