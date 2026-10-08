@@ -3,6 +3,7 @@ import { afterEach, expect, it, vi } from 'vitest'
 import type { AgentsDockAPI } from '@shared/ipc'
 import { setLocale } from '@shared/i18n'
 import { ProviderConnectionSettings } from './ProviderConnectionSettings'
+import { useAppStore } from '../store/app-store'
 
 const props = { backend: 'claude' as const, connected: true, profileId: 'test', profileGeneration: 1 }
 const empty = { backend: 'claude', scope: 'settings_only', revision: 0, configured: false, has_api_key: false,
@@ -11,13 +12,14 @@ const saved = { ...empty, revision: 1, configured: true, has_api_key: true, base
   protocol: 'anthropic', auth_header: 'bearer', checked_at: '2026-09-27T20:00:00Z', last_result: 'verified' }
 function bridge() {
   const request = vi.fn().mockResolvedValue({ configuration: empty })
-  Object.defineProperty(window, 'agentsDock', { configurable: true, value: { providerConnections: { request } } as unknown as AgentsDockAPI })
+  Object.defineProperty(window, 'agentsDock', { configurable: true, value: {
+    providerConnections: { request }, native: { openExternal: vi.fn().mockResolvedValue(undefined) },
+  } as unknown as AgentsDockAPI })
   return request
 }
 async function fill() {
   await waitFor(() => expect(screen.getByRole('button', { name: 'Configure API' })).toBeEnabled())
   fireEvent.click(screen.getByRole('button', { name: 'Configure API' }))
-  fireEvent.change(screen.getByLabelText('Model ID'), { target: { value: 'test/model' } })
   const key = screen.getByLabelText('API key')
   fireEvent.change(key, { target: { value: 'synthetic-test-key' } })
   return key
@@ -66,7 +68,7 @@ it('connects with URL and key using visible fixed protocol and separate authenti
   expect(screen.getByLabelText('API protocol')).toHaveValue('anthropic')
   expect(screen.getByLabelText('API protocol')).toBeDisabled()
   expect(screen.getByLabelText('Authentication header')).toHaveValue('x-api-key')
-  expect(screen.getByLabelText('Model ID')).not.toBeRequired()
+  expect(screen.queryByLabelText('Model ID')).not.toBeInTheDocument()
   fireEvent.change(screen.getByLabelText('API key'), { target: { value: 'synthetic-read-only-key' } })
   let sent: unknown
   request.mockImplementationOnce((_scope, _backend, _action, input) => {
@@ -90,7 +92,7 @@ it('only checks on submit, shows a bounded API check and clears the key', async 
   })
   fireEvent.click(screen.getByRole('button', { name: 'Connect' }))
   await screen.findByText('Connected')
-  expect(submitted).toEqual({ base_url: 'https://api.anthropic.com', model: 'test/model', api_key: 'synthetic-test-key',
+  expect(submitted).toEqual({ base_url: 'https://api.anthropic.com', model: null, api_key: 'synthetic-test-key',
     protocol: 'anthropic', auth_header: 'x-api-key', expected_revision: 0 })
   expect(key).toHaveValue('')
   expect(screen.getByText('Settings only — not used by chats yet.')).toBeVisible()
@@ -189,6 +191,46 @@ it('does not silently choose OpenRouter for OpenCode', async () => {
   expect(screen.getByText(/OpenCode Zen and Go are official options/)).toBeVisible()
 })
 
+it.each(['en', 'zh-CN'] as const)('saves first without a model, then exposes the unverified model picker in %s', async locale => {
+  const request = bridge().mockResolvedValue({ configuration: { ...empty, backend: 'opencode' } })
+  const read = vi.fn().mockResolvedValue({ backend: 'opencode', revision: 1, default_model: null, models: [{ value: 'fixture/model', label: 'Model' }], discovery_status: 'ready' })
+  window.agentsDock.customModels = { read, save: vi.fn() }
+  useAppStore.setState({ connected: true, activeProfileId: 'test', profileGeneration: 1 })
+  setLocale(locale)
+  const onStatus = vi.fn()
+  render(<ProviderConnectionSettings {...props} backend="opencode" expanded onStatus={onStatus} />)
+  const chinese = locale === 'zh-CN'
+  const configure = chinese ? '配置 API' : 'Configure API'
+  await waitFor(() => expect(screen.getByRole('button', { name: configure })).toBeEnabled())
+  fireEvent.click(screen.getByRole('button', { name: configure }))
+  const url = screen.getByLabelText(chinese ? 'API 基础地址' : 'API base URL')
+  fireEvent.change(url, { target: { value: 'https://opencode.ai/zen/v1' } })
+  fireEvent.change(screen.getByLabelText(chinese ? 'API 密钥' : 'API key'), { target: { value: 'synthetic-secret' } })
+  expect(screen.queryByLabelText(chinese ? '模型 ID' : 'Model ID')).not.toBeInTheDocument()
+  expect(read).not.toHaveBeenCalled()
+  expect(request).toHaveBeenCalledTimes(1)
+  request.mockResolvedValueOnce({ ok: false, status: 'model_required', configuration: { ...saved, backend: 'opencode', model: null, last_result: 'model_required' } })
+  fireEvent.click(screen.getByRole('button', { name: chinese ? '连接' : 'Connect' }))
+  expect(await screen.findByText(chinese ? '已保存，待选择模型验证' : 'Saved — choose a model to verify')).toBeVisible()
+  expect(await screen.findByLabelText(chinese ? '默认模型' : 'Default model')).toHaveValue('')
+  expect(screen.queryByText(chinese ? '已连接' : 'Connected')).not.toBeInTheDocument()
+  expect(onStatus).toHaveBeenLastCalledWith(false)
+  expect(screen.queryByLabelText(chinese ? 'API 密钥' : 'API key')).not.toBeInTheDocument()
+  expect(request).toHaveBeenCalledTimes(2)
+  expect(read).toHaveBeenCalledTimes(1)
+})
+
+it('explains an older server without saving false success or asking for a missing model field', async () => {
+  const request = bridge()
+  render(<ProviderConnectionSettings {...props} />)
+  await fill()
+  request.mockResolvedValueOnce({ ok: false, status: 'model_required' })
+  fireEvent.click(screen.getByRole('button', { name: 'Connect' }))
+  expect(await screen.findByRole('alert')).toHaveTextContent('Update AgentsServer')
+  expect(screen.queryByLabelText('Model ID')).not.toBeInTheDocument()
+  expect(screen.queryByText('Connected')).not.toBeInTheDocument()
+})
+
 it('keeps failed non-secret drafts across cancel, reopen and remount without checking again', async () => {
   const request = bridge()
   const mounted = render(<ProviderConnectionSettings {...props} />)
@@ -206,7 +248,7 @@ it('keeps failed non-secret drafts across cancel, reopen and remount without che
   await waitFor(() => expect(screen.getByRole('button', { name: 'Configure API' })).toBeEnabled())
   fireEvent.click(screen.getByRole('button', { name: 'Configure API' }))
   expect(screen.getByLabelText('API base URL')).toHaveValue('https://gateway.example/v1')
-  expect(screen.getByLabelText('Model ID')).toHaveValue('test/model')
+  expect(screen.queryByLabelText('Model ID')).not.toBeInTheDocument()
   expect(screen.getByLabelText('Authentication header')).toHaveValue('bearer')
   expect(screen.getByLabelText('API key')).toHaveValue('')
   expect(screen.queryByText('Connected')).not.toBeInTheDocument()
@@ -215,7 +257,7 @@ it('keeps failed non-secret drafts across cancel, reopen and remount without che
   expect(persisted).not.toContain('synthetic-test-key')
 })
 
-it('requires a model for Zen, separates protocol and auth rows, and keeps another server empty', async () => {
+it('does not require a model for Zen, separates protocol and auth rows, and keeps another server empty', async () => {
   const request = bridge().mockResolvedValue({ configuration: { ...empty, backend: 'opencode' } })
   const mounted = render(<ProviderConnectionSettings {...props} backend="opencode" />)
   await waitFor(() => expect(screen.getByRole('button', { name: 'Configure API' })).toBeEnabled())
@@ -227,10 +269,8 @@ it('requires a model for Zen, separates protocol and auth rows, and keeps anothe
   expect(protocol.closest('.provider-connection-field')).not.toBe(auth.closest('.provider-connection-field'))
   expect(screen.getByLabelText('API base URL')).toBeRequired()
   expect(screen.getByLabelText('API key')).toBeRequired()
-  expect(screen.getByLabelText('Model ID')).toBeRequired()
+  expect(screen.queryByLabelText('Model ID')).not.toBeInTheDocument()
   fireEvent.change(screen.getByLabelText('API key'), { target: { value: 'synthetic-key' } })
-  expect(screen.getByRole('button', { name: 'Connect' })).toBeDisabled()
-  fireEvent.change(screen.getByLabelText('Model ID'), { target: { value: 'test-model' } })
   expect(screen.getByRole('button', { name: 'Connect' })).toBeEnabled()
   expect(request).toHaveBeenCalledTimes(1)
   mounted.rerender(<ProviderConnectionSettings {...props} backend="opencode" profileId="other" profileGeneration={2} />)

@@ -1,5 +1,5 @@
 import { afterEach, expect, it, vi } from 'vitest'
-import { endpointNeedsModel, flushEndpointDraft, queueEndpointDraft, readEndpointDraft } from './endpoint-draft'
+import { flushEndpointDraft, queueEndpointDraft, readEndpointDraft } from './endpoint-draft'
 
 const draft = { baseURL: 'https://gateway.example/v1', model: 'model-one', protocol: 'anthropic' as const, authHeader: 'x-api-key' as const }
 afterEach(() => { vi.runOnlyPendingTimers(); vi.useRealTimers(); vi.restoreAllMocks(); localStorage.clear() })
@@ -42,10 +42,4 @@ it('tolerates unavailable storage without losing the current non-secret draft', 
   queueEndpointDraft('storage-failure', 'claude', draft)
   expect(() => flushEndpointDraft('storage-failure', 'claude')).not.toThrow()
   expect(readEndpointDraft('storage-failure', 'claude')).toEqual(draft)
-})
-
-it('requires a model for known public Zen catalogs, not arbitrary URLs', () => {
-  vi.useFakeTimers()
-  for (const suffix of ['/zen', '/zen/v1', '/zen/go/v1/']) expect(endpointNeedsModel('https://opencode.ai' + suffix)).toBe(true)
-  for (const url of ['https://opencode.ai.evil.test/zen/v1', 'https://example.test/v1', 'https://']) expect(endpointNeedsModel(url)).toBe(false)
 })

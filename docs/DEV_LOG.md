@@ -1,5 +1,30 @@
 # Public development log
 
+## 2026-10-08 — Configure custom APIs before choosing a model
+
+- Remove Model ID from Claude/OpenCode connection forms. Initial connection
+  checks are read-only; saved draft model IDs cannot trigger hidden inference.
+  Choose the default afterward from the endpoint catalog and reload it on demand.
+- When a public or missing catalog cannot verify credentials, save a private
+  `model_required` configuration, not a successful connection. It remains absent
+  from available chat providers until an explicit model check succeeds. Selecting
+  the first model runs that bounded check with a visible possible-cost notice.
+  Already verified defaults remain metadata-only; no arbitrary model is selected.
+- Preserve native administrator checks, credential redaction, revision fencing,
+  Forget and existing chat bindings. Old servers that cannot retain pending
+  configuration show an update message, not a Model ID field the user cannot find.
+- Manual model entry and service-specific official catalog links are fallback
+  controls in the later model section, not initial configuration. Include English
+  and Simplified Chinese copy. Unknown gateways are not assigned another service's
+  model list merely because they use that agent or API protocol.
+- Verification: 62 focused component/native transport tests and 49 server tests pass;
+  TypeScript and production compilation pass. These cover
+  save/list/select/check, failure, refresh, profile switching and no early model
+  call. A real loopback HTTP gateway exercises the production server routes and
+  native authentication with synthetic credentials, not a live provider account.
+  Actual App interaction remains blocked by unavailable computer control; local
+  packaging and user acceptance do not imply release or merge approval.
+
 ## 2026-10-07 — Remember custom API drafts and clarify connection fields
 
 - Keep non-secret endpoint drafts on this device per server connection and

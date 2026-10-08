@@ -5,14 +5,14 @@ import type { CodexServerSettingsScope } from '@shared/types'
 import type { ConnectionAction, ConnectionBackend, ConnectionProtocol, ConnectionResult, ProviderConnectionConfiguration } from '@shared/provider-connections'
 import { useLocale } from '../lib/i18n'
 import { trackOperation } from '../lib/analytics'
-import { endpointNeedsModel, flushEndpointDraft, queueEndpointDraft, readEndpointDraft, type EndpointDraft } from '../lib/endpoint-draft'
+import { flushEndpointDraft, queueEndpointDraft, readEndpointDraft, type EndpointDraft } from '../lib/endpoint-draft'
 import './CodexAuthSettings.css'
 import './ProviderConnectionSettings.css'
 import { CustomModelSettings } from './CustomModelSettings'
 import { EndpointMenu } from './EndpointMenu'
 
 type Props = { connected: boolean; profileId: string | null; profileGeneration: number; expanded?: boolean; onStatus?: (value: boolean) => void }
-type Failure = ConnectionResult | 'update' | 'admin' | 'stale' | 'invalid' | 'failed'
+type Failure = ConnectionResult | 'update' | 'admin' | 'stale' | 'invalid' | 'failed' | 'modelSetupUpdate'
 function failure(reason: unknown): Failure {
   const code = reason instanceof Error ? reason.message : ''
   for (const suffix of ['UPDATE', 'ADMIN', 'STALE', 'INVALID'] as const) {
@@ -30,7 +30,6 @@ export function ProviderConnectionSettings({ backend, ...props }: Props & { back
   const [error, setError] = useState<Failure | null>(null)
   const [reload, setReload] = useState(0)
   const [baseURL, setBaseURL] = useState('')
-  const [model, setModel] = useState('')
   const [protocol, setProtocol] = useState<ConnectionProtocol>('anthropic')
   const [authHeader, setAuthHeader] = useState<'bearer' | 'x-api-key'>('bearer')
   const [hasKey, setHasKey] = useState(false)
@@ -44,8 +43,8 @@ export function ProviderConnectionSettings({ backend, ...props }: Props & { back
   }, [])
   function clearKey() { if (key.current) key.current.value = ''; setHasKey(false) }
   function updateDraft(change: Partial<EndpointDraft>) {
-    const next = { baseURL, model, protocol, authHeader, ...change }
-    setBaseURL(next.baseURL); setModel(next.model); setProtocol(next.protocol); setAuthHeader(next.authHeader)
+    const next = { baseURL, model: '', protocol, authHeader, ...change }
+    setBaseURL(next.baseURL); setProtocol(next.protocol); setAuthHeader(next.authHeader)
     setError(null)
     queueEndpointDraft(props.profileId, backend, next)
   }
@@ -61,7 +60,7 @@ export function ProviderConnectionSettings({ backend, ...props }: Props & { back
   useEffect(() => {
     const n = ++serial.current
     clearKey(); setSaved(null); setOpen(false); setError(null)
-    setBaseURL(''); setModel(''); setBusy(false)
+    setBaseURL(''); setBusy(false)
     if (!props.connected || !props.profileId) return
     const scope = { profileId: props.profileId, profileGeneration: props.profileGeneration }
     const request = window.agentsDock.providerConnections?.request
@@ -78,7 +77,6 @@ export function ProviderConnectionSettings({ backend, ...props }: Props & { back
     clearKey(); setError(null)
     const draft = readEndpointDraft(props.profileId, backend)
     setBaseURL(backend === 'cursor' ? 'https://api2.cursor.sh' : draft?.baseURL ?? saved?.base_url ?? (backend === 'claude' ? 'https://api.anthropic.com' : ''))
-    setModel(draft?.model ?? saved?.model ?? '')
     setProtocol(backend === 'cursor' ? 'cursor' : backend === 'claude' ? 'anthropic' : draft?.protocol ?? saved?.protocol ?? 'chat_completions')
     setAuthHeader(backend === 'cursor' ? 'bearer' : draft?.authHeader ?? saved?.auth_header ?? (backend === 'claude' ? 'x-api-key' : 'bearer')); setOpen(true)
   }
@@ -89,14 +87,16 @@ export function ProviderConnectionSettings({ backend, ...props }: Props & { back
     const n = ++serial.current
     const scope = { profileId: props.profileId, profileGeneration: props.profileGeneration }
     setBusy(true); setError(null)
-    const input = action === 'save' ? { base_url: baseURL, model: model.trim() || null, protocol, auth_header: authHeader,
+    const input = action === 'save' ? { base_url: baseURL, model: null, protocol, auth_header: authHeader,
       api_key: key.current?.value ?? '', expected_revision: saved.revision } : { expected_revision: saved.revision }
     try {
       const reply = await trackOperation(action === 'save' ? 'provider_connection_saved' : action === 'check' ? 'provider_connection_tested' : 'provider_connection_forgotten',
         () => request(scope, backend, action, input), value => value.ok !== false)
       if (!owns(n, scope)) return
       if (reply.configuration) setSaved(reply.configuration)
-      if (reply.ok === false) setError(reply.status ?? 'failed')
+      if (reply.status === 'model_required' && reply.configuration?.configured) setOpen(false)
+      else if (reply.status === 'model_required') setError('modelSetupUpdate')
+      else if (reply.ok === false) setError(reply.status ?? 'failed')
       else setOpen(false)
     } catch (reason) { if (owns(n, scope)) setError(failure(reason)) }
     finally {
@@ -109,7 +109,7 @@ export function ProviderConnectionSettings({ backend, ...props }: Props & { back
   const verified = props.connected && !busy && !open && !error && saved?.configured === true && saved?.last_result === 'verified'
   useEffect(() => { props.onStatus?.(verified) }, [verified, props.onStatus])
   const unavailable = !props.connected || !saved || Boolean(error)
-  const modelRequired = backend !== 'cursor' && (endpointNeedsModel(baseURL) || error === 'model_required')
+  const pendingVerification = backend !== 'cursor' && saved?.configured === true && saved.last_result !== 'verified'
   return <section className={`codex-auth-settings provider-connection ${verified ? 'connection-connected' : 'connection-unconfirmed'}`} aria-label={backend === 'cursor' ? t('connections.cursorKey') : t('connections.title', { provider: name })}>
     <div className="codex-auth-settings-icon">{verified ? <CheckCircle2 size={18} /> : <KeyRound size={16} />}</div>
     <div className="codex-auth-settings-copy">
@@ -122,11 +122,12 @@ export function ProviderConnectionSettings({ backend, ...props }: Props & { back
       <small className={verified ? 'provider-connection-verified' : ''} role="status">
         {verified && <CheckCircle2 size={14} aria-hidden="true" />}
         {busy ? t('connections.working') : verified ? t('connections.verified')
-          : open ? t('connections.draft') : unavailable ? t('connections.unavailable') : saved?.configured ? t('connections.saved') : t('connections.empty')}
+          : open ? t('connections.draft') : unavailable ? t('connections.unavailable') : saved?.last_result === 'model_required' ? t('connections.pendingModel') : saved?.configured ? t('connections.saved') : t('connections.empty')}
       </small>
-      <CustomModelSettings backend={backend} active={props.expanded === true && verified} onSaved={() => setReload(n => n + 1)} />
+      <CustomModelSettings backend={backend} active={props.expanded === true && !open && !busy && props.connected && saved?.configured === true}
+        verifyOnSelect={pendingVerification} baseURL={backend === 'cursor' ? null : saved?.base_url} onSaved={() => setReload(n => n + 1)} />
       {error && <small role="alert" className={error === 'update' ? '' : 'codex-auth-settings-error'}>{t(backend === 'cursor' && error === 'connection_failed' ? 'connections.cursorCheckFailed' : `connections.error.${error}`)}</small>}
-      {!error && !open && saved?.last_result && saved.last_result !== 'verified' && <small role="alert" className="codex-auth-settings-error">{t(`connections.error.${saved.last_result}`)}</small>}
+      {!error && !open && saved?.last_result && !['verified', 'model_required'].includes(saved.last_result) && <small role="alert" className="codex-auth-settings-error">{t(`connections.error.${saved.last_result}`)}</small>}
       {!open && saved?.configured && <>
         {backend !== 'cursor' && <small>{saved.base_url}</small>}
         {!verified && <button type="button" className="quiet-button" disabled={!editable} onClick={configure}>{t('connections.configure')}</button>}
@@ -153,14 +154,9 @@ export function ProviderConnectionSettings({ backend, ...props }: Props & { back
         </div></>}
         <div className="provider-connection-field"><label htmlFor={`${id}-key`}>{t('connections.key')} <span aria-hidden="true" className="provider-field-requirement">{t('connections.required')}</span></label>
         <input id={`${id}-key`} aria-label={t('connections.key')} required type="password" ref={attachKey} maxLength={4096} disabled={busy} onChange={e => setHasKey(Boolean(e.target.value.trim()))} autoComplete="off" autoCapitalize="none" autoCorrect="off" spellCheck={false} data-1p-ignore data-lpignore="true" /></div>
-        {backend !== 'cursor' && <div className="provider-connection-field">
-        <label htmlFor={`${id}-model`}>{t('connections.model')} <span aria-hidden="true" className="provider-field-requirement">{t(modelRequired ? 'connections.required' : 'connections.optional')}</span></label>
-        <input id={`${id}-model`} aria-label={t('connections.model')} value={model} required={modelRequired} maxLength={256} disabled={busy} onChange={e => updateDraft({ model: e.target.value })} autoComplete="off" spellCheck={false} />
-        <small>{t(modelRequired ? 'connections.modelRequiredHelp' : 'connections.modelHelp')}</small>
-        {(modelRequired || model.trim()) && <small>{t('connections.cost')}</small>}
-        </div>}
+        {backend !== 'cursor' && <small>{t('connections.chooseModelLater')}</small>}
         <div className="codex-auth-settings-actions">
-          <button type="submit" className="primary-button" disabled={!editable || !hasKey || !baseURL.trim() || (modelRequired && !model.trim())}>{t('connections.save')}</button>
+          <button type="submit" className="primary-button" disabled={!editable || !hasKey || !baseURL.trim()}>{t('connections.save')}</button>
           <button type="button" className="quiet-button" disabled={busy} onClick={() => { flushEndpointDraft(props.profileId, backend); clearKey(); setOpen(false); setError(null) }}>{t('connections.cancel')}</button>
         </div>
       </form>}

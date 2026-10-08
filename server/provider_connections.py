@@ -602,7 +602,11 @@ def create_router(*, authorize, store: ConnectionStore, check=probe, account=nat
                     current = store.read(backend)
                     if current["revision"] != revision(payload["expected_revision"]):
                         raise HTTPException(409, "Endpoint settings changed. Refresh and try again.")
-                    if current.get("last_result") != "verified": raise HTTPException(409, "Check this API connection first.")
+                    if not current.get("configured"):
+                        raise HTTPException(409, "Connect a custom API first.")
+                    # A saved, unverified connection can choose its first model.
+                    # This write does not verify it or make it usable by chats;
+                    # the explicit /check operation must still succeed.
                     value = {key: current[key] for key in ("base_url", "api_key", "protocol", "auth_header")}
                     saved = store.write(backend, current["revision"], {**value, "model": model, "expected_revision": current["revision"]}, current["last_result"], checked_at=current["checked_at"])
                     cached = store.catalog_cache.get((backend, current["revision"]))
@@ -653,7 +657,11 @@ def create_router(*, authorize, store: ConnectionStore, check=probe, account=nat
                     result = "cli_update_required" if discovered.get("cli_update_required") else "verified" if discovered["discovery_status"] == "ready" and discovered["models"] else "connection_failed"
                 else:
                     result = await check(selected)
-                if request.method == "PUT" and result != "verified":
+                # Public catalogs cannot authenticate a key. Keep a private,
+                # explicitly unverified setup so the client can list models
+                # before choosing one for a subsequent explicit check.
+                pending_model = result == "model_required" and not selected.get("model") and backend != "cursor"
+                if request.method == "PUT" and result != "verified" and not pending_model:
                     return reply({"ok": False, "status": result})
                 configuration = await asyncio.to_thread(store.write, backend, expected, selected, result)
                 if backend == "cursor" and result == "verified":

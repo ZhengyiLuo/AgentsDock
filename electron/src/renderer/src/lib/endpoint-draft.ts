@@ -59,11 +59,3 @@ export function queueEndpointDraft(profileId: string | null, backend: Backend, v
   if (previous) clearTimeout(previous.timer)
   pending.set(key, { draft, timer: setTimeout(() => flushEndpointDraft(profileId, backend), 400) })
 }
-
-/** A public Zen model list cannot verify a key; a model request is required. */
-export function endpointNeedsModel(baseURL: string): boolean {
-  try {
-    const url = new URL(baseURL)
-    return url.hostname === 'opencode.ai' && /^\/zen(?:\/go)?(?:\/v1)?\/?$/.test(url.pathname)
-  } catch { return false }
-}

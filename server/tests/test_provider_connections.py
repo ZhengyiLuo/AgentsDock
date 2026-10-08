@@ -224,6 +224,44 @@ class WireProbeTests(unittest.IsolatedAsyncioTestCase):
     def stop(self):
         self.server.shutdown(); self.thread.join(); self.server.server_close()
 
+    async def test_two_step_setup_uses_real_http_without_inference_until_model_check(self):
+        self.public_status = 200
+        self.payload = {"data": [{"id": "fixture/model"}]}
+        with tempfile.TemporaryDirectory() as directory:
+            store = connections.ConnectionStore(Path(directory) / "private")
+            fixture = auth_fixture.CodexAuthTests()
+            fixture.setUp()
+            self.addCleanup(fixture.doCleanups)
+            fixture.ns["codex_provider"] = codex_provider
+            app = FastAPI()
+            app.middleware("http")(fixture.ns["require_agent_token"])
+            app.include_router(connections.create_router(authorize=fixture.ns["require_native_admin_control"], store=store))
+            with TestClient(app) as client:
+                route = "/api/admin/provider-connections/opencode"
+                models = "/api/admin/provider-models/opencode"
+                response = client.put(route, headers=NATIVE, json={**INPUT, "base_url": self.base, "model": None})
+                self.assertEqual(response.status_code, 200, response.text)
+                self.assertFalse(response.json()["ok"])
+                self.assertEqual(response.json()["status"], "model_required")
+                self.assertTrue(response.json()["configuration"]["configured"])
+                listed = client.get(models, headers=NATIVE)
+                self.assertEqual(listed.json()["models"], [{"value": "fixture/model", "label": "fixture/model"}])
+                self.assertIsNone(listed.json()["default_model"])
+                self.assertTrue(all(call[2] is None for call in self.calls))
+                self.assertFalse(store.catalog("opencode")["available"])
+                chosen = client.put(models, headers=NATIVE, json={"model": "fixture/model", "expected_revision": 1})
+                self.assertEqual(chosen.status_code, 200, chosen.text)
+                self.assertTrue(all(call[2] is None for call in self.calls))
+                self.payload = {"type": "message", "content": [{"type": "text", "text": "OK"}]}
+                verified = client.post(route + "/check", headers=NATIVE, json={"expected_revision": 2})
+                self.assertTrue(verified.json()["ok"])
+                posts = [call for call in self.calls if call[2] is not None]
+                self.assertEqual(len(posts), 1)
+                self.assertEqual(posts[0][2]["model"], "fixture/model")
+                self.assertEqual(posts[0][2]["max_tokens"], 256)
+                self.assertNotIn(KEY, verified.text)
+                self.assertEqual(store.bind({"backend": "opencode", "provider_connection": "custom"})["model"], "fixture/model")
+
     async def test_real_http_protocol_paths_headers_and_response_validation(self):
         cases = [("anthropic", "bearer", "/api", "/api/v1/messages", {"type": "message", "content": [{"type": "text", "text": "OK"}]}),
             ("anthropic", "x-api-key", "/v1", "/v1/messages", {"type": "message", "content": [{"type": "text", "text": "OK"}]}),
