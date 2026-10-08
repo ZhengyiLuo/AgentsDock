@@ -59,6 +59,26 @@ A successful check does **not** establish native agent login, tool use,
 streaming, reasoning, context continuity or full runtime compatibility.
 The UI labels this **Connected**, not “logged in”; it records the last explicit
 check, not continuous verification.
+
+For Anthropic protocol, a root URL or a URL ending in `/v1` resolves to the
+same `/v1/messages` API for model checks and OpenCode runs. Gateway path prefixes
+are retained (for example, `/proxy/anthropic` becomes `/proxy/anthropic/v1`).
+Claude Code still receives the root URL expected by its own SDK. This does not
+rewrite stored URLs, credential identities or chat bindings; OpenAI-compatible
+protocols continue to use the exact API prefix supplied by the user.
+
+An OpenCode step with an unknown/invalid completion reason is a failed response,
+not a successful turn. The server stops that process to bound repeated requests
+and suggests checking the URL, protocol and streaming support. This can happen
+when a gateway returns an HTML page with HTTP 200; the CLI does not always expose
+the response content type, so the error does not claim HTML was confirmed.
+Provider error events retain an available HTTP status, without dumping headers
+or raw response bodies. Partial assistant text stays in the timeline.
+
+One custom connection still has one protocol. Model checks use small output
+budgets and do not establish the runtime model's output/context limits. This
+fix does not add per-model protocols or override OpenCode's token limits.
+
 Checks happen only on explicit user actions. Optional model checks can incur
 a small charge; default read-only checks do not run inference. Checks
 send neither conversation history nor tools. Rechecking failure removes the

@@ -249,6 +249,32 @@ class WireProbeTests(unittest.IsolatedAsyncioTestCase):
             self.payload = payload
             self.assertEqual(await connections.probe({**INPUT, "base_url": self.base}), "invalid_response")
 
+    async def test_anthropic_check_catalog_and_opencode_runtime_share_api_prefix(self):
+        for suffix in ("", "/v1", "/proxy/anthropic", "/proxy/anthropic/v1"):
+            for auth in ("bearer", "x-api-key"):
+                with self.subTest(suffix=suffix, auth=auth), tempfile.TemporaryDirectory() as directory:
+                    selected = {**INPUT, "base_url": self.base + suffix, "auth_header": auth}
+                    expected_prefix = suffix if suffix.endswith("/v1") else suffix + "/v1"
+                    self.payload = {"type": "message", "content": [{"type": "text", "text": "OK"}]}
+                    self.assertEqual(await connections.probe(selected), "verified")
+                    checked_path = self.calls[-1][0]
+                    self.assertEqual(checked_path, expected_prefix + "/messages")
+                    store = connections.ConnectionStore(Path(directory) / "private")
+                    store.write("opencode", 0, selected, "verified")
+                    chat = {"backend": "opencode", "provider_connection": "custom"}
+                    chat["provider_connection_revision"] = store.bind(chat)["credential_id"]
+                    original = store.for_session(chat)
+                    env = store.opencode_overrides(chat, {})
+                    config = json.loads(env["OPENCODE_CONFIG_CONTENT"])
+                    runtime_base = config["provider"]["agentsdock_custom"]["options"]["baseURL"]
+                    self.assertEqual(runtime_base + "/messages", self.base + checked_path)
+                    self.assertEqual(store.for_session(chat), original)
+                    self.payload = {"data": [{"id": "test/model"}]}
+                    self.assertEqual(await connections.probe_credentials(selected), "verified")
+                    self.assertEqual(self.calls[-1][0], expected_prefix + "/models")
+                    self.assertTrue(connections.discover_models(selected))
+                    self.assertEqual(self.calls[-1][0].split("?")[0], expected_prefix + "/models")
+
     async def test_read_only_key_check_requires_a_protected_endpoint(self):
         self.payload = {"data": [{"id": "fixture/model"}]}
         for protocol, header, path in [("responses", "bearer", "/models"), ("anthropic", "x-api-key", "/v1/models")]:

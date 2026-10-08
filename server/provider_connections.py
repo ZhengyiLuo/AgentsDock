@@ -22,7 +22,7 @@ import httpx
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import JSONResponse
 
-from codex_provider import validate_selection, validate_model, endpoint_model_catalog
+from codex_provider import validate_selection, validate_model, endpoint_model_catalog, endpoint_api_base_url
 
 MAX_BODY_BYTES = 16 * 1024
 PROTOCOLS = {"claude": {"anthropic"}, "opencode": {"anthropic", "chat_completions", "responses"}, "cursor": {"cursor"}}
@@ -277,7 +277,7 @@ class ConnectionStore:
         model = require_model(value)
         config = json.loads(env.get("OPENCODE_CONFIG_CONTENT") or "{}")
         adapter = {"anthropic": "@ai-sdk/anthropic", "chat_completions": "@ai-sdk/openai-compatible", "responses": "@ai-sdk/openai"}[value["protocol"]]
-        options = {"baseURL": value["base_url"], "apiKey": "{env:AGENTSDOCK_CUSTOM_API_KEY}"}
+        options = {"baseURL": endpoint_api_base_url(value["base_url"], value["protocol"]), "apiKey": "{env:AGENTSDOCK_CUSTOM_API_KEY}"}
         if value["protocol"] == "anthropic" and value["auth_header"] == "bearer":
             options["headers"] = {"Authorization": "Bearer {env:AGENTSDOCK_CUSTOM_API_KEY}", "x-api-key": ""}
         config.setdefault("provider", {})["agentsdock_custom"] = {"npm": adapter, "name": "Custom endpoint", "options": options, "models": {model: {"name": model}}}
@@ -361,8 +361,7 @@ async def probe_credentials(selected: dict) -> str:
         headers["Authorization"] = "Bearer " + selected["api_key"]
     url = urlsplit(base)
     router = url.scheme == "https" and url.netloc == "openrouter.ai" and url.path in {"/api", "/api/v1"}
-    target = "https://openrouter.ai/api/v1/key" if router else base + (
-        "/v1/models" if protocol == "anthropic" and not base.endswith("/v1") else "/models")
+    target = "https://openrouter.ai/api/v1/key" if router else endpoint_api_base_url(base, protocol) + "/models"
     async def send():
         async with httpx.AsyncClient(timeout=10, follow_redirects=False, trust_env=False) as client:
             async with client.stream("GET", target, headers=headers) as response:
@@ -403,10 +402,10 @@ async def probe(selected: dict) -> str:
         headers["x-api-key"] = selected["api_key"]
     else:
         headers["Authorization"] = "Bearer " + selected["api_key"]
-    base = selected["base_url"]
+    base = endpoint_api_base_url(selected["base_url"], protocol)
     prompt = "Connection check. Reply with OK only."
     if protocol == "anthropic":
-        suffix = "/messages" if base.endswith("/v1") else "/v1/messages"
+        suffix = "/messages"
         headers["anthropic-version"] = "2023-06-01"
         body = {"model": selected["model"], "max_tokens": 32, "messages": [{"role": "user", "content": prompt}]}
     elif protocol == "responses":

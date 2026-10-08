@@ -1,5 +1,29 @@
 # Public development log
 
+## 2026-10-07 — Align OpenCode custom API checks and runtime routes
+
+- Resolve Anthropic API prefixes consistently for model discovery, connection
+  checks and OpenCode runtime configuration. Root URLs and explicit `/v1` URLs
+  work without dropping gateway prefixes or changing saved binding identities.
+  Claude's SDK root convention and OpenAI-compatible routing stay unchanged.
+- Stop unknown/invalid OpenCode completions instead of treating an empty step
+  as success and waiting while the CLI makes repeated requests. Preserve partial
+  timeline text and explicit provider HTTP status diagnostics; do not dump raw
+  gateway bodies or headers. No additional retry or inference probe is added.
+- Verification: 196 focused tests pass, including URL parity, credential
+  isolation/revocation, catalog discovery, stream errors, lifecycle and MCP.
+  Regression cases fail on the prior implementation. Lock validation and
+  compilation/package-source checks pass. Existing runner fixtures emit
+  recovered missing-mailbox-table warnings; these are not live-service errors.
+- Four opt-in tests exercise real OpenCode 1.18.29 through the production
+  process runner and a synthetic loopback gateway: root URL, explicit `/v1`,
+  HTML-200 streaming response and HTTP 401. Disposable home/state and synthetic
+  keys only; no real model inference or external gateway compatibility claim.
+  Run `tests.test_opencode_custom_api_smoke` with `OPENCODE_TEST_EXECUTABLE` set.
+- Desktop interaction is blocked by disabled computer access, so full app and
+  real-gateway acceptance remain pending. This is a local test candidate, not
+  a published release. Per-model protocols and output limits are not included.
+
 ## 2026-10-03 — Preserve automatic naming across follow-up messages
 
 - Compare effective title runtime settings before and after session updates,
