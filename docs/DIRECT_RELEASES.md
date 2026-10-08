@@ -82,6 +82,12 @@ and its legacy mirror. Coordinated releases also require the exact npm archive
 and matching signed legacy server bridge to be available, with identical runtime
 contents and executable permissions.
 
+New releases containing the short `agentsdock` command also prepare and verify
+both npm packages before desktop publication. Follow the
+[matched npm CLI release procedure](NPM_CLI_RELEASES.md), including first-package
+ownership/bootstrap and native CLI acceptance. Runtime-only publication does not
+mean the short CLI is public. Existing frozen releases are not rebuilt.
+
 Both workflows are manual, restricted to the canonical repository and reviewed
 `main` or `release/*` branches. Jobs using signing credentials or the release
 token use the `direct-production` environment with matching branch restrictions.
