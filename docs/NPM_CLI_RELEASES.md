@@ -13,6 +13,14 @@ Choose the next unused `1.0.10-beta.N` only after reconciling the reviewed relea
 source with main; main's development `server/VERSION` is not a release reservation.
 Do not overwrite beta.4 or silently drop fixes maintained on its release branch.
 
+At the reviewed preparation pins, main `3964cf80` is an ancestor of beta.4 source
+`941bc4cd`. Start the next release branch from that frozen release source, then
+apply the reviewed pipeline changes without rewriting the old tag. A version
+bump on main alone would omit already-shipped pending-update HTTP error handling,
+signed-update lock waiting, executable packaging permissions and native build
+reservation fixes, among other release-line changes. Review the resulting merge
+and run its full source checks before accepting any new package.
+
 ## Prepare the immutable pair
 
 1. Commit the complete reviewed candidate, including its exact `server/VERSION`.
