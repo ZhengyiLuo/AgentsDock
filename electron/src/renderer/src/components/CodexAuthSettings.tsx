@@ -4,6 +4,7 @@ import { t } from '@shared/i18n'
 import type { CodexAuthStatus, CodexProviderConfiguration, CodexProviderTestResult, CodexServerSettingsScope } from '@shared/types'
 import { useLocale } from '../lib/i18n'
 import { trackOperation } from '../lib/analytics'
+import { flushEndpointDraft, queueEndpointDraft, readEndpointDraft } from '../lib/endpoint-draft'
 import { CustomModelSettings } from './CustomModelSettings'
 import { EndpointMenu } from './EndpointMenu'
 import { CodexModelCompatibilityCheck } from './CodexModelCompatibilityCheck'
@@ -68,6 +69,11 @@ export function CodexAuthSettings({ connected, profileId, profileGeneration, ser
   scopeRef.current = { connected, profileId, profileGeneration }
   const keyInputRef = useRef<HTMLInputElement | null>(null)
   const endpointInputRef = useRef<HTMLInputElement | null>(null)
+  useEffect(() => {
+    const flush = () => flushEndpointDraft(profileId, 'codex')
+    window.addEventListener('pagehide', flush)
+    return () => { window.removeEventListener('pagehide', flush); flush() }
+  }, [profileId])
 
   // Keep credentials out of React state and clear even a detached input when the
   // form, selected server, or settings dialog closes.
@@ -176,7 +182,7 @@ export function CodexAuthSettings({ connected, profileId, profileGeneration, ser
       if (request !== providerRequestRef.current || !ownsScope(scope)) return
       setProvider(next)
       setProviderScope(scope)
-      setBaseURL(next.base_url ?? 'https://api.openai.com/v1')
+      setBaseURL(readEndpointDraft(profileId, 'codex')?.baseURL ?? next.base_url ?? 'https://api.openai.com/v1')
     } catch (reason) {
       if (request === providerRequestRef.current && ownsScope(scope)) {
         const failure = providerFailure(reason)
@@ -268,6 +274,7 @@ export function CodexAuthSettings({ connected, profileId, profileGeneration, ser
   }
 
   function cancelForm() {
+    flushEndpointDraft(profileId, 'codex')
     clearKey()
     invalidateTest()
     providerRequestRef.current += 1
@@ -327,14 +334,22 @@ export function CodexAuthSettings({ connected, profileId, profileGeneration, ser
       <CustomModelSettings backend="codex" active={expanded === true && apiVerified} onSaved={() => setReload(value => value + 1)} />
       {showForm && <form className="codex-auth-settings-form" onSubmit={event => { event.preventDefault(); void saveProvider() }}>
         {providerLoading && <small>{t('codexAuth.providerLoading')}</small>}
+        <small>{t('connections.draftHelp')}</small>
         <div className="codex-auth-endpoint-fields">
           {currentProvider?.available === false && <small>{t('codexAuth.nativeRequired')}</small>}
-          <label htmlFor={`${fieldId}-endpoint`}>{t('codexAuth.baseURL')}</label>
-          <input ref={endpointInputRef} id={`${fieldId}-endpoint`} type="url" value={baseURL} disabled={!providerEditable} autoComplete="off" spellCheck={false}
-            onChange={event => { setBaseURL(event.currentTarget.value); invalidateTest() }} />
+          <label htmlFor={`${fieldId}-endpoint`}>{t('codexAuth.baseURL')} <span aria-hidden="true" className="provider-field-requirement">{t('connections.required')}</span></label>
+          <input ref={endpointInputRef} id={`${fieldId}-endpoint`} aria-label={t('codexAuth.baseURL')} required type="url" value={baseURL} disabled={!providerEditable} autoComplete="off" spellCheck={false}
+            onChange={event => {
+              setBaseURL(event.currentTarget.value); invalidateTest()
+              queueEndpointDraft(profileId, 'codex', { baseURL: event.currentTarget.value, model: '', protocol: 'responses', authHeader: 'bearer' })
+            }} />
         </div>
-        <label htmlFor={fieldId}>{t('codexAuth.providerKey')}</label>
-        <input ref={attachKeyInput} id={fieldId} type="password" autoComplete="off" autoCapitalize="none" autoCorrect="off"
+        <div className="provider-connection-field"><label htmlFor={`${fieldId}-protocol`}>{t('connections.protocol')}</label>
+          <select id={`${fieldId}-protocol`} disabled value="responses"><option value="responses">OpenAI Responses</option></select></div>
+        <div className="provider-connection-field"><label htmlFor={`${fieldId}-auth`}>{t('connections.authHeader')}</label>
+          <select id={`${fieldId}-auth`} disabled value="bearer"><option value="bearer">Bearer</option></select></div>
+        <label htmlFor={fieldId}>{t('codexAuth.providerKey')} <span aria-hidden="true" className="provider-field-requirement">{t('connections.required')}</span></label>
+        <input ref={attachKeyInput} id={fieldId} aria-label={t('codexAuth.providerKey')} required type="password" autoComplete="off" autoCapitalize="none" autoCorrect="off"
           spellCheck={false} maxLength={4096} disabled={!providerEditable} data-1p-ignore data-lpignore="true"
           onChange={event => { setHasKey(Boolean(event.currentTarget.value.trim())); invalidateTest() }} />
         <div className="codex-auth-settings-actions">

@@ -1160,6 +1160,95 @@
   needs correction and real-app verification. Signed desktop packaging and
   installed-version migration, busy/offline recovery and no-downgrade acceptance
   remain required before a coordinated release.
+## 2026-10-08 — Configure custom APIs before choosing a model
+
+- Remove Model ID from Claude/OpenCode connection forms. Initial connection
+  checks are read-only; saved draft model IDs cannot trigger hidden inference.
+  Choose the default afterward from the endpoint catalog and reload it on demand.
+- When a public or missing catalog cannot verify credentials, save a private
+  `model_required` configuration, not a successful connection. It remains absent
+  from available chat providers until an explicit model check succeeds. Selecting
+  the first model runs that bounded check with a visible possible-cost notice.
+  Already verified defaults remain metadata-only; no arbitrary model is selected.
+- Preserve native administrator checks, credential redaction, revision fencing,
+  Forget and existing chat bindings. Old servers that cannot retain pending
+  configuration show an update message, not a Model ID field the user cannot find.
+- Manual model entry and service-specific official catalog links are fallback
+  controls in the later model section, not initial configuration. Include English
+  and Simplified Chinese copy. Unknown gateways are not assigned another service's
+  model list merely because they use that agent or API protocol.
+- Verification: 62 focused component/native transport tests and 49 server tests pass;
+  TypeScript and production compilation pass. These cover
+  save/list/select/check, failure, refresh, profile switching and no early model
+  call. A real loopback HTTP gateway exercises the production server routes and
+  native authentication with synthetic credentials, not a live provider account.
+  Actual App interaction remains blocked by unavailable computer control; local
+  packaging and user acceptance do not imply release or merge approval.
+- Full desktop regression: 5,064 pass and five skipped; eight build/license
+  guards pass. Package commit `70af1129` as an audited, ad-hoc signed local App
+  (package metadata `0.2.0`, build 85) with the existing isolated test profile.
+  The designated local test server runs `1.0.10-beta.2.opencode.70af1129` with
+  authenticated health and installed module/source parity verified. The primary
+  server is unchanged. No artifacts are published and merge remains pending.
+
+## 2026-10-07 — Remember custom API drafts and clarify connection fields
+
+- Keep non-secret endpoint drafts on this device per server connection and
+  provider, even after failed checks, closing settings or restarting the app.
+  Codex retains its URL too. Keys stay out of drafts; embedded URL credentials,
+  query strings and fragments are not persisted. Typing does not send requests
+  and disk writes are debounced, with a flush on close/page exit.
+- Show protocol and authentication as separate, visible fields. Mark required
+  inputs, keep provider-fixed protocols read-only, and require a model for known
+  public Zen catalogs. Restored drafts never imply a verified connection.
+  Include English and Simplified Chinese copy.
+- Verification: 81 focused component, draft, style and native transport tests
+  pass; TypeScript, eight build/license guards and production compilation pass.
+  Full desktop regression: 5,039 pass, five skipped. Filesystem-sensitive tests
+  use a POSIX temporary directory and the CI-compatible file-creation mask;
+  security checks are unchanged.
+- Package source `3a25c492` as a local ad-hoc test App, audit/sign the bundle and
+  launch it with the existing isolated local-app profile. Packaged main,
+  preload and renderer bytes match the validated build. No release publication
+  or server restart is part of this desktop follow-up.
+- A separate live Zen model check succeeds, but the reported App authentication
+  rejection has not been reproduced. Computer interaction remains disabled,
+  so actual App acceptance is still pending; this change must not be merged
+  based on component or HTTP checks alone.
+
+## 2026-10-07 — Align OpenCode custom API checks and runtime routes
+
+- Resolve Anthropic API prefixes consistently for model discovery, connection
+  checks and OpenCode runtime configuration. Root URLs and explicit `/v1` URLs
+  work without dropping gateway prefixes or changing saved binding identities.
+  Claude's SDK root convention and OpenAI-compatible routing stay unchanged.
+- Stop unknown/invalid OpenCode completions instead of treating an empty step
+  as success and waiting while the CLI makes repeated requests. Preserve partial
+  timeline text and explicit provider HTTP status diagnostics; do not dump raw
+  gateway bodies or headers. No additional retry or inference probe is added.
+- Allow a bounded 256-token output budget for explicit Claude/OpenCode model
+  checks. Reasoning models can consume the former 32/64-token budget before
+  answering; empty or reasoning-only responses still cannot verify a connection.
+  Checks remain single-shot and do not alter runtime token limits.
+- Verification: 198 focused tests pass, including URL parity, credential
+  isolation/revocation, catalog discovery, stream errors, lifecycle and MCP.
+  Regression cases fail on the prior implementation. Lock validation and
+  compilation/package-source checks pass. Existing runner fixtures emit
+  recovered missing-mailbox-table warnings; these are not live-service errors.
+- Four opt-in tests exercise real OpenCode 1.18.29 through the production
+  process runner and a synthetic loopback gateway: root URL, explicit `/v1`,
+  HTML-200 streaming response and HTTP 401. Disposable home/state and synthetic
+  keys only; no real model inference in these four repeatable smoke tests.
+  Run `tests.test_opencode_custom_api_smoke` with `OPENCODE_TEST_EXECUTABLE` set.
+- Separate live OpenCode Zen checks pass for Chat Completions, Anthropic
+  Messages and Responses. Real CLI replies also pass for Anthropic root and
+  `/v1` URLs and Responses. These checks do not establish Go subscription or
+  free-tier compatibility; neither was accepted in this validation.
+- Desktop interaction is blocked by disabled computer access. Full app
+  acceptance remains pending and the PR is held for that check, not merged.
+  This is a local test candidate, not a published release. Per-model protocols
+  and runtime output limits are not included.
+
 ## 2026-10-03 — Preserve automatic naming across follow-up messages
 
 - Compare effective title runtime settings before and after session updates,
