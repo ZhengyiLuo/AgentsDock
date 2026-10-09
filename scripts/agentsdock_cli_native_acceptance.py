@@ -40,6 +40,8 @@ UNTESTED = ["provider-chat", "interactive-pairing-and-optional-dependency-prompt
 PHASES = {"inputs", "clean-host", "automatic-setup", "default-health", "repeat-install",
           "read-only-commands", "named-create", "named-lifecycle", "named-removal",
           "default-lifecycle", "cache-independence", "default-removal", "complete"}
+PUBLIC_CHECKS = {"private-token-file", "npm-output-token-privacy", "authenticated-default-health",
+                 "service-path-independence", "exact-runtime-bytes-and-modes"}
 
 
 def need(condition, message):
@@ -446,11 +448,15 @@ def exercise(args, home, descriptor, receipt, observations, progress):
          "Automatic first setup did not report readiness.")
     binary = str(prefix / "bin/agentsdock")
     need(command([binary, "version"], env=env).stdout.decode().strip() == version, "Installed CLI version differs.")
-    progress("default-health")
+    progress("default-health", "private-token-file")
     token = token_at(home)
+    progress("default-health", "npm-output-token-privacy")
     need(token.encode() not in installed.stdout + installed.stderr, "npm output disclosed the private token.")
+    progress("default-health", "authenticated-default-health")
     first = health(7850, token, version)
+    progress("default-health", "service-path-independence")
     verify_services(home, "default", args.work)
+    progress("default-health", "exact-runtime-bytes-and-modes")
     count = verify_runtime(home, "default", runtime, version)
     observations.update(automaticFirstGlobalSetup=True, authenticatedDefaultHealth=True,
                         exactRuntimeFilesCompared=count, privateTokenAbsentFromNpmOutput=True)
@@ -558,10 +564,12 @@ def exercise(args, home, descriptor, receipt, observations, progress):
     observations["defaultRemovalLeavesNamedSyntheticStateUntouched"] = True
 
 
-def make_report(args, descriptor, observations, phase, passed):
+def make_report(args, descriptor, observations, phase, passed, check=None):
     need(phase in PHASES, "Unknown public report phase.")
+    need(check is None or check in PUBLIC_CHECKS, "Unknown public report check.")
     return {"schema": 1, "kind": "agentsdock-cli-native-acceptance", "scope": "paired-npm-cli-native",
             "status": "passed" if passed else "failed", "phase": phase, "productPublicationEligible": False,
+            "failedCheck": check if not passed else None,
             "fullAcceptance": False, "sourceSha": args.source_sha, "sourceRef": args.source_ref,
             "runtimeManifestSha256": args.manifest_sha256, "cliReceiptSha256": args.cli_receipt_sha256,
             "version": descriptor.get("version") if descriptor else None,
@@ -582,19 +590,20 @@ def main():
     args = parser.parse_args()
     home = guard(args)  # No report or arbitrary write on rejected host/path.
     owned_directory(args.report.parent)
-    descriptor, observations, phase, passed = None, {}, "inputs", False
+    descriptor, observations, phase, passed, check = None, {}, "inputs", False, None
 
-    def progress(value):
-        nonlocal phase
+    def progress(value, current_check=None):
+        nonlocal phase, check
         need(value in PHASES, "Unknown phase.")
-        phase = value
+        need(current_check is None or current_check in PUBLIC_CHECKS, "Unknown check.")
+        phase, check = value, current_check
 
     try:
         descriptor, receipt = inspect_inputs(args)
         exercise(args, home, descriptor, receipt, observations, progress)
         phase, passed = "complete", True
     finally:
-        report = make_report(args, descriptor, observations, phase, passed)
+        report = make_report(args, descriptor, observations, phase, passed, check)
         fd = os.open(args.report, os.O_CREAT | os.O_EXCL | os.O_WRONLY | os.O_NOFOLLOW, 0o600)
         with os.fdopen(fd, "w") as stream:
             json.dump(report, stream, indent=2, sort_keys=True)

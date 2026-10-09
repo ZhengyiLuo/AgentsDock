@@ -143,6 +143,47 @@ class NativeCliGuardTests(unittest.TestCase):
             for boundary in ("populated-native-history", "busy-or-queued-work", "logout-or-reboot", "history-purge"):
                 self.assertIn(boundary, report["notTested"])
 
+    def test_failure_checks_are_closed_set_identifiers_not_private_diagnostics(self):
+        with patch.dict(os.environ, self.env, clear=True):
+            for check in native.PUBLIC_CHECKS:
+                report = native.make_report(self.args, {"version": "1.0.10-beta.5"}, {},
+                                            "default-health", False, check)
+                self.assertEqual(report["failedCheck"], check)
+                self.assertFalse(report["fullAcceptance"])
+                self.assertFalse(report["productPublicationEligible"])
+                self.assertNotIn(str(self.home), json.dumps(report))
+            passed = native.make_report(self.args, {"version": "1.0.10-beta.5"}, {},
+                                        "complete", True, "service-path-independence")
+            self.assertIsNone(passed["failedCheck"])
+            for value in ("token=private-token", str(self.home), "arbitrary exception output"):
+                with self.assertRaisesRegex(RuntimeError, "Unknown public report check"):
+                    native.make_report(self.args, None, {}, "default-health", False, value)
+
+    def test_main_failure_report_keeps_only_selected_check_and_not_exception_text(self):
+        # Replace the entire native exercise and host guard with inert doubles;
+        # this tests report finalization only, never native operations.
+        self.args.report.parent.mkdir(mode=0o700)
+
+        def fail(_args, _home, _descriptor, _receipt, _observations, progress):
+            progress("default-health", "service-path-independence")
+            raise RuntimeError("private-token and private-path must not escape")
+
+        with patch.dict(os.environ, self.env, clear=True), \
+                patch("argparse.ArgumentParser.parse_args", return_value=self.args), \
+                patch.object(native, "guard", return_value=self.home), \
+                patch.object(native, "inspect_inputs", return_value=({"version": "1.0.10-beta.5"}, {})), \
+                patch.object(native, "exercise", side_effect=fail):
+            with self.assertRaises(RuntimeError):
+                native.main()
+        text = self.args.report.read_text()
+        report = json.loads(text)
+        self.assertEqual(report["status"], "failed")
+        self.assertEqual(report["failedCheck"], "service-path-independence")
+        self.assertFalse(report["fullAcceptance"])
+        self.assertFalse(report["productPublicationEligible"])
+        for private in ("private-token", "private-path", str(self.home)):
+            self.assertNotIn(private, text)
+
     def default_removal_fixture(self, change=None):
         # Inert commands/native-state observations and disposable files only.
         # Never invokes exercise(), starts a service, or spoofs a hosted runner.

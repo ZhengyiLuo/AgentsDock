@@ -1,5 +1,21 @@
 # Public development log
 
+## 2026-10-09 — Keep temporary npm paths out of new service installations
+
+- Filter npm lifecycle `.bin` directories, disposable npx cache paths and npm
+  node-gyp shims before CLI setup or local instance helpers can persist them.
+  Preserve stable absolute provider, user and Node paths and their spelling;
+  ignore empty/relative entries without trusting npm configuration as a baseline.
+- Reuse one filter across automatic first setup, explicit setup/recovery and
+  local management. Keep the signed installer and existing installation guards,
+  token privacy, named-instance selection and removal confirmation unchanged.
+- Report closed-set native acceptance subcheck identifiers without private
+  output, so service-path failures are distinguishable from health or file-mode
+  checks. This does not relax acceptance or turn fixture results into native passes.
+- Fix-only preparation: no new release, installed-server PATH repair or native
+  service acceptance is claimed. Frozen candidates remain unchanged; corrected
+  packages require a new approved version and exact-package native validation.
+
 ## 2026-10-09 — Prepare matched beta.5 and the short npm command
 
 - Prepare `1.0.10-beta.5` for the direct desktop app, signed npm server,
