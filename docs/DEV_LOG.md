@@ -1,5 +1,20 @@
 # Public development log
 
+## 2026-10-09 — Prepare matched beta.5 and the short npm command
+
+- Prepare `1.0.10-beta.5` for the direct desktop app, signed npm server,
+  signed legacy bridge and `agentsdock` command. Preserve stable `1.0.9`
+  and all previously published packages and update feeds.
+- Merge the reviewed custom API/OpenCode changes and paired npm pipeline
+  into the existing beta release line, retaining already-shipped update,
+  packaging, history and native build-reservation fixes.
+- Bind the short CLI to the exact same-version signed server runtime.
+  First publication requires the package owner's npm bootstrap; the runtime's
+  existing trusted publisher does not authorize a different package.
+- Preparation only: split-service CLI lifecycle integration, exact-package
+  native acceptance, signing, notarization and publication remain pending.
+  No new accepted build or public availability is claimed by this entry.
+
 ## 2026-10-05 — Prepare matched 1.0.10-beta.4 (unreleased)
 
 - Carry the reviewed native goal-follow-up history repair into a new matched

@@ -59,7 +59,7 @@ STABLE109_ROOT_NORMALIZING_INSTALLER_SHA256 = "52b6212d6bd00fdf2b071cbd5ec8f01ea
 BETA1101_ROOT_NORMALIZING_INSTALLER_SHA256 = "51a6ae6f242476ae4f19712b95ecbaba212b2256e3928d389d8f617a6c367ed7"
 NPM_BASELINE_VERSIONS = {"stable108": "1.0.8", "beta1085": "1.0.8-beta.5", "beta1101": "1.0.10-beta.1"}
 NPM_BASELINE_TARGETS = {"stable108": ("1.0.9",), "beta1085": ("1.0.9",),
-                        "beta1101": ("1.0.10-beta.2", "1.0.10-beta.3", "1.0.10-beta.4")}
+                        "beta1101": ("1.0.10-beta.2", "1.0.10-beta.3", "1.0.10-beta.4", "1.0.10-beta.5")}
 ROLLBACK_STAGES = {"preflight", "start-request", "observe-rollback", "rollback-proof", "preservation",
                    "retry-request", "retry-health", "retry-completion", "retry-verification"}
 
@@ -1434,8 +1434,8 @@ def root_normalization_contract(bundle: Path, receipt: dict) -> str:
                  "Root-normalization package must contain one bounded installer.")
             with package.extractfile(members[0]) as stream:
                 installers.append(stream.read(2 * 1024 * 1024 + 1))
-    # Frozen beta.2/beta.3 and reviewed beta.4 retain the complete beta.1 installer.
-    expected_hash = (BETA1101_ROOT_NORMALIZING_INSTALLER_SHA256 if version in {"1.0.10-beta.1", "1.0.10-beta.2", "1.0.10-beta.3", "1.0.10-beta.4"}
+    # Frozen beta.2/beta.3/beta.4 and reviewed beta.5 retain the complete beta.1 installer.
+    expected_hash = (BETA1101_ROOT_NORMALIZING_INSTALLER_SHA256 if version in {"1.0.10-beta.1", "1.0.10-beta.2", "1.0.10-beta.3", "1.0.10-beta.4", "1.0.10-beta.5"}
                      else STABLE109_ROOT_NORMALIZING_INSTALLER_SHA256 if version == "1.0.9"
                      else ROOT_NORMALIZING_INSTALLER_SHA256)
     need(installers[0] == installers[1] == read_regular(ROOT / "server/install.sh", 2 * 1024 * 1024)

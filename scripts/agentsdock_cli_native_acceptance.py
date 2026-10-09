@@ -39,7 +39,7 @@ UNTESTED = ["provider-chat", "interactive-pairing-and-optional-dependency-prompt
             "bulk-instance-controls", "native-name-release"]
 PHASES = {"inputs", "clean-host", "automatic-setup", "default-health", "repeat-install",
           "read-only-commands", "named-create", "named-lifecycle", "named-removal",
-          "default-lifecycle", "cache-independence", "complete"}
+          "default-lifecycle", "cache-independence", "default-removal", "complete"}
 
 
 def need(condition, message):
@@ -350,6 +350,83 @@ def inspect_runtime_archive(archive, version):
              "Runtime payload version differs.")
 
 
+def stopped_default(files, pids, *, removed=False, timeout=30):
+    """Observe both owned services and former processes; never kill or repair."""
+    deadline = time.monotonic() + timeout
+    while True:
+        states = [service_state(item) for item in files]
+        processes = [command(["/bin/ps", "-p", str(pid), "-o", "pid="], allowed=(0, 1)).stdout.strip()
+                     for pid in pids]
+        if all(value == "absent" if removed else value != "active" for value in states) and not any(processes):
+            return
+        need(time.monotonic() < deadline, "Both owned default components did not stop or unregister.")
+        time.sleep(1)
+
+
+def exercise_default_removal(home, binary, env, version, last, runtime, count, observations):
+    """Actual CLI stop/cancel/remove, only after the guarded exact-pair journey.
+
+    Cancellation preserves token/configuration; confirmed uninstall deliberately
+    removes them. Only synthetic history retention is observed, never real chats.
+    """
+    paths = roots(home)
+    files = service_files(home)
+    need(len(files) == 2 and all(item.is_file() and not item.is_symlink() for item in files),
+         "Both native default registrations are required before removal.")
+    pids = []
+    for name in ("gateway", "execution_service"):
+        component = last.get(name)
+        need(isinstance(component, dict) and component.get("protocol") == 1
+             and component.get("version") == version and type(component.get("pid")) is int
+             and 1 < component["pid"] < 2 ** 31 and bool(component.get("instance_id"))
+             and component.get("maintenance_held") is not True,
+             "Both exact-version default components must be healthy before removal.")
+        pids.append(component["pid"])
+    need(len(set(pids)) == 2, "Default component processes must be distinct.")
+    token = token_at(home)
+    config = read_regular(paths["config"] / "env", private=True)
+    registrations = {item: read_regular(item) for item in files}
+    identities = {name: (info.st_dev, info.st_ino, info.st_uid)
+                  for name, path in paths.items() for info in [owned_directory(path)]}
+    marker = paths["state"] / "cli-native-default-synthetic-preservation.txt"
+    marker_bytes = b"Synthetic default-removal marker; not real native chat history.\n"
+    fd = os.open(marker, os.O_CREAT | os.O_EXCL | os.O_WRONLY | os.O_NOFOLLOW, 0o600)
+    with os.fdopen(fd, "wb") as stream:
+        stream.write(marker_bytes)
+
+    def preserved(names):
+        for name in names:
+            info = owned_directory(paths[name])
+            need((info.st_dev, info.st_ino, info.st_uid) == identities[name],
+                 "Default removal replaced a retained directory.")
+        need(read_regular(marker, private=True) == marker_bytes, "Synthetic default history changed.")
+
+    stopped = command([binary, "stop", "default"], env=env, timeout=240)
+    need(token.encode() not in stopped.stdout + stopped.stderr, "Stop output disclosed the private token.")
+    stopped_default(files, pids)
+    preserved(paths)
+    need(read_regular(paths["config"] / "env", private=True) == config and token_at(home) == token,
+         "Stopping default changed its configuration or token.")
+    cancelled = command([binary, "remove", "default"], env=env, allowed=(1,))
+    need(b"Not confirmed" in cancelled.stderr and token.encode() not in cancelled.stdout + cancelled.stderr,
+         "Default removal did not safely require confirmation.")
+    stopped_default(files, pids)
+    preserved(paths)
+    need(read_regular(paths["config"] / "env", private=True) == config and token_at(home) == token
+         and all(read_regular(item) == raw for item, raw in registrations.items())
+         and verify_runtime(home, "default", runtime, version) == count,
+         "Cancelled default removal changed configuration, registrations or exact runtime.")
+    observations["defaultStoppedRemovalCancellationPreservesRuntimeConfigTokenAndSyntheticState"] = True
+    removed = command([binary, "remove", "default", "--yes"], env=env, timeout=240)
+    need(token.encode() not in removed.stdout + removed.stderr, "Removal output disclosed the private token.")
+    stopped_default(files, pids, removed=True)
+    need(all(not item.exists() and not item.is_symlink() for item in files)
+         and all(not paths[name].exists() and not paths[name].is_symlink() for name in ("runtime", "config")),
+         "Confirmed default removal left runtime, configuration or native registrations.")
+    preserved(("state",))
+    observations["defaultRemovalRequiresConfirmationAndPreservesSyntheticState"] = True
+
+
 def exercise(args, home, descriptor, receipt, observations, progress):
     progress("clean-host")
     ensure_empty(home)
@@ -465,6 +542,20 @@ def exercise(args, home, descriptor, receipt, observations, progress):
          "Post-cache-retirement restart did not preserve server identity and token.")
     need(verify_runtime(home, "default", runtime, version) == count, "Runtime inventory changed.")
     observations["serviceIndependentOfOriginalNpmPrefixAndCacheAfterRestart"] = True
+    progress("default-removal")
+    named_marker = read_regular(marker, private=True)
+    named_state = owned_directory(roots(home, "cli-native")["state"])
+    named_identity = (named_state.st_dev, named_state.st_ino, named_state.st_uid)
+    named_services = [service_state(item) for item in service_files(home, "cli-native")]
+    exercise_default_removal(home, str(retired / "bin/agentsdock"), env, version, last, runtime, count, observations)
+    named_state = owned_directory(roots(home, "cli-native")["state"])
+    need(read_regular(marker, private=True) == named_marker
+         and (named_state.st_dev, named_state.st_ino, named_state.st_uid) == named_identity
+         and not roots(home, "cli-native")["runtime"].exists()
+         and "active" not in named_services
+         and [service_state(item) for item in service_files(home, "cli-native")] == named_services,
+         "Default removal disturbed the separately removed named instance.")
+    observations["defaultRemovalLeavesNamedSyntheticStateUntouched"] = True
 
 
 def make_report(args, descriptor, observations, phase, passed):
@@ -476,7 +567,10 @@ def make_report(args, descriptor, observations, phase, passed):
             "version": descriptor.get("version") if descriptor else None,
             "runId": os.environ["GITHUB_RUN_ID"], "runAttempt": os.environ["GITHUB_RUN_ATTEMPT"],
             "harnessSha": os.environ["GITHUB_SHA"], "repository": REPOSITORY,
-            "platform": platform.system(), "observations": observations, "notTested": UNTESTED}
+            "platform": platform.system(), "observations": observations,
+            "notTested": [item for item in UNTESTED if item != "default-removal" or not (
+                observations.get("defaultRemovalRequiresConfirmationAndPreservesSyntheticState") is True
+                and observations.get("defaultRemovalLeavesNamedSyntheticStateUntouched") is True)]}
 
 
 def main():

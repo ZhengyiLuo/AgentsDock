@@ -54,6 +54,14 @@ test('refuses omitted, ambiguous, unsafe or overflowing build reservations', () 
   assert.throws(() => validateDesktopBuildNumber(String(Number.MAX_SAFE_INTEGER), String(lastSafeRun + 1)), /supported range/)
 })
 
+test('beta.5 preparation follows beta.4 run 31 without changing historical reservations', () => {
+  assert.equal(validateDesktopBuildNumber('1248', '31'), '1248')
+  assert.equal(validateDesktopBuildNumber('1249', '32'), '1249')
+  assert.equal(validateDesktopBuildNumber('1249', '32'), '1249', 'retry retains the same reservation')
+  for (const build of ['1217', '1248', '1250']) assert.throws(() => validateDesktopBuildNumber(build, '32'), /exactly 1249/)
+  assert.throws(() => validateDesktopBuildNumber('1249', '33'), /exactly 1250/)
+})
+
 test('the workflow CLI emits only an exact reservation and rejects reuse on the next run', () => {
   const script = fileURLToPath(new URL('../validate_desktop_build_number.mjs', import.meta.url))
   const first = spawnSync(process.execPath, [script, '1186', '1'], { encoding: 'utf8' })

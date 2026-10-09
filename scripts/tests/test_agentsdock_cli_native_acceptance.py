@@ -5,6 +5,7 @@ import io
 import json
 import os
 from pathlib import Path
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -126,6 +127,141 @@ class NativeCliGuardTests(unittest.TestCase):
         self.assertIn("logout-or-reboot", report["notTested"])
         self.assertIn("default-removal", report["notTested"])
         self.assertNotIn(str(self.home), json.dumps(report))
+
+    def test_default_removal_report_requires_completed_exact_and_unrelated_state_observations(self):
+        exact = "defaultRemovalRequiresConfirmationAndPreservesSyntheticState"
+        unrelated = "defaultRemovalLeavesNamedSyntheticStateUntouched"
+        for observations in ({}, {exact: True}, {unrelated: True}, {exact: True, unrelated: False},
+                             {exact: True, unrelated: True}):
+            with patch.dict(os.environ, self.env, clear=True):
+                report = native.make_report(self.args, {"version": "1.0.10-beta.5"}, observations,
+                                            "default-removal", False)
+            self.assertEqual("default-removal" not in report["notTested"],
+                             observations.get(exact) is True and observations.get(unrelated) is True)
+            self.assertFalse(report["fullAcceptance"])
+            self.assertFalse(report["productPublicationEligible"])
+            for boundary in ("populated-native-history", "busy-or-queued-work", "logout-or-reboot", "history-purge"):
+                self.assertIn(boundary, report["notTested"])
+
+    def default_removal_fixture(self, change=None):
+        # Inert commands/native-state observations and disposable files only.
+        # Never invokes exercise(), starts a service, or spoofs a hosted runner.
+        paths = native.roots(self.home)
+        for path in paths.values():
+            path.mkdir(mode=0o700, parents=True)
+        token = "unit-secret-token-never-log-0123456789"
+        envfile = paths["config"] / "env"
+        envfile.write_text(f"AGENTSDOCK_AGENT_TOKEN={token}\n")
+        envfile.chmod(0o600)
+        retained = paths["state"] / "existing-synthetic-history.txt"
+        retained.write_bytes(b"synthetic history, not native provider history")
+        unrelated = self.root / "unrelated.txt"
+        unrelated.write_bytes(b"leave unrelated paths untouched")
+        files = [self.home / "native/worker", self.home / "native/gateway"]
+        for item in files:
+            item.parent.mkdir(mode=0o700, exist_ok=True)
+            item.write_bytes(b"exact native registration")
+        last = {name: {"pid": pid, "instance_id": f"synthetic-{name}", "version": "1.0.10-beta.5", "protocol": 1}
+                for name, pid in (("gateway", 401), ("execution_service", 402))}
+        calls, observations = [], {}
+
+        def command(argv, **kwargs):
+            calls.append(argv[1:])
+            if argv[1:] == ["stop", "default"]:
+                return subprocess.CompletedProcess(argv, 0, b"stopped", b"")
+            if argv[1:] == ["remove", "default"]:
+                if change == "cancel-token":
+                    envfile.write_text("AGENTSDOCK_AGENT_TOKEN=different-token-01234567890123456789\n")
+                if change == "cancel-state":
+                    (paths["state"] / "cli-native-default-synthetic-preservation.txt").write_bytes(b"changed")
+                if change == "cancel-registration":
+                    files[0].write_bytes(b"changed registration")
+                return subprocess.CompletedProcess(argv, 1, b"", b"Not confirmed; nothing was uninstalled.")
+            self.assertEqual(argv[1:], ["remove", "default", "--yes"])
+            for name in ("runtime", "config"):
+                if change != "retained-" + name:
+                    shutil.rmtree(paths[name])
+            for item in files:
+                if change != "retained-registration":
+                    item.unlink()
+            if change == "removed-state":
+                shutil.rmtree(paths["state"])
+            if change == "changed-state":
+                (paths["state"] / "cli-native-default-synthetic-preservation.txt").write_bytes(b"changed")
+            return subprocess.CompletedProcess(argv, 0, token.encode() if change == "token-output" else b"Successful!", b"")
+
+        def run():
+            with patch.object(native, "service_files", return_value=files), \
+                    patch.object(native, "command", side_effect=command), \
+                    patch.object(native, "stopped_default") as stopped, \
+                    patch.object(native, "verify_runtime", return_value=123):
+                native.exercise_default_removal(self.home, "/fixture/agentsdock", {}, "1.0.10-beta.5",
+                                               last, self.root / "runtime.tgz", 123, observations)
+                self.assertEqual(stopped.call_count, 3)
+                self.assertEqual(stopped.call_args.kwargs, {"removed": True})
+                self.assertEqual(stopped.call_args.args[1], [401, 402])
+            return calls, observations
+        return run, paths, retained, unrelated, calls, observations
+
+    def test_default_stop_cancel_then_remove_deletes_runtime_and_token_but_retains_synthetic_history(self):
+        run, paths, retained, unrelated, _, _ = self.default_removal_fixture()
+        calls, observations = run()
+        self.assertEqual(calls, [["stop", "default"], ["remove", "default"], ["remove", "default", "--yes"]])
+        self.assertFalse(paths["runtime"].exists())
+        self.assertFalse(paths["config"].exists())
+        self.assertEqual(retained.read_bytes(), b"synthetic history, not native provider history")
+        self.assertEqual(unrelated.read_bytes(), b"leave unrelated paths untouched")
+        self.assertTrue(observations["defaultStoppedRemovalCancellationPreservesRuntimeConfigTokenAndSyntheticState"])
+        self.assertTrue(observations["defaultRemovalRequiresConfirmationAndPreservesSyntheticState"])
+        self.assertNotIn("unit-secret", json.dumps(observations))
+
+    def test_cancelled_default_removal_changes_fail_before_confirmed_removal(self):
+        for change in ("cancel-token", "cancel-state", "cancel-registration"):
+            with self.subTest(change=change), tempfile.TemporaryDirectory() as temporary:
+                original = self.home
+                self.home = Path(temporary) / "home"
+                try:
+                    run, _, _, _, calls, observations = self.default_removal_fixture(change)
+                    with self.assertRaises((RuntimeError, OSError)):
+                        run()
+                    self.assertNotIn(["remove", "default", "--yes"], calls)
+                    self.assertNotIn("defaultRemovalRequiresConfirmationAndPreservesSyntheticState", observations)
+                finally:
+                    self.home = original
+
+    def test_confirmed_default_removal_requires_exact_deletion_retention_and_private_output(self):
+        for change in ("retained-runtime", "retained-config", "retained-registration", "removed-state", "changed-state", "token-output"):
+            with self.subTest(change=change), tempfile.TemporaryDirectory() as temporary:
+                original = self.home
+                self.home = Path(temporary) / "home"
+                try:
+                    run, _, _, _, _, observations = self.default_removal_fixture(change)
+                    with self.assertRaises((RuntimeError, OSError)):
+                        run()
+                    self.assertNotIn("defaultRemovalRequiresConfirmationAndPreservesSyntheticState", observations)
+                finally:
+                    self.home = original
+
+    def test_default_stop_proof_requires_both_services_and_both_former_processes_absent(self):
+        files = [Path("/fixture/worker"), Path("/fixture/gateway")]
+        for removed, states, process, accepted in (
+            (False, ["inactive", "absent"], b"", True),
+            (False, ["inactive", "active"], b"", False),
+            (False, ["absent", "absent"], b"402", False),
+            (True, ["absent", "absent"], b"", True),
+            (True, ["inactive", "absent"], b"", False),
+        ):
+            with self.subTest(removed=removed, states=states, process=process), \
+                    patch.object(native, "service_state", side_effect=states), \
+                    patch.object(native, "command", return_value=subprocess.CompletedProcess([], 0, process, b"")) as command:
+                if accepted:
+                    native.stopped_default(files, [401, 402], removed=removed, timeout=0)
+                else:
+                    with self.assertRaises(RuntimeError):
+                        native.stopped_default(files, [401, 402], removed=removed, timeout=0)
+                self.assertEqual(command.call_count, 2)
+                self.assertEqual([call.args[0] for call in command.call_args_list],
+                                 [["/bin/ps", "-p", str(pid), "-o", "pid="] for pid in [401, 402]])
 
     def test_script_refuses_developer_host_without_writing_report(self):
         args = [sys.executable, str(SCRIPT)]

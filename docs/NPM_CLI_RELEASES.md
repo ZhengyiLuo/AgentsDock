@@ -21,6 +21,13 @@ signed-update lock waiting, executable packaging permissions and native build
 reservation fixes, among other release-line changes. Review the resulting merge
 and run its full source checks before accepting any new package.
 
+The beta.5 source preparation starts from that beta.4 release and integrates
+main's reviewed custom-API/OpenCode fixes plus the paired CLI pipeline. Its next
+desktop reservation is build 1249 only if the preparation workflow's next run is
+still 32. Recheck the public counter and other reservations before dispatch;
+never reuse another run's allocation or restore main's older build formula.
+These preparation instructions are not an artifact or acceptance receipt.
+
 ## Prepare the immutable pair
 
 1. Commit the complete reviewed candidate, including its exact `server/VERSION`.
@@ -73,12 +80,28 @@ After these workflows are registered on the default branch, dispatch
 on disposable GitHub-hosted Apple silicon macOS and Linux. It has no npm publish
 or signing operation. Never spoof its runner guards on a developer account.
 
+When main and the release line differ, register only the exact reviewed full
+`.github/workflows/agentsdock-cli-native-acceptance.yml` on main through normal
+review and CI. Do not merge unrelated runtime changes or substitute a no-op
+acceptance workflow. Registration is not execution or acceptance. Dispatch the
+full workflow from the frozen `release/1.0.10-beta.5` source, with `source_sha`
+equal to that branch's actual workflow SHA and `source_ref` equal to its name.
+Its tools must exist in that source, and both immutable candidate drafts must
+already pass inspection. An incomplete main checkout or missing inputs must
+fail, not produce an acceptance receipt.
+
 The native job exercises actual npm global postinstall, authenticated default
 health, installed runtime bytes/modes, repeated-install process/identity/token
 retention, list/status/info/token, named creation and lifecycle, removal
 confirmation and synthetic state retention, default lifecycle and independence
-from the original npm prefix/cache after restart. Failure receipts retain partial
-observations and never assert full product acceptance. Record the actual run,
+from the original npm prefix/cache after restart. Finally it stops both default
+components, cancels removal while preserving their exact runtime/configuration
+and token, then confirms removal. Confirmed uninstall must unregister both
+services and remove runtime/configuration/token while preserving the synthetic
+state marker and the named instance's retained state. It does not purge history.
+Only a report observing this whole boundary removes `default-removal` from its
+untested list. Failure receipts retain partial observations and never assert
+full product acceptance. Record the actual run,
 attempt, source and both hashes; validate the original artifact's API digest and
 contents rather than substituting another attempt.
 
@@ -87,8 +110,8 @@ Remaining release checks:
 - Fresh real global setup on both supported native hosts; missing `uv`/service
   prerequisites, occupied port, interrupted setup and explicit retry.
 - Correct start/stop/restart/removal of both components of a split default
-  installation. The current instance manager has a known old-layout binding
-  limitation. The harness deliberately fails on refusal; do not bypass the
+  installation, including removal after an owned stop. Earlier source had an
+  old-layout binding limitation. The harness fails on refusal; do not bypass the
   binding check, stop only one component, or describe it as complete management.
 - Interactive setup/pairing and optional dependency decline; native token-menu
   cancellation, bulk controls/exclusions, name reuse and removal/purge behavior.
@@ -98,6 +121,29 @@ Remaining release checks:
   `agentsdock@beta` resolution, before exposing a paired desktop release.
 - If a desktop is also released, its normal signed-app, legacy bridge, managed
   update and platform gates still apply. This npm workflow does not waive them.
+
+### Beta.5 scoped desktop/server replay
+
+The existing `ci.yml` now admits exact `candidate-replay-v1.0.10-beta.5` for
+the independently pinned `beta1101` baseline, alongside the retained legacy
+journeys and both `0755`/`0750` installation-root modes. Historical beta.2,
+beta.3 and beta.4 pins and evidence remain unchanged. This is the beta.1-to-beta.5
+journey, not evidence for a beta.4 baseline. The complete reviewed installer
+remains pinned to SHA-256
+`51a6ae6f242476ae4f19712b95ecbaba212b2256e3928d389d8f617a6c367ed7`;
+if the new source changes that installer, review its behavior and whole-file pin
+before creating an accepted candidate rather than weakening the verifier.
+
+Dispatch with that candidate tag, its own accepted `candidate.json` and bundle
+hashes, `candidate_replay=true`, `npm_native_validation=false`, and
+`candidate_server_rollback=false`; leave npm-only inputs empty. The separate
+Linux rollback dispatch uses the same receipt/bundle pins with
+`candidate_server_rollback=true` and both other modes false. Never reuse earlier
+candidate hashes or relabel their observations. Replays remain
+`publicationEligible: false` and `releaseAcceptance: false`; genuine populated
+history, active/queued work, reboot, native Windows update and public-feed
+acceptance are not supplied by these fixtures. First-global-install and instance
+management are covered separately by the paired CLI native workflow.
 
 ## First publication and authentication
 
