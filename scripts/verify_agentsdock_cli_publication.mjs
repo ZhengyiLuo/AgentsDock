@@ -91,12 +91,15 @@ function verifyCliBytes(bytes, receipt) {
   }
 }
 
-export function validateCandidate({ directory, version, sourceSHA, acceptedReceiptSHA256, runtimeDirectory, acceptedManifestSHA256, expectedLatest, sourceRoot = ROOT }) {
+export function validateCandidate({ directory, version, sourceSHA, acceptedReceiptSHA256, runtimeDirectory, acceptedManifestSHA256, expectedLatest, expectedRuntimeLatest, sourceRoot = ROOT }) {
   if (!VERSION.test(version) || !/^[a-f0-9]{40}$/.test(sourceSHA) || !/^[a-f0-9]{64}$/.test(acceptedReceiptSHA256) || !/^[a-f0-9]{64}$/.test(acceptedManifestSHA256)) {
     throw new Error('Explicit version, reviewed source, accepted receipt and accepted runtime manifest hashes are required.')
   }
   if (expectedLatest !== 'absent' && (!VERSION.test(expectedLatest) || expectedLatest.includes('-'))) {
     throw new Error('Provide the pre-publication latest baseline: a stable version or absent.')
+  }
+  if (expectedRuntimeLatest !== undefined && (!VERSION.test(expectedRuntimeLatest) || expectedRuntimeLatest.includes('-'))) {
+    throw new Error('Runtime latest baseline must be an explicit stable version.')
   }
   const readSource = filename => sourceFile(sourceRoot, sourceSHA, filename)
   if (readSource('server/VERSION').toString('utf8').trim() !== version) throw new Error('CLI version differs from the committed server VERSION.')
@@ -127,6 +130,7 @@ export function validateCandidate({ directory, version, sourceSHA, acceptedRecei
   verifyRuntimeBytes(readRegular(join(runtimeDirectory, descriptor.archive.name), 200 * 1024 * 1024), descriptor)
   return { receipt, archive, metadata, descriptor, version, sourceSHA, acceptedReceiptSHA256, acceptedManifestSHA256,
     distTag: version.includes('-') ? 'beta' : 'latest', expectedLatest: expectedLatest === 'absent' ? null : expectedLatest,
+    ...(expectedRuntimeLatest === undefined ? {} : { expectedRuntimeLatest }),
     archiveURL: `${REGISTRY}/agentsdock/-/${archiveName}` }
 }
 
@@ -227,7 +231,8 @@ async function main() {
   if (!['inspect', 'preflight', 'verify'].includes(operation) || process.argv.length !== 10) {
     throw new Error('Usage: verify_agentsdock_cli_publication.mjs inspect|preflight|verify CLI_DIRECTORY VERSION SOURCE_SHA ACCEPTED_RECEIPT_SHA256 RUNTIME_DIRECTORY ACCEPTED_MANIFEST_SHA256 EXPECTED_LATEST_OR_absent')
   }
-  const candidate = validateCandidate({ directory, version, sourceSHA, acceptedReceiptSHA256, runtimeDirectory, acceptedManifestSHA256, expectedLatest })
+  const candidate = validateCandidate({ directory, version, sourceSHA, acceptedReceiptSHA256, runtimeDirectory, acceptedManifestSHA256, expectedLatest,
+    expectedRuntimeLatest: process.env.EXPECTED_NPM_LATEST })
   const result = operation === 'inspect'
     ? { version, sourceSHA, archive: candidate.archive, distTag: candidate.distTag, acceptedReceiptSHA256, acceptedManifestSHA256, expectedLatest: candidate.expectedLatest, registryVerified: false }
     : operation === 'preflight' ? await publicationPreflight(candidate) : await verifyRegistry(candidate)

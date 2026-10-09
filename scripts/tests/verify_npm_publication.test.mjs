@@ -171,3 +171,27 @@ test('missing package requires first-publication bootstrap and registry failures
   await assert.rejects(publicationPreflight(candidate, { fetchImpl: async () => new Response('', { status: 404 }) }), /First publish.*interactively/)
   await assert.rejects(publicationPreflight(candidate, { fetchImpl: async () => new Response('', { status: 503 }) }), /Registry request failed/)
 })
+
+test('paired publication preserves the explicitly pinned runtime stable default across beta and retries', async t => {
+  const { options, bytes } = fixture(t, { version: '1.0.10-beta.5' })
+  const candidate = validateCandidate({ ...options, expectedLatest: '1.0.9' })
+  const withLatest = (latest, extra = {}) => registry(candidate, bytes, { ...extra, mutate: m => { m['dist-tags'].latest = latest } })
+  assert.equal(await publicationPreflight(candidate, withLatest('1.0.9', { published: false, tag: '1.0.10-beta.4' })), true)
+  assert.equal(await publicationPreflight(candidate, withLatest('1.0.9')), false)
+  assert.equal((await verifyRegistry(candidate, withLatest('1.0.9'))).verified, true)
+  for (const latest of ['1.0.8', '1.0.10-beta.5', undefined]) {
+    await assert.rejects(publicationPreflight(candidate, withLatest(latest, { published: false, tag: '1.0.10-beta.4' })), /stable baseline/)
+    await assert.rejects(publicationPreflight(candidate, withLatest(latest)), /stable baseline/)
+    await assert.rejects(verifyRegistry(candidate, withLatest(latest)), /stable baseline/)
+  }
+  assert.throws(() => validateCandidate({ ...options, expectedLatest: '1.0.10-beta.4' }), /explicit stable/)
+})
+
+test('stable matched runtime verifies a resumable publication with latest advanced intentionally', async t => {
+  const { options, bytes } = fixture(t, { version: '1.0.10' })
+  const candidate = validateCandidate({ ...options, expectedLatest: '1.0.9' })
+  assert.equal(await publicationPreflight(candidate, registry(candidate, bytes, { published: false, tag: '1.0.9' })), true)
+  assert.equal(await publicationPreflight(candidate, registry(candidate, bytes)), false)
+  assert.equal((await verifyRegistry(candidate, registry(candidate, bytes))).verified, true)
+  await assert.rejects(publicationPreflight(candidate, registry(candidate, bytes, { published: false, tag: '1.0.8' })), /stable baseline/)
+})

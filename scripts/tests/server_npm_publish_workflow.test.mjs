@@ -40,6 +40,9 @@ function pins(source, reviewed = source, changes = {}) {
     WORKFLOW_SHA: reviewed,
     WORKFLOW_REF: 'refs/heads/release/1.0.4',
     ACCEPTED_MANIFEST_SHA256: 'c'.repeat(64),
+    ACCEPTED_CLI_RECEIPT_SHA256: 'd'.repeat(64),
+    EXPECTED_NPM_LATEST: '1.0.9',
+    EXPECTED_CLI_LATEST: 'absent',
     ...changes,
   }
 }
@@ -94,7 +97,7 @@ test('checkout and publication verification remain pinned to the accepted produc
   assert.match(publish, /verify_npm_publication\.mjs preflight "\$RUNNER_TEMP\/npm-candidate" "\$SOURCE_SHA" "\$ACCEPTED_MANIFEST_SHA256"/)
   assert.match(publish, /verify_npm_publication\.mjs verify "\$RUNNER_TEMP\/npm-candidate" "\$SOURCE_SHA" "\$ACCEPTED_MANIFEST_SHA256"/)
   assert.match(publish, /npm publish "\$ARCHIVE" --ignore-scripts --access public --tag "\$DIST_TAG"/)
-  assert.doesNotMatch(publish, /npm (?:pack|dist-tag)|package_npm_release\.py --output/)
+  assert.doesNotMatch(publish, /npm (?:pack|dist-tag)\b|package_npm_release\.py --output/)
   assert(publish.indexOf('Bind accepted product source') < publish.indexOf('Download the accepted signed bundle'))
 })
 
@@ -116,6 +119,9 @@ test('manual guard rejects missing or mismatched pins, manifest hashes and untru
     { SOURCE_REF: 'feature/publish', WORKFLOW_REF: 'refs/heads/feature/publish' },
     { SOURCE_REF: 'release/../main', WORKFLOW_REF: 'refs/heads/release/../main' },
     { ACCEPTED_MANIFEST_SHA256: '' }, { ACCEPTED_MANIFEST_SHA256: 'c'.repeat(63) },
+    { ACCEPTED_CLI_RECEIPT_SHA256: '' }, { ACCEPTED_CLI_RECEIPT_SHA256: 'd'.repeat(63) },
+    { EXPECTED_NPM_LATEST: '' }, { EXPECTED_NPM_LATEST: '1.0.10-beta.4' },
+    { EXPECTED_CLI_LATEST: '' }, { EXPECTED_CLI_LATEST: '1.0.10-beta.4' },
   ]) denied(bash(identityGuard, { ...base, ...change }), JSON.stringify(change))
 })
 
@@ -192,7 +198,7 @@ test('registry verification immediately succeeds without sleeping or publishing 
   const fixture = verificationFixture(t, 1)
   assert.equal(fixture.run().status, 0)
   fixture.assertCalls(1, 0)
-  assert.equal((publish.match(/run: npm publish /g) ?? []).length, 1)
+  assert.equal((publish.match(/run: npm publish /g) ?? []).length, 2)
   assert.match(publish, /name: Verify the public registry metadata and exact downloaded bytes\n        timeout-minutes: 11\n/)
 })
 
@@ -208,4 +214,29 @@ test('unverifiable registry bytes exhaust the bounded polling window and fail wi
   denied(result, 'registry verification exhausted')
   assert.match(result.stderr, /did not succeed within the bounded visibility window/)
   fixture.assertCalls(61, 60)
+})
+
+test('paired publication inspects both candidates before runtime upload, then orders runtime before CLI', () => {
+  const before = publish.indexOf('name: Inspect the paired CLI before publishing either package')
+  const runtime = publish.indexOf('name: Publish the verified tarball with npm trusted publishing')
+  const verified = publish.indexOf('name: Verify the public registry metadata and exact downloaded bytes')
+  const preflight = publish.indexOf('name: Verify CLI registry preconditions after the runtime is public')
+  const cli = publish.indexOf('name: Publish the exact convenience CLI with its own trusted publisher')
+  const pair = publish.indexOf('name: Verify both public packages and preserved stable defaults')
+  assert(before > 0 && before < runtime && runtime < verified && verified < preflight && preflight < cli && cli < pair)
+  assert.match(publish, /test "\$CLI_CANDIDATE_TAG" = "cli-candidate-v\$version"/)
+  assert.match(publish, /\.targetCommitish == \$source/)
+  assert.match(publish, /ACCEPTED_CLI_RECEIPT_SHA256: \$\{\{ inputs\.accepted_cli_receipt_sha256 \}\}/)
+  assert.match(publish, /EXPECTED_NPM_LATEST: \$\{\{ inputs\.expected_runtime_latest \}\}/)
+  assert.match(publish, /if: steps\.cli\.outputs\.publish == 'true'/)
+  assert.match(publish, /firstPublication == true/)
+  assert.doesNotMatch(runStep('Verify both public packages and preserved stable defaults'), /npm publish|dist-tag/)
+})
+
+test('prepare packs both commands from committed source without invoking setup or publishing', () => {
+  const prepare = workflow.slice(workflow.indexOf('\n  prepare:\n'), workflow.indexOf('\n  publish:\n'))
+  assert.match(prepare, /package_npm_release\.py --output dist\/npm-server --require-clean-source/)
+  assert.match(prepare, /package_agentsdock_cli\.py --output dist\/agentsdock-cli --require-clean-source/)
+  assert.match(prepare, /name: agentsdock-cli-\$\{\{ inputs\.source_sha \}\}/)
+  assert.doesNotMatch(prepare, /npm publish|secrets\.|id-token: write|agentsdock setup/)
 })

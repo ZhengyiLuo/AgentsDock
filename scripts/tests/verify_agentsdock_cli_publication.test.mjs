@@ -212,6 +212,34 @@ test('public scoped runtime must verify before CLI checks can allow publication'
   }
 })
 
+test('explicit runtime stable baseline is checked independently of the CLI latest baseline', async t => {
+  const f = fixture(t, { version: '1.0.10-beta.5', expectedLatest: 'absent' })
+  const candidate = validateCandidate({ ...f.options, expectedRuntimeLatest: '1.0.9' })
+  assert.equal(candidate.expectedLatest, null)
+  assert.equal(candidate.expectedRuntimeLatest, '1.0.9')
+  const matching = registry(candidate, f, { latest: null, runtimeMutate: m => { m['dist-tags'].latest = '1.0.9' } })
+  assert.equal((await publicationPreflight(candidate, matching)).publish, false)
+  assert.equal((await verifyRegistry(candidate, matching)).verified, true)
+  for (const runtimeLatest of ['1.0.8', '1.0.10-beta.5', undefined]) {
+    const remote = registry(candidate, f, { latest: null, runtimeMutate: m => { m['dist-tags'].latest = runtimeLatest } })
+    await assert.rejects(publicationPreflight(candidate, remote), /Runtime latest tag.*stable baseline/)
+    await assert.rejects(verifyRegistry(candidate, remote), /Runtime latest tag.*stable baseline/)
+    assert.equal(remote.requests.includes(`${REGISTRY}/agentsdock`), false)
+  }
+  for (const baseline of ['absent', '1.0.10-beta.5', '', 'latest']) {
+    assert.throws(() => validateCandidate({ ...f.options, expectedRuntimeLatest: baseline }), /Runtime latest baseline.*explicit stable/)
+  }
+  assert.equal(Object.hasOwn(validateCandidate(f.options), 'expectedRuntimeLatest'), false)
+})
+
+test('stable CLI retry accepts the intentional runtime latest advancement from its prior baseline', async t => {
+  const f = fixture(t, { version: '1.0.10', expectedLatest: '1.0.9' })
+  const candidate = validateCandidate({ ...f.options, expectedRuntimeLatest: '1.0.9' })
+  const remote = registry(candidate, f)
+  assert.equal((await publicationPreflight(candidate, remote)).publish, false)
+  assert.equal((await verifyRegistry(candidate, remote)).verified, true)
+})
+
 test('new beta advances its channel and preserves the explicit stable/latest baseline', async t => {
   const f = fixture(t), candidate = validateCandidate(f.options)
   assert.equal((await publicationPreflight(candidate, registry(candidate, f, { published: false, tag: '1.0.10-beta.1' }))).publish, true)
@@ -308,6 +336,9 @@ test('inspect CLI is offline, read-only and validates explicit immutable inputs'
   assert.equal(result.acceptedReceiptSHA256, options.acceptedReceiptSHA256)
   assert.equal(result.distTag, 'beta')
   assert.equal(readFileSync(output, 'utf8'), 'unchanged\n')
+  assert.throws(() => execFileSync(process.execPath, args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'],
+    env: { ...process.env, EXPECTED_NPM_LATEST: '1.0.10-beta.5' } }),
+  error => error.status === 1 && /Runtime latest baseline.*explicit stable/.test(error.stderr))
   const invalid = [...args]; invalid[7] = '0'.repeat(64)
   assert.throws(() => execFileSync(process.execPath, invalid, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }), error => error.status === 1 && error.stdout === '' && /receipt differs/.test(error.stderr))
 })

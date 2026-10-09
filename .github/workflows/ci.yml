@@ -143,6 +143,12 @@ jobs:
           package-manager-cache: false
       - name: Verify public CLI and existing signed-update entry point
         run: node --test server/npm/cli.test.cjs server/npm/agentsdock/cli.test.cjs server/npm/agentsdock/postinstall.test.cjs
+      - name: Verify matched npm staging and publication guards
+        run: node --test scripts/tests/verify*publication.test.mjs scripts/tests/agentsdock_cli_candidate_release.test.mjs scripts/tests/server_npm_publish_workflow.test.mjs
+      - name: Verify disposable native CLI acceptance guards without creating services
+        env:
+          PYTHONDONTWRITEBYTECODE: "1"
+        run: python3 -m unittest discover -s scripts/tests -p test_agentsdock_cli_native_acceptance.py
       - name: Pack and install exact CLI/runtime in disposable npm prefixes
         env:
           PYTHONDONTWRITEBYTECODE: "1"
