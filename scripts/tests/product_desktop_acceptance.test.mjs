@@ -43,18 +43,22 @@ test('stable baseline subscriptions are preserved instead of forced through Beta
     ['1.0.9', '1.0.6', 'unknown'], ['1.0.9', '1.0.8-beta.5', 'legacy']]) assert.throws(() => desktopJourney(...args))
 })
 
-test('exact beta.1 to beta.2, beta.3 and beta.4 journeys retain Beta without switching subscriptions', () => {
-  for (const candidate of ['1.0.10-beta.2', '1.0.10-beta.3', '1.0.10-beta.4']) {
+test('exact beta.1 to beta.2 through beta.5 journeys retain Beta without switching subscriptions', () => {
+  for (const candidate of ['1.0.10-beta.2', '1.0.10-beta.3', '1.0.10-beta.4', '1.0.10-beta.5']) {
     assert.deepEqual(desktopJourney(candidate, '1.0.10-beta.1', 'beta1101'),
       {initialTrack: 'beta', installedTrack: 'beta', switchToBeta: false})
   }
   for (const args of [['1.0.10-beta.2', '1.0.10-beta.1', 'legacy'],
-    ['1.0.10-beta.2', '1.0.8-beta.5', 'beta1101'], ['1.0.10-beta.5', '1.0.10-beta.1', 'beta1101'],
+    ['1.0.10-beta.2', '1.0.8-beta.5', 'beta1101'], ['1.0.10-beta.6', '1.0.10-beta.1', 'beta1101'],
     ['1.0.10-beta.3', '1.0.10-beta.1', 'legacy'], ['1.0.10-beta.3', '1.0.10-beta.2', 'beta1101'],
     ['1.0.10-beta.3', '1.0.8-beta.5', 'beta1101'], ['1.0.10-beta.3', '1.0.10-beta.1', 'beta1085'],
     ['1.0.10-beta.4', '1.0.10-beta.1', 'legacy'], ['1.0.10-beta.4', '1.0.10-beta.2', 'beta1101'],
     ['1.0.10-beta.4', '1.0.10-beta.3', 'beta1101'], ['1.0.10-beta.4', '1.0.8-beta.5', 'beta1101'],
     ['1.0.10-beta.4', '1.0.10-beta.1', 'beta1085'], ['1.0.10-beta.4+local', '1.0.10-beta.1', 'beta1101'],
+    ['1.0.10-beta.5', '1.0.10-beta.1', 'legacy'], ['1.0.10-beta.5', '1.0.10-beta.2', 'beta1101'],
+    ['1.0.10-beta.5', '1.0.10-beta.3', 'beta1101'], ['1.0.10-beta.5', '1.0.10-beta.4', 'beta1101'],
+    ['1.0.10-beta.5', '1.0.8-beta.5', 'beta1101'], ['1.0.10-beta.5', '1.0.10-beta.1', 'beta1085'],
+    ['1.0.10-beta.5', '1.0.10-beta.1', 'stable108'], ['1.0.10-beta.5+local', '1.0.10-beta.1', 'beta1101'],
     ['1.0.10-beta.2', '1.0.10-beta.1', 'beta1085']]) assert.throws(() => desktopJourney(...args))
   assert.equal(parseDesktopAcceptanceArguments([...valid, '--baseline-profile', 'beta1101'])['baseline-profile'], 'beta1101')
 })
