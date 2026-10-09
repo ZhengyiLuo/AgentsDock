@@ -1,0 +1,127 @@
+name: Validate paired npm CLI on disposable native hosts
+
+# Manual, no publication. This exercises actual postinstall and service commands
+# using frozen signed runtime + exact CLI tarballs. It may report existing split
+# default lifecycle limitations as failures; never bypass the production guard.
+on:
+  workflow_dispatch:
+    inputs:
+      source_sha:
+        description: Exact prepared source SHA (must equal dispatched workflow SHA)
+        type: string
+        required: true
+      source_ref:
+        description: Reviewed main or release/* branch
+        type: string
+        required: true
+      manifest_sha256:
+        description: Accepted runtime manifest SHA-256
+        type: string
+        required: true
+      cli_receipt_sha256:
+        description: Accepted CLI receipt SHA-256
+        type: string
+        required: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: agentsdock-cli-native-${{ inputs.source_sha }}
+  cancel-in-progress: false
+
+jobs:
+  cli-native:
+    if: github.repository == 'ZhengyiLuo/AgentsDock' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/release/'))
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macos-15
+            platform: darwin
+          - runner: ubuntu-24.04
+            platform: linux
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 60
+    permissions:
+      contents: write # GitHub requires push permission to read private drafts.
+    defaults:
+      run:
+        shell: bash
+    env:
+      PYTHONDONTWRITEBYTECODE: '1'
+      CLI_NATIVE_ACCEPTANCE: 'true'
+      SOURCE_SHA: ${{ inputs.source_sha }}
+      SOURCE_REF: ${{ inputs.source_ref }}
+      MANIFEST_SHA256: ${{ inputs.manifest_sha256 }}
+      CLI_RECEIPT_SHA256: ${{ inputs.cli_receipt_sha256 }}
+      TEST_PLATFORM: ${{ matrix.platform }}
+    steps:
+      - name: Require exact workflow and source pins
+        run: |
+          [[ "$SOURCE_SHA" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$MANIFEST_SHA256" =~ ^[0-9a-f]{64}$ ]]
+          [[ "$CLI_RECEIPT_SHA256" =~ ^[0-9a-f]{64}$ ]]
+          [[ "$SOURCE_REF" == main || "$SOURCE_REF" =~ ^release/[A-Za-z0-9][A-Za-z0-9._/-]*$ ]]
+          git check-ref-format "refs/heads/$SOURCE_REF"
+          test "$GITHUB_SHA" = "$SOURCE_SHA"
+          test "$GITHUB_REF" = "refs/heads/$SOURCE_REF"
+          test "$RUNNER_ENVIRONMENT" = github-hosted
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        with:
+          node-version: 24
+          package-manager-cache: false
+      - uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e # v6, official tag resolved 2026-10-07
+        with:
+          enable-cache: false
+      - name: Test host guards and CLI behavior without installing services
+        run: |
+          python3 -m unittest discover -s scripts/tests -p test_agentsdock_cli_native_acceptance.py
+          node --test server/npm/agentsdock/*.test.cjs server/npm/cli.test.cjs
+      - name: Download exact immutable candidate pair
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          version="$(cat server/VERSION)"
+          [[ "$version" =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-beta\.[1-9][0-9]*)?$ ]]
+          mkdir "$RUNNER_TEMP/cli-native-inputs" "$RUNNER_TEMP/cli-native-public"
+          mkdir "$RUNNER_TEMP/cli-native-inputs/npm" "$RUNNER_TEMP/cli-native-inputs/cli"
+          gh release download "npm-candidate-v$version" --repo "$GITHUB_REPOSITORY" \
+            --dir "$RUNNER_TEMP/cli-native-inputs/npm" \
+            --pattern agents-server-npm-manifest.json --pattern agents-server-npm-manifest.sig --pattern "server-$version.tgz"
+          gh release download "cli-candidate-v$version" --repo "$GITHUB_REPOSITORY" \
+            --dir "$RUNNER_TEMP/cli-native-inputs/cli" \
+            --pattern agentsdock-cli-receipt.json --pattern "agentsdock-$version.tgz"
+      - name: Prepare disposable native service prerequisites
+        run: |
+          uv python install 3.13
+          if [[ "$RUNNER_OS" == Linux ]]; then
+            sudo apt-get update
+            sudo apt-get install -y tmux
+            sudo loginctl enable-linger "$(id -un)"
+            systemctl --user show-environment > /dev/null
+          else
+            test "$(uname -m)" = arm64
+            command -v tmux || brew install tmux
+            /bin/launchctl print "gui/$(id -u)" > /dev/null
+          fi
+      - name: Verify signed bytes and exercise actual packaged CLI
+        run: |
+          umask 022
+          python3 scripts/agentsdock_cli_native_acceptance.py \
+            --runtime "$RUNNER_TEMP/cli-native-inputs/npm" --cli "$RUNNER_TEMP/cli-native-inputs/cli" \
+            --source-sha "$SOURCE_SHA" --source-ref "$SOURCE_REF" \
+            --manifest-sha256 "$MANIFEST_SHA256" --cli-receipt-sha256 "$CLI_RECEIPT_SHA256" \
+            --work "$RUNNER_TEMP/agentsdock-cli-native-$TEST_PLATFORM" \
+            --report "$RUNNER_TEMP/cli-native-public/report-$TEST_PLATFORM.json"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        if: always()
+        with:
+          name: agentsdock-cli-native-${{ github.run_id }}-${{ github.run_attempt }}-${{ matrix.platform }}
+          path: ${{ runner.temp }}/cli-native-public/report-${{ matrix.platform }}.json
+          if-no-files-found: warn
+          retention-days: 14
