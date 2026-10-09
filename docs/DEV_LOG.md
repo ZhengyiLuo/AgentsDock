@@ -11,9 +11,21 @@
 - Bind the short CLI to the exact same-version signed server runtime.
   First publication requires the package owner's npm bootstrap; the runtime's
   existing trusted publisher does not authorize a different package.
-- Preparation only: split-service CLI lifecycle integration, exact-package
-  native acceptance, signing, notarization and publication remain pending.
-  No new accepted build or public availability is claimed by this entry.
+- Add guarded split-default lifecycle control: authenticate both components,
+  admit only idle shutdowns, retain retry ownership through failures, and start
+  the worker held until both components are verified. Unsupported older workers
+  require a signed server update first and remain untouched by CLI stop/restart.
+- Preserve stopped-installation removal without starting queued work; retain
+  user history while removing confirmed service/configuration targets. Validate
+  retained rollback metadata without rewriting the installation manifest.
+- Source checks pass: 38 new lifecycle cases, the broader 250-test lifecycle,
+  instance and handoff pass (one native-systemd parser check skipped), 374 release
+  and CLI JavaScript checks, and 186 release-harness Python checks. Desktop
+  regression passes 5,192 tests with six skipped, plus typecheck and compilation.
+  Additional exact-removal harness fixtures pass; none are native acceptance.
+- Preparation only: exact-package native acceptance, signing, notarization and
+  publication remain pending. No new accepted build or public availability is
+  claimed by this entry; the stable release and installed services are unchanged.
 
 ## 2026-10-05 — Prepare matched 1.0.10-beta.4 (unreleased)
 
