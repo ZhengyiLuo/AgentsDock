@@ -57,6 +57,158 @@ class NativeCliGuardTests(unittest.TestCase):
             with self.subTest(key=key), self.assertRaises(RuntimeError):
                 self.guarded(**{key: value})
 
+    def diagnostic_pins(self):
+        self.args.source_sha, self.args.source_ref = native.DIAGNOSTIC_PRODUCT, native.DIAGNOSTIC_SOURCE_REF
+        self.args.manifest_sha256, self.args.cli_receipt_sha256 = native.DIAGNOSTIC_MANIFEST, native.DIAGNOSTIC_CLI_RECEIPT
+        self.args.workflow_sha, self.args.harness_ref = "d" * 40, native.DIAGNOSTIC_HARNESS_REF
+        self.env.update(GITHUB_SHA=self.args.workflow_sha, GITHUB_REF="refs/heads/" + self.args.harness_ref,
+                        GITHUB_WORKFLOW_SHA=self.args.workflow_sha,
+                        GITHUB_WORKFLOW_REF=f"{native.REPOSITORY}/.github/workflows/{native.WORKFLOW}@refs/heads/{self.args.harness_ref}")
+
+    def test_diagnostic_pins_are_separate_exact_and_do_not_relax_host_guard(self):
+        self.diagnostic_pins()
+        self.assertEqual(self.guarded(), self.home)
+        self.assertEqual(native.release_pins(self.args), ("d" * 40, native.DIAGNOSTIC_HARNESS_REF, True))
+        for field, value in (("workflow_sha", ""), ("harness_ref", ""), ("workflow_sha", "invalid"),
+                             ("workflow_sha", native.DIAGNOSTIC_PRODUCT), ("harness_ref", "release/other"),
+                             ("source_sha", "a" * 40), ("source_ref", "main"),
+                             ("manifest_sha256", "b" * 64), ("cli_receipt_sha256", "c" * 64)):
+            old = getattr(self.args, field)
+            setattr(self.args, field, value)
+            with self.subTest(field=field, value=value), self.assertRaises(RuntimeError):
+                self.guarded()
+            setattr(self.args, field, old)
+        for key in ("GITHUB_SHA", "GITHUB_REF", "GITHUB_WORKFLOW_REF", "GITHUB_WORKFLOW_SHA", "RUNNER_ENVIRONMENT"):
+            with self.subTest(key=key), self.assertRaises(RuntimeError):
+                self.guarded(**{key: "wrong"})
+        self.assertFalse(self.args.work.exists())
+        self.assertFalse(self.args.report.exists())
+
+    @staticmethod
+    def raw_diff(path="scripts/agentsdock_cli_native_acceptance.py", *, old_mode="100644", new_mode="100644", status="M"):
+        return f":{old_mode} {new_mode} {'1' * 40} {'2' * 40} {status}\0{path}\0".encode()
+
+    def test_raw_harness_diff_only_allows_existing_regular_same_mode_files(self):
+        native.validate_harness_diff(b"".join(self.raw_diff(path) for path in sorted(native.HARNESS_FILES)))
+        for path in ("server/VERSION", "server/npm/cli.cjs", "scripts/verify_agentsdock_cli_publication.mjs",
+                     ".github/workflows/server-npm-publish.yml", "scripts/../server/VERSION"):
+            with self.subTest(path=path), self.assertRaises(RuntimeError):
+                native.validate_harness_diff(self.raw_diff(path))
+        for changes in ({"new_mode": "100755"}, {"old_mode": "120000", "new_mode": "120000"},
+                        {"status": "A"}, {"status": "D"}, {"status": "R100"}, {"old_mode": "000000"}):
+            with self.subTest(changes=changes), self.assertRaises(RuntimeError):
+                native.validate_harness_diff(self.raw_diff(**changes))
+        for malformed in (self.raw_diff()[:-1], b"\0", b"unexpected\0file\0", self.raw_diff() + b"extra\0"):
+            with self.subTest(malformed=malformed), self.assertRaises(RuntimeError):
+                native.validate_harness_diff(malformed)
+
+    def checkout_double(self, *, head=None, status=b"", ancestor=True, diff=None, product_ref=None):
+        # Git-only inert responses, not a native guard bypass or real checkout.
+        def command(argv, **kwargs):
+            self.assertEqual(argv[:4], ["git", "--no-replace-objects", "-C", str(native.ROOT)])
+            operation = argv[4:]
+            if operation == ["rev-parse", "HEAD"]:
+                output = (head if head is not None else self.env["GITHUB_SHA"]).encode()
+            elif operation == ["status", "--porcelain", "--untracked-files=normal"]:
+                output = status
+            elif operation == ["merge-base", "--is-ancestor", self.args.source_sha, self.args.workflow_sha]:
+                if not ancestor:
+                    raise RuntimeError("Synthetic nonancestor")
+                output = b""
+            elif operation == ["diff", "--raw", "--no-renames", "-z", self.args.source_sha, self.args.workflow_sha, "--"]:
+                output = self.raw_diff() if diff is None else diff
+            elif operation == ["rev-parse", "refs/remotes/origin/cli-reviewed-product"]:
+                output = (product_ref if product_ref is not None else self.args.source_sha).encode()
+            else:
+                self.fail(f"Unexpected Git-only operation: {operation}")
+            return subprocess.CompletedProcess(argv, 0, output, b"")
+        return command
+
+    def test_reviewed_checkout_requires_exact_clean_descendant_and_frozen_product_ref(self):
+        self.diagnostic_pins()
+        with patch.dict(os.environ, self.env, clear=True), patch.object(native, "command", side_effect=self.checkout_double()):
+            self.assertEqual(native.verify_harness_source(self.args), self.args.workflow_sha)
+        for values in ({"head": "e" * 40}, {"status": b" M scripts/agentsdock_cli_native_acceptance.py"},
+                       {"status": b"?? unexpected-file"}, {"ancestor": False}, {"diff": b""},
+                       {"diff": self.raw_diff("server/VERSION")}, {"product_ref": "f" * 40}):
+            with self.subTest(values=values), patch.dict(os.environ, self.env, clear=True), \
+                    patch.object(native, "command", side_effect=self.checkout_double(**values)), self.assertRaises(RuntimeError):
+                native.verify_harness_source(self.args)
+
+    def test_original_exact_source_mode_requires_no_diagnostic_ref_or_new_inputs(self):
+        self.assertEqual(native.release_pins(self.args), (self.args.source_sha, self.args.source_ref, False))
+        with patch.dict(os.environ, self.env, clear=True), patch.object(native, "command", side_effect=self.checkout_double()) as commands:
+            self.assertEqual(native.verify_harness_source(self.args), self.args.source_sha)
+        self.assertEqual(commands.call_count, 2)
+
+    def test_diagnostic_report_cannot_masquerade_as_original_acceptance(self):
+        self.diagnostic_pins()
+        with patch.dict(os.environ, self.env, clear=True):
+            for passed in (False, True):
+                report = native.make_report(self.args, {"version": "1.0.10-beta.6"}, {}, "named-lifecycle", passed,
+                                            "named-stop-native-state")
+                self.assertEqual(report["kind"], "agentsdock-cli-native-diagnostic")
+                self.assertEqual(report["scope"], "paired-npm-cli-native-diagnostic")
+                self.assertTrue(report["diagnosticOnly"])
+                self.assertFalse(report["productPublicationEligible"])
+                self.assertFalse(report["fullAcceptance"])
+                self.assertEqual(report["sourceSha"], native.DIAGNOSTIC_PRODUCT)
+                self.assertEqual(report["sourceRef"], native.DIAGNOSTIC_SOURCE_REF)
+                self.assertEqual(report["harnessSha"], self.args.workflow_sha)
+                self.assertEqual(report["harnessRef"], self.args.harness_ref)
+                self.assertEqual(report["failedCheck"], None if passed else "named-stop-native-state")
+
+    def test_named_checks_are_action_specific_closed_labels(self):
+        expected = {f"named-{action}-{check}" for action in ("stop", "start", "restart")
+                    for check in ("command", "default-health", "default-instance-unchanged")}
+        expected |= {"named-stop-native-state"}
+        expected |= {f"named-{action}-{check}" for action in ("start", "restart")
+                     for check in ("authenticated-health", "fresh-process-instance")}
+        self.assertEqual({check for check in native.PUBLIC_CHECKS if check.startswith("named-")}, expected)
+
+    def test_after_failure_stop_samples_are_read_only_bounded_and_never_acceptance(self):
+        observations = {}
+        with patch.object(native, "service_files", return_value=[Path("/inert/named.plist")]), \
+                patch.object(native, "service_state", side_effect=["active", "inactive", "absent"]) as states, \
+                patch.object(native.time, "sleep") as sleep:
+            native.diagnose_named_stop(self.home, observations)
+        self.assertEqual(states.call_count, 3)
+        self.assertEqual([call.args for call in sleep.call_args_list], [(1,), (2,)])
+        self.assertEqual(observations, {"diagnosticNamedStopAfterFailure": [
+            {"minimumDelaySeconds": 0, "registered": True, "assertionActive": True},
+            {"minimumDelaySeconds": 1, "registered": True, "assertionActive": False},
+            {"minimumDelaySeconds": 3, "registered": False, "assertionActive": False}]})
+        with patch.object(native, "service_files", side_effect=RuntimeError("private-token /private-path")), \
+                patch.object(native.time, "sleep"):
+            native.diagnose_named_stop(self.home, observations)
+        self.assertTrue(all(sample["registered"] is None and sample["assertionActive"] is None
+                            for sample in observations["diagnosticNamedStopAfterFailure"]))
+        self.assertNotIn("private", json.dumps(observations))
+
+    def test_late_stop_convergence_never_changes_original_failure_or_checks(self):
+        observations = {}
+        # Exact-source mode keeps its original immediate assertion, no sampling.
+        with patch.object(native, "service_files", return_value=[Path("/inert/named.plist")]), \
+                patch.object(native, "service_state", return_value="active"), \
+                patch.object(native, "diagnose_named_stop") as diagnose:
+            with self.assertRaisesRegex(RuntimeError, "Named service remained active"):
+                native.require_named_stopped(self.args, self.home, observations)
+            diagnose.assert_not_called()
+        self.diagnostic_pins()
+        # Diagnostic samples show convergence but the original failure survives.
+        with patch.object(native, "service_files", return_value=[Path("/inert/named.plist")]), \
+                patch.object(native, "service_state", side_effect=["active", "active", "absent", "absent"]), \
+                patch.object(native.time, "sleep"):
+            with self.assertRaisesRegex(RuntimeError, "Named service remained active"):
+                native.require_named_stopped(self.args, self.home, observations)
+        self.assertFalse(observations["diagnosticNamedStopAfterFailure"][-1]["registered"])
+        with patch.dict(os.environ, self.env, clear=True):
+            report = native.make_report(self.args, None, observations, "named-lifecycle", False, "named-stop-native-state")
+        self.assertEqual(report["status"], "failed")
+        self.assertEqual(report["failedCheck"], "named-stop-native-state")
+        self.assertFalse(report["fullAcceptance"])
+        self.assertFalse(report["productPublicationEligible"])
+
     def test_platform_root_custom_selector_and_bad_pin_rejected(self):
         for values in ({"uid": 0}, {"machine": "x86_64"}, {"system": "Windows"}):
             with self.assertRaises(RuntimeError):
@@ -321,6 +473,9 @@ class NativeCliGuardTests(unittest.TestCase):
         self.assertIn("runner: macos-15", workflow)
         self.assertIn("runner: ubuntu-24.04", workflow)
         self.assertIn("test \"$GITHUB_SHA\" = \"$SOURCE_SHA\"", workflow)
+        self.assertIn("--workflow-sha \"$WORKFLOW_SHA\" --harness-ref \"$HARNESS_REF\"", workflow)
+        self.assertIn("refs/heads/$SOURCE_REF:refs/remotes/origin/cli-reviewed-product", workflow)
+        self.assertLess(workflow.index("verify_harness_source(Namespace("), workflow.index("uv python install 3.13"))
         self.assertIn("persist-credentials: false", workflow)
         self.assertIn("astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e", workflow)
         self.assertIn("--pattern agentsdock-cli-receipt.json", workflow)

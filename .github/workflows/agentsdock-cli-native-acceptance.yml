@@ -7,7 +7,7 @@ on:
   workflow_dispatch:
     inputs:
       source_sha:
-        description: Exact prepared source SHA (must equal dispatched workflow SHA)
+        description: Exact prepared product source SHA
         type: string
         required: true
       source_ref:
@@ -22,6 +22,14 @@ on:
         description: Accepted CLI receipt SHA-256
         type: string
         required: true
+      workflow_sha:
+        description: Optional reviewed diagnostic harness SHA (requires harness_ref)
+        type: string
+        default: ''
+      harness_ref:
+        description: Optional reviewed beta.6 diagnostic branch (not the product ref)
+        type: string
+        default: ''
 
 permissions:
   contents: read
@@ -55,6 +63,8 @@ jobs:
       SOURCE_REF: ${{ inputs.source_ref }}
       MANIFEST_SHA256: ${{ inputs.manifest_sha256 }}
       CLI_RECEIPT_SHA256: ${{ inputs.cli_receipt_sha256 }}
+      WORKFLOW_SHA: ${{ inputs.workflow_sha }}
+      HARNESS_REF: ${{ inputs.harness_ref }}
       TEST_PLATFORM: ${{ matrix.platform }}
     steps:
       - name: Require exact workflow and source pins
@@ -64,13 +74,34 @@ jobs:
           [[ "$CLI_RECEIPT_SHA256" =~ ^[0-9a-f]{64}$ ]]
           [[ "$SOURCE_REF" == main || "$SOURCE_REF" =~ ^release/[A-Za-z0-9][A-Za-z0-9._/-]*$ ]]
           git check-ref-format "refs/heads/$SOURCE_REF"
-          test "$GITHUB_SHA" = "$SOURCE_SHA"
-          test "$GITHUB_REF" = "refs/heads/$SOURCE_REF"
+          if [[ -z "$WORKFLOW_SHA" && -z "$HARNESS_REF" ]]; then
+            test "$GITHUB_SHA" = "$SOURCE_SHA"
+            test "$GITHUB_REF" = "refs/heads/$SOURCE_REF"
+          else
+            [[ "$WORKFLOW_SHA" =~ ^[0-9a-f]{40}$ ]]
+            test "$HARNESS_REF" = release/1.0.10-beta.6-cli-diagnostics
+            test "$GITHUB_SHA" = "$WORKFLOW_SHA"
+            test "$GITHUB_REF" = "refs/heads/$HARNESS_REF"
+          fi
           test "$RUNNER_ENVIRONMENT" = github-hosted
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
         with:
           persist-credentials: false
           fetch-depth: 0
+      - name: Verify clean harness ancestry and exact product pins before native setup
+        run: |
+          if [[ -n "$WORKFLOW_SHA" ]]; then
+            git fetch --no-tags origin "refs/heads/$SOURCE_REF:refs/remotes/origin/cli-reviewed-product"
+          fi
+          python3 - <<'PY'
+          import os
+          from argparse import Namespace
+          from scripts.agentsdock_cli_native_acceptance import verify_harness_source
+          verify_harness_source(Namespace(
+              source_sha=os.environ["SOURCE_SHA"], source_ref=os.environ["SOURCE_REF"],
+              manifest_sha256=os.environ["MANIFEST_SHA256"], cli_receipt_sha256=os.environ["CLI_RECEIPT_SHA256"],
+              workflow_sha=os.environ["WORKFLOW_SHA"], harness_ref=os.environ["HARNESS_REF"]))
+          PY
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
         with:
           node-version: 24
@@ -115,6 +146,7 @@ jobs:
           python3 scripts/agentsdock_cli_native_acceptance.py \
             --runtime "$RUNNER_TEMP/cli-native-inputs/npm" --cli "$RUNNER_TEMP/cli-native-inputs/cli" \
             --source-sha "$SOURCE_SHA" --source-ref "$SOURCE_REF" \
+            --workflow-sha "$WORKFLOW_SHA" --harness-ref "$HARNESS_REF" \
             --manifest-sha256 "$MANIFEST_SHA256" --cli-receipt-sha256 "$CLI_RECEIPT_SHA256" \
             --work "$RUNNER_TEMP/agentsdock-cli-native-$TEST_PLATFORM" \
             --report "$RUNNER_TEMP/cli-native-public/report-$TEST_PLATFORM.json"

@@ -42,11 +42,75 @@ PHASES = {"inputs", "clean-host", "automatic-setup", "default-health", "repeat-i
           "default-lifecycle", "cache-independence", "default-removal", "complete"}
 PUBLIC_CHECKS = {"private-token-file", "npm-output-token-privacy", "authenticated-default-health",
                  "service-path-independence", "exact-runtime-bytes-and-modes"}
+PUBLIC_CHECKS |= {f"named-{action}-{check}" for action in ("stop", "start", "restart")
+                 for check in ("command", "default-health", "default-instance-unchanged")}
+PUBLIC_CHECKS |= {"named-stop-native-state"}
+PUBLIC_CHECKS |= {f"named-{action}-{check}" for action in ("start", "restart")
+                 for check in ("authenticated-health", "fresh-process-instance")}
+DIAGNOSTIC_PRODUCT = "af31c2072ae17eb09a882048e06612bf1fa4040a"
+DIAGNOSTIC_SOURCE_REF = "release/1.0.10-beta.6"
+DIAGNOSTIC_HARNESS_REF = "release/1.0.10-beta.6-cli-diagnostics"
+DIAGNOSTIC_MANIFEST = "31c3a959ea6095471ced4f972f2c27b4f444161dbe36a9586228f42ef9b4fbdf"
+DIAGNOSTIC_CLI_RECEIPT = "af10c2f12dde4e53e53cac56db420b9364ba08513046b04fbce27381f8f4b756"
+HARNESS_FILES = {f".github/workflows/{WORKFLOW}", "scripts/agentsdock_cli_native_acceptance.py",
+                 "scripts/tests/test_agentsdock_cli_native_acceptance.py"}
 
 
 def need(condition, message):
     if not condition:
         raise RuntimeError(message)
+
+
+def release_pins(args):
+    """A diagnostic descendant never substitutes its source for the product."""
+    workflow_sha = getattr(args, "workflow_sha", "")
+    harness_ref = getattr(args, "harness_ref", "")
+    need(bool(workflow_sha) == bool(harness_ref), "Supply both diagnostic harness pins or neither.")
+    if not workflow_sha:
+        return args.source_sha, args.source_ref, False
+    need(re.fullmatch(r"[a-f0-9]{40}", workflow_sha) is not None
+         and workflow_sha != args.source_sha and harness_ref == DIAGNOSTIC_HARNESS_REF
+         and args.source_sha == DIAGNOSTIC_PRODUCT and args.source_ref == DIAGNOSTIC_SOURCE_REF
+         and args.manifest_sha256 == DIAGNOSTIC_MANIFEST and args.cli_receipt_sha256 == DIAGNOSTIC_CLI_RECEIPT,
+         "Diagnostic mode requires the exact frozen beta.6 product, packages and separate harness ref.")
+    return workflow_sha, harness_ref, True
+
+
+def workflow_identity(args, env):
+    workflow_sha, harness_ref, diagnostic = release_pins(args)
+    need(env.get("GITHUB_SHA") == workflow_sha and env.get("GITHUB_REF") == f"refs/heads/{harness_ref}"
+         and env.get("GITHUB_WORKFLOW_REF") == f"{REPOSITORY}/.github/workflows/{WORKFLOW}@refs/heads/{harness_ref}"
+         and (not env.get("GITHUB_WORKFLOW_SHA") or env["GITHUB_WORKFLOW_SHA"] == workflow_sha),
+         "The real workflow identity differs from the explicit harness pins.")
+    return workflow_sha, harness_ref, diagnostic
+
+
+def validate_harness_diff(raw):
+    """Retain modes and permit only modifications of three existing files."""
+    fields = raw.split(b"\0")
+    need(fields[-1] == b"" and (len(fields) - 1) % 2 == 0, "Malformed product/harness diff.")
+    for index in range(0, len(fields) - 1, 2):
+        header, filename = fields[index].decode("ascii"), fields[index + 1].decode("utf8")
+        match = re.fullmatch(r":(100644|100755) (100644|100755) [a-f0-9]+ [a-f0-9]+ M", header)
+        need(match is not None and match[1] == match[2] and filename in HARNESS_FILES,
+             "Diagnostic changes exceed the exact regular-file harness allowlist.")
+
+
+def verify_harness_source(args):
+    workflow_sha, _, diagnostic = workflow_identity(args, os.environ)
+    git = ["git", "--no-replace-objects", "-C", str(ROOT)]
+    need(command([*git, "rev-parse", "HEAD"]).stdout.decode().strip() == workflow_sha,
+         "Harness checkout differs from its reviewed workflow SHA.")
+    need(not command([*git, "status", "--porcelain", "--untracked-files=normal"]).stdout.strip(),
+         "Harness source must be clean and committed.")
+    if diagnostic:
+        command([*git, "merge-base", "--is-ancestor", args.source_sha, workflow_sha])
+        raw = command([*git, "diff", "--raw", "--no-renames", "-z", args.source_sha, workflow_sha, "--"]).stdout
+        need(bool(raw), "Diagnostic harness must contain reviewed harness-only changes.")
+        validate_harness_diff(raw)
+        need(command([*git, "rev-parse", "refs/remotes/origin/cli-reviewed-product"]).stdout.decode().strip()
+             == args.source_sha, "Frozen product ref moved or was not fetched.")
+    return workflow_sha
 
 
 def read_regular(path: Path, maximum=1024 * 1024, *, private=False) -> bytes:
@@ -84,6 +148,7 @@ def guard(args, *, environment=None, uid=None, system=None, machine=None):
     user = os.getuid() if uid is None else uid
     host = platform.system() if system is None else system
     architecture = platform.machine() if machine is None else machine
+    workflow_identity(args, env)
     need(re.fullmatch(r"[a-f0-9]{40}", args.source_sha) is not None
          and all(re.fullmatch(r"[a-f0-9]{64}", value) for value in
                  (args.manifest_sha256, args.cli_receipt_sha256)), "Exact source and both acceptance hashes are required.")
@@ -94,10 +159,8 @@ def guard(args, *, environment=None, uid=None, system=None, machine=None):
     need(env.get("GITHUB_ACTIONS") == "true" and env.get("RUNNER_ENVIRONMENT") == "github-hosted"
          and env.get("GITHUB_REPOSITORY") == REPOSITORY and env.get("GITHUB_EVENT_NAME") == "workflow_dispatch"
          and env.get("GITHUB_JOB") == "cli-native" and env.get("CLI_NATIVE_ACCEPTANCE") == "true"
-         and env.get("GITHUB_SHA") == args.source_sha and env.get("GITHUB_REF") == f"refs/heads/{args.source_ref}"
-         and env.get("GITHUB_WORKFLOW_REF") == f"{REPOSITORY}/.github/workflows/{WORKFLOW}@refs/heads/{args.source_ref}"
          and all(re.fullmatch(r"[1-9]\d*", env.get(name, "")) for name in ("GITHUB_RUN_ID", "GITHUB_RUN_ATTEMPT")),
-         "Requires the exact-source, manual canonical workflow on a disposable GitHub-hosted runner.")
+         "Requires the pinned manual canonical workflow on a disposable GitHub-hosted runner.")
     need(user != 0 and ((host == "Linux" and env.get("RUNNER_OS") == "Linux") or
          (host == "Darwin" and architecture == "arm64" and env.get("RUNNER_OS") == "macOS")),
          "A non-root hosted Linux or Apple silicon macOS account is required.")
@@ -311,10 +374,7 @@ def verify_services(home, name, work):
 def inspect_inputs(args):
     owned_directory(args.runtime)
     owned_directory(args.cli)
-    need(command(["git", "-C", str(ROOT), "rev-parse", "HEAD"]).stdout.decode().strip() == args.source_sha,
-         "Harness checkout is not the exact source.")
-    need(not command(["git", "-C", str(ROOT), "status", "--porcelain", "--untracked-files=normal"]).stdout.strip(),
-         "Harness source must be clean and committed.")
+    verify_harness_source(args)
     descriptor = json.loads(read_regular(args.runtime / "agents-server-npm-manifest.json", 8192))
     receipt = json.loads(read_regular(args.cli / "agentsdock-cli-receipt.json", 8192))
     version = read_regular(ROOT / "server/VERSION", 200).decode().strip()
@@ -429,6 +489,33 @@ def exercise_default_removal(home, binary, env, version, last, runtime, count, o
     observations["defaultRemovalRequiresConfirmationAndPreservesSyntheticState"] = True
 
 
+def diagnose_named_stop(home, observations):
+    """Read-only samples after an already failed assertion; never make it pass."""
+    samples = []
+    for delay, elapsed in ((0, 0), (1, 1), (2, 3)):
+        if delay:
+            time.sleep(delay)
+        try:
+            states = [service_state(item) for item in service_files(home, "cli-native")]
+            # On macOS the existing assertion calls any registered job active;
+            # this does not establish a running process or its identity.
+            samples.append({"minimumDelaySeconds": elapsed, "registered": any(state != "absent" for state in states),
+                            "assertionActive": "active" in states})
+        except Exception:
+            # No raw native output, paths, exception text or environment escapes.
+            samples.append({"minimumDelaySeconds": elapsed, "registered": None, "assertionActive": None})
+    observations["diagnosticNamedStopAfterFailure"] = samples
+
+
+def require_named_stopped(args, home, observations):
+    try:
+        need(all(service_state(item) != "active" for item in service_files(home, "cli-native")), "Named service remained active.")
+    except RuntimeError:
+        if release_pins(args)[2]:
+            diagnose_named_stop(home, observations)
+        raise  # Later convergence is diagnostic only, never an acceptance pass.
+
+
 def exercise(args, home, descriptor, receipt, observations, progress):
     progress("clean-host")
     ensure_empty(home)
@@ -497,14 +584,21 @@ def exercise(args, home, descriptor, receipt, observations, progress):
     observations["namedCreationAndIndependentIdentity"] = True
     progress("named-lifecycle")
     for action in ("stop", "start", "restart"):
+        progress("named-lifecycle", f"named-{action}-command")
         command([binary, action, "cli-native"], env=env, timeout=240)
         if action == "stop":
-            need(all(service_state(item) != "active" for item in service_files(home, "cli-native")), "Named service remained active.")
+            progress("named-lifecycle", "named-stop-native-state")
+            require_named_stopped(args, home, observations)
         else:
+            progress("named-lifecycle", f"named-{action}-authenticated-health")
             value = health(named_port, named_token, version, identity=named_first["server_identity"])
+            progress("named-lifecycle", f"named-{action}-fresh-process-instance")
             need(value["server_instance_id"] != named_first["server_instance_id"], "Named process did not change.")
             named_first = value
-        need(health(7850, token, version, identity=first["server_identity"])["server_instance_id"] == first["server_instance_id"],
+        progress("named-lifecycle", f"named-{action}-default-health")
+        default_health = health(7850, token, version, identity=first["server_identity"])
+        progress("named-lifecycle", f"named-{action}-default-instance-unchanged")
+        need(default_health["server_instance_id"] == first["server_instance_id"],
              "Named action disturbed default server.")
     observations["namedStartStopRestartAndDefaultUnaffected"] = True
     progress("named-removal")
@@ -567,7 +661,10 @@ def exercise(args, home, descriptor, receipt, observations, progress):
 def make_report(args, descriptor, observations, phase, passed, check=None):
     need(phase in PHASES, "Unknown public report phase.")
     need(check is None or check in PUBLIC_CHECKS, "Unknown public report check.")
-    return {"schema": 1, "kind": "agentsdock-cli-native-acceptance", "scope": "paired-npm-cli-native",
+    _, harness_ref, diagnostic = release_pins(args)
+    return {"schema": 1, "kind": "agentsdock-cli-native-diagnostic" if diagnostic else "agentsdock-cli-native-acceptance",
+            "scope": "paired-npm-cli-native-diagnostic" if diagnostic else "paired-npm-cli-native",
+            **({"diagnosticOnly": True, "harnessRef": harness_ref} if diagnostic else {}),
             "status": "passed" if passed else "failed", "phase": phase, "productPublicationEligible": False,
             "failedCheck": check if not passed else None,
             "fullAcceptance": False, "sourceSha": args.source_sha, "sourceRef": args.source_ref,
@@ -587,6 +684,8 @@ def main():
         parser.add_argument("--" + name, type=Path, required=True)
     for name in ("source-sha", "source-ref", "manifest-sha256", "cli-receipt-sha256"):
         parser.add_argument("--" + name, required=True)
+    parser.add_argument("--workflow-sha", default="")
+    parser.add_argument("--harness-ref", default="")
     args = parser.parse_args()
     home = guard(args)  # No report or arbitrary write on rejected host/path.
     owned_directory(args.report.parent)
@@ -608,7 +707,8 @@ def main():
         with os.fdopen(fd, "w") as stream:
             json.dump(report, stream, indent=2, sort_keys=True)
             stream.write("\n")
-    print("Scoped exact-pair native CLI acceptance passed; see the report for untested boundaries.")
+    print("Diagnostic native CLI checks completed; this is not an acceptance receipt." if release_pins(args)[2]
+          else "Scoped exact-pair native CLI acceptance passed; see the report for untested boundaries.")
 
 
 if __name__ == "__main__":
