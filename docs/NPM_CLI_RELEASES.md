@@ -9,9 +9,11 @@ continues to pin the signed runtime descriptor, not a floating npm channel.
 This document describes release preparation, not a publication receipt. As of
 2026-10-07, runtime `latest` is `1.0.9`, runtime `beta` is `1.0.10-beta.4`, and
 `agentsdock` is not public. Leave those existing bytes and stable defaults alone.
-Choose the next unused `1.0.10-beta.N` only after reconciling the reviewed release
-source with main; main's development `server/VERSION` is not a release reservation.
-Do not overwrite beta.4 or silently drop fixes maintained on its release branch.
+The selected new matched candidate is `1.0.10-beta.6`; it must preserve stable
+`1.0.9` and npm `latest`. Recheck registry/release state before any publication.
+Main's development `server/VERSION` is not a release reservation. Do not overwrite
+published beta.4 or the frozen private beta.5 candidate, or silently drop fixes
+maintained on the release branch.
 
 At the reviewed preparation pins, main `3964cf80` is an ancestor of beta.4 source
 `941bc4cd`. Start the next release branch from that frozen release source, then
@@ -21,12 +23,19 @@ signed-update lock waiting, executable packaging permissions and native build
 reservation fixes, among other release-line changes. Review the resulting merge
 and run its full source checks before accepting any new package.
 
-The beta.5 source preparation starts from that beta.4 release and integrates
-main's reviewed custom-API/OpenCode fixes plus the paired CLI pipeline. Its next
-desktop reservation is build 1249 only if the preparation workflow's next run is
-still 32. Recheck the public counter and other reservations before dispatch;
+The frozen beta.5 source integrated main's reviewed custom-API/OpenCode fixes
+and the paired CLI pipeline on that beta.4 release line. Beta.6 starts from the
+same reviewed source plus the CLI PATH-persistence fix: temporary npm lifecycle,
+npx-cache and node-gyp paths must not become service dependencies. Stable absolute
+provider/user/Node path spellings remain intact; existing saved service PATHs are
+not rewritten. The installer bytes and signing trust roots are unchanged.
+
+Use `release/1.0.10-beta.6` and its final committed source for every new artifact.
+The earlier beta.5 native build reservation is consumed. Recheck the public
+preparation counter and all other reservations before assigning beta.6's build;
 never reuse another run's allocation or restore main's older build formula.
-These preparation instructions are not an artifact or acceptance receipt.
+Do not reuse beta.5 tarballs, signatures, checksums or acceptance receipts for
+beta.6. These instructions are not an artifact or acceptance receipt.
 
 ## Prepare the immutable pair
 
@@ -84,7 +93,7 @@ When main and the release line differ, register only the exact reviewed full
 `.github/workflows/agentsdock-cli-native-acceptance.yml` on main through normal
 review and CI. Do not merge unrelated runtime changes or substitute a no-op
 acceptance workflow. Registration is not execution or acceptance. Dispatch the
-full workflow from the frozen `release/1.0.10-beta.5` source, with `source_sha`
+full workflow from the frozen `release/1.0.10-beta.6` source, with `source_sha`
 equal to that branch's actual workflow SHA and `source_ref` equal to its name.
 Its tools must exist in that source, and both immutable candidate drafts must
 already pass inspection. An incomplete main checkout or missing inputs must
@@ -105,6 +114,13 @@ full product acceptance. Record the actual run,
 attempt, source and both hashes; validate the original artifact's API digest and
 contents rather than substituting another attempt.
 
+Beta.6 requires this exact-pair native workflow on both hosts, not only the
+scoped runtime's direct-install checks. The real offline npm regression uses
+inert native/installer doubles; it proves PATH propagation but not live service
+health, restart or cache independence. Bounded `failedCheck` identifiers now
+distinguish token-file/output, authenticated health, service-path independence
+and installed-byte/mode failures without exposing private output.
+
 Remaining release checks:
 
 - Fresh real global setup on both supported native hosts; missing `uv`/service
@@ -122,13 +138,13 @@ Remaining release checks:
 - If a desktop is also released, its normal signed-app, legacy bridge, managed
   update and platform gates still apply. This npm workflow does not waive them.
 
-### Beta.5 scoped desktop/server replay
+### Beta.6 scoped desktop/server replay
 
-The existing `ci.yml` now admits exact `candidate-replay-v1.0.10-beta.5` for
+The existing `ci.yml` now admits exact `candidate-replay-v1.0.10-beta.6` for
 the independently pinned `beta1101` baseline, alongside the retained legacy
-journeys and both `0755`/`0750` installation-root modes. Historical beta.2,
-beta.3 and beta.4 pins and evidence remain unchanged. This is the beta.1-to-beta.5
-journey, not evidence for a beta.4 baseline. The complete reviewed installer
+journeys and both `0755`/`0750` installation-root modes. Historical beta.2 through
+beta.5 pins and evidence remain unchanged. This is the beta.1-to-beta.6 journey,
+not evidence for a beta.4 or beta.5 baseline. The complete reviewed installer
 remains pinned to SHA-256
 `51a6ae6f242476ae4f19712b95ecbaba212b2256e3928d389d8f617a6c367ed7`;
 if the new source changes that installer, review its behavior and whole-file pin

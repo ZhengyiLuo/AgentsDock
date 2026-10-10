@@ -1,5 +1,23 @@
 # Public development log
 
+## 2026-10-09 — Prepare matched beta.6 with npm PATH isolation
+
+- Prepare `1.0.10-beta.6` from the reviewed beta release line for the direct
+  desktop app, signed npm runtime, signed legacy bridge and short `agentsdock`
+  command. Preserve stable `1.0.9`, existing update feeds and frozen beta.5 bytes.
+- Include the reviewed CLI PATH-persistence fix while retaining the complete
+  installer, server signing key and native signing identities. Automatic setup,
+  explicit setup/recovery and local helpers retain stable provider/user paths
+  without persisting npm lifecycle or disposable cache directories.
+- Extend exact scoped beta.1-to-candidate replay admission to beta.6, retaining
+  historical versions, independent baseline hashes and both installation-root
+  modes. Reject later/unreviewed versions, local suffixes and other baselines.
+- Preparation only: commit and verify the final source before allocating a new
+  native build and creating new signed artifacts. Source/fixture checks do not
+  establish native first setup, migration, service survival or product acceptance.
+  Re-run required checks against the exact beta.6 package set before publishing;
+  no new accepted build or public availability is claimed here.
+
 ## 2026-10-09 — Keep temporary npm paths out of new service installations
 
 - Filter npm lifecycle `.bin` directories, disposable npx cache paths and npm

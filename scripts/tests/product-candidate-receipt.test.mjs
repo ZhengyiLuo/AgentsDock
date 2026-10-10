@@ -33,14 +33,15 @@ test('stable baseline profiles retain independent immutable source/archive ident
   for (const [name, version] of [['unknown', '1.0.9'], ['stable108', '1.0.8-beta.5'], ['beta1085', '1.0.10']]) assert.throws(() => stableBaselineProfile(name, version))
 })
 
-test('beta.1 baseline is independently pinned to build 1245 and exactly scoped to beta.2 through beta.5', () => {
-  assert.deepEqual(BETA1101_CANDIDATE_VERSIONS, ['1.0.10-beta.2', '1.0.10-beta.3', '1.0.10-beta.4', '1.0.10-beta.5'])
+test('beta.1 baseline is independently pinned to build 1245 and exactly scoped to beta.2 through beta.6', () => {
+  assert.deepEqual(BETA1101_CANDIDATE_VERSIONS, ['1.0.10-beta.2', '1.0.10-beta.3', '1.0.10-beta.4', '1.0.10-beta.5', '1.0.10-beta.6'])
   assert(Object.isFrozen(BETA1101_CANDIDATE_VERSIONS))
   const beta = candidateBaselineProfile('beta1101', '1.0.10-beta.2')
   assert.equal(beta, BETA1101_BASELINE)
   assert.equal(candidateBaselineProfile('beta1101', '1.0.10-beta.3'), beta)
   assert.equal(candidateBaselineProfile('beta1101', '1.0.10-beta.4'), beta)
   assert.equal(candidateBaselineProfile('beta1101', '1.0.10-beta.5'), beta)
+  assert.equal(candidateBaselineProfile('beta1101', '1.0.10-beta.6'), beta)
   assert.equal(beta.desktop.version, '1.0.10-beta.1')
   assert.equal(beta.server.version, beta.desktop.version)
   assert.equal(beta.desktop.buildNumber, '1245')
@@ -52,11 +53,11 @@ test('beta.1 baseline is independently pinned to build 1245 and exactly scoped t
   assert.equal(beta.server.archiveSha256, '050ddc103670df77b3fe31236cd119c71d7b933e0948b7cf85f92afe2ce2056b')
   assert.equal(beta.server.archiveBytes, 3727576)
   assert(Object.isFrozen(beta) && Object.isFrozen(beta.server) && Object.isFrozen(beta.desktop))
-  for (const version of ['1.0.9', '1.0.10', '1.0.10-beta.1', '1.0.10-beta.6',
-    '1.0.10-beta.2+local', '1.0.10-beta.3+local', '1.0.10-beta.4+local', '1.0.10-beta.5+local']) {
+  for (const version of ['1.0.9', '1.0.10', '1.0.10-beta.1', '1.0.10-beta.7',
+    '1.0.10-beta.2+local', '1.0.10-beta.3+local', '1.0.10-beta.4+local', '1.0.10-beta.5+local', '1.0.10-beta.6+local']) {
     assert.throws(() => candidateBaselineProfile('beta1101', version))
   }
-  for (const version of ['1.0.10-beta.2', '1.0.10-beta.3', '1.0.10-beta.4', '1.0.10-beta.5']) {
+  for (const version of ['1.0.10-beta.2', '1.0.10-beta.3', '1.0.10-beta.4', '1.0.10-beta.5', '1.0.10-beta.6']) {
     for (const name of ['stable108', 'beta1085', 'unknown']) assert.throws(() => candidateBaselineProfile(name, version))
     assert.throws(() => stableBaselineProfile('beta1101', version))
   }
@@ -69,7 +70,7 @@ test('independent baseline verification rejects substituted bytes before trustin
   writeFileSync(join(directory, 'agents-server-npm-manifest.sig'), Buffer.alloc(64))
   writeFileSync(join(directory, 'SHA256SUMS'), 'synthetic untrusted manifest')
   for (const [profile, version] of [['stable108', '1.0.9'], ['beta1085', '1.0.9'],
-    ['beta1101', '1.0.10-beta.2'], ['beta1101', '1.0.10-beta.3'], ['beta1101', '1.0.10-beta.4'], ['beta1101', '1.0.10-beta.5']]) {
+    ['beta1101', '1.0.10-beta.2'], ['beta1101', '1.0.10-beta.3'], ['beta1101', '1.0.10-beta.4'], ['beta1101', '1.0.10-beta.5'], ['beta1101', '1.0.10-beta.6']]) {
     await assert.rejects(() => verifyBaselineServer(profile, directory, version), /independently pinned/)
     await assert.rejects(() => verifyBaselineDesktop(profile, directory, version), /independently pinned/)
   }
@@ -337,11 +338,11 @@ test('candidate workflow retains sealed artifact pins and supplies exact expecte
   assert.match(candidateJob, /\$\{\{ matrix\.kind \}\}-\$\{\{ matrix\.legacy_mode \}\}/)
 })
 
-test('exact stable and beta.2 through beta.5 matrices select independent npm baselines without changing publication guards', () => {
+test('exact stable and beta.2 through beta.6 matrices select independent npm baselines without changing publication guards', () => {
   const workflow = readFileSync(new URL('../../.github/workflows/ci.yml', import.meta.url), 'utf8')
   const inputs = readFileSync(new URL('../../.github/actions/product-candidate-inputs/action.yml', import.meta.url), 'utf8')
   const job = workflow.slice(workflow.indexOf('  candidate-native:'), workflow.indexOf('  candidate-no-downgrade:'))
-  assert.match(job, /baseline_profile: \$\{\{ fromJSON\(inputs\.candidate_tag == 'candidate-replay-v1\.0\.9' && '\["legacy","stable108","beta1085"\]' \|\| \(inputs\.candidate_tag == 'candidate-replay-v1\.0\.10-beta\.2' \|\| inputs\.candidate_tag == 'candidate-replay-v1\.0\.10-beta\.3' \|\| inputs\.candidate_tag == 'candidate-replay-v1\.0\.10-beta\.4' \|\| inputs\.candidate_tag == 'candidate-replay-v1\.0\.10-beta\.5'\) && '\["legacy","beta1101"\]' \|\| '\["legacy"\]'\) \}\}/)
+  assert.match(job, /baseline_profile: \$\{\{ fromJSON\(inputs\.candidate_tag == 'candidate-replay-v1\.0\.9' && '\["legacy","stable108","beta1085"\]' \|\| \(inputs\.candidate_tag == 'candidate-replay-v1\.0\.10-beta\.2' \|\| inputs\.candidate_tag == 'candidate-replay-v1\.0\.10-beta\.3' \|\| inputs\.candidate_tag == 'candidate-replay-v1\.0\.10-beta\.4' \|\| inputs\.candidate_tag == 'candidate-replay-v1\.0\.10-beta\.5' \|\| inputs\.candidate_tag == 'candidate-replay-v1\.0\.10-beta\.6'\) && '\["legacy","beta1101"\]' \|\| '\["legacy"\]'\) \}\}/)
   const negative = workflow.slice(workflow.indexOf('  candidate-no-downgrade:'))
   assert.match(negative, /startsWith\(inputs\.candidate_tag, 'candidate-replay-v1\.0\.8-beta\.'\)/)
   assert.match(job, /INSTALL_KIND=npm-baseline/)
@@ -368,23 +369,27 @@ test('candidate composite shell parses and profile gates reject out-of-scope sel
     {BASELINE_PROFILE: 'beta1101', CANDIDATE_TAG: 'candidate-replay-v1.0.10-beta.3'},
     {BASELINE_PROFILE: 'beta1101', CANDIDATE_TAG: 'candidate-replay-v1.0.10-beta.4'},
     {BASELINE_PROFILE: 'beta1101', CANDIDATE_TAG: 'candidate-replay-v1.0.10-beta.5'},
+    {BASELINE_PROFILE: 'beta1101', CANDIDATE_TAG: 'candidate-replay-v1.0.10-beta.6'},
     {BASELINE_PROFILE: 'legacy', CANDIDATE_TAG: 'candidate-replay-v1.0.8-beta.5'}]) {
     assert.equal(spawnSync('/bin/bash', ['-c', gate], {env: {...env, ...change}}).status, 0)
   }
   for (const change of [{BASELINE_PROFILE: 'unknown'}, {CANDIDATE_TAG: 'candidate-replay-v1.0.8-beta.5'},
     {CANDIDATE_TAG: 'candidate-replay-v1.0.10'}, {EXECUTION_SCOPE: 'candidate-server-linux'}, {RECEIPT_SHA256: 'wrong'},
     {BASELINE_PROFILE: 'beta1101'}, {CANDIDATE_TAG: 'candidate-replay-v1.0.10-beta.2'},
-    {BASELINE_PROFILE: 'beta1101', CANDIDATE_TAG: 'candidate-replay-v1.0.10-beta.6'},
+    {BASELINE_PROFILE: 'beta1101', CANDIDATE_TAG: 'candidate-replay-v1.0.10-beta.7'},
     {BASELINE_PROFILE: 'beta1101', CANDIDATE_TAG: 'candidate-replay-v1.0.10-beta.3+local'},
     {BASELINE_PROFILE: 'beta1101', CANDIDATE_TAG: 'candidate-replay-v1.0.10-beta.4+local'},
     {BASELINE_PROFILE: 'beta1101', CANDIDATE_TAG: 'candidate-replay-v1.0.10-beta.5+local'},
+    {BASELINE_PROFILE: 'beta1101', CANDIDATE_TAG: 'candidate-replay-v1.0.10-beta.6+local'},
     {CANDIDATE_TAG: 'candidate-replay-v1.0.10-beta.3'},
     {CANDIDATE_TAG: 'candidate-replay-v1.0.10-beta.4'},
     {CANDIDATE_TAG: 'candidate-replay-v1.0.10-beta.5'},
+    {CANDIDATE_TAG: 'candidate-replay-v1.0.10-beta.6'},
     {BASELINE_PROFILE: 'beta1101', CANDIDATE_TAG: 'candidate-replay-v1.0.10-beta.2', EXECUTION_SCOPE: 'candidate-server-linux'},
     {BASELINE_PROFILE: 'beta1101', CANDIDATE_TAG: 'candidate-replay-v1.0.10-beta.3', EXECUTION_SCOPE: 'candidate-server-linux'},
     {BASELINE_PROFILE: 'beta1101', CANDIDATE_TAG: 'candidate-replay-v1.0.10-beta.4', EXECUTION_SCOPE: 'candidate-server-linux'},
-    {BASELINE_PROFILE: 'beta1101', CANDIDATE_TAG: 'candidate-replay-v1.0.10-beta.5', EXECUTION_SCOPE: 'candidate-server-linux'}]) {
+    {BASELINE_PROFILE: 'beta1101', CANDIDATE_TAG: 'candidate-replay-v1.0.10-beta.5', EXECUTION_SCOPE: 'candidate-server-linux'},
+    {BASELINE_PROFILE: 'beta1101', CANDIDATE_TAG: 'candidate-replay-v1.0.10-beta.6', EXECUTION_SCOPE: 'candidate-server-linux'}]) {
     assert.notEqual(spawnSync('/bin/bash', ['-c', gate], {env: {...env, ...change}}).status, 0)
   }
 })

@@ -52,9 +52,9 @@ export function stableBaselineProfile(name, candidateVersion) {
 }
 
 // Public beta.1 bytes authenticated independently of every candidate receipt.
-// Keep historical beta.2/beta.3/beta.4 replay and the reviewed beta.5 journey exact;
+// Keep historical beta.2 through beta.5 replay and the reviewed beta.6 journey exact;
 // this is not a general mutable baseline selector or candidate acceptance.
-export const BETA1101_CANDIDATE_VERSIONS = Object.freeze(['1.0.10-beta.2', '1.0.10-beta.3', '1.0.10-beta.4', '1.0.10-beta.5'])
+export const BETA1101_CANDIDATE_VERSIONS = Object.freeze(['1.0.10-beta.2', '1.0.10-beta.3', '1.0.10-beta.4', '1.0.10-beta.5', '1.0.10-beta.6'])
 export const BETA1101_BASELINE = Object.freeze({
   desktop: Object.freeze({ version: '1.0.10-beta.1', buildNumber: '1245', track: 'beta', repository: 'AgentsDock',
     sourceSha: '7790690fc91f0d6331b265820ef64234f5213abd',
@@ -70,7 +70,7 @@ export const BETA1101_BASELINE = Object.freeze({
 
 export function candidateBaselineProfile(name, candidateVersion) {
   if (name === 'beta1101') {
-    assert(BETA1101_CANDIDATE_VERSIONS.includes(candidateVersion), 'Beta.1 baseline requires an exact reviewed beta.2, beta.3, beta.4 or beta.5 candidate')
+    assert(BETA1101_CANDIDATE_VERSIONS.includes(candidateVersion), 'Beta.1 baseline requires an exact reviewed beta.2, beta.3, beta.4, beta.5 or beta.6 candidate')
     return BETA1101_BASELINE
   }
   return stableBaselineProfile(name, candidateVersion)
