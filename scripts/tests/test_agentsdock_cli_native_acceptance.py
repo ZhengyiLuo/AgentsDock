@@ -5,6 +5,7 @@ import io
 import json
 import os
 from pathlib import Path
+import plistlib
 import shutil
 import subprocess
 import sys
@@ -164,6 +165,9 @@ class NativeCliGuardTests(unittest.TestCase):
         expected |= {"named-stop-native-state"}
         expected |= {f"named-{action}-{check}" for action in ("start", "restart")
                      for check in ("authenticated-health", "fresh-process-instance")}
+        expected |= {"named-stop-owned-process", "named-stop-owned-convergence", "named-chain-owned-process",
+                     "named-chain-stop-command", "named-chain-start-command", "named-chain-fresh-stable-health",
+                     "named-chain-default-unaffected"}
         self.assertEqual({check for check in native.PUBLIC_CHECKS if check.startswith("named-")}, expected)
 
     def test_after_failure_stop_samples_are_read_only_bounded_and_never_acceptance(self):
@@ -208,6 +212,132 @@ class NativeCliGuardTests(unittest.TestCase):
         self.assertEqual(report["failedCheck"], "named-stop-native-state")
         self.assertFalse(report["fullAcceptance"])
         self.assertFalse(report["productPublicationEligible"])
+
+    def test_named_native_snapshot_binds_exact_owned_plist_arguments_and_pid(self):
+        with patch.object(native.platform, "system", return_value="Darwin"):
+            item = native.service_files(self.home, "cli-native")[0]
+        item.parent.mkdir(parents=True)
+        runtime = native.roots(self.home, "cli-native")["runtime"]
+        args = [str(runtime / "current/.venv/bin/python"), str(runtime / "current/agent_server.py"), "serve", "--port", "7860"]
+        raw = plistlib.dumps({"Label": item.stem, "ProgramArguments": args})
+        item.write_bytes(raw)
+        item.chmod(0o600)
+        output = f"path = {item}\nprogram = {args[0]}\narguments = {{\n" + "\n".join(args) + "\n}\npid = 401\n"
+        with patch.object(native.platform, "system", return_value="Darwin"), \
+                patch.object(native, "command", return_value=subprocess.CompletedProcess([], 0, output.encode(), b"")) as command:
+            state = native.named_native_snapshot(self.home, raw)
+            self.assertEqual(state, {"file": raw, "registered": True, "active": True, "pid": 401})
+            self.assertEqual(command.call_args.args[0][:2], ["/bin/launchctl", "print"])
+        for text, expected in ((output + "pid = 402\n", raw), (output + "program = /other\n", raw),
+                               (output.replace(str(item), "/foreign.plist"), raw),
+                               (output.replace("--port", "--different"), raw), (output, b"different file")):
+            with patch.object(native.platform, "system", return_value="Darwin"), \
+                    patch.object(native, "command", return_value=subprocess.CompletedProcess([], 0, text.encode(), b"")), \
+                    self.assertRaises(RuntimeError):
+                native.named_native_snapshot(self.home, expected)
+        for error, allowed in ((b"Could not find service", True), (b"permission denied", False)):
+            with patch.object(native.platform, "system", return_value="Darwin"), \
+                    patch.object(native, "command", return_value=subprocess.CompletedProcess([], 113, b"", error)):
+                if allowed:
+                    state = native.named_native_snapshot(self.home, raw)
+                    self.assertEqual((state["registered"], state["pid"]), (False, 0))
+                else:
+                    with self.assertRaises(RuntimeError):
+                        native.named_native_snapshot(self.home, raw)
+
+    def test_named_linux_snapshot_requires_exact_loaded_unit_without_overrides(self):
+        with patch.object(native.platform, "system", return_value="Linux"):
+            item = native.service_files(self.home, "cli-native")[0]
+        item.parent.mkdir(parents=True)
+        item.write_bytes(b"owned synthetic unit")
+        item.chmod(0o600)
+        output = f"FragmentPath={item}\nDropInPaths=\nNeedDaemonReload=no\nLoadState=loaded\nActiveState=active\nMainPID=401\n"
+        for text, allowed in ((output, True), (output.replace("active\n", "inactive\n").replace("401", "0"), True),
+                              (output.replace("NeedDaemonReload=no", "NeedDaemonReload=yes"), False),
+                              (output.replace("DropInPaths=", "DropInPaths=/foreign"), False),
+                              (output + "MainPID=402\n", False)):
+            with patch.object(native.platform, "system", return_value="Linux"), \
+                    patch.object(native, "command", return_value=subprocess.CompletedProcess([], 0, text.encode(), b"")):
+                if allowed:
+                    self.assertTrue(native.named_native_snapshot(self.home)["registered"])
+                else:
+                    with self.assertRaises(RuntimeError):
+                        native.named_native_snapshot(self.home)
+
+    def test_named_stop_observer_requires_both_registration_and_previous_pid_gone(self):
+        previous = {"file": b"owned", "registered": True, "active": True, "pid": 401}
+        absent = {"file": b"owned", "registered": False, "active": False, "pid": 0}
+        with patch.object(native.platform, "system", return_value="Darwin"), \
+                patch.object(native, "named_native_snapshot", side_effect=[previous, absent]), \
+                patch.object(native, "process_present", side_effect=[True, False]), patch.object(native.time, "sleep") as sleep:
+            native.observe_named_stop(self.home, previous)
+            self.assertEqual([call.args for call in sleep.call_args_list], [(0.1,)])
+        for current, present in ((previous, False), (absent, True), ({**previous, "pid": 402}, False)):
+            with patch.object(native.platform, "system", return_value="Darwin"), \
+                    patch.object(native, "named_native_snapshot", return_value=current), \
+                    patch.object(native, "process_present", return_value=present), self.assertRaises(RuntimeError):
+                native.observe_named_stop(self.home, previous, timeout=0)
+
+    def test_restart_observer_requires_new_owned_pid_old_pid_gone_and_stable_new_health(self):
+        old = {"file": b"owned", "registered": True, "active": True, "pid": 401}
+        new = {**old, "pid": 402}
+        stale = {"server_identity": "identity", "server_instance_id": "old"}
+        fresh = {**stale, "server_instance_id": "new"}
+        with patch.object(native, "named_native_snapshot", return_value=new), \
+                patch.object(native, "process_present", side_effect=lambda pid: pid == 402), \
+                patch.object(native, "health", return_value=fresh) as health, patch.object(native.time, "sleep"):
+            self.assertEqual(native.observe_named_restart(self.home, old, stale, 7860, "private", "1.0.10-beta.6"), fresh)
+            self.assertEqual(health.call_count, 2)
+        for current, present, value in ((old, False, fresh), (new, True, fresh), (new, False, stale),
+                                        ({**new, "active": False}, False, fresh)):
+            with patch.object(native, "named_native_snapshot", return_value=current), \
+                    patch.object(native, "process_present", return_value=present), \
+                    patch.object(native, "health", return_value=value), self.assertRaises(RuntimeError):
+                native.observe_named_restart(self.home, old, stale, 7860, "private", "1.0.10-beta.6", timeout=0)
+
+    def test_immediate_chain_has_no_observer_between_stop_and_start_and_cannot_compensate(self):
+        old = {"file": b"owned", "registered": True, "active": True, "pid": 401}
+        previous = {"server_identity": "named", "server_instance_id": "old"}
+        fresh = {**previous, "server_instance_id": "new"}
+        default = {"server_identity": "default", "server_instance_id": "unchanged"}
+        for failure in (False, True):
+            events, observations = [], {}
+            def command(argv, **kwargs):
+                events.append(argv[1])
+                return subprocess.CompletedProcess(argv, 0, b"", b"")
+            def observe(*args, **kwargs):
+                events.append("observe")
+                if failure:
+                    raise RuntimeError("Synthetic no-op start never reached a fresh process")
+                return fresh
+            with patch.object(native, "named_native_snapshot", side_effect=lambda *a: events.append("capture") or old), \
+                    patch.object(native, "command", side_effect=command), \
+                    patch.object(native, "observe_named_restart", side_effect=observe), \
+                    patch.object(native, "health", side_effect=lambda *a, **k: events.append("default-health") or default), \
+                    patch.object(native.time, "sleep") as sleep:
+                def run():
+                    return native.exercise_immediate_named_chain(self.home, "agentsdock", {}, "1.0.10-beta.6", 7860,
+                                                                "private", previous, "private", default, observations, lambda *a: None)
+                if failure:
+                    with self.assertRaises(RuntimeError):
+                        run()
+                    self.assertEqual(events, ["capture", "stop", "start", "observe"])
+                    self.assertFalse(observations)
+                else:
+                    self.assertEqual(run(), fresh)
+                    self.assertEqual(events, ["capture", "stop", "start", "observe", "default-health"])
+                    self.assertTrue(observations["diagnosticImmediateNamedStopStartFreshOwnedProcessAndDefaultUnaffected"])
+                sleep.assert_not_called()
+
+    def test_process_presence_uses_only_ps_and_rejects_ambiguous_output(self):
+        for stdout, expected in ((b"  401\n", True), (b"", False), (b"402\n", None)):
+            with patch.object(native, "command", return_value=subprocess.CompletedProcess([], 0, stdout, b"")) as command:
+                if expected is None:
+                    with self.assertRaises(RuntimeError):
+                        native.process_present(401)
+                else:
+                    self.assertEqual(native.process_present(401), expected)
+                self.assertEqual(command.call_args.args[0], ["/bin/ps", "-p", "401", "-o", "pid="])
 
     def test_platform_root_custom_selector_and_bad_pin_rejected(self):
         for values in ({"uid": 0}, {"machine": "x86_64"}, {"system": "Windows"}):

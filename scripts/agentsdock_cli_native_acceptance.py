@@ -47,6 +47,9 @@ PUBLIC_CHECKS |= {f"named-{action}-{check}" for action in ("stop", "start", "res
 PUBLIC_CHECKS |= {"named-stop-native-state"}
 PUBLIC_CHECKS |= {f"named-{action}-{check}" for action in ("start", "restart")
                  for check in ("authenticated-health", "fresh-process-instance")}
+PUBLIC_CHECKS |= {"named-stop-owned-process", "named-stop-owned-convergence", "named-chain-owned-process",
+                 "named-chain-stop-command", "named-chain-start-command", "named-chain-fresh-stable-health",
+                 "named-chain-default-unaffected"}
 DIAGNOSTIC_PRODUCT = "af31c2072ae17eb09a882048e06612bf1fa4040a"
 DIAGNOSTIC_SOURCE_REF = "release/1.0.10-beta.6"
 DIAGNOSTIC_HARNESS_REF = "release/1.0.10-beta.6-cli-diagnostics"
@@ -516,6 +519,131 @@ def require_named_stopped(args, home, observations):
         raise  # Later convergence is diagnostic only, never an acceptance pass.
 
 
+def named_native_snapshot(home, expected_file=None):
+    """Bind only the disposable named job; keep raw configuration and PIDs private."""
+    items = service_files(home, "cli-native")
+    need(len(items) == 1, "Expected one named native service.")
+    item = items[0]
+    raw = read_regular(item)
+    need(expected_file is None or raw == expected_file, "Owned named service file changed.")
+    if platform.system() == "Darwin":
+        definition = plistlib.loads(raw)
+        expected = definition.get("ProgramArguments", [])
+        need(definition.get("Label") == item.stem and expected and all(type(value) is str for value in expected)
+             and expected[:2] == [str(roots(home, "cli-native")["runtime"] / "current/.venv/bin/python"),
+                                  str(roots(home, "cli-native")["runtime"] / "current/agent_server.py")],
+             "Owned named service executable differs.")
+        result = command(["/bin/launchctl", "print", f"gui/{os.getuid()}/{item.stem}"],
+                         timeout=5, allowed=(0, 3, 5, 113))
+        if result.returncode:
+            need(any(text in (result.stdout + result.stderr).lower() for text in
+                     (b"could not find service", b"service not found", b"no such process")),
+                 "Named native absence is unproven.")
+            return {"file": raw, "registered": False, "active": False, "pid": 0}
+        value = result.stdout.decode()
+        arguments = re.findall(r"(?ms)^\s*arguments = \{\n(.*?)^\s*\}", value)
+        need(re.findall(r"(?m)^\s*path = (.+)$", value) == [str(item)]
+             and re.findall(r"(?m)^\s*program = (.+)$", value) == [expected[0]]
+             and len(arguments) == 1
+             and [line.strip() for line in arguments[0].splitlines() if line.strip()] == expected,
+             "Registered named native binding changed.")
+        pids = re.findall(r"(?m)^\s*pid = (\S+)\s*$", value)
+        need(not pids or len(pids) == 1 and re.fullmatch(r"[1-9]\d*", pids[0]), "Ambiguous named native PID.")
+        pid = int(pids[0]) if pids else 0
+        need(pid == 0 or 1 < pid < 2 ** 31, "Invalid named native PID.")
+        return {"file": raw, "registered": True, "active": pid > 0, "pid": pid}
+    result = command(["systemctl", "--user", "show", item.name, "--no-pager",
+                      "--property=FragmentPath,DropInPaths,NeedDaemonReload,LoadState,ActiveState,MainPID"], timeout=5)
+    values = {}
+    for line in result.stdout.decode().splitlines():
+        key, separator, value = line.partition("=")
+        need(separator and key not in values, "Ambiguous named unit observation.")
+        values[key] = value
+    need(set(values) == {"FragmentPath", "DropInPaths", "NeedDaemonReload", "LoadState", "ActiveState", "MainPID"}
+         and values["FragmentPath"] == str(item) and values["DropInPaths"] == ""
+         and values["NeedDaemonReload"] == "no" and values["LoadState"] == "loaded"
+         and values["ActiveState"] in {"active", "inactive", "activating", "deactivating", "failed"}
+         and re.fullmatch(r"[0-9]+", values["MainPID"]), "Registered named unit binding changed.")
+    pid = int(values["MainPID"])
+    need(pid == 0 or 1 < pid < 2 ** 31, "Invalid named native PID.")
+    return {"file": raw, "registered": True, "active": values["ActiveState"] == "active", "pid": pid}
+
+
+def process_present(pid):
+    need(type(pid) is int and 1 < pid < 2 ** 31, "A positive previously owned PID is required.")
+    result = command(["/bin/ps", "-p", str(pid), "-o", "pid="], timeout=5, allowed=(0, 1))
+    value = result.stdout.strip()
+    need(value in (b"", str(pid).encode()), "Prior process observation is ambiguous.")
+    return bool(value)
+
+
+def observe_named_stop(home, previous, *, timeout=30):
+    """Observe bounded convergence only; never issue signals or repeat control."""
+    need(previous["registered"] and previous["active"] and previous["pid"] > 1, "Named process was not owned before stop.")
+    deadline = time.monotonic() + timeout
+    while True:
+        current = named_native_snapshot(home, previous["file"])
+        need(current["pid"] in {0, previous["pid"]}, "A replacement named process appeared while stopping.")
+        old_present = process_present(previous["pid"])
+        # launchd bootout unregisters; systemd stop retains its loaded unit.
+        stopped = not current["registered"] if platform.system() == "Darwin" else not current["active"] and current["pid"] == 0
+        if stopped and not old_present:
+            return
+        need(time.monotonic() < deadline, "Owned named native registration/process did not stop before deadline.")
+        time.sleep(0.1)
+
+
+def observe_named_restart(home, previous, old_health, port, token, version, *, timeout=180):
+    """Require old PID gone, a fresh owned PID, and two stable authenticated reads."""
+    need(previous["registered"] and previous["active"] and previous["pid"] > 1,
+         "Named process was not owned before immediate stop/start.")
+    deadline, candidate_pid, stable = time.monotonic() + timeout, None, None
+    while True:
+        current = named_native_snapshot(home, previous["file"])
+        old_present = process_present(previous["pid"])
+        if current["registered"] and current["active"] and current["pid"] not in (0, previous["pid"]) and not old_present:
+            need(candidate_pid in (None, current["pid"]), "Named process changed again during restart observation.")
+            candidate_pid = current["pid"]
+            try:
+                value = health(port, token, version, identity=old_health["server_identity"], timeout=0)
+            except RuntimeError:
+                stable = None
+            else:
+                need(value["server_instance_id"] != old_health["server_instance_id"], "Named restart returned stale health.")
+                if stable is not None:
+                    need(value["server_instance_id"] == stable, "Named authenticated epoch changed during observation.")
+                    final = named_native_snapshot(home, previous["file"])
+                    need(final["registered"] and final["active"] and final["pid"] == candidate_pid
+                         and not process_present(previous["pid"]) and process_present(candidate_pid),
+                         "Named restart native identity did not remain stable.")
+                    return value
+                stable = value["server_instance_id"]
+        else:
+            need(candidate_pid is None, "Named replacement process disappeared during observation.")
+        need(time.monotonic() < deadline, "Immediate stop/start did not reach a fresh owned healthy process.")
+        time.sleep(0.1)
+
+
+def exercise_immediate_named_chain(home, binary, env, version, named_port, named_token, named_first,
+                                   token, first, observations, progress):
+    progress("named-lifecycle", "named-chain-owned-process")
+    previous = named_native_snapshot(home)
+    need(previous["registered"] and previous["active"] and previous["pid"] > 1,
+         "Named chain requires an owned running process.")
+    progress("named-lifecycle", "named-chain-stop-command")
+    command([binary, "stop", "cli-native"], env=env, timeout=240)
+    # Deliberately no query, sleep, health request or observer between commands.
+    progress("named-lifecycle", "named-chain-start-command")
+    command([binary, "start", "cli-native"], env=env, timeout=240)
+    progress("named-lifecycle", "named-chain-fresh-stable-health")
+    fresh = observe_named_restart(home, previous, named_first, named_port, named_token, version)
+    progress("named-lifecycle", "named-chain-default-unaffected")
+    default = health(7850, token, version, identity=first["server_identity"])
+    need(default["server_instance_id"] == first["server_instance_id"], "Named fast chain disturbed default.")
+    observations["diagnosticImmediateNamedStopStartFreshOwnedProcessAndDefaultUnaffected"] = True
+    return fresh
+
+
 def exercise(args, home, descriptor, receipt, observations, progress):
     progress("clean-host")
     ensure_empty(home)
@@ -584,11 +712,22 @@ def exercise(args, home, descriptor, receipt, observations, progress):
     observations["namedCreationAndIndependentIdentity"] = True
     progress("named-lifecycle")
     for action in ("stop", "start", "restart"):
+        previous = None
+        if action == "stop" and release_pins(args)[2]:
+            progress("named-lifecycle", "named-stop-owned-process")
+            previous = named_native_snapshot(home)
+            need(previous["registered"] and previous["active"] and previous["pid"] > 1,
+                 "Named stop requires an owned running process.")
         progress("named-lifecycle", f"named-{action}-command")
         command([binary, action, "cli-native"], env=env, timeout=240)
         if action == "stop":
-            progress("named-lifecycle", "named-stop-native-state")
-            require_named_stopped(args, home, observations)
+            if previous is None:
+                progress("named-lifecycle", "named-stop-native-state")
+                require_named_stopped(args, home, observations)
+            else:
+                progress("named-lifecycle", "named-stop-owned-convergence")
+                observe_named_stop(home, previous)
+                observations["diagnosticNamedStopOwnedNativeStateAndProcessAbsent"] = True
         else:
             progress("named-lifecycle", f"named-{action}-authenticated-health")
             value = health(named_port, named_token, version, identity=named_first["server_identity"])
@@ -601,6 +740,9 @@ def exercise(args, home, descriptor, receipt, observations, progress):
         need(default_health["server_instance_id"] == first["server_instance_id"],
              "Named action disturbed default server.")
     observations["namedStartStopRestartAndDefaultUnaffected"] = True
+    if release_pins(args)[2]:
+        named_first = exercise_immediate_named_chain(home, binary, env, version, named_port, named_token, named_first,
+                                                    token, first, observations, progress)
     progress("named-removal")
     cancelled = command([binary, "remove", "cli-native"], env=env, allowed=(1,))
     need(b"Not confirmed" in cancelled.stderr and marker.is_file(), "Unconfirmed removal did not preserve state.")
