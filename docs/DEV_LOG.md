@@ -1,5 +1,21 @@
 # Public development log
 
+## 2026-10-13 — Refresh setup documentation for the public CLI
+
+- Point desktop downloads to stable 1.0.10 and add the published 1.0.11-beta.1
+  channel. Make `npm install -g agentsdock` the primary manual setup path and
+  document list/status, token selection, independent instances and removal.
+- Align server and npm READMEs with the published commands and native CLI
+  acceptance; retain the scoped package and checkout setup paths. Distinguish
+  CLI installation from signed updates of existing services and preserve
+  explicit safety and untested-boundary notes.
+- Remove obsolete Electron build-version examples and align development
+  prerequisites. This is documentation only: no runtime, installed service,
+  release artifact or mobile build changes.
+- Verify public release assets and both npm channels, 31 local documentation
+  links, and nine command forms against the published CLI parser. All 58 scoped
+  CLI, packaging and license tests pass; no service actions are exercised.
+
 ## 2026-10-13 — Recover server updates and preserve detached jobs
 
 - Linux execution workers now restart independently of detached background

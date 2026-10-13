@@ -20,10 +20,11 @@ state, including named instances; repeat installs leave these unchanged and do
 not restart, overwrite or upgrade a running service. The runtime lives in its
 managed installation directory, independently of the npm package/cache.
 
-For a beta, select `npm install -g agentsdock@beta`. This documentation describes
-the package being prepared; commands are available from the registry only after
-that package/channel has been published. Do not infer name ownership from an npm
-404 response.
+Both channels are public: stable is **1.0.10** and beta is **1.0.11-beta.1**.
+The command above selects stable; use `npm install -g agentsdock@beta` for beta,
+or an exact version such as `agentsdock@1.0.10` for reproducible installation.
+These select the CLI and its same-version runtime package, not the version of an
+already-running server. See [Updates and recovery](#updates-and-recovery).
 
 `-g` makes the command available outside the current project when npm's global
 bin directory is on your PATH. A local `npm install agentsdock` is also supported;
@@ -94,21 +95,14 @@ the version comes from that instance's installed runtime, not the npm CLI packag
 installation, it leaves it unchanged and points to `agentsdock new` for another
 instance (or `agentsdock new work --port 7854` for an explicit name and port).
 
-Current acceptance gap: the native instance manager still validates the older
-single-service layout. `remove default --yes` was observed refusing a current
-split gateway/execution installation before making changes. Start/stop/restart
-and removal for split layouts need guarded lifecycle integration and native
-acceptance before this CLI can be advertised as complete instance management.
-Do not bypass the binding check or stop only one process. Fresh auto setup and
-safe repeated npm installation have been verified independently on Linux;
-macOS first-service creation still needs disposable native acceptance.
-
-The packaged CLI has also been installed and reinstalled on Apple silicon
-macOS with existing services. Disposable named launchd instances passed real
-creation (explicit and automatic name/port), token/authenticated-health,
-start/stop/restart, uninstall cancellation and removal/name-release checks.
-Saved test data remained in its private backup. This does not close the
-fresh-default or split-service acceptance gaps above.
+Published 1.0.10 and 1.0.11-beta.1 passed isolated native CLI checks on Apple
+silicon macOS and Linux, including fresh setup, safe reinstall, default/named
+lifecycle, immediate stop/start and history-preserving removal. This does not
+establish full populated-history upgrades or reboot acceptance. See the
+[stable](https://github.com/ZhengyiLuo/AgentsDock/releases/tag/v1.0.10) and
+[beta](https://github.com/ZhengyiLuo/AgentsDock/releases/tag/v1.0.11-beta.1)
+release notes for remaining limits. Development checkouts may differ from the
+published packages; never bypass a service-binding safety check.
 
 ## Connect a phone by QR
 
@@ -243,6 +237,7 @@ server manifests, signing keys and previously frozen candidates are unchanged.
 The canonical `server-npm-publish.yml` now prepares both packages and publishes
 the verified runtime before this CLI, with exact source/version/hash checks and
 explicit stable-tag preservation. See the
-[matched release procedure](../../../docs/NPM_CLI_RELEASES.md) for private staging,
-first-publication authentication and required native acceptance. A first beta
-uses `agentsdock@beta`; it does not create a stable unscoped `latest` tag.
+[matched release procedure](https://github.com/ZhengyiLuo/AgentsDock/blob/main/docs/NPM_CLI_RELEASES.md) for private staging,
+first-publication authentication and required native acceptance. Beta releases
+advance `beta` while preserving the existing stable `latest` tag; verify both
+packages' registry tags after publication.

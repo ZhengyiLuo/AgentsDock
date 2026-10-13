@@ -31,10 +31,11 @@ cd electron
 pnpm install --frozen-lockfile
 pnpm package:win
 cd ..
-./scripts/verify_electron_windows.ps1 dist/windows 0.2.10-beta.2 beta x64 allow-unsigned
 ```
 
 The installer, blockmap, and updater metadata are written to `dist/windows`.
+Release verification must use the built package's exact version and track;
+follow the [direct release procedure](../docs/DIRECT_RELEASES.md).
 Local Windows packages are unsigned unless `CSC_LINK` and
 `CSC_KEY_PASSWORD` point to an Authenticode certificate. Stable publication
 fails closed without signing credentials unless the release owner explicitly
@@ -44,8 +45,8 @@ notarization requirements remain unchanged.
 
 ## Development
 
-The project uses the Node runtime bundled with Codex when it is available. A
-normal Node 22+ and pnpm installation also works.
+Use Node.js 24 and pnpm 11.9.0, the package-manager version pinned by the project.
+Development does not require Codex's bundled Node runtime.
 
 ```bash
 cd electron
@@ -92,7 +93,7 @@ format and remaining acceptance checks.
 
 ## OpenCode
 
-OpenCode is available in desktop stable 1.0.9 with AgentsServer 1.0.9 and appears
+OpenCode is available since desktop/AgentsServer 1.0.9 and appears
 in the chat backend picker. The server must advertise the OpenCode v1 contract;
 an older server shows an upgrade requirement and cannot silently switch the
 chat to another backend.
@@ -116,7 +117,7 @@ resets native OpenCode context while retaining the visible AgentsDock timeline.
 
 OpenCode supports explicitly authorized cross-chat routes through the run-bound
 AgentsDock tool on matching servers, including tool-capable custom API models.
-The 1.0.9 release does not provide external history import, native session forks,
+The current desktop integration does not provide external history import, native session forks,
 side chats, live steering, or native goals for OpenCode.
 Ordinary queued follow-ups and Stop remain available. A copied-memory fork
 is not presented as a native clone.

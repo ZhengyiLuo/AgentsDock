@@ -9,13 +9,17 @@ own versioned installation directory, never from an npm or npx cache.
 
 ## First installation
 
-After this package is published, a fresh user installation can use:
+For the short CLI with multi-server management, use
+[`npm install -g agentsdock`](https://github.com/ZhengyiLuo/AgentsDock/blob/main/server/npm/agentsdock/README.md). Its first global install also
+sets up the server. The scoped package remains supported for explicit setup:
 
 ```sh
-npx @agentsdock/server@beta install --port 7850
+npx @agentsdock/server@latest install --port 7850
 ```
 
-Use an exact package version for reproducible installations. The command needs
+`latest` selects stable (currently 1.0.10); use `@beta` for the beta channel
+(currently 1.0.11-beta.1), or an exact version for reproducible installations.
+Node.js 22.14+ is required. The command needs
 the same prerequisites as the source installer: a trusted `uv`, Linux with a
 working user systemd session or Apple silicon macOS with a GUI launchd session,
 and the desired provider CLIs. It runs as the current user without `sudo`.
@@ -23,8 +27,8 @@ and the desired provider CLIs. It runs as the current user without `sudo`.
 The npm entrypoint only permits a fresh default installation. It refuses an
 existing managed installation, legacy service, or custom installation roots;
 changing directories does not create a second service. Use AgentsDock's managed
-update controls for an existing server. Multiple named services are not enabled
-by this package.
+update controls for an existing server. For named servers, use the short CLI's
+`agentsdock new`; this scoped entry point does not create them.
 
 ## Recover a failed 1.0.4 migration
 
