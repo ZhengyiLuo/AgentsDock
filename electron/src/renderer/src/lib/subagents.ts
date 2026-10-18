@@ -144,8 +144,14 @@ export function subagentsFromEvents(events: Event[], ownerBackend?: 'claude' | '
       const existing = agents.get(key) || (existingKey ? agents.get(existingKey) : undefined) || fallback
       // A retired Claude execution cannot become live again from a delayed
       // snapshot. A new owner has its own key, even if a task ID is reused.
-      if (backend === 'claude' && existing && !ACTIVE_STATUSES.has(existing.status)
-        && ACTIVE_STATUSES.has(normalizedStatus(event.subagent_status))) continue
+      // A tool launch receipt alone does not establish the child lifecycle.
+      if (backend === 'claude' && existing
+        && (authoritativeKeys.has(existing.key) || taskKeys.has(taskAlias(backend, childId, runId)))
+        && !ACTIVE_STATUSES.has(existing.status)
+        && ACTIVE_STATUSES.has(normalizedStatus(event.subagent_status))) {
+        taskKeys.set(taskAlias(backend, childId, runId), existing.key)
+        continue
+      }
       const agent = existing ? rekey(existing, key) : ensure(key, {
         id: childId,
         runId,
@@ -260,6 +266,8 @@ export function subagentsFromEvents(events: Event[], ownerBackend?: 'claude' | '
           startedAt: event.ts,
           updatedAt: event.ts
         })
+        taskKeys.set(taskAlias('claude', taskId, runId), key)
+        if (rawToolId) toolKeys.set(toolAlias('claude', runId, rawToolId), key)
         if (!ACTIVE_STATUSES.has(agent.status)) continue
         agent.id = taskId
         if (task) {
@@ -268,8 +276,6 @@ export function subagentsFromEvents(events: Event[], ownerBackend?: 'claude' | '
         }
         agent.kind = String(raw.subagent_type || agent.kind || 'agent')
         agent.status = 'running'
-        taskKeys.set(taskAlias('claude', taskId, runId), key)
-        if (rawToolId) toolKeys.set(toolAlias('claude', runId, rawToolId), key)
         note(agent, event.ts, raw.description || t('timeline.subagent.started'))
       } else if (raw.type === 'system' && subtype === 'task_progress' && taskId) {
         const agent = agents.get(taskKeys.get(taskAlias('claude', taskId, runId)) || '')

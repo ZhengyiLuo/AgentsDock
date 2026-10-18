@@ -4601,6 +4601,85 @@ describe('split-chat timeline subscriptions', () => {
 })
 
 describe('subagent lifecycle hydration', () => {
+  it.each([
+    { correctedSeq: 7, taskId: 'child-1' },
+    { correctedSeq: 6, taskId: 'child-1' },
+    { correctedSeq: 7, taskId: 'agent-tool' }
+  ])('repairs cached Claude $taskId tracking at snapshot sequence $correctedSeq and rejects delayed resurrection', async ({ correctedSeq, taskId }) => {
+    const session: Session = { id: 'chat', title: 'Chat', backend: 'claude' }
+    const tool = { id: 'agent-tool', name: 'Agent', input: { description: 'Review the renderer', run_in_background: true } }
+    const durable: Event[] = [
+      { seq: 1, id: 'start', session_id: session.id, run_id: 'run-1', backend: 'claude',
+        type: 'tool_started', ts: '2026-09-01T12:00:00Z', tool },
+      { seq: 3, id: 'finish', session_id: session.id, run_id: 'run-1', backend: 'claude',
+        type: 'tool_finished', ts: '2026-09-01T12:00:02Z', tool, tool_id: tool.id, output: 'Background task started' }
+    ]
+    const running: Event = {
+      seq: 7, id: `subagent:chat:run-1:${taskId}`, session_id: session.id,
+      run_id: 'run-1', type: 'subagent_state', backend: 'claude',
+      ts: '2026-09-01T12:00:06Z', subagent_id: taskId,
+      subagent_tool_id: tool.id, subagent_name: 'Review the renderer',
+      subagent_status: 'running', subagent_started_at: durable[0].ts,
+      subagent_log: [{ ts: '2026-09-01T12:00:06Z', text: 'Reviewing source' }]
+    }
+    let agent = running
+    let onEvent: (event: Event) => void = () => { throw new Error('Timeline stream did not start.') }
+    const client = fakeClient({
+      sessionPage: async () => ({ session, events: durable, has_more: false, latest_seq: 7 }),
+      subagents: async () => ({ session_id: session.id, subagents: [agent], count: 1,
+        active_count: agent.subagent_status === 'running' ? 1 : 0, latest_seq: 7 }),
+      stream: (_sessionId, _after, receiveEvent) => { onEvent = receiveEvent; return vi.fn() }
+    })
+    const { service, cache } = createProfileService({ 'http://a.test:7850': [client] }, cache => {
+      cache.putSession('profile:a', session)
+      cache.putEvents('profile:a', session.id, [...durable, running])
+    })
+    Object.assign(service, { validatedGeneration: 1 })
+    await service.openTimeline(session.id, true)
+    await settleBackgroundWork()
+    expect(cache.snapshot('profile:a', session.id)?.events).toContainEqual(running)
+
+    const internals = service as unknown as {
+      scope: unknown
+      timelineSubscriptions: Map<string, { lease: number }>
+      refreshSubagentSnapshot(scope: unknown, sessionId: string, lease: number): Promise<void>
+      flushEventCache(): void
+      emit(name: string, payload: unknown): void
+    }
+    agent = { ...running, seq: correctedSeq, subagent_status: 'tracking_lost',
+      subagent_activity: 'Background task tracking lost; completion is not confirmed' }
+    await internals.refreshSubagentSnapshot(internals.scope, session.id, internals.timelineSubscriptions.get(session.id)!.lease)
+    const states = () => cache.snapshot('profile:a', session.id)!.events.filter(event => event.type === 'subagent_state')
+    expect(states()).toEqual([agent])
+
+    const emit = vi.spyOn(internals, 'emit')
+    onEvent({ ...running, seq: 10, id: 'subagent:chat:run-1:child-1', subagent_id: 'child-1' })
+    onEvent({ ...running, seq: 11, id: 'late-start', type: 'raw_event',
+      raw: JSON.stringify({ type: 'system', subtype: 'task_started', task_type: 'local_agent',
+        task_id: 'child-1', tool_use_id: tool.id }) })
+    onEvent({ ...running, seq: 12, id: 'late-progress', type: 'raw_event',
+      raw: JSON.stringify({ type: 'system', subtype: 'task_progress', task_id: 'child-1' }) })
+    internals.flushEventCache()
+    expect(states()).toEqual([agent])
+    expect(emit).not.toHaveBeenCalledWith('server:event', expect.anything())
+
+    const live = { ...running, seq: 13, id: `subagent:chat:run-2:${taskId}`, run_id: 'run-2' }
+    onEvent(live)
+    internals.flushEventCache()
+    expect(states()).toEqual([agent, live])
+    service.unsubscribeTimeline(session.id)
+    await service.openTimeline(session.id, true)
+    await settleBackgroundWork()
+    expect(states().filter(state => state.run_id === 'run-1')).toEqual([agent])
+    onEvent({ ...running, seq: 14, id: 'observed-completion', type: 'raw_event',
+      raw: JSON.stringify({ type: 'system', subtype: 'task_notification', task_id: 'child-1',
+        status: 'completed', summary: 'Provider confirmed completion' }) })
+    internals.flushEventCache()
+    expect(states().find(state => state.run_id === 'run-1')).toMatchObject({
+      subagent_status: 'completed', subagent_summary: 'Provider confirmed completion'
+    })
+  })
+
   it.each(['task_notification', 'task_updated'])('reopens a running Claude agent and persists progress and %s completion', async subtype => {
     const session: Session = { id: 'chat', title: 'Chat', backend: 'claude' }
     let agent: Event = {

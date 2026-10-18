@@ -3524,6 +3524,7 @@ export class AppService {
         }
         return
       }
+      if (event.type === 'subagent_state' && event.backend === 'claude' && !subagentState) return
       this.emitAgentEvent(scope, event)
       this.enqueueEventCache(scope, event)
       if (JOB_REFRESH_EVENT_TYPES.has(event.type) && !isImportedProviderControlMetadata(event)) void this.refreshJobs(scope)
@@ -5798,7 +5799,7 @@ export class AppService {
     const events = persistable.events.filter(event => event.backend !== 'claude' || (
       event.subagent_kind !== 'local_bash'
       && event.subagent_kind !== 'local_workflow'
-      && this.subagentProjector.project(event) !== null
+      && this.subagentProjector.project(event, 'snapshot') !== null
     ))
     if (!events.length) return
     this.flushEventCache()

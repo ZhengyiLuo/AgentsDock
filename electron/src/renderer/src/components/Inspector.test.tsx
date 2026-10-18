@@ -3,7 +3,7 @@ import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { AgentsDockAPI } from '@shared/ipc'
 import type { Event, Health, RuntimeCatalog, Session } from '@shared/types'
-import { useAppStore } from '../store/app-store'
+import { mergeEvents, useAppStore } from '../store/app-store'
 import { Inspector } from './Inspector'
 
 describe('Inspector', () => {
@@ -849,6 +849,50 @@ describe('Inspector', () => {
     expect(container.querySelector('.subagent-state.tracking_lost')).toBeInTheDocument()
     expect(container.querySelector('.subagent-state.running')).not.toBeInTheDocument()
     expect(screen.queryByText(/Claude · stopped/)).not.toBeInTheDocument()
+  })
+
+  it('moves a corrected cached child into history and keeps the correction when navigating chats', () => {
+    const session: Session = { id: 'chat-1', title: 'Historical review', backend: 'claude' }
+    const other: Session = { id: 'chat-2', title: 'Current review', backend: 'claude' }
+    const running: Event = { id: 'subagent:chat-1:old-owner:task-1', seq: 7,
+      session_id: session.id, run_id: 'old-owner', type: 'subagent_state', backend: 'claude',
+      ts: '2026-09-01T12:00:00Z', subagent_id: 'task-1', subagent_tool_id: 'agent-tool',
+      subagent_name: 'Historical review', subagent_status: 'running',
+      subagent_started_at: '2026-09-01T11:00:00Z',
+      subagent_log: [{ ts: '2026-09-01T12:00:00Z', text: 'Retained child activity' }] }
+    const live: Event = { ...running, id: 'subagent:chat-2:current-owner:task-1',
+      session_id: other.id, run_id: 'current-owner', subagent_name: 'Current review' }
+    const snapshot = (owner: Session, events: Event[]) => ({ session: owner, events,
+      queuedTurns: [], files: [], hasMoreEvents: false, filesTotal: 0, cachedAt: 1 })
+    useAppStore.setState({ sessions: [session, other], snapshots: {
+      [session.id]: snapshot(session, [running]), [other.id]: snapshot(other, [live])
+    } })
+    const { container } = render(<Inspector />)
+    expect(screen.getByRole('button', { name: /Subagents 1 active/i })).toBeInTheDocument()
+    const corrected: Event = { ...running, subagent_status: 'tracking_lost',
+      subagent_activity: 'Background task tracking lost; completion is not confirmed' }
+    act(() => useAppStore.setState(state => ({ snapshots: { ...state.snapshots,
+      [session.id]: snapshot(session, mergeEvents(state.snapshots[session.id].events, [corrected]))
+    } })))
+    expect(screen.getByRole('button', { name: /Subagents 0 active/i })).toBeInTheDocument()
+    expect(screen.getByText('No active subagents.')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: /History 1 records/i }))
+    expect(container.querySelectorAll('.subagent-history-list > button')).toHaveLength(1)
+    expect(screen.getByText(/Claude · Tracking lost/)).toBeInTheDocument()
+    fireEvent.click(container.querySelector('.subagent-history-list > button')!)
+    expect(container.querySelector('.output-panel')).toHaveTextContent('Retained child activity')
+    expect(container.querySelector('.output-panel')).toHaveTextContent('completion is not confirmed')
+
+    act(() => useAppStore.setState({ selectedSessionId: other.id }))
+    expect(screen.getByRole('button', { name: /Subagents 1 active/i })).toBeInTheDocument()
+    expect(container.querySelector('.subagent-active-group')).toHaveTextContent('Current review')
+    expect(container.querySelector('.output-panel')).not.toBeInTheDocument()
+    act(() => useAppStore.setState({ selectedSessionId: session.id }))
+    fireEvent.click(screen.getByRole('button', { name: /Subagents 0 active/i }))
+    fireEvent.click(screen.getByRole('button', { name: /History 1 records/i }))
+    expect(container.querySelectorAll('.subagent-history-list > button')).toHaveLength(1)
+    expect(screen.getByText(/Claude · Tracking lost/)).toBeInTheDocument()
+    expect(container.querySelector('.subagent-state.running')).not.toBeInTheDocument()
   })
 
   it('does not show Codex coordination waits as subagents', () => {

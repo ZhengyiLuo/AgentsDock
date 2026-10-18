@@ -1,5 +1,31 @@
 # Public development log
 
+## 2026-10-17 — Reconcile stale Claude subagent status
+
+- Reconcile the subagent panel's historical Claude records against the existing
+  runtime owner. Untracked old work moves to **Tracking lost** history instead
+  of accumulating hours under **Active now**. Preserve confirmed completion,
+  genuine tracked work, and separate identities for reused task IDs across runs.
+  This read does not start providers, interrupt work, or rewrite chat history.
+- Accept corrected server snapshots in the desktop cache, including corrections
+  whose journal sequence is unchanged or older than a stale projection. Ignore
+  delayed running updates for retired children and reconcile launch-tool aliases
+  without duplicating rows or overriding authoritative task state.
+- Validation covers historical missing completion, owner replacement, live work,
+  delayed events, terminal receipts, cache repair, reload and chat switching.
+  Focused server/desktop tests, TypeScript and production compilation passed.
+- Personally exercised the compiled desktop offscreen through native IPC and a
+  real authenticated disposable server. The baseline reproduced 39 stale active
+  rows; the corrected app showed them in history, preserved a controlled live
+  owner, and rejected delayed running updates. Task history and the live-owner
+  fixture were synthetic. A separate real disposable Claude request rejected
+  the legacy Agent launch as unavailable and correctly produced a failed task;
+  a real child's successful full lifecycle remains unverified.
+- Rechecked the existing Team Space stop-hosting/join fix in the same candidate
+  with two isolated real servers, including a lost reply, TLS joining, message
+  delivery, reload and preservation of the original team. No installed app or
+  production service was changed; these changes are source-only.
+
 ## 2026-10-17 — Let a Team Space host stop hosting and join another team
 
 - Add a visible **Stop hosting…** action that invokes the existing Host-to-Member
