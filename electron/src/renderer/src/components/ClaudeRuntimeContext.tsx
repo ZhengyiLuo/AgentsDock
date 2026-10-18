@@ -430,6 +430,9 @@ function isClaudeCapabilityAvailable(capability: unknown): boolean {
 
 function isClaudeControlEvent(type: string): boolean {
   return type.startsWith('claude_')
+    || type === 'turn_queued'
+    || type === 'turn_unqueued'
+    || type.startsWith('turn_queue_')
     || type === 'turn_started'
     || type === 'turn_finished'
     || type === 'turn_stopped'

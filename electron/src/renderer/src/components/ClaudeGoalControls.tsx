@@ -25,12 +25,14 @@ export function ClaudeGoalControls({ open, onOpenChange, disabled = false }: {
   const activeProfileId = useAppStore(state => state.activeProfileId)
   const profileGeneration = useAppStore(state => state.profileGeneration)
   const switchingProfileId = useAppStore(state => state.switchingProfileId)
+  const lifecycleBusy = useAppStore(state => Boolean(session?.id && state.activeSessionIds.has(session.id)))
   const scope = `${activeProfileId}:${profileGeneration}:${session?.id}`
   const scopeRef = useRef(scope)
   scopeRef.current = scope
   const goal = runtime?.goal ?? null
   const active = goal?.status === 'active'
-  const busy = runtime?.status?.type === 'active'
+  const busy = lifecycleBusy || runtime?.status?.type === 'active'
+  const queuedGoal = runtime?.queued_goal
   const [condition, setCondition] = useState('')
   const [error, setError] = useState<string | null>(null)
   const errorAction = useRef<'set' | 'clear' | null>(null)
@@ -88,7 +90,7 @@ export function ClaudeGoalControls({ open, onOpenChange, disabled = false }: {
   }, [active, goal?.set_at])
 
   const changeGoal = async (next: string | null) => {
-    if (blocked || mutating || next !== null && busy) return
+    if (blocked || mutating) return
     const requestScope = scope
     setError(null)
     errorAction.current = null
@@ -108,6 +110,10 @@ export function ClaudeGoalControls({ open, onOpenChange, disabled = false }: {
   const waiting = runtime?.goal_starting === true || clearRequested
   const clearLabel = busy ? t('claudeGoal.clearAndStop') : t('claudeGoal.clear')
   const clearHint = busy ? t('claudeGoal.clearAndStopHint') : t('claudeGoal.clear')
+  const queuedFeedback = queuedGoal && <p className="goal-feedback" role="status">
+    <strong>{t(queuedGoal.paused ? 'claudeGoal.queuedPaused' : 'claudeGoal.queued')}</strong>{' '}{queuedGoal.condition}<br />
+    {t(queuedGoal.paused ? 'claudeGoal.queuedPausedHint' : 'claudeGoal.queuedHint')}
+  </p>
 
   if (session?.backend !== 'claude' || window.agentsDock.sharedChat) return null
   return <>
@@ -116,6 +122,7 @@ export function ClaudeGoalControls({ open, onOpenChange, disabled = false }: {
       metadata={[goal.iterations != null ? t('claudeGoal.iterationCount', { count: String(goal.iterations) }) : null, elapsed].filter(Boolean).join(' · ')}
       actions={<button type="button" className="quiet-button" aria-label={clearHint} title={clearHint} disabled={blocked || mutating} onClick={() => void changeGoal(null)}>{clearLabel}</button>} />}
     {!open && (error || waiting) && <p className={`goal-feedback${error ? ' error' : ''}`} role={error ? 'alert' : 'status'}>{error || t('claudeGoal.requested')}</p>}
+    {!open && queuedFeedback}
     <Dialog.Root open={open} onOpenChange={onOpenChange}>
       <GoalDialogContent title={t('claudeGoal.title')} description={t('claudeGoal.description')} closeLabel={t('claudeGoal.close')} busy={mutating}>
           <form onSubmit={event => { event.preventDefault(); if (trimmedCondition && condition.length <= 4000) void changeGoal(trimmedCondition) }}>
@@ -128,12 +135,13 @@ export function ClaudeGoalControls({ open, onOpenChange, disabled = false }: {
               value={condition} disabled={blocked || mutating} onChange={value => { conditionEdited.current = true; setCondition(value) }} />
             {(error || runtimeError) && <p className="goal-feedback error" role="alert">{error || runtimeError}</p>}
             {waiting && <p className="goal-feedback" role="status">{t('claudeGoal.requested')}</p>}
-            {busy && <p className="goal-feedback">{t(active ? 'claudeGoal.busyReplace' : 'claudeGoal.busyStart')}</p>}
+            {queuedFeedback}
+            {busy && !queuedGoal && <p className="goal-feedback">{t('claudeGoal.busyHint')}</p>}
             <footer>
               {active && <button type="button" className="quiet-button" aria-label={clearHint} title={clearHint} disabled={blocked || mutating} onClick={() => void changeGoal(null)}>{clearLabel}</button>}
-              <button type="submit" className="primary-button" disabled={blocked || busy || mutating || runtime?.goal_starting === true || !trimmedCondition || condition.length > 4000}>
+              <button type="submit" className="primary-button" disabled={blocked || mutating || runtime?.goal_starting === true || !trimmedCondition || condition.length > 4000}>
                 {mutating && <LoaderCircle size={14} className="spin" aria-hidden="true" />}
-                {active ? t('claudeGoal.replace') : t('claudeGoal.start')}
+                {busy ? t(active ? 'claudeGoal.queueReplacement' : 'claudeGoal.queue') : t(active ? 'claudeGoal.replace' : 'claudeGoal.start')}
               </button>
             </footer>
           </form>

@@ -39,7 +39,8 @@ describe('Claude native goals', () => {
     setGoal.mockResolvedValue(empty)
     clearGoal.mockResolvedValue(empty)
     setLocale('en')
-    useAppStore.setState({ activeProfileId: 'a', profileGeneration: 1, switchingProfileId: null, connected: true })
+    useAppStore.setState({ activeProfileId: 'a', profileGeneration: 1, switchingProfileId: null, connected: true,
+      activeSessionIds: new Set() })
     Object.defineProperty(window, 'agentsDock', { configurable: true, value: {
       claude: { runtime, setGoal, clearGoal },
       events: { on: (name: string, callback: (payload: unknown) => void) => {
@@ -49,6 +50,78 @@ describe('Claude native goals', () => {
     } as unknown as AgentsDockAPI })
   })
   afterEach(() => { cleanup(); setLocale('en') })
+
+  it.each([null, active.goal])('queues a goal during current work with previous goal %j', async previous => {
+    const running = { ...active, goal: previous }
+    runtime.mockResolvedValue(running)
+    render(surface())
+    const user = userEvent.setup()
+    const field = await screen.findByRole('textbox', { name: 'Completion condition' })
+    await waitFor(() => expect(field).toBeEnabled())
+    await waitFor(() => expect(field).toHaveValue(previous?.condition ?? ''))
+    const runtimeCalls = runtime.mock.calls.length
+    await user.clear(field)
+    await user.type(field, 'Current changes pass validation.')
+    expect(runtime).toHaveBeenCalledTimes(runtimeCalls)
+    expect(setGoal).not.toHaveBeenCalled()
+    const submit = screen.getByRole('button', { name: previous ? 'Queue replacement' : 'Queue goal' })
+    expect(submit).toBeEnabled()
+
+    let resolve!: (value: ClaudeRuntimeSnapshot) => void
+    setGoal.mockImplementationOnce(() => new Promise<ClaudeRuntimeSnapshot>(done => { resolve = done }))
+    await user.click(submit)
+    expect(setGoal).toHaveBeenCalledExactlyOnceWith(session.id, 'Current changes pass validation.')
+    expect(clearGoal).not.toHaveBeenCalled()
+    expect(submit).toBeDisabled()
+
+    const queued = { ...running, queued_goal: { queued_id: 'queued-goal', condition: 'Current changes pass validation.',
+      position: 0, paused: false, pause_reason: null, queued_count: 1 } }
+    runtime.mockResolvedValue(queued)
+    await act(async () => resolve(queued))
+    expect(await screen.findByRole('status')).toHaveTextContent('Queued goal: Current changes pass validation.')
+    expect(screen.getByRole('status')).toHaveTextContent('Applies after the current turn finishes.')
+    if (previous) expect(screen.getByRole('region', { name: 'Goal progress' })).toHaveTextContent(previous.condition)
+    else expect(screen.queryByText('Active goal')).not.toBeInTheDocument()
+    expect(screen.queryByText('Request sent to Claude. Waiting for goal status…')).not.toBeInTheDocument()
+    expect(screen.getByRole('textbox', { name: 'Completion condition' })).toHaveValue('Current changes pass validation.')
+    expect(screen.getByRole('button', { name: previous ? 'Queue replacement' : 'Queue goal' })).toBeEnabled()
+    expect(clearGoal).not.toHaveBeenCalled()
+    expect(screen.queryByText(/Wait for current work|Clear & stop before replacing/)).not.toBeInTheDocument()
+
+    runtime.mockResolvedValue({ ...running, queued_goal: null,
+      goal: { ...active.goal!, condition: 'Current changes pass validation.' } })
+    act(() => listeners.get('server:event')?.({ profileId: 'a', profileGeneration: 1,
+      event: { session_id: session.id, type: 'claude_goal_changed' } }))
+    await waitFor(() => expect(screen.getByRole('region', { name: 'Goal progress' })).toHaveTextContent('Current changes pass validation.'))
+    expect(screen.queryByText('Queued goal:')).not.toBeInTheDocument()
+  })
+
+  it.each(['turn_queued', 'turn_unqueued', 'turn_queue_updated', 'turn_queue_reordered', 'turn_queue_paused'])('refreshes queued goal state after a matching %s event without polling', async type => {
+    const queued = { ...active, goal: null, queued_goal: { queued_id: 'queued-goal', condition: 'Next goal condition.',
+      position: 0, paused: false, pause_reason: null, queued_count: 1 } }
+    runtime.mockResolvedValue(queued)
+    render(surface(false))
+    expect(await screen.findByRole('status')).toHaveTextContent('Queued goal: Next goal condition.')
+    const calls = runtime.mock.calls.length
+    const paused = type === 'turn_queue_paused'
+    runtime.mockResolvedValue({ ...queued, queued_goal: paused
+      ? { ...queued.queued_goal, paused: true, pause_reason: 'stopped' } : null })
+    act(() => listeners.get('server:event')?.({ profileId: 'another-server', profileGeneration: 1,
+      event: { session_id: session.id, type } }))
+    act(() => listeners.get('server:event')?.({ profileId: 'a', profileGeneration: 1,
+      event: { session_id: 'another-chat', type } }))
+    expect(runtime).toHaveBeenCalledTimes(calls)
+    act(() => listeners.get('server:event')?.({ profileId: 'a', profileGeneration: 1,
+      event: { session_id: session.id, type } }))
+    if (paused) {
+      expect(await screen.findByText('Queued goal paused:')).toBeInTheDocument()
+      expect(screen.getByRole('status')).toHaveTextContent('Resume or cancel it from the message queue.')
+      expect(screen.getByRole('status')).not.toHaveTextContent('stopped')
+    } else await waitFor(() => expect(screen.queryByText('Queued goal:')).not.toBeInTheDocument())
+    expect(runtime).toHaveBeenCalledTimes(calls + 1)
+    expect(setGoal).not.toHaveBeenCalled()
+    expect(clearGoal).not.toHaveBeenCalled()
+  })
 
   it('waits for native goal state, refreshes on a matching event, and permits busy clear', async () => {
     render(surface())
@@ -94,18 +167,19 @@ describe('Claude native goals', () => {
   })
 
   it('retains retryable errors and does not apply a late goal to another server', async () => {
+    runtime.mockResolvedValue({ ...active, goal: null })
     render(surface())
     const field = screen.getByRole('textbox', { name: 'Completion condition' })
     await waitFor(() => expect(field).toBeEnabled())
     fireEvent.change(field, { target: { value: 'Build succeeds.' } })
     setGoal.mockRejectedValueOnce(new Error('Claude is unavailable.'))
-    await userEvent.setup().click(screen.getByRole('button', { name: 'Start goal' }))
+    await userEvent.setup().click(screen.getByRole('button', { name: 'Queue goal' }))
     expect(await screen.findByRole('alert')).toHaveTextContent('Claude is unavailable.')
     expect(field).toHaveValue('Build succeeds.')
 
     let resolve!: (value: ClaudeRuntimeSnapshot) => void
     setGoal.mockImplementationOnce(() => new Promise<ClaudeRuntimeSnapshot>(done => { resolve = done }))
-    await userEvent.setup().click(screen.getByRole('button', { name: 'Start goal' }))
+    await userEvent.setup().click(screen.getByRole('button', { name: 'Queue goal' }))
     act(() => useAppStore.setState({ activeProfileId: 'b', profileGeneration: 2 }))
     await act(async () => resolve(active))
     expect(screen.queryByText('Active goal')).not.toBeInTheDocument()

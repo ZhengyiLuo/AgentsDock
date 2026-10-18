@@ -1,5 +1,33 @@
 # Public development log
 
+## 2026-10-18 — Queue Claude goals during running work
+
+- Allow a completion condition to be submitted while Claude is running. The
+  desktop offers Queue goal or Queue replacement and shows the saved request
+  separately from the provider's active goal. The existing message queue
+  supplies cancellation and recovery; the current run is not interrupted.
+- Retain the exact native command selection through queue admission and drain.
+  Clear remains the explicit clear-and-stop operation. A queued replacement
+  takes effect after the current run finishes, including its native goal loop;
+  this is not an immediate change to a running goal.
+- Queue events refresh the selected chat's goal display without polling or
+  requests while typing. Native clear-command aliases remain separate from
+  completion conditions. Both English and Chinese controls describe timing.
+- Validation: 129 focused server checks and 239 desktop checks passed, followed
+  by final goal/header checks, TypeScript and production desktop compilation.
+  An isolated offscreen native desktop reproduced the disabled baseline.
+  The corrected desktop sent a real Claude SDK turn, queued a goal through
+  authenticated native IPC/HTTP while its shell tool ran, observed the original
+  task finish successfully, and then observed the goal become active and
+  achieved. The provider session ID stayed unchanged and no stop occurred.
+  A separate native-desktop fixture passed queue cancellation, failed-request
+  retry, chat switching/reopening, and replacement while preserving the original
+  task. English/dark and Chinese/light dialogs and keyboard focus were checked
+  at the supported minimum width. This fixture used synthetic provider state;
+  the live-provider result above was a separate test.
+- Availability: source change and local compiled desktop only. App and server
+  updates are both required; no installed app, live service or release changed.
+
 ## 2026-10-17 — Refresh privacy-limited desktop and sharing metrics
 
 - Integrate current main into the existing sharing-analytics work, preserving

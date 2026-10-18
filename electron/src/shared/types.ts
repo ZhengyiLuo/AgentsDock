@@ -140,6 +140,15 @@ export interface ClaudeRuntimeSnapshot {
   goal?: ClaudeGoal | null
   /** Native command accepted; awaiting an authoritative goal status record. */
   goal_starting?: boolean
+  /** Next durable goal command waiting in the existing message queue. */
+  queued_goal?: {
+    queued_id: string
+    condition: string
+    position: number
+    paused: boolean
+    pause_reason: 'stopped' | 'delivery_uncertain' | null
+    queued_count: number
+  } | null
   /** The initial provider transcript goal projection is still loading. */
   goal_loading?: boolean
 }
