@@ -260,7 +260,8 @@ export function isSteeringCancellation(error: unknown): boolean {
 async function performSteerQueuedTurn(
   sessionId: string,
   queuedId: string,
-  signal: AbortSignal
+  signal: AbortSignal,
+  onNotice?: (message: string) => void
 ): Promise<QueuedTurn[]> {
   let result: QueuedRunNowResponse
   try {
@@ -273,6 +274,10 @@ async function performSteerQueuedTurn(
     throw friendlySteeringError(error)
   }
   const turns = await abortable(window.agentsDock.queue.list(sessionId), signal)
+  if ((result?.deferred === true || result?.ok === true && result.chat_access_applied === false)
+    && result.message?.trim()) {
+    onNotice?.(result.message.trim())
+  }
   return result?.deferred === true
     ? turns
     : turns.filter(turn => turn.queued_id !== queuedId || turn.promoted === true)
@@ -281,7 +286,8 @@ async function performSteerQueuedTurn(
 export function steerQueuedTurn(
   scope: SteeringScope,
   queuedId: string,
-  confirmImmediatelyBeforeRun?: () => boolean
+  confirmImmediatelyBeforeRun?: () => boolean,
+  onNotice?: (message: string) => void
 ): Promise<QueuedTurn[]> {
   const key = steeringKey(scope)
   const existing = pendingSteers.get(key)
@@ -300,7 +306,7 @@ export function steerQueuedTurn(
     () => controller.abort(new SteeringTimeoutError()),
     STEERING_REQUEST_TIMEOUT_MS
   )
-  const operation = performSteerQueuedTurn(scope.sessionId, queuedId, controller.signal)
+  const operation = performSteerQueuedTurn(scope.sessionId, queuedId, controller.signal, onNotice)
   const promise = operation.finally(() => window.clearTimeout(timeout))
   pendingSteers.set(key, { queuedId, controller, promise })
   notifySteeringPending()
@@ -317,7 +323,8 @@ export async function steerFirstQueuedTurn(
   scope: SteeringScope,
   admissionError?: (turn: QueuedTurn) => string | null,
   confirmImmediatelyBeforeRun?: () => boolean,
-  asyncControls = false
+  asyncControls = false,
+  onNotice?: (message: string) => void
 ): Promise<SteerFirstQueuedResult> {
   const pending = pendingSteers.get(steeringKey(scope))
   if (pending) return { steered: false, turns: await pending.promise }
@@ -334,7 +341,7 @@ export async function steerFirstQueuedTurn(
   const error = admissionError?.(first)
   if (error) throw new Error(error)
   try {
-    return { steered: true, turns: await steerQueuedTurn(scope, first.queued_id, confirmImmediatelyBeforeRun) }
+    return { steered: true, turns: await steerQueuedTurn(scope, first.queued_id, confirmImmediatelyBeforeRun, onNotice) }
   } catch (error) {
     if (isSteeringCancellation(error)) return { steered: false, turns }
     throw error
@@ -358,12 +365,16 @@ function abortable<T>(promise: Promise<T>, signal: AbortSignal): Promise<T> {
 }
 
 function friendlySteeringError(error: unknown): unknown {
-  const message = error instanceof Error ? error.message : String(error)
+  const raw = error instanceof Error ? error.message : String(error)
+  const message = raw
+    .replace(/^Error invoking remote method '[^']+':\s*/i, '')
+    .replace(/^Error:\s*/i, '')
+    .trim()
   if (
     message.toLowerCase().includes('steering handoff')
     || message.toLowerCase().includes('force send is already')
   ) {
     return new Error('Another “Send now” action is already in progress. Please wait for it to finish.')
   }
-  return error
+  return message === raw ? error : new Error(message)
 }

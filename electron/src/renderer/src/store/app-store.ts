@@ -2004,7 +2004,9 @@ export const useAppStore = create<AppState>((set, get) => ({
           if (!profileScopeMatches(scope, get())) return false
           if (!queuedId) throw new Error('The message was queued, but its queue ID could not be resolved for steering.')
           const request = get().beginQueuedTurnsRequest(sessionId)
-          const turns = await steerQueuedTurn(steeringScope, queuedId, options?.confirmSteer)
+          const turns = await steerQueuedTurn(steeringScope, queuedId, options?.confirmSteer, message => {
+            if (profileScopeMatches(scope, get()) && get().selectedSessionId === sessionId) set({ error: message })
+          })
           if (!profileScopeMatches(scope, get())) return false
           get().applyQueuedTurnsResponse(sessionId, request, turns)
           trackEvent('message_steered', { backend: session?.backend })

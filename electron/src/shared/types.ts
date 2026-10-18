@@ -980,6 +980,7 @@ export interface QueuedRunNowResponse {
   retryable?: boolean
   delivery_uncertain?: boolean
   native_steer?: boolean
+  chat_access_applied?: boolean
   replays_interrupted_message?: boolean
   message?: string | null
   remaining?: number | null

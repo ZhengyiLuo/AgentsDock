@@ -326,6 +326,17 @@ describe('steerQueuedTurn', () => {
     expect(isSteeringPending(chatOneScope)).toBe(false)
   })
 
+  it('reports unavailable chat access as a delivered-input notice and removes the row', async () => {
+    const notice = vi.fn()
+    runNow.mockResolvedValue({ ok: true, chat_access_applied: false, message: 'Message sent; selected chat access is unavailable.' })
+    list.mockResolvedValue([{ queued_id: 'queued-1', session_id: 'chat-1', prompt: 'Old snapshot', file_ids: [] }])
+
+    await expect(steerQueuedTurn(chatOneScope, 'queued-1', undefined, notice)).resolves.toEqual([])
+    expect(notice).toHaveBeenCalledExactlyOnceWith('Message sent; selected chat access is unavailable.')
+    expect(runNow).toHaveBeenCalledTimes(1)
+    expect(isSteeringPending(chatOneScope)).toBe(false)
+  })
+
   it('retains a server-marked promoted row while its provider handoff is starting', async () => {
     const promoted = {
       queued_id: 'queued-1', session_id: 'chat-1', prompt: 'Starting', file_ids: [], promoted: true
@@ -337,7 +348,8 @@ describe('steerQueuedTurn', () => {
     await expect(steerQueuedTurn(chatOneScope, promoted.queued_id)).resolves.toEqual([promoted, later])
   })
 
-  it('keeps the queued item and resolves without an error when Force Send is deferred', async () => {
+  it('keeps the queued item and reports the reason without retrying when Force Send is deferred', async () => {
+    const notice = vi.fn()
     const deferred = { queued_id: 'queued-1', session_id: 'chat-1', prompt: 'Wait for startup', file_ids: [] }
     const later = { queued_id: 'queued-2', session_id: 'chat-1', prompt: 'Later', file_ids: [] }
     runNow.mockResolvedValue({
@@ -350,7 +362,11 @@ describe('steerQueuedTurn', () => {
     })
     list.mockResolvedValue([deferred, later])
 
-    await expect(steerQueuedTurn(chatOneScope, deferred.queued_id)).resolves.toEqual([deferred, later])
+    await expect(steerQueuedTurn(chatOneScope, deferred.queued_id, undefined, notice)).resolves.toEqual([deferred, later])
+    expect(notice).toHaveBeenCalledExactlyOnceWith('The provider is still starting. This message remains queued.')
+    expect(runNow).toHaveBeenCalledTimes(1)
+    expect(list).toHaveBeenCalledTimes(1)
+    expect(isSteeringPending(chatOneScope)).toBe(false)
   })
 
   it('preserves a missing-row response instead of inferring provider completion', async () => {
@@ -366,6 +382,20 @@ describe('steerQueuedTurn', () => {
     runNow.mockRejectedValue(error)
     list.mockResolvedValue([{ queued_id: 'queued-1', session_id: 'chat-1', prompt: 'Run', file_ids: [] }])
     await expect(steerQueuedTurn(chatOneScope, 'queued-1')).rejects.toBe(error)
+  })
+
+  it.each(['', 'Error: '])('removes the Electron wrapper from a rejected goal steer with %s inner prefix', async prefix => {
+    const detail = 'This queued action adds chat access or invokes a provider command, which cannot be applied inside the running Codex turn. It remains queued.'
+    runNow.mockRejectedValue(new Error(`Error invoking remote method 'queue:run-now': ${prefix}${detail}`))
+
+    await expect(steerQueuedTurn(chatOneScope, 'queued-1')).rejects.toHaveProperty('message', detail)
+    expect(list).not.toHaveBeenCalled()
+    expect(isSteeringPending(chatOneScope)).toBe(false)
+
+    runNow.mockResolvedValue({ ok: true, queued_id: 'queued-1' })
+    list.mockResolvedValue([])
+    await expect(steerQueuedTurn(chatOneScope, 'queued-1')).resolves.toEqual([])
+    expect(runNow).toHaveBeenCalledTimes(2)
   })
 
   it('coalesces repeated steer requests while the first handoff is pending', async () => {
