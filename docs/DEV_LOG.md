@@ -1,5 +1,29 @@
 # Public development log
 
+## 2026-10-20 — Prevent duplicate replies after resumed Codex goals
+
+- Native goal replies now retain their provider thread identity. History sync
+  excludes goal lifecycle records and output from text-only matching, then
+  reconciles public replies by their exact native thread, turn and item.
+  Genuine repeated text from another item remains visible.
+- Existing imported copies can be recognized from an older goal's recorded
+  start and native output identities. Repair is a read-only presentation;
+  original replies and stored history remain unchanged, including after an
+  interrupted goal with multiple native turns.
+- Source is based on `df15d18b`; Electron UI code is unchanged. All 172 focused
+  server tests pass, covering import prevention, existing-history repair,
+  repeated reads, conflicting ownership, interruption and both history matching
+  stages. The added ownership regression fails against the original code.
+- An isolated offscreen native Electron app exercised production IPC and
+  authenticated HTTP against the actual server with synthetic provider history.
+  Duplicate replies changed from two copies to one; two intentional equal-text
+  replies stayed visible. History refresh, repeated chat navigation, full app
+  reopen and scrolling passed. Source and event-log hashes stayed unchanged.
+  Desktop type checking, production compilation and compiled-entry verification
+  also passed. No live provider generation was exercised.
+- Availability: source only. Requires a server update; no installed-app
+  replacement, live-service restart, deployment or public release was performed.
+
 ## 2026-10-20 — Verify history repair in the local desktop
 
 - Integrate the existing repair-budget fix without changing Electron UI code.
