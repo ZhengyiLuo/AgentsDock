@@ -1,5 +1,28 @@
 # Public development log
 
+## 2026-10-22 — Reduce execution-worker descriptor pressure
+
+- Close disconnected gateway sockets without cancelling accepted application
+  work. Retain buffered request bodies and WebSocket disconnect details, and
+  keep closing transports tracked for explicit worker shutdown.
+- Share overlapping runtime catalog refreshes and provider installation probes
+  instead of launching duplicate subprocess pipelines for each client. Preserve
+  explicit refresh, deadline and authentication-generation behavior; one
+  departing caller does not cancel work shared by the remaining callers.
+- Raise low inherited worker/gateway file-descriptor soft limits toward 8192
+  within the existing hard limit, including with older service definitions.
+  Preserve higher limits and continue startup if the OS refuses the increase.
+- Validation: 220 tests passed across transport/gateway integration, real child
+  process descriptor limits, startup/installation, concurrent runtime catalog
+  requests, sign-in handoffs and custom-provider readiness. One native systemd
+  parser case was skipped on macOS. The installer fixtures were run with their
+  expected umask 022; their failure under umask 077 also reproduces on main.
+  Python compilation and diff checks passed. Tests use isolated state and
+  synthetic providers; no live OAuth or production-load acceptance is claimed.
+- These changes address reproduced pressure mechanisms; they do not establish
+  which descriptors caused a previously restarted process to exhaust its limit.
+- Source change only; no user services, installations or credentials changed.
+
 ## 2026-10-21 — Recover held mobile messages after a stopped queue handoff
 
 - Handle bulk Stop events on mobile, clear obsolete promotion flags and retain
