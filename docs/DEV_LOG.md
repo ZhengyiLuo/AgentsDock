@@ -1,5 +1,24 @@
 # Public development log
 
+## 2026-10-21 — Keep old subagent updates from reviving chat errors
+
+- Select the composer's latest chat error from the parent turn lifecycle.
+  A later subagent status update retains its original run association but
+  cannot make an older failed parent turn current again after a newer reply.
+- Preserve genuine errors for the latest turn, including failures whose start
+  lies outside the loaded history page. Imported history and background
+  bookkeeping do not clear or resurrect a current failure. Historical error
+  messages remain in the timeline.
+- Verification: 48 focused component tests and 139 supporting runtime/history
+  tests pass, along with TypeScript and the production Electron build/entry check.
+  An isolated native Electron run reproduced the old warning on unchanged main
+  and verified the fix through authenticated server reads and websocket updates,
+  navigation, reconnection and full app reopening. A new failure remains visible
+  and the original error remains in history. These runs use synthetic historical
+  events through the production event writer; no live provider request was made.
+- No user installation, live service or goal state was changed.
+- Availability: app source only; this correction needs an updated app.
+
 ## 2026-10-20 — Recover Codex model-switch compaction without replacing history
 
 - Address the remaining compaction path in #89; authentication-aware model
