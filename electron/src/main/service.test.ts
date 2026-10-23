@@ -478,6 +478,51 @@ describe('session summary merging', () => {
       unacknowledged_emergency_count: 0
     })])
   })
+
+  it.each([0, 3])('clears a cached non-job cursor of %s after a server downgrade and accepts recovery', latestNonJob => {
+    const existing: Session = {
+      id: 'chat', title: 'Chat', backend: 'codex', latest_agent_event_seq: 8,
+      latest_non_job_agent_event_seq: latestNonJob, last_read_agent_event_seq: 4
+    }
+    const oldServer: Session = {
+      id: 'chat', title: 'Chat', backend: 'codex', latest_agent_event_seq: 8
+    }
+    const downgraded = mergeSessionSummaries([existing], [oldServer])
+    expect(downgraded[0].latest_non_job_agent_event_seq).toBeNull()
+
+    const advanced = mergeSessionSummaries(downgraded, [{ ...oldServer, latest_agent_event_seq: 9 }])
+    expect(advanced[0]).toMatchObject({ latest_agent_event_seq: 9, latest_non_job_agent_event_seq: null })
+
+    const recovered = mergeSessionSummaries(advanced, [{
+      ...oldServer, latest_agent_event_seq: 10, latest_non_job_agent_event_seq: 10
+    }])
+    expect(recovered[0]).toMatchObject({ latest_non_job_agent_event_seq: 10, last_read_agent_event_seq: 4 })
+    expect(existing.latest_non_job_agent_event_seq).toBe(latestNonJob)
+  })
+
+  it('retains the non-job cursor for partial metadata while honoring an explicit unknown cursor', () => {
+    const existing: Session = {
+      id: 'chat', title: 'Chat', backend: 'codex', latest_agent_event_seq: 8,
+      latest_non_job_agent_event_seq: 3
+    }
+    const partial: Session = { id: 'chat', title: 'Renamed', backend: 'codex' }
+    const renamed = mergeSessionSummaries([existing], [partial])
+    expect(renamed[0]).toMatchObject({ title: 'Renamed', latest_agent_event_seq: 8, latest_non_job_agent_event_seq: 3 })
+
+    expect(mergeSessionSummaries(renamed, [{
+      ...partial, latest_non_job_agent_event_seq: null
+    }])[0].latest_non_job_agent_event_seq).toBeNull()
+  })
+
+  it('normalizes an unknown non-job cursor in canonical polling even without an agent cursor', () => {
+    const summary: Session = { id: 'chat', title: 'Chat', backend: 'codex' }
+    const previous: Session[] = [{ ...summary, latest_non_job_agent_event_seq: 0 }]
+    expect(mergePolledSessionSummaries(previous, [summary])[0].latest_non_job_agent_event_seq).toBeNull()
+    expect(mergePolledSessionSummaries([], [summary])[0].latest_non_job_agent_event_seq).toBeNull()
+    expect(mergePolledSessionSummaries(previous, [{
+      ...summary, latest_non_job_agent_event_seq: 0
+    }])[0].latest_non_job_agent_event_seq).toBe(0)
+  })
 })
 
 describe('background refresh failures', () => {
@@ -986,6 +1031,24 @@ describe('inspector visibility preference', () => {
 
     cache.putPreference('profile:a', 'inspectorVisible', true)
     await expect(service.bootstrap()).resolves.toEqual(expect.objectContaining({ inspectorVisible: true }))
+  })
+})
+
+describe('sidebar grouping preferences', () => {
+  it('uses the requested defaults and restores independent choices for each server', async () => {
+    const { service, cache } = createProfileService({
+      'http://a.test:7850': [fakeClient(), fakeClient()],
+      'http://b.test:7850': [fakeClient()]
+    })
+    const defaults = { groupUnreadChats: true, includeCronInUnread: false, groupRunningChats: true }
+    const saved = { groupUnreadChats: false, includeCronInUnread: true, groupRunningChats: false }
+    expect(await service.bootstrap()).toMatchObject(defaults)
+    for (const [key, value] of Object.entries(saved)) cache.putPreference('profile:a', key, value)
+    expect(await service.bootstrap()).toMatchObject(saved)
+    await service.switchServer('b')
+    expect(await service.bootstrap()).toMatchObject(defaults)
+    await service.switchServer('a')
+    expect(await service.bootstrap()).toMatchObject(saved)
   })
 })
 
@@ -2918,7 +2981,7 @@ describe('emergency contact service fencing', () => {
     onSessions([active], true)
     onSessions([active], true)
 
-    expect(cache.session('server-b', 'remote-urgent')).toEqual(active)
+    expect(cache.session('server-b', 'remote-urgent')).toEqual({ ...active, latest_non_job_agent_event_seq: null })
     expect(cache.session('server-b', 'quiet')).toEqual({
       id: 'quiet', title: 'Quiet cached chat', backend: 'codex'
     })

@@ -1,5 +1,57 @@
 # Public development log
 
+## 2026-10-23 — Local desktop package with sidebar controls
+
+- Built macOS arm64 from `29951a90`, combining the sidebar settings with the
+  merged TIFF-preview and split-chat file-opening fixes. Development metadata
+  remains 0.2.0/build 85; this is a local package, not a published release.
+- The full desktop suite passed: 5,367 tests, five skipped. TypeScript,
+  production compilation, bundle audit, Developer ID signing, entitlements
+  and deep strict signature checks passed.
+- Packaged native offscreen checks loaded main, preload and renderer directly
+  from the signed archive. All 91 compiled assets match. The three sidebar
+  switches, cron grouping, running-chat placement and restart persistence
+  passed through real IPC and an isolated authenticated server. The archive
+  and signature remained unchanged. Provider output was synthetic; no provider
+  or scheduled job executed. Signed-executable/Gatekeeper launch was not tested.
+- Keep metadata-free server summaries sparse, fixing the existing summary-size
+  regression without changing its threshold. Known counters and pending-recovery
+  nulls remain explicit; 44 targeted server tests pass. The packaged smoke used
+  this corrected server source.
+- Availability: local app package only. The grouping switches work with older
+  servers; distinguishing cron output requires the matching server patch.
+  Nothing was installed, published or deployed.
+
+## 2026-10-22 — Configure Unread and Running sidebar sections
+
+- Add three General settings remembered locally per server: Unread chats at the
+  top (on by default), Include cron jobs in Unread (off), and Show Running
+  section (on). Hidden sections return chats to their saved folders or pins;
+  unread dots and activity indicators remain visible. Active chats stay out of
+  Unread even when Running is hidden. Keyboard navigation follows the same order.
+- Distinguish scheduled output from ordinary unread replies on the server. A
+  later cron result cannot hide an unread ordinary reply, and explicit Mark
+  unread still promotes the chat. Imported history does not count as a new
+  ordinary reply. Existing read cursors, folders and pins remain unchanged.
+- Recover existing provenance once in a background worker and persist a journal
+  checkpoint for subsequent restarts. Unknown provenance and older servers keep
+  the previous unread behavior; catalog, session-list and turn-admission paths
+  do not wait for recovery. Include the helper in server installation and
+  packaging inventories.
+- Verification: 474 focused desktop tests, 14 unread-provenance regressions,
+  related server projection/provider tests and runtime archive checks pass.
+  TypeScript, Python compilation, production Electron compilation and entry
+  verification pass. Native offscreen Electron exercised the controls through
+  production IPC and authenticated server transport, including active unread
+  placement, manual unread, mixed replies, keyboard navigation, narrow/light
+  layouts, profile switching and app/server restarts. Final server checks also
+  recovered legacy metadata without changing read cursors or event journals.
+  These used synthetic provider events in disposable state; no live provider
+  or scheduled job ran. A packaged release and other native platforms were not
+  exercised.
+- Availability: source changes for desktop and server; cron filtering requires
+  both. No release, installation or live-server deployment is included.
+
 ## 2026-10-22 — TIFF previews and split-chat file opening
 
 - Desktop attachment and workspace viewers render TIFF files through a PNG

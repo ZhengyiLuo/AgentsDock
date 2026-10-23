@@ -6496,6 +6496,9 @@ export class AppService {
       folderOrder: resetPending ? [] : cacheValue(() => this.cache.preference(scope.namespace, 'folderOrder', [] as string[]), []),
       collapsedFolders: resetPending ? [] : cacheValue(() => this.cache.preference(scope.namespace, 'collapsedFolders', [] as string[]), []),
       pinnedCollapsed: resetPending ? false : cacheValue(() => this.cache.preference(scope.namespace, 'pinnedCollapsed', false), false),
+      groupUnreadChats: resetPending || cacheValue(() => this.cache.preference<boolean>(scope.namespace, 'groupUnreadChats', true) !== false, true),
+      includeCronInUnread: !resetPending && cacheValue(() => this.cache.preference<boolean>(scope.namespace, 'includeCronInUnread', false) === true, false),
+      groupRunningChats: resetPending || cacheValue(() => this.cache.preference<boolean>(scope.namespace, 'groupRunningChats', true) !== false, true),
       archivedCollapsed: resetPending ? false : cacheValue(() => this.cache.preference(scope.namespace, 'archivedCollapsed', false), false),
       inspectorVisible: resetPending ? false : cacheValue(() => this.cache.preference(scope.namespace, 'inspectorVisible', false), false),
       activeProfileId: scope.profileId,
@@ -7823,6 +7826,12 @@ export function mergeSessionSummaries(previous: Session[], incoming: Session[]):
     const existing = previousById.get(summary.id)
     if (!existing) return summary
     const merged = preserveCustomProviderModels(existing, { ...existing, ...summary })
+    // Full summaries from older servers cannot retain a newer server's cursor.
+    // Partial metadata without an agent cursor leaves the known value intact.
+    if (Object.prototype.hasOwnProperty.call(summary, 'latest_agent_event_seq')
+      && summary.latest_non_job_agent_event_seq === undefined) {
+      merged.latest_non_job_agent_event_seq = null
+    }
     return jsonEqual(existing, merged) ? existing : merged
   })
 }
@@ -7846,6 +7855,7 @@ function preserveCustomProviderModels(previous: Session, incoming: Session): Ses
 export function mergePolledSessionSummaries(previous: Session[], incoming: Session[]): Session[] {
   return mergeSessionSummaries(previous, incoming.map(summary => ({
     ...summary,
+    latest_non_job_agent_event_seq: summary.latest_non_job_agent_event_seq ?? null,
     emergency_alert: summary.emergency_alert ?? null,
     unacknowledged_emergency_count: summary.unacknowledged_emergency_count
       ?? (summary.emergency_alert ? 1 : 0)

@@ -496,6 +496,8 @@ export interface Session {
   latest_agent_event_seq?: number | null
   latest_agent_event_at?: string | null
   latest_agent_event_type?: string | null
+  /** Latest visible output outside scheduled jobs; omitted by older servers. */
+  latest_non_job_agent_event_seq?: number | null
   last_read_agent_event_seq?: number | null
   last_read_agent_event_at?: string | null
   manual_unread?: boolean | null
@@ -2343,6 +2345,10 @@ export interface BootstrapPayload {
   folderOrder: string[]
   collapsedFolders: string[]
   pinnedCollapsed?: boolean
+  /** Local server-scoped sidebar display preferences. */
+  groupUnreadChats?: boolean
+  includeCronInUnread?: boolean
+  groupRunningChats?: boolean
   archivedCollapsed: boolean
   inspectorVisible: boolean
   /** Present for profile-aware bootstraps; omitted by the legacy single-server path. */
