@@ -458,7 +458,7 @@ export function Dialogs() {
 
 type AppSettingsSection = 'general' | 'shortcuts' | 'server' | 'providers' | 'updates'
 
-export function AppSettingsDialog({ serverSettings, serverUpdates, onServerUpdatesVisible, onServerReleaseChecksVisible, onCoordinatedServerUpdate }: {
+export function AppSettingsDialog({ serverSettings, onServerUpdatesVisible, onServerReleaseChecksVisible, onCoordinatedServerUpdate }: {
   serverSettings?: ReactNode; serverUpdates?: ReactNode; onServerUpdatesVisible?: (visible: boolean) => void
   onServerReleaseChecksVisible?: (visible: boolean) => void
   onCoordinatedServerUpdate?: (status: CoordinatedServerUpdate | null) => void
@@ -478,6 +478,8 @@ export function AppSettingsDialog({ serverSettings, serverUpdates, onServerUpdat
   const [update, setUpdate] = useState<AppUpdateStatus | null>(null)
   const [updateTrackBusy, setUpdateTrackBusy] = useState(false)
   const [updateCancelBusy, setUpdateCancelBusy] = useState(false)
+  const [updateRetryBusy, setUpdateRetryBusy] = useState(false)
+  const updateRetryInFlight = useRef(false)
   const activeSectionRef = useRef<HTMLButtonElement | null>(null)
 
   const closeSettings = () => {
@@ -505,14 +507,12 @@ export function AppSettingsDialog({ serverSettings, serverUpdates, onServerUpdat
     if (legacyServerSettingsOpen) setSection('server')
   }, [legacyServerSettingsOpen])
   const activeCoordinatedUpdate = update?.serverUpdates?.find(server => server.profileId === activeProfileId) || null
-  const manualServerUpdates = !update?.serverUpdates?.length || Boolean(activeProfileId && !activeCoordinatedUpdate)
   useEffect(() => {
-    // An app-only release has no paired server operation. Keep the selected
-    // server's manual update controls independent of that app release.
-    const visible = open && update !== null && manualServerUpdates
-    onServerUpdatesVisible?.(visible && (section === 'server' || section === 'updates'))
-    onServerReleaseChecksVisible?.(visible && section === 'updates')
-  }, [open, section, update !== null, manualServerUpdates, onServerUpdatesVisible, onServerReleaseChecksVisible])
+    // The product update is the only installation entry point. Retain the
+    // server status/restart machinery, but never expose its legacy updater.
+    onServerUpdatesVisible?.(false)
+    onServerReleaseChecksVisible?.(false)
+  }, [onServerUpdatesVisible, onServerReleaseChecksVisible])
   useEffect(() => {
     onCoordinatedServerUpdate?.(activeCoordinatedUpdate)
   }, [activeCoordinatedUpdate, onCoordinatedServerUpdate])
@@ -563,11 +563,31 @@ export function AppSettingsDialog({ serverSettings, serverUpdates, onServerUpdat
     catch (error) { useAppStore.getState().setError(message(error)) }
     finally { setUpdateCancelBusy(false) }
   }
+  const retryableServerUpdates = update?.serverUpdates?.filter(server => server.paused
+    || ['failed', 'blocked', 'offline'].includes(server.phase)) || []
+  const retryUpdate = async () => {
+    if (updateRetryInFlight.current) return
+    updateRetryInFlight.current = true
+    setUpdateRetryBusy(true)
+    trackEvent('server_update_retry_requested')
+    try {
+      // Retry each saved, signed product target; a failed server must not
+      // prevent the others from resuming their own update operation.
+      const errors: string[] = []
+      for (const server of retryableServerUpdates) {
+        try { setUpdate(await window.agentsDock.updates.retryServers(server.profileId)) }
+        catch (error) { errors.push(`${server.name}: ${message(error)}`) }
+      }
+      setUpdate(await window.agentsDock.updates.status())
+      if (errors.length) useAppStore.getState().setError(errors.join('\n'))
+    } catch (error) { useAppStore.getState().setError(message(error)) }
+    finally { updateRetryInFlight.current = false; setUpdateRetryBusy(false) }
+  }
   const updateBusy = Boolean(update && (
     update.state === 'checking'
     || (update.channel === 'direct' && ['available', 'downloading'].includes(update.state))
   ))
-  const updateTrackLocked = Boolean(update && (
+  const updateTrackLocked = updateRetryBusy || Boolean(update && (
     update.state === 'checking'
     || (update.channel === 'direct' && ['available', 'downloading', 'installing'].includes(update.state))
   ))
@@ -653,18 +673,18 @@ export function AppSettingsDialog({ serverSettings, serverUpdates, onServerUpdat
                     <button type="button" className={update.track === 'beta' ? 'active' : ''} aria-pressed={update.track === 'beta'} disabled={updateTrackBusy || updateTrackLocked || updateCancelBusy} onClick={() => void chooseUpdateTrack('beta')}>{t("ui.Dialogs.AppSettingsDialog.beta_7033903")}</button>
                   </div>}
                   {update?.channel === 'app-store' && <span className="app-settings-value">App Store</span>}
-                  {update?.channel === 'development' && <button type="button" className="quiet-button" disabled={!developmentUpdateCheckEnabled || updateBusy || updateTrackBusy} title={developmentUpdateCheckEnabled ? undefined : update.message || t("ui.Dialogs.AppSettingsDialog.app_update_checks_are_unavailable_for_this_86d2da7")} onClick={() => void checkForUpdates()}>{updateBusy || updateTrackBusy ? <LoaderCircle className="spin" size={13} /> : <RefreshCw size={13} />}{updateBusy || updateTrackBusy ? t("ui.Dialogs.AppSettingsDialog.checking_ec963ff") : t("ui.Dialogs.AppSettingsDialog.check_for_updates_f26f327")}</button>}
-                  {update?.channel === 'direct' && update.state !== 'downloaded' && update.state !== 'installing' && <button type="button" className="quiet-button" disabled={updateBusy || updateTrackBusy || updateCancelBusy} onClick={() => void checkForUpdates()}>{updateBusy || updateTrackBusy ? <LoaderCircle className="spin" size={13} /> : <RefreshCw size={13} />}{t("ui.Dialogs.AppSettingsDialog.check_for_updates_f26f327")}</button>}
-                  {update?.channel === 'direct' && update.state === 'downloaded' && <button type="button" className="primary-button" disabled={updateCancelBusy || updateTrackBusy} onClick={() => void installUpdate()}><Download size={13} />{t("ui.Dialogs.AppSettingsDialog.restart_to_update_451d3a7")}</button>}
+                  {update?.channel === 'development' && <button type="button" className="quiet-button" disabled={!developmentUpdateCheckEnabled || updateBusy || updateTrackBusy || updateRetryBusy} title={developmentUpdateCheckEnabled ? undefined : update.message || t("ui.Dialogs.AppSettingsDialog.app_update_checks_are_unavailable_for_this_86d2da7")} onClick={() => void checkForUpdates()}>{updateBusy || updateTrackBusy ? <LoaderCircle className="spin" size={13} /> : <RefreshCw size={13} />}{updateBusy || updateTrackBusy ? t("ui.Dialogs.AppSettingsDialog.checking_ec963ff") : t("ui.Dialogs.AppSettingsDialog.check_for_updates_f26f327")}</button>}
+                  {update?.channel === 'direct' && update.state !== 'downloaded' && update.state !== 'installing' && <button type="button" className="quiet-button" disabled={updateBusy || updateTrackBusy || updateCancelBusy || updateRetryBusy} onClick={() => void checkForUpdates()}>{updateBusy || updateTrackBusy ? <LoaderCircle className="spin" size={13} /> : <RefreshCw size={13} />}{t("ui.Dialogs.AppSettingsDialog.check_for_updates_f26f327")}</button>}
+                  {update?.channel === 'direct' && update.state === 'downloaded' && <button type="button" className="primary-button" disabled={updateCancelBusy || updateTrackBusy || updateRetryBusy} onClick={() => void installUpdate()}><Download size={13} />{t("ui.Dialogs.AppSettingsDialog.restart_to_update_451d3a7")}</button>}
+                  {update?.channel === 'direct' && update.state !== 'downloaded' && update.state !== 'installing' && retryableServerUpdates.length > 0 && <button type="button" className="primary-button" disabled={updateBusy || updateTrackBusy || updateCancelBusy || updateRetryBusy} onClick={() => void retryUpdate()}>{updateRetryBusy ? <LoaderCircle className="spin" size={13} /> : <RotateCcw size={13} />}{t('appUpdate.retryProduct')}</button>}
                   {update?.channel === 'direct' && update.state === 'installing' && <span className="app-settings-value"><LoaderCircle className="spin" size={13} />{t("ui.Dialogs.AppSettingsDialog.restarting_75d0f14")}</span>}
-                  {update?.channel === 'direct' && (update.state === 'downloaded' || update.cancelable) && <button type="button" className="quiet-button" disabled={updateCancelBusy} onClick={() => void cancelUpdate()}>{updateCancelBusy ? <LoaderCircle className="spin" size={13} /> : <X size={13} />}{updateCancelBusy ? t('appUpdate.cancelling') : update.state === 'downloaded' ? t('appUpdate.discard') : t('appUpdate.cancel')}</button>}
+                  {update?.channel === 'direct' && (update.state === 'downloaded' || update.cancelable) && <button type="button" className="quiet-button" disabled={updateCancelBusy || updateRetryBusy} onClick={() => void cancelUpdate()}>{updateCancelBusy ? <LoaderCircle className="spin" size={13} /> : <X size={13} />}{updateCancelBusy ? t('appUpdate.cancelling') : update.state === 'downloaded' ? t('appUpdate.discard') : t('appUpdate.cancel')}</button>}
                 </div>
               </div>
               {update?.state === 'downloading' && <div className="app-settings-update-progress" role="progressbar" aria-label={t("ui.Dialogs.AppSettingsDialog.update_download_1c20b42")} aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round(update.progress ?? 0)}><span style={{ width: `${update.progress ?? 0}%` }} /></div>}
-              {update?.serverUpdates?.map(server => <CoordinatedServerUpdateRow key={server.profileId} server={server} onUpdate={setUpdate} />)}
+              {update?.serverUpdates?.map(server => <CoordinatedServerUpdateRow key={server.profileId} server={server} />)}
               {update?.serverUpdateMessage && <p role="status">{update.serverUpdateMessage}</p>}
             </div>
-            {manualServerUpdates && serverUpdates}
             <div className="app-settings-server-inventory">
               {profiles.map(profile => {
                 const currentVersion = profile.id === activeProfileId

@@ -40,6 +40,10 @@ function fixture(ids = ['a']) {
     checkServerUpdate: vi.fn(async (): Promise<ServerUpdateStatus> => ({ phase: 'available', current_version: '1.1.0-beta.1', latest_version: '1.1.0-beta.3', track: 'beta' })),
     startServerUpdate: vi.fn(async (): Promise<ServerUpdateStatus> => ({ phase: 'pending', current_version: '1.1.0-beta.1',
       server_identity: `server-${id}`, server_instance_id: `boot-${id}`, schedule_id: 'bridge-schedule' })),
+    restartServer: vi.fn(async (request: { request_id: string; expected_update_schedule_id?: string }) => ({
+      phase: 'accepted' as const, request_id: request.request_id,
+      update_schedule_id: request.expected_update_schedule_id, message: 'Restart accepted.'
+    })),
     dispose: vi.fn()
   }]))
   let saved: CoordinatedUpdatePlan | null = null
@@ -74,11 +78,148 @@ describe('signed coordinated release contract', () => {
     expect(compareReleaseVersions('1.2.0', '1.2.0-beta.999')).toBe(1)
     expect(compareReleaseVersions('1.1.9', '1.2.0-beta.1')).toBe(-1)
     expect(() => compareReleaseVersions('development', '1.2.0')).toThrow()
+    expect(() => compareReleaseVersions('1.2.0-beta.2.local-test', '1.2.0-beta.2')).toThrow('not recognized')
   })
 
 })
 
 describe('coordinated app/server reconciliation (mocked server boundary)', () => {
+  it('prepares and verifies the server before allowing the app installer to run', async () => {
+    const f = fixture()
+    const scheduleId = 'a'.repeat(32)
+    f.clients.a.health.mockResolvedValue(health('a', { capabilities: {
+      server_updates: { available: true, version: 12 },
+      server_update_ensure_v1: { available: true, version: 1 },
+      server_update_continuation_v1: { available: true, version: 1 },
+      server_restart: { available: true, required: false, version: 2, message: 'Ready', action: null,
+        force_restart: true, force_confirmation_required: true }
+    } }))
+    f.clients.a.ensureServerUpdate.mockResolvedValue({ phase: 'pending', current_version: '1.1.0-beta.1',
+      target_version: '1.2.0-beta.2', server_identity: 'server-a', server_instance_id: 'boot-a',
+      schedule_id: scheduleId, preparation_phase: 'ready' })
+    f.clients.a.restartServer.mockImplementation(async request => {
+      f.clients.a.health.mockResolvedValue(health('a', { server_version: '1.2.0-beta.2',
+        capabilities: { server_updates: { available: true, version: 12 } } }))
+      return { phase: 'accepted', request_id: request.request_id,
+        update_schedule_id: request.expected_update_schedule_id, message: 'Restart accepted.' }
+    })
+    await f.manager.prepareForInstall(signed(), '1.2.0-beta.2')
+    expect(f.clients.a.restartServer).toHaveBeenCalledOnce()
+    expect(f.clients.a.restartServer.mock.calls[0][0]).toMatchObject({
+      force: true, force_confirmed: true, resume_interrupted_turns: true,
+      expected_update_schedule_id: scheduleId,
+      expected_server_identity: 'server-a'
+    })
+    expect(f.manager.status()[0].phase).toBe('current')
+  })
+
+  it('waits for staging to finish before requesting a forced restart', async () => {
+    const f = fixture()
+    const capabilities = { server_updates: { available: true, version: 12 },
+      server_update_ensure_v1: { available: true, version: 1 },
+      server_update_continuation_v1: { available: true, version: 1 },
+      server_restart: { available: true, required: false, version: 2, message: 'Ready', action: null,
+        force_restart: true, force_confirmation_required: true } }
+    f.clients.a.health.mockResolvedValue(health('a', { capabilities }))
+    let prepared = false
+    f.clients.a.ensureServerUpdate.mockImplementation(async () => ({ phase: 'pending',
+      current_version: '1.1.0-beta.1', target_version: '1.2.0-beta.2',
+      server_identity: 'server-a', server_instance_id: 'boot-a', schedule_id: 'a'.repeat(32),
+      preparation_phase: prepared ? 'ready' : 'staging' }))
+    f.clients.a.restartServer.mockImplementation(async request => {
+      f.clients.a.health.mockResolvedValue(health('a', { server_version: '1.2.0-beta.2', capabilities }))
+      return { phase: 'accepted', request_id: request.request_id,
+        update_schedule_id: request.expected_update_schedule_id, message: 'Restart accepted.' }
+    })
+    const installation = f.manager.prepareForInstall(signed(), '1.2.0-beta.2')
+    await vi.waitFor(() => expect(f.clients.a.ensureServerUpdate).toHaveBeenCalled())
+    expect(f.manager.status()[0].phase).toBe('pending')
+    expect(f.clients.a.restartServer).not.toHaveBeenCalled()
+    prepared = true
+    await f.manager.reconcileAll()
+    await installation
+    expect(f.clients.a.restartServer).toHaveBeenCalledOnce()
+    expect(f.manager.status()[0].phase).toBe('current')
+  })
+
+  it('keeps one-click installation alive through an ambiguous force response and restart gap', async () => {
+    const f = fixture()
+    const capabilities = { server_updates: { available: true, version: 12 },
+      server_update_ensure_v1: { available: true, version: 1 },
+      server_update_continuation_v1: { available: true, version: 1 },
+      server_restart: { available: true, required: false, version: 2, message: 'Ready', action: null,
+        force_restart: true, force_confirmation_required: true } }
+    f.clients.a.health.mockResolvedValue(health('a', { capabilities }))
+    f.clients.a.ensureServerUpdate.mockResolvedValue({ phase: 'pending', current_version: '1.1.0-beta.1',
+      target_version: '1.2.0-beta.2', server_identity: 'server-a', server_instance_id: 'boot-a',
+      schedule_id: 'a'.repeat(32), preparation_phase: 'ready' })
+    f.clients.a.restartServer.mockImplementationOnce(async () => {
+      f.clients.a.health.mockRejectedValueOnce(new Error('service restarting'))
+        .mockResolvedValue(health('a', { server_version: '1.2.0-beta.2', capabilities }))
+      throw new Error('connection lost')
+    })
+    await f.manager.prepareForInstall(signed(), '1.2.0-beta.2')
+    expect(f.clients.a.restartServer).toHaveBeenCalledOnce()
+    expect(f.manager.status()[0].phase).toBe('current')
+    expect(f.saved()?.records[0].forceRequestId).toBe(f.clients.a.restartServer.mock.calls[0][0].request_id)
+  }, 10_000)
+
+  it('does not mutate any server when another saved server fails preflight', async () => {
+    const f = fixture(['a', 'b'])
+    f.clients.b.health.mockRejectedValue(new TypeError('fetch failed'))
+    await expect(f.manager.prepareForInstall(signed(), '1.2.0-beta.2')).rejects.toThrow('server is offline or unreachable')
+    expect(f.clients.a.ensureServerUpdate).not.toHaveBeenCalled()
+    expect(f.clients.b.ensureServerUpdate).not.toHaveBeenCalled()
+  })
+
+  it('keeps a partially completed multi-server update for one-click retry', async () => {
+    const f = fixture(['a', 'b'])
+    const envelope = signed()
+    f.clients.a.ensureServerUpdate.mockImplementation(async () => {
+      f.clients.a.health.mockResolvedValue(health('a', { server_version: '1.2.0-beta.2' }))
+      return { phase: 'pending', current_version: '1.1.0-beta.1', target_version: '1.2.0-beta.2',
+        server_identity: 'server-a', server_instance_id: 'boot-a', schedule_id: 'a-schedule' }
+    })
+    f.clients.b.ensureServerUpdate.mockRejectedValueOnce(new ServerError(503, 'Cannot write update files'))
+      .mockImplementation(async () => {
+        f.clients.b.health.mockResolvedValue(health('b', { server_version: '1.2.0-beta.2' }))
+        return { phase: 'pending', current_version: '1.1.0-beta.1', target_version: '1.2.0-beta.2',
+          server_identity: 'server-b', server_instance_id: 'boot-b', schedule_id: 'b-schedule' }
+      })
+
+    await expect(f.manager.prepareForInstall(envelope, '1.2.0-beta.2')).rejects.toThrow('Server b: Cannot write update files')
+    expect(f.saved()?.records).toEqual(expect.arrayContaining([
+      expect.objectContaining({ profileId: 'a', targetVersion: '1.2.0-beta.2' }),
+      expect.objectContaining({ profileId: 'b', phase: 'blocked', message: 'Cannot write update files' })
+    ]))
+    await f.manager.prepareForInstall(envelope, '1.2.0-beta.2')
+    expect(f.manager.status().map(record => record.phase)).toEqual(['current', 'current'])
+    expect(f.clients.a.ensureServerUpdate).toHaveBeenCalledOnce()
+    expect(f.clients.b.ensureServerUpdate).toHaveBeenCalledTimes(2)
+  }, 10_000)
+
+  it('retries failed preparation from the main Update button without reusing its failed receipt', async () => {
+    const f = fixture()
+    const envelope = signed()
+    f.store.write({ envelope, records: [{ profileId: 'a', name: 'Server a', serverIdentity: 'server-a',
+      targetVersion: '1.2.0-beta.2', phase: 'failed', paused: true,
+      scheduleId: 'failed-schedule', operationTargetVersion: '1.2.0-beta.2',
+      message: 'Server update preparation failed.' }] })
+    f.clients.a.serverUpdateStatus.mockResolvedValue({ phase: 'failed', current_version: '1.1.0-beta.1',
+      target_version: '1.2.0-beta.2', server_identity: 'server-a', server_instance_id: 'boot-a',
+      schedule_id: 'failed-schedule' })
+    f.clients.a.ensureServerUpdate.mockImplementation(async () => {
+      f.clients.a.health.mockResolvedValue(health('a', { server_version: '1.2.0-beta.2' }))
+      return { phase: 'pending', current_version: '1.1.0-beta.1', target_version: '1.2.0-beta.2',
+        server_identity: 'server-a', server_instance_id: 'boot-a', schedule_id: 'retry-schedule' }
+    })
+
+    await f.manager.prepareForInstall(envelope, '1.2.0-beta.2')
+    expect(f.clients.a.serverUpdateStatus).not.toHaveBeenCalled()
+    expect(f.clients.a.ensureServerUpdate).toHaveBeenCalledOnce()
+    expect(f.manager.status()[0]).toMatchObject({ phase: 'current', paused: false })
+  }, 10_000)
+
   it('pauses an unrecoverable legacy 1.0.4 attempt and retries the paired bridge after host repair', async () => {
     const f = fixture()
     f.clients.a.health.mockResolvedValue(health('a', { server_version: '1.0.3',
@@ -261,6 +402,23 @@ describe('coordinated app/server reconciliation (mocked server boundary)', () =>
     expect(f.manager.status()[0].phase).toBe('current')
     expect(f.clients.a.ensureServerUpdate).not.toHaveBeenCalled()
     expect(f.clients.a.startServerUpdate).not.toHaveBeenCalled()
+  })
+  it('does not replace a compatible same-version server with the public release bytes', async () => {
+    const f = fixture()
+    f.clients.a.health.mockResolvedValue(health('a', { server_version: '1.2.0-beta.2' }))
+    await f.manager.prepareForInstall(signed(), '1.2.0-beta.2')
+    expect(f.manager.status()[0]).toMatchObject({ phase: 'current', message: 'Server is up to date.' })
+    expect(f.clients.a.ensureServerUpdate).not.toHaveBeenCalled()
+    expect(f.clients.a.startServerUpdate).not.toHaveBeenCalled()
+    expect(f.clients.a.restartServer).not.toHaveBeenCalled()
+  })
+  it('does not replace a local-suffix server during public update preflight', async () => {
+    const f = fixture()
+    f.clients.a.health.mockResolvedValue(health('a', { server_version: '1.2.0-beta.2.local-test' }))
+    await expect(f.manager.prepareForInstall(signed(), '1.2.0-beta.2')).rejects.toThrow('not recognized')
+    expect(f.clients.a.ensureServerUpdate).not.toHaveBeenCalled()
+    expect(f.clients.a.startServerUpdate).not.toHaveBeenCalled()
+    expect(f.clients.a.restartServer).not.toHaveBeenCalled()
   })
   it.each([7, 29])('reports a newer server outside the supported API range without replacing it (%s)', async api => {
     const f = fixture()

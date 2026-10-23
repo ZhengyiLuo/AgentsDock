@@ -1701,6 +1701,7 @@ export interface ServerRestartRequest {
   force_confirmed?: true
   expected_blocker_revision?: string
   expected_update_schedule_id?: string
+  resume_interrupted_turns?: true
 }
 
 export interface ServerRestartStatus {
@@ -2036,6 +2037,10 @@ export interface CoordinatedServerUpdate {
   scheduleId?: string
   operationTargetVersion?: string
   operationOwned?: boolean
+  /** Exact pending reservation already sent to the restart endpoint. */
+  forceRequestedScheduleId?: string
+  forceRequestId?: string
+  forceRetryAt?: number
   paused?: boolean
 }
 export interface AppUpdateStatus {

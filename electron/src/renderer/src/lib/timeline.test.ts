@@ -849,6 +849,21 @@ describe('projectTimeline', () => {
     expect(user?.kind === 'message' ? messageItemText(user) : null).toBe('This message must remain visible')
   })
 
+  it('shows the original user request and resumed answer without a fake user message', () => {
+    const rows = renderTimelineItems(projectTimeline([
+      event(1, 'turn_started', { run_id: 'original', prompt: 'Finish the work' }),
+      event(2, 'turn_stopped', { run_id: 'original', stopped: true }),
+      event(3, 'turn_started', { run_id: 'continued', purpose: 'server_update_continuation',
+        prompt: '', provider_generated: true, provider_user_authored: false }),
+      event(4, 'turn_finished', { run_id: 'continued', result_text: 'Finished after update.' })
+    ], []))
+    const userMessages = rows.filter(row => row.kind === 'message' && row.role === 'user')
+    expect(userMessages).toHaveLength(1)
+    expect(userMessages[0]?.kind === 'message' ? messageItemText(userMessages[0]) : null).toBe('Finish the work')
+    expect(rows.some(row => row.kind === 'message' && row.role === 'assistant'
+      && messageItemText(row).includes('Finished after update.'))).toBe(true)
+  })
+
   it('hides runtime-only Codex status and native-steer transition stops while preserving a real stop', () => {
     const items = projectTimeline([
       event(1, 'codex_thread_status', {

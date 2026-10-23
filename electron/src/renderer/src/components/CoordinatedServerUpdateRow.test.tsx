@@ -14,10 +14,14 @@ const failed: CoordinatedServerUpdate = {
 function show(update: CoordinatedServerUpdate, retryResult?: Promise<AppUpdateStatus>) {
   const status: AppUpdateStatus = { state: 'not-available', channel: 'direct', track: 'stable',
     currentVersion: '1.0.5', serverUpdates: [update] }
-  const retryServers = vi.fn().mockReturnValue(retryResult ?? Promise.resolve({ ...status,
-    serverUpdates: [{ ...update, phase: 'current', paused: false, message: 'Up to date' }] }))
+  let current = status
+  const retryServers = vi.fn(async () => {
+    current = await (retryResult ?? Promise.resolve({ ...status,
+      serverUpdates: [{ ...update, phase: 'current' as const, paused: false, message: 'Up to date' }] }))
+    return current
+  })
   Object.defineProperty(window, 'agentsDock', { configurable: true, value: {
-    updates: { status: vi.fn().mockResolvedValue(status), check: vi.fn().mockResolvedValue(status), retryServers },
+    updates: { status: vi.fn(() => Promise.resolve(current)), check: vi.fn().mockResolvedValue(status), retryServers },
     events: { on: vi.fn().mockReturnValue(() => undefined) }
   } })
   useAppStore.setState(state => ({ profiles: [], activeProfileId: 'another-server', health: null, error: null,
@@ -30,13 +34,14 @@ function show(update: CoordinatedServerUpdate, retryResult?: Promise<AppUpdateSt
 afterEach(() => { cleanup(); setLocale('en'); window.localStorage.clear(); Reflect.deleteProperty(window, 'agentsDock') })
 
 describe('paired server recovery in Settings', () => {
-  it.each(['failed', 'blocked', 'offline'] as const)('retries an unpaused %s row using its own remote profile', async phase => {
+  it.each(['failed', 'blocked', 'offline'] as const)('retries an unpaused %s row from the product update action', async phase => {
     const { retryServers } = show({ ...failed, phase, paused: false })
-    const retry = await screen.findByRole('button', { name: 'Retry server update' })
+    const retry = await screen.findByRole('button', { name: 'Retry AgentsDock update' })
     expect(screen.queryByText(/npx @agentsdock\/server/)).not.toBeInTheDocument()
     expect(screen.queryByText('Advanced server recovery')).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Retry server update' })).not.toBeInTheDocument()
     fireEvent.click(retry)
-    await waitFor(() => expect(screen.queryByRole('button', { name: 'Retry server update' })).not.toBeInTheDocument())
+    await waitFor(() => expect(retry).not.toBeInTheDocument())
     expect(retryServers).toHaveBeenCalledExactlyOnceWith('remote-server')
   })
 
@@ -44,14 +49,39 @@ describe('paired server recovery in Settings', () => {
     let reject!: (error: Error) => void
     const pending = new Promise<AppUpdateStatus>((_, fail) => { reject = fail })
     const { retryServers } = show(failed, pending)
-    const retry = await screen.findByRole('button', { name: 'Retry server update' })
+    const retry = await screen.findByRole('button', { name: 'Retry AgentsDock update' })
     fireEvent.click(retry)
     fireEvent.click(retry)
     expect(retryServers).toHaveBeenCalledTimes(1)
     expect(retry).toBeDisabled()
     await act(async () => reject(new Error('Connection lost')))
     expect(retry).toBeEnabled()
-    expect(useAppStore.getState().error).toBe('Connection lost')
+    expect(useAppStore.getState().error).toBe('Studio: Connection lost')
+  })
+
+  it('retries two incomplete servers from one action without submitting either twice', async () => {
+    const second = { ...failed, profileId: 'remote-two', name: 'Laptop', serverIdentity: 'identity-laptop' }
+    const status: AppUpdateStatus = { state: 'not-available', channel: 'direct', track: 'stable',
+      currentVersion: '1.0.5', serverUpdates: [failed, second] }
+    let current = status
+    const retryServers = vi.fn(async (profileId: string) => {
+      current = { ...current, serverUpdates: current.serverUpdates?.map(server => server.profileId === profileId
+        ? { ...server, phase: 'current', paused: false, message: 'Up to date' } : server) }
+      return current
+    })
+    Object.defineProperty(window, 'agentsDock', { configurable: true, value: {
+      updates: { status: vi.fn(() => Promise.resolve(current)), retryServers },
+      events: { on: vi.fn().mockReturnValue(() => undefined) }
+    } })
+    useAppStore.setState(state => ({ profiles: [], activeProfileId: null, health: null, error: null,
+      modals: { ...state.modals, appSettings: true, settings: false } }))
+    render(<AppSettingsDialog />)
+    fireEvent.click(screen.getByRole('button', { name: 'Updates' }))
+    const retry = await screen.findByRole('button', { name: 'Retry AgentsDock update' })
+    fireEvent.click(retry)
+    fireEvent.click(retry)
+    await waitFor(() => expect(screen.queryByRole('button', { name: 'Retry AgentsDock update' })).not.toBeInTheDocument())
+    expect(retryServers.mock.calls.map(call => call[0])).toEqual(['remote-server', 'remote-two'])
   })
 
   it.each([
@@ -70,7 +100,7 @@ describe('paired server recovery in Settings', () => {
     setLocale('zh-CN')
     show(failed)
     expect(await screen.findByText('Studio 上的上一次更新未完成，请重试以恢复。')).toBeVisible()
-    expect(screen.getByRole('button', { name: '重试服务器更新' })).toBeEnabled()
+    expect(screen.getByRole('button', { name: '重试 AgentsDock 更新' })).toBeEnabled()
     expect(screen.getByText('错误详情')).toBeVisible()
   })
 
@@ -109,7 +139,7 @@ describe('paired server recovery in Settings', () => {
   it.each(['checking', 'pending', 'updating', 'current'] as const)('does not offer competing recovery controls during %s', async phase => {
     show({ ...failed, phase, paused: false, message: 'Working normally' })
     await screen.findByText('Working normally')
-    expect(screen.queryByRole('button', { name: 'Retry server update' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Retry AgentsDock update' })).not.toBeInTheDocument()
     expect(screen.queryByText('Error details')).not.toBeInTheDocument()
   })
 })

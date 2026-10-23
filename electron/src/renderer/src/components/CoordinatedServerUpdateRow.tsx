@@ -1,9 +1,6 @@
-import { useRef, useState } from 'react'
-import { LoaderCircle, RefreshCw } from 'lucide-react'
-import type { AppUpdateStatus, CoordinatedServerUpdate } from '@shared/types'
+import { LoaderCircle } from 'lucide-react'
+import type { CoordinatedServerUpdate } from '@shared/types'
 import { t } from '../lib/i18n'
-import { useAppStore } from '../store/app-store'
-import { trackEvent } from '../lib/analytics'
 
 function updateDescription(server: CoordinatedServerUpdate): string {
   const raw = server.message.trim()
@@ -28,30 +25,10 @@ function updateDescription(server: CoordinatedServerUpdate): string {
     || t('coordinatedUpdate.missingStatus', { name: server.name })
 }
 
-export function CoordinatedServerUpdateRow({ server, onUpdate }: {
-  server: CoordinatedServerUpdate
-  onUpdate: (status: AppUpdateStatus) => void
-}) {
-  const [retrying, setRetrying] = useState(false)
-  const retryInFlight = useRef(false)
+export function CoordinatedServerUpdateRow({ server }: { server: CoordinatedServerUpdate }) {
   const needsRetry = server.paused || ['failed', 'blocked', 'offline'].includes(server.phase)
-  const busy = retrying || (!server.paused && ['checking', 'updating'].includes(server.phase))
+  const busy = !server.paused && ['checking', 'updating'].includes(server.phase)
   const description = updateDescription(server)
-
-  const retry = async () => {
-    if (retryInFlight.current) return
-    retryInFlight.current = true
-    trackEvent('server_update_retry_requested')
-    setRetrying(true)
-    try {
-      onUpdate(await window.agentsDock.updates.retryServers(server.profileId))
-    } catch (error) {
-      useAppStore.getState().setError(error instanceof Error ? error.message : String(error))
-    } finally {
-      retryInFlight.current = false
-      setRetrying(false)
-    }
-  }
 
   return <div className="app-settings-row coordinated-server-update-row">
     <div className="app-settings-row-copy">
@@ -64,9 +41,6 @@ export function CoordinatedServerUpdateRow({ server, onUpdate }: {
     </div>
     <div className="app-settings-actions">
       <span className="app-settings-value">{busy && <LoaderCircle className="spin" size={13} />}{t(`coordinatedUpdate.${server.phase}`)}</span>
-      {needsRetry && <button type="button" className="quiet-button" disabled={retrying} onClick={() => void retry()}>
-        {retrying ? <LoaderCircle className="spin" size={13} /> : <RefreshCw size={13} />}{t('coordinatedUpdate.retry')}
-      </button>}
     </div>
   </div>
 }

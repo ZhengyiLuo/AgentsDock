@@ -4,6 +4,7 @@ import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from '
 import { dirname, join } from 'node:path'
 import type { AppUpdateStatus, AppUpdateTrack } from '../shared/types'
 import { appLog } from './logger'
+import { verifyPairedRelease, type SignedServerRelease } from './coordinated-updates'
 import { newestCompatibleReleaseFromAtom, type CompatibleRelease } from './updater-feed.mjs'
 
 const STARTUP_CHECK_DELAY_MS = 15_000
@@ -28,6 +29,7 @@ const CANCELABLE_STATES = new Set<AppUpdateStatus['state']>([
 ])
 
 export interface AppUpdateLifecycle {
+  prepareInstall?: (release: SignedServerRelease, version: string) => Promise<void>
   beforeInstall?: () => void
   installFailed?: () => void
   retryServers?: (profileId: string) => Promise<void>
@@ -57,9 +59,15 @@ export class AppUpdateManager {
   private downloadCancellation: { cancel(): void } | null = null
   private cancelInstallWait: (() => void) | null = null
   private nativeInstallStarted = false
+  private preparingPairedInstall = false
+  // A background release check must not turn a failed paired install back into
+  // an ordinary "ready to install" message for the same downloaded version.
+  private installFailure: { version: string; message: string } | null = null
 
   setServerUpdates(serverUpdates: NonNullable<AppUpdateStatus['serverUpdates']>): void {
-    this.set({ serverUpdates, serverUpdateMessage: undefined })
+    const current = serverUpdates.filter(server => server.phase === 'current').length
+    this.set({ serverUpdates, serverUpdateMessage: undefined,
+      ...(this.preparingPairedInstall ? { message: `Updating servers before installing AgentsDock: ${current} of ${serverUpdates.length} ready…` } : {}) })
   }
 
   setServerUpdateError(message: string): void { this.set({ serverUpdateMessage: message }) }
@@ -78,7 +86,7 @@ export class AppUpdateManager {
   }
 
   status(): AppUpdateStatus {
-    return { ...this.value, cancelable: !this.nativeInstallStarted && CANCELABLE_STATES.has(this.value.state) }
+    return { ...this.value, cancelable: !this.nativeInstallStarted && !this.preparingPairedInstall && CANCELABLE_STATES.has(this.value.state) }
   }
 
   cancel(): AppUpdateStatus {
@@ -87,6 +95,7 @@ export class AppUpdateManager {
     this.ignoreUpdaterEvents = true
     this.suppressAutomaticChecks = true
     this.readyUpdateBeforeRefresh = null
+    this.installFailure = null
     this.manualCheck = false
     this.downloadCancellation?.cancel()
     this.downloadCancellation = null
@@ -258,6 +267,7 @@ export class AppUpdateManager {
     }
 
     this.trackStore.write(track)
+    this.installFailure = null
     if (this.value.state === 'downloaded') this.cancel()
     this.track = track
     if (this.value.channel === 'development') {
@@ -307,6 +317,13 @@ export class AppUpdateManager {
         : `Restarting into AgentsDock ${this.value.availableVersion ?? 'update'}…`
     })
     try {
+      if (this.lifecycle.prepareInstall) {
+        this.preparingPairedInstall = true
+        this.set({ message: `Verifying matching servers for AgentsDock ${pinnedVersion}…` })
+        const release = await fetchPairedServerRelease(pinnedVersion)
+        verifyPairedRelease(release, pinnedVersion)
+        await this.lifecycle.prepareInstall(release, pinnedVersion)
+      }
       if (process.platform === 'darwin') {
         const downloadedAt = Date.parse(this.value.downloadedAt ?? '')
         const elapsed = Number.isFinite(downloadedAt) ? Math.max(0, Date.now() - downloadedAt) : 0
@@ -328,18 +345,22 @@ export class AppUpdateManager {
         throw new Error('The downloaded app changed before restart. Try Update AgentsDock again.')
       }
       this.nativeInstallStarted = true
+      this.preparingPairedInstall = false
       this.set({})
       this.lifecycle.beforeInstall?.()
       autoUpdater.quitAndInstall(false, true)
       return true
     } catch (error) {
+      this.preparingPairedInstall = false
       this.nativeInstallStarted = false
       this.lifecycle.installFailed?.()
       const message = error instanceof Error ? error.message : String(error)
       appLog('updater', 'could not install downloaded update', { message })
+      const failureMessage = `AgentsDock update is incomplete: ${message} Retry Update AgentsDock after resolving this.`
+      this.installFailure = { version: pinnedVersion, message: failureMessage }
       this.set({
         state: 'downloaded',
-        message: `The update is still downloaded, but AgentsDock could not restart: ${message}`
+        message: failureMessage
       })
       return false
     }
@@ -361,6 +382,7 @@ export class AppUpdateManager {
     autoUpdater.on('update-available', (info: UpdateInfo) => {
       if (this.ignoreUpdaterEvents) return
       appLog('updater', 'update available', { version: info.version })
+      if (this.installFailure?.version !== info.version) this.installFailure = null
       // electron-updater may clear its pending cache while replacing a
       // download. Once replacement begins, the prior installer can no longer
       // be treated as a safe fallback if the new download fails.
@@ -386,6 +408,7 @@ export class AppUpdateManager {
       const previouslyDownloaded = this.readyUpdateBeforeRefresh?.availableVersion
       if (previouslyDownloaded === info.version && this.restoreReadyUpdate()) return
       this.readyUpdateBeforeRefresh = null
+      this.installFailure = null
       this.set({
         state: 'not-available',
         availableVersion: undefined,
@@ -402,11 +425,12 @@ export class AppUpdateManager {
       if (this.ignoreUpdaterEvents) return
       appLog('updater', 'update downloaded', { version: info.version })
       this.readyUpdateBeforeRefresh = null
+      if (this.installFailure?.version !== info.version) this.installFailure = null
       this.set({
         state: 'downloaded',
         availableVersion: info.version,
         progress: 100,
-        message: `AgentsDock ${info.version} is ready to install.`,
+        message: this.installFailure?.message ?? `AgentsDock ${info.version} is ready to install.`,
         checkedAt: now(),
         downloadedAt: now()
       })
@@ -437,12 +461,15 @@ export class AppUpdateManager {
     if (!ready) return false
     this.readyUpdateBeforeRefresh = null
     this.manualCheck = false
+    const failure = this.installFailure
     this.set({
       ...ready,
       serverUpdates: this.value.serverUpdates,
       serverUpdateMessage: this.value.serverUpdateMessage,
       state: 'downloaded',
-      message: message ?? `AgentsDock ${ready.availableVersion ?? 'update'} is ready to install.`,
+      message: message ?? (failure && failure.version === ready.availableVersion
+        ? failure.message
+        : `AgentsDock ${ready.availableVersion ?? 'update'} is ready to install.`),
       checkedAt: now()
     })
     return true
@@ -522,6 +549,17 @@ export class AppUpdateManager {
   }
 }
 
+async function fetchPairedServerRelease(version: string): Promise<SignedServerRelease> {
+  if (!APP_VERSION_PATTERN.test(version)) throw new Error('The downloaded app version is invalid.')
+  const base = `${RELEASES_URL}/download/v${version}`
+  const [manifest, signature] = await Promise.all([
+    fetchBoundedReleaseBytes(`${base}/agents-server-npm-manifest.json`, 'Matching server descriptor', 8 * 1024),
+    fetchBoundedReleaseBytes(`${base}/agents-server-npm-manifest.sig`, 'Matching server signature', 64)
+  ])
+  if (signature.byteLength !== 64) throw new Error('Matching server signature has an invalid length.')
+  return { manifest_base64: Buffer.from(manifest).toString('base64'), signature_base64: Buffer.from(signature).toString('base64') }
+}
+
 function initialStatus(): AppUpdateStatus {
   return {
     state: 'idle',
@@ -592,6 +630,12 @@ function now(): string {
 }
 
 async function fetchBoundedReleaseText(url: string, accept: string, label: string, maxBytes: number): Promise<string> {
+  const bytes = await fetchBoundedReleaseBytes(url, label, maxBytes, accept)
+  try { return new TextDecoder('utf-8', { fatal: true }).decode(bytes) }
+  catch { throw new Error(`${label} returned invalid UTF-8.`) }
+}
+
+async function fetchBoundedReleaseBytes(url: string, label: string, maxBytes: number, accept = 'application/octet-stream'): Promise<Uint8Array> {
   const controller = new AbortController()
   const timeout = setTimeout(() => controller.abort(), RELEASE_CHECK_TIMEOUT_MS)
   try {
@@ -601,7 +645,7 @@ async function fetchBoundedReleaseText(url: string, accept: string, label: strin
       signal: controller.signal
     })
     if (!response.ok) throw new Error(`${label} returned HTTP ${response.status}.`)
-    return await readBoundedUTF8(response, maxBytes, controller.signal, label)
+    return await readBoundedBytes(response, maxBytes, controller.signal, label)
   } catch (error) {
     if (controller.signal.aborted) throw new Error(`${label} timed out.`)
     throw error
@@ -610,7 +654,7 @@ async function fetchBoundedReleaseText(url: string, accept: string, label: strin
   }
 }
 
-async function readBoundedUTF8(response: Response, maxBytes: number, signal: AbortSignal, label = 'GitHub beta feed'): Promise<string> {
+async function readBoundedBytes(response: Response, maxBytes: number, signal: AbortSignal, label: string): Promise<Uint8Array> {
   const advertisedLength = response.headers.get('Content-Length')
   if (advertisedLength !== null) {
     const normalized = advertisedLength.trim()
@@ -660,9 +704,5 @@ async function readBoundedUTF8(response: Response, maxBytes: number, signal: Abo
     bytes.set(chunk, offset)
     offset += chunk.byteLength
   }
-  try {
-    return new TextDecoder('utf-8', { fatal: true }).decode(bytes)
-  } catch {
-    throw new Error(`${label} returned invalid UTF-8.`)
-  }
+  return bytes
 }

@@ -706,7 +706,8 @@ export class TimelineProjector {
       const prior = event.run_id ? this.turnByRun.get(event.run_id) : this.activeTurn
       const followsSilentInput = event.run_id ? this.silentInputRuns.delete(event.run_id) : false
       this.activeTurn = this.writableTurn(this.ensureTurn(event, Boolean(prior?.user) || followsSilentInput))
-      if (!isDigestDeliveryTurn(event) && !isNativeMailboxWakeInput(event)) this.activeTurn.user = event
+      if (!isDigestDeliveryTurn(event) && !isNativeMailboxWakeInput(event)
+        && !isServerUpdateContinuationInput(event)) this.activeTurn.user = event
       this.activeTurn.seq = Math.min(this.activeTurn.seq, event.seq)
       this.activeTurn.startedAt = event.ts
       this.activeTurn.purpose = event.purpose
@@ -1557,6 +1558,13 @@ function isNativeMailboxWakeInput(event: Event): boolean {
     && typeof event.mailbox_wake_id === 'string' && /^mailwake_[a-f0-9]{32}$/.test(event.mailbox_wake_id)
     && Number.isSafeInteger(event.mailbox_wake_through_seq) && (event.mailbox_wake_through_seq ?? 0) > 0
     && typeof event.provider_input_sha256 === 'string' && /^[a-f0-9]{64}$/.test(event.provider_input_sha256)
+}
+
+function isServerUpdateContinuationInput(event: Event): boolean {
+  return event.type === 'turn_started' && event.imported !== true
+    && event.purpose === 'server_update_continuation' && event.prompt === ''
+    && event.provider_generated === true && event.provider_user_authored !== true
+    && typeof event.run_id === 'string' && Boolean(event.run_id.trim())
 }
 
 function digestBody(event: Event): string {

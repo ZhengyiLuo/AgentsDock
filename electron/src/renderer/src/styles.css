@@ -2497,6 +2497,10 @@ button.tool-event-toggle:hover { background: #242424; }
 .update-toast strong, .update-toast span { overflow-wrap: anywhere; }
 .update-toast span { color: #aebed0; font-size: var(--text-size-label); }
 .update-toast .primary-button, .update-toast .icon-button { flex: none; -webkit-app-region: no-drag; }
+.coordinated-update-gate { position: fixed; inset: 0; z-index: 10000; display: grid; place-items: center; padding: 24px; background: #111b25e8; -webkit-app-region: no-drag; }
+.coordinated-update-gate-card { max-width: 460px; display: grid; gap: 12px; padding: 24px; color: #e8f3ff; background: #202b37; border: 1px solid #38526d; border-radius: 12px; box-shadow: 0 18px 50px #0009; }
+.coordinated-update-gate-card span { overflow-wrap: anywhere; }
+.coordinated-update-gate-card small { color: #aebed0; line-height: 1.5; }
 .emergency-toast { width: 100%; display: flex; align-items: flex-start; gap: 10px; padding: 11px 12px; color: #ffe1df; background: #44201f; border: 1px solid #9a4541; border-radius: 8px; box-shadow: 0 12px 30px #0009; pointer-events: auto; -webkit-app-region: no-drag; }
 .emergency-toast > svg { flex: none; margin-top: 2px; color: #ff7772; }
 .emergency-toast > div { min-width: 0; flex: 1; display: grid; gap: 3px; }

@@ -253,7 +253,7 @@ describe('AppSettingsDialog', () => {
     render(<AppSettingsDialog serverUpdates={<div>Server update controls</div>} />)
     await screen.findByText('Version 0.2.0')
     fireEvent.click(screen.getByRole('button', { name: 'Updates' }))
-    expect(screen.getByText('Server update controls')).toBeInTheDocument()
+    expect(screen.queryByText('Server update controls')).not.toBeInTheDocument()
     expect(screen.getByText('Saved server')).toBeInTheDocument()
     expect(screen.getByText('AgentsServer 0.1.26')).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: /Set up your server|Install or update AgentsServer/ })).not.toBeInTheDocument()

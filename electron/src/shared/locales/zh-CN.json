@@ -1759,6 +1759,7 @@
   "appUpdate.cancel": "取消更新",
   "appUpdate.discard": "丢弃更新",
   "appUpdate.cancelling": "正在取消…",
+  "appUpdate.retryProduct": "重试 AgentsDock 更新",
   "ui.Dialogs.AppSettingsDialog.restarting_75d0f14": "正在重启…",
   "ui.Dialogs.AppSettingsDialog.stable_90ee305": "稳定版",
   "ui.Dialogs.AppSettingsDialog.this_is_the_latest_one_0791214": "已是最新版本。",

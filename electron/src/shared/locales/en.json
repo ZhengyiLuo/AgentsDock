@@ -1759,6 +1759,7 @@
   "appUpdate.cancel": "Cancel update",
   "appUpdate.discard": "Discard update",
   "appUpdate.cancelling": "Cancelling…",
+  "appUpdate.retryProduct": "Retry AgentsDock update",
   "ui.Dialogs.AppSettingsDialog.restarting_75d0f14": "Restarting…",
   "ui.Dialogs.AppSettingsDialog.stable_90ee305": "Stable",
   "ui.Dialogs.AppSettingsDialog.this_is_the_latest_one_0791214": "This is the latest one.",

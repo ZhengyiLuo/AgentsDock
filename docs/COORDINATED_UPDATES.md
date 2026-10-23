@@ -1,5 +1,55 @@
 # Coordinated app and server updates
 
+## Unreleased server-first update work
+
+The next coordinated updater prepares the exact signed server descriptor for
+the downloaded app release before invoking the native app installer. It checks
+all saved server identities, then asks each server to install that version and
+waits for verified gateway, execution and API health. The desktop remains on
+its prior installed version if a server is offline, blocked or fails. During
+this operation the desktop displays a blocking progress view; the native app
+installer runs only after all saved servers have reached the target. A server
+already newer and compatible is never downgraded.
+
+Settings exposes one product update action and one Stable/Beta choice. The
+separate manual AgentsServer update controls are no longer shown. Each saved
+server still reports its version and paired-update progress; if a paired
+update fails after the app is current, the main action becomes **Retry
+AgentsDock update** and retries the incomplete server targets. Server restart
+remains a separate maintenance control on the Server page.
+If a saved server is unreachable before installation, the old app remains
+installed and the same Update action stays available. The incomplete-update
+message identifies the unreachable server and remains visible when a background
+release check rediscovers the same app package.
+
+Servers advertising `server_update_continuation_v1` can activate a prepared
+idle-scheduled update immediately. The request is bound to the exact schedule
+and server boot. It durably queues an internal continuation for each ordinary
+Codex, Claude or Cursor chat turn still active at forced restart. After the
+new server starts, that continuation asks the provider to inspect the prior
+work and finish the task. This resumes the conversation, **not the exact
+in-flight provider instruction**. File writes, commands and outside effects
+may already have happened and may be repeated. Non-chat work, goals, a turn
+still starting, and backends without this continuation contract are not
+force-stopped by the one-click path; they must reach a safe boundary first.
+
+Cross-machine app/server replacement is not atomic. An interrupted install
+can leave a newer server with the older app; the UI must report an incomplete
+update and offer the same target for retry. Release acceptance must test the
+real packaged app and signed update feed with busy chats, old servers, offline
+profiles, multiple clients and failure recovery before this behavior ships.
+In particular, a busy Codex, Claude and Cursor chat must each show one
+interrupted turn and one resumed provider reply after a real managed-service
+replacement. Reimporting native history must never display the internal
+continuation as a user-authored message. A goal, non-chat provider task, or
+persistent terminal must defer the force path without losing work. Verify
+failure after one of several servers has already updated, and failure of the
+native app installer after all servers have updated; neither case may be
+reported as a completed product update.
+
+The sections below describe the earlier app-first bridge and historical
+acceptance; they do not establish acceptance for this new server-first flow.
+
 **1.0.4 and 1.0.5 are withdrawn.** Public stable app and server feeds currently
 offer 1.0.3. Their earlier acceptance below covered particular fixtures and
 missed retained rollback records and channel transitions; it does not establish

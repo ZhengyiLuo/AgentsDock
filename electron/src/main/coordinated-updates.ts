@@ -1,4 +1,4 @@
-import { verify } from 'node:crypto'
+import { randomUUID, verify } from 'node:crypto'
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
 import { dirname } from 'node:path'
 import type { CoordinatedServerUpdate, Health, ServerUpdateStatus, ServerUpdateTrack } from '../shared/types'
@@ -47,7 +47,7 @@ export interface CoordinatedProfile {
   active?: boolean
 }
 export interface CoordinatedConnection {
-  client: Pick<AgentServerClient, 'health' | 'ensureServerUpdate' | 'serverUpdateStatus' | 'startServerUpdate' | 'dispose'>
+  client: Pick<AgentServerClient, 'health' | 'ensureServerUpdate' | 'serverUpdateStatus' | 'startServerUpdate' | 'restartServer' | 'dispose'>
   assertCurrent(): void
   loopback: boolean
 }
@@ -76,10 +76,16 @@ export class CoordinatedUpdateManager {
   private readonly observations = new Map<string, string>()
   private readonly pendingObservations = new Set<string>()
   private generation = 0
+  private preparingInstall = false
 
   constructor(private readonly options: CoordinatedUpdateOptions) {}
 
   status(): CoordinatedServerUpdate[] { return structuredClone(this.plan?.records ?? []) }
+
+  private profilesForUpdate(): CoordinatedProfile[] {
+    const profiles = this.options.profiles()
+    return this.preparingInstall ? profiles.filter(profile => Boolean(profile.serverIdentity)) : profiles
+  }
 
   async resume(bundled?: SignedServerRelease, installedVersion?: string): Promise<void> {
     if (!bundled) {
@@ -101,8 +107,94 @@ export class CoordinatedUpdateManager {
     await this.reconcileAll()
   }
 
+  /** Keep the old app installed until every reachable profile has the signed target. */
+  async prepareForInstall(envelope: SignedServerRelease, version: string): Promise<void> {
+    const manifest = this.verify(envelope, version)
+    if (this.preparingInstall) throw new Error('A coordinated update is already preparing.')
+    this.preparingInstall = true
+    let completed = false
+    let adopted = false
+    try {
+      // Refuse known offline/changed profiles before updating any other server.
+      await Promise.all(this.profilesForUpdate().map(async profile => {
+        const connection = await this.options.connect(profile)
+        let timeout: NodeJS.Timeout | undefined
+        try {
+          const health = await Promise.race([
+            connection.client.health(),
+            new Promise<never>((_resolve, reject) => { timeout = setTimeout(() => {
+              connection.client.dispose()
+              reject(new Error(`${profile.name}: server is offline; reconnect before updating the app.`))
+            }, 8_000) })
+          ]).catch(error => {
+            if (error instanceof ServerError) throw error
+            throw new Error(`${profile.name}: server is offline or unreachable; reconnect before updating AgentsDock.`, { cause: error })
+          })
+          connection.assertCurrent()
+          if (!health.ok || !profile.serverIdentity || health.server_identity !== profile.serverIdentity) {
+            throw new Error(`${profile.name}: reconnect and verify this server before updating the app.`)
+          }
+          if (compareReleaseVersions(health.server_version ?? '', manifest.version) < 0
+            && !capabilityAvailable(health.capabilities?.server_update_ensure_v1)
+            && !capabilityAvailable(health.capabilities?.server_updates)) {
+            throw new Error(`${profile.name}: managed updates are unavailable.`)
+          }
+        } finally { clearTimeout(timeout); connection.client.dispose() }
+      }))
+      const saved = this.options.store.read()
+      this.adopt(envelope, manifest, saved?.records ?? [])
+      adopted = true
+      // A second explicit click retries the same signed target after a prior
+      // pre-install failure; background health observations must not do so.
+      for (const record of this.plan!.records) {
+        if (record.paused || record.phase === 'blocked' || record.phase === 'failed') {
+          // The old operation has already stopped. Keeping its receipt here
+          // makes reconciliation observe the same failure forever instead of
+          // asking the server to retry the exact signed release.
+          Object.assign(record, { operationId: undefined, scheduleId: undefined,
+            operationTargetVersion: undefined, operationOwned: false,
+            forceRequestedScheduleId: undefined, forceRequestId: undefined })
+        }
+        record.paused = false
+        record.forceRetryAt = undefined
+        if (record.phase === 'blocked' || record.phase === 'failed') record.phase = 'checking'
+      }
+      this.save()
+      const deadline = Date.now() + 15 * 60_000
+      while (Date.now() < deadline) {
+        await this.reconcileAll()
+        const records = this.status()
+        if (records.every(record => record.phase === 'current')) {
+          completed = true
+          return
+        }
+        // A managed service must disconnect briefly while replacing its
+        // runtime. A lost force-restart response is also ambiguous: the
+        // server may already be activating the exact saved reservation.
+        // Keep observing that signed target instead of ending the user's
+        // single update action on the expected connection gap.
+        const failed = records.find(record => record.phase === 'failed' || record.phase === 'blocked'
+          || record.paused)
+        if (failed) throw new Error(`${failed.name}: ${failed.message}`)
+        await new Promise(resolve => setTimeout(resolve, 2_000))
+      }
+      throw new Error('Server update is still running. The app was not replaced; retry after checking Server Settings.')
+    } finally {
+      if (adopted && !completed && this.plan) {
+        for (const record of this.plan.records) {
+          if (record.phase !== 'current' && !record.operationId && !record.scheduleId) {
+            record.paused = true
+          }
+        }
+        this.save()
+      }
+      this.preparingInstall = false
+    }
+  }
+
   serverReachable(profileId: string, health: Health): void {
     if (!this.plan) return
+    if (this.preparingInstall && !this.plan.records.some(record => record.profileId === profileId)) return
     const observation = JSON.stringify([health.server_identity, health.server_instance_id, health.server_version,
       health.api_contract_version, health.gateway, health.execution_service, health.server_update, health.chat_readiness])
     const record = this.plan.records.find(candidate => candidate.profileId === profileId
@@ -143,12 +235,13 @@ export class CoordinatedUpdateManager {
     this.generation += 1
     this.manifest = manifest
     this.observations.clear()
-    this.plan = { envelope, records: this.options.profiles().map(profile => {
+    this.plan = { envelope, records: this.profilesForUpdate().map(profile => {
       const old = previous.find(record => record.profileId === profile.id && record.serverIdentity === profile.serverIdentity)
       const sameTarget = old?.targetVersion === manifest.version
       const paused = sameTarget && old.paused === true
       return { ...old, profileId: profile.id, name: profile.name, serverIdentity: profile.serverIdentity,
         ...(!sameTarget ? { operationId: undefined, scheduleId: undefined,
+          forceRequestedScheduleId: undefined, forceRequestId: undefined, forceRetryAt: undefined,
           operationTargetVersion: undefined, operationOwned: false } : {}),
         targetVersion: manifest.version, paused, phase: paused ? old!.phase : 'checking',
         message: paused ? old!.message : 'Checking the paired server update…' }
@@ -158,7 +251,7 @@ export class CoordinatedUpdateManager {
 
   async reconcileAll(): Promise<void> {
     if (!this.plan) return
-    await Promise.all(this.options.profiles().map(profile => this.reconcile(profile.id)))
+    await Promise.all(this.profilesForUpdate().map(profile => this.reconcile(profile.id)))
   }
 
   private reconcile(profileId: string): Promise<void> {
@@ -320,6 +413,47 @@ export class CoordinatedUpdateManager {
         patch({ phase: 'blocked', message: 'Update response belongs to another server instance. Reconnect to reconcile it.' })
         return
       }
+      if (this.preparingInstall && status.phase === 'pending' && status.preparation_phase === 'ready'
+        && status.schedule_id && target
+        && Date.now() >= (previousReceipt?.forceRetryAt ?? 0)
+        && this.options.profiles().find(candidate => candidate.serverIdentity === profile.serverIdentity)?.id === profile.id
+        && legacyUpdateCapabilityVersion(health) >= 12
+        && capabilityAvailable(health.capabilities?.server_update_continuation_v1)
+        && health.capabilities?.server_restart?.available === true) {
+        const sameRequest = previousReceipt?.forceRequestedScheduleId === status.schedule_id
+        const requestId = sameRequest && previousReceipt.forceRequestId || randomUUID()
+        // Persist before the POST: an ambiguous lost response must never send
+        // a different destructive restart against the same reservation.
+        patch({ forceRequestedScheduleId: status.schedule_id, forceRequestId: requestId,
+          forceRetryAt: Date.now() + 30_000,
+          message: 'Saving active chats and restarting the server for this update…' })
+        try {
+          const accepted = await connection.client.restartServer({
+            request_id: requestId,
+            ...target,
+            confirmed: true,
+            force: true,
+            force_confirmed: true,
+            expected_update_schedule_id: status.schedule_id,
+            resume_interrupted_turns: true
+          })
+          connection.assertCurrent()
+          if (accepted.request_id !== requestId || accepted.update_schedule_id !== status.schedule_id) {
+            throw new Error('Server did not confirm the exact update reservation; check its status before retrying.')
+          }
+        } catch (error) {
+          if (error instanceof ServerError && error.status === 409) {
+            patch({ phase: 'pending', forceRequestedScheduleId: undefined, forceRequestId: undefined,
+              forceRetryAt: Date.now() + 30_000,
+              scheduleId: status.schedule_id, operationId: status.update_id ?? undefined,
+              operationTargetVersion: manifest.version,
+              message: 'Waiting for work that cannot be resumed automatically to finish…' })
+            return
+          } else {
+            throw error
+          }
+        }
+      }
       const recoveryFailed = ['server_update_recovery_failed', 'server_update_recovery_launch_failed'].includes(status.error_code ?? '')
       patch({ phase: recoveryFailed ? 'failed' : status.phase === 'pending' ? 'pending' : status.phase === 'failed' ? 'failed'
         : ACTIVE_PHASES.has(status.phase) ? 'updating' : 'pending',
@@ -371,6 +505,11 @@ function updateTarget(health: Health): ServerUpdateTarget | undefined {
     expected_server_identity: health.server_identity,
     expected_server_instance_id: health.server_instance_id
   } : undefined
+}
+
+function capabilityAvailable(value: unknown): boolean {
+  return value !== null && typeof value === 'object' && !Array.isArray(value)
+    && 'available' in value && value.available === true
 }
 
 function legacyUpdateCapabilityVersion(health: Health): number {

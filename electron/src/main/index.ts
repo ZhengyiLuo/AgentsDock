@@ -82,6 +82,10 @@ if (!app.requestSingleInstanceLock()) {
       if (!window.isDestroyed()) window.webContents.send('app:update', status)
     }
   }, {
+    prepareInstall: async (release, version) => {
+      if (!coordinatedUpdates) throw new Error('Server update coordination is not ready.')
+      await coordinatedUpdates.prepareForInstall(release, version)
+    },
     retryServers: async profileId => { await coordinatedUpdates?.retry(profileId) }
   })
 
