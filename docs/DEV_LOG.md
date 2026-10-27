@@ -1,5 +1,26 @@
 # Public development log
 
+## 2026-10-26 - Claude scheduled-message import recovery
+
+- Keep source-proven scheduled inputs out of ordinary user bubbles on first
+  import. Preserve the scheduled-job card, result, genuine messages, and
+  separate occurrences of recurring jobs.
+- Recover native Claude transcripts containing NUL-only padding records without
+  changing source bytes, checkpoint hashes, or cursor offsets. Malformed JSON
+  and ambiguous ownership retain the existing behavior; server journals remain
+  strict.
+- Reader, history-repair, and provider-history synchronization regressions pass.
+  Native offscreen desktop acceptance against an isolated production server
+  reproduced the duplicate, then verified its removal with real Claude output.
+  One ordinary turn and two scheduled turns completed successfully; repeated
+  app reopen checks preserved both job results and the genuine user message.
+- An initial harness assertion incorrectly expected different job revisions to
+  share a card. The corrected assertion passed against the retained fixture.
+  A redundant fresh-provider rerun encountered expired authentication; later
+  history-reopen checks completed without additional provider calls.
+- Availability: source fix only. Desktop package unchanged; no release,
+  installation, live history rewrite, or server deployment performed.
+
 ## 2026-10-25 - Mobile provider pre-merge validation
 
 - Integrated main `3ac069e`; only the development log required conflict
