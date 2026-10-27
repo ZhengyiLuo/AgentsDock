@@ -57,7 +57,7 @@
   <strong>Mobile:</strong>
   <a href="https://apps.apple.com/us/app/agentsdock/id6769275751">iPhone &amp; iPad</a>
   ·
-  <a href="https://github.com/ZhengyiLuo/AgentsDock-Releases/releases/download/android-v0.1.1-beta.8/AgentsDock-0.1.1-android-arm64-beta.8.apk">Android</a>
+  <a href="https://github.com/ZhengyiLuo/AgentsDock-Releases/releases/download/android-v0.1.1-beta.9/AgentsDock-0.1.1-android-arm64-beta.9.apk">Android</a>
   <br />
   <br />
   <a href="https://agentsdock.net">Website</a>

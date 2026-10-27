@@ -51,7 +51,7 @@ test('GitHub discovery is bounded, prerelease-only, digest-checked, and infreque
 })
 
 test('updater has automatic and manual accessible surfaces without affecting iOS', () => {
-  assert.equal(config.android.versionCode, 10)
+  assert.equal(config.android.versionCode, 11)
   assert.match(appShell, /<AndroidUpdateCoordinator/)
   assert.match(dialogs, /<AndroidUpdateSettings/)
   assert.match(updateUi, /Platform\.OS !== 'android'/)

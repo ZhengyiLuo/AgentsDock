@@ -1,5 +1,48 @@
 # Public development log
 
+## 2026-10-26 - Android 0.1.1 beta.9 publication
+
+- Published the ARM64 sideload APK as `android-v0.1.1-beta.9`, app version
+  `0.1.1`, Android build `11`, from source `15e4d61d` based on main `eb165198`.
+  Build 11 supersedes the public beta.8 build 10 without changing the existing
+  application ID or signing certificate.
+- Release assembly and lint passed. Verified package/version, permissions,
+  embedded JavaScript, ZIP integrity, release signature and 16 KB alignment.
+  Android signing/updater contract tests and updater discovery tests passed.
+- Uploaded the APK, update manifest, public signing certificate and checksums.
+  Verified every uploaded asset's size and digest, then anonymously downloaded
+  the public APK and confirmed SHA-256
+  `3aaa501122e139106d673cf8d6f8a0404dd275953cf01d28986c21c088b0cbb0`.
+  Production updater code against the public feed offers build 11 to build 10
+  and does not offer build 11 to itself. Desktop stable remains unchanged.
+- [Public Android beta.9 release](https://github.com/ZhengyiLuo/AgentsDock-Releases/releases/tag/android-v0.1.1-beta.9).
+  Physical-device launch, installation and QR capture remain untested. No iOS
+  upload or server deployment was performed.
+
+## 2026-10-25 - Android APK packaging configuration
+
+- Scope Chinese native privacy descriptions to iOS so Android release lint no
+  longer treats them as translations of missing Android resources. Preserve
+  the existing iOS strings and native configuration.
+- Keep camera permission available for server QR scanning when the image-picker
+  and camera plugins are composed. Microphone and broad media-read permissions
+  remain blocked. Update native verification to accept the existing media-save
+  write permission restricted to Android 9 and earlier.
+- Reproduced both locale and composed-camera regressions before the fixes;
+  all 50 focused configuration, connection and Android checks and TypeScript
+  passed afterward. Compared iOS introspected native configuration before and
+  after and confirmed it is unchanged. Android remains version 0.1.1, build 10.
+- Built the local ARM64 sideload release APK from `4b39badf`, based on main
+  `eb165198`. Native verification, Gradle release lint and assembly passed.
+  Verified the existing release signer, package/version, bundled JavaScript,
+  archive integrity and 16 KB alignment on the final APK. Its manifest includes
+  camera and sideload-install permissions, limits legacy storage writes to API
+  28, and excludes microphone and broad media-read permissions.
+- APK SHA-256: `baf47eb137a85d16cfe72d6c1a3bdfc824cd5de93d774f6adcb3981c7511c845`.
+  No Android device was connected; on-device launch and QR capture remain
+  untested. No iOS build, upload, publication, installation or server change
+  was part of this local APK build.
+
 ## 2026-10-25 - Mobile provider pre-merge validation
 
 - Integrated main `3ac069e`; only the development log required conflict
