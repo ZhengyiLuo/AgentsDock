@@ -1,4 +1,5 @@
 import type { ProviderUsageScope, ProviderUsageSnapshot, UsageBackend } from '../shared/provider-usage'
+import type { CodeIntelligenceLanguage, CodeIntelligenceStatus } from '../shared/code-intelligence'
 import { customModelBackend, customModelInput, type CustomModelBackend, type CustomModelInput } from '../shared/custom-models'
 import { cliAccountBackend, type CLIAccountBackend, connectionRequest, type ConnectionBackend, type ConnectionAction, type ProviderConnectionRequest, type ProviderConnectionReply } from '../shared/provider-connections'
 import { app, BrowserWindow, clipboard, dialog, nativeImage, Notification, shell } from 'electron'
@@ -4484,6 +4485,40 @@ export class AppService {
     const result = await scope.client.workspaceGitStatus(sessionId)
     this.assertCurrentScope(scope)
     return result
+  }
+
+  async workspaceIntelligenceRead(expected: WorkspaceProfileScope, sessionId: string, path: string): Promise<WorkspaceFile> {
+    const scope = this.requireWorkspaceScope(expected)
+    await this.ensureValidatedScope(scope)
+    this.assertCurrentScope(scope)
+    const result = await scope.client.workspaceFile(sessionId, path)
+    this.assertCurrentScope(scope)
+    return result
+  }
+
+  async workspaceIntelligenceFiles(expected: WorkspaceProfileScope, sessionId: string, query = '', limit = 100): Promise<WorkspaceSearchPage> {
+    const scope = this.requireWorkspaceScope(expected)
+    await this.ensureValidatedScope(scope)
+    this.assertCurrentScope(scope)
+    const result = await scope.client.workspaceSearch(sessionId, query, limit)
+    this.assertCurrentScope(scope)
+    return result
+  }
+
+  async workspaceIntelligenceStatus(expected: WorkspaceProfileScope, sessionId: string): Promise<CodeIntelligenceStatus> {
+    const scope = this.requireWorkspaceScope(expected)
+    await this.ensureValidatedScope(scope)
+    this.assertCurrentScope(scope)
+    const result = await scope.client.workspaceIntelligenceStatus(sessionId)
+    this.assertCurrentScope(scope)
+    return result
+  }
+
+  async workspaceIntelligenceSocket(expected: WorkspaceProfileScope, sessionId: string, language: CodeIntelligenceLanguage): Promise<WebSocket> {
+    const scope = this.requireWorkspaceScope(expected)
+    await this.ensureValidatedScope(scope)
+    this.assertCurrentScope(scope)
+    return scope.client.workspaceIntelligenceSocket(sessionId, language)
   }
 
   async workspaceGitDiff(expected: WorkspaceProfileScope, sessionId: string, path: string, view: WorkspaceGitView) {

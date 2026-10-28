@@ -1,5 +1,38 @@
 # Public development log
 
+## 2026-10-28 - Per-chat code intelligence
+
+- Add Python and TypeScript/JavaScript completion, hover information,
+  diagnostics, definition navigation, and references to the workspace editor.
+  Language analysis runs on the chat's connected server and uses its project
+  configuration. Separate editor connections preserve independent unsaved
+  buffers; navigation opens files in the originating pane.
+- Add Files/Symbols search beside the composer. Selected paths and optional
+  line ranges become ordinary editable draft text, with removable references.
+  Symbol startup waits for the language server's project index; it does not
+  send workspace contents or hidden instructions to a chat provider.
+- Discover existing Pyright and TypeScript language servers on demand. Missing
+  tools and connection failures show Setup/Retry while file editing and the
+  composer remain usable. Scope requests to the server, chat, and editor;
+  discard stale responses and reap only the owned language-server processes.
+- Validation: focused renderer, native HTTP/WebSocket, scope-fencing, real
+  language-server, lifecycle, packaging-manifest, and license checks passed.
+  TypeScript and production Electron compilation passed. Fresh TypeScript
+  independent-file symbol search also passed ten isolated process runs.
+- Exercised the compiled app in an isolated native offscreen Electron profile
+  against real authenticated AgentsServer instances and actual Pyright and
+  TypeScript language servers: completion, unsaved diagnostics with disk
+  preservation, F12 navigation, references, unopened-file symbols, editable
+  draft references, chat/server switching, missing tools, installation followed
+  by Retry, and language-process failure followed by Retry. Inspected English
+  light/dark, narrow layouts, Chinese labels, and diagnostic tooltips. No
+  renderer errors occurred in accepted runs. Provider catalog fixtures were
+  used only to create disposable chats; no AI-provider request was needed.
+- This change requires matching desktop/server support and the documented
+  language tools. No release, deployment, user installation, or live-server
+  restart was performed. Packaged Windows/Linux desktop validation remains
+  outside this local macOS acceptance.
+
 ## 2026-10-27 - Honest native sign-in status in My Agents
 
 - Separate credential discovery from verified native login. A reported

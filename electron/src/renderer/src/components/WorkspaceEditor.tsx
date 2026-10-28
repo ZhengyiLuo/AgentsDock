@@ -3605,6 +3605,13 @@ export function WorkspaceEditor({
           maxBytes={maxEditableFileBytes}
           initialViewState={viewStatesRef.current.get(editorViewStateKey(group, file.path))}
           navigationRequest={focused && paneOwnsCommands() && activePath !== null && !changesOpen && editorNavigation?.path === file.path ? editorNavigation : undefined}
+          intelligence={profileScope && file.origin === 'workspace' && !file.truncated ? {
+            scope: profileScope,
+            sessionId: session.id,
+            cwd,
+            active: paneActive && activePath !== null && !changesOpen && !file.loading,
+            onNavigate: location => { void openFile(location.path, undefined, location, { targetGroup: group }) }
+          } : undefined}
           onLimitExceeded={() => updateFile(file.path, current => ({
             ...current,
             error: t('editor.editSizeLimit', { size: formatByteSize(maxEditableFileBytes) })

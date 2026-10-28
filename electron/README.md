@@ -249,3 +249,32 @@ need the terminal; the app reports that rather than bypassing repository policy.
 
 See [FEATURE_PARITY.md](FEATURE_PARITY.md) for the implementation contract and
 verification status.
+
+## Code references and IntelliSense
+
+The composer's **Files and symbols** button opens **Files** and **Symbols** search
+within the selected chat's working directory on its connected server. Select a
+file or symbol, optionally adjust its line range, and attach it to the draft.
+References remain ordinary editable draft text; they are sent with your next
+message and can be edited or removed before sending. Symbol discovery starts
+when requested and uses the language server's project index.
+
+Python and TypeScript/JavaScript source files in the workspace editor support
+project completion (**Ctrl+Space**), hover information, diagnostic underlines,
+**F12** to go to a definition, and **Shift+F12** to find references. The toolbar
+also exposes both navigation actions. Definition and reference selections open
+in the originating editor pane. Unsaved edits reach that editor's language
+server with debounced synchronization; they are saved only through the existing
+save workflow.
+
+This requires matching AgentsServer support and the appropriate tools on the
+server machine: Pyright for Python, or typescript-language-server with a
+compatible TypeScript installation for TypeScript/JavaScript. See
+[workspace intelligence setup](../server/docs/SERVER_REFERENCE.md#workspace-intelligence).
+The servers use native project configuration, including `pyrightconfig.json`
+and `tsconfig.json`. Each connection is rooted in the chat's workspace and is
+closed when its editor or context changes.
+
+If a tool is missing or a connection fails, **Setup** explains the requirement
+and **Retry** explicitly reconnects after it is resolved. File editing and chat
+remain available; the app does not install language servers automatically.

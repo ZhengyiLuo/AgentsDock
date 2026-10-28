@@ -1,0 +1,42 @@
+.code-reference-trigger { flex: 0 0 auto; }
+.code-reference-dialog { width: min(580px, calc(100vw - 32px)); }
+.code-reference-body { display: flex; flex-direction: column; min-width: 0; padding: var(--space-6); gap: var(--space-4); }
+.code-reference-panel { display: flex; flex-direction: column; min-width: 0; gap: var(--space-4); }
+.code-reference-tabs { display: flex; gap: var(--space-2); }
+.code-reference-tabs button { min-height: var(--control-height-md); padding: 0 var(--space-6); border-radius: var(--radius-control); color: var(--muted); background: transparent; font-size: var(--text-size-label); }
+.code-reference-tabs button[data-state="active"] { color: var(--text); background: var(--interaction-pressed); }
+.code-reference-tabs button:hover { background: var(--interaction-hover); }
+.code-reference-search { display: flex; align-items: center; gap: var(--space-4); min-width: 0; min-height: var(--control-height-lg); padding: 0 var(--space-4); border: 1px solid var(--border); border-radius: var(--radius-control); color: var(--muted); }
+.code-reference-search input { flex: 1; min-width: 0; width: 100%; border: 0; background: transparent; color: var(--text); font-size: var(--text-size-ui); }
+.code-reference-search input:focus-visible { outline: none; }
+.code-reference-search:focus-within { border-color: var(--accent); }
+.code-reference-results { min-height: 120px; max-height: min(320px, 35vh); overflow: auto; }
+.code-reference-result { display: flex; align-items: center; gap: var(--space-4); min-width: 0; padding: var(--space-4); border-radius: var(--radius-selection); cursor: pointer; }
+.code-reference-result[aria-selected="true"] { background: var(--interaction-pressed); }
+.code-reference-result:hover { background: var(--interaction-hover); }
+.code-reference-result > svg { flex: 0 0 auto; color: var(--muted); }
+.code-reference-result > span { display: flex; flex-direction: column; min-width: 0; gap: var(--space-1); }
+.code-reference-result strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--text-size-ui); font-weight: var(--text-weight-label); }
+.code-reference-result small { color: var(--muted); font-family: var(--font-mono); font-size: var(--text-size-meta); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.code-reference-empty { margin: var(--space-7); color: var(--muted); text-align: center; font-size: var(--text-size-ui); }
+.code-reference-notice { display: flex; align-items: center; gap: var(--space-4); color: var(--muted); font-size: var(--text-size-meta); }
+.code-reference-notice > span { flex: 1; }
+.code-reference-hint { margin: 0; color: var(--muted); font-size: var(--text-size-meta); overflow-wrap: anywhere; }
+.code-reference-footer { display: flex; justify-content: space-between; align-items: flex-end; gap: var(--space-4); }
+.code-reference-footer label { display: flex; align-items: center; flex-wrap: wrap; gap: var(--space-4); min-width: 0; color: var(--muted); font-size: var(--text-size-meta); }
+.code-reference-footer input { width: 96px; min-height: var(--control-height-md); padding: 0 var(--space-4); border: 1px solid var(--border); border-radius: var(--radius-control); color: var(--text); background: var(--surface); font-family: var(--font-mono); font-size: var(--text-size-meta); }
+.code-reference-footer .primary-button { flex: 0 0 auto; }
+.code-reference-shelf { display: flex; gap: var(--space-2); flex-wrap: wrap; padding: var(--space-2) 0; }
+.code-reference-chip { display: inline-flex; align-items: center; max-width: 100%; border: 1px solid var(--border); border-radius: var(--radius-compact); background: var(--surface); }
+.code-reference-chip button { display: inline-flex; align-items: center; min-height: var(--control-height-sm); color: var(--muted); background: transparent; }
+.code-reference-chip-label { min-width: 0; gap: var(--space-2); padding: 0 var(--space-3); font-family: var(--font-mono); font-size: var(--text-size-meta); }
+.code-reference-chip-label > svg { flex: 0 0 auto; }
+.code-reference-chip-label > span { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.code-reference-chip-remove { flex: 0 0 auto; padding: 0 var(--space-3); }
+.code-reference-chip button:hover:not(:disabled) { color: var(--text); background: var(--interaction-hover); }
+.code-reference-chip button:disabled { opacity: .5; cursor: default; }
+.code-reference-dialog button:focus-visible, .code-reference-chip button:focus-visible, .code-reference-trigger:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+@media (max-width: 420px) {
+  .code-reference-footer label { align-items: flex-start; flex-direction: column; }
+  .code-reference-dialog > header { gap: var(--space-4); padding: var(--space-6); }
+}

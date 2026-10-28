@@ -134,6 +134,7 @@ import { GeminiImportConnection } from './GeminiImportConnection'
 import { ShortcutTooltip } from './ShortcutTooltip'
 import { WorkingDirectoryInput } from './WorkingDirectoryInput'
 import { WorkingDirectoryPopover } from './WorkingDirectoryPopover'
+import { CodeReferencePicker, CodeReferenceShelf, codeReferenceText } from './CodeReferencePicker'
 
 const EMPTY_UPLOADS: AgentFile[] = []
 const EMPTY_UPLOAD_PATHS: NativeFileRef[] = []
@@ -1910,6 +1911,18 @@ export const Composer = memo(function Composer({ dropActive = false, sessionId, 
       />
         </fieldset>
       {(uploads.length > 0 || uploadPaths.length > 0) && <AttachmentShelf sessionId={session.id} profileId={activeProfileId} profileGeneration={profileGeneration} files={uploads} pending={uploadPaths} />}
+      <CodeReferenceShelf draft={draft} disabled={writeDisabled} onEdit={(start, end) => {
+        textareaRef.current?.focus()
+        textareaRef.current?.setSelectionRange(composerSourceToDisplay(messageProjection, start), composerSourceToDisplay(messageProjection, end))
+      }} onRemove={(start, end) => {
+        if (writeDisabled) return
+        const text = draftRef.current
+        const from = start > 0 && text[start - 1] === '\n' ? start - 1 : start
+        const to = from === start && text[end] === '\n' ? end + 1 : end
+        const next = text.slice(0, from) + text.slice(to)
+        pendingCaretRef.current = from
+        updateComposerDraft(next, from)
+      }} />
       <GeminiImportConnection key={`${activeProfileId}:${profileGeneration}:${session.id}`} session={session} />
       <RuntimeHealthNotice backend={session.backend} codexProvider={(session.provider_connection === 'custom' ? 'custom' : session.codex_provider)} sessionId={session.id} admissionError={(sendFailure?.context === sendContext ? cleanActionError(sendFailure.message) : undefined) || (geminiImportRecovery ? undefined : selectedRuntimeError) || undefined} />
       {activeInboundDeliveryKind && activeInboundDeliveryKind !== 'unknown' && <span className="chat-reference-warning" role="status">{activeInboundDeliveryKind === 'secure_peer'
@@ -2250,6 +2263,21 @@ export const Composer = memo(function Composer({ dropActive = false, sessionId, 
               {[t("ui.Composer.Composer.status_report_b784026"), t("ui.Composer.Composer.keep_going_8fc6411"), t("ui.Composer.Composer.verify_the_result_carefully_b07a805")].map(phrase => <DropdownMenu.Item key={phrase} className="menu-item" onSelect={() => void send(false, phrase, false)}>{phrase}</DropdownMenu.Item>)}
             </DropdownMenu.Content></DropdownMenu.Portal>
           </DropdownMenu.Root>
+          {!window.agentsDock.sharedChat && activeProfileId && <CodeReferencePicker
+            key={`${workspaceKey}:${profileGeneration}:${connectionGeneration}:${session.cwd ?? ''}`}
+            session={session} scope={{ profileId: activeProfileId, profileGeneration, serverIdentity }} disabled={writeDisabled}
+            onSelect={reference => {
+              if (writeDisabled || !composerSessionIsCurrent(activeProfileId, profileGeneration, serverIdentity, session.id, draftContextRef, mountedRef)) return
+              const text = draftRef.current
+              const referenceText = codeReferenceText(reference)
+              const next = `${text}${text && !text.endsWith('\n') ? '\n' : ''}${referenceText}\n`
+              pendingCaretRef.current = next.length
+              updateComposerDraft(next, next.length)
+              window.requestAnimationFrame(() => {
+                if (composerSessionIsCurrent(activeProfileId, profileGeneration, serverIdentity, session.id, draftContextRef, mountedRef)) textareaRef.current?.focus()
+              })
+            }}
+          />}
           {!window.agentsDock.sharedChat && <BackendMenu session={session} running={running} admitting={admitting} />}
           <RuntimeMenu
             session={session}

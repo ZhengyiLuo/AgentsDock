@@ -9,6 +9,7 @@ import { LOCAL_SESSION_IMPORT_HARD_LIST_LIMIT, parseBulkImportSessionItems } fro
 import type { LanguageSettings } from './language'
 import { reportStorageError } from './storage-health'
 import { issueReportEnvironment } from './issue-report'
+import { CodeIntelligenceConnections } from './code-intelligence-connections'
 
 export interface RegisterIpcOptions {
   language?: Pick<LanguageSettings, 'get' | 'set'>
@@ -24,6 +25,8 @@ export function registerIpc(
 ): ServerSetupManager {
   const serverSetup = new ServerSetupManager()
   const artifactTextReads = new Map<string, AbortController>()
+  const intelligence = new CodeIntelligenceConnections()
+  const intelligenceOwners = new Set<number>()
   const handleWithEvent = (channel: string, listener: (event: IpcMainInvokeEvent, ...args: any[]) => unknown): void => {
     ipcMain.removeHandler(channel)
     ipcMain.handle(channel, (event, ...args) => {
@@ -42,6 +45,33 @@ export function registerIpc(
   }
 
   handle('app:bootstrap', () => service.bootstrap())
+  handle('intelligence:read', (scope, sessionId, path) => service.workspaceIntelligenceRead(scope, sessionId, path))
+  handle('intelligence:status', (scope, sessionId) => service.workspaceIntelligenceStatus(scope, sessionId))
+  handle('intelligence:files', (scope, sessionId, query, limit) => service.workspaceIntelligenceFiles(scope, sessionId, query, limit))
+  handleWithEvent('intelligence:connect', (event, scope, sessionId, connectionId, language) => {
+    const sender = event.sender
+    if (!intelligenceOwners.has(sender.id)) {
+      intelligenceOwners.add(sender.id)
+      sender.once('destroyed', () => { intelligence.closeOwner(sender.id); intelligenceOwners.delete(sender.id) })
+      sender.on('render-process-gone', () => intelligence.closeOwner(sender.id))
+      sender.on('did-start-navigation', (_event, _url, isInPlace, isMainFrame) => {
+        if (isMainFrame && !isInPlace) intelligence.closeOwner(sender.id)
+      })
+    }
+    return intelligence.connect(sender.id, scope, sessionId, connectionId, language,
+      () => service.workspaceIntelligenceSocket(scope, sessionId, language),
+      packet => { if (!sender.isDestroyed()) sender.send('intelligence:event', packet) })
+  })
+  handleWithEvent('intelligence:disconnect', (event, scope, sessionId, connectionId) => {
+    intelligence.disconnect(event.sender.id, scope, sessionId, connectionId)
+  })
+  ipcMain.removeAllListeners('intelligence:send')
+  ipcMain.on('intelligence:send', (event, scope, sessionId, connectionId, message) => {
+    if (acceptTrustedSender(event, 'intelligence:send')) {
+      try { intelligence.send(event.sender.id, scope, sessionId, connectionId, message) }
+      catch { /* Invalid IPC must not escape the Electron event loop. */ }
+    }
+  })
   handle('workspace-git:status', (scope, sessionId) => service.workspaceGitStatus(scope, sessionId))
   handle('workspace-git:diff', (scope, sessionId, path, view) => service.workspaceGitDiff(scope, sessionId, path, view))
   handle('workspace-git:conflict', (scope, sessionId, path) => service.workspaceGitConflict(scope, sessionId, path))
