@@ -455,6 +455,7 @@ export class AppService {
    * CLIs instead of trusting the server's own cached diagnostics. */
   private runtimeInstanceProbePending = false
   private refreshInFlight = new Map<number, Promise<void>>()
+  private refreshIdentityReady = new Map<number, Promise<void>>()
   private readStateMutations = new Map<string, Promise<void>>()
   private lastSyncState = ''
   private lastProfilesPayload = ''
@@ -683,6 +684,7 @@ export class AppService {
     cleanup(() => this.removeClipboardStagingDirectory())
     cleanup(() => this.flushEventCache())
     this.refreshInFlight.clear()
+    this.refreshIdentityReady.clear()
     this.runtimeRefreshInFlight.clear()
     this.subagentSnapshotInFlight.clear()
     cleanup(() => this.invalidateAllProfileHealthProbes())
@@ -3943,7 +3945,7 @@ export class AppService {
   ): Promise<boolean> {
     assertLocalAgentChatReferences(chatReferences)
     const scope = this.captureScope()
-    await this.ensureValidatedScope(scope)
+    await this.ensureValidatedScope(scope, { waitForMetadata: false })
     const result = await scope.client.updateQueued(
       sessionId,
       queuedId,
@@ -5346,10 +5348,15 @@ export class AppService {
       return existing
     }
     if (deferApplyDuringInteraction) this.foregroundSensitiveRefreshes.add(scope.generation)
-    const task = this.performRefreshAll(scope, announce, includeJobs, deferApplyDuringInteraction)
+    let identityReady!: () => void
+    this.refreshIdentityReady.set(scope.generation, new Promise<void>(resolve => { identityReady = resolve }))
+    const task = this.performRefreshAll(scope, announce, includeJobs, deferApplyDuringInteraction, identityReady)
     this.refreshInFlight.set(scope.generation, task)
     return task.finally(() => {
-      if (this.refreshInFlight.get(scope.generation) === task) this.refreshInFlight.delete(scope.generation)
+      if (this.refreshInFlight.get(scope.generation) === task) {
+        this.refreshInFlight.delete(scope.generation)
+        this.refreshIdentityReady.delete(scope.generation)
+      }
       this.foregroundSensitiveRefreshes.delete(scope.generation)
       this.foregroundApplyBypassGenerations.delete(scope.generation)
     })
@@ -5359,7 +5366,8 @@ export class AppService {
     scope: ConnectionScope,
     announce: boolean,
     includeJobs: boolean,
-    deferApplyDuringInteraction: boolean
+    deferApplyDuringInteraction: boolean,
+    identityReady: () => void
   ): Promise<void> {
     const started = Date.now()
     const healthResult = Promise.allSettled([
@@ -5443,6 +5451,9 @@ export class AppService {
     }
     const namespaceWasAdopted = activeScope !== scope
     if (!this.isCurrentScope(activeScope)) return
+    // Queue edits need the verified identity, not unrelated list
+    // responses. Keep the existing refresh running to reconcile metadata.
+    identityReady()
     // Already-requested chats need live recovery as soon as health is valid,
     // even while background session/job metadata waits for an input pause.
     if (!namespaceWasAdopted) {
@@ -6193,12 +6204,18 @@ export class AppService {
     if (directory) rmSync(directory, { recursive: true, force: true })
   }
 
-  private async ensureValidatedScope(scope: ConnectionScope): Promise<void> {
+  private async ensureValidatedScope(scope: ConnectionScope, { waitForMetadata = true }: { waitForMetadata?: boolean } = {}): Promise<void> {
     if (this.profileResetIsPending(scope)) {
       throw new Error('This server profile is waiting for its prior identity reset to finish. Retry the identity reset before reconnecting.')
     }
     if (this.isValidatedScope(scope)) return
-    await this.refreshAll(true, false, scope)
+    const refresh = this.refreshAll(true, false, scope)
+    // Only queue edits opt out of the list refresh. Session/job mutations must
+    // still wait so its older snapshot cannot overwrite their local result.
+    const identityReady = waitForMetadata ? undefined : this.refreshIdentityReady.get(scope.generation)
+    // The full promise still owns failures and scope retirement; racing it
+    // also handles rejection before identity adoption without a second probe.
+    await (identityReady ? Promise.race([identityReady, refresh]) : refresh)
     this.assertCurrentScope(scope)
     if (!this.isValidatedScope(scope)) throw new Error('The server profile has not passed its identity check.')
   }
@@ -6267,6 +6284,7 @@ export class AppService {
     this.eventCacheTimer = null
     this.pendingEventCache.clear()
     this.refreshInFlight.clear()
+    this.refreshIdentityReady.clear()
     this.runtimeRefreshInFlight.clear()
     this.subagentSnapshotInFlight.clear()
     this.filesRefreshInFlight.clear()

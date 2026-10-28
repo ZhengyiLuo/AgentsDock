@@ -126,6 +126,15 @@ work. The app shows the pending request until Claude applies it at its next
 native boundary; setting a goal does not interrupt the current tool or agents.
 Native refusals remain visible and leave the completion condition available
 for retry.
+The Claude goal banner distinguishes a saved goal from actual execution: it
+shows whether Claude is working, idle, waiting for input, or not loaded.
+Elapsed time is shown only when Claude reports it. An idle or unloaded goal
+offers **Continue goal**, which submits the native goal command in the same
+thread; it does not create an automatic restart loop. Native failed evaluations
+remain visible with their reported reason.
+Recovered provider messages use their original timestamps to appear between
+the appropriate live turns. History catch-up does not take ownership of an
+active turn or merge distinct native replies into one import batch.
 The camera-enabled mobile app can scan it from **Servers > Add Server > Scan QR
 code** and authenticates before saving. Older mobile builds need an app update.
 The image does not make a loopback-only server reachable from a phone. See
