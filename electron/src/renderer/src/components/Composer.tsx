@@ -52,6 +52,13 @@ import {
   type ComposerCommandMetadata,
   type ComposerCommandTrigger
 } from '../lib/composer-commands'
+import {
+  caretAllowsHistoryStep,
+  loadComposerHistory,
+  recordComposerHistory,
+  stepComposerHistory,
+  type ComposerHistoryCursor
+} from '../lib/composer-history'
 import { getWorkspacePreference, setWorkspacePreference } from '../lib/workspace-preferences'
 import {
   canonicalizeLocalRouteHints,
@@ -580,6 +587,7 @@ export const Composer = memo(function Composer({ dropActive = false, sessionId, 
   const editorLayoutFrameRef = useRef<number | null>(null)
   const paletteBlurTimerRef = useRef<number | null>(null)
   const pendingCaretRef = useRef<number | null>(null)
+  const historyCursorRef = useRef<{ sessionId: string; cursor: ComposerHistoryCursor } | null>(null)
   const pendingSelectionRef = useRef<{ start: number; end: number; direction: 'forward' | 'backward' | 'none' } | null>(null)
   const nativeEditSelectionRef = useRef<ComposerNativeEditSelection | null>(null)
   const providerCommandBindingRef = useRef<BoundProviderCommand | null>(null)
@@ -1521,6 +1529,10 @@ export const Composer = memo(function Composer({ dropActive = false, sessionId, 
         if (message) setSendFailure({ context: sendContext, message })
       }
       if (sent) {
+        if (consumeComposer && promptOverride === undefined) {
+          recordComposerHistory(session.id, rawOutgoing.trim())
+          historyCursorRef.current = null
+        }
         trackEvent('message_sent', messageProps)
         if (boundProviderCommand) {
           trackEvent(boundProviderCommand.kind.toLowerCase() === 'skill' ? 'slash_skill_used' : 'slash_command_used')
@@ -2215,15 +2227,40 @@ export const Composer = memo(function Composer({ dropActive = false, sessionId, 
                 return
               }
             }
+            if (
+              selectedId
+              && !event.metaKey && !event.ctrlKey && !event.altKey && !event.shiftKey
+              && (event.key === 'ArrowUp' || event.key === 'ArrowDown')
+            ) {
+              const direction = event.key === 'ArrowUp' ? 'older' : 'newer'
+              const displayText = event.currentTarget.value
+              if (caretAllowsHistoryStep(displayText, event.currentTarget.selectionStart, event.currentTarget.selectionEnd, direction)) {
+                const current = historyCursorRef.current?.sessionId === selectedId ? historyCursorRef.current.cursor : null
+                const step = stepComposerHistory(loadComposerHistory(selectedId), current, draftRef.current, direction)
+                if (step) {
+                  event.preventDefault()
+                  historyCursorRef.current = { sessionId: selectedId, cursor: step.cursor }
+                  pendingCaretRef.current = step.text.length
+                  updateComposerDraft(step.text, step.text.length)
+                  return
+                }
+              }
+            }
             if (event.key === 'Enter' && !event.shiftKey && !event.altKey) {
               event.preventDefault()
               const forceSend = (event.metaKey || event.ctrlKey) && !steeringPending && session.backend !== 'opencode'
+              const composerEmpty = !draft.trim() && uploads.length === 0 && uploadPaths.length === 0
               if (canSend) void send(forceSend)
+              else if (composerEmpty && (event.metaKey || event.ctrlKey)) void steerFirstQueued()
+              // A second Enter on an empty composer is Send now for the first
+              // queued message: Claude takes it as a native follow-up, while
+              // plain Codex turns are stopped and continued with it.
               else if (
-                (event.metaKey || event.ctrlKey)
-                && !draft.trim()
-                && uploads.length === 0
-                && uploadPaths.length === 0
+                composerEmpty
+                && running
+                && !steeringPending
+                && session.backend !== 'opencode'
+                && queuedTurns.some(isUserQueuedTurn)
               ) void steerFirstQueued()
             }
           }}
