@@ -23,7 +23,8 @@ export const APP_SHORTCUTS = {
   terminalSplitDown: { label: 'Split pane down', mac: '⇧⌘D', other: 'Ctrl+Shift+D' },
   terminalFind: { label: 'Find in terminal', mac: '⌘F', other: 'Ctrl+F' },
   sendMessage: { label: 'Send message', mac: '↩', other: 'Enter' },
-  steerMessage: { label: 'Steer now', mac: '⌘↩', other: 'Ctrl+Enter' }
+  steerMessage: { label: 'Steer now', mac: '⌘↩', other: 'Ctrl+Enter' },
+  stopAgent: { label: 'Stop agent', mac: '⎋', other: 'Esc' }
 } as const
 
 export type AppShortcutId = keyof typeof APP_SHORTCUTS
@@ -53,7 +54,7 @@ export const APP_SHORTCUT_GROUPS = [
   },
   {
     id: 'messaging',
-    shortcuts: ['sendMessage', 'steerMessage']
+    shortcuts: ['sendMessage', 'steerMessage', 'stopAgent']
   }
 ] as const satisfies ReadonlyArray<{
   id: AppShortcutGroupId

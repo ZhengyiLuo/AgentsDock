@@ -810,6 +810,7 @@
   "shortcuts.action.sendMessage": "Send message",
   "shortcuts.action.settings": "Settings",
   "shortcuts.action.steerMessage": "Steer now",
+  "shortcuts.action.stopAgent": "Stop agent",
   "shortcuts.action.terminalFind": "Find in terminal",
   "shortcuts.action.terminalNewWindow": "New tmux window",
   "shortcuts.action.terminalSplitDown": "Split pane down",

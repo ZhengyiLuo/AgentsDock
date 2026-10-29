@@ -45,6 +45,8 @@ describe('app shortcut catalog', () => {
     expect(shortcutKeycaps('attachFiles', 'mac')).toEqual(['⇧', '⌘', 'O'])
     expect(shortcutKeycaps('attachFiles', 'other')).toEqual(['Ctrl', 'Shift', 'O'])
     expect(shortcutKeycaps('sendMessage', 'mac')).toEqual(['↩'])
+    expect(shortcutKeycaps('stopAgent', 'mac')).toEqual(['⎋'])
+    expect(shortcutKeycaps('stopAgent', 'other')).toEqual(['Esc'])
     expect(shortcutKeycaps('settings', 'other')).toEqual(['Ctrl', ','])
   })
 

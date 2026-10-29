@@ -810,6 +810,7 @@
   "shortcuts.action.sendMessage": "发送消息",
   "shortcuts.action.settings": "设置",
   "shortcuts.action.steerMessage": "立即介入",
+  "shortcuts.action.stopAgent": "停止 Agent",
   "shortcuts.action.terminalFind": "在终端中查找",
   "shortcuts.action.terminalNewWindow": "新建 tmux 窗口",
   "shortcuts.action.terminalSplitDown": "向下拆分窗格",

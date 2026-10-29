@@ -1600,6 +1600,13 @@ export const Composer = memo(function Composer({ dropActive = false, sessionId, 
     }
   }
 
+  // Shared by the Stop button and Escape in the composer.
+  const requestStop = () => {
+    if (!session || writeDisabled || stopping || !(running || liveCodexChildren > 0)) return
+    if (!confirmInboundDeliveryInterruption(session.id, 'stop')) return
+    void useAppStore.getState().stopTurnForSession(session.id)
+  }
+
   const steerFirstQueued = async () => {
     if (running && session?.backend === 'opencode') { reportActionError(t('opencode.steerUnavailable')); return }
     if (writeDisabled) return
@@ -2215,6 +2222,19 @@ export const Composer = memo(function Composer({ dropActive = false, sessionId, 
                 return
               }
             }
+            // Like the Codex and Claude CLIs, Escape interrupts the running
+            // agent once no composer palette is left to close.
+            if (
+              event.key === 'Escape'
+              && !event.metaKey && !event.ctrlKey && !event.altKey && !event.shiftKey
+              && !event.repeat
+              && (running || liveCodexChildren > 0)
+            ) {
+              event.preventDefault()
+              event.stopPropagation()
+              requestStop()
+              return
+            }
             if (event.key === 'Enter' && !event.shiftKey && !event.altKey) {
               event.preventDefault()
               const forceSend = (event.metaKey || event.ctrlKey) && !steeringPending && session.backend !== 'opencode'
@@ -2326,17 +2346,16 @@ export const Composer = memo(function Composer({ dropActive = false, sessionId, 
                   ? t('timeline.status.running')
                 : t("ui.Composer.Composer.starting_bbe5fc3")
           }</span></span>}
-          {(running || liveCodexChildren > 0) && <button
+          {(running || liveCodexChildren > 0) && <ShortcutTooltip
+            shortcut="stopAgent"
+            label={stopping ? t("ui.Composer.Composer.stopping_agent_ec42789") : t("ui.Composer.Composer.stop_f9da57a", { "provider": String(session.title) })}
+          ><button
             type="button"
             className="stop-button"
             aria-label={stopping ? t("ui.Composer.Composer.stopping_bbe8574") : stopLabel}
             disabled={writeDisabled || stopping}
-            onClick={() => {
-              if (!confirmInboundDeliveryInterruption(session.id, 'stop')) return
-              void useAppStore.getState().stopTurnForSession(session.id)
-            }}
-            title={stopping ? t("ui.Composer.Composer.stopping_agent_ec42789") : t("ui.Composer.Composer.stop_f9da57a", { "provider": String(session.title) })}
-          ><span className="activity-ring" /><Square size={12} fill="currentColor" /><span className="stop-button-label">{stopping ? t("ui.Composer.Composer.stopping_bbe8574") : stopLabel}</span></button>}
+            onClick={requestStop}
+          ><span className="activity-ring" /><Square size={12} fill="currentColor" /><span className="stop-button-label">{stopping ? t("ui.Composer.Composer.stopping_bbe8574") : stopLabel}</span></button></ShortcutTooltip>}
           <ShortcutTooltip shortcut={running && session.backend !== 'opencode' ? ['sendMessage', 'steerMessage'] : 'sendMessage'} label={running ? session.backend === 'opencode' ? t("ui.Composer.Composer.queue_message_891d4ef") : activeCodexGoal ? t('composer.queueMessageDuringGoal') : t("ui.Composer.Composer.queue_message_steer_now_eea53cb") : t("ui.Composer.Composer.send_message_93a26b1")}><button className="send-button" aria-label={sessionId === undefined ? (running ? t("ui.Composer.Composer.queue_message_891d4ef") : t("ui.Composer.Composer.send_message_93a26b1")) : t(running ? 'ui.composer.queueFor' : 'ui.composer.sendTo', { title: session.title })} disabled={!canSend} onClick={() => void send()}><Send size={17} /></button></ShortcutTooltip>
         </div>
       </fieldset>

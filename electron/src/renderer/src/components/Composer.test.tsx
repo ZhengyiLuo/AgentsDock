@@ -1927,6 +1927,68 @@ describe('Composer', () => {
     confirm.mockRestore()
   })
 
+  it('stops the running agent with Escape and keeps the draft', async () => {
+    const stop = vi.fn().mockResolvedValue({ stopped: true })
+    Object.defineProperty(window, 'agentsDock', {
+      configurable: true,
+      value: {
+        preferences: { get: vi.fn().mockResolvedValue(''), set: vi.fn().mockResolvedValue(undefined) },
+        turns: { stop }
+      } as unknown as AgentsDockAPI
+    })
+    useAppStore.setState({ activeSessionIds: new Set(['chat-1']), stoppingSessionIds: new Set() })
+    const user = userEvent.setup()
+    render(<Composer />)
+    const editor = screen.getByPlaceholderText('Message')
+
+    await user.type(editor, 'next idea')
+    await user.keyboard('{Escape}')
+
+    await waitFor(() => expect(stop).toHaveBeenCalledExactlyOnceWith('chat-1'))
+    expect(editor).toHaveValue('next idea')
+  })
+
+  it('closes an open command palette with Escape before stopping the agent', async () => {
+    const stop = vi.fn().mockResolvedValue({ stopped: true })
+    Object.defineProperty(window, 'agentsDock', {
+      configurable: true,
+      value: {
+        preferences: { get: vi.fn().mockResolvedValue(''), set: vi.fn().mockResolvedValue(undefined) },
+        turns: { stop }
+      } as unknown as AgentsDockAPI
+    })
+    useAppStore.setState({ activeSessionIds: new Set(['chat-1']), stoppingSessionIds: new Set() })
+    const user = userEvent.setup()
+    render(<Composer />)
+    const editor = screen.getByPlaceholderText('Message')
+
+    await user.type(editor, '/')
+    expect(editor).toHaveAttribute('aria-expanded', 'true')
+    await user.keyboard('{Escape}')
+    expect(editor).toHaveAttribute('aria-expanded', 'false')
+    expect(stop).not.toHaveBeenCalled()
+
+    await user.keyboard('{Escape}')
+    await waitFor(() => expect(stop).toHaveBeenCalledExactlyOnceWith('chat-1'))
+  })
+
+  it('ignores Escape when no agent is running', async () => {
+    const stop = vi.fn()
+    Object.defineProperty(window, 'agentsDock', {
+      configurable: true,
+      value: {
+        preferences: { get: vi.fn().mockResolvedValue(''), set: vi.fn().mockResolvedValue(undefined) },
+        turns: { stop }
+      } as unknown as AgentsDockAPI
+    })
+    const user = userEvent.setup()
+    render(<Composer />)
+
+    await user.click(screen.getByPlaceholderText('Message'))
+    await user.keyboard('{Escape}')
+    expect(stop).not.toHaveBeenCalled()
+  })
+
   it.each(['codex_thread_id', 'session_id'] as const)('keeps idle Stop subagents with %s until a native terminal arrives, without queuing Send', async providerId => {
     const owner = { id: 'chat-1', title: 'Chat', backend: 'codex' as const, [providerId]: 'root' }
     const child = { id: 'child-event', seq: 1, session_id: owner.id, type: 'subagent_state',

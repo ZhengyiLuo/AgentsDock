@@ -1,5 +1,28 @@
 # Public development log
 
+## 2026-10-29 - Escape stops the running agent from the composer
+
+- Escape in the desktop composer stops the running agent, like the Codex and
+  Claude CLIs. It reuses the Stop button's action (including the inbound
+  delivery confirmation and Stop subagents for idle Codex chats with live
+  children). An open command, @Chat or team-mention palette is closed first;
+  the draft is kept; key repeat, modifiers and idle chats are ignored. Escape
+  elsewhere in the app is unchanged. The Stop button tooltip and the shortcut
+  list show the new ⎋/Esc shortcut in English and Chinese.
+- Based on main `aa1b8c4`. 5 new regression checks (the two composer stop
+  checks fail without the change); TypeScript and production compilation
+  passed; the full run passed 5,518 tests (5 skipped) plus 8 packaging/license
+  checks.
+- Test surface: `pnpm dev` Electron app with isolated user data, connected over
+  its production transport to a loopback AgentsServer from this checkout with
+  isolated HOME/state and a real Codex login. Escape during a running Codex
+  turn sent exactly one `stop` (200) and the turn ended as stopped; the Stop
+  tooltip showed ⎋; with the command palette open, the first Escape only
+  closed it and the second stopped the turn; an unsent draft survived Escape;
+  Escape while idle did nothing. Claude was not exercised (no Claude login in
+  the isolated environment); the stop request itself is provider-agnostic.
+  Availability: source only.
+
 ## 2026-10-28 - Cursor compound tool IDs and live analytics acceptance
 
 - Cursor CLI 2026.10.22 emits compound tool correlation IDs containing an LF
