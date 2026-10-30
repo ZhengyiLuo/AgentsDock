@@ -879,10 +879,14 @@ export function Composer({ sessionId, keyboardVisible, keyboardHeight = 0, onSen
   return (
     <View testID="chat-composer" style={[styles.shell, { backgroundColor: colors.background }]}>
       {!pickerLayout.sideBySide ? localChatPicker : null}
-      {!welcome && !localPickerVisible && backend === 'codex' ? <CodexGoalBar keyboardVisible={keyboardVisible} /> : null}
-      {!localPickerVisible && hasAuxiliaryContent && viewportLimits.auxiliaryMaxHeight > 0 ? <ScrollView
+      {!welcome && backend === 'codex' ? <CodexGoalBar keyboardVisible={keyboardVisible} hidden={localPickerVisible} /> : null}
+      {hasAuxiliaryContent ? <ScrollView
         testID="composer-auxiliary-scroll"
-        style={[styles.auxiliaryScroll, { maxHeight: viewportLimits.auxiliaryMaxHeight }]}
+        // Keep unsaved queued edits mounted while the palette borrows this space.
+        style={[styles.auxiliaryScroll, { maxHeight: viewportLimits.auxiliaryMaxHeight }, (localPickerVisible || viewportLimits.auxiliaryMaxHeight <= 0) && { display: 'none' }]}
+        accessibilityElementsHidden={localPickerVisible || viewportLimits.auxiliaryMaxHeight <= 0}
+        importantForAccessibility={localPickerVisible || viewportLimits.auxiliaryMaxHeight <= 0 ? 'no-hide-descendants' : 'auto'}
+        pointerEvents={localPickerVisible || viewportLimits.auxiliaryMaxHeight <= 0 ? 'none' : 'auto'}
         contentContainerStyle={styles.auxiliaryContent}
         keyboardShouldPersistTaps="handled"
         nestedScrollEnabled

@@ -79,6 +79,19 @@ test('collapsed goal occupies one summary row and reveals status, progress, and 
   assert.equal(nodes(tree, 'codex-goal-menu').length, 0)
 })
 
+test('inline picker can hide a mounted goal card without resetting its expanded state', async () => {
+  const tree = await mount()
+  assert.equal(nodes(tree, 'codex-goal-progress').length, 1)
+  for (const hidden of [true, false]) {
+    await act(async () => tree.update(<CodexRuntimeProvider sessionId="chat-a"><Probe /><CodexGoalBar hidden={hidden} /></CodexRuntimeProvider>))
+    const card = node(tree, 'codex-goal-bar')
+    assert.equal(card.props.accessibilityElementsHidden, hidden)
+    assert.equal(card.props.pointerEvents, hidden ? 'none' : 'auto')
+    assert.equal(Object.assign({}, ...card.props.style.flat().filter(Boolean)).display, hidden ? 'none' : undefined)
+    assert.equal(nodes(tree, 'codex-goal-progress').length, 1)
+  }
+})
+
 test('Pause is single-flight and applies the returned snapshot before stale refreshes settle', async () => {
   const staleRead = deferred<CodexRuntimeSnapshot>()
   const freshRead = deferred<CodexRuntimeSnapshot>()

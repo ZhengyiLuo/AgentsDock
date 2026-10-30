@@ -337,7 +337,7 @@ test('time-budget exhaustion is visible before a blocked goal turn', () => {
 })
 
 test('mobile persistent goal controls collapse to one row with touch-accessible actions', () => {
-  assert.match(composer, /<CodexGoalBar keyboardVisible=\{keyboardVisible\} \/>/)
+  assert.match(composer, /<CodexGoalBar keyboardVisible=\{keyboardVisible\} hidden=\{localPickerVisible\} \/>/)
   assert.match(controls, /<CodexGoalEditor key=\{scopeKey\} \/>/)
   assert.match(controls, /useEffect\(\(\) => \{ if \(visible\) void refresh\(\)/)
   assert.match(goalBar, /accessibilityLabel="Persistent Codex goal"/)

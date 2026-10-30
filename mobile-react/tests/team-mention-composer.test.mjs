@@ -635,6 +635,41 @@ test('queue revalidation clears hung action and rejects old closure/completion w
   }finally{await act(async()=>renderer.unmount())}
 })
 
+test('opening and closing inline @ preserves mounted unsaved queued edits', async () => {
+  const turn = { queued_id: 'user', session_id: 'chat', prompt: 'Old text', file_ids: [] }
+  resetRoutes({ snapshots: { chat: { queuedTurns: [turn] } } })
+  const updates = []
+  store.setState({ updateQueued: async (...args) => { updates.push(args); return true } })
+  const renderer = await render()
+  try {
+    await act(async () => renderer.root.findAllByType('Pressable').find(node => node.props.accessibilityLabel === 'Edit queued message').props.onPress())
+    const editor = () => byID(renderer, 'queued-row-user')[0].findByType('TextInput')
+    await act(async () => editor().props.onChangeText('Keep this unsaved 🧭 text'))
+    await type(renderer, '@new')
+    assert.equal(byID(renderer, 'chat-target-palette').length, 1)
+    const rail = byID(renderer, 'composer-auxiliary-scroll')[0]
+    assert.equal(Object.assign({}, ...rail.props.style.flat()).display, 'none')
+    assert.equal(rail.props.accessibilityElementsHidden, true)
+    assert.equal(rail.props.importantForAccessibility, 'no-hide-descendants')
+    assert.equal(rail.props.pointerEvents, 'none')
+    assert.equal(editor().props.value, 'Keep this unsaved 🧭 text')
+    await click(renderer, 'chat-target-picker-close')
+    assert.equal(editor().props.value, 'Keep this unsaved 🧭 text')
+    assert.equal(byID(renderer, 'composer-auxiliary-scroll')[0].props.pointerEvents, 'auto')
+    fixture.width = 844; fixture.height = 390
+    await type(renderer, 'Landscape draft')
+    assert.equal(byID(renderer, 'composer-auxiliary-scroll')[0].props.pointerEvents, 'none')
+    assert.equal(editor().props.value, 'Keep this unsaved 🧭 text')
+    fixture.width = 390; fixture.height = 844
+    await type(renderer, 'Portrait draft')
+    assert.equal(byID(renderer, 'composer-auxiliary-scroll')[0].props.pointerEvents, 'auto')
+    assert.equal(editor().props.value, 'Keep this unsaved 🧭 text')
+    await click(renderer, 'queued-save-user')
+    assert.equal(updates.length, 1)
+    assert.equal(updates[0][2], 'Keep this unsaved 🧭 text')
+  } finally { await act(async () => renderer.unmount()) }
+})
+
 test('same-tick queued Save submits once and reconnect preserves unsaved editor text',async()=>{
   const turn={queued_id:'user',session_id:'chat',prompt:'Old text',file_ids:[]}
   resetRoutes({snapshots:{chat:{queuedTurns:[turn]}}})

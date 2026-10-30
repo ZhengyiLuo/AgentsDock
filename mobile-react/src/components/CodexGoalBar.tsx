@@ -13,7 +13,7 @@ import { Text, TextInput } from './AppText'
 import { useCodexRuntime } from './CodexRuntimeContext'
 import { SheetCloseButton } from './ui'
 
-export function CodexGoalBar({ keyboardVisible = false }: { keyboardVisible?: boolean }) {
+export function CodexGoalBar({ keyboardVisible = false, hidden = false }: { keyboardVisible?: boolean; hidden?: boolean }) {
   const colors = usePalette()
   const { supported, goalsSupported, goalsEnabled, runtime, session, mutating, error, scopeKey, refresh, updateGoal } = useCodexRuntime()
   const lifecycleActive = useAppStore(state => session ? state.activeSessionIds.has(session.id) : false)
@@ -84,7 +84,11 @@ export function CodexGoalBar({ keyboardVisible = false }: { keyboardVisible?: bo
     } else setExpanded(value => !value)
   }
   return <>
-    <View testID="codex-goal-bar" accessibilityLabel="Persistent Codex goal" style={[styles.card, { backgroundColor: colors.surface, borderColor: accent }]}>
+    <View testID="codex-goal-bar" accessibilityLabel="Persistent Codex goal"
+      style={[styles.card, { backgroundColor: colors.surface, borderColor: accent }, hidden && { display: 'none' }]}
+      accessibilityElementsHidden={hidden}
+      importantForAccessibility={hidden ? 'no-hide-descendants' : 'auto'}
+      pointerEvents={hidden ? 'none' : 'auto'}>
       <View style={styles.summary}>
         <Goal size={18} color={accent} />
         <Pressable testID="codex-goal-details" accessibilityRole="button" accessibilityLabel={detailsVisible ? 'Hide goal details' : 'Show goal details'} accessibilityState={{ expanded: detailsVisible }} onPress={toggleDetails} style={styles.summaryTitle}>
