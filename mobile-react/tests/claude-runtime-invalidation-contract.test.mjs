@@ -14,8 +14,10 @@ test('ephemeral Claude runtime packets bypass timeline sequencing', () => {
   )
   assert.match(messageHandler, /isProviderRuntimeChanged\(packet\)/)
   assert.match(messageHandler, /onProviderRuntime\?\.\(packet\)[\s\S]*?return/)
+  const sequenceGate = messageHandler.indexOf('Number.isSafeInteger(event.seq)')
+  assert.ok(sequenceGate >= 0, 'durable events must have a safe integer sequence gate')
   assert.ok(
-    messageHandler.indexOf('isProviderRuntimeChanged(packet)') < messageHandler.indexOf('Number.isFinite(event.seq)'),
+    messageHandler.indexOf('isProviderRuntimeChanged(packet)') < sequenceGate,
     'runtime invalidations must be routed before the durable sequence gate',
   )
 })

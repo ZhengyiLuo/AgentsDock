@@ -214,6 +214,49 @@
   metadata is not attached to the public PR. Login renewal itself remains a
   native-provider operation, and this display fix does not prevent OAuth expiry.
 
+## 2026-10-25 - iOS TestFlight 194 available for internal testing
+
+- Released 0.1.3 (194) from exact source
+  `6d503e2d7cd369ea8fd8865fabbcb2eff2b5d975` using authorized hosted workflow
+  [40279350226](https://github.com/ZhengyiLuo/AgentsDock/actions/runs/40279350226).
+  Apple reports `VALID` and `IN_BETA_TESTING`; read-only verification confirms
+  the exact build is associated with the existing internal testing group.
+  External testing remains `READY_FOR_BETA_SUBMISSION`; no external beta or
+  App Store review submission was performed.
+- Native QA workflow
+  [40277664726](https://github.com/ZhengyiLuo/AgentsDock/actions/runs/40277664726)
+  produced the same-source arm64 Release simulator app. Downloaded executable
+  and JavaScript hashes matched its manifest. The actual installed package
+  connected to an isolated server through the UI, exercised Settings, update
+  destinations, My agents, reasoning display and Gemini history, then created
+  an inherited Gemini Custom API chat with Default permissions. A real UI send
+  received the expected provider reply; server readback confirmed completion
+  and an empty queue. Cold launch retained the connection and reply history.
+- Initial connection automation needed the half-height sheet expanded; a stale
+  assertion expected the server list after successful Add had already closed
+  the sheet. These script failures are not passing checks. Subsequent actual
+  Release-package interaction and cold-launch flows completed successfully.
+- Production archive metadata, resources, signatures, native ABI and symbol
+  checks passed before upload. Android packaging remains separately owned;
+  this release did not publish an APK or deploy desktop/server changes.
+
+## 2026-10-25 - iOS TestFlight 194 candidate integration
+
+- Prepare version 0.1.3 build 194 from main `eb16519`, retaining the mobile
+  goal queue, route capacity and reasoning display fixes shipped in build 193
+  (`8a3f822`). Desktop and server source remain unchanged from main.
+- Preserve OpenCode/Gemini support, inherited new-chat settings, provider
+  recovery, notification ownership and the existing Android cache safeguards.
+  Update a source-contract assertion for the safe-integer event sequence gate.
+- The integrated source passes TypeScript, 494 mobile MJS checks and 10 release
+  workflow guards. One generated-native-metadata check awaits native prebuild.
+  Focused goal queue, reasoning transport, route capacity and creation suites
+  pass. Maestro exercises the actual iOS Dev simulator through updates,
+  My agents, reasoning display, Gemini history and inherited permissions.
+- Publication remains pending: the authorized iOS workflow must verify the
+  exact committed candidate, native archive, Apple processing and internal
+  TestFlight availability. Android packaging is handled separately.
+
 ## 2026-10-25 - Mobile provider pre-merge validation
 
 - Integrated main `3ac069e`; only the development log required conflict
@@ -746,6 +789,69 @@
   exercised.
 - Availability: source changes for desktop and server; cron filtering requires
   both. No release, installation or live-server deployment is included.
+
+## 2026-10-24 — Prepare mobile reasoning-display parity
+
+- Receive Codex's provider-exposed live reasoning on the selected chat's
+  dedicated transient stream, without writing tokens into durable history,
+  reprojecting history, or advancing its acknowledgement cursor. Clear that
+  presentation state on disconnect, navigation and completion; retain the
+  provider's durable summaries and partial traces in their chronological slice.
+- Add the device-local Show reasoning traces preference, matching desktop's
+  live expanded and completed compact behavior for Claude and Codex. The first
+  explicit historical disclosure loads one bounded detail page. Longer supplied
+  text has selectable, paged reading controls and truthful truncation notices.
+- Keep a newly appearing live trace in view when already at the bottom, without
+  replaying send-scroll animations on token updates or reconnects. Native
+  acceptance measures the text preview above the composer, not just a hittable
+  disclosure label; reading older history retains control of the viewport.
+- Reproduced missing Codex live text in the packaged previous release through
+  its actual native transport and a real provider. Claude has an independent
+  real-provider journey; neither provider's visibility is evidence of the
+  other's content parity. No hidden or unsupplied reasoning is generated.
+- Candidate 0.1.3 (193) remains pending packaged native acceptance and TestFlight
+  publication. No desktop app replacement or server deployment is included.
+
+## 2026-10-24 — Release mobile cross-chat route-limit correction
+
+- TestFlight 0.1.3 (192), source `c8bfdc042b4466cd3b938245591da016087ae9f8`,
+  is Apple-validated, unexpired and available to the existing internal tester
+  group. External beta review/submission is not included in this release.
+- The packaged iOS 27 Simulator app passed the actual native journey against
+  an isolated production server and real Codex: send with seventeen existing
+  grants, select and grant an eighteenth chat, then navigate away and reopen.
+  Both messages were accepted exactly once, received real provider replies,
+  and cleared the composer. All original grants remained usable.
+- Visual inspection of native screenshots confirmed enabled picker rows and
+  retained grants. The native client requested unlimited-route metadata;
+  no production chat or permission grant was modified. Physical-device
+  acceptance was not exercised.
+- All 35 focused route-policy/client/store regressions passed, along with
+  TypeScript, production JavaScript export, and 32 broader mobile source-check
+  groups. Those local checks supplement native acceptance, not replace it.
+  The hosted archive passed signature, metadata, native ABI and symbol checks.
+- Add the sixteen new route-limit regressions to continuous source verification.
+  No desktop app replacement or server deployment was performed.
+
+## 2026-10-23 — Prepare mobile cross-chat route-limit correction
+
+- Match desktop's unlimited-route negotiation and nullable capacity metadata.
+  Share the same capacity policy between the mobile picker and send validation;
+  ordinary messages and existing grants do not require another access slot.
+  Older servers' genuine finite limits still apply to explicit new grants.
+- Preserve the previously released native goal/queue fixes while integrating
+  main's paused-queue recovery and notification updates. This is a mobile
+  candidate; no desktop app replacement or server deployment is included.
+- Reproduced the original failure in the installed production-style iOS
+  Simulator app against an isolated real server with seventeen persisted
+  grants: an ordinary Send was rejected before transport and the eighteenth
+  target was disabled. No user chat or permission grant was changed.
+- Focused policy, HTTP-client and store tests cover unlimited and finite
+  limits, ordinary sends, existing and repeated grants, preserved drafts,
+  authentication failures, and exact request encoding. These tests use mocked
+  transport and do not substitute for native candidate acceptance.
+- Candidate 0.1.3 (192) requires packaged native acceptance before TestFlight
+  publication. Release availability will be recorded after Apple verification.
 
 ## 2026-10-22 — TIFF previews and split-chat file opening
 
