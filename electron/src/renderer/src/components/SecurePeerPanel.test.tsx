@@ -418,7 +418,7 @@ describe('automatic secure peer approval completion', () => {
     })] })) })
     render(<SecurePeerPanel status={peerStatus} />)
     expect(await screen.findByText('Host approved. Finishing connection automatically…')).toBeVisible()
-    expect(teamHub.waitForSecurePeerPairingCompletion).toHaveBeenCalledTimes(1)
+    await waitFor(() => expect(teamHub.waitForSecurePeerPairingCompletion).toHaveBeenCalledTimes(1))
     expect(teamHub.activateSecurePeerPairing).not.toHaveBeenCalled()
     expect(screen.queryByRole('button', { name: 'Reconnect' })).not.toBeInTheDocument()
   })

@@ -25,12 +25,19 @@
   did not authorize an additional file. Native app clicks appended full mail,
   preserved an existing draft across chat navigation, and sent user-edited text
   through normal Send to a real provider response. Light/dark and narrow English/
-  Chinese presentation were inspected. The 214 focused server tests and 273
+  Chinese presentation were inspected. The 229 focused server tests and 343
   desktop regressions pass, along with TypeScript and production compilation.
 - Component/transport regressions cover unread/read messages, attachments,
   stale responses, forged provenance, size boundaries and retry identity. Those
   edge cases are not all repeated in the native UI; Claude-provider acceptance
-  is not claimed. Changes are source-only and need a matching app/server update;
+  is not claimed. A separate pre-existing limitation was reproduced: an idle
+  native goal resume can acknowledge steering but lacks the runtime capability/
+  metadata needed by Chats, which fails before mailbox dispatch. This change
+  does not claim to repair that distinct goal-resume lifecycle path. Full CI
+  also exposed an invalid object-only goal authority fixture and a peer-panel
+  assertion preceding its effect; use a real capability fixture and await the
+  existing observer without weakening assertions or increasing timeouts.
+  Changes are source-only and need a matching app/server update;
   no public release or production server restart was performed.
 
 ## 2026-10-28 - Cursor compound tool IDs and live analytics acceptance
