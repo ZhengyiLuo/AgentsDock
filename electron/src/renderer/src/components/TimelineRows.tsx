@@ -1206,8 +1206,7 @@ function timelineWorkspaceScopeCurrent(scope: TimelineWorkspaceScope): boolean {
     && (state.profiles.find(profile => profile.id === state.activeProfileId)?.serverIdentity ?? null) === scope.serverIdentity
     && (
       state.selectedSessionId === scope.sessionId
-      || state.chatPanes.primary === scope.sessionId
-      || state.chatPanes.secondary === scope.sessionId
+      || Object.values(state.chatPanes).includes(scope.sessionId)
     )
 }
 
@@ -1562,8 +1561,7 @@ function CrossChatExchangeView({ item, sessionId, profileScope }: { item: System
   const workspaceRevision = useAppStore(state => {
     const profile = state.profiles.find(candidate => candidate.id === state.activeProfileId)
     const visible = state.selectedSessionId === sessionId
-      || state.chatPanes.primary === sessionId
-      || state.chatPanes.secondary === sessionId
+      || Object.values(state.chatPanes).includes(sessionId)
     return JSON.stringify([
       state.activeProfileId, state.profileGeneration, profile?.serverIdentity ?? null,
       state.connected, state.connectionGeneration, state.health?.server_instance_id ?? null, visible
@@ -1855,8 +1853,7 @@ function CrossChatView({ item, sessionId, profileScope }: { item: SystemItem; se
   const workspaceRevision = useAppStore(state => {
     const profile = state.profiles.find(candidate => candidate.id === state.activeProfileId)
     const visible = state.selectedSessionId === sessionId
-      || state.chatPanes.primary === sessionId
-      || state.chatPanes.secondary === sessionId
+      || Object.values(state.chatPanes).includes(sessionId)
     return JSON.stringify([
       state.activeProfileId, state.profileGeneration, profile?.serverIdentity ?? null,
       state.connected, state.connectionGeneration, state.health?.server_instance_id ?? null, visible

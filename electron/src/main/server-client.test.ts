@@ -1281,6 +1281,17 @@ describe('AgentServerClient provider reload', () => {
 describe('AgentServerClient stop acknowledgement', () => {
   afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals() })
 
+  it('retains child results even when an older server reports parent success', async () => {
+    const response = { ok: true, stopped: true, subagents: {
+      pending: ['child'], errors: ['Native interrupt not confirmed'], interrupted: ['sibling']
+    } }
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify(response), {
+      status: 200, headers: { 'Content-Type': 'application/json' }
+    })))
+    const client = new AgentServerClient('http://example.test:7850', 'token')
+    await expect(client.stopTurn('chat-1')).resolves.toEqual(response)
+  })
+
   it('preserves a retryable pending Stop response', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({
       ok: true,

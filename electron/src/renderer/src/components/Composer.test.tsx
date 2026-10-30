@@ -1,7 +1,7 @@
 import { StrictMode } from 'react'
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi, type MockInstance } from 'vitest'
 import type { AgentsDockAPI } from '@shared/ipc'
 import { setLocale } from '@shared/i18n'
 import type { TeamHubStatus, TeamHubTeamDetails, TeamHubWorkspace } from '@shared/team-hub'
@@ -17,6 +17,8 @@ import { Composer, TeamMentionPalette } from './Composer'
 import { ClaudeRuntimeProvider } from './ClaudeRuntimeContext'
 import { CodexRuntimeProvider } from './CodexRuntimeContext'
 import { CodexStatusButton } from './CodexControls'
+import * as analytics from '../lib/analytics'
+import * as sessionAnalytics from '../lib/session-analytics'
 
 const secureConnectionId = '09d7bb2e-3b47-4be7-89fc-2cecd90f4434'
 const secureRouteId = '22e7bb2e-3b47-4be7-89fc-2cecd90f4434'
@@ -195,6 +197,128 @@ describe('Composer', () => {
     })
   })
 
+  describe('typed model commands and message routing analytics', () => {
+    let tracker: MockInstance<typeof analytics.trackEvent>
+    const claude: Session = {id:'chat-1',title:'QA',backend:'claude',model:'sonnet',provider_connection:'default'}
+    beforeEach(() => {
+      tracker = vi.spyOn(analytics, 'trackEvent').mockImplementation(() => {})
+      window.agentsDock.sessions = {update:vi.fn().mockImplementation(async (_id,patch) => ({...claude,...patch}))} as unknown as AgentsDockAPI['sessions']
+      window.agentsDock.turns = {send:vi.fn().mockResolvedValue({session:claude,queued:false})} as unknown as AgentsDockAPI['turns']
+      useAppStore.setState({sessions:[claude],runtimeCatalog:{backends:{claude:{models:[{value:'sonnet',label:'Sonnet'},{value:'opus',label:'Opus'},{value:'locked',label:'Locked',locked:true}],efforts:[]}}}})
+    })
+    afterEach(() => tracker.mockRestore())
+    const enter = (text: string) => {
+      const input = screen.getByPlaceholderText('Message')
+      fireEvent.change(input, {target:{value:text}})
+      fireEvent.keyDown(input, {key:'Enter',code:'Enter'})
+    }
+    it.each([false,true])('changes the session model, never sends a prompt (busy=%s)', async busy => {
+      const confirmed = vi.spyOn(sessionAnalytics, 'trackConfirmedSessionChange')
+      useAppStore.setState({activeSessionIds:new Set(busy ? ['chat-1'] : [])})
+      render(<Composer />)
+      enter('/model Opus')
+      await waitFor(() => expect(useAppStore.getState().sessions[0].model).toBe('opus'))
+      await waitFor(() => expect(screen.getByPlaceholderText('Message')).toHaveValue(''))
+      expect(window.agentsDock.sessions.update).toHaveBeenCalledExactlyOnceWith('chat-1',{model:'opus',effort:null})
+      expect(window.agentsDock.turns.send).not.toHaveBeenCalled()
+      expect(useAppStore.getState().pendingTurnSubmissions).toEqual({})
+      expect(confirmed).toHaveBeenCalledWith(expect.objectContaining({model:'sonnet'}),{model:'opus',effort:null},expect.objectContaining({model:'opus'}))
+      confirmed.mockRestore()
+      expect(tracker).not.toHaveBeenCalledWith('message_sent',expect.anything())
+    })
+    it('opens the existing picker for a bare command and preserves attached files', async () => {
+      const file = {id:'file-1',filename:'keep.png'} as AgentFile
+      window.agentsDock.files = {mediaURL:vi.fn().mockReturnValue('data:image/png;base64,')} as unknown as AgentsDockAPI['files']
+      useAppStore.setState({uploadsBySession:{'chat-1':[file]}})
+      render(<Composer />)
+      enter('/model ')
+      expect(await screen.findByRole('menuitemcheckbox',{name:'Opus'})).toBeInTheDocument()
+      expect(useAppStore.getState().uploadsBySession['chat-1']).toEqual([file])
+      expect(window.agentsDock.turns.send).not.toHaveBeenCalled()
+    })
+    it('clears a confirmed default command when the server resolves the concrete API model', async () => {
+      const cursor: Session = {id:'chat-1',title:'QA',backend:'cursor',provider_connection:'custom',model:'chosen'}
+      useAppStore.setState({sessions:[cursor],runtimeCatalog:{backends:{cursor:{models:[],efforts:[],custom_provider:{configured:true,available:true,base_url:null,model:'auto',default_model:'auto',models:[{value:'auto',label:'Auto'},{value:'chosen',label:'Chosen'}]}}}}})
+      vi.mocked(window.agentsDock.sessions.update).mockResolvedValue({...cursor,model:'auto'})
+      render(<Composer />); enter('/model default')
+      await waitFor(() => expect(screen.getByPlaceholderText('Message')).toHaveValue(''))
+      expect(window.agentsDock.sessions.update).toHaveBeenCalledExactlyOnceWith('chat-1',{model:null,effort:null})
+      expect(useAppStore.getState().sessions[0].model).toBe('auto')
+      expect(window.agentsDock.turns.send).not.toHaveBeenCalled()
+      expect(tracker).not.toHaveBeenCalledWith('message_sent',expect.anything())
+    })
+    it('allows fixing an unavailable current model without sending a turn', async () => {
+      useAppStore.setState({sessions:[{...claude,model:'locked'}]})
+      render(<Composer />); enter('/model Opus')
+      await waitFor(() => expect(screen.getByPlaceholderText('Message')).toHaveValue(''))
+      expect(useAppStore.getState().sessions[0].model).toBe('opus')
+      expect(window.agentsDock.turns.send).not.toHaveBeenCalled()
+    })
+    it.each(['/model unknown','/model locked','/model Opus\nextra instructions'])('rejects %s without admitting a turn', text => {
+      render(<Composer />); enter(text)
+      expect(useAppStore.getState().error).toMatch(/Model not found/)
+      expect(screen.getByPlaceholderText('Message')).toHaveValue(text)
+      expect(window.agentsDock.sessions.update).not.toHaveBeenCalled()
+      expect(window.agentsDock.turns.send).not.toHaveBeenCalled()
+    })
+    it('keeps a failed command for retry and rolls back the model', async () => {
+      vi.mocked(window.agentsDock.sessions.update).mockRejectedValueOnce(new Error('offline'))
+      render(<Composer />); enter('/model Opus')
+      await waitFor(() => expect(useAppStore.getState().error).toBe('offline'))
+      expect(useAppStore.getState().sessions[0].model).toBe('sonnet')
+      expect(screen.getByPlaceholderText('Message')).toHaveValue('/model Opus')
+      expect(tracker).not.toHaveBeenCalledWith('chat_model_changed',expect.anything())
+      enter('/model Opus')
+      await waitFor(() => expect(screen.getByPlaceholderText('Message')).toHaveValue(''))
+      expect(useAppStore.getState().sessions[0].model).toBe('opus')
+    })
+    it('keeps a newer draft and guards double Enter while saving', async () => {
+      let done!: (s:Session) => void
+      vi.mocked(window.agentsDock.sessions.update).mockReturnValue(new Promise(resolve => {done=resolve}))
+      render(<Composer />); enter('/model Opus'); enter('/model Opus')
+      expect(window.agentsDock.sessions.update).toHaveBeenCalledOnce()
+      fireEvent.change(screen.getByPlaceholderText('Message'),{target:{value:'new draft'}})
+      await act(async () => done({...claude,model:'opus'}))
+      expect(screen.getByPlaceholderText('Message')).toHaveValue('new draft')
+      expect(window.agentsDock.turns.send).not.toHaveBeenCalled()
+    })
+    it('does not clear a different server draft on a late model reply', async () => {
+      let done!: (s:Session) => void
+      vi.mocked(window.agentsDock.sessions.update).mockReturnValue(new Promise(resolve => {done=resolve}))
+      render(<Composer />); enter('/model Opus')
+      act(() => useAppStore.setState({activeProfileId:'profile-b',profileGeneration:1,sessions:[{...claude,model:'sonnet'}],drafts:{'chat-1':'other server draft'}}))
+      await act(async () => done({...claude,model:'opus'}))
+      expect(useAppStore.getState().sessions[0].model).toBe('sonnet')
+      expect(screen.getByPlaceholderText('Message')).toHaveValue('other server draft')
+      expect(tracker).not.toHaveBeenCalledWith('chat_model_changed',expect.anything())
+    })
+    it.each([false,true])('tracks the submitting connection after receipt, not the later selection (queued=%s)', async queued => {
+      let done!: (response:unknown) => void
+      vi.mocked(window.agentsDock.turns.send).mockImplementation(() => new Promise(resolve => {done=resolve}) as never)
+      render(<Composer />); enter('QA normal message')
+      await waitFor(() => expect(window.agentsDock.turns.send).toHaveBeenCalledOnce())
+      expect(tracker).not.toHaveBeenCalledWith('message_sent',expect.anything())
+      act(() => useAppStore.setState({sessions:[{...claude,provider_connection:'custom'}]}))
+      await act(async () => done({session:claude,queued}))
+      expect(tracker).toHaveBeenCalledWith('message_sent',{backend:'claude',connection_kind:'default'})
+      expect(tracker.mock.calls.filter(([event]) => event==='message_sent')).toHaveLength(1)
+    })
+    it('does not count a failed submission', async () => {
+      vi.mocked(window.agentsDock.turns.send).mockRejectedValue(new Error('offline'))
+      render(<Composer />); enter('QA failed message')
+      await waitFor(() => expect(useAppStore.getState().error).toBe('offline'))
+      expect(tracker).not.toHaveBeenCalledWith('message_sent',expect.anything())
+    })
+    it('counts an accepted Custom API message without API or model details', async () => {
+      const custom: Session = {...claude,provider_connection:'custom',model:'private-model'}
+      useAppStore.setState({sessions:[custom],health:{ok:true,capabilities:{provider_connections_v1:{per_chat:true}}},runtimeCatalog:{backends:{claude:{models:[],efforts:[],custom_provider:{configured:true,available:true,base_url:'https://private.invalid',model:'private-model',default_model:'private-model',models:[{value:'private-model',label:'Private'}]}}}}})
+      vi.mocked(window.agentsDock.turns.send).mockResolvedValue({session:custom,queued:false})
+      render(<Composer />); enter('private message')
+      await waitFor(() => expect(tracker).toHaveBeenCalledWith('message_sent',{backend:'claude',connection_kind:'custom_api'}))
+      expect(JSON.stringify(tracker.mock.calls)).not.toMatch(/private/)
+    })
+  })
+
   it('mounts with empty per-chat upload state without an external-store render loop', () => {
     render(<Composer />)
     expect(screen.getByPlaceholderText('Message')).toBeInTheDocument()
@@ -218,6 +342,42 @@ describe('Composer', () => {
     expect(view.container.querySelector('.queued-row.local-pending')).toHaveTextContent('Follow up after the current task')
     expect(view.container.querySelector('.queued-row.local-pending')).toHaveTextContent('Adding to queue…')
     expect(view.container.querySelector('.queued-row.local-pending button')).toBeNull()
+  })
+
+  it('keeps the focused draft outside queue scrolling when a queued turn arrives and leaves', () => {
+    const session: Session = { id: 'chat-1', title: 'Chat', backend: 'codex' }
+    const snapshot = {
+      session, events: [], queuedTurns: [] as QueuedTurn[], files: [],
+      hasMoreEvents: false, filesTotal: 0, cachedAt: 0
+    }
+    useAppStore.setState({ activeSessionIds: new Set(['chat-1']), snapshots: { 'chat-1': snapshot } })
+    const view = render(<Composer />)
+    const editor = screen.getByRole('textbox', { name: 'Message' }) as HTMLTextAreaElement
+    const draft = 'First line of my draft\nSecond line stays editable\nFinal detail'
+    fireEvent.change(editor, { target: { value: draft } })
+    editor.focus()
+    editor.setSelectionRange(6, 10)
+
+    act(() => useAppStore.setState({ snapshots: { 'chat-1': { ...snapshot, queuedTurns: [{
+      queued_id: 'queued-other', session_id: 'chat-1', prompt: 'Previously queued message',
+      file_ids: [], position: 1
+    }] } } }))
+    const extras = view.container.querySelector('.composer-scroll-region')!
+    expect(extras).toContainElement(screen.getByText('Previously queued message'))
+    expect(extras).not.toContainElement(editor)
+    expect(screen.getByRole('textbox', { name: 'Message' })).toBe(editor)
+    expect(editor).toHaveValue(draft)
+    expect(editor).toHaveFocus()
+    fireEvent.scroll(extras, { target: { scrollTop: 100 } })
+    expect([editor.selectionStart, editor.selectionEnd, editor.scrollTop]).toEqual([6, 10, 0])
+
+    act(() => useAppStore.setState({ snapshots: { 'chat-1': snapshot } }))
+    expect(screen.queryByText('Previously queued message')).not.toBeInTheDocument()
+    expect(screen.getByRole('textbox', { name: 'Message' })).toBe(editor)
+    expect(editor).toHaveFocus()
+    fireEvent.change(editor, { target: { value: `${draft}\nContinue writing` } })
+    expect(editor).toHaveValue(`${draft}\nContinue writing`)
+    expect(view.container.querySelector('.composer-bar')).not.toBeNull()
   })
 
   it('keeps an offline shared-chat draft editable while gating message and attachment writes', () => {
@@ -1767,6 +1927,27 @@ describe('Composer', () => {
     confirm.mockRestore()
   })
 
+  it.each(['codex_thread_id', 'session_id'] as const)('keeps idle Stop subagents with %s until a native terminal arrives, without queuing Send', async providerId => {
+    const owner = { id: 'chat-1', title: 'Chat', backend: 'codex' as const, [providerId]: 'root' }
+    const child = { id: 'child-event', seq: 1, session_id: owner.id, type: 'subagent_state',
+      backend: 'codex' as const, ts: '2026-10-25T10:00:00Z', subagent_id: 'child',
+      subagent_parent_thread_id: 'root', subagent_status: 'running' }
+    const snapshot = { session: owner, events: [child], queuedTurns: [], files: [], filesTotal: 0, hasMoreEvents: false, cachedAt: 0 }
+    const stop = vi.fn().mockResolvedValue({ stopped: true, subagents: { pending: ['child'] } })
+    window.agentsDock.turns = { stop } as unknown as AgentsDockAPI['turns']
+    useAppStore.setState({ sessions: [owner], snapshots: { [owner.id]: snapshot } })
+    render(<Composer />)
+    expect(screen.getByRole('button', { name: 'Send message' })).toBeInTheDocument()
+    await userEvent.click(screen.getByRole('button', { name: 'Stop subagents' }))
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Stop subagents' })).toBeEnabled())
+    expect(stop).toHaveBeenCalledExactlyOnceWith(owner.id)
+    expect(useAppStore.getState().error).toContain('subagents')
+    act(() => useAppStore.setState({ snapshots: { [owner.id]: { ...snapshot,
+      events: [child, { ...child, id: 'child-end', seq: 2, subagent_status: 'stopped' }] } } }))
+    expect(screen.queryByRole('button', { name: 'Stop subagents' })).not.toBeInTheDocument()
+    expect(useAppStore.getState().activeSessionIds.has(owner.id)).toBe(false)
+  })
+
   it.each(['idle', 'cached', 'syncing', 'reconnecting', 'offline', 'error'] as const)(
     'shows only a neutral sync status for an unknown active origin while chat sync is %s', status => {
       useAppStore.setState({
@@ -1778,6 +1959,8 @@ describe('Composer', () => {
       expect(notice).toHaveAttribute('role', 'status')
       expect(notice).toHaveClass('composer-sync-status')
       expect(notice).not.toHaveClass('chat-reference-warning')
+      expect(notice.closest('.composer-context-row')).not.toBeNull()
+      expect(notice.closest('.composer-scroll-region')).toBeNull()
       expect(screen.queryByText(/An active turn is running while chat sync is not live/)).not.toBeInTheDocument()
 
       act(() => useAppStore.setState({ syncBySession: { 'chat-1': { status: 'live', error: null } } }))
@@ -1786,6 +1969,24 @@ describe('Composer', () => {
       expect(screen.getByRole('button', { name: 'Stop' })).toBeInTheDocument()
     }
   )
+
+  it('keeps shared-chat sync status outside the compact input without exposing the folder control', () => {
+    Object.defineProperty(window, 'agentsDock', { configurable: true, value: { ...window.agentsDock, sharedChat: true } })
+    useAppStore.setState({
+      activeSessionIds: new Set(['chat-1']),
+      syncBySession: { 'chat-1': { status: 'syncing', error: null } }
+    })
+    const view = render(<Composer />)
+    const notice = screen.getByText('Syncing…')
+    expect(notice).toHaveAttribute('role', 'status')
+    expect(notice.closest('.composer-context-row')).not.toBeNull()
+    expect(notice.closest('.composer-scroll-region')).toBeNull()
+    expect(view.container.querySelector('.cwd-pill')).toBeNull()
+    expect(screen.getByPlaceholderText('Message')).toBeEnabled()
+
+    act(() => useAppStore.setState({ syncBySession: { 'chat-1': { status: 'live', error: null } } }))
+    expect(view.container.querySelector('.composer-context-row')).toBeNull()
+  })
 
   it('localizes the neutral unknown-origin sync status without inventing activity for an idle chat', () => {
     setLocale('zh-CN')

@@ -1,8 +1,9 @@
 import assert from 'node:assert/strict'
-import type { ChatDefaults, CreateSessionInput, PublicServerProfile, QueuedRunNowResponse, Session } from '../types'
+import type { ChatDefaults, CreateSessionInput, Health, PublicServerProfile, QueuedRunNowResponse, RuntimeCatalog, Session, Snapshot, TimelinePage } from '../types'
 import { WELCOME_SESSION_ID } from '../lib/welcome-session'
 import { saveCachedSessions, saveWorkspacePreferences } from '../storage/cache'
 import { client, useAppStore } from './useAppStore'
+import { ServerError } from '../api/AgentServerClient'
 
 function deferred<T>() {
   let resolve!: (value: T) => void
@@ -17,6 +18,8 @@ const defaults: ChatDefaults = {
 const selected: Session = {
   id: 'selected', title: 'Open project', folder: 'Research', cwd: '/work/research',
   backend: 'codex', model: 'gpt-current', effort: 'low',
+  codex_approval_policy: 'on-request', codex_sandbox_mode: 'read-only',
+  codex_permission_profile: null, codex_approvals_reviewer: 'user',
 }
 const profile = (id: string): PublicServerProfile => ({
   id, name: id, serverURL: `https://${id}.example`, serverIdentity: `identity-${id}`,
@@ -26,6 +29,7 @@ const profile = (id: string): PublicServerProfile => ({
 })
 const originalFetch = globalThis.fetch
 const originalState = useAppStore.getState()
+const originalSessionPage = client.sessionPage
 const requests: CreateSessionInput[] = []
 let nextCreatedId = 0
 const createdSession = (input: CreateSessionInput): Session => ({ ...input, id: `created-${++nextCreatedId}` })
@@ -40,6 +44,7 @@ const captureCreate = async (input: CreateSessionInput): Promise<Session> => {
 function resetCreation(overrides: Partial<ReturnType<typeof useAppStore.getState>> = {}) {
   requests.length = 0
   client.createSession = captureCreate
+  client.sessionPage = async () => { throw new Error('Unexpected session detail read') }
   useAppStore.setState({
     sessions: [selected], selectedSessionId: selected.id, chatDefaults: { ...defaults },
     health: { ok: true, default_cwd: ' /server/default ' }, runtime: null,
@@ -66,12 +71,155 @@ try {
   assert.equal(await useAppStore.getState().quickCreateSession(0), true)
   assert.deepEqual(requests[0], {
     title: 'New chat', folder: 'Research', cwd: '/work/research',
-    backend: 'claude', model: 'claude-sonnet', effort: 'high',
-  }, 'the open chat supplies location while saved preferences supply backend/model/effort')
+    backend: 'codex', model: 'gpt-current', effort: 'low',
+    codex_approval_policy: 'on-request', codex_sandbox_mode: 'read-only',
+    codex_permission_profile: null, codex_approvals_reviewer: 'user',
+  }, 'the last open chat supplies agent, model, permissions, and location')
   assert.deepEqual(useAppStore.getState().chatDefaults, {
-    ...defaults, folder: 'Research', cwd: '/work/research',
-  }, 'successful quick creation remembers the effective location')
+    backend: 'codex', model: 'gpt-current', effort: 'low', folder: 'Research', cwd: '/work/research',
+  }, 'successful quick creation remembers the effective defaults')
   assert.equal(useAppStore.getState().selectedSessionId, 'created-1')
+
+  for (const permissionMode of ['default', 'acceptEdits', 'bypassPermissions', 'plan'] as const) {
+    resetCreation({
+      chatDefaults: { ...defaults, backend: 'codex' },
+      sessions: [{ ...selected, backend: 'claude', model: 'claude-sonnet', claude_permission_mode: permissionMode }],
+    })
+    assert.equal(await useAppStore.getState().quickCreateSession(0), true)
+    assert.equal(requests[0].backend, 'claude', 'opening Claude overrides the initial Codex preference')
+    assert.equal(requests[0].claude_permission_mode, permissionMode)
+    assert.equal(requests[0].codex_sandbox_mode, undefined, 'permissions belonging to another agent are not copied')
+  }
+
+  resetCreation({ sessions: [{
+    ...selected, codex_permission_profile: 'restricted-project', codex_approvals_reviewer: 'auto_review',
+    provider_jobs_access: 'blocked', system_prompt: 'Only applies to this chat', codex_thread_id: 'existing-thread',
+  }] })
+  assert.equal(await useAppStore.getState().quickCreateSession(0), true)
+  assert.equal(requests[0].codex_permission_profile, 'restricted-project')
+  assert.equal(requests[0].codex_approvals_reviewer, 'auto_review')
+  assert.equal(requests[0].provider_jobs_access, 'blocked')
+  assert.equal(requests[0].system_prompt, undefined)
+  assert.equal(requests[0].providerId, undefined, 'a new chat must not resume the source provider thread')
+
+  resetCreation({ runtime: { backends: {
+    codex: { models: [], efforts: [], available: false, native_credentials_present: false },
+    claude: { models: [], efforts: [], available: true, native_credentials_present: true },
+  } } })
+  assert.equal(await useAppStore.getState().quickCreateSession(0), true)
+  assert.equal(requests[0].backend, 'claude')
+  assert.equal(requests[0].model, '')
+  assert.equal(requests[0].codex_sandbox_mode, undefined, 'unavailable agents cannot pass their policy to the fallback')
+
+  const allAgents = ['codex', 'claude', 'cursor', 'opencode', 'gemini'] as const
+  const allAgentHealth: Health = { ok: true, default_cwd: '/server/default', capabilities: {
+    codex_provider_v1: { per_chat: true, per_chat_models: true },
+    provider_connections_v1: { per_chat: true, backends: [...allAgents] },
+    cursor_backend: { version: 2, available: true }, opencode_backend: { version: 1, available: true },
+    gemini_backend: { version: 1, available: true, client_capability: 'gemini_acp_v1' },
+  } }
+  const agentCatalog = (available: readonly string[]): RuntimeCatalog => ({ backends: Object.fromEntries(allAgents.map(backend => [backend, {
+    models: [], efforts: [], available: false, native_credentials_present: false,
+    custom_provider: { configured: true, available: available.includes(backend), model: 'api-model' },
+  }])) })
+  for (const previous of allAgents) {
+    for (const available of allAgents.filter(backend => backend !== previous)) {
+      resetCreation({ sessions: [{ ...selected, backend: previous, codex_provider: 'custom', provider_connection: 'custom' }],
+        health: allAgentHealth, runtime: agentCatalog([available]) })
+      assert.equal(await useAppStore.getState().quickCreateSession(0), true, `${previous} -> ${available}`)
+      assert.equal(requests[0].backend, available)
+      assert.equal(requests[0].model, '')
+      assert.equal(requests[0].cwd, '/server/default')
+      assert.equal(requests[0].codex_sandbox_mode, undefined)
+    }
+    resetCreation({ sessions: [{ ...selected, backend: previous, codex_provider: 'custom', provider_connection: 'custom' }],
+      health: allAgentHealth, runtime: agentCatalog([]) })
+    assert.equal(await useAppStore.getState().quickCreateSession(0), false)
+    assert.equal(requests.length, 0)
+    assert.match(useAppStore.getState().error ?? '', /No available agent/)
+  }
+
+  for (const succeedOn of [3, Infinity]) {
+    resetCreation({ sessions: [{ ...selected, backend: 'gemini', provider_connection: 'custom', gemini_permission_mode: 'default' }],
+      health: allAgentHealth, runtime: agentCatalog(allAgents) })
+    client.createSession = async input => {
+      requests.push({ ...input })
+      if (requests.length === succeedOn) return createdSession(input)
+      throw new ServerError(409, 'Connect this custom API in My Agents before creating a chat.')
+    }
+    assert.equal(await useAppStore.getState().quickCreateSession(0), Number.isFinite(succeedOn))
+    assert.equal(requests[0].backend, 'gemini')
+    assert.equal(requests.length, Math.min(succeedOn, allAgents.length))
+    assert.equal(new Set(requests.map(input => input.backend)).size, requests.length, 'try each rejected candidate only once')
+  }
+
+  for (const previous of ['codex', 'claude', 'cursor', 'opencode'] as const) {
+    resetCreation({ sessions: [{ ...selected, backend: previous }],
+      health: allAgentHealth, runtime: agentCatalog([previous]) })
+    assert.equal(await useAppStore.getState().quickCreateSession(0), true)
+    assert.equal(requests[0].backend, previous, 'the same agent API mode can be the only available fallback')
+    assert.equal(previous === 'codex' ? requests[0].codex_provider : requests[0].provider_connection, 'custom')
+    assert.equal(requests[0].model, '')
+    assert.equal(requests[0].codex_sandbox_mode, undefined)
+  }
+
+  resetCreation({
+    sessions: [{ ...selected, backend: 'cursor', model: '', cursor_permission_mode: 'ask' }],
+    health: { ok: true, capabilities: { cursor_backend: { version: 2, available: true } } },
+    runtime: { backends: { cursor: { models: [], efforts: [], available: true } } },
+  })
+  assert.equal(await useAppStore.getState().quickCreateSession(0), true)
+  assert.equal(requests[0].backend, 'cursor')
+  assert.equal(requests[0].cursor_permission_mode, 'ask')
+  assert.equal(requests[0].codex_approval_policy, undefined)
+
+  for (const backend of ['opencode', 'gemini'] as const) {
+    const permissionField = backend === 'opencode' ? 'opencode_permission_mode' : 'gemini_permission_mode'
+    resetCreation({
+      sessions: [{ ...selected, backend, provider_connection: 'custom', model: 'api-model', [permissionField]: 'plan' }],
+      health: { ok: true, capabilities: {
+        opencode_backend: { version: 1, available: true },
+        gemini_backend: { version: 1, available: true, client_capability: 'gemini_acp_v1' },
+        provider_connections_v1: { per_chat: true, backends: ['opencode', 'gemini'] },
+      } },
+      runtime: { backends: { [backend]: { models: [], efforts: [], available: true, native_credentials_present: false,
+        custom_provider: { configured: true, available: true, model: 'api-model' } } } },
+    })
+    assert.equal(await useAppStore.getState().quickCreateSession(0), true)
+    assert.equal(requests[0].backend, backend)
+    assert.equal(requests[0].provider_connection, 'custom')
+    assert.equal(requests[0].model, 'api-model')
+    assert.equal(requests[0][permissionField], 'plan')
+    assert.equal(requests[0].codex_approval_policy, undefined)
+  }
+
+  const summary = { id: selected.id, title: 'Summary only', backend: 'claude' as const }
+  resetCreation({ sessions: [summary] })
+  const detailGate = deferred<TimelinePage>()
+  let detailReads = 0
+  client.sessionPage = (id, options) => {
+    assert.equal(id, selected.id)
+    assert.equal(options?.limit, 1, 'inheritance never downloads a full transcript')
+    detailReads += 1
+    return detailGate.promise
+  }
+  const resolvingDefaults = useAppStore.getState().quickCreateSession(0)
+  assert.equal(resolvingDefaults, useAppStore.getState().quickCreateSession(0))
+  assert.equal(detailReads, 1)
+  assert.equal(requests.length, 0, 'summary rows must resolve permissions before creating')
+  useAppStore.setState({ selectedSessionId: 'different-chat' })
+  detailGate.resolve({ session: { ...summary, claude_permission_mode: 'plan' } } as TimelinePage)
+  assert.equal(await resolvingDefaults, true)
+  assert.equal(requests[0].backend, 'claude')
+  assert.equal(requests[0].claude_permission_mode, 'plan', 'inherit the chat captured at the tap')
+
+  resetCreation({ sessions: [summary] })
+  client.sessionPage = async () => { throw new Error('Permission lookup failed') }
+  assert.equal(await useAppStore.getState().quickCreateSession(0), false)
+  assert.equal(requests.length, 0, 'failed permission reads must not create with a different policy')
+  assert.match(useAppStore.getState().error ?? '', /Permission lookup failed/)
+  client.sessionPage = async () => ({ session: { ...summary, claude_permission_mode: 'default' } } as TimelinePage)
+  assert.equal(await useAppStore.getState().quickCreateSession(0), true, 'detail-read failure releases the create gate')
 
   const apiHealth = { ok: true, capabilities: {
     codex_provider_v1: { per_chat: true, per_chat_models: true },
@@ -83,25 +231,106 @@ try {
   }])) }
   for (const backend of ['codex', 'claude'] as const) {
     const modeField = backend === 'codex' ? 'codex_provider' : 'provider_connection'
-    resetCreation({ health: apiHealth, runtime: apiCatalog, chatDefaults: { ...defaults, backend, [modeField]: 'custom', model: 'api-model' } })
+    resetCreation({ selectedSessionId: null, health: apiHealth, runtime: apiCatalog, chatDefaults: { ...defaults, backend, [modeField]: 'custom', model: 'api-model' } })
     assert.equal(await useAppStore.getState().quickCreateSession(0), true)
     assert.equal(requests[0][modeField], 'custom', 'API mode must reach the client even with no native login')
     assert.equal(useAppStore.getState().chatDefaults[modeField], 'custom')
     assert.equal(useAppStore.getState().sessions.at(-1)?.[modeField], 'custom')
     requests.length = 0
     useAppStore.setState({ runtime: { backends: { [backend]: { models: [], efforts: [], native_credentials_present: true } } } })
-    assert.equal(await useAppStore.getState().quickCreateSession(0), false)
-    assert.equal(requests.length, 0, 'a removed custom default must not fall back to native login')
+    assert.equal(await useAppStore.getState().quickCreateSession(0), true)
+    assert.equal(requests.length, 1, 'an unavailable custom default must not block a new blank chat')
+    assert.equal(requests[0].codex_provider, undefined)
+    assert.equal(requests[0].provider_connection, undefined)
+    assert.equal(requests[0].model, '')
+    assert.equal(requests[0].cwd, '', 'without an advertised directory, let the server use its default')
+
+    resetCreation({
+      health: apiHealth, runtime: apiCatalog,
+      sessions: [{ ...selected, backend, [modeField]: 'custom', model: 'api-model', claude_permission_mode: 'plan' }],
+    })
+    assert.equal(await useAppStore.getState().quickCreateSession(0), true)
+    assert.equal(requests[0].backend, backend)
+    assert.equal(requests[0][modeField], 'custom', 'the last open API chat overrides native saved defaults')
+    assert.equal(requests[0].model, 'api-model')
   }
   resetCreation({ health: apiHealth, runtime: apiCatalog })
   assert.equal(await useAppStore.getState().quickCreateSession(0), true)
-  assert.equal(requests[0].provider_connection, 'custom', 'API-only servers create in an available API mode')
+  assert.equal(requests[0].backend === 'codex' ? requests[0].codex_provider : requests[0].provider_connection,
+    'custom', 'API-only servers create in an available API mode')
   assert.equal(requests[0].model, '', 'switching to API must not carry a native model default')
 
   resetCreation({ health: apiHealth, runtime: apiCatalog })
-  client.createSession = async input => ({ ...createdSession(input), provider_connection: 'default' })
+  client.createSession = async input => ({ ...createdSession(input), codex_provider: 'default', provider_connection: 'default' })
   assert.equal(await useAppStore.getState().quickCreateSession(0), false, 'a server ignoring API routing must not open a native chat as though it were custom')
   assert.equal(useAppStore.getState().selectedSessionId, selected.id)
+
+  const geminiHealth = { ok: true, default_cwd: '/server/default', capabilities: {
+    gemini_backend: { available: true, version: 1, client_capability: 'gemini_acp_v1' },
+    provider_connections_v1: { per_chat: true, backends: ['gemini'] },
+  } }
+  const geminiCatalog = { backends: { gemini: { models: [], efforts: [],
+    custom_provider: { configured: true, available: true, model: 'api-model' } } } }
+  const geminiChat: Session = { ...selected, backend: 'gemini', provider_connection: 'custom',
+    cwd: '/deleted/workspace', model: 'api-model', gemini_permission_mode: 'plan' }
+  resetCreation({ sessions: [geminiChat], health: geminiHealth, runtime: geminiCatalog })
+  client.createSession = async input => {
+    requests.push({ ...input })
+    if (input.cwd === '/deleted/workspace') throw new ServerError(400, 'Gemini requires an existing workspace directory.')
+    return createdSession(input)
+  }
+  assert.equal(await useAppStore.getState().quickCreateSession(0), true)
+  assert.equal(requests.length, 2)
+  assert.notEqual(requests[1].backend, 'gemini')
+  assert.equal(requests[1].cwd, '/server/default')
+  assert.equal(requests[1].gemini_permission_mode, undefined)
+  assert.equal(useAppStore.getState().sessions[0].cwd, '/deleted/workspace', 'never rewrite the old chat workspace')
+  assert.equal(useAppStore.getState().error, null)
+
+  for (const failure of [new ServerError(500, 'Gemini requires an existing workspace directory.'),
+    new ServerError(401, 'Unauthorized'), new Error('Network request timed out')]) {
+    resetCreation({ sessions: [geminiChat], health: geminiHealth, runtime: geminiCatalog })
+    client.createSession = async input => { requests.push({ ...input }); throw failure }
+    assert.equal(await useAppStore.getState().quickCreateSession(0), false)
+    assert.equal(requests.length, 1, 'unknown write outcomes and auth errors cannot create a second chat')
+  }
+
+  resetCreation({ sessions: [geminiChat], health: geminiHealth, runtime: geminiCatalog })
+  client.createSession = async input => { requests.push({ ...input }); throw new ServerError(400, 'Gemini requires an existing workspace directory.') }
+  assert.equal(await useAppStore.getState().quickCreateSession(0), false)
+  assert.equal(requests.length, 2, 'a bad server default does not cause an infinite retry')
+  requests.length = 0
+  assert.equal(await useAppStore.getState().createSession({ title: 'Explicit', folder: 'General', cwd: '/deleted/workspace', backend: 'gemini', provider_connection: 'custom' }, 0), false)
+  assert.equal(requests.length, 1, 'explicit workspace choices are never silently replaced')
+
+  for (const [events, running] of [
+    [[{ type: 'turn_started' }, { type: 'error' }, { type: 'turn_finished' }], false],
+    [[{ type: 'error' }, { type: 'turn_started' }, { type: 'assistant_text' }, { type: 'turn_finished' }], false],
+    [[{ type: 'turn_started' }, { type: 'error' }], true],
+  ] as const) {
+    resetCreation({ sessions: [geminiChat], health: geminiHealth, runtime: geminiCatalog,
+      activeSessionIds: new Set(running ? [geminiChat.id] : []),
+      snapshots: { [geminiChat.id]: { events } as unknown as Snapshot } })
+    assert.equal(await useAppStore.getState().quickCreateSession(0), true)
+    assert.equal(requests[0].backend, 'gemini', 'a message failure is not a create failure')
+    assert.equal(requests[0].provider_connection, 'custom')
+    assert.equal(requests[0].model, 'api-model')
+    assert.equal(requests[0].gemini_permission_mode, 'plan')
+    assert.equal(requests.length, 1, 'inherit the selected agent regardless of previous turn outcomes')
+  }
+
+  resetCreation({ sessions: [geminiChat], health: geminiHealth, runtime: geminiCatalog })
+  client.createSession = async input => {
+    requests.push({ ...input })
+    if (input.backend === 'gemini') throw new ServerError(409, 'Connect this custom API in My Agents before creating a chat.')
+    return createdSession(input)
+  }
+  assert.equal(await useAppStore.getState().quickCreateSession(0), true)
+  assert.equal(requests.length, 2)
+  assert.notEqual(requests[1].backend, 'gemini')
+  assert.equal(requests[1].gemini_permission_mode, undefined)
+  assert.equal(requests[1].model, '')
+  assert.equal(requests[1].cwd, '/server/default')
 
   const originalUpdate = client.updateSession
   try {
@@ -129,6 +358,8 @@ try {
     assert.equal(await useAppStore.getState().quickCreateSession(0), true, label)
     assert.equal(requests[0]?.folder, defaults.folder, `${label} uses the saved folder`)
     assert.equal(requests[0]?.cwd, defaults.cwd, `${label} uses the saved working directory`)
+    assert.equal(requests[0]?.backend, defaults.backend, `${label} uses the saved agent`)
+    assert.equal(requests[0]?.codex_sandbox_mode, undefined)
   }
   for (const location of [
     { folder: undefined, cwd: undefined },
@@ -224,7 +455,8 @@ try {
     assert.equal(requests.length, 2, 'a pending old-profile request does not block the new profile')
     assert.equal(requests[1]?.folder, nextSession.folder)
     assert.equal(requests[1]?.cwd, nextSession.cwd)
-    assert.equal(requests[1]?.model, 'next-model')
+    assert.equal(requests[1]?.model, nextSession.model)
+    assert.equal(requests[1]?.codex_sandbox_mode, nextSession.codex_sandbox_mode)
     if (oldFails) oldGate.reject(new Error('Old profile failure'))
     else oldGate.resolve({ ...selected, id: 'stale-created-chat' })
     assert.equal(await oldRequest, false)
@@ -237,10 +469,25 @@ try {
     assert.equal(useAppStore.getState().selectedSessionId, newSession.id)
   }
 
+  resetCreation({ sessions: [summary] })
+  const staleDetail = deferred<TimelinePage>()
+  client.sessionPage = () => staleDetail.promise
+  const oldDetailRequest = useAppStore.getState().quickCreateSession(useAppStore.getState().profileGeneration)
+  await useAppStore.getState().switchServerProfile('profile-b')
+  staleDetail.resolve({ session: { ...summary, claude_permission_mode: 'plan' } } as TimelinePage)
+  assert.equal(await oldDetailRequest, false)
+  assert.equal(requests.length, 0, 'switching servers during the permission lookup cannot create on either server')
+  assert.equal(useAppStore.getState().error, null)
+  await useAppStore.getState().switchServerProfile('uninitialized')
+
   resetCreation()
   let forkCalls = 0
   client.forkSession = async () => { forkCalls += 1; return { session: { ...selected, id: 'forked' } } }
   const generation = useAppStore.getState().profileGeneration
+  resetCreation({ sessions: [{ ...selected, backend: 'gemini' }] })
+  await useAppStore.getState().forkSession(selected.id, generation)
+  assert.equal(forkCalls, 0, 'unsupported Gemini forks must not reach the server')
+  assert.match(useAppStore.getState().error ?? '', /does not support forking Gemini/)
   for (const blocked of [
     { activeSessionIds: new Set([selected.id]) },
     { stoppingSessionIds: new Set([selected.id]) },
@@ -298,6 +545,7 @@ try {
   await nextFork
   assert.equal(useAppStore.getState().selectedSessionId, 'next-profile-fork')
 } finally {
+  client.sessionPage = originalSessionPage
   globalThis.fetch = originalFetch
   useAppStore.setState(originalState)
 }

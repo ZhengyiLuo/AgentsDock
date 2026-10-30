@@ -632,7 +632,7 @@ export class TimelineProjector {
         ? event.run_id || `job-${event.seq}`
         : ''
     )
-    if (jobId) {
+    if (jobId && !isNativeGoalSteerEvent(event)) {
       this.appendJobEvent(event, jobId)
       return
     }
@@ -673,7 +673,7 @@ export class TimelineProjector {
     }
 
     if (isNativeGoalSteerEvent(event)) {
-      // Native steering keeps the same goal/run alive. End only the previous
+      // Native user input keeps the same provider run alive. End only the previous
       // display slice so its activity and trace cannot absorb the new input.
       const prior = this.turnByRun.get(event.run_id!)
       if (prior) {
@@ -689,7 +689,7 @@ export class TimelineProjector {
         const file = this.filesById.get(id)
         if (file && agentFileBelongsToSession(file, event.session_id)) turn.files.push(file)
       }
-      this.activeTurn = turn
+      if (!jobId) this.activeTurn = turn
       return
     }
 

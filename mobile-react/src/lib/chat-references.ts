@@ -179,7 +179,7 @@ export function supportedCrossChatTargetBackends(health: Health | null | undefin
   if (!crossChatHandoffsAvailable(health)) return []
   const advertised = health?.capabilities?.cross_chat_handoffs_v1?.supported_target_backends
   if (!Array.isArray(advertised)) return ['codex', 'claude']
-  return advertised.filter((backend): backend is Backend => backend === 'codex' || backend === 'claude' || backend === 'cursor')
+  return advertised.filter((backend): backend is Backend => ['codex', 'claude', 'cursor', 'opencode', 'gemini'].includes(backend))
 }
 
 /**
@@ -198,6 +198,9 @@ export function interactiveClientCapabilities(
       ? codexInteractiveClientCapability(health)
       : null
   if (interactive) capabilities.push(interactive)
+  if (session?.backend === 'gemini' && health?.capabilities?.gemini_backend?.available === true
+    && health.capabilities.gemini_backend.version === 1
+    && health.capabilities.gemini_backend.client_capability === 'gemini_acp_v1') capabilities.push('gemini_acp_v1')
   if (crossChatHandoffsAvailable(health)) {
     capabilities.push(CROSS_CHAT_HANDOFFS_V1_CLIENT_CAPABILITY)
     if (crossChatCapabilityVersion(health) >= 2) {

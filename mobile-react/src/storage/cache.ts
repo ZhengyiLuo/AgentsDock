@@ -1,5 +1,6 @@
 import AsyncStorage from '@react-native-async-storage/async-storage'
 import * as SecureStore from 'expo-secure-store'
+import { Platform } from 'react-native'
 import type {
   PinnedItem,
   QueuedTurn,
@@ -47,6 +48,10 @@ const SNAPSHOT_RECENT_PREFIX = 'agentsdock.react.recent.'
 const SNAPSHOT_CACHE_GENERATION_KEY = 'agentsdock.react.snapshot-cache-generation'
 const CACHED_QUEUED_PROMPT_LIMIT = 48_000
 const CACHE_TRUNCATION_SUFFIX = '\n\n[Content truncated on mobile.]'
+const ANDROID_SNAPSHOT_SESSION_LIMIT = 24
+const ANDROID_SNAPSHOT_EVENT_LIMIT = 240
+// JSON code units can occupy up to three UTF-8 bytes in SQLite; keep rows below Android's CursorWindow limit.
+const ANDROID_SNAPSHOT_MAX_JSON_LENGTH = 400_000
 
 interface WriteCompletion {
   promise: Promise<void>
@@ -199,10 +204,30 @@ export async function loadProfileSettings(): Promise<StoredProfileSettings> {
 export async function saveProfileSettings(value: StoredProfileSettings): Promise<void> {
   const normalized = normalizeStoredProfileSettings(value)
   const write = profileSettingsWrite.catch(() => undefined).then(() => (
-    AsyncStorage.setItem(PROFILE_SETTINGS_KEY, JSON.stringify(normalized))
+    writeCriticalItem(PROFILE_SETTINGS_KEY, JSON.stringify(normalized))
   ))
   profileSettingsWrite = write
   await write
+}
+
+async function writeCriticalItem(key: string, value: string): Promise<void> {
+  try {
+    await AsyncStorage.setItem(key, value)
+    return
+  } catch (error) {
+    if (Platform.OS !== 'android' || !/SQLITE_FULL|database or disk is full/i.test(String(error))) throw error
+    const snapshotKeys = (await AsyncStorage.getAllKeys()).filter(candidate => candidate.startsWith(SNAPSHOT_STORAGE_PREFIX))
+    for (const snapshotKey of snapshotKeys) {
+      await AsyncStorage.removeItem(snapshotKey)
+      try {
+        await AsyncStorage.setItem(key, value)
+        return
+      } catch (retryError) {
+        if (!/SQLITE_FULL|database or disk is full/i.test(String(retryError))) throw retryError
+      }
+    }
+    throw error
+  }
 }
 
 export async function loadProfileToken(profileId: string, credentialVersion: number): Promise<string> {
@@ -315,7 +340,7 @@ async function drainWorkspaceWrites(key: string, state: WorkspaceWriteState): Pr
     const entry = state.pending
     state.pending = null
     try {
-      await AsyncStorage.setItem(key, JSON.stringify(entry.value))
+      await writeCriticalItem(key, JSON.stringify(entry.value))
       entry.completion.resolve()
     } catch (error) {
       entry.completion.reject(error)
@@ -457,7 +482,8 @@ async function writeSnapshot(cacheNamespace: string, snapshot: Snapshot): Promis
     .filter(event => event.type !== 'raw_event')
     .map(sanitizeTimelineEvent)
   const boundedEvents = boundLiveTimelineEvents(matchingEvents)
-  const events = boundedEvents.slice(-(trusted ? CACHE_SNAPSHOT_EVENT_LIMIT : CACHE_LEGACY_EVENT_LIMIT))
+  const eventLimit = Platform.OS === 'android' ? ANDROID_SNAPSHOT_EVENT_LIMIT : trusted ? CACHE_SNAPSHOT_EVENT_LIMIT : CACHE_LEGACY_EVENT_LIMIT
+  const events = boundedEvents.slice(-eventLimit)
   const eventsTruncated = matchingEvents.length > events.length
   const queuedTurns = snapshot.queuedTurns
     .filter(turn => !turn.session_id || turn.session_id === snapshot.session.id)
@@ -478,15 +504,29 @@ async function writeSnapshot(cacheNamespace: string, snapshot: Snapshot): Promis
     latestSeq,
     cachedAt: Date.now(),
   }
-  await AsyncStorage.setItem(snapshotKey(cacheNamespace, snapshot.session.id), JSON.stringify(compact))
+  const key = snapshotKey(cacheNamespace, snapshot.session.id)
+  let serialized = JSON.stringify(compact)
+  if (Platform.OS === 'android') {
+    while (serialized.length > ANDROID_SNAPSHOT_MAX_JSON_LENGTH && compact.events.length > 1) {
+      compact.events = compact.events.slice(Math.ceil(compact.events.length / 2))
+      compact.hasMore = true
+      serialized = JSON.stringify(compact)
+    }
+    if (serialized.length > ANDROID_SNAPSHOT_MAX_JSON_LENGTH) {
+      await deleteSnapshot(cacheNamespace, snapshot.session.id)
+      return
+    }
+  }
+  await AsyncStorage.setItem(key, serialized)
   let recent: string[] = []
   try {
     const parsed = JSON.parse(await AsyncStorage.getItem(recentKey(cacheNamespace)) ?? '[]') as unknown
     if (Array.isArray(parsed)) recent = parsed.filter((value): value is string => typeof value === 'string')
   } catch { /* reset */ }
   recent = [snapshot.session.id, ...recent.filter(id => id !== snapshot.session.id)]
-  const evicted = recent.slice(CACHE_SNAPSHOT_SESSION_LIMIT)
-  await AsyncStorage.setItem(recentKey(cacheNamespace), JSON.stringify(recent.slice(0, CACHE_SNAPSHOT_SESSION_LIMIT)))
+  const sessionLimit = Platform.OS === 'android' ? ANDROID_SNAPSHOT_SESSION_LIMIT : CACHE_SNAPSHOT_SESSION_LIMIT
+  const evicted = recent.slice(sessionLimit)
+  await AsyncStorage.setItem(recentKey(cacheNamespace), JSON.stringify(recent.slice(0, sessionLimit)))
   await Promise.all(evicted.map(id => AsyncStorage.removeItem(snapshotKey(cacheNamespace, id))))
 }
 

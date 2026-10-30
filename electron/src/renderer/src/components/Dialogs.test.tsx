@@ -3,6 +3,7 @@ import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { AgentsDockAPI } from '@shared/ipc'
 import { setLocale, t } from '@shared/i18n'
+import { APP_SHORTCUTS } from '@shared/shortcuts'
 import type { AppUpdateStatus, AppUpdateTrack, ChatReference, CrossChatHandoffsCapability, Health, ProfileBootstrapPayload, PublicServerProfile, RuntimeCatalog, Session, TeamReference, TimelineSearchResult } from '@shared/types'
 import { clearSessionHistorySearchCache } from '../lib/session-history-search'
 import { useAppStore } from '../store/app-store'
@@ -186,8 +187,10 @@ describe('AppSettingsDialog', () => {
     fireEvent.click(within(dialog).getByRole('button', { name: 'Keyboard shortcuts' }))
     expect(within(dialog).getByRole('button', { name: 'Keyboard shortcuts' })).toHaveAttribute('aria-current', 'page')
     expect(within(dialog).getByRole('heading', { name: 'Keyboard shortcuts' })).toBeInTheDocument()
-    expect(within(dialog).getAllByRole('listitem')).toHaveLength(23)
+    expect(within(dialog).getAllByRole('listitem')).toHaveLength(Object.keys(APP_SHORTCUTS).length)
     expect(within(dialog).getByText('Toggle chat list')).toBeInTheDocument()
+    expect(within(dialog).getByText('Next chat workspace')).toBeInTheDocument()
+    expect(within(dialog).getByText('Previous chat workspace')).toBeInTheDocument()
 
     act(() => window.dispatchEvent(new CustomEvent('agentsdock:app-settings-section', { detail: 'appearance' })))
     expect(within(dialog).getByRole('button', { name: 'General' })).toHaveAttribute('aria-current', 'page')

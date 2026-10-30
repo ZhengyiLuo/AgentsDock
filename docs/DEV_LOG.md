@@ -91,6 +91,662 @@
 - Candidate 0.1.3 (192) requires packaged native acceptance before TestFlight
   publication. Release availability will be recorded after Apple verification.
 
+## 2026-10-28 - Cursor compound tool IDs and live analytics acceptance
+
+- Cursor CLI 2026.10.22 emits compound tool correlation IDs containing an LF
+  separator. The server previously rejected these and interrupted otherwise
+  valid tool-using turns. Recognize the observed bounded compound format and
+  map its entire value to a deterministic, control-free digest. Preserve ordinary
+  IDs, separate the encoded namespace from literal provider IDs, and continue
+  rejecting empty, oversized and unrelated control-bearing IDs. Tool start and
+  completion retain the same key without conflating distinct calls.
+- Reproduced the native CLI format before the fix. Added a failing-before/passing-
+  after parser regression and production-runner subprocess coverage. An isolated
+  native offscreen Electron app connected through its production IPC/HTTP boundary
+  to a source-built test server and real Cursor API key: two file reads completed
+  with distinct paired IDs, their results appeared in the UI, and a subsequent
+  tool-using follow-up succeeded. No production service was restarted or deployed.
+- Repeated acceptance in the user-designated installed test instance, retaining
+  its existing connection identity and configuration and changing only the parser.
+  The visible native desktop app selected Cursor API key and a disposable working
+  directory through the UI. Three real-provider turns and six paired tool calls
+  (including four file reads) completed successfully, and reloading retained the
+  results. The main service was left running unchanged; this test-only patch is
+  not a published update.
+- Removed the temporary local-launcher analytics cancellation used during
+  automated QA; this was not shipped app code. With normal consent handling
+  unchanged, three real UI submissions produced exactly three Cursor Custom API
+  message events in the actual Mixpanel project's raw export. Verification must
+  distinguish raw ingestion from dashboards that exclude test installations.
+  Earlier intercepted events were not replayed or backfilled. No new payload
+  fields, credentials or message content were added.
+- Follow-up desktop acceptance found that `/model default` could remain in the
+  composer after a successful API-model reset: the server returned its concrete
+  default rather than null. Clear the command after that confirmed normalization,
+  retaining existing failure/newer-draft/server-switch guards. Added a regression
+  that fails before this correction. No prompt or provider turn is submitted.
+- Validation: 120 focused Cursor parser/runner/API-key regressions, 577 desktop
+  regressions, TypeScript and Electron production build/output verification pass.
+  Source repair is not an installed server update: existing services need to load
+  the new parser before their tool-using chats benefit.
+
+## 2026-10-28 - Custom API message metrics and local model commands
+
+- Desktop accepted-message analytics now includes an allowlisted connection
+  kind (`default` or `custom_api`) when explicitly known at submission. Keep it
+  separate from the five Agent families; omit legacy/unknown values. No model,
+  endpoint, credential, account, chat ID or message content is collected.
+  Update the event catalog and source privacy disclosure accordingly.
+- Typed `/model` opens the existing model picker; `/model <ID or unique label>`
+  updates the session through the same model/effort logic as that picker.
+  Commands never enter prompt composition or count as sent messages. Unknown,
+  ambiguous and locked choices are rejected without starting a turn. Preserve
+  attachments, failed-command drafts and newer drafts; ignore late results
+  after switching servers. Keep existing slash skills and ordinary text intact.
+- Based on main `9a750c7a`; source-built desktop metadata remains 0.2.0/build 86.
+  An isolated native offscreen Electron app connected to a test AgentsServer
+  1.0.7-beta.11 reproduced the old typed command starting a Claude turn without
+  changing the selected model. After the fix, real keyboard input changed
+  Claude and Codex models through production preload/IPC/HTTP and server
+  persistence without adding turns. Subsequent real provider messages returned
+  expected replies. Repeated switching, default reset, reload persistence,
+  unknown-model draft retention and the existing picker were also exercised.
+- Captured and cancelled test analytics before network transmission: default
+  Claude/Codex messages included the new property; model commands did not emit
+  message events. Custom API classification across all five Agents, Custom API
+  accepted sends, queued/failed sends, stale-response ownership and failure
+  rollback were verified with deterministic tests. The isolated test service
+  had no configured Custom API endpoint; see the user-acceptance follow-up below.
+  No production analytics events were sent.
+- 576 focused regressions, TypeScript and the production build/output check
+  passed. No server/mobile changes, release, deployment, or website publication.
+- User-acceptance follow-up: at the user's request, gracefully closed the prior
+  local source app and launched this branch with its existing profile and cache.
+  Rebuilt and verified the loaded renderer asset, online connection, composer
+  and model picker through native input. No server restart or release occurred.
+  The user's subsequent live Cursor Custom API submission produced one accepted
+  `message_sent` event with `backend: cursor` and `connection_kind: custom_api`.
+  This verifies client submission acceptance and classification, not provider
+  completion. Test telemetry is captured locally and cancelled before Mixpanel
+  submission. Other live Custom API backends and a live queued-send scenario
+  remain untested; their deterministic coverage is described above.
+
+## 2026-10-27 - Honest native sign-in status in My Agents
+
+- Separate credential discovery from verified native login. A reported
+  authentication failure now overrides retained credential files; detected but
+  unverified credentials show a neutral status rather than a connected check.
+  Native and Custom API cards remain independent. Keep send-time verification
+  and retries available after credentials are renewed outside the app.
+- Add English/Chinese guidance and regressions for expired credentials, passive
+  detection, latest-diagnostic selection, Recheck, recovery and independent API
+  connectivity. No provider login, token storage or server admission changes.
+- Based on main `eb165198`; availability is local source/build only. An isolated
+  offscreen Electron app reproduced the previous false Connected label using a
+  real authenticated server catalog, then verified the corrected CLI status,
+  login guidance and reopening My Agents through the production renderer,
+  preload, IPC and client transport. Inspected English light/dark and Chinese
+  narrow-window layouts. No server deployment or user-app replacement.
+- 86 focused checks, TypeScript and production compilation passed. One full
+  regression run passed 5,484 tests (5 skipped), plus 8 packaging/license checks.
+  A repeat full run hit an unrelated existing SecurePeerPanel timing assertion;
+  all 156 tests in the focused/auth and secure-peer follow-up run passed. That
+  repeat-suite failure is recorded, not counted as a successful full run.
+- Live credential renewal and an actual post-login provider request remain
+  pending. Recheck failure/recovery uses component fixtures; the live legacy
+  server's forced catalog refresh was deliberately not invoked because it may
+  initiate an unrelated provider auth handoff. Real-app inspection used passive
+  reads and did not modify credentials or run agent tasks.
+- Follow-up: launched the complete compiled Electron app interactively with an
+  isolated cache and existing connection metadata for user acceptance. Native
+  clicks opened My Agents and expanded Claude. The server now reported a
+  successful native authentication, and the CLI card correctly showed Signed
+  in rather than relying on credential presence. This observes recovery; the
+  login operation and provider request were not initiated by this test. All 86
+  focused checks, TypeScript and compilation passed again. User chat acceptance
+  is pending; no server restart, deployment, publication or PR was performed.
+- PR validation: repeated the full suite successfully (5,484 passed, 5 skipped,
+  plus 8 packaging/license checks), TypeScript and production compilation.
+  In an isolated native offscreen app, opened My Agents, inspected the verified
+  CLI status, then typed and sent a short no-tools prompt to an exact-ID-bound
+  disposable Claude chat. The real server/provider returned the expected reply
+  and the renderer displayed it without errors. Screenshots stay local; account
+  metadata is not attached to the public PR. Login renewal itself remains a
+  native-provider operation, and this display fix does not prevent OAuth expiry.
+
+## 2026-10-25 - Mobile provider pre-merge validation
+
+- Integrated main `3ac069e`; only the development log required conflict
+  resolution, retaining both sets of entries. Updated older source-contract
+  tests and the composer fixture for the additional providers.
+- All 428 mobile MJS checks passed, with one generated-native-metadata check
+  skipped. Session creation, provider selection, recovery, optional permissions,
+  transport, cross-chat references, notifications and Android discovery tests
+  passed, along with TypeScript and iOS/Android production JavaScript exports.
+- Maestro operated the real iOS simulator through Settings, update destinations,
+  My agents and Gemini chat navigation. Home creation retained Gemini Custom API
+  and Default permissions, confirmed through authenticated server readback.
+  Initial scripted attempts missed a navigation tap and a keyboard-obscured
+  row; waiting for navigation and bringing the row fully into view completed
+  the flow. These failed attempts are not counted as passing acceptance.
+- The user confirmed the refreshed physical iPhone Dev build works. Existing
+  cross-agent receipt checks still show no duplicate mail or pending QA work.
+  Store handoff, signed APK installation and Android provider end-to-end checks
+  remain outside this validation. No release or TestFlight upload was performed.
+
+## 2026-10-25 - Mobile Gemini identity and recoverable new-chat defaults
+
+- Embed the desktop multicolor Gemini SVG in the mobile bundle, without a
+  network image dependency or monochrome tint. Light and dark iOS simulator
+  screenshots show the multicolor mark. The dark-mode scripted scroll to a
+  specific QA row timed out; direct screenshot inspection verified other
+  Gemini rows instead.
+- Home new-chat creation keeps an available inherited provider/mode, otherwise
+  randomly chooses from available choices across all five agents. Report no
+  available agent only when the candidate set is empty. Preserve model and permissions after
+  message failures; an earlier local fallback based on turn failure was too
+  broad and has been removed. On confirmed pre-creation API/workspace validation
+  failures, try remaining choices at most once each; never
+  retry ambiguous writes, authentication failures, or explicit provider forms.
+  Reset provider-specific defaults when switching; preserve existing chats.
+- Confirmed unavailable native diagnostics override stale credential presence;
+  Custom API and native modes retain independent availability. Regression
+  coverage includes every agent-to-agent fallback, all-unavailable cases,
+  same-agent API fallback, and bounded retries across rejected candidates.
+  Ten randomized session-creation runs passed; actual simulator creation also
+  verified fallback to OpenCode after a confirmed invalid-workspace rejection.
+- Actual iOS simulator testing against the isolated beta.12 server reproduced
+  a deleted Gemini workspace, then verified fallback creation and a real Claude
+  reply. Mobile mention selection granted routes to all five providers. Codex
+  sent mail to Claude, Cursor, and OpenCode and read their explicit replies.
+- Gemini cross-chat preflight was blocked by native workspace trust, while
+  ordinary replies worked. After explicit approval to trust only the isolated
+  QA directory, actual simulator mention/send flows exercised Gemini against
+  Codex, Claude, Cursor, and OpenCode in both initiating directions, with native
+  one-time tool approvals and explicit return acknowledgments. No permission
+  policy was disabled. Initial Claude initiation used a legacy target index
+  and failed; an explicit route-discovery retry succeeded. This first-attempt
+  provider tool-use failure remains a limitation, not a passing first attempt.
+  Receipt checks found exactly one request and one acknowledgment per initiating
+  direction, with no duplicate messages or pending QA turns/approvals.
+- Simulator acceptance also verified that after a Gemini communication error,
+  Home new-chat creation retained Gemini and received a real ordinary reply.
+  An intermediate retry at the server default directory exposed an API-auth
+  override; confirmed invalid-directory creation still falls back to another
+  provider rather than silently changing Gemini's authentication.
+- Session-creation and chat-reference regressions, 51 focused component/source
+  checks, TypeScript, and iOS production JS export passed. Availability is local
+  development only; no release or TestFlight build was published.
+
+## 2026-10-25 - Mobile optional agents and discoverable app updates
+
+- Add capability-gated OpenCode and Gemini choices, API-aware model catalogs,
+  saved selections, permissions, and new-chat inheritance. OpenCode free models
+  remain selectable without login credentials; Gemini uses configured APIs and
+  its required client protocol. Preserve bound API catalogs in chat details.
+- Add run-owned Gemini approvals with native-control authentication, duplicate
+  response protection, foreground/event invalidation, and server-generation
+  fencing. Do not expose unsupported provider reloads or Gemini forks.
+- Move App updates into the primary Settings categories on both platforms.
+  iOS opens App Store or TestFlight. Android discovery now reads bounded release
+  pages; desktop releases can no longer hide Android updates after page one.
+  Failed checks do not persist a successful up-to-date cache entry.
+- Actual iOS simulator acceptance against AgentsServer 1.0.11-beta.11 verified
+  OpenCode free-model and Custom API replies, Gemini replies and contextual
+  follow-ups, permission deny/allow-once with file readback, and OpenCode model
+  and Plan-permission inheritance. One default OpenCode model returned an empty
+  response in its native transcript too; an explicitly selected free model and
+  the configured API returned normally. No server code or deployment changed.
+- Settings/agent/approval/interaction component checks, provider and transport
+  regressions, TypeScript, iOS production JS export, and a local Android debug
+  APK build passed. Real public release discovery found an Android candidate on
+  page two. Android updater Settings, offline failure, and successful retry
+  were exercised on an emulator. iOS Settings retained both agents and update
+  destinations in dark mode.
+- Availability: local development builds only, based on main `7d94b05`.
+  iOS store installation is not testable on a simulator; physical-device
+  App Store/TestFlight handoff and a signed production APK upgrade remain
+  unverified. Android provider end-to-end acceptance remains pending.
+
+## 2026-10-25 - Mobile new-chat defaults follow the last open chat
+
+- Inherit the last open chat's agent, native or Custom API mode, model, effort,
+  and agent-specific permissions when creating a chat from Home. Keep saved
+  preferences as the fallback when no valid chat is selected on that server.
+- Resolve omitted permissions with a bounded detail read before creation;
+  failed reads remain retryable instead of silently resetting permissions.
+  Preserve duplicate-tap protection and connection-generation checks.
+- iOS simulator acceptance reproduced Claude reverting to Codex on the previous
+  client, then verified Claude Plan and Codex read-only/on-request inheritance
+  through the actual app with authenticated server readback. Temporary chats
+  were removed without starting provider runs.
+- Session-creation regressions, 39 interaction tests, TypeScript checks, and
+  iOS/Android production JS exports passed. Custom API selection, Cursor,
+  lookup failure, and server-switch races have automated coverage; Android
+  interaction and physical-device acceptance were not exercised for this change.
+
+## 2026-10-25 — Codex child cancellation acknowledgement (#85)
+
+- Keep a localized Stop subagents action available for an idle Codex chat with
+  authoritative, owned live children, without changing Send into Queue. Ignore
+  forked history and unrelated roots; refresh the selected chat's child snapshot
+  once after stopping, fenced by the current server and timeline subscription.
+- Reconcile children already terminal when Stop reaches the native runtime.
+  Report pending children and interrupt errors instead of treating parent
+  completion as successful child cancellation. Recheck ownership after native
+  reads and preserve newer lifecycle transitions during stop confirmation.
+- Source: `fix/codex-subagent-stop-85`, based on `7d94b05b`; local development
+  build only. Both desktop and server changes are required; no release published.
+- Actual visible native Electron acceptance exercised composer submission,
+  native Codex child execution, Stop, reopening the chat, and repeated use.
+  Native provider records confirmed interrupted child turns; the stop control
+  cleared, an independently running control chat continued, and another pane's
+  draft was retained. The actual IPC/authenticated HTTP/native-provider boundary
+  was exercised without a stub provider.
+- The installed native provider retained the parent turn until child completion
+  or interruption, even after emitting its final reply. The fully idle-parent
+  case, stale terminal state, missing runtime, concurrent state/ownership changes,
+  pending errors and legacy response compatibility have regression coverage;
+  that historical idle-parent lifecycle was not recreated end-to-end.
+- Pre-merge validation: 1,190 focused desktop tests and 240 focused server tests passed;
+  TypeScript and Electron production compilation passed.
+- Updated the compact-composer layout contract to recognize the shared Stop
+  label, including the idle-child label; action placement and sizing are unchanged.
+- Simplified Chinese consistently calls subagents “子 Agent” in the inspector,
+  limits, lifecycle labels and Stop feedback. Localize the inspector heading and
+  unnamed display fallback without changing provider names, identities or chat
+  content. English remains unchanged. Actual native-app Settings language
+  switching verified the Chinese heading, empty state and per-chat limit text,
+  then restored English. The terminology follow-up passed 308 focused tests,
+  TypeScript checks and the Electron production build; no server restart required.
+
+## 2026-10-25 — Remove host-imposed provider restrictions
+
+- Allow native background shell commands and Claude scheduling tools. Remove
+  prompt rules forbidding detached work, full-history subagent forks, other
+  integrations and ordinary use of the chat terminal. Native permissions and
+  the exact authenticated owner of AgentsDock helpers remain intact.
+- Remove default execution silence deadlines and automatic retained-connection
+  eviction. Idle warnings remain informational; Stop and transport failures
+  still settle owned work. Explicit operator timeouts and retention limits
+  remain effective. Available-memory launch floors now default to disabled,
+  matching the existing opt-in concurrency limits.
+- Remove the internal Claude MCP two-call ceiling while preserving mutation
+  deduplication and checking authorization before replay. Allow Codex Side chat
+  subagents with verified native ancestry; inherited parent agents do not gain
+  side-chat authority. Retain idle side conversations until explicit cleanup,
+  and use the existing request-body bound instead of a separate 8,000-character
+  question limit in both desktop validation and the server. Older servers'
+  advertised limits remain honored by the desktop.
+- Allow background-terminal inspection and explicit termination during a Codex
+  turn without replacing its owner. Submit confirmed shell commands through
+  that same live owner and notification stream; native command receipts retain
+  the owner until accepted commands finish, including a late native shell turn.
+  Register requests at the actual transport write boundary and do not replay
+  uncertain delivery. A real service-managed source checkout can
+  restart without the official installer directory layout. Remove the normal
+  restart cooldown; in-flight request coalescing and exact service ownership
+  remain in place.
+- Real offscreen app/IPC/authenticated HTTP acceptance with Claude Code 2.1.303
+  verified native background Bash and detached workers continuing after the
+  reply, native schedule creation and retention through the next turn, exact
+  schedule deletion and reuse of the same native connection. This verifies
+  schedule retention, not delivery of a future scheduled wake into the app.
+- Native Codex 0.156.1 acceptance verified a saved Side chat's full-history
+  child, inherited context and file work while the parent completed normally;
+  original parent readback confirmed completion. Active terminal list,
+  terminate and clean used the exact original owner. Approval ancestry and
+  closed-owner rejection have regression coverage; an actual child approval
+  dialog was not required by the selected native permissions.
+- Actual offscreen app restart acceptance used a disposable named launchd
+  service and source checkout. Two confirmed requests 4.7 seconds apart each
+  returned acceptance and reconnected to a new process with the same durable
+  server identity. The previous source reproduced the disabled Restart button.
+  Test services, processes and credential copies were cleaned up.
+- Preserve native background task accounting after a Claude reply. Inspect
+  retained Side chat descendants when preparing an idle-update snapshot, and
+  check the same native generation before using that snapshot. Active work
+  delays an idle update; idle retained conversations do not. Cancelling an
+  optional Claude context sample leaves its live connection and tasks intact.
+- Actual offscreen app/IPC/HTTP acceptance with Codex verified a confirmed shell
+  command during an existing native tool, one normal completion of the original
+  turn and a successful follow-up. A separate Side chat journey verified a
+  full-history child, an immediate reply, a context-preserving follow-up, and
+  the child continuing after the main chat completed. The production idle-update
+  snapshot reported only that child until it finished, then cleared all work
+  labels. Original credentials were unchanged and isolated copies removed.
+- Focused server suites cover disabled deadlines, positive configured limits,
+  long-lived native connections, ownership, concurrent helper calls, side
+  context retention and restart races. Cursor/OpenCode execution tests use
+  real subprocess pipes with fixture CLIs; live provider acceptance for those
+  adapters is not claimed. No live server deployment or public release.
+- App source `492360f7`, paired server source `1b07dbbe`; accepted local macOS
+  arm64 0.2.0/build 86. TypeScript, all 5,460 desktop tests (five skipped),
+  production compilation, bundle audit, Developer ID signing and strict
+  signature verification passed. The exact packaged archive repeated the live
+  Codex active-shell and subsequent-message journey through production IPC and
+  authenticated HTTP. All 91 compiled assets matched the archive, with no
+  renderer errors. Archive SHA-256 remained
+  `c71bd2ccee0c7fdc7387804ff075fd85c82f065dfb4ec929fbf042cd6250cc73`
+  before and after acceptance. Packaged code ran through an isolated native
+  Electron bootstrap; signed-executable launch and Gatekeeper were not tested.
+  No installed app or live server was replaced or restarted.
+
+## 2026-10-25 — Set and replace Claude goals during active work
+
+- Remove the desktop busy-turn disable and route active goal requests through
+  the owning Claude session. Native queue admission is acknowledged separately
+  from application of the goal. A running tool and its original subagents
+  continue, including when replacing a goal that is keeping Claude running.
+- Surface later native refusals in the dialog and beside the composer. Match
+  each pending goal to its exact run and native command receipt; stale history
+  and receipts from another request cannot settle it. Goal input remains
+  separate from the existing Force Send lane.
+- Explicit Stop withdraws the queued goal and uses native task controls for
+  owned commands that become background tasks during interruption. Wait for
+  their actual terminal receipts before retiring that provider connection.
+  Clear & stop then clears the native goal through the normal idle path.
+  Successful user-requested cancellation settles quietly; genuine refusals and
+  unconfirmed cancellation remain visible errors.
+- App source `e1cd724c`, server source `0392ba4c`; local macOS arm64
+  0.2.0/build 85. TypeScript, all 5,458 desktop tests (five skipped), production
+  compilation, bundle audit, Developer ID signing and strict signature checks
+  passed. The server SDK, runner, goal-route and goal-projection suites passed
+  226 tests. Focused regressions cover native refusal, uncertain delivery,
+  concurrent Force Send, stale results and cancellation-control failure.
+- The exact packaged archive passed native offscreen interaction through
+  production IPC and authenticated HTTP into an isolated server with real
+  Claude Code 2.1.303. Set a goal while parent and child tools were running,
+  replace it while the original child remained active, and observe the same
+  native session reach Goal achieved after both original tasks completed.
+  The archive and signature remained unchanged, with no JavaScript errors.
+- Native SDK Stop acceptance verified cancellation of the queued goal, original
+  process exit without completion outputs, and a successful subsequent tool
+  turn. Delayed superseded results and cancellation-control errors were checked
+  with focused fixtures after that native run. Actual app Stop and Clear & stop
+  also passed through production IPC/authenticated HTTP with real Claude:
+  original process IDs exited, pending goals disappeared, cleared native state
+  was read back, and each chat accepted a successful subsequent message without
+  reviving the stopped work. The final Clear run verified quiet cancellation.
+  Test profiles and processes were cleaned up. Signed-executable launch and
+  Gatekeeper were not exercised.
+- This is a paired app/server source fix and local package, not an installed
+  update or published release. Setting a goal before the provider has bound its
+  initial native session remains outside this active-session acceptance.
+
+## 2026-10-23 — Quieter workspace selection
+
+- Replace persistent blue stripes on workspace/chat/file tabs and focused grid
+  panes with neutral selected-tab backgrounds and medium-weight titles. The
+  focused pane's selected tab has a slightly stronger neutral background.
+- Resize handles use a neutral hover treatment; keyboard focus retains a clear
+  outline. Tab order, drag/reorder, pane selection and file state are unchanged.
+- Source `88372526`, local macOS arm64 package 0.2.0/build 85. TypeScript,
+  production compilation, all 5,455 desktop tests (five skipped), bundle audit,
+  Developer ID signing and deep strict signature checks passed.
+- Native offscreen checks exercised the exact packaged archive: select chat and
+  file tabs across three/four panes, retain open files while focusing another
+  pane, resize to the desktop minimum, and inspect dark/light appearance.
+  Native keyboard navigation retained a visible focus outline. Production IPC
+  and authenticated file reads used isolated server state; no provider ran.
+  All 91 compiled assets matched; archive/signature unchanged, no JavaScript
+  errors, and test processes/credentials cleaned up. Signed-executable launch
+  and Gatekeeper were not exercised.
+- Local desktop presentation change only. No server change, installed-app
+  replacement or publication is included.
+
+## 2026-10-23 — Keep queued messages from crowding the split-pane draft
+
+- Give queued messages, attachments and notices a separate scrolling area above
+  the draft. Short panes can grow the composer instead of forcing everything
+  into a 75-pixel box. Keep the text field and Send/Stop toolbar visible together;
+  smaller panes retain a full editable line and scroll longer drafts internally.
+- Allocate the composer from the space remaining below the goal/context controls.
+  Preserve the same draft, focus and selection when queued messages arrive or
+  disappear. Single-pane queue behavior and sending contracts are unchanged.
+- Source `6175fb76`, local macOS arm64 package 0.2.0/build 85. All 5,455
+  desktop tests passed (five skipped), with TypeScript, production compilation,
+  bundle audit, Developer ID signing and deep strict signature verification.
+  An existing asynchronous file-picker focus assertion now waits for focus;
+  its targeted rerun also passed after the initial full-suite timing failure.
+- Native offscreen baseline reproduced a queued message pushing the input fully
+  outside its visible area. The exact packaged archive then passed queue
+  submission, edit/save with authoritative readback, removal and repeat use,
+  retained multiline drafts, goal/alert pressure, three/four panes, divider
+  dragging, light/dark and narrow-window checks. Draft and queue scroll
+  independently; Send/Stop remain inside the tested panes.
+- These exercised production IPC, authenticated HTTP and WebSockets in isolated
+  server state with synthetic held turns; no provider ran. All 91 compiled
+  assets matched the package, and its archive and signature remained unchanged.
+  The archive ran through stock Electron offscreen; signed-executable launch
+  and Gatekeeper were not exercised.
+- App-only local trial; this layout fix needs no server update. No live service,
+  installed app or published release is changed.
+
+## 2026-10-23 — Reorder workspace tabs and preserve Claude tasks on Force Send
+
+- Replace boxed workspace tabs with a flat rail and an active underline. Drag
+  tabs to reorder, or use Alt-Shift-Left/Right. Remember order per server without
+  changing selection, drafts, files or pane layouts. Keep the active tab visible
+  after resizing and retain the adjacent new-workspace button during overflow.
+- Claude Force Send uses native queued-input acknowledgement and Send now,
+  preserving the same process, logical run, tool authority and tracked children.
+  It no longer falls through Stop for ordinary user follow-ups. Explicit Stop
+  keeps its cancellation behavior. Unsupported native protocols leave input
+  queued; uncertain delivery is never replayed or treated as permission to
+  terminate children. Proven prewrite cancellation restores the unsent input.
+- Accepted follow-ups appear once in desktop/shared history, including during
+  scheduled work. Recovery consumes only acknowledged input and retains a
+  truncated delivery record without resending it. New route grants/provider
+  actions still require their own turn; Force Send retains its original owner.
+- Source `be4b6806`, local macOS arm64 package 0.2.0/build 85. All 5,457 desktop
+  tests passed (five skipped), with TypeScript, compilation, bundle audit,
+  Developer ID signing and deep strict verification. The scoped server SDK,
+  runner, queue, goal, history and projection suites passed 518 tests.
+- Real Claude Code 2.1.296 and 2.1.303 probes submitted Force Send during a
+  foreground Bash command. An existing native Agent survived, completed and
+  woke the parent; acknowledgement took approximately 0.7 and 1.2 seconds.
+  A separate explicit Stop probe observed killed/stopped child receipts.
+  These exercised the candidate SDK adapter in disposable state; server queue
+  races and workflow receipts used isolated fixtures, not live user chats.
+- The exact packaged archive passed native offscreen drag/keyboard, rename,
+  close/add, draft/file/layout retention, per-server persistence, full restart,
+  narrow overflow, resize and light/dark checks through real authenticated
+  HTTP/WebSockets and production IPC. All 91 compiled assets matched; archive
+  and signature remained unchanged. This ran stock Electron with the packaged
+  archive, not the signed executable or Gatekeeper.
+- Local trial only: no app installation, service update/restart or publication.
+  Workspace tabs work with the existing server; the Claude Force Send fix
+  requires installing the paired server source.
+
+## 2026-10-23 — Readable syncing status in compact chat panes
+
+- Place the neutral syncing status beside the working-directory control, outside
+  the compact input's scrolling area. Keep the full input line and toolbar
+  visible without increasing the desktop composer's height. Shared chats show
+  the status without exposing the working-directory control.
+- Source `99d50432`, local macOS arm64 development package 0.2.0/build 85.
+  Placement regressions failed before the fix; all 5,430 desktop tests passed
+  (five skipped), plus TypeScript, production compilation, bundle audit,
+  Developer ID signing, required entitlements and deep strict signature checks.
+- Native offscreen acceptance reproduced the clipped input in the previous
+  package, then verified a full input line, readable status, accessible toolbar
+  and retained typing through reconnection. Three/four panes, completed goal
+  banners, light/dark themes and narrow windows passed through production IPC
+  and authenticated HTTP/WebSockets in isolated state. All 91 compiled assets
+  matched; archive and signature remained unchanged.
+- Reconnecting activity was a disposable fixture; no provider ran. The packaged
+  archive ran in stock Electron offscreen, without launching the signed executable
+  or exercising Gatekeeper. This is an app-only local trial; no server update is
+  required. No installed app, live service or published release was changed.
+
+## 2026-10-23 — Keep every visible chat receiving live updates
+
+- Remove the obsolete two-stream eviction from the desktop service. Opening a
+  third or fourth pane now preserves every visible chat's history request and
+  live connection. Explicit pane/workspace cleanup still releases hidden chats;
+  late events from retired subscriptions remain fenced to their original owner.
+- Clear ended-subscription bookkeeping so explicitly selecting a cached chat
+  can reconnect it. Reconnecting streams keep their owner; this adds no polling
+  or automatic retries.
+- Source `50c89366`, local macOS arm64 development package 0.2.0/build 85.
+  Regression tests reproduced dropped primary history/completion and stale
+  subscription bookkeeping before the fixes. All 5,429 desktop tests passed
+  (five skipped), plus TypeScript, production compilation, bundle audit,
+  Developer ID signing, required entitlements and deep strict signature checks.
+- Native offscreen acceptance reproduced missing primary replies in the old
+  package, then verified all three/four panes receiving new assistant, reasoning,
+  tool and completion events through production IPC, authenticated HTTP and
+  WebSockets. Working, Running and Stop appear during held fixture turns and
+  clear on completion. Concurrent hydration, workspace switching, hidden-pane
+  cleanup and catch-up after reopening passed. All 91 compiled assets matched;
+  the packaged archive and signature stayed unchanged.
+- Provider events and active-run ownership were synthetic fixtures in disposable
+  server state; no provider ran. The actual packaged archive ran in stock
+  Electron offscreen; signed-executable/Gatekeeper launch was not exercised.
+  No installed app, running service or published release was changed. This is
+  an app-only local trial using existing contracts; no server update is required.
+
+## 2026-10-23 — Three-column chat workspaces
+
+- Place the new-workspace button immediately beside the workspace tabs. Keep
+  it accessible when tabs overflow and reveal the newly selected tab.
+- Add three full-height, independently resizable columns alongside the existing
+  three-pane split. Remember each workspace's layout and widths separately;
+  retain pane assignments, drafts and file tabs when changing arrangements.
+  Keyboard focus navigation follows the visible columns. Command-Control-Left
+  and Command-Control-Right cycle workspace tabs, including from the composer.
+- Show each pane's chat title once in its pinned tab. Double-click that tab or
+  use Rename chat in the actions menu to rename it; keep the folder control
+  accessible in the toolbar. Selecting a chat already assigned to a workspace
+  returns to that workspace and focuses its pane instead of opening a duplicate.
+- Local macOS arm64 package: source `7187ce27`, development version 0.2.0/build
+  85. All 5,425 desktop tests passed (five skipped), followed by TypeScript,
+  production compilation, bundle audit, Developer ID signing, required
+  entitlements and deep strict signature checks.
+- Native offscreen acceptance used the packaged archive through production IPC
+  and authenticated HTTP against isolated services. Verified both three-pane
+  arrangements, both draggable dividers, keyboard resizing, workspace shortcuts,
+  sidebar jumps without duplicate placement, title consolidation and real rename,
+  pane-local file opening, retained drafts/layouts after reload, tab overflow and
+  narrow presentation. All 91 compiled assets matched; archive and signature
+  remained unchanged. No provider ran. Signed-executable/Gatekeeper launch was
+  not exercised; this remains a local, unnotarized trial.
+- Scope: app only, using existing server contracts. No server update is required;
+  no installed app, live service or published release was changed.
+
+## 2026-10-23 — Cron unread grouping on older servers
+
+- When cron inclusion is off and an older server omits output provenance, use
+  the existing scheduled-job list to keep registered cron chats in their folders
+  or pinned section. Visible ordering and keyboard navigation use the same rule.
+  No additional requests, transcript scans or polling are needed.
+- Preserve saved inclusion settings, manual unread overrides and unread dots.
+  Newer servers continue distinguishing ordinary replies from cron output.
+  Older servers cannot distinguish replies within a mixed-use scheduled chat;
+  their fallback applies to the registered chat until inclusion is enabled.
+- Four new regressions failed before the fix. All 281 focused sidebar, session
+  and store tests pass. The local macOS arm64 package uses source `13193ad2`,
+  development version 0.2.0/build 85. All 5,398 desktop tests passed (five skipped),
+  followed by TypeScript, production compilation, bundle audit, Developer ID
+  signing, required entitlements and deep strict signature checks.
+- Native offscreen acceptance reproduced the failure in the prior packaged app,
+  then verified the corrected signed archive against an isolated authenticated
+  server returning missing/null legacy provenance. Settings on/off, preserved
+  saved choices after restart, pinned placement, ordinary and manual unread,
+  keyboard order, server switching, offline cached jobs and reconnect passed.
+  Auxiliary job-add/remove fixtures used the existing read-only jobs-list IPC
+  through real HTTP; the existing background polling cadence was not changed.
+  All 91 compiled assets matched and archive/signature remained unchanged.
+  No scheduled job or provider ran. Signed-executable/Gatekeeper launch remains
+  untested; this is a local unnotarized trial, not a publication or installation.
+- Scope: app compatibility fix; no server update or live-state change required.
+
+## 2026-10-23 — Tabbed chat workspaces and pane-local file tabs
+
+- Add named workspace tabs with one, two, three or four chat panes. Three panes
+  use a tall left pane and stacked right panes; four use a resizable grid.
+  Each pane owns its chat and file tabs, so opening a file leaves other chats
+  visible and preserves the conversation in its pinned tab.
+- Remember workspace layouts, focused panes and divider sizes per server.
+  Retain chat drafts, scroll positions and file edits while switching workspaces,
+  servers and layouts; reducing the pane count keeps hidden chat assignments.
+  Keyboard pane navigation follows the visible grid and file commands target
+  the focused pane.
+- Focused renderer, editor and store regressions, TypeScript and production
+  compilation pass. Native offscreen desktop acceptance exercised all four
+  layouts, mouse and keyboard dividers, pane-local file reads and saves, dirty
+  edits, drafts, exact scroll restoration, named workspace switching, server
+  isolation and app/server restart persistence through real IPC and authenticated
+  HTTP in disposable state. Provider events were synthetic. Narrow-pane headers
+  retain compact controls without wrapping their provider status. Escape, focus
+  loss and navigation clear the drag highlight immediately.
+- Local macOS arm64 package: source `fe26f598`, development version 0.2.0/build
+  85. All 5,393 desktop tests passed (five skipped), followed by production
+  compilation, bundle audit, Developer ID signing, required entitlements and
+  deep strict signature checks.
+- Packaged native offscreen smoke loaded main, preload and renderer directly
+  from the signed archive; all 91 compiled assets matched. Pane-local file
+  reads/saves, four-pane tabs, per-server state, app restart, retained drafts,
+  native drag cancellation and narrow light layouts passed. The archive and
+  signature were unchanged after testing. Signed-executable/Gatekeeper launch
+  was not exercised; this remains a local, unnotarized trial build.
+- Scope: desktop only, using existing server contracts. No server update is
+  required for the tabbed grid. This local trial does not publish a release or
+  replace an installed app.
+
+## 2026-10-23 — Local desktop package with sidebar controls
+
+- Built macOS arm64 from `29951a90`, combining the sidebar settings with the
+  merged TIFF-preview and split-chat file-opening fixes. Development metadata
+  remains 0.2.0/build 85; this is a local package, not a published release.
+- The full desktop suite passed: 5,367 tests, five skipped. TypeScript,
+  production compilation, bundle audit, Developer ID signing, entitlements
+  and deep strict signature checks passed.
+- Packaged native offscreen checks loaded main, preload and renderer directly
+  from the signed archive. All 91 compiled assets match. The three sidebar
+  switches, cron grouping, running-chat placement and restart persistence
+  passed through real IPC and an isolated authenticated server. The archive
+  and signature remained unchanged. Provider output was synthetic; no provider
+  or scheduled job executed. Signed-executable/Gatekeeper launch was not tested.
+- Keep metadata-free server summaries sparse, fixing the existing summary-size
+  regression without changing its threshold. Known counters and pending-recovery
+  nulls remain explicit; 44 targeted server tests pass. The packaged smoke used
+  this corrected server source.
+- Availability: local app package only. The grouping switches work with older
+  servers; distinguishing cron output requires the matching server patch.
+  Nothing was installed, published or deployed.
+
+## 2026-10-22 — Configure Unread and Running sidebar sections
+
+- Add three General settings remembered locally per server: Unread chats at the
+  top (on by default), Include cron jobs in Unread (off), and Show Running
+  section (on). Hidden sections return chats to their saved folders or pins;
+  unread dots and activity indicators remain visible. Active chats stay out of
+  Unread even when Running is hidden. Keyboard navigation follows the same order.
+- Distinguish scheduled output from ordinary unread replies on the server. A
+  later cron result cannot hide an unread ordinary reply, and explicit Mark
+  unread still promotes the chat. Imported history does not count as a new
+  ordinary reply. Existing read cursors, folders and pins remain unchanged.
+- Recover existing provenance once in a background worker and persist a journal
+  checkpoint for subsequent restarts. Unknown provenance and older servers keep
+  the previous unread behavior; catalog, session-list and turn-admission paths
+  do not wait for recovery. Include the helper in server installation and
+  packaging inventories.
+- Verification: 474 focused desktop tests, 14 unread-provenance regressions,
+  related server projection/provider tests and runtime archive checks pass.
+  TypeScript, Python compilation, production Electron compilation and entry
+  verification pass. Native offscreen Electron exercised the controls through
+  production IPC and authenticated server transport, including active unread
+  placement, manual unread, mixed replies, keyboard navigation, narrow/light
+  layouts, profile switching and app/server restarts. Final server checks also
+  recovered legacy metadata without changing read cursors or event journals.
+  These used synthetic provider events in disposable state; no live provider
+  or scheduled job ran. A packaged release and other native platforms were not
+  exercised.
+- Availability: source changes for desktop and server; cron filtering requires
+  both. No release, installation or live-server deployment is included.
+
 ## 2026-10-22 — TIFF previews and split-chat file opening
 
 - Desktop attachment and workspace viewers render TIFF files through a PNG

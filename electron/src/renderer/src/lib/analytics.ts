@@ -16,7 +16,7 @@ export const ANALYTICS_CONSENT_CHANGED_EVENT = 'agentsdock:analytics-consent-cha
 
 export type AnalyticsConsentDecision = 'granted' | 'denied'
 export const ANALYTICS_BACKENDS = ['codex', 'claude', 'cursor', 'opencode', 'gemini'] as const
-export type AnalyticsEventProps = { success?: boolean; backend?: typeof ANALYTICS_BACKENDS[number] }
+export type AnalyticsEventProps = { success?: boolean; backend?: typeof ANALYTICS_BACKENDS[number]; connection_kind?: 'default' | 'custom_api' }
 
 let runtimeDecision: AnalyticsConsentDecision | null = null
 let consentRevision = 0
@@ -119,6 +119,9 @@ function safeEventProps(name: AnalyticsEvent, props?: AnalyticsEventProps): Reco
   // A provider family is not an API endpoint, account, custom model or profile.
   // Unknown values and backend metadata on unrelated events are dropped.
   if (BACKEND_EVENTS.has(name) && props?.backend && ANALYTICS_BACKENDS.includes(props.backend)) safe.backend = props.backend
+  if (name === 'message_sent' && (props?.connection_kind === 'default' || props?.connection_kind === 'custom_api')) {
+    safe.connection_kind = props.connection_kind
+  }
   return safe
 }
 

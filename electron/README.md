@@ -121,6 +121,11 @@ offline servers fall back to the saved single address. Sharing does not switch
 the active server. The active card also contains restart controls.
 Persistent goals have no server-wide Settings toggle. Updated servers keep the
 capability available by default; each chat retains its own goal controls.
+With a matching server, Claude goals can be set or replaced during current
+work. The app shows the pending request until Claude applies it at its next
+native boundary; setting a goal does not interrupt the current tool or agents.
+Native refusals remain visible and leave the completion condition available
+for retry.
 The camera-enabled mobile app can scan it from **Servers > Add Server > Scan QR
 code** and authenticates before saving. Older mobile builds need an app update.
 The image does not make a loopback-only server reachable from a phone. See
@@ -180,11 +185,19 @@ older history loads on upward navigation. Failed refreshes retain the cache.
 Incoming events are coalesced to one renderer publish per animation frame.
 Timeline rows are virtualized with stable semantic keys.
 
-The chat sidebar temporarily groups unread and running chats above ordinary
-folders, with a blue dot for Unread and green for Running. Running takes
-precedence while a turn is active. Chats appear only once; their saved folder
-and pinned state are unchanged. Reading a completed chat returns it to its
-ordinary section, and empty status groups disappear. Groups and folders use
+Settings → General has three sidebar switches, remembered locally per server:
+**Unread chats at the top** (on), **Include cron jobs in Unread** (off), and
+**Show Running section** (on). Turning a section off leaves its chats in their
+saved folders or pins, with unread and activity indicators intact. Active chats
+never move into Unread while Running is hidden. Cron-only unread output stays
+in its folder by default; an unread ordinary reply still promotes the chat even
+if a later cron result arrives. Explicit **Mark unread** also promotes it.
+Cron attribution requires the matching server change; older servers or pending
+history recovery retain ordinary unread grouping until provenance is known.
+
+Chats appear only once; their saved folder and pinned state are unchanged.
+Reading a completed chat returns it to its ordinary section, and empty status
+groups disappear. Groups and folders use
 right-aligned collapse arrows. Status collapse state lasts within the current
 workspace, and next/previous-chat shortcuts follow the visible group order.
 Pinned also collapses, remembers its state per server across reopening, and

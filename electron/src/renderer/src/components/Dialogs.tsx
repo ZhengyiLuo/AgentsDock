@@ -4,6 +4,7 @@ import { localeOptions } from '@shared/locales'
 import { useLocale } from '../lib/i18n'
 import { forwardRef, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type FormEvent, type KeyboardEvent, type ReactNode } from 'react'
 import * as Dialog from '@radix-ui/react-dialog'
+import * as Switch from '@radix-ui/react-switch'
 import { ArrowRight, Check, ChevronDown, ChevronRight, CircleAlert, Clock3, Command, Copy, Download, ExternalLink, FileText, FolderOpen, GitFork, Import, KeyRound, Laptop, LoaderCircle, Network, RefreshCw, RotateCcw, Search, Server, Sparkles, X } from 'lucide-react'
 import type { AppUpdateStatus, AppUpdateTrack, Backend, BulkImportSessionItem, BulkImportSessionResult, ChatReference, ChatReferenceAction, CoordinatedServerUpdate, CreateJobInput, Health, Job, JobContextMode, JobScheduleKind, LocalSessionCandidate, ServerRestartBlockerSnapshot, ServerSetupCapabilities, ServerSetupProgress, ServerUpdateStatus, ServerUpdateTrack, Session, TeamReference, UpdateJobInput, WorkspaceProfileScope } from '@shared/types'
 import { cursorLocalSessionImportSupported, geminiLocalSessionImportSupported, localSessionImportKey, localSessionImportSupported } from '@shared/local-session-import'
@@ -471,6 +472,9 @@ export function AppSettingsDialog({ serverSettings, serverUpdates, onServerUpdat
   const health = useAppStore(state => state.health)
   const profiles = useAppStore(state => state.profiles)
   const activeProfileId = useAppStore(state => state.activeProfileId)
+  const groupUnreadChats = useAppStore(state => state.groupUnreadChats)
+  const includeCronInUnread = useAppStore(state => state.includeCronInUnread)
+  const groupRunningChats = useAppStore(state => state.groupRunningChats)
   const open = appSettingsOpen || legacyServerSettingsOpen
   const [section, setSection] = useState<AppSettingsSection>('general')
   const [providerRequest, setProviderRequest] = useState<{ backend?: Backend }>()
@@ -623,6 +627,18 @@ export function AppSettingsDialog({ serverSettings, serverUpdates, onServerUpdat
                 </select>
               </label>
               <ReasoningDisplaySettings />
+              <label className="app-settings-row">
+                <div className="app-settings-row-copy"><strong>{t('settings.groupUnreadChats')}</strong><span id="group-unread-chats-help">{t('settings.groupUnreadChatsHelp')}</span></div>
+                <Switch.Root className="settings-switch" aria-label={t('settings.groupUnreadChats')} aria-describedby="group-unread-chats-help" checked={groupUnreadChats} onCheckedChange={value => useAppStore.getState().setGroupUnreadChats(value)}><Switch.Thumb className="settings-switch-thumb" /></Switch.Root>
+              </label>
+              <label className="app-settings-row">
+                <div className="app-settings-row-copy"><strong>{t('settings.includeCronInUnread')}</strong><span id="include-cron-in-unread-help">{t('settings.includeCronInUnreadHelp')}</span></div>
+                <Switch.Root className="settings-switch" aria-label={t('settings.includeCronInUnread')} aria-describedby="include-cron-in-unread-help" checked={includeCronInUnread} onCheckedChange={value => useAppStore.getState().setIncludeCronInUnread(value)}><Switch.Thumb className="settings-switch-thumb" /></Switch.Root>
+              </label>
+              <label className="app-settings-row">
+                <div className="app-settings-row-copy"><strong>{t('settings.groupRunningChats')}</strong><span id="group-running-chats-help">{t('settings.groupRunningChatsHelp')}</span></div>
+                <Switch.Root className="settings-switch" aria-label={t('settings.groupRunningChats')} aria-describedby="group-running-chats-help" checked={groupRunningChats} onCheckedChange={value => useAppStore.getState().setGroupRunningChats(value)}><Switch.Thumb className="settings-switch-thumb" /></Switch.Root>
+              </label>
               <div className="app-settings-row">
                 <strong className="app-settings-row-title">AgentsDock</strong>
                 <span className="app-settings-value">{update?.currentVersion ? t('settings.version', { version: update.currentVersion }) : t('settings.versionUnavailable')}</span>

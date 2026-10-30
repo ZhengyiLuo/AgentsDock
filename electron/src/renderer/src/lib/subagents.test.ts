@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it } from 'vitest'
 import { setLocale } from '@shared/i18n'
 import type { Event } from '@shared/types'
-import { isSubagentActive, subagentDetailText, subagentDisplayName, subagentLogText, subagentStatusLabel, subagentsFromEvents } from './subagents'
+import { liveCodexSubagentCount, isSubagentActive, subagentDetailText, subagentDisplayName, subagentLogText, subagentStatusLabel, subagentsFromEvents } from './subagents'
 afterEach(() => setLocale('en'))
 
 const event = (seq: number, type: string, patch: Partial<Event> = {}): Event => ({
@@ -15,6 +15,43 @@ const event = (seq: number, type: string, patch: Partial<Event> = {}): Event => 
 })
 
 describe('subagentsFromEvents', () => {
+  it.each(['codex', 'claude'] as const)('localizes only the %s display fallback, preserving native identity and output', backend => {
+    const [agent] = subagentsFromEvents([event(1, 'subagent_state', {
+      backend, subagent_id: 'child', subagent_status: 'stopped', subagent_activity: 'Original subagent output'
+    })], backend)
+    const provider = backend === 'codex' ? 'Codex' : 'Claude'
+    expect(subagentDisplayName(agent)).toBe(`${provider} subagent`)
+    setLocale('zh-CN')
+    expect(subagentDisplayName(agent)).toBe(`${provider} 子 Agent`)
+    expect(subagentLogText(agent)).toContain('Original subagent output')
+    expect(subagentDisplayName({ ...agent, title: 'My subagent' })).toBe('My subagent')
+  })
+
+  it('counts only native live children owned by the current root, including nested children', () => {
+    const states = [
+      event(1, 'subagent_state', { backend: 'codex', subagent_id: 'a', subagent_parent_thread_id: 'root', subagent_status: 'completed' }),
+      event(2, 'subagent_state', { backend: 'codex', subagent_id: 'b', subagent_parent_thread_id: 'a', subagent_status: 'running' }),
+      event(3, 'subagent_state', { backend: 'codex', subagent_id: 'foreign', subagent_root_thread_id: 'elsewhere', subagent_status: 'running' }),
+      event(4, 'subagent_state', { backend: 'codex', subagent_id: 'forked', subagent_parent_thread_id: 'root', subagent_status: 'running', forked: true }),
+      event(5, 'subagent_state', { backend: 'claude', subagent_id: 'claude', subagent_parent_thread_id: 'root', subagent_status: 'running' }),
+    ]
+    expect(liveCodexSubagentCount(states, 'root')).toBe(1)
+    expect(liveCodexSubagentCount(states, 'root')).toBe(1)
+    expect(liveCodexSubagentCount(states, 'unknown')).toBe(0)
+    expect(liveCodexSubagentCount(states, null)).toBe(0)
+    expect(liveCodexSubagentCount([event(6, 'subagent_state', {
+      subagent_id: 'b', subagent_parent_thread_id: 'a', subagent_status: 'stopped'
+    }), ...states], 'root')).toBe(0)
+  })
+
+  it('uses explicit root ownership when bounded history omits the parent, but not unknown or root records', () => {
+    const states = [
+      event(1, 'subagent_state', { subagent_id: 'a', subagent_root_thread_id: 'root', subagent_status: 'running' }),
+      event(2, 'subagent_state', { subagent_id: 'root', subagent_root_thread_id: 'root', subagent_status: 'running' }),
+      event(3, 'subagent_state', { subagent_id: 'unknown', subagent_status: 'running' }),
+    ]
+    expect(liveCodexSubagentCount(states, 'root')).toBe(1)
+  })
   it('does not mislabel OpenCode tasks or their backend-less continuations as Codex agents', () => {
     expect(subagentsFromEvents([
       event(1, 'turn_started', { backend: 'opencode' }),

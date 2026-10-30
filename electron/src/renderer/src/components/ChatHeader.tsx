@@ -3,7 +3,7 @@ import { t } from '@shared/i18n'
 import { useLocale } from '../lib/i18n'
 import { useEffect, useMemo, useState } from 'react'
 import * as DropdownMenu from '@radix-ui/react-dropdown-menu'
-import { Archive, ArchiveRestore, ArrowLeftRight, Check, ChevronRight, Columns2, Copy, Folder, GitFork, LoaderCircle, MoreHorizontal, PanelLeft, PanelRight, PanelRightClose, Pin, RefreshCw, SquareTerminal, Trash2, X } from 'lucide-react'
+import { Archive, ArchiveRestore, ArrowLeftRight, Check, ChevronRight, Columns2, Copy, Folder, GitFork, LoaderCircle, MoreHorizontal, PanelLeft, PanelRight, PanelRightClose, Pencil, Pin, RefreshCw, SquareTerminal, Trash2, X } from 'lucide-react'
 import type { Session } from '@shared/types'
 import { completedPrefixForkAvailable } from '@shared/session-fork'
 import { backendLabel, shortId } from '../lib/format'
@@ -19,6 +19,7 @@ import { ScheduledJobsPopover } from './ScheduledJobsPopover'
 export function ChatHeader({
   session: sessionProp,
   focused = true,
+  titleInTab = false,
   sidebarVisible = true,
   terminalOpen = false,
   onSidebarToggle,
@@ -29,6 +30,7 @@ export function ChatHeader({
 }: {
   session?: Session | null
   focused?: boolean
+  titleInTab?: boolean
   sidebarVisible?: boolean
   terminalOpen?: boolean
   onSidebarToggle?: () => void
@@ -57,10 +59,9 @@ export function ChatHeader({
     () => sessions.filter(candidate => (
       !candidate.archived
       && candidate.id !== session?.id
-      && candidate.id !== chatPanes.primary
-      && candidate.id !== chatPanes.secondary
+      && !Object.values(chatPanes).includes(candidate.id)
     )).slice(0, 30),
-    [chatPanes.primary, chatPanes.secondary, session?.id, sessions]
+    [chatPanes, session?.id, sessions]
   )
   const folders = useMemo(() => {
     const order = new Map(folderOrder.map((folder, index) => [folder, index]))
@@ -110,16 +111,16 @@ export function ChatHeader({
   }
   return (
     <header className={`chat-header${focused ? ' focused' : ''}`}>
-      <div className="title-block">
+      <div className={`title-block${titleInTab ? ' chat-header-tab-folder' : ''}`}>
         <div className="editable-title">
-          <input
+          {!titleInTab && <input
             aria-label={t("ui.ChatHeader.ChatHeader.rename_e84e258", { "name": String(session.title) })}
             value={title}
             size={Math.max(1, Array.from(title).length)}
             onChange={event => setTitle(event.target.value)}
             onBlur={save}
             onKeyDown={event => { if (event.key === 'Enter') { event.currentTarget.blur(); save() } }}
-          />
+          />}
           <DropdownMenu.Root>
             <DropdownMenu.Trigger asChild>
               <button type="button" className="chat-folder-label" title={t("ui.ChatHeader.ChatHeader.move_chat_to_folder_currently_b505564", { "folder": String(currentFolder) })} aria-label={t("ui.ChatHeader.ChatHeader.folder_4e7d7bc", { "folder": String(currentFolder) })}>
@@ -151,6 +152,7 @@ export function ChatHeader({
           setActionsMenuOpen(open)
           if (!open) setSplitMenuRequested(false)
         }}><DropdownMenu.Trigger asChild><button className="icon-button" title={t("ui.ChatHeader.ChatHeader.chat_actions_8ba35bb")} aria-label={t("ui.ChatHeader.ChatHeader.chat_actions_8ba35bb")}><MoreHorizontal size={16} /></button></DropdownMenu.Trigger><DropdownMenu.Portal><DropdownMenu.Content className="menu-content" align="end">
+          {titleInTab && <DropdownMenu.Item className="menu-item" onSelect={() => window.dispatchEvent(new CustomEvent('agentsdock:rename-chat', { detail: session }))}><Pencil size={14} />{t('ui.Sidebar.SessionContextMenu.rename_chat_a257dec')}</DropdownMenu.Item>}
           {splitMenuRequested && onOpenSplit && <DropdownMenu.Sub>
             <DropdownMenu.SubTrigger className="menu-item split-chat-menu-trigger"><Columns2 size={14} />{t("ui.ChatHeader.ChatHeader.open_split_view_51e50f7")}<ChevronRight size={13} /></DropdownMenu.SubTrigger>
             <DropdownMenu.Portal><DropdownMenu.SubContent className="menu-content split-chat-menu" sideOffset={6} collisionPadding={12}>

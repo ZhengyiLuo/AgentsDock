@@ -176,7 +176,7 @@ function SubagentsSection({ sessionId }: { sessionId: string }) {
 
   if (!agents.length) return null
   return <section className="inspector-section collapsible-section subagents-section">
-    <button className="section-toggle" aria-label={t("ui.Inspector.SubagentsSection.subagents_active_987ab1c", { "count": String(activeCount) })} aria-expanded={open} onClick={() => setOpen(value => !value)}>{open ? <ChevronDown size={14} /> : <ChevronRight size={14} />}<Bot size={15} /><strong>Subagents</strong><small className="subagent-active-count">{activeCount}{" "}{t("ui.Inspector.SubagentsSection.active_9687961")}</small></button>
+    <button className="section-toggle" aria-label={t("ui.Inspector.SubagentsSection.subagents_active_987ab1c", { "count": String(activeCount) })} aria-expanded={open} onClick={() => setOpen(value => !value)}>{open ? <ChevronDown size={14} /> : <ChevronRight size={14} />}<Bot size={15} /><strong>{t('subagents.title')}</strong><small className="subagent-active-count">{activeCount}{" "}{t("ui.Inspector.SubagentsSection.active_9687961")}</small></button>
     {open && <div className="subagent-groups">
       {activeAgents.length
         ? <div className="subagent-group subagent-active-group">

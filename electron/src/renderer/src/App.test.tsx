@@ -1,14 +1,16 @@
-import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
-import { useEffect, type ReactNode } from 'react'
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
+import { useEffect, type ComponentProps, type ReactNode } from 'react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { AgentsDockAPI } from '@shared/ipc'
-import type { PublicServerProfile, Session } from '@shared/types'
+import type { PublicServerProfile, Session, WorkspaceFile } from '@shared/types'
 import { handleMenuCommand, useAppStore } from './store/app-store'
 import { installChatSwitcherShortcut } from './lib/chat-switcher-shortcut'
 import { App } from './App'
+import { resetWorkspaceEditorMemoryForTests } from './components/WorkspaceEditor'
 
 const workspaceEditorHarness = vi.hoisted(() => ({
   autoReady: true,
+  real: false,
   onFileOpen: null as (() => void) | null,
   onReady: null as (() => void) | null
 }))
@@ -82,8 +84,9 @@ vi.mock('./components/TeamNetwork', () => ({
     return <div data-testid="teamspace">Teamspace</div>
   }
 }))
-vi.mock('./components/WorkspaceEditor', () => ({
-  WorkspaceEditor: ({
+vi.mock('./components/WorkspaceEditor', async importOriginal => {
+  const actual = await importOriginal<typeof import('./components/WorkspaceEditor')>()
+  const MockWorkspaceEditor = ({
     session,
     available,
     workspaceKey,
@@ -122,7 +125,10 @@ vi.mock('./components/WorkspaceEditor', () => ({
       data-max-text-file-bytes={maxTextFileBytes}
     >{onFileOpen && <button onClick={onFileOpen}>View file</button>}{onActivate && <button onClick={onActivate}>Activate file editor</button>}<div data-testid="code-editor" role="textbox" contentEditable suppressContentEditableWarning>code</div>{chatContent}</div>
   }
-}))
+  return { ...actual, WorkspaceEditor: (props: ComponentProps<typeof actual.WorkspaceEditor>) => workspaceEditorHarness.real
+    ? <actual.WorkspaceEditor {...props} /> : <MockWorkspaceEditor {...props} /> }
+})
+vi.mock('./components/CodeMirrorEditor', () => ({ CodeMirrorEditor: ({ value, ariaLabel, readOnly, onChange }: any) => <textarea aria-label={ariaLabel} value={value} readOnly={readOnly} onChange={event => onChange(event.target.value, 1)} /> }))
 vi.mock('./components/WorkspaceResizeHandles', () => ({
   WorkspaceResizeHandles: ({ sidebarVisible = true }: { sidebarVisible?: boolean }) => <div data-testid="resize" data-sidebar-visible={String(sidebarVisible)} />,
   savedWorkspaceColumnStyle: () => ({}),
@@ -154,6 +160,8 @@ describe('App chat workspace identity', () => {
   beforeEach(() => {
     sideChatHarness.props = null
     appRenderHarness.sidebarRenders = 0
+    workspaceEditorHarness.real = false
+    resetWorkspaceEditorMemoryForTests()
     workspaceEditorHarness.autoReady = true
     workspaceEditorHarness.onReady = null
     teamspaceHarness.mounts = 0
@@ -183,7 +191,14 @@ describe('App chat workspace identity', () => {
             path: `/tmp/${file.name}`, name: file.name, size: file.size, type: file.type
           })),
           stageClipboardImage: vi.fn(),
-          upload: vi.fn().mockResolvedValue([])
+          upload: vi.fn().mockResolvedValue([]),
+          cancelReadText: vi.fn().mockResolvedValue(true)
+
+        },
+        workspace: {
+          entries: vi.fn((id: string) => Promise.resolve({ root: sessions.find(session => session.id === id)!.cwd, path: '', entries: [{ name: 'example.ts', path: 'example.ts', kind: 'file' }], has_more: false })),
+          search: vi.fn().mockResolvedValue({ root: '/work/alpha', query: '', entries: [{ name: 'example.ts', path: 'example.ts', kind: 'file' }], scanned: 1, truncated: false, limit: 100 }),
+          read: vi.fn((id: string, path: string) => Promise.resolve({ root: sessions.find(session => session.id === id)!.cwd, path, name: path.split('/').at(-1)!, content: `Content from ${id}`, revision: 'rev-1', size: 19, mtime_ns: 1, writable: true }))
         },
         preferences: {
           get: vi.fn((_key, fallback) => Promise.resolve(fallback)),
@@ -204,6 +219,7 @@ describe('App chat workspace identity', () => {
       selectedSessionId: sessions[0].id,
       chatPanes: { primary: sessions[0].id, secondary: null },
       focusedChatPane: 'primary',
+      chatPaneCount: 1, chatWorkspaces: [], activeChatWorkspaceId: 'workspace-main',
       inspectorVisible: false,
       health: {
         ok: true,
@@ -261,60 +277,77 @@ describe('App chat workspace identity', () => {
     expect(inspectorHarness.props.tab).toBe('details')
   })
 
-  it('opens the Files tab from a closed panel when a file is viewed, and remembers it', () => {
+  it('opens a file in its pane while preserving the closed Files panel preference', async () => {
+    workspaceEditorHarness.real = true
     render(<App />)
     expect(useAppStore.getState().inspectorVisible).toBe(false)
+    act(() => window.dispatchEvent(new CustomEvent('agentsdock:open-workspace-path', { detail: { sessionId: 'chat-a', path: 'example.ts' } })))
+    expect(await screen.findByRole('textbox', { name: 'Contents of example.ts' })).toHaveValue('Content from chat-a')
+    expect(useAppStore.getState().inspectorVisible).toBe(false)
     expect(inspectorHarness.props.tab).toBe('details')
-    fireEvent.click(screen.getByRole('button', { name: 'View file' }))
-    expect(useAppStore.getState().inspectorVisible).toBe(true)
-    expect(inspectorHarness.props.tab).toBe('files')
+    act(() => inspectorHarness.props.onTabChange('files'))
     expect(localStorage.getItem('agentsdock:inspector-tab')).toBe('files')
     act(() => inspectorHarness.props.onHide())
-    fireEvent.click(screen.getByRole('button', { name: 'View file' }))
-    expect(useAppStore.getState().inspectorVisible).toBe(true)
+    act(() => window.dispatchEvent(new CustomEvent('agentsdock:open-workspace-path', { detail: { sessionId: 'chat-a', path: 'other.ts' } })))
+    expect(await screen.findByRole('textbox', { name: 'Contents of other.ts' })).toBeVisible()
+    expect(useAppStore.getState().inspectorVisible).toBe(false)
     expect(inspectorHarness.props.tab).toBe('files')
   })
 
-  it('ignores late file-open notifications from a previous connection', () => {
+  it('ignores late file results and scoped requests from a previous connection', async () => {
+    workspaceEditorHarness.real = true
+    let finishRead!: (file: WorkspaceFile) => void
+    const original = vi.mocked(window.agentsDock.workspace.read).getMockImplementation()!
+    vi.mocked(window.agentsDock.workspace.read).mockImplementation(() => new Promise(resolve => { finishRead = resolve }))
     render(<App />)
-    const staleOpen = workspaceEditorHarness.onFileOpen!
+    const detail = { sessionId: 'chat-a', path: 'stale.ts', profileId: profile.id, profileGeneration: 4, serverIdentity: 'server-a' }
+    act(() => window.dispatchEvent(new CustomEvent('agentsdock:open-workspace-path', { detail })))
+    await waitFor(() => expect(window.agentsDock.workspace.read).toHaveBeenCalledTimes(1))
     act(() => useAppStore.setState({ profileGeneration: 5 }))
-    act(() => staleOpen())
+    await act(async () => finishRead(await original('chat-a', 'stale.ts')))
+    act(() => window.dispatchEvent(new CustomEvent('agentsdock:open-workspace-path', { detail })))
+    expect(window.agentsDock.workspace.read).toHaveBeenCalledTimes(1)
+    expect(screen.queryByRole('textbox', { name: 'Contents of stale.ts' })).not.toBeInTheDocument()
     expect(useAppStore.getState().inspectorVisible).toBe(false)
     expect(inspectorHarness.props.tab).toBe('details')
   })
 
-  it('opens Files when a split-chat file is viewed from a closed panel', () => {
-    useAppStore.setState({ chatPanes: { primary: 'chat-a', secondary: 'chat-b' } })
-    render(<App />)
-    act(() => window.dispatchEvent(new CustomEvent('agentsdock:open-workspace-path', { detail: { sessionId: 'chat-b', path: 'README.md' } })))
-    fireEvent.click(screen.getByRole('button', { name: 'View file' }))
+  it('opens a split-chat file locally while the Files panel is closed', async () => {
+    workspaceEditorHarness.real = true
+    useAppStore.setState({ chatPaneCount: 2, chatPanes: { primary: 'chat-a', secondary: 'chat-b' } })
+    const view = render(<App />)
+    const secondary = view.container.querySelector('[data-chat-pane="secondary"]')!
+    fireEvent.pointerDown(secondary)
+    act(() => window.dispatchEvent(new CustomEvent('agentsdock:open-workspace-path', { detail: { sessionId: 'chat-b', path: 'example.ts' } })))
+    expect(await screen.findByRole('textbox', { name: 'Contents of example.ts' })).toHaveValue('Content from chat-b')
     expect(useAppStore.getState().selectedSessionId).toBe('chat-b')
-    expect(useAppStore.getState().inspectorVisible).toBe(true)
-    expect(inspectorHarness.props.tab).toBe('files')
+    expect(useAppStore.getState().inspectorVisible).toBe(false)
+    expect(screen.getByText('composer:chat-a')).toBeVisible()
+    expect(view.container.querySelector('.split-workspace-overlay')).toBeNull()
   })
 
-  it('browses the focused split chat in Files without covering chats, then activates the same editor', () => {
+  it('keeps each pane editor mounted while file and chat tabs change and Files follows focus', async () => {
+    workspaceEditorHarness.real = true
     localStorage.setItem('agentsdock:inspector-tab', 'files')
-    useAppStore.setState({ chatPanes: { primary: 'chat-a', secondary: 'chat-b' }, focusedChatPane: 'secondary', selectedSessionId: 'chat-b', inspectorVisible: true })
-    render(<App />)
-    const editor = screen.getByTestId('workspace-editor')
-    expect(editor).toHaveAttribute('data-session', 'chat-b')
-    expect(editor).toHaveAttribute('data-files-only', 'true')
-    expect(document.querySelector('.split-workspace-overlay')).toBeNull()
-    fireEvent.click(screen.getByRole('button', { name: 'Activate file editor' }))
-    expect(screen.getByTestId('workspace-editor')).toBe(editor)
-    expect(editor).toHaveAttribute('data-files-only', 'false')
-    expect(document.querySelector('.split-workspace-overlay')).not.toBeNull()
-    fireEvent.click(screen.getByRole('button', { name: 'Return to split chats' }))
-    expect(screen.getByTestId('workspace-editor')).toBe(editor)
-    expect(editor).toHaveAttribute('data-files-only', 'true')
-    act(() => useAppStore.getState().focusChatPane('primary'))
-    expect(screen.getByTestId('workspace-editor')).toHaveAttribute('data-session', 'chat-a')
+    useAppStore.setState({ chatPaneCount: 2, chatPanes: { primary: 'chat-a', secondary: 'chat-b' }, focusedChatPane: 'secondary', selectedSessionId: 'chat-b', inspectorVisible: true })
+    const view = render(<App />)
+    const primary = view.container.querySelector('[data-chat-pane="primary"]') as HTMLElement
+    const secondary = view.container.querySelector('[data-chat-pane="secondary"]') as HTMLElement
+    expect(inspectorHarness.props.session.id).toBe('chat-b')
+    act(() => window.dispatchEvent(new CustomEvent('agentsdock:open-workspace-path', { detail: { sessionId: 'chat-b', path: 'example.ts' } })))
+    expect(await within(secondary).findByRole('textbox', { name: 'Contents of example.ts' })).toBeVisible()
+    expect(within(primary).getByTestId('composer')).toBeVisible()
+    expect(view.container.querySelector('.split-workspace-overlay')).toBeNull()
+    fireEvent.click(within(secondary).getByRole('button', { name: /Chat.*pinned/i }))
+    expect(within(secondary).getByTestId('composer')).toBeVisible()
+    expect(view.container.querySelector('[data-chat-pane="secondary"]')).toBe(secondary)
+    fireEvent.pointerDown(primary)
+    expect(inspectorHarness.props.session.id).toBe('chat-a')
+    expect(view.container.querySelector('[data-chat-pane="primary"]')).toBe(primary)
   })
 
   it('opens Side chat for the explicitly clicked split pane and rejects stale routing', () => {
-    useAppStore.setState({ chatPanes: { primary: 'chat-a', secondary: 'chat-b' } })
+    useAppStore.setState({ chatPaneCount: 2, chatPanes: { primary: 'chat-a', secondary: 'chat-b' } })
     render(<App />)
     const open = (profileGeneration: number, sessionId: string) => act(() => window.dispatchEvent(new CustomEvent('agentsdock:open-side-chat', {
       detail: { profileId: profile.id, profileGeneration, sessionId }
@@ -758,26 +791,20 @@ describe('App chat workspace identity', () => {
     expect(runtime).not.toHaveBeenCalled()
   })
 
-  it('keeps an archived target read-only while its file workspace preserves split view', async () => {
+  it('keeps an archived target read-only while its pane-local file preserves split view', async () => {
+    workspaceEditorHarness.real = true
     const archived = { ...sessions[1], archived: true }
-    act(() => useAppStore.setState({
-      sessions: [sessions[0], archived],
-      selectedSessionId: sessions[0].id,
-      chatPanes: { primary: sessions[0].id, secondary: archived.id },
-      focusedChatPane: 'primary'
-    }))
-    render(<App />)
-
-    act(() => {
-      window.dispatchEvent(new CustomEvent('agentsdock:open-workspace-path', {
-        detail: { sessionId: archived.id, path: 'README.md' }
-      }))
-    })
-
-    await waitFor(() => expect(screen.getByTestId('workspace-editor')).toHaveAttribute('data-session', archived.id))
-    expect(useAppStore.getState().chatPanes).toEqual({ primary: sessions[0].id, secondary: archived.id })
-    expect(screen.getByTestId('workspace-editor')).toHaveAttribute('data-session', archived.id)
-    expect(screen.getByText('Archived chat. Unarchive it to send a message.')).toBeVisible()
+    useAppStore.setState({ sessions: [sessions[0], archived], selectedSessionId: 'chat-a',
+      chatPaneCount: 2, chatPanes: { primary: 'chat-a', secondary: archived.id }, focusedChatPane: 'primary' })
+    const view = render(<App />)
+    const archivedPane = view.container.querySelector('[data-chat-pane="secondary"]') as HTMLElement
+    act(() => window.dispatchEvent(new CustomEvent('agentsdock:open-workspace-path', { detail: { sessionId: archived.id, path: 'README.md' } })))
+    await waitFor(() => expect(window.agentsDock.workspace.read).toHaveBeenCalledWith(archived.id, 'README.md'))
+    expect(await within(archivedPane).findByRole('tab', { name: 'README.md' })).toBeInTheDocument()
+    expect(within(archivedPane).queryByTestId('composer')).not.toBeInTheDocument()
+    fireEvent.click(within(archivedPane).getByRole('button', { name: /Chat.*pinned/i }))
+    expect(within(archivedPane).getByText('Archived chat. Unarchive it to send a message.')).toBeVisible()
+    expect(useAppStore.getState().chatPanes).toEqual({ primary: 'chat-a', secondary: archived.id })
     expect(screen.getAllByTestId('composer')).toHaveLength(1)
     expect(screen.getByTestId('composer')).toHaveTextContent('composer:chat-a')
   })
@@ -885,14 +912,15 @@ describe('App chat workspace identity', () => {
   it('renders two stable interactive chat panes and keeps shared surfaces on the focused chat', () => {
     act(() => useAppStore.setState({
       selectedSessionId: 'chat-a',
-      chatPanes: { primary: 'chat-a', secondary: 'chat-b' },
+      chatPaneCount: 2, chatPanes: { primary: 'chat-a', secondary: 'chat-b' },
       focusedChatPane: 'primary'
     }))
     render(<App />)
 
     expect(screen.getAllByTestId('timeline').map(node => node.textContent)).toEqual(['timeline:chat-a', 'timeline:chat-b'])
     expect(screen.getAllByTestId('composer').map(node => node.textContent)).toEqual(['composer:chat-a', 'composer:chat-b'])
-    expect(screen.queryByTestId('workspace-editor')).not.toBeInTheDocument()
+    expect(screen.getAllByTestId('workspace-editor').map(node => node.getAttribute('data-session'))).toEqual(['chat-a', 'chat-b'])
+    expect(inspectorHarness.props.session.id).toBe('chat-a')
     expect(document.querySelector('[data-chat-pane="primary"]')).toHaveClass('focused')
     expect(document.querySelector('[data-chat-pane="secondary"]')).not.toHaveClass('focused')
 
@@ -900,6 +928,7 @@ describe('App chat workspace identity', () => {
     expect(useAppStore.getState().selectedSessionId).toBe('chat-b')
     expect(useAppStore.getState().focusedChatPane).toBe('secondary')
     expect(document.querySelector('[data-chat-pane="secondary"]')).toHaveClass('focused')
+    expect(inspectorHarness.props.session.id).toBe('chat-b')
   })
 
   it('focuses split chat panes with exact non-Mac Control-Alt-arrow shortcuts', () => {
@@ -907,7 +936,7 @@ describe('App chat workspace identity', () => {
     vi.spyOn(window.navigator, 'userAgent', 'get').mockReturnValue('AgentsDock')
     act(() => useAppStore.setState({
       selectedSessionId: 'chat-a',
-      chatPanes: { primary: 'chat-a', secondary: 'chat-b' },
+      chatPaneCount: 2, chatPanes: { primary: 'chat-a', secondary: 'chat-b' },
       focusedChatPane: 'primary'
     }))
     render(<App />)
@@ -946,7 +975,7 @@ describe('App chat workspace identity', () => {
     expect(useAppStore.getState().selectedSessionId).toBe('chat-a')
 
     act(() => useAppStore.setState({
-      chatPanes: { primary: 'chat-a', secondary: 'chat-b' },
+      chatPaneCount: 2, chatPanes: { primary: 'chat-a', secondary: 'chat-b' },
       focusedChatPane: 'primary'
     }))
     fireEvent.keyDown(window, { key: 'ArrowRight', code: 'ArrowRight', ctrlKey: true, altKey: true })
@@ -956,175 +985,134 @@ describe('App chat workspace identity', () => {
     expect(document.activeElement).toBe(view.container.querySelector('[data-chat-pane="secondary"]'))
   })
 
-  it('uses a pane shortcut to leave the split file workspace without crossing an open modal', async () => {
+  it('moves focus from a pane-local file without closing it or crossing an open modal', async () => {
+    workspaceEditorHarness.real = true
     vi.spyOn(window.navigator, 'platform', 'get').mockReturnValue('Linux x86_64')
     vi.spyOn(window.navigator, 'userAgent', 'get').mockReturnValue('AgentsDock')
-    act(() => useAppStore.setState({
-      selectedSessionId: 'chat-b',
-      chatPanes: { primary: 'chat-a', secondary: 'chat-b' },
-      focusedChatPane: 'secondary'
-    }))
+    useAppStore.setState({ selectedSessionId: 'chat-b', chatPaneCount: 2,
+      chatPanes: { primary: 'chat-a', secondary: 'chat-b' }, focusedChatPane: 'secondary' })
     render(<App />)
-    act(() => { window.dispatchEvent(new CustomEvent('agentsdock:open-workspace-file')) })
-    expect(screen.getByRole('region', { name: 'Chat B file workspace' })).toBeInTheDocument()
-
+    act(() => window.dispatchEvent(new CustomEvent('agentsdock:open-workspace-path', { detail: { sessionId: 'chat-b', path: 'example.ts' } })))
+    const editor = await screen.findByRole('textbox', { name: 'Contents of example.ts' })
     const modal = document.createElement('div')
     modal.setAttribute('aria-modal', 'true')
     document.body.appendChild(modal)
     fireEvent.keyDown(window, { key: 'ArrowLeft', code: 'ArrowLeft', ctrlKey: true, altKey: true })
     expect(useAppStore.getState().focusedChatPane).toBe('secondary')
-    expect(screen.getByRole('region', { name: 'Chat B file workspace' })).toBeInTheDocument()
-
+    expect(editor).toBeVisible()
     modal.remove()
     fireEvent.keyDown(window, { key: 'ArrowLeft', code: 'ArrowLeft', ctrlKey: true, altKey: true })
     expect(useAppStore.getState().focusedChatPane).toBe('primary')
-    expect(screen.queryByRole('region', { name: 'Chat B file workspace' })).not.toBeInTheDocument()
-    await waitFor(() => expect(document.activeElement).toBe(document.querySelector('[data-chat-pane="primary"]')))
+    expect(editor).toBeVisible()
+    expect(document.activeElement).toBe(document.querySelector('[data-chat-pane="primary"]'))
   })
 
-  it('preserves both chat panes and delivers the targeted request once in a fresh event on editor readiness', async () => {
-    act(() => useAppStore.setState({
-      selectedSessionId: 'chat-a',
-      chatPanes: { primary: 'chat-a', secondary: 'chat-b' },
-      focusedChatPane: 'primary'
-    }))
-    workspaceEditorHarness.autoReady = false
+  it('preserves both panes and delivers a fresh targeted request once after its editor restores', async () => {
+    workspaceEditorHarness.real = true
+    useAppStore.setState({ selectedSessionId: 'chat-a', chatPaneCount: 2,
+      chatPanes: { primary: 'chat-a', secondary: 'chat-b' }, focusedChatPane: 'primary' })
+    let restore!: (value: null) => void
+    const pendingRestore = new Promise<null>(resolve => { restore = resolve })
+    vi.mocked(window.agentsDock.preferences.getScoped).mockImplementation((_scope, key, fallback) => key === 'workspace-editor:chat-b' ? pendingRestore : Promise.resolve(fallback))
     const view = render(<App />)
-    const primaryPane = view.container.querySelector('[data-chat-pane="primary"]')
-    const secondaryPane = view.container.querySelector('[data-chat-pane="secondary"]')
+    const primary = view.container.querySelector('[data-chat-pane="primary"]') as HTMLElement
+    const secondary = view.container.querySelector('[data-chat-pane="secondary"]') as HTMLElement
     const opened = vi.fn()
     window.addEventListener('agentsdock:open-workspace-path', opened)
     try {
       const request = new CustomEvent('agentsdock:open-workspace-path', {
         detail: { sessionId: 'chat-b', path: 'src/index.ts', line: 12, column: 3, resolve: true },
-        bubbles: true,
-        cancelable: true,
-        composed: true
+        bubbles: true, cancelable: true, composed: true
       })
-      act(() => { window.dispatchEvent(request) })
-
-      expect(useAppStore.getState().chatPanes).toEqual({ primary: 'chat-a', secondary: 'chat-b' })
+      fireEvent.pointerDown(secondary)
+      act(() => window.dispatchEvent(request))
       expect(useAppStore.getState().selectedSessionId).toBe('chat-b')
-      expect(screen.getByTestId('workspace-editor')).toHaveAttribute('data-session', 'chat-b')
-      expect(view.container.querySelector('[data-chat-pane="primary"]')).toBe(primaryPane)
-      expect(view.container.querySelector('[data-chat-pane="secondary"]')).toBe(secondaryPane)
-      expect(view.container.querySelector('.chat-split-view')).toHaveAttribute('inert')
-      expect(view.container.querySelector('.chat-split-view')).toHaveAttribute('aria-hidden', 'true')
-      expect(opened).not.toHaveBeenCalled()
-      expect(workspaceEditorHarness.onReady).toBeTypeOf('function')
-
-      act(() => workspaceEditorHarness.onReady?.())
-      expect(opened).toHaveBeenCalledOnce()
-      act(() => workspaceEditorHarness.onReady?.())
-      expect(opened).toHaveBeenCalledOnce()
-
-      const secondRequest = new CustomEvent('agentsdock:open-workspace-path', {
-        detail: { sessionId: 'chat-b', path: 'src/other.ts' }
-      })
-      act(() => { window.dispatchEvent(secondRequest) })
-      expect(opened).toHaveBeenCalledTimes(2)
-      expect(opened.mock.calls[1][0]).toBe(secondRequest)
-
-      fireEvent.click(screen.getByRole('button', { name: 'Return to split chats' }))
-      expect(screen.queryByRole('region', { name: 'Chat B file workspace' })).not.toBeInTheDocument()
-      expect(screen.queryByTestId('workspace-editor')).not.toBeInTheDocument()
-      expect(useAppStore.getState().chatPanes).toEqual({ primary: 'chat-a', secondary: 'chat-b' })
-      expect(view.container.querySelector('[data-chat-pane="primary"]')).toBe(primaryPane)
-      expect(view.container.querySelector('[data-chat-pane="secondary"]')).toBe(secondaryPane)
+      expect(window.agentsDock.workspace.read).not.toHaveBeenCalled()
+      // Pane editors are mounted already: the original fresh request is
+      // delivered directly, avoiding Chromium's stopped-event replay trap.
+      expect(opened).toHaveBeenCalledExactlyOnceWith(request)
       expect(view.container.querySelector('.chat-split-view')).not.toHaveAttribute('inert')
       expect(view.container.querySelector('.chat-split-view')).not.toHaveAttribute('aria-hidden')
-      // Chromium retains stopImmediatePropagation when the same Event is
-      // dispatched again; jsdom does not. Never replay that stopped instance.
-      expect(opened.mock.calls[0][0]).not.toBe(request)
-      expect(opened.mock.calls[0][0]).toMatchObject({ type: request.type, bubbles: true, cancelable: true, composed: true })
-      expect((opened.mock.calls[0][0] as CustomEvent).detail).toBe(request.detail)
-
-    } finally {
-      window.removeEventListener('agentsdock:open-workspace-path', opened)
-    }
+      await act(async () => restore(null))
+      expect(await within(secondary).findByRole('textbox', { name: 'Contents of src/index.ts' })).toHaveValue('Content from chat-b')
+      expect(window.agentsDock.workspace.read).toHaveBeenCalledExactlyOnceWith('chat-b', 'src/index.ts')
+      expect(opened).toHaveBeenCalledOnce()
+      expect(within(primary).getByTestId('composer')).toBeVisible()
+      const secondRequest = new CustomEvent('agentsdock:open-workspace-path', { detail: { sessionId: 'chat-b', path: 'src/other.ts' } })
+      act(() => window.dispatchEvent(secondRequest))
+      expect(await within(secondary).findByRole('textbox', { name: 'Contents of src/other.ts' })).toBeVisible()
+      expect(opened).toHaveBeenCalledTimes(2)
+      expect(opened.mock.calls[1][0]).toBe(secondRequest)
+      fireEvent.click(within(secondary).getByRole('button', { name: /Chat.*pinned/i }))
+      expect(within(secondary).getByTestId('composer')).toBeVisible()
+      expect(view.container.querySelector('[data-chat-pane="primary"]')).toBe(primary)
+      expect(view.container.querySelector('[data-chat-pane="secondary"]')).toBe(secondary)
+      expect(useAppStore.getState().chatPanes).toEqual({ primary: 'chat-a', secondary: 'chat-b' })
+    } finally { window.removeEventListener('agentsdock:open-workspace-path', opened) }
   })
 
-  it('replays the menu open-file request in a fresh event only after the targeted editor is ready', () => {
-    act(() => useAppStore.setState({
-      selectedSessionId: 'chat-b',
-      chatPanes: { primary: 'chat-a', secondary: 'chat-b' },
-      focusedChatPane: 'secondary'
-    }))
-    workspaceEditorHarness.autoReady = false
+  it('delivers the menu request once and opens only the focused editor after restoration', async () => {
+    workspaceEditorHarness.real = true
+    useAppStore.setState({ selectedSessionId: 'chat-b', chatPaneCount: 2,
+      chatPanes: { primary: 'chat-a', secondary: 'chat-b' }, focusedChatPane: 'secondary' })
+    let restore!: (value: null) => void
+    const pendingRestore = new Promise<null>(resolve => { restore = resolve })
+    vi.mocked(window.agentsDock.preferences.getScoped).mockImplementation((_scope, key, fallback) => key === 'workspace-editor:chat-b' ? pendingRestore : Promise.resolve(fallback))
     render(<App />)
     const opened = vi.fn()
     window.addEventListener('agentsdock:open-workspace-file', opened)
     try {
       const request = new CustomEvent('agentsdock:open-workspace-file')
-      act(() => { window.dispatchEvent(request) })
-
-      expect(useAppStore.getState().chatPanes).toEqual({ primary: 'chat-a', secondary: 'chat-b' })
-      expect(screen.getByTestId('workspace-editor')).toHaveAttribute('data-session', 'chat-b')
-      expect(opened).not.toHaveBeenCalled()
-
-      act(() => workspaceEditorHarness.onReady?.())
+      act(() => window.dispatchEvent(request))
+      expect(opened).toHaveBeenCalledExactlyOnceWith(request)
+      expect(screen.queryByRole('combobox', { name: 'Find a workspace file' })).not.toBeInTheDocument()
+      await act(async () => restore(null))
+      expect(await screen.findByRole('combobox', { name: 'Find a workspace file' })).toHaveFocus()
+      expect(screen.getAllByRole('combobox', { name: 'Find a workspace file' })).toHaveLength(1)
       expect(opened).toHaveBeenCalledOnce()
-      expect(opened.mock.calls[0][0]).not.toBe(request)
-      expect(opened.mock.calls[0][0]).toMatchObject({ type: request.type, detail: request.detail })
-    } finally {
-      window.removeEventListener('agentsdock:open-workspace-file', opened)
-    }
+      expect(useAppStore.getState().selectedSessionId).toBe('chat-b')
+      expect(useAppStore.getState().chatPanes).toEqual({ primary: 'chat-a', secondary: 'chat-b' })
+    } finally { window.removeEventListener('agentsdock:open-workspace-file', opened) }
   })
 
-  it('dismisses a split file workspace before closing either chat pane', () => {
-    act(() => useAppStore.setState({
-      selectedSessionId: 'chat-b',
-      chatPanes: { primary: 'chat-a', secondary: 'chat-b' },
-      focusedChatPane: 'secondary'
-    }))
-    render(<App />)
-
-    act(() => { window.dispatchEvent(new CustomEvent('agentsdock:open-workspace-file')) })
-    expect(screen.getByTestId('workspace-editor')).toHaveAttribute('data-session', 'chat-b')
-
+  it('closes the focused pane file before closing either chat pane', async () => {
+    workspaceEditorHarness.real = true
+    useAppStore.setState({ selectedSessionId: 'chat-b', chatPaneCount: 2,
+      chatPanes: { primary: 'chat-a', secondary: 'chat-b' }, focusedChatPane: 'secondary' })
+    const view = render(<App />)
+    const secondary = view.container.querySelector('[data-chat-pane="secondary"]') as HTMLElement
+    act(() => window.dispatchEvent(new CustomEvent('agentsdock:open-workspace-path', { detail: { sessionId: 'chat-b', path: 'example.ts' } })))
+    expect(await within(secondary).findByRole('textbox', { name: 'Contents of example.ts' })).toBeVisible()
     fireEvent(window, new Event('agentsdock:close-surface'))
-
-    expect(screen.queryByTestId('workspace-editor')).not.toBeInTheDocument()
+    await waitFor(() => expect(within(secondary).queryByRole('tab', { name: 'example.ts' })).not.toBeInTheDocument())
+    expect(within(secondary).getByTestId('composer')).toBeVisible()
     expect(useAppStore.getState().chatPanes).toEqual({ primary: 'chat-a', secondary: 'chat-b' })
     expect(useAppStore.getState().selectedSessionId).toBe('chat-b')
     expect(window.agentsDock.native.closeWindow).not.toHaveBeenCalled()
   })
 
-  it('cancels a pending split workspace replay when its pane is removed', () => {
-    act(() => useAppStore.setState({
-      selectedSessionId: 'chat-a',
-      chatPanes: { primary: 'chat-a', secondary: 'chat-b' },
-      focusedChatPane: 'primary'
-    }))
-    workspaceEditorHarness.autoReady = false
+  it('cancels a pending file open when its pane is removed before restoration', async () => {
+    workspaceEditorHarness.real = true
+    useAppStore.setState({ selectedSessionId: 'chat-a', chatPaneCount: 2,
+      chatPanes: { primary: 'chat-a', secondary: 'chat-b' }, focusedChatPane: 'primary' })
+    let restore!: (value: null) => void
+    const pendingRestore = new Promise<null>(resolve => { restore = resolve })
+    vi.mocked(window.agentsDock.preferences.getScoped).mockImplementation((_scope, key, fallback) => key === 'workspace-editor:chat-b' ? pendingRestore : Promise.resolve(fallback))
     render(<App />)
-    const opened = vi.fn()
-    window.addEventListener('agentsdock:open-workspace-path', opened)
-    try {
-      act(() => { window.dispatchEvent(new CustomEvent('agentsdock:open-workspace-path', {
-        detail: { sessionId: 'chat-b', path: 'src/index.ts' }
-      })) })
-      expect(screen.getByTestId('workspace-editor')).toHaveAttribute('data-session', 'chat-b')
-
-      act(() => useAppStore.setState({
-        selectedSessionId: 'chat-a',
-        chatPanes: { primary: 'chat-a', secondary: null },
-        focusedChatPane: 'primary'
-      }))
-
-      expect(screen.queryByRole('region', { name: 'Chat B file workspace' })).not.toBeInTheDocument()
-      expect(screen.getByTestId('workspace-editor')).toHaveAttribute('data-session', 'chat-a')
-      act(() => workspaceEditorHarness.onReady?.())
-      expect(opened).not.toHaveBeenCalled()
-    } finally {
-      window.removeEventListener('agentsdock:open-workspace-path', opened)
-    }
+    act(() => window.dispatchEvent(new CustomEvent('agentsdock:open-workspace-path', { detail: { sessionId: 'chat-b', path: 'src/index.ts' } })))
+    expect(window.agentsDock.workspace.read).not.toHaveBeenCalled()
+    act(() => useAppStore.getState().closeChatPane('secondary'))
+    await act(async () => restore(null))
+    expect(document.querySelector('[data-chat-pane="secondary"]')).toBeNull()
+    expect(screen.getByTestId('composer')).toHaveTextContent('composer:chat-a')
+    expect(window.agentsDock.workspace.read).not.toHaveBeenCalled()
+    expect(screen.queryByRole('tab', { name: 'index.ts' })).not.toBeInTheDocument()
   })
 
   it('closes the focused split pane before closing the app window', () => {
     act(() => useAppStore.setState({
       selectedSessionId: 'chat-b',
-      chatPanes: { primary: 'chat-a', secondary: 'chat-b' },
+      chatPaneCount: 2, chatPanes: { primary: 'chat-a', secondary: 'chat-b' },
       focusedChatPane: 'secondary'
     }))
     render(<App />)

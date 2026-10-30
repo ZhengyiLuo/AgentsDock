@@ -663,7 +663,7 @@ function GoalSettings({ onNotice, notice }: { onNotice(value: string): void; not
 
 function ThreadActions({ onNotice }: { onNotice(value: string): void }) {
   useLocale()
-  const { runtime, session, error, run } = useCodexRuntime()
+  const { runtime, session, error, mutating, run } = useCodexRuntime()
   const [reviewType, setReviewType] = useState<'uncommittedChanges' | 'baseBranch' | 'commit' | 'custom'>('uncommittedChanges')
   const [reviewValue, setReviewValue] = useState('')
   const [rollbackTurns, setRollbackTurns] = useState('1')
@@ -676,14 +676,14 @@ function ThreadActions({ onNotice }: { onNotice(value: string): void }) {
   const hasProviderThread = runtime
     ? runtime.thread_loaded === true
     : Boolean(session.codex_thread_id || session.session_id)
-  const actionsEnabled = Boolean(
+  const threadReady = Boolean(
     runtime
     && runtime.available
     && !error
     && hasProviderThread
-    && threadStatus !== 'active'
     && threadStatus !== 'systemError'
   )
+  const actionsEnabled = threadReady && threadStatus !== 'active'
   const unavailableReason = actionsEnabled
     ? null
     : error
@@ -691,7 +691,7 @@ function ThreadActions({ onNotice }: { onNotice(value: string): void }) {
       : runtime?.available === false
         ? 'Thread actions are unavailable with the current Codex runtime.'
         : threadStatus === 'active'
-          ? 'Thread actions will be available when the current turn finishes.'
+          ? 'Compaction, review, and rollback will be available when the current turn finishes.'
           : !hasProviderThread || runtime?.thread_loaded === false
             ? 'Start a Codex turn in this chat before using thread actions.'
             : threadStatus === 'systemError'
@@ -768,7 +768,7 @@ function ThreadActions({ onNotice }: { onNotice(value: string): void }) {
           onChange={event => setShellCommand(event.target.value)}
         />
         <label className="codex-confirm-check"><input type="checkbox" checked={shellConfirmed} onChange={event => setShellConfirmed(event.target.checked)} /><span>{t("ui.CodexControls.ThreadActions.i_explicitly_approve_running_this_command__3fbfc84")}</span></label>
-        <button type="button" className="danger-button" disabled={!actionsEnabled || !shellConfirmed || !shellCommand.trim()} onClick={shell}><Play size={14} />{" "}{t("ui.CodexControls.ThreadActions.run_command_87e30f3")}</button>
+        <button type="button" className="danger-button" disabled={!threadReady || mutating || !shellConfirmed || !shellCommand.trim()} onClick={shell}><Play size={14} />{" "}{t("ui.CodexControls.ThreadActions.run_command_87e30f3")}</button>
       </div>
     </div>}
   </section>

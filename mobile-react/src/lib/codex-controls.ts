@@ -104,6 +104,7 @@ export function isAgentActivityEvent(event: Pick<Event, 'type'> & Partial<Pick<E
     'handoff_digest_received',
     'codex_interaction_requested',
     'claude_interaction_requested',
+    'gemini_interaction_requested',
   ].includes(event.type)
 }
 

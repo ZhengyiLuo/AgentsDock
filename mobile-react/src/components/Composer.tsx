@@ -93,6 +93,8 @@ import { CodexGoalBar } from './CodexGoalBar'
 import { ClaudePermissionMenu } from './ClaudePermissionMenu'
 import { useClaudeRuntime } from './ClaudeRuntimeContext'
 import { CursorPermissionMenu } from './CursorPermissionMenu'
+import { OptionalAgentPermissionMenu } from './OptionalAgentPermissionMenu'
+import { awaitOptionalPermissionUpdates } from '../lib/optional-agent-permissions'
 import { IconButton, Pill, SheetCloseButton } from './ui'
 import { FullscreenViewerCloseButton, SwipeDismissImage } from './FullscreenImageViewer'
 import { TeamTargetPicker } from './TeamTargetPicker'
@@ -237,7 +239,7 @@ export function Composer({ sessionId, keyboardVisible, onSent, onOpenMcp }: { se
   const effectiveSendBusy = !mcpCommand && (sending || admitting)
   const attachmentDisabled = networkDisabled || pickingAttachment || admissionPreflight
   const quickMessageDisabled = networkDisabled || sending || admitting
-  const providerReloadDisabled = networkDisabled || active || sending || admitting || stopping || providerReloading || !backend || backend === 'cursor'
+  const providerReloadDisabled = networkDisabled || active || sending || admitting || stopping || providerReloading || (backend !== 'codex' && backend !== 'claude')
   // A brand-new chat has no provider session yet, so its coding agent can still
   // change. Once the agent starts (backend_locked or a provider session id) or a
   // turn is in flight, the backend is fixed and only reload remains.
@@ -628,9 +630,10 @@ export function Composer({ sessionId, keyboardVisible, onSent, onOpenMcp }: { se
         }
         if (!remoteComposerScopeIsCurrent(activeProfileId, profileGeneration, sessionId)) return
       }
-      if (backend === 'cursor' && activeProfileId) {
+      if ((backend === 'cursor' || backend === 'opencode' || backend === 'gemini') && activeProfileId) {
         try {
-          await awaitCursorPermissionUpdates({ profileId: activeProfileId, profileGeneration, sessionId })
+          const wait = backend === 'cursor' ? awaitCursorPermissionUpdates : awaitOptionalPermissionUpdates
+          await wait({ profileId: activeProfileId, profileGeneration, sessionId })
         } catch (error) {
           if (composerScopeIsCurrent(activeProfileId, profileGeneration, sessionId)) {
             useAppStore.setState({ error: error instanceof Error ? error.message : String(error) })
@@ -931,6 +934,7 @@ export function Composer({ sessionId, keyboardVisible, onSent, onOpenMcp }: { se
           {!welcome && backend === 'codex' ? <CodexPermissionMenu sessionId={sessionId} compact={compactToolbar} /> : null}
           {!welcome && backend === 'claude' ? <ClaudePermissionMenu sessionId={sessionId} compact={compactToolbar} /> : null}
           {!welcome && backend === 'cursor' ? <CursorPermissionMenu sessionId={sessionId} compact={compactToolbar} /> : null}
+          {!welcome && (backend === 'opencode' || backend === 'gemini') ? <OptionalAgentPermissionMenu sessionId={sessionId} /> : null}
           <View style={styles.toolbarSpacer} />
           {active ? <Pressable
             accessibilityRole="button"

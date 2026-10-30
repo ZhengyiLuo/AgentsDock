@@ -2,15 +2,34 @@ import type { Session } from '@shared/types'
 
 export type SidebarStatus = 'unread' | 'running'
 
+export interface SidebarGroupingOptions {
+  groupUnreadChats?: boolean
+  includeCronInUnread?: boolean
+  groupRunningChats?: boolean
+  jobSessionIds?: ReadonlySet<string>
+}
+
 export function isUnread(session: Session): boolean {
   return Boolean(session.manual_unread) || (session.latest_agent_event_seq ?? 0) > (session.last_read_agent_event_seq ?? 0)
 }
 
-export function sidebarSessionGroups(sessions: Session[], activeSessionIds: ReadonlySet<string>) {
+function promotesUnread(session: Session, options: SidebarGroupingOptions): boolean {
+  if (!isUnread(session)) return false
+  if (options.includeCronInUnread === true || session.manual_unread) return true
+  const latest = session.latest_non_job_agent_event_seq
+  // Older servers cannot separate human replies from scheduled output. Their
+  // registered jobs still identify cron chats without inspecting transcripts.
+  if (latest == null) return !options.jobSessionIds?.has(session.id)
+  return latest > (session.last_read_agent_event_seq ?? 0)
+}
+
+export function sidebarSessionGroups(sessions: Session[], activeSessionIds: ReadonlySet<string>, options: SidebarGroupingOptions = {}) {
   const groups: Record<SidebarStatus | 'ordinary', Session[]> = { unread: [], running: [], ordinary: [] }
   for (const session of sessions) {
-    if (!session.archived && activeSessionIds.has(session.id)) groups.running.push(session)
-    else if (!session.archived && isUnread(session)) groups.unread.push(session)
+    if (!session.archived && activeSessionIds.has(session.id)) {
+      groups[options.groupRunningChats === false ? 'ordinary' : 'running'].push(session)
+    }
+    else if (options.groupUnreadChats !== false && !session.archived && promotesUnread(session, options)) groups.unread.push(session)
     else groups.ordinary.push(session)
   }
   return groups
@@ -133,8 +152,8 @@ export function digestTargetSections(
   return sections
 }
 
-export function navigableSessions(sessions: Session[], folderOrder: string[], collapsedFolders: Set<string>, activeSessionIds: ReadonlySet<string> = new Set(), collapsedStatuses: ReadonlySet<SidebarStatus> = new Set(), pinnedCollapsed = false): Session[] {
-  const groups = sidebarSessionGroups(sessions, activeSessionIds)
+export function navigableSessions(sessions: Session[], folderOrder: string[], collapsedFolders: Set<string>, activeSessionIds: ReadonlySet<string> = new Set(), collapsedStatuses: ReadonlySet<SidebarStatus> = new Set(), pinnedCollapsed = false, options: SidebarGroupingOptions = {}): Session[] {
+  const groups = sidebarSessionGroups(sessions, activeSessionIds, options)
   return [
     ...(!collapsedStatuses.has('unread') ? groups.unread : []),
     ...(!collapsedStatuses.has('running') ? groups.running : []),

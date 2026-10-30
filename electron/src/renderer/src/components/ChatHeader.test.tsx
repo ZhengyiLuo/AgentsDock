@@ -8,6 +8,7 @@ import { RUNNING_FORK_DESCRIPTION, RUNNING_FORK_UNAVAILABLE } from '@shared/sess
 import { useAppStore } from '../store/app-store'
 import { ChatHeader } from './ChatHeader'
 import { CodexRuntimeProvider } from './CodexRuntimeContext'
+import { RenameChatDialog } from './Dialogs'
 
 const originalAcknowledgeEmergency = useAppStore.getState().acknowledgeEmergency
 const originalUpdateSession = useAppStore.getState().updateSession
@@ -202,6 +203,40 @@ describe('ChatHeader', () => {
 
     expect(screen.getByLabelText('Folder: Research')).toHaveTextContent('Research')
     expect(screen.queryByText('/work/not-the-folder')).not.toBeInTheDocument()
+  })
+
+  it('keeps the folder and chat controls without repeating a title already shown in the pane tab', () => {
+    const session = { id: 'chat', title: 'Deployment notes', folder: 'Research', backend: 'codex' as const }
+    useAppStore.setState({ sessions: [session], selectedSessionId: session.id })
+    render(<ChatHeader titleInTab onTerminalToggle={() => undefined} />)
+
+    expect(screen.queryByRole('textbox', { name: 'Rename Deployment notes' })).not.toBeInTheDocument()
+    expect(screen.queryByText(session.title)).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Folder: Research' })).toBeVisible()
+    expect(screen.getByRole('button', { name: 'Chat actions' })).toBeVisible()
+    expect(screen.getByRole('button', { name: 'Open terminal panel' })).toBeVisible()
+  })
+
+  it('renames the displayed pane chat through its actions menu while another chat is selected', async () => {
+    const selected = { id: 'selected', title: 'Selected chat', backend: 'codex' as const }
+    const displayed = { id: 'displayed', title: 'Pane chat', backend: 'claude' as const }
+    const updateSession = vi.fn().mockImplementation(async (id: string, patch: { title: string }) => {
+      useAppStore.setState(state => ({ sessions: state.sessions.map(session => session.id === id ? { ...session, ...patch } : session) }))
+    })
+    useAppStore.setState({ sessions: [selected, displayed], selectedSessionId: selected.id, updateSession })
+    const user = userEvent.setup()
+    render(<><ChatHeader session={displayed} titleInTab focused={false} /><RenameChatDialog /></>)
+
+    await user.click(screen.getByRole('button', { name: 'Chat actions' }))
+    await user.click(screen.getByRole('menuitem', { name: 'Rename Chat' }))
+    const input = await screen.findByRole('textbox', { name: 'Chat name' })
+    expect(input).toHaveValue(displayed.title)
+    await user.clear(input)
+    await user.type(input, 'New pane title')
+    await user.click(screen.getByRole('button', { name: 'Rename' }))
+
+    expect(updateSession).toHaveBeenCalledExactlyOnceWith(displayed.id, { title: 'New pane title' })
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Rename chat' })).not.toBeInTheDocument())
   })
 
   it('labels an unfiled chat as General', () => {

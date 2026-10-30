@@ -32,6 +32,41 @@
   overflow: hidden;
 }
 
+.workspace-editor-tabbed-pane .workspace-editor-command-button {
+  width: 34px;
+  padding: 0 10px;
+}
+
+.workspace-editor-tabbed-pane .workspace-editor-chat-tab > span {
+  max-width: 160px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.workspace-editor-tabbed-pane .workspace-editor-command-button kbd,
+.workspace-editor-tabbed-pane .workspace-editor-open-label {
+  display: none;
+}
+
+.workspace-editor-content.workspace-editor-tabbed-pane {
+  min-width: 0;
+  min-height: 0;
+}
+
+.workspace-editor-tabbed-pane .workspace-editor-editor-toolbar {
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.workspace-editor-tabbed-pane .workspace-editor-breadcrumb {
+  min-width: 0;
+  flex: 1 1 100px;
+}
+
+.workspace-editor-tabbed-pane .workspace-editor-breadcrumb-parent {
+  display: none;
+}
+
 .workspace-editor-tab-strip-split.workspace-editor-right {
   display: grid;
   grid-template-columns: minmax(0, calc(100% - var(--workspace-editor-width) - 6px)) 6px minmax(0, var(--workspace-editor-width));
@@ -102,8 +137,18 @@
 .workspace-editor-tab-active,
 .workspace-editor-file-tab-active .workspace-editor-tab {
   color: var(--text);
-  background: #1d1d1d;
-  box-shadow: inset 0 2px var(--accent);
+  background: var(--surface-2);
+  font-weight: var(--text-weight-label);
+}
+
+.chat-pane.focused .workspace-editor-tab-active,
+.chat-pane.focused .workspace-editor-file-tab-active .workspace-editor-tab {
+  background: color-mix(in srgb, var(--text) 8%, var(--surface-2));
+}
+
+.workspace-editor-tab:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -3px;
 }
 
 .workspace-editor-chat-tab { min-width: 112px; }
@@ -544,8 +589,8 @@
   overflow: hidden;
 }
 
-.workspace-editor-editor-focused {
-  box-shadow: inset 0 2px color-mix(in srgb, var(--accent), transparent 28%);
+.workspace-editor-editor-focused > .workspace-editor-editor-toolbar {
+  background: var(--surface-2);
 }
 
 .workspace-editor-editor-toolbar {
@@ -1420,12 +1465,6 @@
 :root[data-theme="light"] .workspace-editor-close-tab:hover {
   color: var(--text);
   background: var(--interaction-hover);
-}
-
-:root[data-theme="light"] .workspace-editor-tab-active,
-:root[data-theme="light"] .workspace-editor-file-tab-active .workspace-editor-tab {
-  color: var(--text);
-  background: var(--surface);
 }
 
 :root[data-theme="light"] .workspace-editor-command-button {

@@ -1,4 +1,4 @@
-import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { StrictMode } from 'react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { AgentsDockAPI } from '@shared/ipc'
@@ -66,6 +66,8 @@ describe('App split workspace files', () => {
       profiles: [{ id: 'profile-a', name: 'Alpha', serverUrl: 'https://alpha.example:7850', serverIdentity: 'server-a', hasAccessToken: true, serverSetupComplete: true, connectionState: 'online', cachedUnreadCount: 0 }],
       activeProfileId: 'profile-a', profileGeneration: 4, switchingProfileId: null, sessions,
       selectedSessionId: 'chat-a', chatPanes: { primary: 'chat-a', secondary: 'chat-b' }, focusedChatPane: 'primary',
+      chatPaneCount: 2, activeChatWorkspaceId: 'workspace-a',
+      chatWorkspaces: [{ id: 'workspace-a', panes: { primary: 'chat-a', secondary: 'chat-b' }, focusedPane: 'primary', paneCount: 2, columnRatio: 0.5, rowRatio: 0.5 }],
       inspectorVisible: false, health: { ok: true, capabilities: { workspace_files: { available: true, version: 6, required: false, message: '', action: null } } },
       error: null, storageFull: false, uploadsBySession: {}, uploadPathsBySession: {}
     })
@@ -73,32 +75,101 @@ describe('App split workspace files', () => {
 
   afterEach(() => { cleanup(); vi.restoreAllMocks() })
 
-  it('opens a targeted file through the real editor and returns to the same split chats', async () => {
+  it('cycles workspace tabs with Command-Control arrows while preserving drafts', async () => {
+    const first = useAppStore.getState().chatWorkspaces[0]
+    useAppStore.setState({ chatWorkspaces: [first, { ...first, id: 'workspace-b', title: 'Second workspace' }] })
+    render(<App />)
+    fireEvent.change(screen.getByRole('textbox', { name: 'Draft chat-a' }), { target: { value: 'Keep typed draft' } })
+    const chord = { metaKey: true, ctrlKey: true }
+    await act(async () => fireEvent.keyDown(screen.getByRole('textbox', { name: 'Draft chat-a' }), { key: 'ArrowRight', ...chord }))
+    expect(useAppStore.getState().activeChatWorkspaceId).toBe('workspace-b')
+    expect(screen.getByRole('textbox', { name: 'Draft chat-a' })).toHaveValue('Keep typed draft')
+    await act(async () => fireEvent.keyDown(window, { key: 'ArrowRight', ...chord }))
+    expect(useAppStore.getState().activeChatWorkspaceId).toBe('workspace-a')
+    await act(async () => fireEvent.keyDown(window, { key: 'ArrowLeft', ...chord }))
+    expect(useAppStore.getState().activeChatWorkspaceId).toBe('workspace-b')
+    fireEvent.keyDown(window, { key: 'ArrowLeft', ...chord, shiftKey: true })
+    fireEvent.keyDown(window, { key: 'ArrowLeft', metaKey: true })
+    expect(useAppStore.getState().activeChatWorkspaceId).toBe('workspace-b')
+    const modal = document.createElement('div')
+    modal.setAttribute('aria-modal', 'true')
+    document.body.appendChild(modal)
+    fireEvent.keyDown(window, { key: 'ArrowLeft', ...chord })
+    expect(useAppStore.getState().activeChatWorkspaceId).toBe('workspace-b')
+    modal.remove()
+  })
+
+  it('moves keyboard focus across three columns without remounting their drafts', () => {
+    const three = [...sessions, { ...sessions[0], id: 'chat-c', title: 'Chat C' }]
+    useAppStore.setState({ sessions: three, chatPaneCount: 3,
+      chatPanes: { primary: 'chat-a', secondary: 'chat-b', tertiary: 'chat-c' },
+      chatWorkspaces: [{ ...useAppStore.getState().chatWorkspaces[0], paneCount: 3,
+        threePaneLayout: 'columns', panes: { primary: 'chat-a', secondary: 'chat-b', tertiary: 'chat-c' } }] })
+    render(<App />)
+    fireEvent.change(screen.getByRole('textbox', { name: 'Draft chat-b' }), { target: { value: 'Keep center draft' } })
+    const modifiers = /Mac|iPhone|iPad|iPod/i.test(`${navigator.platform} ${navigator.userAgent}`)
+      ? { metaKey: true, altKey: true } : { ctrlKey: true, altKey: true }
+    fireEvent.keyDown(window, { key: 'ArrowRight', ...modifiers })
+    expect(useAppStore.getState().focusedChatPane).toBe('secondary')
+    fireEvent.keyDown(window, { key: 'ArrowRight', ...modifiers })
+    expect(useAppStore.getState().focusedChatPane).toBe('tertiary')
+    fireEvent.keyDown(window, { key: 'ArrowDown', ...modifiers })
+    expect(useAppStore.getState().focusedChatPane).toBe('tertiary')
+    fireEvent.keyDown(window, { key: 'ArrowLeft', ...modifiers })
+    expect(useAppStore.getState().focusedChatPane).toBe('secondary')
+    fireEvent.click(screen.getByRole('button', { name: '3 panes' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Three columns' }))
+    expect(screen.getByRole('textbox', { name: 'Draft chat-b' })).toHaveValue('Keep center draft')
+  })
+
+  it('opens a fourth-pane file without changing the first three conversations', async () => {
+    const four = [...sessions,
+      { ...sessions[0], id: 'chat-c', title: 'Chat C' },
+      { ...sessions[1], id: 'chat-d', title: 'Chat D' }]
+    vi.mocked(window.agentsDock.workspace.read).mockImplementation(async (id, path) => ({
+      root: four.find(session => session.id === id)!.cwd!, path, name: path,
+      content: `Content from ${id}`, revision: 'rev-1', size: 19, mtime_ns: 1, writable: true
+    }))
+    useAppStore.setState({ sessions: four, chatPaneCount: 4,
+      chatPanes: { primary: 'chat-a', secondary: 'chat-b', tertiary: 'chat-c', quaternary: 'chat-d' } })
+    const view = render(<App />)
+    const fourth = view.container.querySelector('[data-chat-pane="quaternary"]') as HTMLElement
+    fireEvent.pointerDown(within(fourth).getByRole('link', { name: 'Open example.ts from chat-d' }))
+    fireEvent.click(within(fourth).getByRole('link', { name: 'Open example.ts from chat-d' }))
+    expect(await within(fourth).findByRole('textbox', { name: 'Contents of example.ts' })).toHaveValue('Content from chat-d')
+    expect(useAppStore.getState().selectedSessionId).toBe('chat-d')
+    for (const id of ['chat-a', 'chat-b', 'chat-c']) expect(screen.getByRole('textbox', { name: `Draft ${id}` })).toBeVisible()
+    expect(window.agentsDock.workspace.read).toHaveBeenCalledTimes(1)
+    expect(window.agentsDock.workspace.read).toHaveBeenCalledWith('chat-d', 'example.ts')
+    const modifiers = /Mac|iPhone|iPad|iPod/i.test(`${navigator.platform} ${navigator.userAgent}`)
+      ? { metaKey: true, altKey: true } : { ctrlKey: true, altKey: true }
+    fireEvent.keyDown(window, { key: 'ArrowLeft', ...modifiers })
+    expect(useAppStore.getState().focusedChatPane).toBe('tertiary')
+    fireEvent.keyDown(window, { key: 'ArrowLeft', ...modifiers })
+    expect(useAppStore.getState().focusedChatPane).toBe('tertiary')
+    fireEvent.keyDown(window, { key: 'ArrowUp', ...modifiers })
+    expect(useAppStore.getState().focusedChatPane).toBe('primary')
+  })
+
+  it('opens files inside their owning panes while both chats and drafts remain mounted', async () => {
     const view = render(<StrictMode><App /></StrictMode>)
-    const primary = view.container.querySelector('[data-chat-pane="primary"]')
-    const secondary = view.container.querySelector('[data-chat-pane="secondary"]')
+    const primary = view.container.querySelector('[data-chat-pane="primary"]') as HTMLElement
+    const secondary = view.container.querySelector('[data-chat-pane="secondary"]') as HTMLElement
     fireEvent.change(screen.getByRole('textbox', { name: 'Draft chat-a' }), { target: { value: 'Keep primary draft' } })
     fireEvent.change(screen.getByRole('textbox', { name: 'Draft chat-b' }), { target: { value: 'Keep secondary draft' } })
-
-    act(() => window.dispatchEvent(new CustomEvent('agentsdock:open-workspace-path', { detail: { sessionId: 'chat-b', path: 'example.ts' } })))
-
-    expect(await screen.findByRole('textbox', { name: 'Contents of example.ts' })).toHaveValue('Content from chat-b')
+    fireEvent.click(within(secondary).getByRole('link', { name: 'Open example.ts from chat-b' }))
+    expect(await within(secondary).findByRole('textbox', { name: 'Contents of example.ts' })).toHaveValue('Content from chat-b')
     expect(window.agentsDock.workspace.read).toHaveBeenCalledWith('chat-b', 'example.ts')
-    expect(useAppStore.getState().focusedChatPane).toBe('secondary')
-    expect(screen.queryByText('Your split chats are still open')).not.toBeVisible()
-    fireEvent.click(screen.getByRole('button', { name: 'Return to split chats' }))
-    await waitFor(() => expect(document.activeElement).toBe(secondary))
+    expect(screen.getByRole('textbox', { name: 'Draft chat-a' })).toBeVisible()
+    expect(view.container.querySelector('.split-workspace-overlay')).toBeNull()
+    fireEvent.click(within(secondary).getByRole('button', { name: /Chat.*pinned/i }))
     expect(view.container.querySelector('[data-chat-pane="primary"]')).toBe(primary)
     expect(view.container.querySelector('[data-chat-pane="secondary"]')).toBe(secondary)
     expect(screen.getByRole('textbox', { name: 'Draft chat-a' })).toHaveValue('Keep primary draft')
     expect(screen.getByRole('textbox', { name: 'Draft chat-b' })).toHaveValue('Keep secondary draft')
-
-    fireEvent.click(screen.getByRole('button', { name: 'Open example.ts' }))
-    expect(await screen.findByRole('textbox', { name: 'Contents of example.ts' })).toHaveValue('Content from chat-b')
-    fireEvent.click(screen.getByRole('button', { name: 'Return to split chats' }))
-    fireEvent.pointerDown(primary!)
-    fireEvent.click(await screen.findByRole('button', { name: 'Open example.ts' }))
-    expect(await screen.findByRole('textbox', { name: 'Contents of example.ts' })).toHaveValue('Content from chat-a')
+    fireEvent.click(within(primary).getByRole('link', { name: 'Open example.ts from chat-a' }))
+    expect(await within(primary).findByRole('textbox', { name: 'Contents of example.ts' })).toHaveValue('Content from chat-a')
+    expect(screen.getByRole('textbox', { name: 'Draft chat-b' })).toBeVisible()
     expect(useAppStore.getState().chatPanes).toEqual({ primary: 'chat-a', secondary: 'chat-b' })
   })
 
@@ -123,11 +194,12 @@ describe('App split workspace files', () => {
   })
 
   it('opens the clicked reference after a single chat file was retained into split view', async () => {
-    useAppStore.setState({ chatPanes: { primary: 'chat-a', secondary: null } })
+    useAppStore.setState({ chatPanes: { primary: 'chat-a', secondary: null }, chatPaneCount: 1 })
     render(<App />)
     fireEvent.click(screen.getByRole('link', { name: 'Open previous.ts from chat-a' }))
     expect(await screen.findByRole('textbox', { name: 'Contents of previous.ts' })).toHaveValue('Content from chat-a')
-    act(() => useAppStore.setState({ chatPanes: { primary: 'chat-a', secondary: 'chat-b' }, selectedSessionId: 'chat-b', focusedChatPane: 'secondary' }))
+    act(() => useAppStore.setState({ chatPanes: { primary: 'chat-a', secondary: 'chat-b' }, chatPaneCount: 2, selectedSessionId: 'chat-b', focusedChatPane: 'secondary' }))
+    fireEvent.click(screen.getAllByRole('button', { name: /Chat.*pinned/i })[0])
     const link = screen.getByRole('link', { name: 'Open example.ts from chat-a' })
     fireEvent.pointerDown(link)
     fireEvent.click(link)
@@ -138,9 +210,9 @@ describe('App split workspace files', () => {
     const view = render(<StrictMode><App /></StrictMode>)
     act(() => handleMenuCommand('open-workspace-file', useAppStore.getState, value => useAppStore.setState(value)))
     const search = await screen.findByRole('combobox', { name: 'Find a workspace file' })
-    expect(search).toHaveFocus()
+    await waitFor(() => expect(search).toHaveFocus())
     fireEvent.click(screen.getByRole('button', { name: 'Close file picker' }))
-    await waitFor(() => expect(document.activeElement).toBe(view.container.querySelector('[data-chat-pane="primary"]')))
+    expect(screen.getByRole('textbox', { name: 'Draft chat-a' })).toBeVisible()
     expect(view.container.querySelector('.split-workspace-overlay')).toBeNull()
     expect(window.agentsDock.workspace.read).not.toHaveBeenCalled()
   })
@@ -149,14 +221,14 @@ describe('App split workspace files', () => {
     render(<StrictMode><App /></StrictMode>)
     act(() => window.dispatchEvent(new CustomEvent('agentsdock:open-workspace-path', { detail: { sessionId: 'chat-b', path: 'image.png' } })))
     expect(await screen.findByRole('img', { name: 'image.png' })).toHaveAttribute('src', 'agentsdock-media://workspace/profile-a/4/chat-b/image.png')
-    fireEvent.click(screen.getByRole('button', { name: 'Return to split chats' }))
+    fireEvent.click(screen.getAllByRole('button', { name: /Chat.*pinned/i })[1])
     act(() => window.dispatchEvent(new CustomEvent('agentsdock:open-agent-file', { detail: { sessionId: 'chat-a', file: { id: 'artifact', session_id: 'chat-a', filename: 'attachment.png', content_type: 'image/png' } } })))
     expect(await screen.findByRole('img', { name: 'attachment.png' })).toHaveAttribute('src', 'agentsdock-media://file/profile-a/4/chat-a/artifact')
     expect(useAppStore.getState().focusedChatPane).toBe('primary')
     expect(useAppStore.getState().chatPanes).toEqual({ primary: 'chat-a', secondary: 'chat-b' })
   })
 
-  it('discards the queued open when the focused chat changes before restoration finishes', async () => {
+  it('keeps an owner-targeted open in its pane when focus changes during restoration', async () => {
     let restore!: (value: null) => void
     const pendingRestore = new Promise<null>(resolve => { restore = resolve })
     vi.mocked(window.agentsDock.preferences.getScoped).mockImplementation((_scope, key, fallback) => key === 'workspace-editor:chat-b' ? pendingRestore : Promise.resolve(fallback))
@@ -164,7 +236,9 @@ describe('App split workspace files', () => {
     act(() => window.dispatchEvent(new CustomEvent('agentsdock:open-workspace-path', { detail: { sessionId: 'chat-b', path: 'example.ts' } })))
     act(() => useAppStore.getState().focusChatPane('primary'))
     await act(async () => restore(null))
-    expect(window.agentsDock.workspace.read).not.toHaveBeenCalled()
+    await waitFor(() => expect(window.agentsDock.workspace.read).toHaveBeenCalledWith('chat-b', 'example.ts'))
+    expect(await screen.findByRole('textbox', { name: 'Contents of example.ts' })).toHaveValue('Content from chat-b')
+    expect(screen.getByRole('textbox', { name: 'Draft chat-a' })).toBeVisible()
     expect(view.container.querySelector('.split-workspace-overlay')).toBeNull()
     expect(useAppStore.getState().selectedSessionId).toBe('chat-a')
   })

@@ -42,6 +42,7 @@ import type {
 import { AgentServerClient, AgentServerClientDisposedError, AgentServerClientUnvalidatedError, AgentServerRequestTimeoutError, AgentServerRequestInterruptedError, AgentServerTurnAcceptedError, ServerError, WebSocketConnectionError } from '../api/AgentServerClient'
 import { errorMessage, isUnread, mergeEvents, mergeFiles, normalizeServerURL } from '../lib/format'
 import { selectServerAddress } from '../lib/server-address-selection'
+import { chooseNewChatBackend, newChatRecoveryInput } from '../lib/new-chat-recovery'
 import { reconcileHealthActiveSessions } from '../lib/active-sessions'
 import { shouldAutoConnectServer } from '../lib/first-launch'
 import { SNAPSHOT_CACHE_VERSION, shouldReplaceCachedTimeline, snapshotLatestSeq } from '../lib/history'
@@ -73,7 +74,7 @@ import { awaitAllCursorPermissionUpdates } from '../lib/cursor-permission-update
 import { DEFAULT_SERVER_URL } from '../lib/server-setup'
 import { serverSearchQuery } from '../lib/server-search'
 import { isBackendLocked, runtimeSelectionError } from '../lib/runtime-catalog'
-import { chatBackendChoice, chatBackendSelection, isCustomProvider, providerSelectionError, selectableChatBackendChoices } from '../lib/provider-selection'
+import { chatBackendChoice, chatBackendSelection, isCustomProvider, providerSelectionError, selectableChatBackendChoices, type ChatBackendChoice } from '../lib/provider-selection'
 import { clearCodeReviewFallbacks } from '../lib/code-review'
 import { SessionMutationReconciler, type SessionReadToken } from '../lib/session-mutation-reconciler'
 import { APP_FONT_SCALE_DEFAULT, clampAppFontScale } from '../lib/typography'
@@ -152,6 +153,13 @@ let syncRecovery: { key: string; attempt: number; timer: ReturnType<typeof setTi
 let refreshSessionsInFlight: { scope: ConnectionScope; healthReady: Promise<boolean>; promise: Promise<void> } | null = null
 let refreshJobsInFlight: { scope: ConnectionScope; promise: Promise<void>; dirty: boolean } | null = null
 let quickCreateSessionInFlight: { scope: ConnectionScope; promise: Promise<boolean> } | null = null
+const CHAT_PERMISSION_FIELDS = {
+  codex: ['codex_approval_policy', 'codex_sandbox_mode', 'codex_permission_profile', 'codex_approvals_reviewer'],
+  claude: ['claude_permission_mode'],
+  cursor: ['cursor_permission_mode'],
+  opencode: ['opencode_permission_mode'],
+  gemini: ['gemini_permission_mode'],
+} as const satisfies Record<Backend, readonly (keyof Session)[]>
 let readReceiptTimer: ReturnType<typeof setTimeout> | null = null
 let pinSaveQueue: Promise<void> = Promise.resolve()
 const notifiedEvents = new Set<string>()
@@ -535,9 +543,9 @@ interface AppState {
   attachFiles(files: UploadRef[], expectedGeneration?: number, expectedSessionId?: string): Promise<void>
   removeUpload(fileId: string, expectedGeneration?: number, expectedSessionId?: string): void
   removeFailedUpload(fileUri: string, expectedGeneration?: number, expectedSessionId?: string): void
-  updateSession(sessionId: string, patch: Partial<Pick<Session, 'title' | 'folder' | 'cwd' | 'backend' | 'codex_provider' | 'provider_connection' | 'model' | 'effort' | 'system_prompt' | 'codex_approval_policy' | 'codex_sandbox_mode' | 'codex_permission_profile' | 'codex_approvals_reviewer' | 'claude_permission_mode' | 'cursor_permission_mode' | 'provider_jobs_access' | 'pinned' | 'archived'>>, expectedGeneration?: number): Promise<boolean>
+  updateSession(sessionId: string, patch: Partial<Pick<Session, 'title' | 'folder' | 'cwd' | 'backend' | 'codex_provider' | 'provider_connection' | 'model' | 'effort' | 'system_prompt' | 'codex_approval_policy' | 'codex_sandbox_mode' | 'codex_permission_profile' | 'codex_approvals_reviewer' | 'claude_permission_mode' | 'cursor_permission_mode' | 'opencode_permission_mode' | 'gemini_permission_mode' | 'provider_jobs_access' | 'pinned' | 'archived'>>, expectedGeneration?: number): Promise<boolean>
   reloadProvider(sessionId: string, expectedGeneration?: number): Promise<ProviderReloadResult | null>
-  createSession(input: CreateSessionInput, expectedGeneration?: number): Promise<boolean>
+  createSession(input: CreateSessionInput, expectedGeneration?: number, recoveryAttempts?: readonly ChatBackendChoice[]): Promise<boolean>
   quickCreateSession(expectedGeneration?: number): Promise<boolean>
   setChatDefaults(patch: Partial<ChatDefaults>): void
   forkSession(sessionId: string, expectedGeneration?: number): Promise<void>
@@ -2002,12 +2010,19 @@ export const useAppStore = create<AppState>((set, get) => ({
   setChatReferencesForSession(sessionId, references, expectedGeneration) {
     if (captureConnection().namespaceAdopting) return
     if (expectedGeneration !== undefined && expectedGeneration !== get().profileGeneration) return
-    set(state => ({
-      chatReferencesBySession: {
-        ...state.chatReferencesBySession,
-        [sessionId]: references.map(reference => ({ ...reference })),
-      },
-    }))
+    set(state => {
+      const routeSnapshot = state.agentRoutesBySession[sessionId]
+      const previousCapacityError = agentRouteCapacityError(routeSnapshot, state.chatReferencesBySession[sessionId] ?? [])
+      const capacityStillExceeded = agentRouteCapacityError(routeSnapshot, references) !== null
+      return {
+        chatReferencesBySession: {
+          ...state.chatReferencesBySession,
+          [sessionId]: references.map(reference => ({ ...reference })),
+        },
+        error: state.selectedSessionId === sessionId && previousCapacityError !== null
+          && state.error === previousCapacityError && !capacityStillExceeded ? null : state.error,
+      }
+    })
     scheduleCurrentWorkspaceSave(get)
   },
 
@@ -2654,7 +2669,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       providerReloadInFlight.delete(inFlightKey)
     }
   },
-  async createSession(input, expectedGeneration) {
+  async createSession(input, expectedGeneration, recoveryAttempts) {
     const selectionError = providerSelectionError(get().health, get().runtime, input, true)
     if (selectionError) {
       set({ error: selectionError })
@@ -2691,6 +2706,11 @@ export const useAppStore = create<AppState>((set, get) => ({
       })
       return true
     } catch (error) {
+      if (recoveryAttempts && connectionIsCurrent(scope) && error instanceof ServerError) {
+        const attempted = [...recoveryAttempts, chatBackendChoice(input)]
+        const fallback = newChatRecoveryInput(input, get().health, get().runtime, error.status, error.message, attempted)
+        if (fallback) return get().createSession(fallback, scope.generation, attempted)
+      }
       if (!isStaleConnectionError(error, scope)) set({ error: errorMessage(error) })
       return false
     }
@@ -2700,37 +2720,58 @@ export const useAppStore = create<AppState>((set, get) => ({
     if (!scope) return Promise.resolve(false)
     if (quickCreateSessionInFlight?.scope === scope) return quickCreateSessionInFlight.promise
     const state = get()
-    // Capture the open chat's location at the tap, while keeping the user's
-    // configured runtime defaults independent of that chat's agent settings.
+    // Capture the last open chat on this server before any asynchronous reads.
     const selected = state.sessions.find(session => session.id === state.selectedSessionId
       && !session.archived && !isWelcomeSession(session.id))
     const defaultCwd = state.health?.default_cwd?.trim() || ''
-    const choices = selectableChatBackendChoices(state.health, state.runtime)
-    const preferred = chatBackendChoice(state.chatDefaults)
-    if (isCustomProvider(state.chatDefaults) && !choices.includes(preferred)) {
-      set({ error: 'The selected Custom API is unavailable. Choose another agent in Settings or check the server configuration.' })
-      return Promise.resolve(false)
-    }
-    const choice = choices.includes(preferred) ? preferred : choices[0]
-    if (!choice) {
-      set({ error: 'No available agent. Check My agents or configure an account on the server machine.' })
-      return Promise.resolve(false)
-    }
-    const selection = chatBackendSelection(choice)
-    let model = state.chatDefaults.model
-    let effort = state.chatDefaults.effort
-    if (choice !== preferred || providerSelectionError(state.health, state.runtime, { ...selection, model: model || null })) {
-      model = ''
-      effort = ''
-    }
-    const operation = get().createSession({
-      title: 'New chat',
-      folder: selected ? selected.folder?.trim() || 'General' : state.chatDefaults.folder.trim() || 'General',
-      cwd: selected ? selected.cwd?.trim() || defaultCwd : state.chatDefaults.cwd.trim() || defaultCwd,
-      ...(isCustomProvider(selection) ? selection : { backend: selection.backend }),
-      model,
-      effort,
-    }, scope.generation).finally(() => {
+    const operation = (async () => {
+      let source = selected
+      // Summary list rows omit permissions. Resolve them before creating so a
+      // fast Home -> New chat tap cannot silently reset a restrictive policy.
+      if (source && selectableChatBackendChoices(get().health, get().runtime).includes(chatBackendChoice(source))
+        && CHAT_PERMISSION_FIELDS[source.backend]?.some(field => source![field] === undefined)) {
+        const read = sessionMutations.captureRead()
+        const page = await scope.client.sessionPage(source.id, { limit: 1, tail: true, visible: true })
+        if (!connectionIsCurrent(scope)) return false
+        if (page.session.id !== source.id) throw new Error('The server returned a different chat. Try again.')
+        const current = get().sessions.find(session => session.id === source!.id) ?? source
+        source = sessionMutations.reconcileIncoming(current, page.session, read)
+      }
+      const defaults = source ?? state.chatDefaults
+      const choices = selectableChatBackendChoices(get().health, get().runtime)
+      const preferred = chatBackendChoice(defaults)
+      const choice = chooseNewChatBackend(choices, preferred)
+      if (!choice) {
+        set({ error: 'No available agent. Check My agents or configure an account on the server machine.' })
+        return false
+      }
+      const selection = chatBackendSelection(choice)
+      let model = defaults.model ?? ''
+      let effort = defaults.effort ?? ''
+      if (choice !== preferred || providerSelectionError(get().health, get().runtime, { ...selection, model: model || null })) {
+        model = ''
+        effort = ''
+      }
+      const permissions = source && choice === preferred
+        ? Object.fromEntries((CHAT_PERMISSION_FIELDS[source.backend] ?? [])
+          .filter(field => source![field] !== undefined)
+          .map(field => [field, source![field]]))
+        : {}
+      return get().createSession({
+        title: 'New chat',
+        folder: selected ? selected.folder?.trim() || 'General' : state.chatDefaults.folder.trim() || 'General',
+        cwd: choice !== preferred ? defaultCwd : selected ? selected.cwd?.trim() || defaultCwd : state.chatDefaults.cwd.trim() || defaultCwd,
+        ...(isCustomProvider(selection) ? selection : { backend: selection.backend }),
+        model,
+        effort,
+        ...permissions,
+        ...(source && choice === preferred && source.provider_jobs_access != null
+          ? { provider_jobs_access: source.provider_jobs_access } : {}),
+      }, scope.generation, [])
+    })().catch(error => {
+      if (!isStaleConnectionError(error, scope)) set({ error: errorMessage(error) })
+      return false
+    }).finally(() => {
       if (quickCreateSessionInFlight?.promise === operation) quickCreateSessionInFlight = null
     })
     quickCreateSessionInFlight = { scope, promise: operation }
@@ -2744,6 +2785,10 @@ export const useAppStore = create<AppState>((set, get) => ({
     const scope = validatedConnectionOrReport(get, set, expectedGeneration)
     if (!scope) return
     const state = get()
+    if (state.sessions.find(session => session.id === sessionId)?.backend === 'gemini' && state.health?.capabilities?.gemini_backend?.features?.fork !== true) {
+      set({ error: 'This server does not support forking Gemini chats.' })
+      return
+    }
     const inFlightKey = `${scope.generation}:${sessionId}`
     if (state.activeSessionIds.has(sessionId) || state.stoppingSessionIds.has(sessionId)) {
       set({ error: 'Wait for the active turn to finish before forking this chat.' })
@@ -4501,6 +4546,8 @@ function applyLiveEvent(scope: ConnectionScope, event: Event, set: (value: Parti
     'codex_interaction_resolved',
     'claude_interaction_requested',
     'claude_interaction_resolved',
+    'gemini_interaction_requested',
+    'gemini_interaction_resolved',
   ].includes(event.type)) void get().refreshSessions()
   if (event.type.startsWith('job_')) void get().refreshJobs()
   if (!acceptQueueEvent

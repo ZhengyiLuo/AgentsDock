@@ -92,6 +92,16 @@ jobs:
         working-directory: mobile-react
       - run: pnpm test:server-setup
         working-directory: mobile-react
+      - name: Verify mobile provider defaults, approvals, and update discovery
+        run: |
+          node scripts/run-history-tests.mjs src/store/useAppStore.session-creation.test.ts --native-mocks
+          node scripts/run-history-tests.mjs src/lib/new-chat-recovery.test.ts --native-mocks
+          node scripts/run-history-tests.mjs src/lib/provider-selection.test.ts --native-mocks
+          node scripts/run-history-tests.mjs src/lib/optional-agent-permissions.test.ts --native-mocks
+          node scripts/run-history-tests.mjs src/api/AgentServerClient.test.ts --native-mocks
+          node scripts/run-history-tests.mjs src/lib/android-update.test.ts --native-mocks
+          node --test tests/gemini-interactions.test.mjs tests/settings-agents.test.mjs tests/settings-navigation.test.mjs tests/inspector-chat-actions.test.mjs tests/sidebar-selection.test.mjs
+        working-directory: mobile-react
       - name: Verify stopped queue recovery without replay
         run: |
           node scripts/run-history-tests.mjs src/lib/queue.test.ts

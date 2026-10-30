@@ -252,6 +252,148 @@ describe('WorkspaceEditor', () => {
     vi.unstubAllGlobals()
   })
 
+  it('keeps pane chat content mounted and restores its draft while files remain local tabs', async () => {
+    const onFileOpen = vi.fn()
+    const view = render(<WorkspaceEditor
+      workspaceKey="tabbed:chat-a" session={session} profileScope={null} available capabilityVersion={6}
+      tabbedPane onFileOpen={onFileOpen} chatContent={<textarea aria-label="Chat draft" defaultValue="Keep this draft" />}
+    />)
+    const chat = screen.getByRole('textbox', { name: 'Chat draft' })
+    act(() => window.dispatchEvent(new CustomEvent('agentsdock:open-workspace-path', {
+      detail: { sessionId: session.id, path: 'src/App.tsx' }
+    })))
+    const editor = await screen.findByRole('textbox', { name: 'Contents of src/App.tsx' })
+    fireEvent.change(editor, { target: { value: 'unsaved edit' } })
+    expect(chat).not.toBeVisible()
+    expect(chat.closest('.workspace-editor-chat-panel')).toHaveAttribute('inert')
+    expect(onFileOpen).not.toHaveBeenCalled()
+    expect(screen.queryByRole('button', { name: 'Split editor right' })).not.toBeInTheDocument()
+    expect(view.container.querySelector('.workspace-editor-content-split')).toBeNull()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Chat (pinned)' }))
+    expect(screen.getByRole('textbox', { name: 'Chat draft' })).toBe(chat)
+    expect(chat).toHaveValue('Keep this draft')
+    expect(chat.closest('.workspace-editor-chat-panel')).not.toHaveAttribute('inert')
+    fireEvent.click(screen.getByRole('tab', { name: 'App.tsx' }))
+    expect(await screen.findByRole('textbox', { name: 'Contents of src/App.tsx' })).toHaveValue('unsaved edit')
+  })
+
+  it('offers the existing rename dialog for the owning chat when its pane tab is double-clicked', () => {
+    const rename = vi.fn()
+    window.addEventListener('agentsdock:rename-chat', rename)
+    try {
+      const view = render(<WorkspaceEditor workspaceKey="tabbed:rename" session={session} profileScope={null}
+        available tabbedPane chatContent={<p>Conversation</p>} />)
+      const chatTab = screen.getByRole('button', { name: 'Chat (pinned)' })
+      expect(chatTab).toHaveTextContent(session.title)
+      fireEvent.doubleClick(chatTab)
+      expect(rename).toHaveBeenCalledOnce()
+      expect((rename.mock.calls[0][0] as CustomEvent).detail).toBe(session)
+
+      view.rerender(<WorkspaceEditor workspaceKey="tabbed:rename" session={session} profileScope={null}
+        available chatContent={<p>Conversation</p>} />)
+      fireEvent.doubleClick(screen.getByRole('button', { name: 'Chat (pinned)' }))
+      expect(rename).toHaveBeenCalledOnce()
+    } finally {
+      window.removeEventListener('agentsdock:rename-chat', rename)
+    }
+  })
+
+  it('routes targeted opens to their pane but global commands and Files portals only to the focused pane', async () => {
+    const scope = { profileId: 'profile-a', profileGeneration: 1, serverIdentity: 'server-a' }
+    const second = { ...session, id: 'chat-b', title: 'Chat B' }
+    const panes = (focused: 'a' | 'b') => <>
+      <div data-testid="pane-a"><WorkspaceEditor workspaceKey="tabbed:chat-a" session={session} profileScope={scope}
+        available capabilityVersion={6} tabbedPane paneFocused={focused === 'a'} chatContent={<p>Chat A</p>} /></div>
+      <div data-testid="pane-b"><WorkspaceEditor workspaceKey="tabbed:chat-b" session={second} profileScope={scope}
+        available capabilityVersion={6} tabbedPane paneFocused={focused === 'b'} chatContent={<p>Chat B</p>} /></div>
+    </>
+    const view = render(panes('b'))
+    await act(async () => { await Promise.resolve() })
+    act(() => {
+      window.dispatchEvent(new CustomEvent('agentsdock:open-workspace-path', { detail: { sessionId: session.id, path: 'a.ts', line: 2 } }))
+      window.dispatchEvent(new CustomEvent('agentsdock:open-workspace-path', { detail: { sessionId: second.id, path: 'b.ts' } }))
+    })
+    const editorA = await screen.findByRole('textbox', { name: 'Contents of a.ts' })
+    const editorB = await screen.findByRole('textbox', { name: 'Contents of b.ts' })
+    expect(editorA).not.toHaveAttribute('data-editor-navigation-line')
+    fireEvent.change(editorA, { target: { value: 'draft a' } })
+    fireEvent.change(editorB, { target: { value: 'draft b' } })
+    fireEvent.keyDown(window, { key: 's', metaKey: true })
+    await waitFor(() => expect(window.agentsDock.workspace.write).toHaveBeenCalledExactlyOnceWith('chat-b', 'b.ts', 'draft b', 'rev-1'))
+    expect(within(screen.getByTestId('pane-a')).queryByRole('complementary', { name: 'File explorer' })).not.toBeInTheDocument()
+    expect(within(screen.getByTestId('pane-b')).getByRole('complementary', { name: 'File explorer' })).toBeInTheDocument()
+
+    act(() => window.dispatchEvent(new Event('agentsdock:open-workspace-file')))
+    expect(within(screen.getByTestId('pane-a')).queryByRole('dialog', { name: 'Open workspace file' })).not.toBeInTheDocument()
+    expect(within(screen.getByTestId('pane-b')).getByRole('dialog', { name: 'Open workspace file' })).toBeVisible()
+    act(() => window.dispatchEvent(new Event('agentsdock:dismiss-workspace-file-picker')))
+    view.rerender(panes('a'))
+    act(() => window.dispatchEvent(new Event('agentsdock:workspace-close-active', { cancelable: true })))
+    expect(within(screen.getByTestId('pane-a')).getByRole('button', { name: 'Save and close' })).toBeVisible()
+    expect(within(screen.getByTestId('pane-b')).getByRole('textbox', { name: 'Contents of b.ts' })).toBeVisible()
+    fireEvent.click(within(screen.getByTestId('pane-a')).getByRole('button', { name: 'Cancel' }))
+    expect(editorA).toHaveValue('draft a')
+  })
+
+  it('rejects inactive panes and mismatched scoped requests before reading files', async () => {
+    const props = { workspaceKey: 'tabbed:chat-a', session,
+      profileScope: { profileId: 'profile-a', profileGeneration: 1, serverIdentity: 'server-a' },
+      available: true, capabilityVersion: 6, tabbedPane: true, chatContent: <p>Chat</p> }
+    const view = render(<WorkspaceEditor {...props} paneActive={false} />)
+    await act(async () => { await Promise.resolve() })
+    const open = (detail: object) => window.dispatchEvent(new CustomEvent('agentsdock:open-workspace-path', { detail: {
+      sessionId: session.id, path: 'a.ts', ...detail
+    } }))
+    act(() => { open({}); window.dispatchEvent(new Event('agentsdock:open-workspace-file')) })
+    expect(window.agentsDock.workspace.read).not.toHaveBeenCalled()
+    view.rerender(<WorkspaceEditor {...props} />)
+    act(() => {
+      open({ profileId: 'other' })
+      open({ profileGeneration: 2 })
+      open({ serverIdentity: 'other' })
+      open({ cwd: '/other' })
+    })
+    expect(window.agentsDock.workspace.read).not.toHaveBeenCalled()
+    act(() => open({ ...props.profileScope, cwd: session.cwd }))
+    expect(await screen.findByRole('textbox', { name: 'Contents of a.ts' })).toBeVisible()
+  })
+
+  it('applies the latest pane file request after hydration without restoring an old split', async () => {
+    const hydration = deferred<unknown>()
+    vi.mocked(window.agentsDock.preferences.getScoped).mockReturnValueOnce(hydration.promise)
+    const props = { workspaceKey: 'tabbed:chat-a', session,
+      profileScope: { profileId: 'profile-a', profileGeneration: 1, serverIdentity: 'server-a' },
+      available: true, capabilityVersion: 6, tabbedPane: true, chatContent: <p>Chat</p> }
+    const view = render(<WorkspaceEditor {...props} />)
+    act(() => {
+      window.dispatchEvent(new CustomEvent('agentsdock:open-workspace-path', { detail: { sessionId: session.id, path: 'first.ts' } }))
+      window.dispatchEvent(new CustomEvent('agentsdock:open-workspace-path', { detail: { sessionId: session.id, path: 'latest.ts' } }))
+    })
+    expect(window.agentsDock.workspace.read).not.toHaveBeenCalled()
+    await act(async () => hydration.resolve({ version: 5, cwd: session.cwd, activePath: 'previous.ts',
+      secondaryPath: 'side.ts', activeGroup: 'secondary', filePresentation: 'split',
+      tabs: [{ path: 'previous.ts' }, { path: 'side.ts' }] }))
+    expect(await screen.findByRole('textbox', { name: 'Contents of latest.ts' })).toBeVisible()
+    expect(window.agentsDock.workspace.read).not.toHaveBeenCalledWith(session.id, 'first.ts')
+    expect(view.container.querySelector('.workspace-editor-editor-groups-split')).toBeNull()
+    expect(view.container.querySelector('.workspace-editor-content-split')).toBeNull()
+    expect(screen.getByRole('tab', { name: 'previous.ts' })).toBeInTheDocument()
+  })
+
+  it('uses one Markdown preview in a pane even when a split view was saved', async () => {
+    vi.mocked(window.agentsDock.preferences.getScoped).mockResolvedValueOnce({ version: 5, cwd: session.cwd,
+      activePath: 'README.md', tabs: [{ path: 'README.md', markdownViewMode: 'split' }] })
+    const view = render(<WorkspaceEditor workspaceKey="tabbed:chat-a" session={session}
+      profileScope={{ profileId: 'profile-a', profileGeneration: 1, serverIdentity: 'server-a' }} available tabbedPane
+      chatContent={<p>Chat</p>} />)
+    expect(await screen.findByRole('heading', { name: 'Project' })).toBeVisible()
+    expect(screen.queryByRole('textbox', { name: 'Contents of README.md' })).not.toBeInTheDocument()
+    expect(view.container.querySelector('.workspace-editor-markdown-split')).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: 'Source' }))
+    expect(await screen.findByRole('textbox', { name: 'Contents of README.md' })).toBeVisible()
+  })
+
   it('opens a file selected in the chat Details Files tab in the existing editor', async () => {
     const previousState = useAppStore.getState()
     const scope = { profileId: 'profile-a', profileGeneration: 1, serverIdentity: 'server-a' }

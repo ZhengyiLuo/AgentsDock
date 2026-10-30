@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { Health, NativeFileRef, PublicServerProfile, Session } from '@shared/types'
 import { useAppStore } from '../store/app-store'
 import { ChatPane } from './ChatPane'
+import type { WorkspaceEditorProps } from './WorkspaceEditor'
 
 const nativeFiles = vi.hoisted(() => ({
   fromFiles: vi.fn()
@@ -11,10 +12,11 @@ const runtimeProviders = vi.hoisted(() => ({
   claude: vi.fn(),
   codex: vi.fn()
 }))
+const workspaceEditor = vi.hoisted(() => ({ render: vi.fn() }))
 
 vi.mock('../lib/native-files', () => ({ nativeFileRefsFromFiles: nativeFiles.fromFiles }))
 vi.mock('./ChatHeader', () => ({
-  ChatHeader: ({ session }: { session: Session }) => <div data-testid="chat-header">Header:{session.id}</div>
+  ChatHeader: ({ session, titleInTab }: { session: Session; titleInTab?: boolean }) => <div data-testid="chat-header" data-title-in-tab={String(titleInTab)}>Header:{session.id}</div>
 }))
 vi.mock('./ClaudeRuntimeContext', () => ({
   ClaudeRuntimeProvider: ({ children }: { children: React.ReactNode }) => {
@@ -41,7 +43,14 @@ vi.mock('./Composer', () => ({
     <div data-testid="composer" data-session-id={sessionId} data-drop-active={String(dropActive)} />
   )
 }))
+vi.mock('./WorkspaceEditor', () => ({
+  WorkspaceEditor: (props: WorkspaceEditorProps) => {
+    workspaceEditor.render(props)
+    return <div data-testid="pane-workspace-editor">{props.chatContent}</div>
+  }
+}))
 
+const initialState = useAppStore.getState()
 const profile: PublicServerProfile = {
   id: 'profile-a',
   name: 'Profile A',
@@ -65,12 +74,15 @@ describe('ChatPane', () => {
     nativeFiles.fromFiles.mockReset()
     runtimeProviders.claude.mockClear()
     runtimeProviders.codex.mockClear()
+    workspaceEditor.render.mockClear()
     useAppStore.setState({
+      ...initialState,
       activeProfileId: profile.id,
       profileGeneration: 7,
       profiles: [profile],
       switchingProfileId: null,
       chatPanes: { primary: primary.id, secondary: secondary.id },
+      chatPaneCount: 2,
       focusedChatPane: 'primary',
       selectedSessionId: primary.id,
       sessions: [primary, secondary],
@@ -82,6 +94,7 @@ describe('ChatPane', () => {
 
   afterEach(() => {
     cleanup()
+    useAppStore.setState(initialState, true)
     vi.restoreAllMocks()
   })
 
@@ -89,9 +102,16 @@ describe('ChatPane', () => {
     renderSecondary()
 
     expect(screen.getByTestId('chat-header')).toHaveTextContent('Header:chat-b')
+    expect(screen.getByTestId('chat-header')).toHaveAttribute('data-title-in-tab', 'true')
     expect(screen.getByTestId('timeline')).toHaveAttribute('data-session-id', secondary.id)
     expect(screen.getByTestId('timeline')).toHaveAttribute('data-focused', 'false')
     expect(screen.getByTestId('composer')).toHaveAttribute('data-session-id', secondary.id)
+    expect(workspaceEditor.render).toHaveBeenCalledWith(expect.objectContaining({
+      session: secondary,
+      profileScope: { profileId: profile.id, profileGeneration: 7, serverIdentity: profile.serverIdentity },
+      tabbedPane: true,
+      paneFocused: false
+    }))
 
     fireEvent.pointerDown(screen.getByRole('region', { name: 'Secondary chat pane' }))
     expect(focusChatPane).toHaveBeenCalledWith('secondary')
@@ -188,6 +208,35 @@ describe('ChatPane', () => {
     await act(async () => finishStaging([{ path: '/tmp/late.txt', name: 'late.txt' }]))
 
     expect(attachPathsForSession).not.toHaveBeenCalled()
+  })
+
+  it.each(['Escape', 'pointerdown', 'blur', 'dragend', 'drop', 'visibilitychange'])('clears a stale pane drop overlay immediately on %s', eventName => {
+    const { container } = renderSecondary()
+    const workspace = container.querySelector('.chat-workspace') as HTMLDivElement
+    fireEvent.dragEnter(workspace, {
+      dataTransfer: { types: ['Files'], files: [new File(['report'], 'report.txt')], dropEffect: 'none' }
+    })
+    expect(screen.getByTestId('composer')).toHaveAttribute('data-drop-active', 'true')
+
+    if (eventName === 'Escape') fireEvent.keyDown(window, { key: 'Escape' })
+    else if (eventName === 'visibilitychange') {
+      vi.spyOn(document, 'visibilityState', 'get').mockReturnValue('hidden')
+      fireEvent(document, new Event('visibilitychange'))
+    } else fireEvent(window, new Event(eventName))
+
+    expect(screen.getByTestId('composer')).toHaveAttribute('data-drop-active', 'false')
+    expect(nativeFiles.fromFiles).not.toHaveBeenCalled()
+    expect(attachPathsForSession).not.toHaveBeenCalled()
+  })
+
+  it('clears the pane drop overlay when its profile generation changes', () => {
+    const { container } = renderSecondary()
+    fireEvent.dragEnter(container.querySelector('.chat-workspace')!, {
+      dataTransfer: { types: ['Files'], files: [new File(['report'], 'report.txt')], dropEffect: 'none' }
+    })
+    expect(screen.getByTestId('composer')).toHaveAttribute('data-drop-active', 'true')
+    act(() => useAppStore.setState({ profileGeneration: 8 }))
+    expect(screen.getByTestId('composer')).toHaveAttribute('data-drop-active', 'false')
   })
 
   it('surfaces a native staging rejection only while the pane scope is current', async () => {

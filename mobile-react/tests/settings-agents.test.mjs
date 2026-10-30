@@ -54,7 +54,8 @@ test('availability uses the newest diagnostic, not backend contract support or a
   health.runtimes.codex = diagnostic('ready', '2026-10-17T12:00:00Z')
   assert.equal(settingsAgentAvailable(health, runtime, 'codex'), true)
   assert.equal(settingsAgentAvailable(health, null, 'opencode'), false)
-  assert.equal(settingsAgentAvailable(null, { backends: { opencode: { available: true } } }, 'opencode'), true)
+  assert.equal(settingsAgentAvailable(null, { backends: { opencode: { available: true } } }, 'opencode'), false)
+  assert.equal(settingsAgentAvailable({ capabilities: { opencode_backend: { version: 1, available: true } } }, { backends: { opencode: { available: true, native_credentials_present: false } } }, 'opencode'), true)
   for (const status of ['missing', 'unauthenticated', 'error', 'unknown']) {
     assert.equal(settingsAgentAvailable({ runtimes: { opencode: diagnostic(status) } }, null, 'opencode'), false)
   }
@@ -81,7 +82,7 @@ test('all agents remain visible; only ready agents on a connected server are gre
   store.setState({ health: { runtimes: { codex: diagnostic(), claude: diagnostic('missing'), cursor: diagnostic('unauthenticated') } } })
   await render(async tree => {
     assert.equal(tree.root.findAllByType('CircleCheck').length, 1)
-    assert.equal(tree.root.findAllByType('Circle').length, 4)
+    assert.equal(tree.root.findAllByType('Circle').length, 3, 'API-only Gemini never advertises a native login mode')
     assert.equal(available(tree, 'codex'), true)
     assert.doesNotMatch(JSON.stringify(tree.toJSON()), /Persistent goals|Sign-in required|Not installed|Latest run failed/)
     for (const state of [{ connecting: true }, { switchingProfileId: 'next' }, { workspaceAdopting: true }, { connected: false }]) {
@@ -101,7 +102,7 @@ test('Recheck deduplicates taps, shows loading and applies returned statuses wit
     assert.equal(recheck(tree).props.disabled, true)
     assert.equal(tree.root.findAllByType('Spinner').length, 1)
     await act(async () => {
-      store.setState({ runtime: { backends: { opencode: { available: true, diagnostic: diagnostic() }, codex: { diagnostic: diagnostic('missing') } } } })
+      store.setState({ health: { capabilities: { opencode_backend: { version: 1, available: true } } }, runtime: { backends: { opencode: { available: true, native_credentials_present: false, diagnostic: diagnostic() }, codex: { diagnostic: diagnostic('missing') } } } })
       finish()
     })
     assert.equal(recheck(tree).props.disabled, false)

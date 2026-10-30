@@ -293,6 +293,10 @@ export interface WorkspaceEditorProps {
   filesOnly?: boolean
   onActivate?: () => void
   onFileOpen?: () => void
+  /** Keep Chat and files inside one chat pane without nested editor splits. */
+  tabbedPane?: boolean
+  paneActive?: boolean
+  paneFocused?: boolean
 }
 
 export function WorkspaceEditor({
@@ -308,7 +312,10 @@ export function WorkspaceEditor({
   onReturnToChat,
   filesOnly = false,
   onActivate,
-  onFileOpen
+  onFileOpen,
+  tabbedPane = false,
+  paneActive = true,
+  paneFocused = true
 }: WorkspaceEditorProps) {
   useLocale()
   const onFileOpenRef = useRef(onFileOpen)
@@ -322,7 +329,8 @@ export function WorkspaceEditor({
   const instanceId = useId().replace(/:/g, '')
   const preferenceKey = `workspace-editor:${session.id}`
   const cwd = session.cwd ?? ''
-  const filesHost = useWorkspaceFilesHost(workspaceFilesKey(profileScope, session.id, cwd))
+  const registeredFilesHost = useWorkspaceFilesHost(workspaceFilesKey(profileScope, session.id, cwd))
+  const filesHost = !tabbedPane || (paneActive && paneFocused) ? registeredFilesHost : null
   const filesHostRef = useRef(filesHost)
   filesHostRef.current = filesHost
   const maxEditableFileBytes = resolvedWorkspaceFileByteLimit(maxTextFileBytes)
@@ -338,9 +346,33 @@ export function WorkspaceEditor({
   const memoryPaths = new Set(memoryFiles.map(file => file.path))
   const [openFiles, setOpenFiles] = useState<OpenWorkspaceFile[]>(memoryFiles)
   const [activePath, setActivePath] = useState<string | null>(() => memory?.activePath && memoryPaths.has(memory.activePath) ? memory.activePath : null)
-  const [secondaryPath, setSecondaryPath] = useState<string | null>(() => memory?.secondaryPath && memoryPaths.has(memory.secondaryPath) ? memory.secondaryPath : null)
-  const [activeGroup, setActiveGroup] = useState<EditorGroupId>(() => memoryMatches ? memory.activeGroup ?? 'primary' : 'primary')
+  const [secondaryPath, setSecondaryPath] = useState<string | null>(() => !tabbedPane && memory?.secondaryPath && memoryPaths.has(memory.secondaryPath) ? memory.secondaryPath : null)
+  const [activeGroup, setActiveGroup] = useState<EditorGroupId>(() => !tabbedPane && memoryMatches ? memory.activeGroup ?? 'primary' : 'primary')
   const [restored, setRestored] = useState(memoryMatches)
+  const pendingPaneOpenRef = useRef<(() => void) | null>(null)
+  const paneOwnershipRef = useRef({ tabbedPane, paneActive, paneFocused, profileScope, sessionId: session.id, cwd, restored })
+  paneOwnershipRef.current = { tabbedPane, paneActive, paneFocused, profileScope, sessionId: session.id, cwd, restored }
+  const paneOwnsCommands = (): boolean => {
+    const owner = paneOwnershipRef.current
+    return !owner.tabbedPane || (owner.paneActive && owner.paneFocused)
+  }
+  const acceptsWorkspaceRequest = (detail?: {
+    sessionId?: string | null; profileId?: string; profileGeneration?: number; serverIdentity?: string | null; cwd?: string
+  }): boolean => {
+    const owner = paneOwnershipRef.current
+    if (detail?.sessionId && detail.sessionId !== owner.sessionId) return false
+    if (!owner.tabbedPane) return true
+    if (!owner.paneActive || (!detail?.sessionId && !owner.paneFocused)) return false
+    return (detail?.profileId === undefined || detail.profileId === owner.profileScope?.profileId)
+      && (detail?.profileGeneration === undefined || detail.profileGeneration === owner.profileScope?.profileGeneration)
+      && (detail?.serverIdentity === undefined || detail.serverIdentity === owner.profileScope?.serverIdentity)
+      && (detail?.cwd === undefined || detail.cwd === owner.cwd)
+  }
+  const afterPaneRestoration = (open: () => void): void => {
+    const owner = paneOwnershipRef.current
+    if (owner.tabbedPane && !owner.restored && owner.profileScope) pendingPaneOpenRef.current = open
+    else open()
+  }
   const [pendingClosePath, setPendingClosePath] = useState<string | null>(null)
   const [pendingReloadPath, setPendingReloadPath] = useState<string | null>(null)
   const [paletteOpen, setPaletteOpen] = useState(false)
@@ -462,9 +494,9 @@ export function WorkspaceEditor({
     archived: Boolean(session.archived)
   }
 
-  const focusedPath = activeGroup === 'secondary' && secondaryPath ? secondaryPath : activePath
+  const focusedPath = !tabbedPane && activeGroup === 'secondary' && secondaryPath ? secondaryPath : activePath
   const primaryFile = openFiles.find(file => file.path === activePath) ?? null
-  const secondaryFile = openFiles.find(file => file.path === secondaryPath) ?? null
+  const secondaryFile = !tabbedPane ? openFiles.find(file => file.path === secondaryPath) ?? null : null
   const activeFile = openFiles.find(file => file.path === focusedPath) ?? null
   const paletteRenderGroup: EditorGroupId | null = paletteGroup === 'secondary'
     ? secondaryPath ? 'secondary' : activePath ? 'primary' : null
@@ -584,16 +616,16 @@ export function WorkspaceEditor({
     return true
   }
 
-  useTransientClose(paletteOpen, cancelPalette)
-  useTransientClose(Boolean(pendingUntitledSave), () => {
+  useTransientClose(paneOwnsCommands() && paletteOpen, cancelPalette)
+  useTransientClose(paneOwnsCommands() && Boolean(pendingUntitledSave), () => {
     if (!pendingUntitledSave?.saving) setPendingUntitledSave(null)
   })
-  useTransientClose(Boolean(pendingCloseFile), () => setPendingClosePath(null))
-  useTransientClose(Boolean(pendingReloadFile), () => setPendingReloadPath(null))
-  useTransientClose(Boolean(pendingRenameEntry), () => {
+  useTransientClose(paneOwnsCommands() && Boolean(pendingCloseFile), () => setPendingClosePath(null))
+  useTransientClose(paneOwnsCommands() && Boolean(pendingReloadFile), () => setPendingReloadPath(null))
+  useTransientClose(paneOwnsCommands() && Boolean(pendingRenameEntry), () => {
     if (!renamingEntry) setPendingRenameEntry(null)
   })
-  useTransientClose(Boolean(pendingDeleteEntry), () => {
+  useTransientClose(paneOwnsCommands() && Boolean(pendingDeleteEntry), () => {
     if (!deletingEntry) setPendingDeleteEntry(null)
   })
 
@@ -601,6 +633,7 @@ export function WorkspaceEditor({
     mountedRef.current = true
     return () => {
       mountedRef.current = false
+      pendingPaneOpenRef.current = null
       if (splitFrameRef.current !== null) {
         window.cancelAnimationFrame(splitFrameRef.current)
         splitFrameRef.current = null
@@ -674,12 +707,12 @@ export function WorkspaceEditor({
             ? persisted.activePath
             : null
         ))
-        setSecondaryPath(current => current ?? (
+        if (!tabbedPane) setSecondaryPath(current => current ?? (
           persisted.secondaryPath && restoredFiles.some(file => file.path === persisted.secondaryPath)
             ? persisted.secondaryPath
             : null
         ))
-        setActiveGroup(current => current === 'secondary' || persisted.activeGroup !== 'secondary'
+        if (!tabbedPane) setActiveGroup(current => current === 'secondary' || persisted.activeGroup !== 'secondary'
           ? current
           : persisted.secondaryPath ? 'secondary' : 'primary')
         if (!filePresentationTouchedRef.current) {
@@ -690,7 +723,7 @@ export function WorkspaceEditor({
       .catch(() => undefined)
       .finally(() => { if (!cancelled) setRestored(true) })
     return () => { cancelled = true }
-  }, [cwd, memoryMatches, preferenceKey, profileScope, session.id])
+  }, [cwd, memoryMatches, preferenceKey, profileScope, session.id, tabbedPane])
 
   const persistWorkspace = useCallback(() => {
     const currentFiles = openFilesRef.current
@@ -783,7 +816,7 @@ export function WorkspaceEditor({
   }, [persistWorkspace, restored])
 
   const currentEditorGroup = (): EditorGroupId | null => (
-    activeGroupRef.current === 'secondary' && secondaryPathRef.current
+    !paneOwnershipRef.current.tabbedPane && activeGroupRef.current === 'secondary' && secondaryPathRef.current
       ? 'secondary'
       : activePathRef.current ? 'primary' : null
   )
@@ -795,6 +828,7 @@ export function WorkspaceEditor({
   )
 
   const fileWorkspaceOwnsFocus = (): boolean => {
+    if (!paneOwnsCommands()) return false
     const focusedElement = document.activeElement
     if (!(focusedElement instanceof Element)) return false
     if (
@@ -810,6 +844,8 @@ export function WorkspaceEditor({
   }
 
   const workspaceSurfaceOwnsFocus = (): boolean => {
+    if (!paneOwnsCommands()) return false
+    if (paneOwnershipRef.current.tabbedPane) return true
     const focusedElement = document.activeElement
     if (!(focusedElement instanceof Element)) return false
     if (
@@ -828,7 +864,7 @@ export function WorkspaceEditor({
   }
 
   const requestOpenPalette = (returnToChatOnCancel = false) => {
-    onActivate?.()
+    if (!paneOwnershipRef.current.tabbedPane) onActivate?.()
     setChangesOpen(false)
     if (available !== true) {
       setWorkspaceError(capabilityMessage)
@@ -856,8 +892,11 @@ export function WorkspaceEditor({
   }
 
   const activateFilePath = (path: string, group: EditorGroupId = activeGroupRef.current): void => {
-    onActivate?.()
-    onFileOpenRef.current?.()
+    if (paneOwnershipRef.current.tabbedPane) group = 'primary'
+    else {
+      onActivate?.()
+      onFileOpenRef.current?.()
+    }
     setChangesOpen(false)
     if (group === 'secondary') {
       secondaryPathRef.current = path
@@ -892,8 +931,8 @@ export function WorkspaceEditor({
 
   useEffect(() => {
     const open = (event: Event) => {
-      const targetSessionId = (event as CustomEvent<{ sessionId?: string }>).detail?.sessionId
-      if (targetSessionId && targetSessionId !== session.id) return
+      const detail = (event as CustomEvent<{ sessionId?: string }>).detail
+      if (!acceptsWorkspaceRequest(detail)) return
       if (paletteOpenRef.current) {
         cancelPalette()
         return
@@ -901,7 +940,7 @@ export function WorkspaceEditor({
       if (document.querySelector('[aria-modal="true"]')) return
       const initial = initialWorkspaceOpenPendingRef.current
       initialWorkspaceOpenPendingRef.current = false
-      requestOpenPalette(initial)
+      afterPaneRestoration(() => requestOpenPalette(initial))
     }
     window.addEventListener('agentsdock:open-workspace-file', open)
     return () => window.removeEventListener('agentsdock:open-workspace-file', open)
@@ -909,7 +948,7 @@ export function WorkspaceEditor({
 
   useEffect(() => {
     const quickOpen = (event: Event) => {
-      if (event.defaultPrevented) return
+      if (event.defaultPrevented || !paneOwnsCommands()) return
       const detail = (event as CustomEvent<{
         source?: 'contextual' | 'workspace-file'
         sessionId?: string | null
@@ -929,7 +968,7 @@ export function WorkspaceEditor({
       // direct key handler. Claim it for the selected workspace, but never
       // stack quick open on top of an unsaved/reload/rename/delete dialog.
       if (document.querySelector('[aria-modal="true"]')) return
-      requestOpenPalette()
+      afterPaneRestoration(() => requestOpenPalette())
     }
     window.addEventListener('agentsdock:quick-open-active-surface', quickOpen)
     return () => window.removeEventListener('agentsdock:quick-open-active-surface', quickOpen)
@@ -937,7 +976,7 @@ export function WorkspaceEditor({
 
   useEffect(() => {
     const dismissFilePicker = () => {
-      if (paletteOpenRef.current) cancelPalette()
+      if (paneOwnsCommands() && paletteOpenRef.current) cancelPalette()
     }
     window.addEventListener('agentsdock:dismiss-workspace-file-picker', dismissFilePicker)
     return () => window.removeEventListener('agentsdock:dismiss-workspace-file-picker', dismissFilePicker)
@@ -945,6 +984,7 @@ export function WorkspaceEditor({
 
   useEffect(() => {
     const navigateWorkspaceTab = (direction: -1 | 1): boolean => {
+      if (!paneOwnsCommands()) return false
       if (paletteOpen || pendingClosePath || pendingReloadPath || document.querySelector('[aria-modal="true"]')) return false
       const target = workspaceTabNavigationTarget(
         changesOpenRef.current ? CHANGES_TAB_TARGET : currentFocusedPath(),
@@ -960,6 +1000,7 @@ export function WorkspaceEditor({
       return true
     }
     const handleShortcut = (event: KeyboardEvent) => {
+      if (event.defaultPrevented || !paneOwnsCommands()) return
       const navigation = workspaceTabNavigationShortcut(event)
       if (navigation) {
         const handled = navigation.kind === 'cycle'
@@ -997,7 +1038,7 @@ export function WorkspaceEditor({
         if (!workspaceSurfaceOwnsFocus()) return
         event.preventDefault()
         event.stopImmediatePropagation()
-        requestOpenPalette()
+        afterPaneRestoration(() => requestOpenPalette())
         return
       }
       if (key === 's' && focusedPath && !changesOpenRef.current) {
@@ -1020,7 +1061,7 @@ export function WorkspaceEditor({
 
   useEffect(() => {
     const closeActive = (event: Event) => {
-      if (event.defaultPrevented) return
+      if (event.defaultPrevented || !paneOwnsCommands()) return
       if (changesOpenRef.current) {
         event.preventDefault()
         showChat()
@@ -1053,7 +1094,7 @@ export function WorkspaceEditor({
     const wasOpen = paletteFocusWasOpenRef.current
     paletteFocusWasOpenRef.current = paletteOpen
     if (paletteOpen) {
-      paletteInputRef.current?.focus()
+      if (paneOwnsCommands()) paletteInputRef.current?.focus()
       return
     }
     if (!wasOpen) return
@@ -1086,6 +1127,7 @@ export function WorkspaceEditor({
     const restoreFocus = (attempt: number) => {
       if (
         cancelled
+        || !paneOwnsCommands()
         || focusGeneration !== paletteGenerationRef.current
         || !focusIsNeutral()
       ) return
@@ -1868,6 +1910,7 @@ export function WorkspaceEditor({
 
   useEffect(() => {
     const createOnActiveSurface = (event: Event) => {
+      if (event.defaultPrevented || !paneOwnsCommands()) return
       if (document.querySelector('[aria-modal="true"]')) {
         event.preventDefault()
         return
@@ -2171,7 +2214,7 @@ export function WorkspaceEditor({
       }
       setWorkspaceError(message)
     }
-    const targetGroup = paletteLease?.targetGroup ?? options.targetGroup ?? (
+    const targetGroup = tabbedPane ? 'primary' : paletteLease?.targetGroup ?? options.targetGroup ?? (
       activePathRef.current && activeGroupRef.current === 'secondary' ? 'secondary' : 'primary'
     )
     if (!paletteLeaseIsCurrent(paletteLease)) return false
@@ -2803,25 +2846,27 @@ export function WorkspaceEditor({
   useEffect(() => {
     const open = (event: Event) => {
       const detail = (event as CustomEvent<OpenWorkspacePathDetail>).detail
-      if (!detail || detail.sessionId !== session.id || !detail.path) return
-      initialWorkspaceOpenPendingRef.current = false
-      if (available !== true) {
-        setWorkspaceError(capabilityMessage)
-        return
-      }
-      if (detail.resolve) void openWorkspaceReference(detail)
-      else {
-        const pathInput = resolveWorkspacePathInput(cwd, detail.path)
-        if (pathInput.kind === 'outside-workspace') {
-        setWorkspaceError(t('editor.fileOutsideDirectory'))
+      if (!detail || detail.sessionId !== session.id || !detail.path || !acceptsWorkspaceRequest(detail)) return
+      afterPaneRestoration(() => {
+        initialWorkspaceOpenPendingRef.current = false
+        if (available !== true) {
+          setWorkspaceError(capabilityMessage)
           return
         }
-        if (pathInput.kind === 'absolute-file') {
-          void openAbsoluteFile(pathInput.path, detail)
-          return
+        if (detail.resolve) void openWorkspaceReference(detail)
+        else {
+          const pathInput = resolveWorkspacePathInput(cwd, detail.path)
+          if (pathInput.kind === 'outside-workspace') {
+            setWorkspaceError(t('editor.fileOutsideDirectory'))
+            return
+          }
+          if (pathInput.kind === 'absolute-file') {
+            void openAbsoluteFile(pathInput.path, detail)
+            return
+          }
+          void openFile(pathInput.kind === 'workspace-file' ? pathInput.path : detail.path, undefined, detail)
         }
-        void openFile(pathInput.kind === 'workspace-file' ? pathInput.path : detail.path, undefined, detail)
-      }
+      })
     }
     window.addEventListener('agentsdock:open-workspace-path', open)
     return () => window.removeEventListener('agentsdock:open-workspace-path', open)
@@ -2830,18 +2875,20 @@ export function WorkspaceEditor({
   useEffect(() => {
     const open = (event: Event) => {
       const detail = (event as CustomEvent<OpenAgentFileDetail>).detail
-      if (!detail || detail.sessionId !== session.id || !detail.file?.id) return
-      initialWorkspaceOpenPendingRef.current = false
-      if (!agentFileBelongsToSession(detail.file, session.id)) {
-        setWorkspaceError(t('editor.thatFileBelongsToADifferentChat'))
-        return
-      }
-      const workspacePath = workspacePathForAgentFile(detail.file, cwd)
-      if (workspacePath && available === true) {
-        void openFile(workspacePath, detail.file, detail)
-        return
-      }
-      void openArtifactFile(detail.file, detail)
+      if (!detail || detail.sessionId !== session.id || !detail.file?.id || !acceptsWorkspaceRequest(detail)) return
+      afterPaneRestoration(() => {
+        initialWorkspaceOpenPendingRef.current = false
+        if (!agentFileBelongsToSession(detail.file, session.id)) {
+          setWorkspaceError(t('editor.thatFileBelongsToADifferentChat'))
+          return
+        }
+        const workspacePath = workspacePathForAgentFile(detail.file, cwd)
+        if (workspacePath && available === true) {
+          void openFile(workspacePath, detail.file, detail)
+          return
+        }
+        void openArtifactFile(detail.file, detail)
+      })
     }
     window.addEventListener('agentsdock:open-agent-file', open)
     return () => window.removeEventListener('agentsdock:open-agent-file', open)
@@ -2853,7 +2900,13 @@ export function WorkspaceEditor({
     // restoring the selected tab first so hydration cannot invalidate that
     // request, and let mount effect cleanup finish before accepting it.
     let cancelled = false
-    queueMicrotask(() => { if (!cancelled) onReady?.() })
+    queueMicrotask(() => {
+      if (cancelled) return
+      const pending = pendingPaneOpenRef.current
+      pendingPaneOpenRef.current = null
+      if (paneOwnershipRef.current.paneActive) pending?.()
+      onReady?.()
+    })
     return () => { cancelled = true }
   }, [onReady, restored, Boolean(profileScope), session.id])
 
@@ -3360,8 +3413,8 @@ export function WorkspaceEditor({
   const chatPanelId = `${instanceId}-chat-panel`
   const editorPanelId = `${instanceId}-editor-panel`
   const fileActive = activePath !== null
-  const editorOnly = fileActive && (filePresentation === 'full' || Boolean(onReturnToChat))
-  const splitActive = !changesOpen && fileActive && filePresentation === 'split' && !onReturnToChat
+  const editorOnly = fileActive && (tabbedPane || filePresentation === 'full' || Boolean(onReturnToChat))
+  const splitActive = !tabbedPane && !changesOpen && fileActive && filePresentation === 'split' && !onReturnToChat
   const splitStyle = splitActive
     ? { '--workspace-editor-width': `${editorSplit.editorPercent}%` } as CSSProperties
     : undefined
@@ -3425,16 +3478,19 @@ export function WorkspaceEditor({
     aria-pressed={activePath === null && !changesOpen}
     aria-controls={chatPanelId}
     aria-label={t('editor.chatPinned')}
-    title={t('editor.chat1')}
+    title={tabbedPane ? `${t('editor.chat')}: ${session.title}` : t('editor.chat1')}
     onClick={() => {
       referenceRequestSequence.current += 1
       openRequestSequence.current += 1
       showChat()
     }}
+    onDoubleClick={tabbedPane && paneActive
+      ? () => window.dispatchEvent(new CustomEvent('agentsdock:rename-chat', { detail: session }))
+      : undefined}
   >
     <MessageSquare size={13} aria-hidden="true" />
-    <span>{t('editor.chat')}</span>
-    <span className="workspace-editor-pinned-label">{t('editor.pinned')}</span>
+    <span>{tabbedPane ? session.title || t('editor.chat') : t('editor.chat')}</span>
+    {!tabbedPane && <span className="workspace-editor-pinned-label">{t('editor.pinned')}</span>}
   </button>
   const handleFileTabWheel = (event: ReactWheelEvent<HTMLDivElement>) => {
     if (event.deltaY === 0 || Math.abs(event.deltaX) >= Math.abs(event.deltaY)) return
@@ -3521,8 +3577,11 @@ export function WorkspaceEditor({
       && workspacePathIsWithin(file.path, workspaceMutationPath)
     )
     const largeTextPreview = Boolean(file?.truncated)
+    const savedMarkdownMode = file ? markdownViewModes.get(file.path) : undefined
     const markdownMode = file?.viewerKind === 'markdown'
-      ? largeTextPreview ? 'source' : markdownViewModes.get(file.path) ?? 'split'
+      ? largeTextPreview ? 'source' : tabbedPane
+        ? savedMarkdownMode === 'source' ? 'source' : 'preview'
+        : savedMarkdownMode ?? 'split'
       : null
     const setMarkdownMode = (mode: MarkdownViewMode) => {
       if (!file) return
@@ -3545,7 +3604,7 @@ export function WorkspaceEditor({
           ariaLabel={t('editor.contentsOf', { name: editorContentLabel(file) })}
           maxBytes={maxEditableFileBytes}
           initialViewState={viewStatesRef.current.get(editorViewStateKey(group, file.path))}
-          navigationRequest={focused && editorNavigation?.path === file.path ? editorNavigation : undefined}
+          navigationRequest={focused && paneOwnsCommands() && activePath !== null && !changesOpen && editorNavigation?.path === file.path ? editorNavigation : undefined}
           onLimitExceeded={() => updateFile(file.path, current => ({
             ...current,
             error: t('editor.editSizeLimit', { size: formatByteSize(maxEditableFileBytes) })
@@ -3598,7 +3657,7 @@ export function WorkspaceEditor({
             <div className="workspace-editor-editor-actions">
               {file.viewerKind === 'markdown' && !largeTextPreview && <div className="workspace-editor-markdown-controls" role="group" aria-label={t('editor.markdownViewMode')}>
                 <button type="button" aria-pressed={markdownMode === 'source'} onClick={() => setMarkdownMode('source')}><FileCode2 size={12} />{t('editor.source')}</button>
-                <button type="button" aria-pressed={markdownMode === 'split'} onClick={() => setMarkdownMode('split')}><Columns2 size={12} />{t('editor.split')}</button>
+                {!tabbedPane && <button type="button" aria-pressed={markdownMode === 'split'} onClick={() => setMarkdownMode('split')}><Columns2 size={12} />{t('editor.split')}</button>}
                 <button type="button" aria-pressed={markdownMode === 'preview'} onClick={() => setMarkdownMode('preview')}><Eye size={12} />{t('editor.preview')}</button>
               </div>}
               {file.truncated && file.artifact && <button
@@ -3610,7 +3669,7 @@ export function WorkspaceEditor({
                   })
                 }}
               >{t('editor.openCompleteFile')}</button>}
-              {group === 'primary' && !secondaryPath && <button
+              {!tabbedPane && group === 'primary' && !secondaryPath && <button
                 type="button"
                 className="workspace-editor-expand-button"
                 aria-label={t('editor.splitEditorRight')}
@@ -3649,7 +3708,7 @@ export function WorkspaceEditor({
                   onClick={() => setEditorSplit(current => ({ ...current, side: 'right' }))}
                 >{t('editor.editorRight')}</button>
               </div>}
-              {focused && onReturnToChat && <button
+              {focused && !tabbedPane && onReturnToChat && <button
                 type="button"
                 className="workspace-editor-expand-button"
                 aria-label={t('editor.returnToSplitChats')}
@@ -3659,7 +3718,7 @@ export function WorkspaceEditor({
                 <Minimize2 size={13} aria-hidden="true" />
                 <span className="workspace-editor-expand-label">{t('editor.showChats')}</span>
               </button>}
-              {focused && !onReturnToChat && <button
+              {focused && !tabbedPane && !onReturnToChat && <button
                 type="button"
                 className="workspace-editor-expand-button"
                 aria-label={editorOnly ? t('editor.restoreChatSplitView') : t('editor.showFileWorkspaceFullScreen')}
@@ -3880,7 +3939,7 @@ export function WorkspaceEditor({
           creationAvailable={creationAvailable && !workspaceMutationPath}
           pendingCreate={pendingCreate}
           onOpen={path => void openFile(path)}
-          onOpenToSide={openFileToSide}
+          onOpenToSide={tabbedPane ? undefined : openFileToSide}
           onToggle={toggleDirectory}
           onLoadMore={path => void loadDirectory(path, true)}
           onRefresh={refreshExplorer}
@@ -3907,8 +3966,8 @@ export function WorkspaceEditor({
     </>, filesHost)}
     <nav
       ref={splitTabStripRef}
-      hidden={filesOnly}
-      className={`workspace-editor-tab-strip${splitActive ? ` workspace-editor-tab-strip-split workspace-editor-${editorSplit.side}` : ''}`}
+      hidden={filesOnly || (tabbedPane && !paneActive)}
+      className={`workspace-editor-tab-strip${tabbedPane ? ' workspace-editor-tabbed-pane' : ''}${splitActive ? ` workspace-editor-tab-strip-split workspace-editor-${editorSplit.side}` : ''}`}
       aria-label={t('editor.workspaceTabs')}
       style={splitStyle}
     >
@@ -3919,8 +3978,9 @@ export function WorkspaceEditor({
 
     <section
       ref={splitContainerRef}
-      hidden={filesOnly}
-      className={`workspace-editor-content${splitActive ? ` workspace-editor-content-split workspace-editor-${editorSplit.side}${splitDragging ? ' workspace-editor-split-dragging' : ''}` : ''}${editorOnly ? ' workspace-editor-content-editor-only' : ''}`}
+      hidden={filesOnly || (tabbedPane && !paneActive)}
+      inert={tabbedPane && !paneActive ? true : undefined}
+      className={`workspace-editor-content${tabbedPane ? ' workspace-editor-tabbed-pane' : ''}${splitActive ? ` workspace-editor-content-split workspace-editor-${editorSplit.side}${splitDragging ? ' workspace-editor-split-dragging' : ''}` : ''}${editorOnly ? ' workspace-editor-content-editor-only' : ''}`}
       style={splitStyle}
     >
       <div
@@ -3929,6 +3989,7 @@ export function WorkspaceEditor({
         role="region"
         aria-labelledby={chatTabId}
         hidden={editorOnly || changesOpen}
+        inert={tabbedPane && (editorOnly || changesOpen) ? true : undefined}
       >{chatContent}</div>
 
       {changesVisited && profileScope && <div id={`${instanceId}-changes-panel`} className="workspace-changes-host" hidden={!changesOpen}>
@@ -4175,7 +4236,7 @@ const Explorer = memo(function Explorer({
   creationAvailable: boolean
   pendingCreate: PendingWorkspaceCreate | null
   onOpen: (path: string) => void
-  onOpenToSide: (path: string) => void
+  onOpenToSide?: (path: string) => void
   onToggle: (path: string) => void
   onLoadMore: (path: string) => void
   onRefresh: () => void
@@ -4262,7 +4323,7 @@ const Explorer = memo(function Explorer({
           : contextEntry.kind === 'directory'
             ? () => onToggle(contextEntry.path)
             : undefined}
-        onOpenToSide={contextEntry.kind === 'file'
+        onOpenToSide={contextEntry.kind === 'file' && onOpenToSide
           ? () => onOpenToSide(contextEntry.path)
           : undefined}
         onRequestCreate={kind => onRequestCreate(kind, contextEntry)}

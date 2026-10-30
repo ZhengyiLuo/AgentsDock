@@ -250,7 +250,6 @@ const REMOTE_AGENT_ROUTE_UNAVAILABLE = 'Remote agent routes cannot be used from 
 const SERVER_RESTART_RECONNECT_TIMEOUT_MS = 45_000
 const SERVER_RESTART_POLL_DELAY_MS = 500
 const SERVER_RESTART_HEALTH_TIMEOUT_MS = 3_000
-const MAX_TIMELINE_SUBSCRIPTIONS = 2
 const TRACE_DETAIL_EVENT_TYPES = new Set([
   'reasoning_summary',
   'reasoning_text',
@@ -3519,13 +3518,9 @@ export class AppService {
     this.assertCurrentScope(scope)
     this.stopTimelineSubscription(sessionId)
     this.flushEventCache()
-    if (this.timelineSubscriptions.size >= MAX_TIMELINE_SUBSCRIPTIONS) {
-      const oldestSessionId = this.timelineSubscriptions.keys().next().value as string | undefined
-      if (oldestSessionId) {
-        this.stopTimelineSubscription(oldestSessionId)
-        this.emitSync(scope, oldestSessionId, 'idle')
-      }
-    }
+    // The renderer owns the visible pane set and explicitly unsubscribes hidden
+    // chats. Opening another pane must not retire a still-visible chat's lease,
+    // including while a workspace switch briefly overlaps old and new panes.
     const lease = ++this.timelineLeaseSequence
     this.timelineSubscriptions.set(sessionId, { lease, stop: null, connected: false, initializing: true })
     return lease
@@ -3789,6 +3784,8 @@ export class AppService {
     await this.ensureValidatedScope(scope)
     const result = await scope.client.stopTurn(sessionId)
     this.assertCurrentScope(scope)
+    const subscription = this.timelineSubscriptions.get(sessionId)
+    if (subscription) this.scheduleSubagentSnapshotRefresh(scope, sessionId, subscription.lease)
     return result
   }
 
@@ -6496,6 +6493,9 @@ export class AppService {
       folderOrder: resetPending ? [] : cacheValue(() => this.cache.preference(scope.namespace, 'folderOrder', [] as string[]), []),
       collapsedFolders: resetPending ? [] : cacheValue(() => this.cache.preference(scope.namespace, 'collapsedFolders', [] as string[]), []),
       pinnedCollapsed: resetPending ? false : cacheValue(() => this.cache.preference(scope.namespace, 'pinnedCollapsed', false), false),
+      groupUnreadChats: resetPending || cacheValue(() => this.cache.preference<boolean>(scope.namespace, 'groupUnreadChats', true) !== false, true),
+      includeCronInUnread: !resetPending && cacheValue(() => this.cache.preference<boolean>(scope.namespace, 'includeCronInUnread', false) === true, false),
+      groupRunningChats: resetPending || cacheValue(() => this.cache.preference<boolean>(scope.namespace, 'groupRunningChats', true) !== false, true),
       archivedCollapsed: resetPending ? false : cacheValue(() => this.cache.preference(scope.namespace, 'archivedCollapsed', false), false),
       inspectorVisible: resetPending ? false : cacheValue(() => this.cache.preference(scope.namespace, 'inspectorVisible', false), false),
       activeProfileId: scope.profileId,
@@ -7823,6 +7823,12 @@ export function mergeSessionSummaries(previous: Session[], incoming: Session[]):
     const existing = previousById.get(summary.id)
     if (!existing) return summary
     const merged = preserveCustomProviderModels(existing, { ...existing, ...summary })
+    // Full summaries from older servers cannot retain a newer server's cursor.
+    // Partial metadata without an agent cursor leaves the known value intact.
+    if (Object.prototype.hasOwnProperty.call(summary, 'latest_agent_event_seq')
+      && summary.latest_non_job_agent_event_seq === undefined) {
+      merged.latest_non_job_agent_event_seq = null
+    }
     return jsonEqual(existing, merged) ? existing : merged
   })
 }
@@ -7846,6 +7852,7 @@ function preserveCustomProviderModels(previous: Session, incoming: Session): Ses
 export function mergePolledSessionSummaries(previous: Session[], incoming: Session[]): Session[] {
   return mergeSessionSummaries(previous, incoming.map(summary => ({
     ...summary,
+    latest_non_job_agent_event_seq: summary.latest_non_job_agent_event_seq ?? null,
     emergency_alert: summary.emergency_alert ?? null,
     unacknowledged_emergency_count: summary.unacknowledged_emergency_count
       ?? (summary.emergency_alert ? 1 : 0)

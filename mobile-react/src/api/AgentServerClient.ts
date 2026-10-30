@@ -21,6 +21,8 @@ import type {
   ClaudeMcpControlInput,
   ClaudeMcpSnapshot,
   ClaudeRuntimeSnapshot,
+  GeminiRuntimeSnapshot,
+  ProviderPendingInteraction,
   ChatReference,
   TeamReference,
   CreateJobInput,
@@ -358,6 +360,8 @@ export class AgentServerClient {
       codex_approvals_reviewer: input.codex_approvals_reviewer ?? null,
       claude_permission_mode: input.claude_permission_mode ?? null,
       cursor_permission_mode: input.cursor_permission_mode ?? null,
+      opencode_permission_mode: input.opencode_permission_mode ?? null,
+      gemini_permission_mode: input.gemini_permission_mode ?? null,
       provider_jobs_access: input.provider_jobs_access ?? null,
       provider_session_id: input.providerId || null,
       import_history: Boolean(input.providerId),
@@ -554,6 +558,17 @@ export class AgentServerClient {
 
   claudeRuntime(sessionId: string): Promise<ClaudeRuntimeSnapshot> {
     return this.get(`/api/sessions/${encodeURIComponent(sessionId)}/claude/runtime`)
+  }
+
+  geminiRuntime(sessionId: string): Promise<GeminiRuntimeSnapshot> {
+    return this.request(`/api/sessions/${encodeURIComponent(sessionId)}/gemini/runtime`, {}, 30_000, false, 'native-control')
+  }
+
+  async resolveGeminiInteraction(sessionId: string, interactionId: string, response: Record<string, JsonValue>): Promise<ProviderPendingInteraction> {
+    return (await this.request<{ interaction: ProviderPendingInteraction }>(
+      `/api/sessions/${encodeURIComponent(sessionId)}/gemini/interactions/${encodeURIComponent(interactionId)}/resolve`,
+      { method: 'POST', body: JSON.stringify({ response }) }, 30_000, false, 'native-control',
+    )).interaction
   }
 
   claudeMcp(sessionId: string): Promise<ClaudeMcpSnapshot> {

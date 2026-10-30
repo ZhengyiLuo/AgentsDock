@@ -837,6 +837,35 @@ describe('Codex controls', () => {
     }))
   })
 
+  it('runs a confirmed shell command during the active turn and prevents duplicate submissions', async () => {
+    let settle!: (value: { accepted: boolean; operation_id: string }) => void
+    shell.mockImplementationOnce(() => new Promise(resolve => { settle = resolve }))
+    renderControls()
+    const user = userEvent.setup()
+    await user.click(await screen.findByRole('button', { name: 'Codex controls: Approval needed' }))
+    expect(screen.getByRole('button', { name: 'Compact' })).toBeDisabled()
+    expect(screen.getByRole('button', { name: 'Review' })).toBeDisabled()
+    await user.click(screen.getByRole('button', { name: 'Advanced and unsandboxed actions' }))
+    expect(screen.getByRole('button', { name: 'Roll back' })).toBeDisabled()
+
+    const command = screen.getByPlaceholderText('Enter an exact shell command')
+    const submit = screen.getByRole('button', { name: 'Run command' })
+    await user.type(command, 'git status')
+    expect(submit).toBeDisabled()
+    await user.click(screen.getByRole('checkbox', { name: 'I explicitly approve running this command with full access.' }))
+    expect(submit).toBeEnabled()
+    await user.click(submit)
+    await waitFor(() => expect(shell).toHaveBeenCalledWith('chat-1', { command: 'git status', confirmed: true }))
+    expect(submit).toBeDisabled()
+    await user.click(submit)
+    expect(shell).toHaveBeenCalledTimes(1)
+
+    await act(async () => { settle({ accepted: true, operation_id: 'op-live-shell' }) })
+    await waitFor(() => expect(command).toHaveValue(''))
+    expect(screen.getByRole('checkbox', { name: 'I explicitly approve running this command with full access.' })).not.toBeChecked()
+    expect(screen.getByRole('button', { name: 'Compact' })).toBeDisabled()
+  })
+
   it('shows an explicit warning and status when the persistent goal time budget is exhausted', async () => {
     runtimeResponse = { ...runtime, status: { type: 'idle' }, time_budget_exhausted: true }
     renderControls()

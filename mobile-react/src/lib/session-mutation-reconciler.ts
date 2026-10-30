@@ -16,6 +16,8 @@ export const SESSION_MUTATION_FIELDS = [
   'codex_approvals_reviewer',
   'claude_permission_mode',
   'cursor_permission_mode',
+  'opencode_permission_mode',
+  'gemini_permission_mode',
   'provider_jobs_access',
   'pinned',
   'archived',

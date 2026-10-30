@@ -4,9 +4,13 @@ import { describe, expect, it } from 'vitest'
 
 const rendererRoot = resolve(process.cwd(), 'src/renderer/src')
 
-// These variables represent live layout state supplied by WorkspaceEditor.tsx
+// These variables represent live layout state supplied by the workspace components
 // or Radix. They are not design tokens and intentionally have no global value.
 const runtimeCustomProperties = new Set([
+  '--workspace-column',
+  '--workspace-first-column',
+  '--workspace-second-column',
+  '--workspace-row',
   '--workspace-editor-width',
   '--workspace-explorer-width',
   '--workspace-markdown-source-percent',

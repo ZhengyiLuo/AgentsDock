@@ -7,6 +7,7 @@ import { initialIOSKeyboardLifecycle, IOS_KEYBOARD_HIDE_FALLBACK_MS, reduceIOSKe
 import { usePalette } from '../theme'
 import { ChatHeader } from './ChatHeader'
 import { ClaudeInteractionShelf } from './ClaudeInteractionShelf'
+import { GeminiInteractionShelf } from './GeminiInteractionShelf'
 import { ClaudeRuntimeProvider } from './ClaudeRuntimeContext'
 import { CodexInteractionShelf } from './CodexInteractionShelf'
 import { CodexRuntimeProvider } from './CodexRuntimeContext'
@@ -134,6 +135,7 @@ export function ChatScreen({ sessionId, compact, inlineInspectorAvailable, onBac
             </View>
             {!welcome ? <CodexInteractionShelf /> : null}
             {!welcome ? <ClaudeInteractionShelf /> : null}
+            {!welcome ? <GeminiInteractionShelf sessionId={sessionId} /> : null}
             <View
               style={[styles.composerDock, {
                 paddingBottom: Platform.OS === 'ios'

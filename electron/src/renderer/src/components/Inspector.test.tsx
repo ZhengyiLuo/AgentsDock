@@ -3,11 +3,13 @@ import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { AgentsDockAPI } from '@shared/ipc'
 import type { Event, Health, RuntimeCatalog, Session } from '@shared/types'
+import { setLocale } from '@shared/i18n'
 import { useAppStore } from '../store/app-store'
 import { Inspector } from './Inspector'
 
 describe('Inspector', () => {
   afterEach(cleanup)
+  afterEach(() => setLocale('en'))
 
   beforeEach(() => {
     Object.defineProperty(window, 'agentsDock', {
@@ -572,6 +574,27 @@ describe('Inspector', () => {
     expect(section).toHaveTextContent('Subagents')
     expect(section).toHaveTextContent('Audit timeline performance')
     expect(section).toHaveTextContent('1 active')
+  })
+
+  it('switches the subagent heading and empty-state label to Chinese without renaming history', async () => {
+    const session = { id: 'chat-1', title: 'Performance check', backend: 'codex' as const }
+    useAppStore.setState({ snapshots: { [session.id]: {
+      session, events: [{ id: 'child', seq: 1, session_id: session.id, type: 'subagent_state',
+        ts: '2026-10-25T10:00:00Z', backend: 'codex', subagent_id: 'child',
+        subagent_title: 'Keep my name', subagent_status: 'stopped' }],
+      queuedTurns: [], files: [], filesTotal: 0, hasMoreEvents: false, cachedAt: 1
+    } } })
+    render(<Inspector />)
+    expect(screen.getByText('Subagents')).toBeInTheDocument()
+    act(() => setLocale('zh-CN'))
+    expect(screen.getByText('子 Agent')).toBeInTheDocument()
+    await userEvent.click(screen.getByRole('button', { name: '进行中的子 Agent：0 个' }))
+    expect(screen.getByText('暂无进行中的子 Agent。')).toBeInTheDocument()
+    await userEvent.click(screen.getByRole('button', { name: '历史记录：1 条' }))
+    expect(screen.getByText('Keep my name')).toBeInTheDocument()
+    act(() => setLocale('en'))
+    expect(screen.getByText('Subagents')).toBeInTheDocument()
+    expect(screen.getByText('Keep my name')).toBeInTheDocument()
   })
 
   it('shows active subagents first and keeps completed or stopped history collapsed', async () => {
