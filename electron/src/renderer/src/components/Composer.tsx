@@ -18,6 +18,7 @@ import { teamAllServersAliasAvailable, teamBulletinAliasAvailable, type TeamNetw
 import { chatBackendChoice, chatBackendSelection, codexCustomProviderAvailable, cursorBackendAvailable, cursorBackendUnavailableReason, runtimeCatalogOptions, runtimeEffortOptions, runtimeSelectionError, runtimeSendAdmissionError, selectableChatBackendChoices } from '@shared/runtime-catalog'
 import { trackEvent } from '../lib/analytics'
 import { messageAnalyticsProps } from '../lib/session-analytics'
+import { COMPOSER_DRAFT_APPEND_EVENT, type ComposerDraftAppendDetail } from '../lib/composer-draft-append'
 import { modelCommandArgument, resolveModelCommand, sessionModelPatch } from '../lib/model-command'
 import { backendLabel, formatBytes, runtimeLabel } from '../lib/format'
 import { CodexModelDiscovery } from './CodexModelDiscovery'
@@ -1717,6 +1718,32 @@ export const Composer = memo(function Composer({ dropActive = false, sessionId, 
     setMentionCandidates(nextMention && selectedId ? currentMentionCandidates(nextMention, selectedId, supportedTargetBackends, crossChatSupported) : [])
     setMentionIndex(0)
   }
+  const appendDraftRef = useRef<(text: string) => void>(() => {})
+  appendDraftRef.current = text => {
+    const existing = draftRef.current
+    const next = `${existing}${existing ? '\n\n' : ''}${text}`
+    pendingCaretRef.current = next.length
+    updateComposerDraft(next, next.length)
+    useAppStore.getState().setDraftForSession(selectedId!, next)
+  }
+  useEffect(() => {
+    const append = (event: Event) => {
+      const detail = (event as CustomEvent<ComposerDraftAppendDetail>).detail
+      const current = useAppStore.getState(), context = draftContextRef.current
+      const sourcePane = event.target instanceof Element ? event.target.closest('[data-chat-pane]') : null
+      const composerPane = textareaRef.current?.closest('[data-chat-pane]') ?? null
+      if (event.defaultPrevented || writeDisabled || !mountedRef.current || !textareaRef.current || !detail?.scope
+        || sourcePane !== composerPane || detail.sessionId !== selectedId || context.sessionId !== selectedId
+        || detail.scope.profileId !== activeProfileId || detail.scope.profileGeneration !== profileGeneration
+        || detail.scope.serverIdentity !== serverIdentity || current.activeProfileId !== activeProfileId
+        || current.profileGeneration !== profileGeneration || activeIdentity(current) !== serverIdentity
+        || current.switchingProfileId || typeof detail.text !== 'string' || !detail.text.trim()) return
+      event.preventDefault()
+      appendDraftRef.current(detail.text)
+    }
+    window.addEventListener(COMPOSER_DRAFT_APPEND_EVENT, append)
+    return () => window.removeEventListener(COMPOSER_DRAFT_APPEND_EVENT, append)
+  }, [activeProfileId, profileGeneration, selectedId, serverIdentity, writeDisabled])
   const focusCommandSession = () => {
     const state = useAppStore.getState()
     const pane = Object.entries(state.chatPanes).find(([, id]) => id === session?.id)?.[0]

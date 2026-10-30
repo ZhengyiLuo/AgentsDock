@@ -13,6 +13,7 @@ import { loadTeamNetworkCore, loadTeamNetworkWorkspace, resetTeamNetworkSnapshot
 import { flushActiveWorkspace, useAppStore } from '../store/app-store'
 import { teamMessageLinkURL } from '../lib/team-message-links'
 import { projectTeamMessageComposer } from '../lib/team-message-composer'
+import { appendComposerDraft } from '../lib/composer-draft-append'
 import { Composer, TeamMentionPalette } from './Composer'
 import { ClaudeRuntimeProvider } from './ClaudeRuntimeContext'
 import { CodexRuntimeProvider } from './CodexRuntimeContext'
@@ -322,6 +323,50 @@ describe('Composer', () => {
   it('mounts with empty per-chat upload state without an external-store render loop', () => {
     render(<Composer />)
     expect(screen.getByPlaceholderText('Message')).toBeInTheDocument()
+  })
+
+  it('appends a reviewed peer message to the live draft without replacing selected text or attached files', async () => {
+    const file = { id: 'file-1', filename: 'keep.txt' } as AgentFile
+    const send = vi.fn().mockResolvedValue({ session: { id: 'chat-1', title: 'Chat', backend: 'codex' }, queued: false })
+    window.agentsDock.turns = { send } as unknown as AgentsDockAPI['turns']
+    useAppStore.setState({ uploadsBySession: { 'chat-1': [file] } })
+    render(<section data-chat-pane="primary"><button>Peer message</button><Composer /></section>)
+    const editor = screen.getByPlaceholderText('Message') as HTMLTextAreaElement
+    fireEvent.change(editor, { target: { value: 'Keep this unsaved draft.' } })
+    editor.setSelectionRange(5, 9)
+    act(() => {
+      expect(appendComposerDraft(screen.getByRole('button', { name: 'Peer message' }),
+        { profileId: 'profile-a', profileGeneration: 0, serverIdentity: null }, 'chat-1', 'Review this peer instruction.')).toBe(true)
+    })
+    expect(editor).toHaveValue('Keep this unsaved draft.\n\nReview this peer instruction.')
+    expect(editor).toHaveFocus()
+    expect(editor.selectionStart).toBe(editor.value.length)
+    expect(useAppStore.getState().uploadsBySession['chat-1']).toEqual([file])
+    expect(send).not.toHaveBeenCalled()
+    const edited = 'Keep this unsaved draft.\n\nProceed with my revised instruction.'
+    fireEvent.change(editor, { target: { value: edited } })
+    fireEvent.click(screen.getByRole('button', { name: 'Send message' }))
+    await waitFor(() => expect(send).toHaveBeenCalledOnce())
+    expect(send).toHaveBeenCalledWith(expect.objectContaining({ sessionId: 'chat-1', prompt: edited, fileIds: ['file-1'] }))
+    expect(send.mock.calls[0][0]).not.toHaveProperty('source_user_instruction')
+  })
+
+  it('targets only the originating composer pane and rejects stale server identities', () => {
+    useAppStore.setState({ sessions: [{ id: 'chat-1', title: 'Alpha', backend: 'codex' },
+      { id: 'chat-2', title: 'Beta', backend: 'claude' }] })
+    render(<><section data-chat-pane="primary"><button>Alpha message</button><Composer sessionId="chat-1" /></section>
+      <section data-chat-pane="secondary"><button>Beta message</button><Composer sessionId="chat-2" /></section></>)
+    const scope = { profileId: 'profile-a', profileGeneration: 0, serverIdentity: null }
+    const source = screen.getByRole('button', { name: 'Beta message' })
+    act(() => {
+      expect(appendComposerDraft(source, { ...scope, profileGeneration: 1 }, 'chat-2', 'Stale')).toBe(false)
+      expect(appendComposerDraft(source, { ...scope, serverIdentity: 'other-server' }, 'chat-2', 'Wrong server')).toBe(false)
+      expect(appendComposerDraft(source, scope, 'chat-1', 'Wrong pane')).toBe(false)
+      expect(appendComposerDraft(source, scope, 'chat-2', 'For Beta')).toBe(true)
+    })
+    expect(screen.getByRole('textbox', { name: 'Message Alpha' })).toHaveValue('')
+    expect(screen.getByRole('textbox', { name: 'Message Beta' })).toHaveValue('For Beta')
+    expect(screen.getByRole('textbox', { name: 'Message Beta' })).toHaveFocus()
   })
 
   it('shows an active-turn submission immediately in the queue shelf', () => {

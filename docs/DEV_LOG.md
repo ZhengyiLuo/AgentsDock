@@ -1,5 +1,38 @@
 # Public development log
 
+## 2026-10-29 - User-authorized mailbox tasks and editable drafts
+
+- Existing authorized chat pairs now carry the originating user's exact task
+  without requiring another `@` mention. Shared, idle-wake and busy-mail guidance
+  tells the receiving agent to perform work covered by that instruction without
+  requesting the same authorization again. Peer-written bodies, quoted wrappers,
+  reply links and internal wakes remain distinct from user instructions.
+- Native steering records the incoming user's text without generated attachment
+  scaffolding. Goal steering suspends earlier task attestation at the actual
+  transport write, binds the correction after a valid acknowledgement and keeps
+  the existing provider owner, routes and tools. Previously accepted messages
+  retain their original source instruction on exact retries. Empty or oversized
+  ordinary tasks still deliver peer mail without truncated authorization.
+- Inbox messages have an **Edit and send** action. It loads the complete message
+  into the matching chat's composer, preserves existing drafts and attachments,
+  and requires normal Send after review. The original received message and its
+  agent-read state are unchanged. Late responses cannot populate another pane,
+  chat or server. English and Simplified Chinese are included.
+- Validation uses source-built Electron 0.2.0/build 86 in an isolated native
+  offscreen profile, production IPC/authenticated HTTP and a disposable full
+  server with real Codex. Repeated no-mention delegation produced the requested
+  files without asking for authorization again. A quoted authorization lookalike
+  did not authorize an additional file. Native app clicks appended full mail,
+  preserved an existing draft across chat navigation, and sent user-edited text
+  through normal Send to a real provider response. Light/dark and narrow English/
+  Chinese presentation were inspected. The 214 focused server tests and 273
+  desktop regressions pass, along with TypeScript and production compilation.
+- Component/transport regressions cover unread/read messages, attachments,
+  stale responses, forged provenance, size boundaries and retry identity. Those
+  edge cases are not all repeated in the native UI; Claude-provider acceptance
+  is not claimed. Changes are source-only and need a matching app/server update;
+  no public release or production server restart was performed.
+
 ## 2026-10-28 - Cursor compound tool IDs and live analytics acceptance
 
 - Cursor CLI 2026.10.22 emits compound tool correlation IDs containing an LF

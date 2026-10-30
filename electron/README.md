@@ -134,6 +134,14 @@ format and remaining acceptance checks.
 
 <a id="opencode-optional-beta-backend"></a>
 
+## Chat inbox instructions
+
+Expand a sender's inbox group and choose **Edit and send** on a read or unread
+message to place its complete text in that chat's composer. Existing draft text
+and attachments stay in place. Review or change the text, then use the normal
+Send button to issue it as your own instruction. The received message and its
+original sender metadata remain preserved.
+
 ## OpenCode
 
 OpenCode is available in desktop stable 1.0.9 with AgentsServer 1.0.9 and appears
