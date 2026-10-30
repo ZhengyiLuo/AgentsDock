@@ -361,5 +361,9 @@
   "completed": "已完成",
   "Edit job": "编辑任务",
   "Dismiss pinned item": "关闭置顶项",
-  "This file is not in the loaded media page yet.": "已加载的媒体页面中暂时没有此文件。"
+  "This file is not in the loaded media page yet.": "已加载的媒体页面中暂时没有此文件。",
+  "Reply to": "回复",
+  "Reconnect to a server with chat inbox support to manage these messages.": "重新连接支持会话收件箱的服务器后，即可管理这些消息。",
+  "Edited by you": "由你编辑",
+  "This server cannot deliver one or more selected actions or target chats.": "此服务器无法向一个或多个所选操作或目标会话发送消息。"
 }

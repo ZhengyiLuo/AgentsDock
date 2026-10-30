@@ -26,7 +26,7 @@ const mocks = {
   './MediaGrid': `export const MediaGrid='MediaGrid'`,
   './CrossChatTimelineCards': `export const ChatReferenceChips='ChatReferenceChips',CrossChatExchangeCard='CrossChatExchangeCard',CrossChatHandoffCard='CrossChatHandoffCard',CrossChatMessageCard='CrossChatMessageCard'`,
   './ImportedCrossChatDeliveryCard': `export const ImportedCrossChatDeliveryCard='ImportedCrossChatDeliveryCard'`,
-  './ChatInboxGroup': `export const ChatInboxGroup='ChatInboxGroup'`,
+  './ChatInboxGroupCard': `export const ChatInboxGroupCard='ChatInboxGroupCard'`,
   './TeamMessageTimelineCard': `export const TeamMessageTimelineCard='TeamMessageTimelineCard',TeamReferenceChips='TeamReferenceChips'`,
 }
 const outfile = path.resolve('build/tmp', `reasoning-trace-rendering-${process.pid}.mjs`)

@@ -3,6 +3,7 @@ import { mkdir, unlink } from 'node:fs/promises'
 import { createRequire, isBuiltin } from 'node:module'
 import path from 'node:path'
 import { after, test } from 'node:test'
+import { createHash } from 'node:crypto'
 import { pathToFileURL } from 'node:url'
 import React from 'react'
 import TestRenderer, { act } from 'react-test-renderer'
@@ -14,12 +15,12 @@ const listeners = new Set()
 const calls = []
 const client = { validationRevision: 1 }
 const fixture = {
-  state: null, theme: 'dark', client, links: [],
+  state: null, theme: 'dark', appearance: 'system', client, links: [],
   subscribe(listener) { listeners.add(listener); return () => listeners.delete(listener) },
 }
 globalThis.__asyncChatMessageFixture = fixture
 const mocks = {
-  './store/useAppearanceStore': `export const useAppearanceStore = selector => selector({ preference: 'system' });`,
+  './store/useAppearanceStore': `export const useAppearanceStore = selector => selector({ preference: globalThis.__asyncChatMessageFixture.appearance });`,
   'react-native': `import { createElement } from 'react';
     export const View='View', Text='Text', ActivityIndicator='ActivityIndicator', ScrollView='ScrollView', Image='Image', TouchableWithoutFeedback='TouchableWithoutFeedback';
     export const Pressable = props => createElement('Pressable', props, typeof props.children === 'function' ? props.children({ pressed: false }) : props.children);
@@ -30,7 +31,7 @@ const mocks = {
     export const useColorScheme = () => globalThis.__asyncChatMessageFixture.theme;
     export const AccessibilityInfo = { announceForAccessibility() {} };`,
   '@shopify/flash-list': `import { useEffect, useState } from 'react'; export function useRecyclingState(initial, deps) { const [value, setValue] = useState(initial); useEffect(() => setValue(initial), deps); return [value, setValue]; }`,
-  'lucide-react-native': `export const AlertTriangle='AlertTriangle', Check='Check', ChevronDown='ChevronDown', ChevronRight='ChevronRight', Clock3='Clock3', Code2='Code2', Copy='Copy', History='History', Pin='Pin', Siren='Siren', Sparkles='Sparkles', Wrench='Wrench', MessageSquareShare='MessageSquareShare', X='X';`,
+  'lucide-react-native': `export const AlertTriangle='AlertTriangle', Check='Check', ChevronDown='ChevronDown', ChevronRight='ChevronRight', Clock3='Clock3', Code2='Code2', Copy='Copy', History='History', Pin='Pin', Siren='Siren', Sparkles='Sparkles', Wrench='Wrench', MessageSquareShare='MessageSquareShare', Trash2='Trash2', X='X';`,
   'react-native-svg': `export default 'Svg'; export const SvgXml='SvgXml', Defs='Defs', LinearGradient='LinearGradient', Rect='Rect', Stop='Stop';`,
   '@bsky.app/react-native-uitextview': `export const UITextView='SelectableText';`,
   'react-native-fit-image': `export default 'FitImage';`,
@@ -78,7 +79,7 @@ const handoff = (patch = {}) => ({
   created_at: '2026-09-10T10:00:00Z', updated_at: '2026-09-10T10:00:00Z', ...patch,
 })
 function reset() {
-  calls.length = 0; fixture.links.length = 0; fixture.theme = 'dark'; client.validationRevision = 1
+  calls.length = 0; fixture.links.length = 0; fixture.theme = 'dark'; fixture.appearance = 'system'; client.validationRevision = 1
   fixture.state = {
     activeProfileId: 'profile-a', profileGeneration: 1, selectedSessionId: 'recipient',
     connected: true, connecting: false, health: { ok: true, server_instance_id: 'instance-a' },
@@ -121,7 +122,7 @@ for (const theme of ['dark', 'light']) for (const width of [320, 834]) test(`${t
   try {
     assert.match(visible(renderer), /Research agent/)
     assert.doesNotMatch(visible(renderer), /Renamed agent|Agent conversation|Reply expected|End conversation|Source request|Provider authority/)
-    assert.equal(renderer.root.findAllByType('Pressable').length, 0, 'A complete short message has no exchange or routing actions')
+    assert.deepEqual(renderer.root.findAllByType('Pressable').map(node => node.props.testID), ['cross-chat-peer-sender'], 'Only the authenticated sender header navigates; no exchange/reply controls')
     const surface = flatten(byID(renderer, 'cross-chat-async-message-message-a-surface')[0].props.style)
     assert.equal(surface.alignSelf, 'flex-end')
     assert.equal(surface.width, width > 720 ? '82%' : '94%')
@@ -309,7 +310,7 @@ test('message body and sender labels cannot create chat routes or reply controls
     assert.match(visible(renderer), /@Different chat/)
     assert.match(visible(renderer), /@Research agent/)
     assert.equal(renderer.root.findAll(node => node.type === 'SelectableText' && node.props.onPress).length, 0)
-    assert.equal(renderer.root.findAllByType('Pressable').length, 0)
+    assert.deepEqual(renderer.root.findAllByType('Pressable').map(node => node.props.testID), ['cross-chat-peer-sender'], 'Untrusted body/label cannot create extra routes')
     assert.deepEqual(calls, [])
   } finally { await act(async () => renderer.unmount()) }
 })
@@ -357,7 +358,6 @@ for (const status of ['running', 'delivered']) test(`legacy cancel shows returne
   client.cancelCrossChatHandoff = async () => handoff({ status })
   const renderer = await render(legacyEvent({ session_id: 'sender' }))
   try {
-    await pressID(renderer, 'cross-chat-handoff-message-a')
     await pressID(renderer, 'cross-chat-cancel-handoff-message-a')
     assert.match(visible(renderer), /cancellation was not confirmed/)
     assert.ok(visible(renderer).toLowerCase().includes(status))
@@ -370,7 +370,7 @@ test('legacy handoff detail rejects changed participants before rendering their 
   reset(); client.crossChatHandoff = async () => handoff({ source_session_id: 'unexpected-peer', body: 'Wrong participant body' })
   const renderer = await render(legacyEvent({ handoff_body_truncated: true }))
   try {
-    await pressID(renderer, 'cross-chat-handoff-message-a')
+    await pressID(renderer, 'cross-chat-handoff-message-a-toggle')
     assert.match(visible(renderer), /different handoff participants/)
     assert.doesNotMatch(visible(renderer), /Wrong participant body/)
   } finally { await act(async () => renderer.unmount()) }
@@ -381,7 +381,6 @@ test('legacy cancellation rejects changed participant identities', async () => {
   client.cancelCrossChatHandoff = async () => handoff({ target_session_id: 'unexpected-peer', status: 'cancelled' })
   const renderer = await render(legacyEvent({ session_id: 'sender' }))
   try {
-    await pressID(renderer, 'cross-chat-handoff-message-a')
     await pressID(renderer, 'cross-chat-cancel-handoff-message-a')
     assert.match(visible(renderer), /different handoff participants/)
     assert.doesNotMatch(visible(renderer), /· Cancelled ·/)
@@ -395,7 +394,6 @@ test('a late legacy cancel receipt cannot overwrite a newer delivered lifecycle 
   const initial = legacyEvent({ session_id: 'sender' })
   const renderer = await render(initial)
   try {
-    await pressID(renderer, 'cross-chat-handoff-message-a')
     await pressID(renderer, 'cross-chat-cancel-handoff-message-a')
     const delivered = { ...initial, id: 'event-b', seq: 2, type: 'cross_chat_handoff_delivered', handoff_status: 'delivered' }
     await act(async () => renderer.update(React.createElement(TimelineRowView, props(row([initial, delivered])))))
@@ -410,10 +408,278 @@ test('a confirmed legacy cancellation updates the card and removes its cancel ac
   client.cancelCrossChatHandoff = async () => handoff({ status: 'cancelled' })
   const renderer = await render(legacyEvent({ session_id: 'sender' }))
   try {
-    await pressID(renderer, 'cross-chat-handoff-message-a')
     await pressID(renderer, 'cross-chat-cancel-handoff-message-a')
     assert.match(visible(renderer), /Cancelled/)
     assert.doesNotMatch(visible(renderer), /not confirmed/)
     assert.equal(byID(renderer, 'cross-chat-cancel-handoff-message-a').length, 0)
+  } finally { await act(async () => renderer.unmount()) }
+})
+
+for (const appearance of ['dark', 'light']) test(`both async directions use the selected ${appearance} app appearance, independently of iOS`, async () => {
+  reset(); fixture.appearance = appearance; fixture.theme = appearance === 'dark' ? 'light' : 'dark'
+  const renderer = await render(event())
+  try {
+    const expected = appearance === 'dark' ? { fill: '#332444', border: '#685080' } : { fill: '#eee5fb', border: '#bca5dc' }
+    for (const sessionId of ['recipient', 'sender']) {
+      await act(async () => renderer.update(React.createElement(TimelineRowView, props(row(event({ session_id: sessionId }))))))
+      const surface = flatten(byID(renderer, 'cross-chat-async-message-message-a-surface')[0].props.style)
+      assert.equal(surface.backgroundColor, expected.fill)
+      assert.equal(surface.borderColor, expected.border)
+      assert.equal(surface.alignSelf, sessionId === 'recipient' ? 'flex-end' : 'flex-start')
+    }
+    assert.deepEqual(calls, [])
+  } finally { await act(async () => renderer.unmount()) }
+})
+
+test('legacy one-shot deliveries use the same compact purple surface and show their body immediately', async () => {
+  reset()
+  const renderer = await render(legacyEvent())
+  try {
+    assert.equal(content(renderer), event().handoff_preview)
+    const surface = flatten(byID(renderer, 'cross-chat-handoff-message-a-surface')[0].props.style)
+    assert.equal(surface.backgroundColor, '#332444')
+    assert.equal(surface.borderColor, '#685080')
+    assert.equal(surface.alignSelf, 'flex-end')
+    assert.equal(renderer.root.findAllByType('LinearGradient').length, 0)
+    assert.doesNotMatch(visible(renderer), /Agent conversation|Incoming ·/)
+    assert.deepEqual(calls, [])
+  } finally { await act(async () => renderer.unmount()) }
+})
+
+test('a trusted peer header navigates by exact participant identity, never its display title', async () => {
+  reset()
+  fixture.state.selectSession = async (...args) => { calls.push(['select', ...args]) }
+  const renderer = await render(event({ source_title: '@Different display title' }))
+  try {
+    const peer = byID(renderer, 'cross-chat-peer-sender')[0]
+    assert.ok(peer)
+    assert.ok(flatten(peer.props.style({ pressed: false })).minHeight >= 44)
+    await act(async () => peer.props.onPress())
+    assert.deepEqual(calls, [['select', 'sender', 1]])
+    await act(async () => publish({ selectedSessionId: 'different-chat' }))
+    await act(async () => peer.props.onPress())
+    assert.equal(calls.length, 1, 'A stale timeline cannot navigate after chat selection changes')
+  } finally { await act(async () => renderer.unmount()) }
+})
+
+test('sent inline @ routes retain exact text and navigation while sharing the purple mention treatment', async () => {
+  reset()
+  const reference = { session_id: 'sender', display_title_snapshot: 'Research agent', source_text_start: 4, source_text_end: 19, action: 'route', grant_intent: true }
+  let renderer
+  await act(async () => {
+    renderer = TestRenderer.create(React.createElement(MarkdownContent, {
+      value: 'Ask @Research agent to review.', inlineChatReferences: [reference], sourceSessionId: 'recipient',
+      onChatReferencePress: selected => calls.push(['reference', selected.session_id]),
+    }))
+  })
+  try {
+    const marker = renderer.root.findAll(node => node.type === 'SelectableText' && node.props.accessibilityLabel === 'Open Research agent')[0]
+    assert.ok(marker)
+    assert.equal(marker.children.join(''), '@Research agent')
+    assert.equal(flatten(marker.props.style).backgroundColor, '#292344')
+    assert.equal(flatten(marker.props.style).color, '#d8cffc')
+    await act(async () => marker.props.onPress())
+    assert.deepEqual(calls, [['reference', 'sender']])
+  } finally { await act(async () => renderer.unmount()) }
+})
+
+const digest = value => createHash('sha256').update(value).digest('hex')
+const mailboxEvent = patch => event({ type: 'chat_conversation_message_received', delivery_mode: 'mailbox', inbox_state: 'unread', handoff_status: 'stored', message_revision: 0, received_at: '2026-10-30T18:00:00Z', ...patch })
+const inboxMessage = patch => ({ message_id: 'message-a', source_session_id: 'sender', source_title: 'Research agent', target_session_id: 'recipient', conversation_id: 'pair-a', conversation_mode: 'async_route_v1', delivery_mode: 'mailbox', state: 'unread', message_revision: 0, body: 'Full received mailbox body.', body_chars: 27, body_sha256: digest('Full received mailbox body.'), created_at: '2026-10-30T18:00:00Z', received_at: '2026-10-30T18:00:00Z', read_at: null, reply_to_message_id: null, ...patch })
+const inboxGroupToggle = renderer => byID(renderer, 'cross-chat-inbox-message-a-toggle')[0]
+function resetInbox() {
+  reset()
+  fixture.state.health.capabilities = { cross_chat_handoffs_v1: { available: true, features: { chat_mailbox_v1: true } } }
+  client.chatInbox = async (...args) => { calls.push(['inbox', ...args]); return { session_id: 'recipient', messages: [inboxMessage()], senders: [], has_more: false, next_cursor: null } }
+  client.deleteChatInboxMessage = async (...args) => { calls.push(['delete', ...args]); return { ok: true, session_id: 'recipient', message_id: args[1], state: 'deleted' } }
+}
+
+test('outgoing unread mailbox cancellation is exact, receipt-confirmed and single-flight', async () => {
+  resetInbox(); publish({ selectedSessionId: 'sender' })
+  const pending = deferred()
+  client.cancelCrossChatHandoff = async id => { calls.push(['cancel', id]); return pending.promise }
+  const renderer = await render(mailboxEvent({ session_id: 'sender', type: 'chat_conversation_message_registered' }))
+  try {
+    const cancel = byID(renderer, 'cross-chat-async-message-message-a-cancel')[0]
+    assert.ok(flatten(cancel.props.style({ pressed: false })).minHeight >= 44)
+    await act(async () => { cancel.props.onPress(); cancel.props.onPress() })
+    assert.deepEqual(calls, [['cancel', 'message-a']])
+    assert.equal(byID(renderer, 'cross-chat-async-message-message-a-cancel')[0].props.disabled, true)
+    await act(async () => pending.resolve(handoff({ status: 'cancelled', delivery_mode: 'mailbox' })))
+    assert.equal(byID(renderer, 'cross-chat-async-message-message-a-cancel').length, 0)
+    assert.match(visible(renderer), /Cancelled/)
+  } finally { await act(async () => renderer.unmount()) }
+})
+
+test('outgoing mailbox cancellation rejects a wrong receipt and permits a truthful retry', async () => {
+  resetInbox(); publish({ selectedSessionId: 'sender' })
+  client.cancelCrossChatHandoff = async () => handoff({ status: 'cancelled', target_session_id: 'other' })
+  const renderer = await render(mailboxEvent({ session_id: 'sender', type: 'chat_conversation_message_registered' }))
+  try {
+    await pressID(renderer, 'cross-chat-async-message-message-a-cancel')
+    assert.equal(byID(renderer, 'cross-chat-async-message-message-a-cancel')[0].props.disabled, false)
+    assert.match(visible(renderer), /did not confirm cancellation/)
+    assert.doesNotMatch(visible(renderer), /Cancelled/)
+  } finally { await act(async () => renderer.unmount()) }
+})
+
+test('passive received mail is a purple group before provider execution; disclosure is one bounded read and never marks mail read', async () => {
+  resetInbox()
+  const renderer = await render(mailboxEvent())
+  try {
+    const surface = flatten(byID(renderer, 'cross-chat-inbox-message-a-surface')[0].props.style)
+    assert.equal(surface.backgroundColor, '#332444')
+    assert.equal(surface.alignSelf, 'flex-end')
+    assert.match(visible(renderer), /1 unread/)
+    assert.deepEqual(calls, [])
+    await act(async () => inboxGroupToggle(renderer).props.onPress())
+    assert.deepEqual(calls, [['inbox', 'recipient', null, 25]])
+    assert.equal(byID(renderer, 'cross-chat-async-message-message-a').length, 1)
+    assert.equal(content(renderer), 'Full received mailbox body.')
+    assert.match(visible(renderer), /Unread/)
+    await act(async () => inboxGroupToggle(renderer).props.onPress())
+    await act(async () => inboxGroupToggle(renderer).props.onPress())
+    assert.equal(calls.length, 1)
+    assert.match(visible(renderer), /Unread/)
+  } finally { await act(async () => renderer.unmount()) }
+})
+
+test('mailbox previews never split Unicode at 240 or 800 UTF-16 boundaries', async () => {
+  resetInbox()
+  const body = 'x'.repeat(239) + '😀' + 'y'.repeat(558) + '😀' + 'tail'
+  client.chatInbox = async () => ({ session_id: 'recipient', messages: [], senders: [], has_more: false, next_cursor: null })
+  const renderer = await render(mailboxEvent({ handoff_preview: body, message_body: body, handoff_body_chars: body.length }))
+  try {
+    assert.equal(byID(renderer, 'cross-chat-inbox-message-a-preview')[0].children.join(''), 'x'.repeat(239))
+    await act(async () => inboxGroupToggle(renderer).props.onPress())
+    assert.equal(content(renderer), body.slice(0, 799))
+    assert.ok(content(renderer).isWellFormed())
+    await pressID(renderer, 'cross-chat-async-message-message-a-toggle')
+    assert.equal(content(renderer), body)
+    assert.ok(content(renderer).isWellFormed())
+  } finally { await act(async () => renderer.unmount()) }
+})
+
+test('mailbox read failure preserves the received preview and exposes an explicit retry', async () => {
+  resetInbox(); let attempts = 0
+  client.chatInbox = async () => { if (++attempts === 1) throw new Error('offline'); return { session_id: 'recipient', messages: [inboxMessage()], senders: [], has_more: false, next_cursor: null } }
+  const renderer = await render(mailboxEvent())
+  try {
+    await act(async () => inboxGroupToggle(renderer).props.onPress())
+    assert.equal(content(renderer), event().handoff_preview)
+    assert.match(visible(renderer), /Could not load messages/)
+    await pressID(renderer, 'cross-chat-inbox-message-a-retry')
+    assert.equal(content(renderer), 'Full received mailbox body.')
+    assert.doesNotMatch(visible(renderer), /Could not load messages/)
+    assert.equal(attempts, 2)
+  } finally { await act(async () => renderer.unmount()) }
+})
+
+test('mailbox list body hash mismatch cannot replace authenticated timeline preview', async () => {
+  resetInbox()
+  client.chatInbox = async () => ({ session_id: 'recipient', messages: [inboxMessage({ body: 'MISMATCHED_BODY' })], senders: [], has_more: false, next_cursor: null })
+  const renderer = await render(mailboxEvent())
+  try {
+    await act(async () => inboxGroupToggle(renderer).props.onPress())
+    assert.equal(content(renderer), event().handoff_preview)
+    assert.doesNotMatch(visible(renderer), /MISMATCHED_BODY/)
+    assert.match(visible(renderer), /Could not load messages/)
+  } finally { await act(async () => renderer.unmount()) }
+})
+
+test('a revised mailbox message rejects an older in-flight body while retaining the new preview', async () => {
+  resetInbox(); const pending = deferred()
+  client.chatInbox = async () => pending.promise
+  const original = mailboxEvent()
+  const renderer = await render(original)
+  try {
+    await act(async () => inboxGroupToggle(renderer).props.onPress())
+    const revised = { ...original, id: 'revised', seq: 2, message_revision: 1, message_edited_by_user: true, handoff_preview: 'New recipient text' }
+    await act(async () => renderer.update(React.createElement(TimelineRowView, props(row([original, revised])))))
+    await act(async () => pending.resolve({ session_id: 'recipient', messages: [inboxMessage()], senders: [], has_more: false, next_cursor: null }))
+    assert.equal(content(renderer), 'New recipient text')
+    assert.doesNotMatch(visible(renderer), /Full received mailbox body/)
+  } finally { await act(async () => renderer.unmount()) }
+})
+
+test('mailbox deletion is exact, single-flight, receipt-checked, and never resurrected by an older inbox response', async () => {
+  resetInbox(); const pending = deferred(), olderRead = deferred()
+  client.chatInbox = async () => olderRead.promise
+  client.deleteChatInboxMessage = async (...args) => { calls.push(['delete', ...args]); return pending.promise }
+  const renderer = await render(mailboxEvent())
+  try {
+    await act(async () => inboxGroupToggle(renderer).props.onPress())
+    const remove = byID(renderer, 'cross-chat-async-message-message-a-delete')[0]
+    assert.ok(flatten(remove.props.style({ pressed: false })).minHeight >= 44)
+    await act(async () => { remove.props.onPress(); remove.props.onPress() })
+    assert.equal(calls.filter(call => call[0] === 'delete').length, 1)
+    assert.equal(byID(renderer, 'cross-chat-async-message-message-a').length, 1)
+    await act(async () => pending.resolve({ ok: true, session_id: 'recipient', message_id: 'message-a', state: 'deleted' }))
+    assert.equal(byID(renderer, 'cross-chat-inbox-message-a').length, 0)
+    await act(async () => olderRead.resolve({ session_id: 'recipient', messages: [inboxMessage()], senders: [], has_more: false, next_cursor: null }))
+    assert.equal(byID(renderer, 'cross-chat-inbox-message-a').length, 0, 'A late inbox list cannot resurrect a receipt-confirmed deletion')
+  } finally { await act(async () => renderer.unmount()) }
+})
+
+test('wrong mailbox deletion receipt keeps the message and permits a truthful retry', async () => {
+  resetInbox()
+  client.deleteChatInboxMessage = async () => ({ ok: true, session_id: 'recipient', message_id: 'different', state: 'deleted' })
+  const renderer = await render(mailboxEvent())
+  try {
+    await act(async () => inboxGroupToggle(renderer).props.onPress())
+    await pressID(renderer, 'cross-chat-async-message-message-a-delete')
+    assert.equal(byID(renderer, 'cross-chat-async-message-message-a').length, 1)
+    assert.match(visible(renderer), /Could not delete this message/)
+    assert.equal(byID(renderer, 'cross-chat-async-message-message-a-delete')[0].props.disabled, false)
+  } finally { await act(async () => renderer.unmount()) }
+})
+
+for (const invalid of ['body hash', 'revision', 'participants']) test(`mailbox full detail rejects a mismatched ${invalid} without replacing the preview`, async () => {
+  resetInbox()
+  client.chatInbox = async () => ({ session_id: 'recipient', messages: [], senders: [], has_more: false, next_cursor: null })
+  const body = 'Full authenticated reply.'
+  client.crossChatHandoff = async () => handoff({ delivery_mode: 'mailbox', message_revision: invalid === 'revision' ? 1 : 0, body: invalid === 'body hash' ? 'Wrong body' : body, ...(invalid === 'participants' ? { source_session_id: 'other' } : {}) })
+  const renderer = await render(mailboxEvent({ handoff_body_truncated: true, handoff_body_chars: 1000, handoff_body_sha256: digest(body) }))
+  try {
+    await act(async () => inboxGroupToggle(renderer).props.onPress())
+    await pressID(renderer, 'cross-chat-async-message-message-a-toggle')
+    assert.equal(content(renderer), event().handoff_preview)
+    assert.match(visible(renderer), /Could not load this message/)
+  } finally { await act(async () => renderer.unmount()) }
+})
+
+test('edited mailbox full text checks recipient revision and preserves all Unicode through bounded disclosure', async () => {
+  resetInbox()
+  client.chatInbox = async () => ({ session_id: 'recipient', messages: [], senders: [], has_more: false, next_cursor: null })
+  const body = '😀'.repeat(5000)
+  client.crossChatHandoff = async id => { calls.push(['handoff', id]); return handoff({ delivery_mode: 'mailbox', message_revision: 2, message_edited_by_user: true, target_body: body, body: 'Original sender text' }) }
+  const renderer = await render(mailboxEvent({ message_revision: 2, message_edited_by_user: true, message_body: 'Clipped recipient-effective text', handoff_body_truncated: true, handoff_body_chars: body.length, handoff_body_sha256: digest(body) }))
+  try {
+    await act(async () => inboxGroupToggle(renderer).props.onPress())
+    await pressID(renderer, 'cross-chat-async-message-message-a-toggle')
+    assert.equal(content(renderer), body.slice(0, 4000) + '…')
+    await pressID(renderer, 'cross-chat-async-message-message-a:2-more')
+    assert.equal(content(renderer), body.slice(0, 8000) + '…')
+    await pressID(renderer, 'cross-chat-async-message-message-a:2-more')
+    assert.equal(content(renderer), body)
+    assert.equal(calls.filter(call => call[0] === 'handoff').length, 1)
+    assert.doesNotMatch(visible(renderer), /Original sender text/)
+  } finally { await act(async () => renderer.unmount()) }
+})
+
+for (const transition of ['chat', 'profile', 'validation']) test(`mailbox ${transition} change fences an in-flight read`, async () => {
+  resetInbox(); const pending = deferred()
+  client.chatInbox = async () => pending.promise
+  const renderer = await render(mailboxEvent())
+  try {
+    await act(async () => inboxGroupToggle(renderer).props.onPress())
+    await act(async () => {
+      if (transition === 'chat') publish({ selectedSessionId: 'other' })
+      else if (transition === 'profile') publish({ activeProfileId: 'other', profileGeneration: 2 })
+      else { client.validationRevision++; publish() }
+    })
+    await act(async () => pending.resolve({ session_id: 'recipient', messages: [inboxMessage({ body: 'STALE_PRIVATE_BODY' })], senders: [], has_more: false, next_cursor: null }))
+    assert.doesNotMatch(visible(renderer), /STALE_PRIVATE_BODY/)
+    assert.equal(inboxGroupToggle(renderer).props.accessibilityState.expanded, false)
   } finally { await act(async () => renderer.unmount()) }
 })

@@ -73,6 +73,18 @@ entitlement warning before running; do not mistake that overlay for this bug.
 
 ## Agents and app updates
 
+Local `@` chat references use a compact picker above the composer; keep typing
+in the same input to filter chats. Selected references appear inline in purple.
+Selection alone does not send a message or grant access; Send applies the
+selected reference. Editing a referenced title removes its routing metadata.
+
+Cross-chat messages share purple timeline cards, including older imported
+deliveries. Incoming mailbox messages from the same sender can be expanded or
+collapsed, and authenticated peer headers open the referenced chat. Expanding
+a card is read-only; it does not mark agent mail read or start a provider turn.
+Delete acts only on the selected inbox message. Mailbox management requires a
+server advertising the mailbox capability; older history remains readable.
+
 Mobile exposes OpenCode and Gemini only when the connected server advertises
 their supported contracts. OpenCode free models do not require native account
 credentials. Gemini is Custom API-only and sends the `gemini_acp_v1` client

@@ -9,8 +9,9 @@ import { build } from 'esbuild'
 
 globalThis.IS_REACT_ACT_ENVIRONMENT = true
 const calls = []
-const fixture = { theme: 'dark', copied: '', state: {
+const fixture = { theme: 'dark', appearance: 'system', copied: '', state: {
   activeProfileId: 'profile', profileGeneration: 1, pins: [], sessions: [], snapshots: {},
+  profiles: [], connected: false, health: null,
   selectedSessionId: 'chat', pinMessage: () => calls.push('pin'), removePin: () => calls.push('unpin'),
 } }
 globalThis.__importedDeliveryFixture = fixture
@@ -18,7 +19,7 @@ fixture.client = new Proxy({}, { get: (_, method) => (...args) => {
   calls.push([method, args]); throw new Error(`Unexpected imported-delivery API: ${String(method)}`)
 } })
 const mocks = {
-  './store/useAppearanceStore': `export const useAppearanceStore = selector => selector({ preference: 'system' });`,
+  './store/useAppearanceStore': `export const useAppearanceStore = selector => selector({ preference: globalThis.__importedDeliveryFixture.appearance });`,
   'react-native': `import { createElement } from 'react';
     export const View = 'View', ActivityIndicator = 'ActivityIndicator', ScrollView = 'ScrollView';
     export const Pressable = props => createElement('Pressable', props, typeof props.children === 'function' ? props.children({ pressed: false }) : props.children);
@@ -26,7 +27,7 @@ const mocks = {
     export const useColorScheme = () => globalThis.__importedDeliveryFixture.theme;
     export const AccessibilityInfo = { announceForAccessibility() {} };`,
   '@shopify/flash-list': `import { useEffect, useState } from 'react'; export function useRecyclingState(initial, deps) { const [value, setValue] = useState(initial); useEffect(() => setValue(initial), deps); return [value, setValue]; }`,
-  'lucide-react-native': `export const AlertTriangle='AlertTriangle', Check='Check', ChevronDown='ChevronDown', ChevronRight='ChevronRight', Clock3='Clock3', Code2='Code2', Copy='Copy', History='History', Pin='Pin', Siren='Siren', Sparkles='Sparkles', Wrench='Wrench', MessageSquareShare='MessageSquareShare', X='X';`,
+  'lucide-react-native': `export const AlertTriangle='AlertTriangle', Check='Check', ChevronDown='ChevronDown', ChevronRight='ChevronRight', Clock3='Clock3', Code2='Code2', Copy='Copy', History='History', Pin='Pin', Siren='Siren', Sparkles='Sparkles', Wrench='Wrench', MessageSquareShare='MessageSquareShare', Trash2='Trash2', X='X';`,
   'react-native-svg': `export default 'Svg'; export const Defs='Defs', LinearGradient='LinearGradient', Rect='Rect', Stop='Stop';`,
   'expo-clipboard': `export async function setStringAsync(value) { globalThis.__importedDeliveryFixture.copied = value; }`,
   'expo-haptics': `export const NotificationFeedbackType = { Success: 'success', Error: 'error' }; export async function notificationAsync() {}`,
@@ -38,7 +39,7 @@ const mocks = {
 const outfile = path.resolve('build/tmp', `imported-delivery-tests-${process.pid}.mjs`)
 await mkdir(path.dirname(outfile), { recursive: true })
 await build({
-  stdin: { contents: `export { TimelineRowView } from './src/components/TimelineRows'; export { projectTimeline } from './src/lib/timeline'; export { sanitizeTimelineEvent } from './src/lib/timeline-memory'; export { CROSS_CHAT_CONVERSATION_DARK, CROSS_CHAT_CONVERSATION_LIGHT } from './src/components/CrossChatTimelineCards';`, resolveDir: process.cwd(), loader: 'ts' },
+  stdin: { contents: `export { TimelineRowView } from './src/components/TimelineRows'; export { projectTimeline } from './src/lib/timeline'; export { sanitizeTimelineEvent } from './src/lib/timeline-memory';`, resolveDir: process.cwd(), loader: 'ts' },
   outfile, bundle: true, format: 'esm', platform: 'node', packages: 'external', jsx: 'automatic', logLevel: 'silent',
   plugins: [{ name: 'imported-delivery-native-hosts', setup(context) {
     context.onResolve({ filter: /.*/ }, args => args.path === 'react' ? { path: args.path, external: true }
@@ -47,7 +48,7 @@ await build({
   } }],
 })
 after(async () => { await unlink(outfile); delete globalThis.__importedDeliveryFixture })
-const { TimelineRowView, projectTimeline, sanitizeTimelineEvent, CROSS_CHAT_CONVERSATION_DARK, CROSS_CHAT_CONVERSATION_LIGHT } = await import(pathToFileURL(outfile).href)
+const { TimelineRowView, projectTimeline, sanitizeTimelineEvent } = await import(pathToFileURL(outfile).href)
 
 const body = 'Received; these **native-goal findings** are recorded.\n\n- Fixed rendering\n- Kept `code` and [details](https://example.com)'
 const source = 'Please review the mobile renderer.'
@@ -76,58 +77,49 @@ for (const backend of ['codex', 'claude']) for (const theme of ['dark', 'light']
   const renderer = await render(rows([event({ backend })])[0])
   try {
     assert.equal(byID(renderer, 'imported-cross-chat-delivery-1').length, 1)
-    assert.match(visible(renderer), /Agent conversation/)
+    assert.doesNotMatch(visible(renderer), /Agent conversation|Source request/)
     assert.match(visible(renderer), /AgentsDock Sept/)
     assert.doesNotMatch(visible(renderer), /^You$|\[AgentsDock delivery|\[Source user instruction|provider-authority|\[End delivery\]/m)
-    assert.ok(!visible(renderer).includes(source), 'Source is not mounted until explicitly disclosed')
+    assert.ok(!visible(renderer).includes(source), 'The source instruction scaffold is not shown as message content')
     const markdown = renderer.root.findByType('MarkdownContent')
     assert.equal(markdown.props.value, body)
     assert.equal(markdown.props.compact, true)
     assert.equal(markdown.props.fontScale, 1.4)
-    assert.equal(markdown.props.color, (theme === 'dark' ? CROSS_CHAT_CONVERSATION_DARK : CROSS_CHAT_CONVERSATION_LIGHT).body)
-    assert.equal(renderer.root.findAllByType('LinearGradient').length, 1)
+    assert.equal(markdown.props.color, theme === 'dark' ? '#f2f2f2' : '#202020')
+    assert.equal(renderer.root.findAllByType('LinearGradient').length, 0)
     const buttons = renderer.root.findAllByType('Pressable')
-    assert.equal(buttons.length, 1, 'Historical sender is not a navigation/reply/cancel action')
-    assert.equal(buttons[0].props.accessibilityLabel, 'Show source request')
-    assert.ok(flatten(buttons[0].props.style({ pressed: false })).minHeight >= 44)
+    assert.equal(buttons.length, 0, 'A historical sender label without a trusted ID cannot become navigation/reply/cancel')
     assert.deepEqual(calls, [])
   } finally { await act(async () => renderer.unmount()) }
 })
 
-test('Source request opens and closes and resets when FlashList recycles another delivery', async () => {
+test('source instruction stays hidden when FlashList recycles another delivery', async () => {
   const renderer = await render(rows([event()])[0])
   try {
-    await press(renderer, 'imported-cross-chat-delivery-1-source-toggle')
-    assert.equal(byID(renderer, 'imported-cross-chat-delivery-1-source').length, 1)
-    assert.ok(visible(renderer).includes(source))
-    assert.equal(byID(renderer, 'imported-cross-chat-delivery-1-source-toggle')[0].props.accessibilityState.expanded, true)
-    await press(renderer, 'imported-cross-chat-delivery-1-source-toggle')
+    assert.ok(!visible(renderer).includes(source))
     assert.equal(byID(renderer, 'imported-cross-chat-delivery-1-source').length, 0)
-    await press(renderer, 'imported-cross-chat-delivery-1-source-toggle')
     const next = rows([event({ id: 'delivery-2', prompt: envelope({ request: 'Different private source.' }) })])[0]
     await act(async () => renderer.update(React.createElement(TimelineRowView, props(next))))
     assert.equal(byID(renderer, 'imported-cross-chat-delivery-2-source').length, 0)
     assert.ok(!visible(renderer).includes('Different private source.'))
+    assert.equal(renderer.root.findByType('MarkdownContent').props.value, body)
   } finally { await act(async () => renderer.unmount()) }
 })
 
-test('long body and source have working Show more/less and bounded first render', async () => {
+test('long imported body has bounded working disclosure without source instruction leakage', async () => {
   const message = ('**Long body** and `code`.\n\n').repeat(250)
   const request = 'Long source paragraph.\n\n'.repeat(250)
   const renderer = await render(rows([event({ prompt: envelope({ message, request }) })])[0])
   try {
-    assert.ok(renderer.root.findByType('MarkdownContent').props.value.length < 3500)
+    assert.ok(renderer.root.findByType('MarkdownContent').props.value.length <= 641)
     await press(renderer, 'imported-cross-chat-delivery-1-body-toggle')
+    assert.equal(renderer.root.findByType('MarkdownContent').props.value, message.trim().slice(0, 4000) + '…')
+    await press(renderer, 'imported-cross-chat-delivery-1-body-more')
     assert.equal(renderer.root.findByType('MarkdownContent').props.value, message.trim())
-    assert.equal(byID(renderer, 'imported-cross-chat-delivery-1-body-toggle')[0].props.accessibilityLabel, 'Show less of message')
+    assert.equal(byID(renderer, 'imported-cross-chat-delivery-1-body-toggle')[0].props.accessibilityLabel, 'Show less')
     await press(renderer, 'imported-cross-chat-delivery-1-body-toggle')
-    assert.ok(renderer.root.findByType('MarkdownContent').props.value.length < 3500)
-    await press(renderer, 'imported-cross-chat-delivery-1-source-toggle')
-    await press(renderer, 'imported-cross-chat-delivery-1-source-body-toggle')
-    assert.equal(renderer.root.findAllByType('MarkdownContent')[1].props.value, request.trim())
-    await press(renderer, 'imported-cross-chat-delivery-1-source-toggle')
-    await press(renderer, 'imported-cross-chat-delivery-1-source-toggle')
-    assert.ok(renderer.root.findAllByType('MarkdownContent')[1].props.value.length < 3500)
+    assert.ok(renderer.root.findByType('MarkdownContent').props.value.length <= 641)
+    assert.doesNotMatch(visible(renderer), /Long source paragraph|Source request/)
   } finally { await act(async () => renderer.unmount()) }
 })
 
@@ -182,8 +174,21 @@ test('large imported source survives sanitization/cache hydration without swallo
   try {
     assert.equal(renderer.root.findByType('MarkdownContent').props.value, body)
     assert.doesNotMatch(visible(renderer), /Long user source|AgentsDock delivery/)
-    await press(renderer, 'imported-cross-chat-delivery-1-source-toggle')
-    await press(renderer, 'imported-cross-chat-delivery-1-source-body-toggle')
-    assert.match(renderer.root.findAllByType('MarkdownContent')[1].props.value, /Content truncated on mobile/)
+    assert.equal(byID(renderer, 'imported-cross-chat-delivery-1-source-toggle').length, 0)
   } finally { await act(async () => renderer.unmount()) }
+})
+
+for (const appearance of ['dark', 'light']) test(`imported reply uses compact ${appearance} app-theme message, without the obsolete conversation frame`, async () => {
+  fixture.appearance = appearance; fixture.theme = appearance === 'dark' ? 'light' : 'dark'; calls.length = 0
+  const renderer = await render(rows([event()])[0])
+  try {
+    assert.doesNotMatch(visible(renderer), /Agent conversation|Source request/)
+    assert.equal(renderer.root.findAllByType('LinearGradient').length, 0)
+    const surface = flatten(byID(renderer, 'imported-cross-chat-delivery-1-surface')[0].props.style)
+    assert.equal(surface.backgroundColor, appearance === 'dark' ? '#332444' : '#eee5fb')
+    assert.equal(surface.borderColor, appearance === 'dark' ? '#685080' : '#bca5dc')
+    assert.equal(surface.alignSelf, 'flex-end')
+    assert.equal(renderer.root.findByType('MarkdownContent').props.value, body)
+    assert.deepEqual(calls, [])
+  } finally { fixture.appearance = 'system'; await act(async () => renderer.unmount()) }
 })

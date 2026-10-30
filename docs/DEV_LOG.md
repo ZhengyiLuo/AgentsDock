@@ -1,5 +1,21 @@
 # Public development log
 
+## 2026-10-30 — Prepare mobile cross-chat visual parity
+
+- Replace the full-screen local chat-reference sheet with a bounded inline
+  picker and purple in-place references. Preserve draft text, caret editing,
+  granted-route controls, and server/chat ownership across navigation.
+- Render incoming and outgoing mailbox replies, legacy handoffs and imported
+  deliveries with shared purple surfaces. Keep individual exchange legs in
+  chronological order and group only adjacent same-sender inbox messages.
+- Inbox disclosure is a bounded, read-only request with validated identity,
+  revision and body hash. Deletion requires an explicit action and exact
+  receipt. Sender names and envelope-shaped human text never grant authority.
+- Reproduced the released build's full-screen picker and generic blue incoming
+  mailbox rows through a real provider exchange in an isolated iOS Simulator.
+  Candidate 0.1.3 (195) remains pending packaged native acceptance and upload.
+  This work does not replace the Mac app or deploy a production server.
+
 ## 2026-10-24 — Release mobile reasoning-display parity
 
 - TestFlight 0.1.3 (193), source `8a3f822e6bd83b95a4e4cdb77bb4a5e730cdd9bf`,

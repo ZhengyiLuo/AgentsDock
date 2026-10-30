@@ -345,18 +345,19 @@ test('fast @@ wins over the single-@ picker even when local chat routing is enab
   }finally{await act(async()=>renderer.unmount())}
 })
 
-for(const entry of ['button','second @'])test(`local chat picker switches to servers via ${entry} only after its iOS sheet dismisses`,async()=>{
+for(const entry of ['button','second @'])test(`inline chat picker switches to servers via ${entry} without competing native sheets`,async()=>{
   reset({health:withLocalChats()})
   const renderer=await render()
   try{
     await type(renderer,'@')
     await act(async()=>new Promise(resolve=>setTimeout(resolve,280)))
-    assert.equal(byID(renderer,'chat-target-search').length,1)
-    const dismiss=renderer.root.findByType('Modal').props.onDismiss
+    assert.equal(byID(renderer,'chat-target-palette').length,1)
+    assert.equal(renderer.root.findAllByType('Modal').length,0)
     if(entry==='button')await click(renderer,'chat-target-team-network')
-    else await act(async()=>byID(renderer,'chat-target-search')[0].props.onChangeText('@Mac'))
-    assert.equal(renderer.root.findAllByType('Modal').length,0,'Two native sheets must not compete')
-    await act(async()=>dismiss())
+    else await type(renderer,'@@Mac')
+    await act(async()=>new Promise(resolve=>setTimeout(resolve,10)))
+    assert.equal(byID(renderer,'chat-target-palette').length,0)
+    assert.equal(renderer.root.findAllByType('Modal').length,1,'Only the Team picker owns a native sheet')
     assert.equal(byID(renderer,'team-target-search').length,1)
     assert.ok(recipient(renderer))
     await act(async()=>recipient(renderer).props.onPress())
@@ -383,6 +384,69 @@ test('Add menu exposes a direct server recipient picker without requiring typed 
 const targetSession=(id='target')=>({id,title:`Chat ${id}`,backend:'codex',folder:'Work',status:'idle'})
 const route=(id='route',target='target')=>({route_id:id,revision:`opaque-${id}-revision`,alias:`Chat ${target}`,target_session_id:target,actions:['instruction','request_reply'],created_at:'2026-09-01T00:00:00Z',updated_at:'2026-09-01T00:00:00Z',target:{title:`Chat ${target}`,folder:'Work',backend:'codex',available:true,unavailable_reason:null}})
 function resetRoutes(patch={}){reset({health:withLocalChats(),sessions:[{id:'chat',title:'Mobile',backend:'codex'},targetSession(),targetSession('new')],agentRoutesBySession:{chat:{routes:[route()],max_routes:2}},...patch})}
+
+test('Add chat reference works after an existing word and preserves the preceding draft', async () => {
+  resetRoutes({drafts:{chat:'hello'}})
+  const renderer = await render()
+  try {
+    await click(renderer, 'chat-attach')
+    const index = fixture.actionSheet.options.options.indexOf('Reference another chat')
+    assert.ok(index >= 0)
+    await act(async () => fixture.actionSheet.callback(index))
+    assert.equal(store.getState().drafts.chat, 'hello @')
+    assert.equal(byID(renderer, 'chat-target-palette').length, 1)
+    await click(renderer, 'chat-target-new')
+    assert.equal(store.getState().drafts.chat, 'hello @Chat new ')
+    assert.equal(store.getState().chatReferencesBySession.chat[0].source_text_start, 6)
+    assert.equal(fixture.sends.length, 0)
+  } finally { await act(async () => renderer.unmount()) }
+})
+
+test('single @ stays in the composer with a bounded inline palette and live local filtering', async () => {
+  resetRoutes()
+  const renderer = await render()
+  try {
+    await type(renderer, '@')
+    assert.equal(byID(renderer, 'chat-target-palette').length, 1)
+    assert.equal(renderer.root.findAllByType('Modal').length, 0)
+    assert.equal(byID(renderer, 'chat-target-search').length, 0, 'Typing stays in the original composer')
+    assert.equal(byID(renderer, 'chat-target-target').length, 1)
+    assert.equal(byID(renderer, 'chat-target-new').length, 1)
+    const readsBeforeFiltering = fixture.routeReads.length
+    await type(renderer, '@new')
+    assert.equal(byID(renderer, 'chat-target-target').length, 0)
+    assert.equal(byID(renderer, 'chat-target-new').length, 1)
+    assert.equal(fixture.routeReads.length, readsBeforeFiltering, 'Filtering must not issue requests per keystroke')
+    await click(renderer, 'chat-target-new')
+    assert.equal(byID(renderer, 'chat-target-palette').length, 0)
+    assert.equal(renderer.root.findAllByType('Modal').length, 0)
+    assert.equal(store.getState().drafts.chat, '@Chat new ')
+    assert.equal(store.getState().chatReferencesBySession.chat.length, 1)
+    const input = byID(renderer, 'chat-composer-input')[0]
+    assert.equal(input.props.value, undefined, 'Native attributed input must not also receive a duplicate plain value')
+    assert.equal(input.findAllByType('Text').map(node => node.children.join('')).join(''), '@Chat new ')
+    assert.equal(input.findAllByType('Text')[0].props.style.backgroundColor, '#292344')
+    assert.equal(byID(renderer, 'composer-chat-references').length, 0, 'Intact inline mentions must not be duplicated in a separate chip rail')
+    assert.deepEqual(fixture.sends, [], 'Selecting a reference must not send anything')
+  } finally { await act(async () => renderer.unmount()) }
+})
+
+test('closing the inline @ palette preserves the draft and moving away retires its search', async () => {
+  resetRoutes()
+  const renderer = await render()
+  try {
+    await type(renderer, 'hello @new')
+    await click(renderer, 'chat-target-picker-close')
+    assert.equal(store.getState().drafts.chat, 'hello @new')
+    assert.equal(byID(renderer, 'chat-target-palette').length, 0)
+    await type(renderer, 'hello @new ')
+    await type(renderer, 'hello @new @')
+    assert.equal(byID(renderer, 'chat-target-palette').length, 1)
+    await act(async () => byID(renderer, 'chat-composer-input')[0].props.onSelectionChange({ nativeEvent: { selection: { start: 0, end: 0 } } }))
+    assert.equal(byID(renderer, 'chat-target-palette').length, 0)
+  } finally { await act(async () => renderer.unmount()) }
+})
+
 async function renderChatPicker(overrides={}){
   let renderer
   const props={visible:true,width:fixture.width,query:'',sourceSessionId:'chat',supportedTargetBackends:['codex','claude'],references:[],requestReplySupported:true,referenceLimitReached:false,onQueryChange(){},onTeamNetwork(){},onSelect(value){fixture.selected=value;return true},onClose(){},onDidDismiss(){},...overrides}

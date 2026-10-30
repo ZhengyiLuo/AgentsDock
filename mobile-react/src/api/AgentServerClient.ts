@@ -24,6 +24,8 @@ import type {
   GeminiRuntimeSnapshot,
   ProviderPendingInteraction,
   ChatReference,
+  ChatInboxPage,
+  ChatInboxDeleteReceipt,
   TeamReference,
   CreateJobInput,
   CreateSessionInput,
@@ -69,6 +71,7 @@ import { normalizeServerURL } from '../lib/format'
 import { createUploadFormData } from '../lib/upload-form'
 import { teamNetworkRequestPath } from '../lib/team-network'
 import { isReasoningSummaryStream, normalizedReasoningStream } from '../lib/reasoning-stream'
+import { parseChatInboxDelete, parseChatInboxPage } from '../lib/chat-inbox'
 
 interface SessionResponse {
   session: Session
@@ -679,6 +682,21 @@ export class AgentServerClient {
     return (await this.get<{ handoff: CrossChatHandoff }>(
       `/api/cross-chat/handoffs/${encodeURIComponent(envelopeId)}`,
     )).handoff
+  }
+  async chatInbox(sessionId: string, cursor: string | null = null, limit = 25): Promise<ChatInboxPage> {
+    if (!Number.isInteger(limit) || limit < 1 || limit > 25 || cursor !== null && !/^\d+$/u.test(cursor)) {
+      throw new Error('Invalid inbox page request.')
+    }
+    const query = new URLSearchParams({ limit: String(limit) })
+    if (cursor !== null) query.set('cursor', cursor)
+    return parseChatInboxPage(await this.get<unknown>(
+      `/api/sessions/${encodeURIComponent(sessionId)}/inbox?${query}`,
+    ), sessionId, limit)
+  }
+  async deleteChatInboxMessage(sessionId: string, messageId: string): Promise<ChatInboxDeleteReceipt> {
+    return parseChatInboxDelete(await this.delete<unknown>(
+      `/api/sessions/${encodeURIComponent(sessionId)}/inbox/${encodeURIComponent(messageId)}`,
+    ), sessionId, messageId)
   }
   agentHandoffRoutes(sessionId: string): Promise<AgentCrossChatRoutesSnapshot> {
     return this.get(`/api/sessions/${encodeURIComponent(sessionId)}/agent-handoff-routes?unlimited_routes=true`)

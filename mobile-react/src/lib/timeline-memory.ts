@@ -126,6 +126,7 @@ function sanitizeEvent(event: Event, reasoningTextLimit: number): Event {
     ? Math.max(receivedCharacters, event.reasoning_text_chars!) : receivedCharacters
   const reasoningTruncated = reasoning && (receivedCharacters > textLimit || event.reasoning_text_truncated === true
     || reportedCharacters > receivedCharacters)
+  const messageBodyClipped = typeof event.message_body === 'string' && event.message_body.length > MESSAGE_FIELD_LIMIT
   const next: Event = {
     ...event,
     // Remove launch-only provider authority while the complete suffix and its
@@ -143,6 +144,12 @@ function sanitizeEvent(event: Event, reasoningTextLimit: number): Event {
     message: truncateText(event.message, MESSAGE_FIELD_LIMIT),
     digest: truncateText(event.digest, MESSAGE_FIELD_LIMIT),
     handoff_preview: truncateText(event.handoff_preview, MESSAGE_FIELD_LIMIT),
+    message_body: truncateText(event.message_body, MESSAGE_FIELD_LIMIT),
+    ...(messageBodyClipped ? {
+      handoff_body_truncated: true,
+      handoff_body_chars: Math.max(event.message_body!.length,
+        Number.isSafeInteger(event.handoff_body_chars) && event.handoff_body_chars! >= 0 ? event.handoff_body_chars! : 0),
+    } : {}),
     source_title: truncateText(event.source_title, TIMELINE_LABEL_LIMIT),
     target_title: truncateText(event.target_title, TIMELINE_LABEL_LIMIT),
     requester_title: truncateText(event.requester_title, TIMELINE_LABEL_LIMIT),

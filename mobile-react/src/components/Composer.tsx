@@ -34,6 +34,7 @@ import {
 } from '../lib/composer-input-size'
 import { trackEvent } from '../lib/analytics'
 import { routeCapacityReached } from '../lib/agent-route-policy'
+import { composerReferenceSegments } from '../lib/composer-reference-segments'
 import { backendLabel, formatBytes, isImage, isVideo } from '../lib/format'
 import { FULLSCREEN_HEADER_GUTTER, FULLSCREEN_HEADER_MIN_HEIGHT, fullscreenModalPadding } from '../lib/fullscreen-modal-layout'
 import { isAsyncQueuedChatMessage, isCrossChatDeliveryQueuedTurn, isUserQueuedTurn, isVisibleQueuedTurn, queuedDeliverySkipIdentity, queuedMoveCrossesDeliveryBarrier, queuedTurnHasEarlierDeliveryBarrier } from '../lib/queue'
@@ -188,7 +189,6 @@ export function Composer({ sessionId, keyboardVisible, onSent, onOpenMcp }: { se
   const referencesRef = useRef<ChatReference[]>(references)
   const teamReferencesRef = useRef<TeamReference[]>(teamReferences)
   const pickerTriggerRef = useRef<ComposerMentionTrigger | null>(pickerTrigger)
-  const mentionOpenTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const pendingTeamPicker = useRef<TeamMentionTrigger | null>(null)
   const selectionRef = useRef<ComposerSelection>({ start: draft.length, end: draft.length })
   const pendingCaretRef = useRef<number | null>(null)
@@ -253,7 +253,9 @@ export function Composer({ sessionId, keyboardVisible, onSent, onOpenMcp }: { se
   const denseToolbar = compactToolbar && (composerWidth === 0 ? width < 352 : isDenseComposerToolbar(composerWidth))
   const viewportLimits = composerViewportLimits(width, height, keyboardVisible)
   const displayedInputHeight = Math.min(composerInputHeight(draft, inputHeight), viewportLimits.inputMaxHeight)
-  const hasAuxiliaryContent = mailCommandSuggested || references.length > 0 || teamReferences.length > 0 || queued.length > 0 || Boolean(queuedRunStatus) || uploads.length > 0 || pending.length > 0 || failed.length > 0
+  const inputSegments = useMemo(() => composerReferenceSegments(draft, references, sessionId), [draft, references, sessionId])
+  const hasInlineReferences = inputSegments.some(segment => segment.reference)
+  const hasAuxiliaryContent = mailCommandSuggested || (references.length > 0 && (!hasInlineReferences || !referencesSupported)) || teamReferences.length > 0 || queued.length > 0 || Boolean(queuedRunStatus) || uploads.length > 0 || pending.length > 0 || failed.length > 0
   const validationRevision = client.validationRevision
   useEffect(() => {
     if (welcome || networkDisabled || !routeHintsSupported) return
@@ -283,9 +285,6 @@ export function Composer({ sessionId, keyboardVisible, onSent, onOpenMcp }: { se
     pendingTeamPicker.current = null
     restoreInputAfterPickerRef.current = false
     dismissedMentionStartRef.current = null
-    if (mentionOpenTimer.current) clearTimeout(mentionOpenTimer.current)
-    mentionOpenTimer.current = null
-    return () => { if (mentionOpenTimer.current) clearTimeout(mentionOpenTimer.current) }
   }, [activeProfileId, profileGeneration, sessionId])
   useEffect(() => setInputHeight(COMPOSER_INPUT_MIN_HEIGHT), [activeProfileId, profileGeneration, sessionId])
   useEffect(() => {
@@ -325,21 +324,22 @@ export function Composer({ sessionId, keyboardVisible, onSent, onOpenMcp }: { se
   }, [activeProfileId, profileGeneration, sessionId, setTeamReferencesForSession])
 
   const discoverMention = useCallback((trigger: ComposerMentionTrigger | null) => {
-    if (mentionOpenTimer.current) clearTimeout(mentionOpenTimer.current)
-    mentionOpenTimer.current = null
-    if (!trigger) { dismissedMentionStartRef.current = null; return }
-    if (pickerTriggerRef.current || dismissedMentionStartRef.current === trigger.start) return
-    if (trigger.kind !== '@@' && !crossChatSupported) return
-    const show = () => {
-      mentionOpenTimer.current = null
-      if (!remoteComposerScopeIsCurrent(activeProfileId, profileGeneration, sessionId) || pickerTriggerRef.current) return
-      setPickerQuery(trigger.query)
-      pickerTriggerRef.current = trigger
-      setPickerTrigger(trigger)
+    // The local palette never takes focus away from this editor. Its query and
+    // range follow the native caret, including a slowly typed second @.
+    if (pickerTriggerRef.current?.kind === '@@') return
+    if (!trigger) {
+      dismissedMentionStartRef.current = null
+      pickerTriggerRef.current = null
+      setPickerTrigger(null)
+      setPickerQuery('')
+      return
     }
-    // Native @ opens a sheet; leave a brief window for the second @ first.
-    if (trigger.kind === '@') mentionOpenTimer.current = setTimeout(show, 250)
-    else show()
+    if (dismissedMentionStartRef.current === trigger.start) return
+    if (trigger.kind !== '@@' && !crossChatSupported) return
+    if (!remoteComposerScopeIsCurrent(activeProfileId, profileGeneration, sessionId)) return
+    setPickerQuery(trigger.query)
+    pickerTriggerRef.current = trigger
+    setPickerTrigger(trigger)
   }, [activeProfileId, profileGeneration, sessionId, crossChatSupported])
 
   const updateComposerDraft = useCallback((text: string) => {
@@ -399,8 +399,10 @@ export function Composer({ sessionId, keyboardVisible, onSent, onOpenMcp }: { se
     pickerTriggerRef.current = null
     setPickerTrigger(null)
     setPickerQuery('')
-    requestAnimationFrame(dismissAppKeyboard)
-    if (Platform.OS !== 'ios') requestAnimationFrame(finishTargetPickerDismissal)
+    if (currentTrigger.kind === '@@') {
+      requestAnimationFrame(dismissAppKeyboard)
+      if (Platform.OS !== 'ios') requestAnimationFrame(finishTargetPickerDismissal)
+    } else requestAnimationFrame(finishTargetPickerDismissal)
   }, [finishTargetPickerDismissal])
 
   const openTeamFromChatPicker = useCallback((query = '') => {
@@ -416,18 +418,27 @@ export function Composer({ sessionId, keyboardVisible, onSent, onOpenMcp }: { se
       return
     }
     const selection = selectionRef.current
-    const nextTrigger = trigger ?? {
-      kind: '@' as const,
-      start: Math.min(selection.start, selection.end),
-      end: Math.max(selection.start, selection.end),
-      query: '',
+    if (!trigger) {
+      const start = Math.min(selection.start, selection.end)
+      const end = Math.max(selection.start, selection.end)
+      const prefix = draftRef.current.slice(0, start)
+      const mention = !prefix || /\s|[([{]/u.test(prefix.slice(-1)) ? '@' : ' @'
+      const text = prefix + mention + draftRef.current.slice(end)
+      dismissedMentionStartRef.current = null
+      updateComposerDraft(text)
+      requestAnimationFrame(() => {
+        if (!composerScopeIsCurrent(activeProfileId, profileGeneration, sessionId)) return
+        inputRef.current?.focus()
+        const caret = start + mention.length
+        inputRef.current?.setNativeProps({ selection: { start: caret, end: caret } })
+      })
+      return
     }
     dismissedMentionStartRef.current = null
-    if (mentionOpenTimer.current) clearTimeout(mentionOpenTimer.current)
-    setPickerQuery(nextTrigger.query)
-    pickerTriggerRef.current = nextTrigger
-    setPickerTrigger(nextTrigger)
-  }, [crossChatSupported])
+    setPickerQuery(trigger.query)
+    pickerTriggerRef.current = trigger
+    setPickerTrigger(trigger)
+  }, [activeProfileId, crossChatSupported, profileGeneration, sessionId, updateComposerDraft])
 
   const chooseTarget = useCallback((target: Session): boolean => {
     const currentTrigger = pickerTriggerRef.current
@@ -469,8 +480,7 @@ export function Composer({ sessionId, keyboardVisible, onSent, onOpenMcp }: { se
     storeTeamReferences(reconcileTeamReferences(currentDraft, inserted.text, teamReferencesRef.current))
     setPickerTrigger(null)
     setPickerQuery('')
-    requestAnimationFrame(dismissAppKeyboard)
-    if (Platform.OS !== 'ios') requestAnimationFrame(finishTargetPickerDismissal)
+    requestAnimationFrame(finishTargetPickerDismissal)
     return true
   }, [activeProfileId, backend, crossChatSupported, finishTargetPickerDismissal, health, profileGeneration, sessionId, setSessionDraft, storeReferences, storeTeamReferences])
 
@@ -850,6 +860,20 @@ export function Composer({ sessionId, keyboardVisible, onSent, onOpenMcp }: { se
 
   return (
     <View testID="chat-composer" style={[styles.shell, { backgroundColor: colors.background }]}>
+      <ChatTargetPicker
+        visible={!welcome && pickerTrigger != null && pickerTrigger.kind !== '@@'}
+        width={width}
+        maxHeight={height < 500 ? 96 : Math.min(280, Math.floor(height * 0.28))}
+        query={pickerQuery}
+        sourceSessionId={sessionId}
+        supportedTargetBackends={supportedTargetBackends}
+        references={references}
+        requestReplySupported={requestReplySupportedForSource}
+        referenceLimitReached={references.length >= MAX_CHAT_REFERENCES}
+        onTeamNetwork={() => openTeamFromChatPicker()}
+        onSelect={chooseTarget}
+        onClose={closeTargetPicker}
+      />
       {!welcome && backend === 'codex' ? <CodexGoalBar keyboardVisible={keyboardVisible} /> : null}
       {hasAuxiliaryContent && viewportLimits.auxiliaryMaxHeight > 0 ? <ScrollView
         testID="composer-auxiliary-scroll"
@@ -873,7 +897,7 @@ export function Composer({ sessionId, keyboardVisible, onSent, onOpenMcp }: { se
             <Text style={[styles.commandSuggestionSyntax, { color: colors.muted }]}>{TEAM_MAIL_COMMAND_SYNTAX}</Text>
           </View>
         </Pressable> : null}
-        {references.length ? <ChatReferenceShelf
+        {references.length && !hasInlineReferences ? <ChatReferenceShelf
           references={references}
           referenceSupported={referenceSupported}
           onChangeAction={changeReferenceAction}
@@ -881,6 +905,7 @@ export function Composer({ sessionId, keyboardVisible, onSent, onOpenMcp }: { se
           warning={!referencesSupported ? 'This server cannot deliver one or more selected actions or target chats.' : null}
           testID="composer-chat-references"
         /> : null}
+        {hasInlineReferences && !referencesSupported ? <Text accessibilityRole="alert" style={{ color: colors.red }} localize>This server cannot deliver one or more selected actions or target chats.</Text> : null}
         {teamReferences.length ? <View testID="composer-team-references" accessibilityLabel="Team Network recipients" style={styles.referenceShelfWrap}>
           {teamReferences.map(reference => <View key={`${reference.team_id}:${reference.target_id}`} style={[styles.referenceShelf, { borderColor: colors.border }]}>
             <Mail size={16} color={colors.blue} /><Text style={{ flex: 1, color: colors.text }} localize>@@{reference.display_name_snapshot} · Server inbox</Text>
@@ -914,7 +939,7 @@ export function Composer({ sessionId, keyboardVisible, onSent, onOpenMcp }: { se
           ref={inputRef}
           testID="chat-composer-input"
           accessibilityLabel="Message"
-          value={draft}
+          value={hasInlineReferences ? undefined : draft}
           onChangeText={updateComposerDraft}
           onSelectionChange={handleSelectionChange}
           onContentSizeChange={event => setInputHeight(measuredComposerInputHeight(event.nativeEvent.contentSize.height))}
@@ -926,7 +951,7 @@ export function Composer({ sessionId, keyboardVisible, onSent, onOpenMcp }: { se
           scrollEnabled
           autoCorrect
           style={[styles.input, { color: colors.text, height: displayedInputHeight, maxHeight: viewportLimits.inputMaxHeight }]}
-        />
+        >{hasInlineReferences ? inputSegments.map(segment => <Text key={segment.key} style={segment.reference ? { color: colors.chatReferenceText, backgroundColor: colors.chatReferenceSurface } : undefined}>{segment.text}</Text>) : undefined}</TextInput>
         <View style={[styles.toolbar, compactToolbar && styles.toolbarCompact, denseToolbar && styles.toolbarDense]}>
           {!welcome ? <IconButton icon={Paperclip} disabled={attachmentDisabled} onPress={chooseAttachment} label="Add files, photos, videos, or another chat" testID="chat-attach" /> : null}
           {runtimeControl}
@@ -975,21 +1000,6 @@ export function Composer({ sessionId, keyboardVisible, onSent, onOpenMcp }: { se
           </SwipeDismissImage>
         </View> : null}
       </Modal>
-      <ChatTargetPicker
-        visible={!welcome && pickerTrigger != null && pickerTrigger.kind !== '@@'}
-        width={width}
-        query={pickerQuery}
-        sourceSessionId={sessionId}
-        supportedTargetBackends={supportedTargetBackends}
-        references={references}
-        requestReplySupported={requestReplySupportedForSource}
-        referenceLimitReached={references.length >= MAX_CHAT_REFERENCES}
-        onQueryChange={query => { if (query.startsWith('@')) openTeamFromChatPicker(query.replace(/^@+/u, '')); else setPickerQuery(query) }}
-        onTeamNetwork={() => openTeamFromChatPicker()}
-        onSelect={chooseTarget}
-        onClose={closeTargetPicker}
-        onDidDismiss={finishTargetPickerDismissal}
-      />
       <TeamTargetPicker
         visible={!welcome && pickerTrigger?.kind === '@@'}
         width={width}
@@ -1026,10 +1036,12 @@ function ChatReferenceShelf({ references, referenceSupported, onChangeAction, on
         const supported = referenceSupported(reference)
         return <View
           key={`${reference.session_id}:${reference.source_text_start}:${reference.source_text_end}`}
-          style={[styles.referenceChip, { backgroundColor: supported ? `${colors.blue}14` : `${colors.red}14`, borderColor: supported ? `${colors.blue}66` : colors.red }]}
+          style={[styles.referenceChip, { backgroundColor: supported ? colors.chatReferenceSurface : `${colors.red}14`, borderColor: supported ? colors.chatReferenceBorder : colors.red }]}
         >
-          <MessageSquareShare size={14} color={supported ? colors.blue : colors.red} />
-          <Pressable
+          <MessageSquareShare size={14} color={supported ? colors.chatReferenceText : colors.red} />
+          {reference.action === 'route' ? <View style={styles.referenceAction}>
+            <Text style={[styles.referenceTitle, { color: supported ? colors.chatReferenceText : colors.red }]} numberOfLines={1}>@{reference.display_title_snapshot}</Text>
+          </View> : <Pressable
             accessibilityRole="button"
             accessibilityLabel={`Cross-chat action for ${reference.display_title_snapshot}: ${chatReferenceLabel(reference.action)}. Change action`}
             onPress={() => onChangeAction(reference)}
@@ -1038,7 +1050,7 @@ function ChatReferenceShelf({ references, referenceSupported, onChangeAction, on
             <Text style={[styles.referenceTitle, { color: colors.text }]} numberOfLines={1} localize>@{reference.display_title_snapshot}</Text>
             <Text style={[styles.referenceLabel, { color: supported ? colors.blue : colors.red }]} numberOfLines={1} localize>· {chatReferenceLabel(reference.action)}</Text>
             <ChevronDown size={13} color={supported ? colors.blue : colors.red} />
-          </Pressable>
+          </Pressable>}
           {onRemove ? <IconButton icon={X} size={13} touchSize={44} onPress={() => onRemove(reference)} label={`Remove reference to ${reference.display_title_snapshot}`} /> : null}
         </View>
       })}
@@ -1047,24 +1059,22 @@ function ChatReferenceShelf({ references, referenceSupported, onChangeAction, on
   </View>
 }
 
-export function ChatTargetPicker({ visible, width, query, sourceSessionId, supportedTargetBackends, references, requestReplySupported, referenceLimitReached, onQueryChange, onTeamNetwork, onSelect, onClose, onDidDismiss }: {
+export function ChatTargetPicker({ visible, width, maxHeight = 280, query, sourceSessionId, supportedTargetBackends, references, requestReplySupported, referenceLimitReached, onTeamNetwork, onSelect, onClose }: {
   visible: boolean
   width: number
+  maxHeight?: number
   query: string
   sourceSessionId: string
   supportedTargetBackends: readonly Session['backend'][]
   references: readonly ChatReference[]
   requestReplySupported: boolean
   referenceLimitReached: boolean
-  onQueryChange: (query: string) => void
   onTeamNetwork: () => void
   onSelect: (target: Session) => boolean
   onClose: () => void
-  onDidDismiss: () => void
 }) {
   const colors = usePalette()
   const tablet = width >= 720
-  const searchInputRef = useRef<TextInput>(null)
   const routeSnapshot = useAppStore(state => visible ? state.agentRoutesBySession?.[sourceSessionId] : undefined)
   const routes = routeSnapshot?.routes ?? EMPTY_ROUTES
   const loading = useAppStore(state => visible && (state.agentRouteLoadingSessionIds?.has(sourceSessionId) ?? false))
@@ -1116,64 +1126,36 @@ export function ChatTargetPicker({ visible, width, query, sourceSessionId, suppo
     const disabled = busy || !connected || !client.isValidated
     return <Pressable testID={`chat-route-revoke-${route.route_id}`} accessibilityRole="button" accessibilityLabel={`Revoke access to ${route.target.title || route.alias || 'chat'}`} accessibilityState={{ disabled, busy }} disabled={disabled} onPress={() => void revoke(route)} style={({ pressed }) => [styles.routeRevoke, { opacity: disabled || pressed ? 0.5 : 1 }]}>{busy ? <ActivityIndicator size="small" color={colors.red} /> : <Text style={{ color: colors.red, fontSize: 12, fontWeight: '700' }} localize>Revoke</Text>}</Pressable>
   }
-  return <Modal
-    visible={visible}
-    animationType="slide"
-    presentationStyle={Platform.OS === 'ios' ? tablet ? 'formSheet' : 'pageSheet' : 'fullScreen'}
-    allowSwipeDismissal
-    onShow={() => searchInputRef.current?.focus()}
-    onRequestClose={onClose}
-    onDismiss={onDidDismiss}
-  >
-    {visible ? <SafeAreaView edges={Platform.OS === 'ios' ? ['bottom'] : ['top', 'bottom']} onAccessibilityEscape={onClose} style={[styles.targetPickerSafe, { backgroundColor: colors.background }]}>
-      <View style={styles.targetPickerGrabber} />
-      <View style={[styles.targetPickerPanel, tablet && styles.targetPickerPanelTablet]}>
+  if (!visible) return null
+  return <View testID="chat-target-palette" accessibilityLabel="Chats" onAccessibilityEscape={onClose} style={[styles.targetPickerPanel, { maxHeight, backgroundColor: colors.surface, borderColor: colors.border }]}>
         <View style={[styles.targetPickerHeader, { borderColor: colors.border }]}>
           <View style={styles.targetPickerHeading}>
-            <Text style={[styles.targetPickerTitle, { color: colors.text }]} localize>Reference another chat</Text>
-            <Text style={[styles.targetPickerSubtitle, { color: colors.muted }]} localize>Choose a chat. New access is granted when you send.</Text>
+            <Text style={[styles.targetPickerTitle, { color: colors.text }]} localize>Chats</Text>
           </View>
-          <SheetCloseButton onPress={onClose} label="Close chat picker" testID="chat-target-picker-close" />
+          <IconButton icon={X} size={16} touchSize={44} onPress={onClose} label="Close chat picker" testID="chat-target-picker-close" />
         </View>
-        <View style={[styles.targetSearch, { backgroundColor: colors.surface, borderColor: colors.border }]}>
-          <Search size={17} color={colors.muted} />
-          <TextInput
-            ref={searchInputRef}
-            testID="chat-target-search"
-            accessibilityLabel="Search target chats"
-            value={query}
-            onChangeText={onQueryChange}
-            returnKeyType="search"
-            submitBehavior="blurAndSubmit"
-            onSubmitEditing={dismissAppKeyboard}
-            clearButtonMode="while-editing"
-            placeholder="Search chats"
-            placeholderTextColor={colors.muted}
-            style={[styles.targetSearchInput, { color: colors.text }]}
-          />
-        </View>
-        {referenceLimitReached ? <View accessibilityRole="alert" testID="chat-target-reference-limit" style={[styles.referenceWarning, styles.targetLimitWarning]}><AlertCircle size={14} color={colors.red} /><Text style={[styles.referenceWarningText, { color: colors.red }]} localize>Maximum {MAX_CHAT_REFERENCES} chat references reached. Remove one before adding another.</Text></View> : null}
-        {loading ? <View testID="chat-routes-loading" style={styles.routeNotice}><ActivityIndicator size="small" color={colors.blue} /><Text style={{ color: colors.muted }} localize>Refreshing granted access…</Text></View> : null}
-        {error ? <View testID="chat-routes-error" accessibilityRole="alert" style={styles.routeNotice}><Text style={{ color: colors.red, flex: 1 }}>{error}</Text><Pressable testID="chat-routes-retry" accessibilityRole="button" accessibilityLabel="Retry loading granted chat access" disabled={!connected || loading} onPress={() => { if (remoteComposerScopeIsCurrent(profileId, generation, sourceSessionId)) void useAppStore.getState().refreshAgentRoutes(sourceSessionId, generation) }} style={styles.routeRevoke}><Text style={{ color: colors.blue }} localize>Retry</Text></Pressable></View> : null}
-        <Pressable testID="chat-target-team-network" accessibilityRole="button" accessibilityLabel="Reference a server inbox with @@" onPress={onTeamNetwork} style={[styles.targetRow, { marginHorizontal: 16, backgroundColor: colors.surface, borderColor: colors.border }]}><Mail size={20} color={colors.blue} /><Text style={{ color: colors.blue }} localize>Servers (@@) · Team Network inbox</Text></Pressable>
         <FlatList
           testID="chat-target-list"
+          style={{ flexGrow: 0, flexShrink: 1, maxHeight: Math.max(44, maxHeight - 44) }}
           data={targets}
           keyExtractor={target => target.id}
           keyboardShouldPersistTaps="always"
-          keyboardDismissMode="on-drag"
-          onScrollBeginDrag={dismissAppKeyboard}
+          keyboardDismissMode="none"
           contentContainerStyle={[styles.targetList, !targets.length && styles.targetListEmpty]}
           ListEmptyComponent={<View style={styles.targetEmpty}><MessageSquareShare size={28} color={colors.muted} /><Text style={[styles.targetEmptyTitle, { color: colors.text }]} localize>No matching chats</Text><Text style={[styles.targetEmptyBody, { color: colors.muted }]} localize>Try another title, folder, backend, or chat ID.</Text></View>}
           ListFooterComponent={<View style={{ gap: 8 }}>
+            {referenceLimitReached ? <View accessibilityRole="alert" testID="chat-target-reference-limit" style={styles.referenceWarning}><AlertCircle size={14} color={colors.red} /><Text style={[styles.referenceWarningText, { color: colors.red }]} localize>Maximum {MAX_CHAT_REFERENCES} chat references reached. Remove one before adding another.</Text></View> : null}
+            {loading ? <View testID="chat-routes-loading" style={styles.routeNotice}><ActivityIndicator size="small" color={colors.chatReferenceText} /><Text style={{ color: colors.muted }} localize>Refreshing granted access…</Text></View> : null}
+            {error ? <View testID="chat-routes-error" accessibilityRole="alert" style={styles.routeNotice}><Text style={{ color: colors.red, flex: 1 }}>{error}</Text><Pressable testID="chat-routes-retry" accessibilityRole="button" accessibilityLabel="Retry loading granted chat access" disabled={!connected || loading} onPress={() => { if (remoteComposerScopeIsCurrent(profileId, generation, sourceSessionId)) void useAppStore.getState().refreshAgentRoutes(sourceSessionId, generation) }} style={styles.routeRevoke}><Text style={{ color: colors.blue }} localize>Retry</Text></Pressable></View> : null}
             {detachedGrants.map(route => <View key={route.route_id} testID={`chat-detached-route-${route.route_id}`} style={[styles.targetRow, { borderColor: colors.border, backgroundColor: colors.surface }]}><View style={styles.targetIdentity}><Text style={[styles.targetTitle, { color: colors.text }]}>{route.target.title || route.alias || 'Unavailable chat'}</Text><Text style={[styles.targetMeta, { color: colors.muted }]} localize>Granted · {routeActionLabel(route)} · {route.target.available ? 'Available' : 'Target unavailable'}</Text></View>{routeRevokeButton(route)}</View>)}
             {routeSnapshot && routeCapacityReached(routes, routeSnapshot.max_routes, references) ? <Text testID="chat-route-capacity" style={{ color: colors.orange, fontSize: 12 }} localize>Route access limit reached. Granted chats remain available; revoke one to grant another.</Text> : null}
             {routes.length ? <Text style={{ color: colors.muted, fontSize: 12 }} localize>Revoke removes this chat’s granted cross-chat access. Removing a draft reference does not revoke access.</Text> : null}
+            <Pressable testID="chat-target-team-network" accessibilityRole="button" accessibilityLabel="Reference a server inbox with @@" onPress={onTeamNetwork} style={[styles.targetRow, { backgroundColor: colors.surface, borderColor: colors.border }]}><Mail size={16} color={colors.muted} /><Text style={[typography.caption, { color: colors.muted }]} localize>Servers (@@) · Team Network inbox</Text></Pressable>
           </View>}
           renderItem={({ item }) => {
             const count = queuedCount(item.id)
             const status = chatTargetStatus(item, activeSessionIds.has(item.id), count)
-            const meta = [item.folder?.trim(), backendLabel(item.backend), tablet ? item.id.slice(0, 8) : null].filter(Boolean).join(' · ')
+            const meta = [item.folder?.trim() || 'General', status !== 'Idle' ? status : null].filter(Boolean).join(' · ')
             const grant = grantByTarget.get(item.id)
             const capacityReached = Boolean(routeSnapshot && routeCapacityReached(routes, routeSnapshot.max_routes, references, item.id))
             const disabled = referenceLimitReached || capacityReached || !connected || !client.isValidated || Boolean(grant && revoking.has(`${sourceSessionId}:${grant.route_id}`))
@@ -1190,14 +1172,13 @@ export function ChatTargetPicker({ visible, width, query, sourceSessionId, suppo
               }}
               style={({ pressed }) => [styles.targetRow, styles.routeTarget, tablet && styles.targetRowTablet, { backgroundColor: pressed ? colors.raised : colors.surface, opacity: disabled ? 0.45 : 1 }]}
             >
-              <View style={[styles.targetBackend, { backgroundColor: colors.raised }]}><BackendMark backend={item.backend} size={22} /></View>
-              <View style={styles.targetIdentity}><Text style={[styles.targetTitle, { color: colors.text }]} numberOfLines={1}>{item.title || item.id}</Text><Text style={[styles.targetMeta, { color: colors.muted }]}>{grant ? `Granted · ${routeActionLabel(grant)}` : `Will grant when sent · ${requestReplySupported ? 'Send + Ask' : 'Send'}`}</Text><Text style={[styles.targetMeta, { color: colors.muted }]} numberOfLines={1} localize>{meta} · {status}</Text></View>
+              <BackendMark backend={item.backend} size={18} />
+              <View style={styles.targetIdentity}><Text style={[styles.targetTitle, { color: colors.text }]} numberOfLines={1}>{item.title || item.id}</Text><Text style={[styles.targetMeta, { color: colors.muted }]} numberOfLines={2}>{grant ? `Granted · ${routeActionLabel(grant)}` : `Will grant when sent · ${requestReplySupported ? 'Send + Ask' : 'Send'}`} · {meta}</Text></View>
+              <Text style={[typography.caption, { color: colors.muted }]}>{item.id.slice(-8)}</Text>
             </Pressable>{grant ? routeRevokeButton(grant) : null}</View>
           }}
         />
-      </View>
-    </SafeAreaView> : null}
-  </Modal>
+  </View>
 }
 
 function availableChatReferenceActions(actions: readonly ChatReferenceAction[], requestReplySupportedForSource: boolean): ChatReferenceAction[] {
@@ -1664,20 +1645,14 @@ const styles = StyleSheet.create({
   stop: { width: COMPOSER_TOOLBAR_TOUCH_SIZE, height: COMPOSER_TOOLBAR_TOUCH_SIZE, flexShrink: 0, borderRadius: radius.md, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 5 }, stopWide: { width: 76 }, compactStopFace: { width: COMPOSER_STOP_FACE_SIZE, height: COMPOSER_STOP_FACE_SIZE, borderWidth: StyleSheet.hairlineWidth, borderRadius: radius.md, alignItems: 'center', justifyContent: 'center' }, stopLabel: { color: 'white', fontSize: 11, fontWeight: '800' }, send: { width: COMPOSER_TOOLBAR_TOUCH_SIZE, height: COMPOSER_TOOLBAR_TOUCH_SIZE, flexShrink: 0, alignItems: 'center', justifyContent: 'center' }, sendFace: { width: COMPOSER_SEND_FACE_SIZE, height: COMPOSER_SEND_FACE_SIZE, borderRadius: COMPOSER_SEND_FACE_SIZE / 2, alignItems: 'center', justifyContent: 'center' }, steer: { minHeight: COMPOSER_TOOLBAR_TOUCH_SIZE, flexShrink: 0, paddingHorizontal: 8, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 3 }, steerCompact: { width: COMPOSER_TOOLBAR_TOUCH_SIZE, paddingHorizontal: 0 },
   uploadRail: { flexGrow: 0, minHeight: 64, maxHeight: 64 }, uploads: { flexDirection: 'row', gap: 7, paddingRight: 2 }, upload: { width: 216, height: 64, flexShrink: 0, borderWidth: StyleSheet.hairlineWidth, borderRadius: radius.md, paddingLeft: 7, flexDirection: 'row', alignItems: 'center' }, uploadIdentity: { minWidth: 0, flex: 1, height: 62, flexDirection: 'row', alignItems: 'center', gap: 8 }, fileIconWell: { width: 48, height: 48, minWidth: 48, flexShrink: 0, borderRadius: radius.md, overflow: 'hidden', alignItems: 'center', justifyContent: 'center' }, uploadText: { minWidth: 0, flex: 1, gap: 2 }, uploadName: { fontSize: 12, fontWeight: '700' }, uploadMeta: { fontSize: 10.5 }, uploadActionSpacer: { width: 44, height: 44, flexShrink: 0 }, uploadBusy: { position: 'absolute', top: 0, right: 0, bottom: 0, left: 0, alignItems: 'center', justifyContent: 'center', backgroundColor: '#00000066' }, uploadError: { position: 'absolute', right: 3, bottom: 3, width: 19, height: 19, borderRadius: radius.round, backgroundColor: '#ffffff', alignItems: 'center', justifyContent: 'center' },
   previewModal: { flex: 1 }, previewHeader: { minHeight: FULLSCREEN_HEADER_MIN_HEIGHT, borderBottomWidth: StyleSheet.hairlineWidth, paddingHorizontal: 12, paddingVertical: FULLSCREEN_HEADER_GUTTER, flexDirection: 'row', alignItems: 'center', gap: 8 }, previewTitle: { minWidth: 0, flex: 1, fontSize: 14, fontWeight: '700' }, previewImage: { flex: 1, margin: 12 },
-  targetPickerSafe: { flex: 1 },
-  targetPickerGrabber: { width: 38, height: 5, marginTop: 8, marginBottom: 3, borderRadius: radius.round, backgroundColor: '#8e8e9380', alignSelf: 'center' },
-  targetPickerPanel: { flex: 1, width: '100%', alignSelf: 'center' }, targetPickerPanelTablet: { maxWidth: 760 },
-  targetPickerHeader: { minHeight: 70, paddingLeft: 16, paddingRight: 10, borderBottomWidth: StyleSheet.hairlineWidth, flexDirection: 'row', alignItems: 'center', gap: 10 },
-  targetPickerHeading: { minWidth: 0, flex: 1, gap: 3 }, targetPickerTitle: { fontSize: 18, fontWeight: '800' }, targetPickerSubtitle: { fontSize: 12.5 },
-  targetSearch: { height: 46, marginHorizontal: 12, marginTop: 12, marginBottom: 8, borderWidth: StyleSheet.hairlineWidth, borderRadius: radius.md, paddingHorizontal: 12, flexDirection: 'row', alignItems: 'center', gap: 8 },
-  targetSearchInput: { minWidth: 0, flex: 1, height: 44, paddingVertical: 0, fontSize: 15 },
-  targetLimitWarning: { minHeight: 40, marginHorizontal: 12, marginBottom: 8, paddingVertical: 6 },
-  targetList: { paddingHorizontal: 12, paddingBottom: 20, gap: 7 }, targetListEmpty: { flexGrow: 1 },
-  targetRow: { minHeight: 66, borderWidth: StyleSheet.hairlineWidth, borderRadius: radius.md, paddingHorizontal: 10, flexDirection: 'row', alignItems: 'center', gap: 9 }, targetRowTablet: { minHeight: 74, paddingHorizontal: 14 },
-  targetBackend: { width: 40, height: 40, flexShrink: 0, borderRadius: radius.md, alignItems: 'center', justifyContent: 'center' },
-  targetIdentity: { minWidth: 0, flex: 1, gap: 3 }, targetTitle: { fontSize: 14, fontWeight: '700' }, targetMeta: { fontSize: 10.5 },
+  targetPickerPanel: { flexShrink: 1, width: '100%', borderWidth: StyleSheet.hairlineWidth, borderRadius: radius.md, overflow: 'hidden' },
+  targetPickerHeader: { height: 44, flexShrink: 0, paddingLeft: spacing.md, borderBottomWidth: StyleSheet.hairlineWidth, flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
+  targetPickerHeading: { minWidth: 0, flex: 1 }, targetPickerTitle: { ...typography.label, fontWeight: '600' },
+  targetList: { padding: spacing.xs, gap: spacing.xs }, targetListEmpty: {},
+  targetRow: { minHeight: 56, borderWidth: 0, borderRadius: radius.sm, paddingHorizontal: spacing.sm, paddingVertical: spacing.xs, flexDirection: 'row', alignItems: 'center', gap: spacing.sm }, targetRowTablet: {},
+  targetIdentity: { minWidth: 0, flex: 1, gap: 2 }, targetTitle: { ...typography.label, fontWeight: '600' }, targetMeta: { ...typography.caption },
   targetStatus: { minHeight: 25, maxWidth: 104, borderRadius: radius.sm, paddingHorizontal: 8, alignItems: 'center', justifyContent: 'center' }, targetStatusText: { fontSize: 10.5, fontWeight: '700' },
-  targetEmpty: { flex: 1, minHeight: 200, alignItems: 'center', justifyContent: 'center', gap: 7, padding: 24 }, targetEmptyTitle: { fontSize: 17, fontWeight: '700' }, targetEmptyBody: { maxWidth: 300, fontSize: 12.5, lineHeight: 18, textAlign: 'center' },
+  targetEmpty: { minHeight: 88, alignItems: 'center', justifyContent: 'center', gap: spacing.xs, padding: spacing.sm }, targetEmptyTitle: { ...typography.label, fontWeight: '600' }, targetEmptyBody: { maxWidth: 300, ...typography.caption, textAlign: 'center' },
   queue: { gap: spacing.sm }, queueLabel: { ...typography.caption, fontWeight: '600', textAlign: 'right' },
   queueStatus: { minHeight: 44, borderWidth: StyleSheet.hairlineWidth, borderRadius: radius.md, paddingLeft: spacing.md, flexDirection: 'row', alignItems: 'center', gap: spacing.sm }, queueStatusText: { ...typography.caption, minWidth: 0, flex: 1, paddingVertical: spacing.sm },
   queueList: { gap: spacing.sm },

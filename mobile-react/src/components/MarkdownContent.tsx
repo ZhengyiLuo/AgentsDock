@@ -121,7 +121,7 @@ export function MarkdownContent({
                 ? `Open ${segment.reference.display_title_snapshot}`
                 : `${segment.text}, route unavailable`}
           onPress={interactive ? () => onChatReferencePress?.(segment.reference!) : undefined}
-          style={!insideLink ? [inlineReferenceStyles.marker, { color: remote ? colors.muted : colors.blue, backgroundColor: `${remote ? colors.muted : colors.blue}1A` }] : undefined}
+          style={!insideLink ? [inlineReferenceStyles.marker, { color: remote ? colors.muted : colors.chatReferenceText, backgroundColor: remote ? `${colors.muted}1A` : colors.chatReferenceSurface }] : undefined}
         >{segment.text}</SelectableText>
       })}</SelectableText>
     },

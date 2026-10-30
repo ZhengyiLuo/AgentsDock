@@ -65,6 +65,8 @@ const timelineRows = fs.readFileSync(path.resolve('src/components/TimelineRows.t
 const serverSearch = fs.readFileSync(path.resolve('src/lib/server-search.ts'), 'utf8')
 const codexPermissionDefaults = fs.readFileSync(path.resolve('src/lib/codex-permissions.ts'), 'utf8')
 const codexPermissionMenu = fs.readFileSync(path.resolve('src/components/CodexPermissionMenu.tsx'), 'utf8')
+const crossChatCards = fs.readFileSync(path.resolve('src/components/CrossChatTimelineCards.tsx'), 'utf8')
+const chatInboxCard = fs.readFileSync(path.resolve('src/components/ChatInboxGroupCard.tsx'), 'utf8')
 
 test('send, steer, and queued run-now controls retain touch-safe targets and durable busy gates', () => {
   assert.match(composer, /testID="chat-stop"/)
@@ -673,6 +675,31 @@ test('timeline uses fixed prepend anchoring and resets recycled disclosure state
   assert.match(timelineRows, /testID=\{`trace-live-update-\$\{event\.id\}`\}/)
   assert.match(timelineRows, /first=\{index === 0\}/)
   assert.doesNotMatch(timelineRows, /testID=\{`trace-live-update-\$\{index\}`\}/)
+})
+
+test('compact cross-chat controls remain touch-safe, single-flight, and scoped to recycled message ownership', () => {
+  assert.match(crossChatCards, /conversationBodyToggle: \{ minWidth: 44, minHeight: 44/)
+  assert.match(crossChatCards, /peerLink: \{ flex: 1, minWidth: 44, minHeight: 44/)
+  assert.match(chatInboxCard, /toggle: \{ minHeight: 44/)
+  assert.match(chatInboxCard, /delete: \{ minWidth: 44, minHeight: 44/)
+  assert.match(chatInboxCard, /accessibilityState=\{\{ expanded: open \}\}/)
+  assert.match(chatInboxCard, /testID=\{`\$\{messageIdentity\}-delete`\} accessibilityRole="button" accessibilityLabel="Delete message"/)
+  assert.match(chatInboxCard, /disabled=\{!available \|\| Boolean\(deleting\)\}/)
+  assert.match(chatInboxCard, /if \(!available \|\| loadingRef\.current\) return/)
+  assert.match(chatInboxCard, /if \(!available \|\| loadingMessageRef\.current\) return/)
+  assert.match(chatInboxCard, /if \(!available \|\| deletingRef\.current \|\| !latestChildren\.current\.some/)
+  assert.match(chatInboxCard, /child\.event\.target_session_id === sessionId/)
+  assert.match(chatInboxCard, /loadingRef\.current = true; setLoading\(true\)/)
+  assert.match(chatInboxCard, /deletingRef\.current = id; setDeleting\(id\)/)
+  assert.match(chatInboxCard, /return \(\) => \{ generation\.current\+\+ \}/)
+  assert.match(chatInboxCard, /\}, \[row\.key, sessionId, workspaceRevision\]\)/)
+  assert.match(chatInboxCard, /setOpen\(false\); setVisibleLimit\(25\); setLoaded\(\{\}\); setDetails\(\{\}\); setExpanded\(new Set\(\)\); setDeleted\(new Set\(\)\)/)
+  assert.match(chatInboxCard, /if \(request !== generation\.current \|\| !timelineWorkspaceScopeCurrent\(scope\)\) return/)
+  assert.match(chatInboxCard, /visible\.slice\(0, visibleLimit\)/)
+  assert.match(chatInboxCard, /label="Show more messages" onPress=\{\(\) => setVisibleLimit\(value => value \+ 25\)\}/)
+  assert.match(chatInboxCard, /label="Retry loading" onPress=\{\(\) => void load\(\)\} disabled=\{!available\}/)
+  assert.match(chatInboxCard, /\{error \? <InlineError message=\{error\} \/> : null\}/)
+  assert.match(crossChatCards, /<View accessibilityRole="alert" style=\{styles\.inlineError\}/)
 })
 
 test('long-chat scrolling bounds native work without weakening anchors or live traces', () => {

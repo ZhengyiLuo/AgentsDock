@@ -73,6 +73,21 @@ test('user bubbles have a distinct green surface in both themes', () => {
   assert.ok(luminance(exports.dark.user) < 0.1)
 })
 
+test('cross-chat messages and route references match the Mac semantic purple roles', () => {
+  assert.equal(exports.dark.crossChatSurface, '#332444')
+  assert.equal(exports.dark.crossChatBorder, '#685080')
+  assert.equal(exports.light.crossChatSurface, '#eee5fb')
+  assert.equal(exports.light.crossChatBorder, '#bca5dc')
+  assert.equal(exports.dark.chatReferenceSurface, '#292344')
+  assert.equal(exports.light.chatReferenceSurface, '#f0ecff')
+  for (const palette of [exports.light, exports.dark]) {
+    for (const [text, surface] of [['text', 'crossChatSurface'], ['muted', 'crossChatSurface'], ['crossChatControl', 'crossChatSurface'], ['chatReferenceText', 'chatReferenceSurface']]) {
+      const a = luminance(palette[text]), b = luminance(palette[surface])
+      assert.ok((Math.max(a, b) + 0.05) / (Math.min(a, b) + 0.05) >= 4.5, `${text} on ${surface} must remain readable`)
+    }
+  }
+})
+
 test('subtle dates remain readable while control outlines differ from separators', () => {
   for (const palette of [exports.light, exports.dark]) {
     for (const surface of ['background', 'surface']) {

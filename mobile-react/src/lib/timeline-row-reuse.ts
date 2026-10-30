@@ -50,10 +50,17 @@ export function sameTimelineRow(left: TimelineRow, right: TimelineRow): boolean 
     // their bodies: previews may be 48k across hundreds of lifecycle cards.
     && left.event === right.event
     && left.crossChatMessage === right.crossChatMessage
+    && left.crossChatLegId === right.crossChatLegId
+    && sameMailboxMessages(left.mailboxMessages, right.mailboxMessages)
     && left.anchorTs === right.anchorTs
     && sameOptionalReferences(left.events, right.events)
     && sameOptionalReferences(left.representedEventIds, right.representedEventIds)
     && sameOptionalReferences(left.representedEventSeqs, right.representedEventSeqs)
+}
+
+function sameMailboxMessages(left?: readonly TimelineRow[], right?: readonly TimelineRow[]): boolean {
+  return left === right || Boolean(left && right && left.length === right.length
+    && left.every((row, index) => sameTimelineRow(row, right[index])))
 }
 
 function sameReferences(left: readonly unknown[], right: readonly unknown[]): boolean {

@@ -687,6 +687,42 @@ export interface TeamReference {
   grant_intent: true
 }
 
+export type ChatInboxState = 'unread' | 'read' | 'cancelled' | 'deleted'
+
+export interface ChatInboxMessage {
+  message_id: string
+  conversation_id: string
+  conversation_mode: 'async_route_v1'
+  delivery_mode: 'mailbox'
+  source_session_id: string
+  source_title: string
+  target_session_id: string
+  state: ChatInboxState
+  created_at: string
+  received_at: string | null
+  read_at: string | null
+  reply_to_message_id: string | null
+  body: string
+  body_chars: number
+  body_sha256: string
+  message_revision: number
+}
+
+export interface ChatInboxPage {
+  session_id: string
+  messages: ChatInboxMessage[]
+  next_cursor: string | null
+  has_more: boolean
+  senders: Array<{ source_session_id: string; source_title: string; unread_count: number }>
+}
+
+export interface ChatInboxDeleteReceipt {
+  ok: true
+  session_id: string
+  message_id: string
+  state: 'deleted'
+}
+
 export interface CrossChatHandoffSummary {
   id: string
   kind: ChatReferenceAction
@@ -695,6 +731,8 @@ export interface CrossChatHandoffSummary {
   target_session_id: string
   action: ChatReferenceAction
   conversation_mode?: 'async_route_v1' | null
+  delivery_mode?: 'mailbox' | null
+  inbox_state?: ChatInboxState | null
   conversation_id?: string | null
   message_id?: string | null
   status: string
@@ -710,6 +748,10 @@ export interface CrossChatHandoff extends CrossChatHandoffSummary {
   body: string
   body_chars: number
   body_sha256: string
+  /** Recipient-effective text; body remains the sender's original message. */
+  target_body?: string | null
+  message_edited_by_user?: boolean | null
+  message_revision?: number | null
 }
 
 export type CrossChatExchangeStatus = 'waiting_request' | 'active' | 'completed' | 'failed' | 'cancelled' | 'expired'
@@ -864,12 +906,20 @@ export interface Event {
   message_id?: string | null
   correlation_id?: string | null
   handoff_status?: string | null
+  delivery_mode?: 'mailbox' | null
+  inbox_state?: ChatInboxState | null
+  received_at?: string | null
+  read_at?: string | null
+  reply_to_message_id?: string | null
   handoff_action?: ChatReferenceAction | null
   source_title?: string | null
   target_title?: string | null
   handoff_preview?: string | null
   handoff_body_chars?: number | null
   handoff_body_sha256?: string | null
+  message_body?: string | null
+  message_edited_by_user?: boolean | null
+  message_revision?: number | null
   handoff_body_truncated?: boolean | null
   handoff_authorization_kind?: 'explicit_prompt' | 'configured_route' | null
   handoff_authorization_route_id?: string | null

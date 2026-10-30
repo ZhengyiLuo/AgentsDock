@@ -21,6 +21,12 @@ export const dark = {
   yellow: '#e2bd38',
   user: '#193629',
   queued: '#3a3214',
+  crossChatSurface: '#332444',
+  crossChatBorder: '#685080',
+  crossChatControl: '#c9b1eb',
+  chatReferenceText: '#d8cffc',
+  chatReferenceSurface: '#292344',
+  chatReferenceBorder: '#574b80',
 } as const
 
 export const light = {
@@ -43,6 +49,12 @@ export const light = {
   yellow: '#8d7200',
   user: '#e4f3e9',
   queued: '#fff6cf',
+  crossChatSurface: '#eee5fb',
+  crossChatBorder: '#bca5dc',
+  crossChatControl: '#664185',
+  chatReferenceText: '#5c4a91',
+  chatReferenceSurface: '#f0ecff',
+  chatReferenceBorder: '#c7bdeb',
 } as const
 
 export type Palette = { [K in keyof typeof dark]: string }
