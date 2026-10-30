@@ -127,7 +127,7 @@ test('large drafts collapse the composer immediately after send', () => {
   assert.match(composerInputSize, /Math\.min\(\s*COMPOSER_INPUT_MAX_HEIGHT/)
   assert.match(composer, /const \[inputHeight, setInputHeight\] = useState\(COMPOSER_INPUT_MIN_HEIGHT\)/)
   assert.match(composer, /onContentSizeChange=\{event => setInputHeight\(measuredComposerInputHeight\(event\.nativeEvent\.contentSize\.height\)\)\}/)
-  assert.match(composer, /const displayedInputHeight = Math\.min\(composerInputHeight\(draft, inputHeight\), viewportLimits\.inputMaxHeight\)/)
+  assert.match(composer, /const displayedInputHeight = localPickerVisible \? pickerLayout\.inputMaxHeight : Math\.min\(composerInputHeight\(draft, inputHeight\), viewportLimits\.inputMaxHeight\)/)
   assert.match(composer, /height: displayedInputHeight, maxHeight: viewportLimits\.inputMaxHeight/)
   assert.match(composer, /useEffect\(\(\) => \{[\s\S]*?if \(!draft\.length\) setInputHeight\(COMPOSER_INPUT_MIN_HEIGHT\)[\s\S]*?\}, \[draft\.length\]\)/)
   assert.match(composer, /if \(!text\.length\) setInputHeight\(COMPOSER_INPUT_MIN_HEIGHT\)/)

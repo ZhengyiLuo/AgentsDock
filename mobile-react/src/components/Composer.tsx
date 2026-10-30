@@ -35,6 +35,7 @@ import {
 import { trackEvent } from '../lib/analytics'
 import { routeCapacityReached } from '../lib/agent-route-policy'
 import { composerReferenceSegments } from '../lib/composer-reference-segments'
+import { composerPickerLayout } from '../lib/composer-picker-layout'
 import { backendLabel, formatBytes, isImage, isVideo } from '../lib/format'
 import { FULLSCREEN_HEADER_GUTTER, FULLSCREEN_HEADER_MIN_HEIGHT, fullscreenModalPadding } from '../lib/fullscreen-modal-layout'
 import { isAsyncQueuedChatMessage, isCrossChatDeliveryQueuedTurn, isUserQueuedTurn, isVisibleQueuedTurn, queuedDeliverySkipIdentity, queuedMoveCrossesDeliveryBarrier, queuedTurnHasEarlierDeliveryBarrier } from '../lib/queue'
@@ -115,7 +116,7 @@ type AttachmentImageSource = { uri: string; headers?: Record<string, string> }
 type ComposerSelection = { start: number; end: number }
 type ComposerMentionTrigger = ChatMentionTrigger | TeamMentionTrigger
 
-export function Composer({ sessionId, keyboardVisible, onSent, onOpenMcp }: { sessionId: string; keyboardVisible: boolean; onSent: () => void; onOpenMcp: () => void }) {
+export function Composer({ sessionId, keyboardVisible, keyboardHeight = 0, onSent, onOpenMcp }: { sessionId: string; keyboardVisible: boolean; keyboardHeight?: number; onSent: () => void; onOpenMcp: () => void }) {
   const welcome = isWelcomeSession(sessionId)
   const colors = usePalette()
   const locale = useLanguageStore(state => state.locale)
@@ -252,7 +253,9 @@ export function Composer({ sessionId, keyboardVisible, onSent, onOpenMcp }: { se
   const compactToolbar = composerWidth === 0 || isCompactComposerToolbar(composerWidth)
   const denseToolbar = compactToolbar && (composerWidth === 0 ? width < 352 : isDenseComposerToolbar(composerWidth))
   const viewportLimits = composerViewportLimits(width, height, keyboardVisible)
-  const displayedInputHeight = Math.min(composerInputHeight(draft, inputHeight), viewportLimits.inputMaxHeight)
+  const localPickerVisible = !welcome && pickerTrigger != null && pickerTrigger.kind !== '@@'
+  const pickerLayout = composerPickerLayout({ width, height, keyboardVisible, keyboardHeight })
+  const displayedInputHeight = localPickerVisible ? pickerLayout.inputMaxHeight : Math.min(composerInputHeight(draft, inputHeight), viewportLimits.inputMaxHeight)
   const inputSegments = useMemo(() => composerReferenceSegments(draft, references, sessionId), [draft, references, sessionId])
   const hasInlineReferences = inputSegments.some(segment => segment.reference)
   const hasAuxiliaryContent = mailCommandSuggested || (references.length > 0 && (!hasInlineReferences || !referencesSupported)) || teamReferences.length > 0 || queued.length > 0 || Boolean(queuedRunStatus) || uploads.length > 0 || pending.length > 0 || failed.length > 0
@@ -858,12 +861,11 @@ export function Composer({ sessionId, keyboardVisible, onSent, onOpenMcp }: { se
     {runtimeTrigger}
   </AgentPicker>
 
-  return (
-    <View testID="chat-composer" style={[styles.shell, { backgroundColor: colors.background }]}>
-      <ChatTargetPicker
+  const localChatPicker = <ChatTargetPicker
         visible={!welcome && pickerTrigger != null && pickerTrigger.kind !== '@@'}
         width={width}
-        maxHeight={height < 500 ? 96 : Math.min(280, Math.floor(height * 0.28))}
+        maxHeight={pickerLayout.maxHeight}
+        compact={pickerLayout.sideBySide}
         query={pickerQuery}
         sourceSessionId={sessionId}
         supportedTargetBackends={supportedTargetBackends}
@@ -874,8 +876,11 @@ export function Composer({ sessionId, keyboardVisible, onSent, onOpenMcp }: { se
         onSelect={chooseTarget}
         onClose={closeTargetPicker}
       />
-      {!welcome && backend === 'codex' ? <CodexGoalBar keyboardVisible={keyboardVisible} /> : null}
-      {hasAuxiliaryContent && viewportLimits.auxiliaryMaxHeight > 0 ? <ScrollView
+  return (
+    <View testID="chat-composer" style={[styles.shell, { backgroundColor: colors.background }]}>
+      {!pickerLayout.sideBySide ? localChatPicker : null}
+      {!welcome && !localPickerVisible && backend === 'codex' ? <CodexGoalBar keyboardVisible={keyboardVisible} /> : null}
+      {!localPickerVisible && hasAuxiliaryContent && viewportLimits.auxiliaryMaxHeight > 0 ? <ScrollView
         testID="composer-auxiliary-scroll"
         style={[styles.auxiliaryScroll, { maxHeight: viewportLimits.auxiliaryMaxHeight }]}
         contentContainerStyle={styles.auxiliaryContent}
@@ -935,6 +940,7 @@ export function Composer({ sessionId, keyboardVisible, onSent, onOpenMcp }: { se
         }}
         style={[styles.composer, { backgroundColor: colors.surface, borderColor: colors.border }]}
       >
+        <View style={styles.editorRow}>
         <TextInput
           ref={inputRef}
           testID="chat-composer-input"
@@ -950,8 +956,10 @@ export function Composer({ sessionId, keyboardVisible, onSent, onOpenMcp }: { se
           textAlignVertical="top"
           scrollEnabled
           autoCorrect
-          style={[styles.input, { color: colors.text, height: displayedInputHeight, maxHeight: viewportLimits.inputMaxHeight }]}
+          style={[styles.input, { flex: 1, color: colors.text, height: displayedInputHeight, maxHeight: viewportLimits.inputMaxHeight }]}
         >{hasInlineReferences ? inputSegments.map(segment => <Text key={segment.key} style={segment.reference ? { color: colors.chatReferenceText, backgroundColor: colors.chatReferenceSurface } : undefined}>{segment.text}</Text>) : undefined}</TextInput>
+        {localPickerVisible && pickerLayout.sideBySide ? <View testID="chat-target-compact-slot" style={styles.compactPickerSlot}>{localChatPicker}</View> : null}
+        </View>
         <View style={[styles.toolbar, compactToolbar && styles.toolbarCompact, denseToolbar && styles.toolbarDense]}>
           {!welcome ? <IconButton icon={Paperclip} disabled={attachmentDisabled} onPress={chooseAttachment} label="Add files, photos, videos, or another chat" testID="chat-attach" /> : null}
           {runtimeControl}
@@ -1059,10 +1067,11 @@ function ChatReferenceShelf({ references, referenceSupported, onChangeAction, on
   </View>
 }
 
-export function ChatTargetPicker({ visible, width, maxHeight = 280, query, sourceSessionId, supportedTargetBackends, references, requestReplySupported, referenceLimitReached, onTeamNetwork, onSelect, onClose }: {
+export function ChatTargetPicker({ visible, width, maxHeight = 280, compact = false, query, sourceSessionId, supportedTargetBackends, references, requestReplySupported, referenceLimitReached, onTeamNetwork, onSelect, onClose }: {
   visible: boolean
   width: number
   maxHeight?: number
+  compact?: boolean
   query: string
   sourceSessionId: string
   supportedTargetBackends: readonly Session['backend'][]
@@ -1127,22 +1136,22 @@ export function ChatTargetPicker({ visible, width, maxHeight = 280, query, sourc
     return <Pressable testID={`chat-route-revoke-${route.route_id}`} accessibilityRole="button" accessibilityLabel={`Revoke access to ${route.target.title || route.alias || 'chat'}`} accessibilityState={{ disabled, busy }} disabled={disabled} onPress={() => void revoke(route)} style={({ pressed }) => [styles.routeRevoke, { opacity: disabled || pressed ? 0.5 : 1 }]}>{busy ? <ActivityIndicator size="small" color={colors.red} /> : <Text style={{ color: colors.red, fontSize: 12, fontWeight: '700' }} localize>Revoke</Text>}</Pressable>
   }
   if (!visible) return null
-  return <View testID="chat-target-palette" accessibilityLabel="Chats" onAccessibilityEscape={onClose} style={[styles.targetPickerPanel, { maxHeight, backgroundColor: colors.surface, borderColor: colors.border }]}>
-        <View style={[styles.targetPickerHeader, { borderColor: colors.border }]}>
+  return <View testID="chat-target-palette" accessibilityLabel="Chats" onAccessibilityEscape={onClose} style={[styles.targetPickerPanel, compact && styles.targetPickerCompact, { maxHeight, backgroundColor: colors.surface, borderColor: colors.border }]}>
+        {!compact ? <View style={[styles.targetPickerHeader, { borderColor: colors.border }]}>
           <View style={styles.targetPickerHeading}>
             <Text style={[styles.targetPickerTitle, { color: colors.text }]} localize>Chats</Text>
           </View>
           <IconButton icon={X} size={16} touchSize={44} onPress={onClose} label="Close chat picker" testID="chat-target-picker-close" />
-        </View>
+        </View> : null}
         <FlatList
           testID="chat-target-list"
-          style={{ flexGrow: 0, flexShrink: 1, maxHeight: Math.max(44, maxHeight - 44) }}
+          style={{ flexGrow: compact ? 1 : 0, flexShrink: 1, flexBasis: compact ? 0 : undefined, maxHeight: Math.max(44, maxHeight - (compact ? 0 : 44)) }}
           data={targets}
           keyExtractor={target => target.id}
           keyboardShouldPersistTaps="always"
           keyboardDismissMode="none"
-          contentContainerStyle={[styles.targetList, !targets.length && styles.targetListEmpty]}
-          ListEmptyComponent={<View style={styles.targetEmpty}><MessageSquareShare size={28} color={colors.muted} /><Text style={[styles.targetEmptyTitle, { color: colors.text }]} localize>No matching chats</Text><Text style={[styles.targetEmptyBody, { color: colors.muted }]} localize>Try another title, folder, backend, or chat ID.</Text></View>}
+          contentContainerStyle={[styles.targetList, compact && styles.targetListCompact, !targets.length && styles.targetListEmpty]}
+          ListEmptyComponent={compact ? <View style={styles.targetEmptyCompact}><Text numberOfLines={2} style={[typography.caption, { color: colors.muted }]} localize>No matching chats</Text></View> : <View style={styles.targetEmpty}><MessageSquareShare size={28} color={colors.muted} /><Text style={[styles.targetEmptyTitle, { color: colors.text }]} localize>No matching chats</Text><Text style={[styles.targetEmptyBody, { color: colors.muted }]} localize>Try another title, folder, backend, or chat ID.</Text></View>}
           ListFooterComponent={<View style={{ gap: 8 }}>
             {referenceLimitReached ? <View accessibilityRole="alert" testID="chat-target-reference-limit" style={styles.referenceWarning}><AlertCircle size={14} color={colors.red} /><Text style={[styles.referenceWarningText, { color: colors.red }]} localize>Maximum {MAX_CHAT_REFERENCES} chat references reached. Remove one before adding another.</Text></View> : null}
             {loading ? <View testID="chat-routes-loading" style={styles.routeNotice}><ActivityIndicator size="small" color={colors.chatReferenceText} /><Text style={{ color: colors.muted }} localize>Refreshing granted access…</Text></View> : null}
@@ -1170,14 +1179,15 @@ export function ChatTargetPicker({ visible, width, maxHeight = 280, query, sourc
                 if (selected.current || disabled || !remoteComposerScopeIsCurrent(profileId, generation, sourceSessionId) || composerActionScopeKey(useAppStore.getState(), sourceSessionId) !== actionScopeKey) return
                 selected.current = onSelect(item)
               }}
-              style={({ pressed }) => [styles.targetRow, styles.routeTarget, tablet && styles.targetRowTablet, { backgroundColor: pressed ? colors.raised : colors.surface, opacity: disabled ? 0.45 : 1 }]}
+              style={({ pressed }) => [styles.targetRow, styles.routeTarget, compact && styles.targetRowCompact, tablet && styles.targetRowTablet, { backgroundColor: pressed ? colors.raised : colors.surface, opacity: disabled ? 0.45 : 1 }]}
             >
               <BackendMark backend={item.backend} size={18} />
-              <View style={styles.targetIdentity}><Text style={[styles.targetTitle, { color: colors.text }]} numberOfLines={1}>{item.title || item.id}</Text><Text style={[styles.targetMeta, { color: colors.muted }]} numberOfLines={2}>{grant ? `Granted · ${routeActionLabel(grant)}` : `Will grant when sent · ${requestReplySupported ? 'Send + Ask' : 'Send'}`} · {meta}</Text></View>
-              <Text style={[typography.caption, { color: colors.muted }]}>{item.id.slice(-8)}</Text>
+              <View style={styles.targetIdentity}><Text style={[styles.targetTitle, { color: colors.text }]} numberOfLines={1}>{item.title || item.id}</Text>{!compact ? <Text style={[styles.targetMeta, { color: colors.muted }]} numberOfLines={2}>{grant ? `Granted · ${routeActionLabel(grant)}` : `Will grant when sent · ${requestReplySupported ? 'Send + Ask' : 'Send'}`} · {meta}</Text> : null}</View>
+              {!compact ? <Text style={[typography.caption, { color: colors.muted }]}>{item.id.slice(-8)}</Text> : null}
             </Pressable>{grant ? routeRevokeButton(grant) : null}</View>
           }}
         />
+        {compact ? <IconButton icon={X} size={14} touchSize={44} onPress={onClose} label="Close chat picker" testID="chat-target-picker-close" /> : null}
   </View>
 }
 
@@ -1624,6 +1634,8 @@ const styles = StyleSheet.create({
   routeTarget: { flex: 1, minWidth: 0, borderWidth: 0 },
   routeRevoke: { minWidth: 64, minHeight: 44, paddingHorizontal: 10, alignItems: 'center', justifyContent: 'center' },
   shell: { padding: COMPOSER_SHELL_PADDING, gap: spacing.sm },
+  editorRow: { flexDirection: 'row', minWidth: 0, alignItems: 'flex-start' },
+  compactPickerSlot: { width: '60%', minWidth: 0, height: COMPOSER_INPUT_MIN_HEIGHT },
   auxiliaryScroll: { flexGrow: 0 }, auxiliaryContent: { gap: spacing.sm },
   commandSuggestion: { minHeight: 54, borderWidth: StyleSheet.hairlineWidth, borderRadius: radius.md, paddingHorizontal: spacing.md, flexDirection: 'row', alignItems: 'center', gap: spacing.sm }, commandSuggestionText: { minWidth: 0, flex: 1, gap: spacing.xs }, commandSuggestionTitle: { ...typography.label, fontWeight: '600' }, commandSuggestionSyntax: { ...typography.caption, fontFamily: 'Menlo' },
   referenceShelfWrap: { minWidth: 0, gap: 3 },
@@ -1646,6 +1658,10 @@ const styles = StyleSheet.create({
   uploadRail: { flexGrow: 0, minHeight: 64, maxHeight: 64 }, uploads: { flexDirection: 'row', gap: 7, paddingRight: 2 }, upload: { width: 216, height: 64, flexShrink: 0, borderWidth: StyleSheet.hairlineWidth, borderRadius: radius.md, paddingLeft: 7, flexDirection: 'row', alignItems: 'center' }, uploadIdentity: { minWidth: 0, flex: 1, height: 62, flexDirection: 'row', alignItems: 'center', gap: 8 }, fileIconWell: { width: 48, height: 48, minWidth: 48, flexShrink: 0, borderRadius: radius.md, overflow: 'hidden', alignItems: 'center', justifyContent: 'center' }, uploadText: { minWidth: 0, flex: 1, gap: 2 }, uploadName: { fontSize: 12, fontWeight: '700' }, uploadMeta: { fontSize: 10.5 }, uploadActionSpacer: { width: 44, height: 44, flexShrink: 0 }, uploadBusy: { position: 'absolute', top: 0, right: 0, bottom: 0, left: 0, alignItems: 'center', justifyContent: 'center', backgroundColor: '#00000066' }, uploadError: { position: 'absolute', right: 3, bottom: 3, width: 19, height: 19, borderRadius: radius.round, backgroundColor: '#ffffff', alignItems: 'center', justifyContent: 'center' },
   previewModal: { flex: 1 }, previewHeader: { minHeight: FULLSCREEN_HEADER_MIN_HEIGHT, borderBottomWidth: StyleSheet.hairlineWidth, paddingHorizontal: 12, paddingVertical: FULLSCREEN_HEADER_GUTTER, flexDirection: 'row', alignItems: 'center', gap: 8 }, previewTitle: { minWidth: 0, flex: 1, fontSize: 14, fontWeight: '700' }, previewImage: { flex: 1, margin: 12 },
   targetPickerPanel: { flexShrink: 1, width: '100%', borderWidth: StyleSheet.hairlineWidth, borderRadius: radius.md, overflow: 'hidden' },
+  targetPickerCompact: { flexDirection: 'row', height: COMPOSER_INPUT_MIN_HEIGHT },
+  targetListCompact: { padding: 0, gap: 0 },
+  targetRowCompact: { minHeight: 44, paddingVertical: 0 },
+  targetEmptyCompact: { minHeight: 44, justifyContent: 'center', paddingHorizontal: spacing.xs },
   targetPickerHeader: { height: 44, flexShrink: 0, paddingLeft: spacing.md, borderBottomWidth: StyleSheet.hairlineWidth, flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
   targetPickerHeading: { minWidth: 0, flex: 1 }, targetPickerTitle: { ...typography.label, fontWeight: '600' },
   targetList: { padding: spacing.xs, gap: spacing.xs }, targetListEmpty: {},

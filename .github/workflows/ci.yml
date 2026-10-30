@@ -154,6 +154,7 @@ jobs:
           node scripts/run-history-tests.mjs src/lib/timeline-cross-chat-legs.test.ts --native-mocks
           node scripts/run-history-tests.mjs src/lib/imported-cross-chat-async.test.ts --native-mocks
           node scripts/run-history-tests.mjs src/lib/composer-reference-segments.test.ts --native-mocks
+          node scripts/run-history-tests.mjs src/lib/composer-picker-layout.test.ts --native-mocks
           node scripts/run-history-tests.mjs src/api/AgentServerClient.chat-inbox.test.ts --native-mocks
           node scripts/run-history-tests.mjs src/store/useAppStore.cross-chat-routes.test.ts --native-mocks
           node scripts/run-history-tests.mjs src/lib/agent-route-capacity.test.ts --native-mocks

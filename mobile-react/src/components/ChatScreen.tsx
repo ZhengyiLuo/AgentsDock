@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useReducer, useState } from 'react'
 import { AppState, Keyboard, Platform, StyleSheet, View } from 'react-native'
-import { KeyboardAvoidingView, KeyboardController, useGenericKeyboardHandler } from 'react-native-keyboard-controller'
+import { KeyboardAvoidingView, KeyboardController, useGenericKeyboardHandler, useKeyboardState } from 'react-native-keyboard-controller'
 import { runOnJS } from 'react-native-reanimated'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { initialIOSKeyboardLifecycle, IOS_KEYBOARD_HIDE_FALLBACK_MS, reduceIOSKeyboardLifecycle } from '../lib/keyboard-lifecycle'
@@ -29,6 +29,7 @@ export function ChatScreen({ sessionId, compact, inlineInspectorAvailable, onBac
   const [nonIOSKeyboardVisible, setNonIOSKeyboardVisible] = useState(() => Platform.OS !== 'ios' && KeyboardController.isVisible())
   const [iosKeyboard, dispatchIOSKeyboard] = useReducer(reduceIOSKeyboardLifecycle, AppState.currentState === 'active', initialIOSKeyboardLifecycle)
   const keyboardVisible = Platform.OS === 'ios' ? iosKeyboard.visible : nonIOSKeyboardVisible
+  const keyboardHeight = useKeyboardState(state => state.height)
   // During interactive iOS dismissal, `visible` clears at willHide while the
   // keyboard-avoidance frame remains active until didHide. Keep the composer
   // in its constrained layout for that full interval so its rails cannot grow
@@ -143,7 +144,7 @@ export function ChatScreen({ sessionId, compact, inlineInspectorAvailable, onBac
                   : keyboardVisible ? 0 : insets.bottom,
               }]}
             >
-              <Composer sessionId={sessionId} keyboardVisible={composerKeyboardConstrained} onSent={() => setScrollRequest(value => value + 1)} onOpenMcp={onOpenMcp} />
+              <Composer sessionId={sessionId} keyboardVisible={composerKeyboardConstrained} keyboardHeight={keyboardHeight} onSent={() => setScrollRequest(value => value + 1)} onOpenMcp={onOpenMcp} />
             </View>
       </KeyboardAvoidingView>
     </View>

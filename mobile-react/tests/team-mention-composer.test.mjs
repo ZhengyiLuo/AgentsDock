@@ -12,7 +12,7 @@ globalThis.IS_REACT_ACT_ENVIRONMENT = true
 globalThis.requestAnimationFrame ??= callback => setTimeout(() => callback(Date.now()), 0)
 globalThis.cancelAnimationFrame ??= clearTimeout
 const store = create(() => ({}))
-const fixture = { store, alerts: [], reads: [], sends: [], routeReads: [], revokes: [], skips: [], width: 390, scheme: 'dark', client: { isValidated: true, validationRevision: 1 } }
+const fixture = { store, alerts: [], reads: [], sends: [], routeReads: [], revokes: [], skips: [], width: 390, height: 844, scheme: 'dark', client: { isValidated: true, validationRevision: 1 } }
 globalThis.__teamComposerFixture = fixture
 const mocks = {
   'react-native': `import { createElement } from 'react'; const fixture=globalThis.__teamComposerFixture;
@@ -22,7 +22,7 @@ const mocks = {
     export const FlatList = ({data=[],renderItem,ListEmptyComponent,ListFooterComponent,...props}) => createElement('FlatList',props,data.length ? data.map((item,index) => createElement('ListItem',{key:item.id||index},renderItem({item,index}))) : typeof ListEmptyComponent === 'function' ? createElement(ListEmptyComponent) : ListEmptyComponent, ListFooterComponent);
     export const StyleSheet={create:value=>value,hairlineWidth:0.5,absoluteFill:{},flatten:value=>Object.assign({},...[value].flat(Infinity).filter(Boolean))};
     export const Platform={OS:'ios',select:choices=>choices.ios??choices.default};
-    export const useColorScheme=()=>fixture.scheme; export const useWindowDimensions=()=>({width:fixture.width,height:844,scale:3,fontScale:1});
+    export const useColorScheme=()=>fixture.scheme; export const useWindowDimensions=()=>({width:fixture.width,height:fixture.height,scale:3,fontScale:1});
     export const Alert={alert:(...args)=>fixture.alerts.push(args)}; export const ActionSheetIOS={showActionSheetWithOptions:(options,callback)=>fixture.actionSheet={options,callback}};`,
   'react-native-safe-area-context': `export const SafeAreaView='SafeAreaView'; export const useSafeAreaInsets=()=>({top:0,bottom:0,left:0,right:0});`,
   'expo-image': `export const Image='Image';`,
@@ -65,7 +65,7 @@ function health() { return { ok: true, server_identity: 'local-server', server_i
 } } }
 function reset(patch = {}) {
   fixture.alerts.length=0; fixture.reads.length=0; fixture.sends.length=0; fixture.client.isValidated=true; fixture.client.validationRevision=1
-  fixture.routeReads.length=0;fixture.revokes.length=0;fixture.skips.length=0;fixture.width=390;fixture.scheme='dark'
+  fixture.routeReads.length=0;fixture.revokes.length=0;fixture.skips.length=0;fixture.width=390;fixture.height=844;fixture.scheme='dark'
   fixture.client.teamNetworkGet = async (base, endpoint) => {
     fixture.reads.push([base,endpoint])
     if (endpoint === '/v1/health') return {hub_id:'hub',capabilities:{team_messages_v1:{available:true,version:1}}}
@@ -428,6 +428,26 @@ test('single @ stays in the composer with a bounded inline palette and live loca
     assert.equal(input.findAllByType('Text')[0].props.style.backgroundColor, '#292344')
     assert.equal(byID(renderer, 'composer-chat-references').length, 0, 'Intact inline mentions must not be duplicated in a separate chip rail')
     assert.deepEqual(fixture.sends, [], 'Selecting a reference must not send anything')
+  } finally { await act(async () => renderer.unmount()) }
+})
+
+for (const [width, height, sideBySide] of [[390, 844, false], [844, 390, true], [320, 568, true]]) test(`inline palette shares the editor budget for long drafts at ${width}x${height}`, async () => {
+  resetRoutes()
+  fixture.width = width; fixture.height = height
+  const renderer = await render()
+  try {
+    await act(async () => byID(renderer, 'chat-composer-input')[0].props.onContentSizeChange({nativeEvent:{contentSize:{height:178}}}))
+    const draft = 'long draft\n'.repeat(8) + '@new'
+    await type(renderer, draft)
+    const input = byID(renderer, 'chat-composer-input')[0]
+    assert.equal(Object.assign({}, ...input.props.style.flat()).height, 46)
+    assert.equal(byID(renderer, 'chat-target-compact-slot').length, sideBySide ? 1 : 0)
+    assert.equal(byID(renderer, 'composer-auxiliary-scroll').length, 0)
+    assert.equal(renderer.root.findAllByType('Modal').length, 0)
+    await click(renderer, 'chat-target-picker-close')
+    assert.equal(store.getState().drafts.chat, draft)
+    assert.equal(byID(renderer, 'chat-target-compact-slot').length, 0)
+    assert.equal(byID(renderer, 'chat-target-palette').length, 0)
   } finally { await act(async () => renderer.unmount()) }
 })
 
