@@ -3,6 +3,8 @@ import { t, getLocale } from '@shared/i18n'
 import { useLocale } from '../lib/i18n'
 import { AlertTriangle, CheckCircle2, CircleHelp, RefreshCw, XCircle } from 'lucide-react'
 import type { Backend, CodexProvider, Event, RuntimeCatalog, RuntimeDiagnostic } from '@shared/types'
+import { isImportedHistoryRecord, isImportedProviderControlMetadata } from '@shared/provider-origin'
+import { isNativeGoalSteerEvent, SEMANTIC_HIDDEN_EVENT_TYPES } from '@shared/semantic-timeline'
 import {
   opencodeBackendAvailable,
   opencodeBackendUnavailableReason,
@@ -209,22 +211,43 @@ function RuntimeStatus({
   </div>
 }
 
+const chatRunEventTypes = new Set([
+  'turn_started', 'turn_finished', 'turn_stopped', 'error',
+  'codex_compaction_started', 'codex_compaction_completed',
+  'codex_review_started', 'codex_review_finished', 'codex_shell_started', 'codex_shell_finished',
+])
+const backgroundEventTypes = new Set<string>(SEMANTIC_HIDDEN_EVENT_TYPES)
+
+function isChatRunEvent(event: Event, backend: Backend): boolean {
+  // A background snapshot's run_id attributes its original parent; it does
+  // not make that parent the latest chat turn. Imported history is likewise
+  // independent of the live turn lifecycle.
+  return (!event.backend || event.backend === backend)
+    && !event.subagent_id && !event.subagent_tool_id
+    && !isImportedHistoryRecord(event) && !isImportedProviderControlMetadata(event)
+    && !backgroundEventTypes.has(event.type)
+}
+
 function latestChatRunError(events: Event[] | undefined, backend: Backend): string {
   if (!events?.length) return ''
   let latestRunId = ''
   for (let index = events.length - 1; index >= 0; index -= 1) {
     const event = events[index]
-    if (event.backend && event.backend !== backend) continue
+    if (!isChatRunEvent(event, backend)) continue
+    if (!chatRunEventTypes.has(event.type) && !isNativeGoalSteerEvent(event)) continue
     if (event.run_id) {
       latestRunId = event.run_id
       break
     }
-    if (isTimelineError(event)) return compactError(event)
+    if (isTimelineError(event)) {
+      const detail = compactError(event)
+      if (detail) return detail
+    }
   }
   if (!latestRunId) return ''
   for (let index = events.length - 1; index >= 0; index -= 1) {
     const event = events[index]
-    if (event.run_id !== latestRunId || (event.backend && event.backend !== backend) || !isTimelineError(event)) continue
+    if (event.run_id !== latestRunId || !isChatRunEvent(event, backend) || !isTimelineError(event)) continue
     const detail = compactError(event)
     if (detail) return detail
   }

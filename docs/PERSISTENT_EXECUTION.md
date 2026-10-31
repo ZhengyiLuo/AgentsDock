@@ -44,6 +44,15 @@ execution owner -- provider subprocesses -- tools / subagents
   including headers the server rejects. It streams HTTP and WebSocket traffic
   with backpressure. Gateway loss disconnects client attachments without
   cancelling accepted execution work or retrying mutations.
+  Once ingress disconnection is observed, its Unix socket is closed even if
+  the accepted application call is still running. Request bodies already
+  received remain available to that application.
+- Both execution-service entrypoints raise a small inherited file-descriptor
+  soft limit toward 8192, bounded by the existing OS hard limit. Higher or
+  unlimited limits are preserved. This also applies to existing service
+  definitions when they next start the updated runtime; failure to increase
+  the limit is logged and does not block startup. No system-wide limit or
+  hard limit is changed.
 - Provider helpers use a loopback listener owned by the execution process, so
   their requests do not depend on the replaceable gateway.
 - `/api/health` retains the actual execution server version and instance. It

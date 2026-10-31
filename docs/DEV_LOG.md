@@ -1,5 +1,48 @@
 # Public development log
 
+## 2026-10-31 - Local review of activation diagnostics and runtime reliability
+
+- Integrate PRs #122, #112 and #111 on the previously accepted #134 preview,
+  retaining their original commits and contributor attribution. The combined
+  review is PR #135, not a published release. The earlier #123 changes are
+  already included in that baseline and were not applied again.
+- Split-service activation failures identify the failed boundary and unsafe
+  recovery-interpreter requirement without relaxing trust checks. Update the
+  existing rollback regression's block extraction; resolve macOS temporary-path
+  aliases in fixtures. Check foreign ownership, symlinks, exact short-circuit
+  order and cold-handoff signal restoration.
+- Retain disconnected-IPC cleanup, bounded descriptor headroom and shared runtime
+  discovery from #112. Reproduce its hosted concurrency-test failure with a
+  small executor. Give the deliberately overlapping synchronous calls an
+  explicit pool and observe their entry through event-loop notifications,
+  replacing timing sleeps. Thirty repeated runs pass with a one-worker default
+  executor. This corrects test scheduling, not production concurrency policy.
+- Verify 204 focused server tests and 193 desktop tests, TypeScript, shell
+  syntax and production compilation. Server checks include real disposable
+  gateway/worker processes, descriptor retirement, recovery controls and
+  cancelled catalog waiters; providers in those fixtures are synthetic.
+- Native macOS Electron against a real disposable source server reproduces
+  #111's stale banner before the fix when an old child update arrives after a
+  successful turn. The fixed build ignores repeated late updates, retains
+  historical errors and displays genuine current errors, including artifacts.
+  Native Codex and Claude sends complete successfully through production IPC
+  and authenticated transport. Settings reload and concurrent catalog requests
+  succeed when one caller disconnects; unrelated drafts are preserved.
+- The late-child failure sequence was injected through the production event
+  writer into disposable chats, not reproduced by inducing a provider fault.
+  Native input used Electron's debugging mouse/keyboard interface; QA analytics
+  were disabled. Full installed-version upgrade/rollback, native Linux/Windows
+  UI, and long-duration resource-load acceptance were not repeated. No release
+  publication or production-service update is included.
+- Additional acceptance: all 5,727 desktop tests (five skipped), eight
+  packaging/license guards, TypeScript and production compilation pass.
+  Correct an older durability regression's script-block extraction and wait
+  for the goal editor's asynchronous hydration in its button assertion; both
+  failures reproduced in hosted CI. The 41 durability/activation tests pass.
+  Native Codex and Claude runs complete concurrently; a busy follow-up appears
+  in the queue and is delivered once. Switching chats and reloading preserves
+  an unsent draft without restoring a stale error banner.
+
 ## 2026-10-31 - Inline workspace-file naming and temporary empty buffers
 
 - New file in the desktop Files explorer opens an Untitled buffer and focuses
@@ -1129,6 +1172,29 @@
 - Availability: local Mac app package. This desktop fix requires no server
   update; nothing was installed, published or deployed.
 
+## 2026-10-22 — Reduce execution-worker descriptor pressure
+
+- Close disconnected gateway sockets without cancelling accepted application
+  work. Retain buffered request bodies and WebSocket disconnect details, and
+  keep closing transports tracked for explicit worker shutdown.
+- Share overlapping runtime catalog refreshes and provider installation probes
+  instead of launching duplicate subprocess pipelines for each client. Preserve
+  explicit refresh, deadline and authentication-generation behavior; one
+  departing caller does not cancel work shared by the remaining callers.
+- Raise low inherited worker/gateway file-descriptor soft limits toward 8192
+  within the existing hard limit, including with older service definitions.
+  Preserve higher limits and continue startup if the OS refuses the increase.
+- Validation: 220 tests passed across transport/gateway integration, real child
+  process descriptor limits, startup/installation, concurrent runtime catalog
+  requests, sign-in handoffs and custom-provider readiness. One native systemd
+  parser case was skipped on macOS. The installer fixtures were run with their
+  expected umask 022; their failure under umask 077 also reproduces on main.
+  Python compilation and diff checks passed. Tests use isolated state and
+  synthetic providers; no live OAuth or production-load acceptance is claimed.
+- These changes address reproduced pressure mechanisms; they do not establish
+  which descriptors caused a previously restarted process to exhaust its limit.
+- Source change only; no user services, installations or credentials changed.
+
 ## 2026-10-21 — Recover held mobile messages after a stopped queue handoff
 
 - Handle bulk Stop events on mobile, clear obsolete promotion flags and retain
@@ -1187,6 +1253,25 @@
   No live service was modified during that initial simulated check.
 - Availability: source only; the complete correction includes app and server
   changes. No release, installation, deployment or restart is included.
+
+## 2026-10-21 — Keep old subagent updates from reviving chat errors
+
+- Select the composer's latest chat error from the parent turn lifecycle.
+  A later subagent status update retains its original run association but
+  cannot make an older failed parent turn current again after a newer reply.
+- Preserve genuine errors for the latest turn, including failures whose start
+  lies outside the loaded history page. Imported history and background
+  bookkeeping do not clear or resurrect a current failure. Historical error
+  messages remain in the timeline.
+- Verification: 48 focused component tests and 139 supporting runtime/history
+  tests pass, along with TypeScript and the production Electron build/entry check.
+  An isolated native Electron run reproduced the old warning on unchanged main
+  and verified the fix through authenticated server reads and websocket updates,
+  navigation, reconnection and full app reopening. A new failure remains visible
+  and the original error remains in history. These runs use synthetic historical
+  events through the production event writer; no live provider request was made.
+- No user installation, live service or goal state was changed.
+- Availability: app source only; this correction needs an updated app.
 
 ## 2026-10-20 — Recover Codex model-switch compaction without replacing history
 
