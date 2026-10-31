@@ -1,5 +1,40 @@
 # Public development log
 
+## 2026-10-31 - Local review of activation diagnostics and runtime reliability
+
+- Integrate PRs #122, #112 and #111 on the previously accepted #134 preview,
+  retaining their original commits and contributor attribution. This remains
+  a local review branch, not a merged release. The earlier #123 changes are
+  already included in that baseline and were not applied again.
+- Split-service activation failures identify the failed boundary and unsafe
+  recovery-interpreter requirement without relaxing trust checks. Update the
+  existing rollback regression's block extraction; resolve macOS temporary-path
+  aliases in fixtures. Check foreign ownership, symlinks, exact short-circuit
+  order and cold-handoff signal restoration.
+- Retain disconnected-IPC cleanup, bounded descriptor headroom and shared runtime
+  discovery from #112. Reproduce its hosted concurrency-test failure with a
+  small executor. Give the deliberately overlapping synchronous calls an
+  explicit pool and observe their entry through event-loop notifications,
+  replacing timing sleeps. Thirty repeated runs pass with a one-worker default
+  executor. This corrects test scheduling, not production concurrency policy.
+- Verify 204 focused server tests and 193 desktop tests, TypeScript, shell
+  syntax and production compilation. Server checks include real disposable
+  gateway/worker processes, descriptor retirement, recovery controls and
+  cancelled catalog waiters; providers in those fixtures are synthetic.
+- Native macOS Electron against a real disposable source server reproduces
+  #111's stale banner before the fix when an old child update arrives after a
+  successful turn. The fixed build ignores repeated late updates, retains
+  historical errors and displays genuine current errors, including artifacts.
+  Native Codex and Claude sends complete successfully through production IPC
+  and authenticated transport. Settings reload and concurrent catalog requests
+  succeed when one caller disconnects; unrelated drafts are preserved.
+- The late-child failure sequence was injected through the production event
+  writer into disposable chats, not reproduced by inducing a provider fault.
+  Native input used Electron's debugging mouse/keyboard interface; QA analytics
+  were disabled. Full installed-version upgrade/rollback, native Linux/Windows
+  UI, and long-duration resource-load acceptance were not repeated. No release
+  publication or production-service update is included.
+
 ## 2026-10-31 - Inline workspace-file naming and temporary empty buffers
 
 - New file in the desktop Files explorer opens an Untitled buffer and focuses
