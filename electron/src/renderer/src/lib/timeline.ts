@@ -305,6 +305,7 @@ export class TimelineProjector {
   private activeTurn: TurnItem | null = null
   private writableKeys = new Set<string>()
   private movedKeys = new Set<string>()
+  private hasImportedChronology = false
 
   constructor(knownFiles: AgentFile[], scope: TimelineProjectionScope = {}) {
     this.filesById = new Map(knownFiles.map(file => [file.id, file]))
@@ -390,9 +391,28 @@ export class TimelineProjector {
     this.itemsValue = [...this.itemsValue]
     this.writableKeys = new Set()
     this.movedKeys = new Set()
-    for (const event of events) this.appendEvent(event)
+    let chronologyChanged = false
+    for (const event of events) {
+      if (importedContentTimestamp(event) !== null) {
+        this.hasImportedChronology = true
+        chronologyChanged = true
+      } else if (this.hasImportedChronology && event.type === 'turn_started') chronologyChanged = true
+      // Transcript catch-up never owns or ends the currently executing turn.
+      // Keep its own run map while temporarily detaching the live fallback.
+      const live = event.run_id?.startsWith('import_') && this.activeTurn
+        && !this.activeTurn.runId?.startsWith('import_') ? this.activeTurn : null
+      if (live) this.activeTurn = null
+      this.appendEvent(event)
+      if (live) this.activeTurn = live
+    }
     if (initialProjection) this.itemsValue.sort((left, right) => left.seq - right.seq)
-    else if (this.movedKeys.size) this.repositionMovedItems()
+    else if (this.movedKeys.size) {
+      if (this.hasImportedChronology) {
+        this.itemsValue.sort((left, right) => left.seq - right.seq)
+        chronologyChanged = true
+      } else this.repositionMovedItems()
+    }
+    if (chronologyChanged) this.itemsValue = interleaveImportedTurns(this.itemsValue)
     this.reindex()
     return true
   }
@@ -693,6 +713,23 @@ export class TimelineProjector {
       return
     }
 
+    const resumedAfterRun = event.provider_admission_after_run_id?.trim()
+    if (resumedAfterRun && event.run_id && resumedAfterRun !== event.run_id && event.imported !== true
+      && (traceTypes.has(event.type) || event.type === 'assistant_text' || event.type === 'turn_finished')) {
+      const prior = this.turnByRun.get(event.run_id)
+      if (prior?.user && (event.backend ?? prior.user.backend) === 'claude' && !prior.assistant.length) {
+        // The human input was persisted before a native wake won admission.
+        // Keep that bubble in place, but start its first actual execution here
+        // so its answer and activity do not jump above the intervening wake.
+        const input = this.writableTurn(prior)
+        input.finishedAt ||= event.ts
+        input.throughSeq = event.seq - 1
+        this.assistantByTurn.delete(input.key)
+        this.activeTurn = this.writableTurn(this.ensureTurn(event, true))
+        this.activeTurn.afterSeq = event.seq - 1
+      }
+    }
+
     if (event.type === 'turn_started') {
       const interruptedRunId = event.steer_interrupted_run_id?.trim()
       if (interruptedRunId) this.retireNativeSteerPredecessor(interruptedRunId, event.ts)
@@ -706,7 +743,7 @@ export class TimelineProjector {
       const prior = event.run_id ? this.turnByRun.get(event.run_id) : this.activeTurn
       const followsSilentInput = event.run_id ? this.silentInputRuns.delete(event.run_id) : false
       this.activeTurn = this.writableTurn(this.ensureTurn(event, Boolean(prior?.user) || followsSilentInput))
-      if (!isDigestDeliveryTurn(event) && !isNativeMailboxWakeInput(event)) this.activeTurn.user = event
+      if (!isDigestDeliveryTurn(event) && !isNativeMailboxWakeInput(event) && !isNativeBackgroundWakeInput(event)) this.activeTurn.user = event
       this.activeTurn.seq = Math.min(this.activeTurn.seq, event.seq)
       this.activeTurn.startedAt = event.ts
       this.activeTurn.purpose = event.purpose
@@ -722,7 +759,21 @@ export class TimelineProjector {
     }
 
     if (event.type === 'assistant_text' || event.type === 'turn_finished') {
-      const turn = this.writableTurn(this.ensureTurn(event))
+      const prior = event.run_id ? this.turnByRun.get(event.run_id) : undefined
+      const previousAssistant = prior?.assistant.at(-1)
+      // An import run is a transport batch, not one provider response. Keep
+      // distinct native message identities separate even without user inputs
+      // between them (for example a background task's later answer).
+      const newImportedMessage = importedContentTimestamp(event) !== null
+        && event.type === 'assistant_text' && previousAssistant != null
+        && importedContentTimestamp(previousAssistant) !== null
+        && (event.provider_origin?.event_id !== previousAssistant.provider_origin?.event_id
+          || event.provider_origin?.session_id !== previousAssistant.provider_origin?.session_id)
+      if (newImportedMessage && prior) {
+        this.writableTurn(prior).finishedAt ||= event.ts
+        this.assistantByTurn.delete(prior.key)
+      }
+      const turn = this.writableTurn(this.ensureTurn(event, newImportedMessage))
       const text = event.type === 'turn_finished' ? event.result_text : event.text
       if (text?.trim()) this.appendAssistantOutput(turn, event, text, event.type === 'turn_finished')
       if (event.type === 'turn_finished') {
@@ -1542,6 +1593,94 @@ export function projectTimeline(
   return projector.items
 }
 
+function zonedTimestamp(value: unknown): number | null {
+  if (typeof value !== 'string' || !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$/.test(value)) return null
+  const parsed = Date.parse(value)
+  return Number.isFinite(parsed) ? parsed : null
+}
+
+/** Only source-identified imported content may move from its arrival position. */
+function importedContentTimestamp(event: Event): number | null {
+  const origin = event.provider_origin
+  if (event.imported !== true || !event.run_id?.startsWith('import_')
+    || (event.type !== 'turn_started' && event.type !== 'assistant_text')
+    || (origin?.provider !== 'claude' && origin?.provider !== 'codex')
+    || origin.provider !== event.backend
+    || typeof origin.event_id !== 'string' || !origin.event_id.trim()
+    || typeof origin.session_id !== 'string' || !origin.session_id.trim()) return null
+  return zonedTimestamp(origin.timestamp)
+}
+
+/**
+ * Place recovered provider messages between native turns, never timestamp-sort
+ * live turns or their progress. This runs on import/input boundaries only;
+ * streaming deltas keep the existing positions and incremental render cache.
+ */
+function interleaveImportedTurns(items: TimelineItem[]): TimelineItem[] {
+  const historical = new Map<string, { item: TurnItem; timestamp: number; sessionId: string }>()
+  for (const item of items) {
+    if (item.kind !== 'turn') continue
+    const content = [...(item.user ? [item.user] : []), ...item.assistant]
+    if (!content.length) continue
+    const times = content.map(importedContentTimestamp)
+    if (times.some(time => time === null)) continue
+    historical.set(item.key, { item, timestamp: Math.min(...times as number[]), sessionId: content[0].session_id })
+  }
+  if (!historical.size) return items
+  // Restore only ledger presentation boundaries before placing history. The
+  // events, sequence IDs, run IDs and per-turn row ordering stay untouched.
+  const base = items.filter(item => !historical.has(item.key)).sort((a, b) => a.seq - b.seq)
+  const anchorsBySession = new Map<string, { index: number; timestamp: number }[]>()
+  base.forEach((item, index) => {
+    if (item.kind !== 'turn' || item.runId?.startsWith('import_')) return
+    const event = item.user ?? item.assistant[0] ?? item.trace[0]
+    if (!event || event.imported === true) return
+    const timestamp = zonedTimestamp(event.ts)
+    if (timestamp === null) return
+    const anchors = anchorsBySession.get(event.session_id) ?? []
+    anchors.push({ index, timestamp })
+    anchorsBySession.set(event.session_id, anchors)
+  })
+  for (const anchors of anchorsBySession.values()) {
+    anchors.sort((a, b) => a.timestamp - b.timestamp)
+    // Clocks may move backwards. Each sorted timestamp retains the earliest
+    // ledger boundary among itself and every later timestamp, not clock order.
+    for (let index = anchors.length - 2; index >= 0; index--) {
+      anchors[index].index = Math.min(anchors[index].index, anchors[index + 1].index)
+    }
+  }
+  const insertions = new Map<number, TurnItem[]>()
+  const ordered = [...historical.values()].sort((a, b) => a.timestamp - b.timestamp || a.item.seq - b.item.seq)
+  for (const entry of ordered) {
+    const anchors = anchorsBySession.get(entry.sessionId) ?? []
+    let low = 0
+    let high = anchors.length
+    while (low < high) {
+      const middle = (low + high) >>> 1
+      if (anchors[middle].timestamp <= entry.timestamp) low = middle + 1
+      else high = middle
+    }
+    let index = anchors[low]?.index
+    if (index === undefined) {
+      // With no later native boundary, keep the ledger's position relative to
+      // unrelated system/job rows and any unproven imported content.
+      low = 0
+      high = base.length
+      while (low < high) {
+        const middle = (low + high) >>> 1
+        if (base[middle].seq <= entry.item.seq) low = middle + 1
+        else high = middle
+      }
+      index = low
+    }
+    const bucket = insertions.get(index) ?? []
+    bucket.push(entry.item)
+    insertions.set(index, bucket)
+  }
+  return base.flatMap((item, index) => [...(insertions.get(index) ?? []), item])
+    .concat(insertions.get(base.length) ?? [])
+}
+
 function deduplicateEvents(events: Event[]): Event[] {
   return [...new Map(events.map(event => [event.id, event])).values()].sort((left, right) => left.seq - right.seq)
 }
@@ -1557,6 +1696,27 @@ function isNativeMailboxWakeInput(event: Event): boolean {
     && typeof event.mailbox_wake_id === 'string' && /^mailwake_[a-f0-9]{32}$/.test(event.mailbox_wake_id)
     && Number.isSafeInteger(event.mailbox_wake_through_seq) && (event.mailbox_wake_through_seq ?? 0) > 0
     && typeof event.provider_input_sha256 === 'string' && /^[a-f0-9]{64}$/.test(event.provider_input_sha256)
+}
+
+function isNativeBackgroundWakeInput(event: Event): boolean {
+  const nativeBoundary = event.type === 'turn_started' && event.backend === 'claude' && event.imported !== true
+    && typeof event.run_id === 'string' && Boolean(event.run_id.trim()) && !event.run_id.startsWith('import_')
+    && event.purpose === 'provider_background_wake' && event.provider_generated === true
+    && event.metadata_only === true && event.prompt === '' && !hasProviderUserProvenance(event)
+    && typeof event.parent_run_id === 'string' && Boolean(event.parent_run_id.trim()) && event.parent_run_id !== event.run_id
+    && typeof event.provider_session_id === 'string' && Boolean(event.provider_session_id.trim())
+    && typeof event.provider_tool_use_id === 'string' && Boolean(event.provider_tool_use_id.trim())
+  if (!nativeBoundary) return false
+  if (event.provider_wake_kind === 'schedule') {
+    return typeof event.provider_native_wake_id === 'string' && Boolean(event.provider_native_wake_id.trim())
+      && Array.isArray(event.provider_schedule_ids) && event.provider_schedule_ids.length > 0
+      && event.provider_schedule_ids.every(id => typeof id === 'string' && Boolean(id.trim()))
+      && (event.provider_schedule_id == null || event.provider_schedule_ids.includes(event.provider_schedule_id))
+  }
+  return (event.provider_wake_kind == null || event.provider_wake_kind === 'task')
+    && typeof event.provider_task_id === 'string' && Boolean(event.provider_task_id.trim())
+    && Array.isArray(event.provider_task_ids) && event.provider_task_ids.includes(event.provider_task_id)
+    && ['local_agent', 'local_workflow', 'local_bash'].includes(event.provider_task_type ?? '')
 }
 
 function digestBody(event: Event): string {
