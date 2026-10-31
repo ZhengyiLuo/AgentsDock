@@ -1516,6 +1516,39 @@
   the live-provider result above was a separate test.
 - Availability: source change and local compiled desktop only. App and server
   updates are both required; no installed app, live service or release changed.
+## 2026-10-18 — Allow ordinary chat mentions while steering Codex goals
+
+- Send selected native skills and local `@Chat` follow-ups into the current
+  Codex goal turn. Preserve its native thread, running tools, goal and original
+  chat access; add only the explicitly selected live chat routes after delivery.
+  Ordinary text with a local chat mention is a supported follow-up; it does not
+  need a skill or command. Saved chat routes also remain compatible with steering.
+- Bind provider tools from native goal activation to their exact live owner
+  when Codex omits client metadata. Keep ordinary-turn proofs and rejection of
+  stale, partial or ambiguous ownership. Preserve selected skills in durable
+  queue recovery and retain per-route user instructions across mailbox retries.
+- Show actionable Send now failures and deferred outcomes without Electron's
+  IPC wrapper. If input was accepted but chat access subsequently disappeared,
+  explain that outcome without replaying the message.
+- Exclude promptless goal-control starts from native history matching so a
+  later sync does not import the accepted follow-up and reply a second time.
+- Validation on main base `126c74f7`: 434 targeted server tests, 516 desktop
+  tests, Python compilation, TypeScript and production Electron compilation.
+  Native offscreen Electron acceptance used disposable state and real Codex:
+  selected a skill and a local chat through the actual pickers, queued each
+  follow-up and clicked Send now while the original shell remained running.
+  Both goals received the input and completed without changing their thread
+  or interrupting work. The chat case reused a thread with prior conversation,
+  verified the selected route through the real provider tool, and returned to
+  idle. History was checked again after switching away and reopening the chat.
+  Team/remote mentions and legacy/internal deliveries remain separate-turn
+  operations. Live mailbox sends, cross-device and custom-endpoint provider
+  acceptance are outside these checks. Source only; no release or deployment.
+- Additional regression: an ordinary local mention with five saved routes and
+  no skill or special-purpose metadata fails the old admission guard and passes
+  the updated guard. Plain-text controls pass both. The full admission suite
+  passes 35 tests; native-turn projection passes 14 tests after completing its
+  isolated cleanup fixture dependency and asserting capability revocation.
 
 ## 2026-10-17 — Refresh privacy-limited desktop and sharing metrics
 
