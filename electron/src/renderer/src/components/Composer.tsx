@@ -53,6 +53,13 @@ import {
   type ComposerCommandMetadata,
   type ComposerCommandTrigger
 } from '../lib/composer-commands'
+import {
+  caretAllowsHistoryStep,
+  loadComposerHistory,
+  recordComposerHistory,
+  stepComposerHistory,
+  type ComposerHistoryCursor
+} from '../lib/composer-history'
 import { getWorkspacePreference, setWorkspacePreference } from '../lib/workspace-preferences'
 import {
   canonicalizeLocalRouteHints,
@@ -581,6 +588,7 @@ export const Composer = memo(function Composer({ dropActive = false, sessionId, 
   const editorLayoutFrameRef = useRef<number | null>(null)
   const paletteBlurTimerRef = useRef<number | null>(null)
   const pendingCaretRef = useRef<number | null>(null)
+  const historyCursorRef = useRef<{ workspaceKey: string; cursor: ComposerHistoryCursor } | null>(null)
   const pendingSelectionRef = useRef<{ start: number; end: number; direction: 'forward' | 'backward' | 'none' } | null>(null)
   const nativeEditSelectionRef = useRef<ComposerNativeEditSelection | null>(null)
   const providerCommandBindingRef = useRef<BoundProviderCommand | null>(null)
@@ -1001,6 +1009,7 @@ export const Composer = memo(function Composer({ dropActive = false, sessionId, 
       void Promise.all(writes).catch(() => undefined)
     }
     draftContextRef.current = { profileId: activeProfileId, profileGeneration, serverIdentity, sessionId: selectedId, workspaceKey }
+    historyCursorRef.current = null
     setMention(null)
     setMentionCandidates([])
     setTeamMention(null)
@@ -1522,6 +1531,13 @@ export const Composer = memo(function Composer({ dropActive = false, sessionId, 
         if (message) setSendFailure({ context: sendContext, message })
       }
       if (sent) {
+        if (consumeComposer && promptOverride === undefined && workspaceKey) {
+          // This closure owns the submitting workspace, even after navigation.
+          recordComposerHistory(workspaceKey, rawOutgoing.trim())
+          if (composerSessionIsCurrent(activeProfileId, profileGeneration, serverIdentity, session.id, draftContextRef, mountedRef)) {
+            historyCursorRef.current = null
+          }
+        }
         trackEvent('message_sent', messageProps)
         if (boundProviderCommand) {
           trackEvent(boundProviderCommand.kind.toLowerCase() === 'skill' ? 'slash_skill_used' : 'slash_command_used')
@@ -2139,6 +2155,12 @@ export const Composer = memo(function Composer({ dropActive = false, sessionId, 
           onScroll={event => recordEditorMirrorAlignment(syncComposerEditorMirror(event.currentTarget, editorMirrorRef.current))}
           onKeyDown={event => {
             if (event.nativeEvent.isComposing) return
+            // A held send/selection key is not a second, deliberate Send now.
+            // Keep Shift/Alt+Enter multiline editing unchanged.
+            if (event.key === 'Enter' && event.repeat && !event.shiftKey && !event.altKey) {
+              event.preventDefault()
+              return
+            }
             const projection = projectTeamMessageComposer(draftRef.current)
             const atomicSpans = [
               ...orderedComposerReferenceSpans(referencesRef.current, teamReferencesRef.current),
@@ -2249,6 +2271,25 @@ export const Composer = memo(function Composer({ dropActive = false, sessionId, 
                 return
               }
             }
+            if (
+              workspaceKey
+              && !event.metaKey && !event.ctrlKey && !event.altKey && !event.shiftKey
+              && (event.key === 'ArrowUp' || event.key === 'ArrowDown')
+            ) {
+              const direction = event.key === 'ArrowUp' ? 'older' : 'newer'
+              const displayText = event.currentTarget.value
+              if (caretAllowsHistoryStep(displayText, event.currentTarget.selectionStart, event.currentTarget.selectionEnd, direction)) {
+                const current = historyCursorRef.current?.workspaceKey === workspaceKey ? historyCursorRef.current.cursor : null
+                const step = stepComposerHistory(loadComposerHistory(workspaceKey), current, draftRef.current, direction)
+                if (step) {
+                  event.preventDefault()
+                  historyCursorRef.current = { workspaceKey, cursor: step.cursor }
+                  pendingCaretRef.current = step.text.length
+                  updateComposerDraft(step.text, step.text.length)
+                  return
+                }
+              }
+            }
             // Like the Codex and Claude CLIs, Escape interrupts the running
             // agent once no composer palette is left to close.
             if (
@@ -2265,12 +2306,18 @@ export const Composer = memo(function Composer({ dropActive = false, sessionId, 
             if (event.key === 'Enter' && !event.shiftKey && !event.altKey) {
               event.preventDefault()
               const forceSend = (event.metaKey || event.ctrlKey) && !steeringPending && session.backend !== 'opencode'
+              const composerEmpty = !draft.trim() && uploads.length === 0 && uploadPaths.length === 0
               if (canSend) void send(forceSend)
+              else if (composerEmpty && (event.metaKey || event.ctrlKey)) void steerFirstQueued()
+              // A second Enter on an empty composer is Send now for the first
+              // queued message: Claude takes it as a native follow-up, while
+              // plain Codex turns are stopped and continued with it.
               else if (
-                (event.metaKey || event.ctrlKey)
-                && !draft.trim()
-                && uploads.length === 0
-                && uploadPaths.length === 0
+                composerEmpty
+                && running
+                && !steeringPending
+                && session.backend !== 'opencode'
+                && queuedTurns.some(isUserQueuedTurn)
               ) void steerFirstQueued()
             }
           }}

@@ -14,6 +14,8 @@ import { flushActiveWorkspace, useAppStore } from '../store/app-store'
 import { teamMessageLinkURL } from '../lib/team-message-links'
 import { projectTeamMessageComposer } from '../lib/team-message-composer'
 import { appendComposerDraft } from '../lib/composer-draft-append'
+import { loadComposerHistory, recordComposerHistory } from '../lib/composer-history'
+import { profileSessionKey } from '../lib/profile-scope'
 import { Composer, TeamMentionPalette } from './Composer'
 import { ClaudeRuntimeProvider } from './ClaudeRuntimeContext'
 import { CodexRuntimeProvider } from './CodexRuntimeContext'
@@ -2954,6 +2956,176 @@ describe('Composer', () => {
     expect(send).toHaveBeenCalledWith(expect.objectContaining({
       sessionId: 'chat-1', prompt: '', fileIds: ['image-1'],
     }))
+  })
+
+  it('sends the first queued message now with a plain Enter on an empty composer while running', async () => {
+    const queued = { queued_id: 'queued-1', prompt: 'follow up', file_ids: [], position: 0 } as QueuedTurn
+    const runNow = vi.fn().mockResolvedValue(true)
+    const send = vi.fn()
+    Object.defineProperty(window, 'agentsDock', {
+      configurable: true,
+      value: {
+        preferences: { get: vi.fn().mockResolvedValue(''), set: vi.fn().mockResolvedValue(undefined) },
+        turns: { send },
+        queue: { runNow, list: vi.fn().mockResolvedValue([queued]) },
+      } as unknown as AgentsDockAPI,
+    })
+    useAppStore.setState({
+      activeSessionIds: new Set(['chat-1']),
+      snapshots: {
+        'chat-1': {
+          session: { id: 'chat-1', title: 'Chat', backend: 'codex' },
+          events: [], queuedTurns: [queued], files: [], hasMoreEvents: false, filesTotal: 0, cachedAt: 0
+        }
+      }
+    })
+    render(<Composer />)
+
+    fireEvent.keyDown(screen.getByPlaceholderText('Message'), { key: 'Enter' })
+
+    await waitFor(() => expect(runNow).toHaveBeenCalledWith('chat-1', 'queued-1'))
+    expect(send).not.toHaveBeenCalled()
+  })
+
+  it('does not run queued messages on a plain Enter when the chat is idle', () => {
+    const queued = { queued_id: 'queued-1', prompt: 'follow up', file_ids: [], position: 0 } as QueuedTurn
+    const runNow = vi.fn().mockResolvedValue(true)
+    const list = vi.fn().mockResolvedValue([queued])
+    Object.defineProperty(window, 'agentsDock', {
+      configurable: true,
+      value: {
+        preferences: { get: vi.fn().mockResolvedValue(''), set: vi.fn().mockResolvedValue(undefined) },
+        queue: { runNow, list },
+      } as unknown as AgentsDockAPI,
+    })
+    useAppStore.setState({
+      snapshots: {
+        'chat-1': {
+          session: { id: 'chat-1', title: 'Chat', backend: 'codex' },
+          events: [], queuedTurns: [queued], files: [], hasMoreEvents: false, filesTotal: 0, cachedAt: 0
+        }
+      }
+    })
+    render(<Composer />)
+
+    fireEvent.keyDown(screen.getByPlaceholderText('Message'), { key: 'Enter' })
+
+    expect(list).not.toHaveBeenCalled()
+    expect(runNow).not.toHaveBeenCalled()
+  })
+
+  it.each([{}, {metaKey: true}, {ctrlKey: true}])('does not promote a queued message from a held Enter key repeat (%j)', async modifiers => {
+    const queued = { queued_id: 'queued-1', prompt: 'follow up', file_ids: [], position: 0 } as QueuedTurn
+    const list = vi.fn().mockResolvedValue([queued])
+    const runNow = vi.fn().mockResolvedValue(true)
+    window.agentsDock.queue = { list, runNow } as unknown as AgentsDockAPI['queue']
+    useAppStore.setState({
+      activeSessionIds: new Set(['chat-1']),
+      snapshots: { 'chat-1': {
+        session: { id: 'chat-1', title: 'Chat', backend: 'codex' },
+        events: [], queuedTurns: [queued], files: [], hasMoreEvents: false, filesTotal: 0, cachedAt: 0
+      } }
+    })
+    render(<Composer />)
+    await act(async () => fireEvent.keyDown(screen.getByPlaceholderText('Message'), { key: 'Enter', repeat: true, ...modifiers }))
+    expect(runNow).not.toHaveBeenCalled()
+    expect(list).not.toHaveBeenCalled()
+  })
+
+  it('does not recall another server history when session IDs are the same', async () => {
+    window.localStorage.clear()
+    const session = { id: 'chat-1', title: 'Chat', backend: 'codex' as const }
+    window.agentsDock.turns = { send: vi.fn().mockResolvedValue({ session }) } as unknown as AgentsDockAPI['turns']
+    const user = userEvent.setup()
+    const view = render(<Composer />)
+    await user.type(screen.getByPlaceholderText('Message'), 'Only for server A')
+    await user.keyboard('{Enter}')
+    await waitFor(() => expect(screen.getByPlaceholderText('Message')).toHaveValue(''))
+    view.unmount()
+    useAppStore.setState({
+      activeProfileId: 'profile-b', profileGeneration: 1,
+      drafts: {}, snapshots: {}, sessions: [session],
+      pendingTurnSubmissions: {}, turnAdmissionTokens: {}, activeSessionIds: new Set()
+    })
+    render(<Composer />)
+    await user.click(screen.getByPlaceholderText('Message'))
+    await user.keyboard('{ArrowUp}')
+    expect(screen.getByPlaceholderText('Message')).toHaveValue('')
+  })
+
+  it('keeps a late accepted send in its original chat without resetting the newly opened history cursor', async () => {
+    window.localStorage.clear()
+    const receipt = deferred<{session: Session}>()
+    const first: Session = {id: 'chat-1', title: 'First', backend: 'codex'}
+    const second: Session = {id: 'chat-2', title: 'Second', backend: 'codex'}
+    const send = vi.fn().mockReturnValue(receipt.promise)
+    window.agentsDock.turns = {send} as unknown as AgentsDockAPI['turns']
+    const secondKey = profileSessionKey('profile-a', second.id)
+    recordComposerHistory(secondKey, 'B older')
+    recordComposerHistory(secondKey, 'B newest')
+    useAppStore.setState({sessions: [first, second]})
+    render(<Composer />)
+    const input = screen.getByPlaceholderText('Message')
+    fireEvent.change(input, {target: {value: 'A accepted later'}})
+    fireEvent.keyDown(input, {key: 'Enter'})
+    await waitFor(() => expect(send).toHaveBeenCalledOnce())
+    act(() => useAppStore.setState({selectedSessionId: second.id, chatPanes: {primary: second.id, secondary: null}}))
+    await waitFor(() => expect(input).toHaveValue(''))
+    fireEvent.keyDown(input, {key: 'ArrowUp'})
+    expect(input).toHaveValue('B newest')
+    await act(async () => receipt.resolve({session: first}))
+    await waitFor(() => expect(loadComposerHistory(profileSessionKey('profile-a', first.id))).toEqual(['A accepted later']))
+    fireEvent.keyDown(input, {key: 'ArrowUp'})
+    expect(input).toHaveValue('B older')
+    expect(loadComposerHistory(secondKey)).toEqual(['B older', 'B newest'])
+  })
+
+  it('does not record rejected sends and preserves the failed draft', async () => {
+    window.localStorage.clear()
+    const send = vi.fn().mockRejectedValue(new Error('Offline'))
+    window.agentsDock.turns = {send} as unknown as AgentsDockAPI['turns']
+    render(<Composer />)
+    const input = screen.getByPlaceholderText('Message')
+    fireEvent.change(input, {target: {value: 'Keep my failed draft'}})
+    fireEvent.keyDown(input, {key: 'Enter'})
+    await waitFor(() => expect(useAppStore.getState().error).toContain('Offline'))
+    expect(input).toHaveValue('Keep my failed draft')
+    expect(loadComposerHistory(profileSessionKey('profile-a', 'chat-1'))).toEqual([])
+  })
+
+  it('recalls sent prompts with ArrowUp and returns to an empty draft with ArrowDown', async () => {
+    window.localStorage.clear()
+    const send = vi.fn().mockResolvedValue({ session: { id: 'chat-1', title: 'Chat', backend: 'codex' } })
+    Object.defineProperty(window, 'agentsDock', {
+      configurable: true,
+      value: {
+        preferences: { get: vi.fn().mockResolvedValue(''), set: vi.fn().mockResolvedValue(undefined) },
+        turns: { send },
+      } as unknown as AgentsDockAPI,
+    })
+    const user = userEvent.setup()
+    render(<Composer />)
+    const editor = screen.getByPlaceholderText('Message') as HTMLTextAreaElement
+
+    for (const prompt of ['first prompt', 'second prompt']) {
+      await user.type(editor, prompt)
+      await user.keyboard('{Enter}')
+      await waitFor(() => expect(send).toHaveBeenCalledWith(expect.objectContaining({ prompt })))
+      await waitFor(() => expect(editor).toHaveValue(''))
+    }
+
+    await user.keyboard('{ArrowUp}')
+    expect(editor).toHaveValue('second prompt')
+    await user.keyboard('{ArrowUp}')
+    expect(editor).toHaveValue('first prompt')
+    await user.keyboard('{ArrowDown}')
+    expect(editor).toHaveValue('second prompt')
+    await user.keyboard('{ArrowDown}')
+    expect(editor).toHaveValue('')
+
+    await user.type(editor, 'unsent work')
+    await user.keyboard('{ArrowUp}')
+    expect(editor).toHaveValue('unsent work')
   })
 
   it('waits for pending uploads before enabling a send or steer', () => {

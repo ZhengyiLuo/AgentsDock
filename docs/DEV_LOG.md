@@ -1,5 +1,64 @@
 # Public development log
 
+## 2026-10-31 - Composer history isolation and deliberate queue shortcuts
+
+- Integrated prompt-history and empty-composer Enter shortcuts with main
+  `45fe1710`, retaining Escape-to-stop and the opt-in workspace UI.
+- Holding Enter no longer promotes a queued message or submits a selected
+  command accidentally. Release and press Enter again to use Send now;
+  Shift/Alt+Enter multiline editing and IME composition remain unchanged.
+- Recall history and its navigation cursor use the existing server-identity
+  and chat scope, with a saved-profile fallback. Aliases of the same known
+  server share history; different servers cannot recall each other's prompts.
+  Legacy chat-only history is not adopted because its server is unknown.
+  Late receipts do not reset another chat's history cursor; failed sends keep
+  their drafts and are not added to history. Storage failures retain old data.
+- Verification: 284 focused component/helper/shortcut tests, TypeScript,
+  production compilation and compiled-output verification passed. Reproduced
+  held-Enter queue promotion in the original native macOS app, then exercised
+  the fixed build with an isolated, analytics-disabled profile and a disposable
+  service through real Electron IPC/HTTP and Codex/Claude requests. Both agents
+  completed repeated messages; Up/Down recall, draft and multiline preservation,
+  chat navigation, idle Enter and held Enter passed. A deliberate second Enter
+  issued one successful run-now request per provider: ordinary Codex stopped
+  and continued on its thread; Claude admitted the native follow-up without a
+  stopped turn. No server implementation changes were required.
+- Cross-server identical-ID, storage-full and late-receipt cases were exercised
+  in deterministic fixtures, not on customer servers. Native Windows/Linux and
+  every provider's own CLI keyboard UI were not exercised. Computer-control
+  integration was unavailable; native app input used Electron's debugging
+  keyboard/mouse interface, not direct React handler calls. Availability: local
+  development build only, not published or merged.
+
+## 2026-10-28 - Composer prompt history and Enter to send queued messages
+
+- ArrowUp/ArrowDown in the desktop composer recall prompts previously sent from
+  that chat, like the Codex and Claude CLIs. History is stored locally per chat
+  (latest 100), only steps from the first/last line, and never replaces a draft
+  the user typed or edited.
+- While a chat is running, a plain Enter on an empty composer sends the first
+  user-queued message now, matching the existing Command/Control-Enter and
+  "Send now" path (same confirmation and admission checks). OpenCode, which
+  cannot steer, keeps queueing. The server decides delivery: Claude accepts it
+  as a native follow-up without stopping the run; a plain (non-goal) Codex turn
+  is stopped and the queued message continues on the same thread, so the
+  timeline shows the earlier turn as stopped.
+- Implemented and accepted on main `9a750c7`: 12 new unit/component checks,
+  TypeScript and production compilation passed; the full run passed 5,496
+  tests (5 skipped) plus 8 packaging/license checks. Rebased onto `aa1b8c4`;
+  TypeScript, the full suite and production compilation were rerun there.
+- Test surface: `pnpm dev` Electron app with an isolated user-data directory,
+  connected over its production transport to a loopback AgentsServer from this
+  checkout with isolated HOME/state, using a real Codex login. ArrowUp/Down
+  recalled sent prompts newest-first and returned to an empty draft; an unsent
+  draft was left unchanged; ArrowUp on the second line of a multi-line draft
+  only moved the caret; a second chat did not show the first chat's history;
+  Enter on an empty composer while idle did nothing. Enter while a
+  Codex turn was running issued exactly one `run-now` (200); the server stopped
+  the running turn and the queued prompt completed on the same Codex thread
+  with the earlier context. Claude follow-up insertion was not exercised (no
+  Claude login in the isolated environment). Availability: source only.
+
 ## 2026-10-31 - Escape shortcut integration verification
 
 - Integrated the Escape-to-stop change with main `827ed452`, retaining the
