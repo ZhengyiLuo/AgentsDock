@@ -4554,6 +4554,7 @@
 - Add regressions for line-ending preservation, external reloads, LF inserts in
   CRLF documents, byte limits, cursor clamping and fold restoration.
 
+<<<<<<< HEAD
 ## 2026-09-27 — Custom API live acceptance and API-only chat routing
 
 - Cursor and OpenCode advertise cross-chat transport when their CLI is installed
@@ -7871,6 +7872,8 @@ Forget is in the API card's three-dot menu and requires confirmation.
 - Add focused service coverage for successful opens, native error responses,
   and download failures using synthetic data and mocked native boundaries.
 
+=======
+>>>>>>> origin/pr-review-24
 ## 2026-09-14 — Desktop 1.0.0 replacement accepted
 
 - Published desktop `1.0.0`, build `1167`, from committed source
