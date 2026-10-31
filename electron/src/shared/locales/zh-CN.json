@@ -573,6 +573,7 @@
   "editor.tabLimit": "打开超过 {count} 个标签页前，请先关闭一个文件。",
   "editor.targetAlreadyOpen": "{path} 已打开。请选择其他文件名。",
   "editor.targetExists": "{path} 已存在。选择“替换”以覆盖。",
+  "editor.newFileAlreadyExists": "{path} 已存在，请使用其他文件名。",
   "editor.thatFileBelongsToADifferentChat": "该文件属于其他会话。",
   "editor.thatFileReferenceIsNotASafeWorkspacePath": "该文件引用不是安全的工作区路径。",
   "editor.thatFileReferenceIsOutsideThisChatSWorkingDirectory": "该文件引用不在当前会话的工作目录内。",

@@ -243,6 +243,7 @@ interface PendingWorkspaceCreate {
   kind: WorkspaceCreateKind
   creating: boolean
   error: string | null
+  placeholder?: string
 }
 
 interface PendingUntitledSave {
@@ -253,6 +254,7 @@ interface PendingUntitledSave {
   closeAfterSave: boolean
   overwriteConfirmed: boolean
   error: string | null
+  inline?: boolean
 }
 
 interface PendingWorkspaceFileOperation {
@@ -333,7 +335,8 @@ export function WorkspaceEditor({
   const memoryMatches = memory?.sessionId === session.id && memory.cwd === cwd
   const memoryFiles = memoryMatches
     ? memory.openFiles.filter(file => (
-      !file.artifact || agentFileBelongsToSession(file.artifact, session.id)
+      retainWorkspaceDraft(file)
+      && (!file.artifact || agentFileBelongsToSession(file.artifact, session.id))
     ))
     : []
   const memoryPaths = new Set(memoryFiles.map(file => file.path))
@@ -452,6 +455,7 @@ export function WorkspaceEditor({
   const revealRequestSequence = useRef(0)
   const workspaceMutationRef = useRef<PendingWorkspaceMutation | null>(null)
   const pendingCreateRef = useRef(pendingCreate)
+  const pendingUntitledSaveRef = useRef(pendingUntitledSave)
   const workspaceFileOperationsRef = useRef(new Map<string, PendingWorkspaceFileOperation>())
   const workspaceMetadataSyncsRef = useRef(new Map<string, Set<symbol>>())
   const untitledSequenceRef = useRef(0)
@@ -481,6 +485,7 @@ export function WorkspaceEditor({
   markdownViewModesRef.current = markdownViewModes
   directoriesRef.current = directories
   pendingCreateRef.current = pendingCreate
+  pendingUntitledSaveRef.current = pendingUntitledSave
   creationAuthorityRef.current = {
     available,
     capabilityVersion,
@@ -683,7 +688,8 @@ export function WorkspaceEditor({
           return next
         })
         const restoredTabs = persisted.tabs.filter(tab => (
-          !tab.artifact || agentFileBelongsToSession(tab.artifact, session.id)
+          (!tab.untitled || Boolean(tab.draft))
+          && (!tab.artifact || agentFileBelongsToSession(tab.artifact, session.id))
         ))
         const restoredFiles = restoredTabs.slice(0, MAX_OPEN_TABS).map(tab => (
           tab.artifact
@@ -719,7 +725,9 @@ export function WorkspaceEditor({
   }, [cwd, memoryMatches, preferenceKey, profileScope, session.id, tabbedPane])
 
   const persistWorkspace = useCallback(() => {
-    const currentFiles = openFilesRef.current
+    // Empty, unnamed buffers are temporary UI, not files. Keep them visible
+    // while editing, but do not resurrect them when this chat is reopened.
+    const currentFiles = openFilesRef.current.filter(retainWorkspaceDraft)
     const currentActivePath = activePathRef.current
     const currentSecondaryPath = secondaryPathRef.current
     const currentActiveGroup = activeGroupRef.current
@@ -1677,7 +1685,7 @@ export function WorkspaceEditor({
     for (const path of nextExpanded) void loadDirectory(path, false, generation)
   }
 
-  const createUntitledFile = (directory = '') => {
+  const createUntitledFile = (directory = '', focusEditor = true) => {
     if (!creationAvailable) {
       setWorkspaceError(session.archived
         ? t('editor.archivedChatsAreReadOnly')
@@ -1707,15 +1715,29 @@ export function WorkspaceEditor({
     activateFilePath(path)
     setPendingClosePath(null)
     setWorkspaceError(null)
-    setEditorNavigation({
+    if (focusEditor) setEditorNavigation({
       path,
       line: 1,
       column: 1,
       requestId: ++editorNavigationSequence.current
     })
+    return file
   }
 
-  const requestNewWorkspaceFile = (target?: WorkspaceEntry | null) => {
+  const revealCreateDirectory = (directory: string) => {
+    const ancestors = directory ? workspaceParentDirectories(`${directory}/.agentsdock-new-entry`) : []
+    setExpandedDirectories(current => new Set([...current, ...ancestors]))
+    for (const candidate of ['', ...ancestors]) {
+      if (!directoryAt(directoriesRef.current, candidate)) void loadDirectory(candidate)
+    }
+  }
+
+  const requestNewWorkspaceFile = (target?: WorkspaceEntry | null, inline = false) => {
+    if (pendingCreateRef.current || pendingUntitledSaveRef.current?.inline) {
+      window.dispatchEvent(new Event('agentsdock:focus-pending-create'))
+      return
+    }
+    if (workspaceMutationRef.current) return
     const directory = target === null
       ? ''
       : target
@@ -1726,14 +1748,21 @@ export function WorkspaceEditor({
             if (file?.origin === 'workspace') return workspaceParentDirectory(file.path)
             return file?.origin === 'untitled' ? file.saveDirectory ?? '' : ''
           })()
-    createUntitledFile(directory)
+    const file = createUntitledFile(directory, !inline)
+    if (file && inline) {
+      setPendingUntitledSave({
+        path: file.path, directory, name: '', saving: false,
+        closeAfterSave: false, overwriteConfirmed: false, error: null, inline: true
+      })
+      revealCreateDirectory(directory)
+    }
   }
 
   const requestCreateWorkspaceEntry = (
     kind: WorkspaceCreateKind,
     target?: WorkspaceEntry | null
   ) => {
-    if (pendingCreateRef.current) {
+    if (pendingCreateRef.current || pendingUntitledSaveRef.current?.inline) {
       window.dispatchEvent(new Event('agentsdock:focus-pending-create'))
       return
     }
@@ -1763,17 +1792,7 @@ export function WorkspaceEditor({
       creating: false,
       error: null
     })
-    const directoryAncestors = directory
-      ? workspaceParentDirectories(`${directory}/.agentsdock-new-entry`)
-      : []
-    setExpandedDirectories(current => {
-      const next = new Set(current)
-      for (const ancestor of directoryAncestors) next.add(ancestor)
-      return next
-    })
-    for (const candidate of ['', ...directoryAncestors]) {
-      if (!directoryAt(directoriesRef.current, candidate)) void loadDirectory(candidate)
-    }
+    revealCreateDirectory(directory)
   }
 
   const createWorkspaceEntry = async (name: string) => {
@@ -3051,8 +3070,10 @@ export function WorkspaceEditor({
     return null
   }
 
-  async function commitUntitledSave(): Promise<void> {
-    const pending = pendingUntitledSave
+  async function commitUntitledSave(inlineName?: string): Promise<void> {
+    const pending = pendingUntitledSave && inlineName !== undefined
+      ? { ...pendingUntitledSave, name: inlineName }
+      : pendingUntitledSave
     if (!pending || pending.saving) return
     const file = openFilesRef.current.find(candidate => candidate.path === pending.path)
     if (!file || file.origin !== 'untitled') {
@@ -3095,8 +3116,8 @@ export function WorkspaceEditor({
     if (knownTarget && !pending.overwriteConfirmed) {
       setPendingUntitledSave(current => current ? {
         ...current,
-        overwriteConfirmed: true,
-        error: t('editor.targetExists', { path: targetPath })
+        overwriteConfirmed: !pending.inline,
+        error: t(pending.inline ? 'editor.newFileAlreadyExists' : 'editor.targetExists', { path: targetPath })
       } : current)
       return
     }
@@ -3151,8 +3172,8 @@ export function WorkspaceEditor({
           setPendingUntitledSave(current => current ? {
             ...current,
             saving: false,
-            overwriteConfirmed: true,
-            error: t('editor.targetExists', { path: targetPath })
+            overwriteConfirmed: !pending.inline,
+            error: t(pending.inline ? 'editor.newFileAlreadyExists' : 'editor.targetExists', { path: targetPath })
           } : current)
           return
         }
@@ -3199,7 +3220,9 @@ export function WorkspaceEditor({
       }
       setPendingClosePath(current => current === pending.path ? targetPath : current)
       setPendingReloadPath(current => current === pending.path ? targetPath : current)
-      setEditorNavigation(current => current?.path === pending.path ? { ...current, path: targetPath } : current)
+      setEditorNavigation(current => pending.inline ? {
+        path: targetPath, line: 1, column: 1, requestId: ++editorNavigationSequence.current
+      } : current?.path === pending.path ? { ...current, path: targetPath } : current)
       setWorkspaceRoot(saved.root)
       const nextExpanded = new Set(expandedDirectories)
       for (const directory of workspaceParentDirectories(targetPath)) nextExpanded.add(directory)
@@ -3382,6 +3405,7 @@ export function WorkspaceEditor({
     }
     setPendingClosePath(current => current === path ? null : current)
     setPendingReloadPath(current => current === path ? null : current)
+    setPendingUntitledSave(current => current?.path === path ? null : current)
     setOpeningPath(current => current === path ? null : current)
   }
 
@@ -3912,21 +3936,29 @@ export function WorkspaceEditor({
           expanded={expandedDirectories}
           mutationsAvailable={mutationsAvailable && !workspaceMutationPath}
           creationAvailable={creationAvailable && !workspaceMutationPath}
-          pendingCreate={pendingCreate}
+          pendingCreate={pendingUntitledSave?.inline ? {
+            directory: pendingUntitledSave.directory,
+            kind: 'file',
+            creating: pendingUntitledSave.saving,
+            error: pendingUntitledSave.error,
+            placeholder: openFiles.find(file => file.path === pendingUntitledSave.path)?.name
+          } : pendingCreate}
           onOpen={path => void openFile(path)}
           onOpenToSide={tabbedPane ? undefined : openFileToSide}
           onToggle={toggleDirectory}
           onLoadMore={path => void loadDirectory(path, true)}
           onRefresh={refreshExplorer}
           onRequestCreate={(kind, target) => {
-            if (kind === 'file') requestNewWorkspaceFile(target)
+            if (kind === 'file') requestNewWorkspaceFile(target, true)
             else requestCreateWorkspaceEntry(kind, target)
           }}
-          onCreateCommit={name => void createWorkspaceEntry(name)}
-          onCreateErrorClear={() => setPendingCreate(current => (
-            current?.error ? { ...current, error: null } : current
-          ))}
+          onCreateCommit={name => void (pendingUntitledSave?.inline ? commitUntitledSave(name) : createWorkspaceEntry(name))}
+          onCreateErrorClear={() => {
+            if (pendingUntitledSave?.inline) setPendingUntitledSave(current => current ? { ...current, error: null } : current)
+            else setPendingCreate(current => current?.error ? { ...current, error: null } : current)
+          }}
           onCreateCancel={() => {
+            if (pendingUntitledSave?.inline && !pendingUntitledSave.saving) setPendingUntitledSave(null)
             if (!pendingCreate?.creating) setPendingCreate(null)
           }}
           onCopyPath={(entry, relative) => void copyWorkspaceEntryPath(entry, relative)}
@@ -4017,7 +4049,7 @@ export function WorkspaceEditor({
 
       {paletteOpen && paletteRenderGroup === null && renderFilePalette()}
 
-      {pendingUntitledSave && <form
+      {pendingUntitledSave && !pendingUntitledSave.inline && <form
         className="workspace-editor-save-picker"
         role="dialog"
         aria-modal="true"
@@ -4433,7 +4465,7 @@ function WorkspaceCreateRow({
         disabled={pending.creating}
         autoFocus
         aria-label={pending.kind === 'directory' ? t('editor.newFolderName') : t('editor.newFileName')}
-        placeholder={pending.kind === 'directory' ? 'folder name' : 'file name'}
+        placeholder={pending.placeholder ?? (pending.kind === 'directory' ? t('editor.newFolderName') : t('editor.newFileName'))}
         onChange={event => {
           setName(event.target.value)
           if (pending.error) onErrorClear()
@@ -4630,6 +4662,10 @@ function openExternalFile(file: WorkspaceFile, writesAvailable = false): OpenWor
     lines: countLines(file.content),
     error: null
   }
+}
+
+function retainWorkspaceDraft(file: OpenWorkspaceFile): boolean {
+  return file.origin !== 'untitled' || file.draft.length > 0 || file.saving
 }
 
 function openUntitledFile(

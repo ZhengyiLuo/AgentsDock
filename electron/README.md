@@ -283,6 +283,15 @@ References remain ordinary editable draft text; they are sent with your next
 message and can be edited or removed before sending. Symbol discovery starts
 when requested and uses the language server's project index.
 
+The Files explorer's **New file** action opens an Untitled editor and an inline
+filename field in the selected directory. Enter a name such as `demo.py` and
+press Enter to save it; the extension selects the editor language. Existing
+files are never overwritten by inline creation. Escape leaves the buffer
+unsaved, and Command/Control-S still offers Save As. Empty unnamed buffers are
+discarded when leaving and reopening a chat; nonempty drafts and named empty
+files are retained. **New folder** keeps its inline naming flow, and saved
+files can be renamed through their explorer context menu.
+
 Python and TypeScript/JavaScript source files in the workspace editor support
 project completion (**Ctrl+Space**), hover information, diagnostic underlines,
 **F12** to go to a definition, and **Shift+F12** to find references. The toolbar

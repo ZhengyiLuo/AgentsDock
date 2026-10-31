@@ -573,6 +573,7 @@
   "editor.tabLimit": "Close a file before opening more than {count} tabs.",
   "editor.targetAlreadyOpen": "{path} is already open. Choose another filename.",
   "editor.targetExists": "{path} already exists. Choose Replace to overwrite it.",
+  "editor.newFileAlreadyExists": "{path} already exists. Choose a different filename.",
   "editor.thatFileBelongsToADifferentChat": "That file belongs to a different chat.",
   "editor.thatFileReferenceIsNotASafeWorkspacePath": "That file reference is not a safe workspace path.",
   "editor.thatFileReferenceIsOutsideThisChatSWorkingDirectory": "That file reference is outside this chat’s working directory.",

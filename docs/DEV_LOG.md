@@ -1,5 +1,30 @@
 # Public development log
 
+## 2026-10-31 - Inline workspace-file naming and temporary empty buffers
+
+- New file in the desktop Files explorer opens an Untitled buffer and focuses
+  an inline filename field in the selected directory. Enter saves through the
+  existing revision-checked create/write path; extensions such as `.py` select
+  the editor language. Existing filenames cannot be overwritten inline. Save As
+  and folder creation remain available.
+- Empty unnamed buffers are not restored after leaving a chat or relaunching.
+  Nonempty drafts and named files, including empty files, remain intact; this
+  cleanup never deletes workspace files from disk.
+- Verified on the combined PR #127/#125/#123 source-preview baseline `01dd9b81`:
+  157 editor tests, all 5,704 desktop tests (five skipped), eight packaging/license
+  guards, TypeScript and production compilation pass. Regression cases cover
+  inline naming, Python detection, duplicate-name rejection, failed-write retry,
+  repeated clicks, and warm/cold restoration of empty versus nonempty drafts.
+- Exercised the compiled native macOS app against an isolated real test server:
+  inline creation, save, rename, Python definition navigation, folder creation,
+  duplicate-name rejection and chat-switch draft preservation. Files on the
+  server confirmed the results. Dark and light/narrow rendering were inspected;
+  light preference and viewport width were emulated in the native renderer.
+  Input used Electron's keyboard/mouse debugging interface, not React handlers.
+  QA analytics were disabled. No new server implementation is required.
+- Availability: local development build, not published or merged. Windows/Linux
+  native input and physical Mac function-key mappings were not exercised.
+
 ## 2026-10-31 - Combined code intelligence and Claude integration check
 
 - Locally integrate PRs #127, #125 and #123 on the post-#129 main baseline.
