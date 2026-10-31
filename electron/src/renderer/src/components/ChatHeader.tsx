@@ -3,7 +3,7 @@ import { t } from '@shared/i18n'
 import { useLocale } from '../lib/i18n'
 import { useEffect, useMemo, useState } from 'react'
 import * as DropdownMenu from '@radix-ui/react-dropdown-menu'
-import { Archive, ArchiveRestore, ArrowLeftRight, Check, ChevronRight, Columns2, Copy, Folder, GitFork, LoaderCircle, MoreHorizontal, PanelLeft, PanelRight, PanelRightClose, Pencil, Pin, RefreshCw, SquareTerminal, Trash2, X } from 'lucide-react'
+import { Archive, ArchiveRestore, ArrowLeftRight, Check, ChevronRight, Columns2, Copy, Folder, GitFork, LayoutGrid, LoaderCircle, MoreHorizontal, PanelLeft, PanelRight, PanelRightClose, Pencil, Pin, RefreshCw, Search, SquareTerminal, Trash2, X } from 'lucide-react'
 import type { Session } from '@shared/types'
 import { completedPrefixForkAvailable } from '@shared/session-fork'
 import { backendLabel, shortId } from '../lib/format'
@@ -20,6 +20,8 @@ export function ChatHeader({
   session: sessionProp,
   focused = true,
   titleInTab = false,
+  compact = false,
+  onOpenFile,
   sidebarVisible = true,
   terminalOpen = false,
   onSidebarToggle,
@@ -31,6 +33,8 @@ export function ChatHeader({
   session?: Session | null
   focused?: boolean
   titleInTab?: boolean
+  compact?: boolean
+  onOpenFile?: () => void
   sidebarVisible?: boolean
   terminalOpen?: boolean
   onSidebarToggle?: () => void
@@ -67,7 +71,7 @@ export function ChatHeader({
     const order = new Map(folderOrder.map((folder, index) => [folder, index]))
     return [...new Set([
       ...folderOrder,
-      ...sessions.filter(candidate => !candidate.archived && !candidate.pinned).map(candidate => candidate.folder?.trim() || 'General'),
+      ...sessions.filter(candidate => !candidate.archived).map(candidate => candidate.folder?.trim() || 'General'),
       currentFolder
     ])].sort((a, b) => (order.get(a) ?? Number.MAX_SAFE_INTEGER) - (order.get(b) ?? Number.MAX_SAFE_INTEGER) || a.localeCompare(b))
   }, [currentFolder, folderOrder, sessions])
@@ -109,19 +113,31 @@ export function ChatHeader({
       window.setTimeout(() => setSessionIdCopied(false), 1200)
     }).catch(() => undefined)
   }
+  const folderOptions = folders.map(folder => {
+    const selected = folder === currentFolder
+    return <DropdownMenu.CheckboxItem
+      className="menu-item"
+      key={folder}
+      checked={selected}
+      onSelect={() => {
+        if (!selected) void useAppStore.getState().updateSession(session.id, { folder, archived: false })
+      }}
+    ><span className="chat-folder-menu-check" aria-hidden="true">{selected && <Check size={14} />}</span><span>{folder}</span></DropdownMenu.CheckboxItem>
+  })
   return (
-    <header className={`chat-header${focused ? ' focused' : ''}`}>
+    <header className={`chat-header ${compact ? 'compact-chat-header' : 'standard-chat-header'}${focused ? ' focused' : ''}`}>
       <div className={`title-block${titleInTab ? ' chat-header-tab-folder' : ''}`}>
         <div className="editable-title">
           {!titleInTab && <input
             aria-label={t("ui.ChatHeader.ChatHeader.rename_e84e258", { "name": String(session.title) })}
             value={title}
+            title={session.title}
             size={Math.max(1, Array.from(title).length)}
             onChange={event => setTitle(event.target.value)}
             onBlur={save}
             onKeyDown={event => { if (event.key === 'Enter') { event.currentTarget.blur(); save() } }}
           />}
-          <DropdownMenu.Root>
+          {!compact && <DropdownMenu.Root>
             <DropdownMenu.Trigger asChild>
               <button type="button" className="chat-folder-label" title={t("ui.ChatHeader.ChatHeader.move_chat_to_folder_currently_b505564", { "folder": String(currentFolder) })} aria-label={t("ui.ChatHeader.ChatHeader.folder_4e7d7bc", { "folder": String(currentFolder) })}>
                 <Folder size={12} aria-hidden="true" /><span>{currentFolder}</span>
@@ -130,29 +146,26 @@ export function ChatHeader({
             <DropdownMenu.Portal>
               <DropdownMenu.Content className="menu-content chat-folder-menu" side="bottom" align="start" sideOffset={6} collisionPadding={12}>
                 <DropdownMenu.Label className="menu-label">{t("ui.ChatHeader.ChatHeader.move_to_folder_91d631e")}</DropdownMenu.Label>
-                {folders.map(folder => {
-                  const selected = folder === currentFolder
-                  return <DropdownMenu.CheckboxItem
-                    className="menu-item"
-                    key={folder}
-                    checked={selected}
-                    onSelect={() => {
-                      if (!selected) void useAppStore.getState().updateSession(session.id, { folder, archived: false })
-                    }}
-                  ><span className="chat-folder-menu-check" aria-hidden="true">{selected && <Check size={14} />}</span><span>{folder}</span></DropdownMenu.CheckboxItem>
-                })}
+                {folderOptions}
               </DropdownMenu.Content>
             </DropdownMenu.Portal>
-          </DropdownMenu.Root>
+          </DropdownMenu.Root>}
         </div>
-        <small title={geminiIdentityPending ? t('gemini.session.pendingDescription') : undefined}>session {geminiIdentityPending ? t('gemini.session.pending') : shortId(sessionIdValue)}{sessionIdValue && <button type="button" className="session-id-copy" title={sessionIdCopied ? t("ui.ChatHeader.ChatHeader.copied_8d525e5") : t("ui.ChatHeader.ChatHeader.copy_session_8b985e2")} aria-label={sessionIdCopied ? t("ui.ChatHeader.ChatHeader.session_copied_673328f") : t("ui.ChatHeader.ChatHeader.copy_session_8b985e2")} onClick={copySessionId}>{sessionIdCopied ? <Check size={12} /> : <Copy size={12} />}</button>}</small>
+        <small className="chat-session-id" title={geminiIdentityPending ? t('gemini.session.pendingDescription') : sessionIdValue ?? undefined}><span>{!compact && 'session '}{geminiIdentityPending ? t('gemini.session.pending') : shortId(sessionIdValue)}</span>{sessionIdValue && <button type="button" className="session-id-copy" title={sessionIdCopied ? t("ui.ChatHeader.ChatHeader.copied_8d525e5") : t("ui.ChatHeader.ChatHeader.copy_session_8b985e2")} aria-label={sessionIdCopied ? t("ui.ChatHeader.ChatHeader.session_copied_673328f") : t("ui.ChatHeader.ChatHeader.copy_session_8b985e2")} onClick={copySessionId}>{sessionIdCopied ? <Check size={12} /> : <Copy size={12} />}</button>}</small>
       </div>
       <div className="header-actions">
+        {onOpenFile && <ShortcutTooltip shortcut="openWorkspaceFile" label={t('editor.openFile')}><button type="button" className="icon-button" aria-label={t('editor.openFile')} onClick={onOpenFile}><Search size={16} /></button></ShortcutTooltip>}
         <DropdownMenu.Root open={actionsMenuOpen} onOpenChange={open => {
           setActionsMenuOpen(open)
           if (!open) setSplitMenuRequested(false)
         }}><DropdownMenu.Trigger asChild><button className="icon-button" title={t("ui.ChatHeader.ChatHeader.chat_actions_8ba35bb")} aria-label={t("ui.ChatHeader.ChatHeader.chat_actions_8ba35bb")}><MoreHorizontal size={16} /></button></DropdownMenu.Trigger><DropdownMenu.Portal><DropdownMenu.Content className="menu-content" align="end">
           {titleInTab && <DropdownMenu.Item className="menu-item" onSelect={() => window.dispatchEvent(new CustomEvent('agentsdock:rename-chat', { detail: session }))}><Pencil size={14} />{t('ui.Sidebar.SessionContextMenu.rename_chat_a257dec')}</DropdownMenu.Item>}
+          {compact && <DropdownMenu.Sub>
+            <DropdownMenu.SubTrigger className="menu-item split-chat-menu-trigger"><Folder size={14} />{t('chatHeader.changeFolder')}<ChevronRight size={13} /></DropdownMenu.SubTrigger>
+            <DropdownMenu.Portal><DropdownMenu.SubContent className="menu-content chat-folder-menu" sideOffset={6} collisionPadding={12}>
+              {folderOptions}
+            </DropdownMenu.SubContent></DropdownMenu.Portal>
+          </DropdownMenu.Sub>}
           {splitMenuRequested && onOpenSplit && <DropdownMenu.Sub>
             <DropdownMenu.SubTrigger className="menu-item split-chat-menu-trigger"><Columns2 size={14} />{t("ui.ChatHeader.ChatHeader.open_split_view_51e50f7")}<ChevronRight size={13} /></DropdownMenu.SubTrigger>
             <DropdownMenu.Portal><DropdownMenu.SubContent className="menu-content split-chat-menu" sideOffset={6} collisionPadding={12}>
@@ -173,6 +186,7 @@ export function ChatHeader({
         </DropdownMenu.Content></DropdownMenu.Portal></DropdownMenu.Root>
         {sidebarButton}
         <ScheduledJobsPopover session={session} />
+        <button type="button" className="icon-button" title={t('chatWorkspace.create')} aria-label={t('chatWorkspace.create')} onClick={() => void useAppStore.getState().createChatWorkspace(session.id)}><LayoutGrid size={16} /></button>
         {onSwapPanes && <button className="icon-button" title={t("ui.ChatHeader.ChatHeader.swap_chat_panes_7129f59")} aria-label={t("ui.ChatHeader.ChatHeader.swap_chat_panes_7129f59")} onClick={onSwapPanes}><ArrowLeftRight size={15} /></button>}
         {focused && onTerminalToggle && <ShortcutTooltip shortcut="toggleTerminal" label={terminalOpen ? t("ui.ChatHeader.ChatHeader.close_terminal_panel_48e963f") : t("ui.ChatHeader.ChatHeader.open_terminal_panel_3284242")}><button
           className={`icon-button terminal-toggle${terminalOpen ? ' active' : ''}`}

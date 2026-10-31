@@ -1,5 +1,33 @@
 # Public development log
 
+## 2026-10-31 - Workspace toolbar entry and contextual chat headers
+
+- Move Create workspace from the chat menu to a matching icon button next to
+  Scheduled jobs and Terminal. Ordinary chats show title and folder together,
+  with their copyable provider session ID underneath. Workspace chats retain
+  a single compact title/ID/action row without the folder chip.
+- Workspace menus now offer Change folder as a hover/keyboard submenu, listing
+  saved and in-use folders, including folders containing only pinned chats.
+  Mark the current folder and preserve the existing per-chat update path.
+- Native desktop acceptance on base `aa1b8c47` (development 0.2.0/build 86)
+  used a test server: created a workspace from the toolbar, reloaded, closed
+  back to ordinary mode, hovered the submenu, changed and restored a test
+  chat's folder through production IPC/HTTP, and verified server state and
+  the newly selected checkmark. Copied the full native session ID in both
+  modes. Restored the original test layout. Checked both themes and a narrow
+  simulated viewport; no provider turn, server restart or deployment was needed.
+- Targeted header/layout/design regressions: 58 passed. Full desktop suite:
+  5,532 passed, 5 skipped. TypeScript and production build/output verification
+  pass. Native Windows/Linux UI and live cross-server switching were not
+  repeated. Source and local development app only; no release published.
+- CI follow-up: make the existing Team Hub maintenance-cancellation test use
+  event-loop notifications instead of blocking executor observers. Keep real
+  temporary-store snapshots, repeated cancellation and exact-fence assertions;
+  use explicit release gates and a bounded watchdog independent of filesystem
+  speed. The regression now runs with a single worker. Local before/after probes
+  reproduce the old failure with a constrained executor and a slow snapshot;
+  both pass with the revised synchronization. No server runtime behavior changed.
+
 ## 2026-10-29 - User-authorized mailbox tasks and editable drafts
 
 - Existing authorized chat pairs now carry the originating user's exact task
@@ -39,6 +67,48 @@
   existing observer without weakening assertions or increasing timeouts.
   Changes are source-only and need a matching app/server update;
   no public release or production server restart was performed.
+- Latest-main revalidation: integrated `d79677ef` without changing the new
+  workspace/header behavior; the only merge conflict was overlapping log entries.
+  On the matching source-preview test server, native Electron input exercised
+  initial pairing, repeated no-mention Codex and Claude delegation, recipient
+  file creation and replies. Reviewed mail appended to an existing draft;
+  navigation preserved it, a manually edited Send reached a real provider,
+  and split-pane drafting left the other pane unchanged. Checked dark English
+  and narrow light Chinese rendering. Focused checks: 212 server tests and
+  376 desktop tests pass; TypeScript and production compilation pass. Clarified
+  the documented difference between oversized ordinary-turn fallback and
+  explicit-reference delegation. Live goal steering, cross-server stale replies
+  and attachment retention were not repeated in this acceptance pass; their
+  automated coverage and the separate idle-goal limitation above still apply.
+  No production restart, public release or mobile change.
+
+## 2026-10-28 - Optional desktop workspaces and single-row chat headers
+
+- Ordinary chats no longer manufacture a default workspace. The chat action
+  menu's Create workspace entry enables the workspace/layout bar on demand.
+  Preserve existing named and multi-pane layouts, while migrating the old
+  implicit single-chat default back to ordinary mode. Closing the last
+  workspace keeps the selected chat and its draft; no chat or directory is
+  deleted. Workspace preferences remain scoped to the connected server.
+- Keep title, folder, provider session ID/copy and right-side actions in one
+  chat header, including three- and four-pane layouts. Remove the redundant
+  pinned Chat/file row while viewing chat and the Changes entry altogether.
+  File tabs and their Chat return action remain available when viewing a file.
+- Source base: `aa1b8c47`; local desktop metadata: 0.2.0/build 86. Exercised the
+  visible native Electron app with disposable chats on an authorized
+  AgentsServer 1.0.11-beta.12 test instance: ordinary mode, explicit and repeated workspace creation, three/four
+  panes, closing a workspace, last-workspace exit, and persistence on reload.
+  Opened an existing file through the real preload/IPC/server boundary and
+  returned to chat without the duplicate header. Checked dark and simulated
+  light system appearance and narrow three-column layouts. Primary services
+  were not restarted. No new provider turn was needed for this layout change.
+- Regression coverage includes legacy preference migration, explicit opt-in,
+  draft retention, per-pane menu ownership, hidden tab navigation and file
+  return. Desktop suite: 5,528 passed, 5 skipped; build/license script tests:
+  8 passed. TypeScript, production compilation and output verification pass.
+  Native Windows/Linux presentation and live cross-server switching were not
+  exercised; ownership/isolation remain covered by automated regressions.
+  Available in source and the local development app only; not published.
 
 ## 2026-10-28 - Cursor compound tool IDs and live analytics acceptance
 

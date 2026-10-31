@@ -221,7 +221,7 @@ describe('App split workspace files', () => {
     render(<StrictMode><App /></StrictMode>)
     act(() => window.dispatchEvent(new CustomEvent('agentsdock:open-workspace-path', { detail: { sessionId: 'chat-b', path: 'image.png' } })))
     expect(await screen.findByRole('img', { name: 'image.png' })).toHaveAttribute('src', 'agentsdock-media://workspace/profile-a/4/chat-b/image.png')
-    fireEvent.click(screen.getAllByRole('button', { name: /Chat.*pinned/i })[1])
+    fireEvent.click(screen.getByRole('button', { name: /Chat.*pinned/i }))
     act(() => window.dispatchEvent(new CustomEvent('agentsdock:open-agent-file', { detail: { sessionId: 'chat-a', file: { id: 'artifact', session_id: 'chat-a', filename: 'attachment.png', content_type: 'image/png' } } })))
     expect(await screen.findByRole('img', { name: 'attachment.png' })).toHaveAttribute('src', 'agentsdock-media://file/profile-a/4/chat-a/artifact')
     expect(useAppStore.getState().focusedChatPane).toBe('primary')

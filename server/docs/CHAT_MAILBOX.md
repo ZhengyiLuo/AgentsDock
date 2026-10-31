@@ -81,8 +81,9 @@ the edited message stays readable as peer content. Legacy records are not
 backfilled, even if they already contain source instruction text.
 
 The complete source instruction counts toward the existing mailbox response
-byte bound. A delegated message that would not fit is rejected before commit;
-instructions are never truncated or silently downgraded to peer mail. This is
+byte bound. Explicit-reference delegation that would not fit is rejected before
+commit; its instruction is never truncated or silently downgraded to peer mail.
+Ordinary-turn fallback uses the no-attestation behavior described above. This is
 an additive server response field; no client UI change is required. Provider
 contexts must receive the updated server instructions to interpret the field.
 

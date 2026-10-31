@@ -145,8 +145,8 @@ export function ChatWorkspaceGrid({ sidebarVisible, terminalOpen, onSidebarToggl
     }}
   />
 
-  return <div className="chat-grid-workspace">
-    <header className="workspace-tabs-bar">
+  return <div className={`chat-grid-workspace${workspaces.length ? '' : ' plain-chat-mode'}`}>
+    {workspaces.length > 0 && <header className="workspace-tabs-bar">
       {!sidebarVisible && <button type="button" className="icon-button" onClick={onSidebarToggle} aria-label={t('chatWorkspace.showSidebar')}><PanelLeft size={16} /></button>}
       <ChatWorkspaceTabs key={JSON.stringify([profileId, profileGeneration, serverIdentity])} />
       <div className="workspace-layout-picker" role="group" aria-label={t('chatWorkspace.layout')}>
@@ -159,7 +159,7 @@ export function ChatWorkspaceGrid({ sidebarVisible, terminalOpen, onSidebarToggl
           {value === 1 ? <Square size={15} /> : value === 2 ? <Columns2 size={15} /> : value === 'columns' ? <Columns3 size={15} /> : value === 4 ? <Grid2X2 size={15} /> : <span className="three-pane-icon" aria-hidden="true"><span /><span /><span /></span>}
         </button>)}
       </div>
-    </header>
+    </header>}
     <div ref={gridRef} className={`workspace-chat-grid chat-split-view${count >= 3 && !threeColumns ? ' short' : ''}`} data-pane-count={count} data-three-pane-layout={threeColumns ? 'columns' : 'split'}
       style={{ '--workspace-column': `${ratios.column}%`, '--workspace-row': `${ratios.row}%`,
         '--workspace-first-column': `${ratios.first}%`, '--workspace-second-column': `${ratios.second}%` } as CSSProperties}>

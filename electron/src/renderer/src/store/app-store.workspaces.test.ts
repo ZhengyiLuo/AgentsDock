@@ -61,7 +61,60 @@ beforeEach(async () => {
   api.timeline.unsubscribe.mockClear()
 })
 
+describe('opt-in chat workspaces', () => {
+  it('does not create a default workspace when starting, selecting chats or reopening', async () => {
+    expect(useAppStore.getState().chatWorkspaces).toEqual([])
+    expect(useAppStore.getState().activeChatWorkspaceId).toBe('')
+    await useAppStore.getState().selectSession('b')
+    useAppStore.getState().setDraftForSession('b', 'keep this draft')
+    expect(useAppStore.getState().chatWorkspaces).toEqual([])
+    await initialize()
+    expect(useAppStore.getState().chatWorkspaces).toEqual([])
+    expect(persisted.get('server-one:chatWorkspaces')).toMatchObject({ enabled: false, workspaces: [] })
+  })
+
+  it('creates the first workspace around the current chat and remembers explicit opt-in', async () => {
+    useAppStore.getState().setDraftForSession('a', 'unfinished')
+    await useAppStore.getState().createChatWorkspace('a')
+    expect(useAppStore.getState().chatWorkspaces).toHaveLength(1)
+    expect(useAppStore.getState()).toMatchObject({ activeChatWorkspaceId: 'workspace-main', selectedSessionId: 'a' })
+    expect(useAppStore.getState().drafts.a).toBe('unfinished')
+    expect(persisted.get('server-one:chatWorkspaces')).toMatchObject({ enabled: true })
+    await initialize()
+    expect(useAppStore.getState().chatWorkspaces).toHaveLength(1)
+    await useAppStore.getState().switchServer('two')
+    expect(useAppStore.getState().chatWorkspaces).toEqual([])
+    await useAppStore.getState().switchServer('one')
+    expect(useAppStore.getState().chatWorkspaces).toHaveLength(1)
+  })
+
+  it('closing the last workspace returns to ordinary chat without deleting the chat or draft', async () => {
+    await useAppStore.getState().createChatWorkspace('a')
+    useAppStore.getState().setDraftForSession('a', 'unfinished')
+    await useAppStore.getState().closeChatWorkspace('workspace-main')
+    expect(useAppStore.getState()).toMatchObject({ chatWorkspaces: [], activeChatWorkspaceId: '', selectedSessionId: 'a', chatPaneCount: 1 })
+    expect(useAppStore.getState().drafts.a).toBe('unfinished')
+    expect(useAppStore.getState().sessions).toEqual(sessions)
+    await initialize()
+    expect(useAppStore.getState().chatWorkspaces).toEqual([])
+  })
+
+  it('migrates only the automatically created single-pane default, preserving the selected chat', async () => {
+    persisted.set('server-one:chatWorkspaces', { activeWorkspaceId: 'workspace-main', workspaces: [{
+      id: 'workspace-main', paneCount: 1, panes: { primary: 'a', secondary: null }, focusedPane: 'primary'
+    }] })
+    await initialize()
+    expect(useAppStore.getState().chatWorkspaces).toEqual([])
+    expect(useAppStore.getState().selectedSessionId).toBe('a')
+  })
+})
+
 describe('tabbed chat workspaces', () => {
+  beforeEach(async () => {
+    await useAppStore.getState().createChatWorkspace()
+    api.timeline.subscribe.mockClear()
+    api.timeline.unsubscribe.mockClear()
+  })
   it('persists reordered workspaces without changing active panes, drafts, files or subscriptions', async () => {
     const first = useAppStore.getState().activeChatWorkspaceId
     for (const id of ['b', 'c', 'd']) await useAppStore.getState().openSessionInSplit(id)
@@ -100,7 +153,7 @@ describe('tabbed chat workspaces', () => {
     expect(api.timeline.cached).not.toHaveBeenCalled()
     expect(api.timeline.open).not.toHaveBeenCalled()
     await useAppStore.getState().switchServer('two')
-    expect(useAppStore.getState().chatWorkspaces.map(workspace => workspace.id)).toEqual(['workspace-main'])
+    expect(useAppStore.getState().chatWorkspaces).toEqual([])
     await useAppStore.getState().switchServer('one')
     expect(useAppStore.getState().chatWorkspaces.map(workspace => workspace.id)).toEqual([third, second, first])
     await initialize()
@@ -177,8 +230,10 @@ describe('tabbed chat workspaces', () => {
     api.timeline.unsubscribe.mockClear()
     api.timeline.subscribe.mockClear()
     await useAppStore.getState().closeChatWorkspace(second)
-    expect(api.timeline.unsubscribe).toHaveBeenCalledExactlyOnceWith('b')
+    expect(api.timeline.unsubscribe).not.toHaveBeenCalled()
     expect(api.timeline.subscribe).not.toHaveBeenCalled()
+    expect(useAppStore.getState().selectedSessionId).toBe('b')
+    expect(useAppStore.getState().chatWorkspaces).toEqual([])
   })
 
   it('returns to an existing workspace and focuses its chat without replacing the departing pane', async () => {
@@ -339,7 +394,7 @@ describe('tabbed chat workspaces', () => {
       threePaneLayout: 'columns', threeColumnRatios: [0.2, 0.8], paneCount: 3
     })
     await useAppStore.getState().switchServer('two')
-    expect(useAppStore.getState().chatWorkspaces[0]).toMatchObject({ threePaneLayout: 'split', threeColumnRatios: [1 / 3, 2 / 3] })
+    expect(useAppStore.getState().chatWorkspaces).toEqual([])
     useAppStore.getState().setChatThreePaneLayout('columns')
     useAppStore.getState().setChatWorkspaceRatios({ threeColumnRatios: [0.4, 0.65] })
     await useAppStore.getState().switchServer('one')
@@ -380,8 +435,8 @@ describe('tabbed chat workspaces', () => {
     expect(useAppStore.getState().activeChatWorkspaceId).toBe(first)
     expect(useAppStore.getState().chatWorkspaces).toHaveLength(1)
     await useAppStore.getState().closeChatWorkspace(first)
-    expect(useAppStore.getState().chatWorkspaces).toHaveLength(1)
-    expect(useAppStore.getState().selectedSessionId).toBeNull()
+    expect(useAppStore.getState().chatWorkspaces).toHaveLength(0)
+    expect(useAppStore.getState().selectedSessionId).toBe('b')
     expect(useAppStore.getState().drafts.a).toBe('draft A')
   })
 
@@ -412,7 +467,7 @@ describe('tabbed chat workspaces', () => {
     useAppStore.getState().setChatPaneCount(3)
     useAppStore.getState().focusChatPane('tertiary')
     await useAppStore.getState().switchServer('two')
-    expect(useAppStore.getState().chatWorkspaces).toHaveLength(1)
+    expect(useAppStore.getState().chatWorkspaces).toHaveLength(0)
     expect(useAppStore.getState().chatPaneCount).toBe(1)
     await useAppStore.getState().createChatWorkspace('e')
     await useAppStore.getState().switchServer('one')

@@ -30,7 +30,6 @@ import {
   Download,
   Eye,
   FileCode2,
-  FileDiff,
   FileImage,
   FilePlus2,
   FileText,
@@ -83,14 +82,11 @@ import { useTransientClose } from '../lib/transient-close'
 import type { CodeMirrorNavigationRequest, CodeMirrorViewState } from './CodeMirrorEditor'
 import { MarkdownContent } from './MarkdownContent'
 import { ShortcutKey } from './ShortcutTooltip'
-import { useWorkspaceGitLabels } from '../lib/workspace-git-labels'
 import './WorkspaceEditor.css'
 
 const LazyCodeMirrorEditor = lazy(() => import('./CodeMirrorEditor').then(module => ({ default: module.CodeMirrorEditor })))
 const LazySafeHtmlMarkdownContent = lazy(() => import('./SafeHtmlMarkdownContent'))
-const LazyWorkspaceChanges = lazy(() => import('./WorkspaceChanges').then(module => ({ default: module.WorkspaceChanges })))
 const MAX_OPEN_TABS = 12
-const CHANGES_TAB_TARGET = '\0workspace-changes'
 // Servers predating the advertised workspace capability enforce 2 MiB. Keep
 // that fallback only when the field is absent; an explicit zero means that a
 // newer server deliberately disabled its ceiling.
@@ -281,6 +277,8 @@ export type WorkspaceReferenceResolution =
 
 export interface WorkspaceEditorProps {
   chatContent: ReactNode
+  /** Replaces the redundant pinned-Chat strip while viewing a conversation. */
+  chatHeader?: ReactNode
   workspaceKey: string
   session: Session
   profileScope: WorkspaceProfileScope | null
@@ -301,6 +299,7 @@ export interface WorkspaceEditorProps {
 
 export function WorkspaceEditor({
   chatContent,
+  chatHeader,
   workspaceKey,
   session,
   profileScope,
@@ -320,12 +319,6 @@ export function WorkspaceEditor({
   useLocale()
   const onFileOpenRef = useRef(onFileOpen)
   onFileOpenRef.current = onFileOpen
-  const gitLabels = useWorkspaceGitLabels()
-  const [changesOpen, setChangesOpen] = useState(false)
-  const [changesVisited, setChangesVisited] = useState(false)
-  const changesOpenRef = useRef(changesOpen)
-  changesOpenRef.current = changesOpen
-  const gitAvailable = Boolean(profileScope && window.agentsDock.workspaceGit && !window.agentsDock.sharedChat)
   const instanceId = useId().replace(/:/g, '')
   const preferenceKey = `workspace-editor:${session.id}`
   const cwd = session.cwd ?? ''
@@ -865,7 +858,6 @@ export function WorkspaceEditor({
 
   const requestOpenPalette = (returnToChatOnCancel = false) => {
     if (!paneOwnershipRef.current.tabbedPane) onActivate?.()
-    setChangesOpen(false)
     if (available !== true) {
       setWorkspaceError(capabilityMessage)
       return
@@ -897,7 +889,6 @@ export function WorkspaceEditor({
       onActivate?.()
       onFileOpenRef.current?.()
     }
-    setChangesOpen(false)
     if (group === 'secondary') {
       secondaryPathRef.current = path
       setSecondaryPath(path)
@@ -912,7 +903,6 @@ export function WorkspaceEditor({
   }
 
   const showChat = (): void => {
-    setChangesOpen(false)
     if (paletteOpenRef.current) cancelPalette()
     activePathRef.current = null
     setActivePath(null)
@@ -920,13 +910,6 @@ export function WorkspaceEditor({
     setActiveGroup('primary')
     setPendingClosePath(null)
     onReturnToChat?.()
-  }
-
-  const showChanges = (): void => {
-    if (paletteOpenRef.current) cancelPalette()
-    changesOpenRef.current = true
-    setChangesVisited(true)
-    setChangesOpen(true)
   }
 
   useEffect(() => {
@@ -987,15 +970,14 @@ export function WorkspaceEditor({
       if (!paneOwnsCommands()) return false
       if (paletteOpen || pendingClosePath || pendingReloadPath || document.querySelector('[aria-modal="true"]')) return false
       const target = workspaceTabNavigationTarget(
-        changesOpenRef.current ? CHANGES_TAB_TARGET : currentFocusedPath(),
-        [...(gitAvailable ? [CHANGES_TAB_TARGET] : []), ...openFilesRef.current.map(file => file.path)],
+        currentFocusedPath(),
+        openFilesRef.current.map(file => file.path),
         { kind: 'cycle', direction }
       )
       if (target === undefined) return false
       referenceRequestSequence.current += 1
       openRequestSequence.current += 1
       if (target === null) showChat()
-      else if (target === CHANGES_TAB_TARGET) showChanges()
       else activateFilePath(target)
       return true
     }
@@ -1008,15 +990,14 @@ export function WorkspaceEditor({
           : (() => {
               if (paletteOpen || pendingClosePath || pendingReloadPath || document.querySelector('[aria-modal="true"]')) return false
               const target = workspaceTabNavigationTarget(
-                changesOpenRef.current ? CHANGES_TAB_TARGET : currentFocusedPath(),
-                [...(gitAvailable ? [CHANGES_TAB_TARGET] : []), ...openFilesRef.current.map(file => file.path)],
+                currentFocusedPath(),
+                openFilesRef.current.map(file => file.path),
                 navigation
               )
               if (target === undefined) return false
               referenceRequestSequence.current += 1
               openRequestSequence.current += 1
               if (target === null) showChat()
-              else if (target === CHANGES_TAB_TARGET) showChanges()
               else activateFilePath(target)
               return true
             })()
@@ -1041,7 +1022,7 @@ export function WorkspaceEditor({
         afterPaneRestoration(() => requestOpenPalette())
         return
       }
-      if (key === 's' && focusedPath && !changesOpenRef.current) {
+      if (key === 's' && focusedPath) {
         event.preventDefault()
         event.stopPropagation()
         void saveFile(focusedPath)
@@ -1057,16 +1038,11 @@ export function WorkspaceEditor({
       window.removeEventListener('keydown', handleShortcut, true)
       window.removeEventListener('agentsdock:navigate-workspace-tab', handleNavigationCommand)
     }
-  }, [available, capabilityMessage, focusedPath, paletteOpen, pendingClosePath, pendingReloadPath, pendingUntitledSave, gitAvailable])
+  }, [available, capabilityMessage, focusedPath, paletteOpen, pendingClosePath, pendingReloadPath, pendingUntitledSave])
 
   useEffect(() => {
     const closeActive = (event: Event) => {
       if (event.defaultPrevented || !paneOwnsCommands()) return
-      if (changesOpenRef.current) {
-        event.preventDefault()
-        showChat()
-        return
-      }
       if (paletteOpenRef.current && fileWorkspaceOwnsFocus()) {
         event.preventDefault()
         cancelPalette()
@@ -3414,7 +3390,7 @@ export function WorkspaceEditor({
   const editorPanelId = `${instanceId}-editor-panel`
   const fileActive = activePath !== null
   const editorOnly = fileActive && (tabbedPane || filePresentation === 'full' || Boolean(onReturnToChat))
-  const splitActive = !tabbedPane && !changesOpen && fileActive && filePresentation === 'split' && !onReturnToChat
+  const splitActive = !tabbedPane && fileActive && filePresentation === 'split' && !onReturnToChat
   const splitStyle = splitActive
     ? { '--workspace-editor-width': `${editorSplit.editorPercent}%` } as CSSProperties
     : undefined
@@ -3474,8 +3450,8 @@ export function WorkspaceEditor({
     key="chat"
     type="button"
     id={chatTabId}
-    className={`workspace-editor-tab workspace-editor-chat-tab${activePath === null && !changesOpen ? ' workspace-editor-tab-active' : ''}`}
-    aria-pressed={activePath === null && !changesOpen}
+    className={`workspace-editor-tab workspace-editor-chat-tab${activePath === null ? ' workspace-editor-tab-active' : ''}`}
+    aria-pressed={activePath === null}
     aria-controls={chatPanelId}
     aria-label={t('editor.chatPinned')}
     title={tabbedPane ? `${t('editor.chat')}: ${session.title}` : t('editor.chat1')}
@@ -3508,18 +3484,10 @@ export function WorkspaceEditor({
     tabList.scrollLeft = nextScrollLeft
   }
   const fileWorkspaceTabs = <div key="files" className="workspace-editor-file-tabs">
-    {gitAvailable && <button
-      type="button"
-      className={`workspace-editor-tab${changesOpen ? ' workspace-editor-tab-active' : ''}`}
-      aria-pressed={changesOpen}
-      aria-controls={`${instanceId}-changes-panel`}
-      title={`${gitLabels.changes} · ⌘2`}
-      onClick={showChanges}
-    ><FileDiff size={13} aria-hidden="true" /><span>{gitLabels.changes}</span></button>}
     <div className="workspace-editor-tab-list" role="tablist" aria-label={t('editor.openFiles')} onWheel={handleFileTabWheel}>
       {openFiles.map((file, index) => {
         const dirty = file.dirty
-        const selected = !changesOpen && file.path === focusedPath
+        const selected = file.path === focusedPath
         const visible = file.path === activePath || file.path === secondaryPath
         const id = `${instanceId}-${pathToken(file.path)}-tab`
         const label = file.name || fileName(file.path)
@@ -3534,7 +3502,7 @@ export function WorkspaceEditor({
             aria-controls={editorPanelId}
             aria-label={label}
             tabIndex={selected || (activePath === null && index === 0) ? 0 : -1}
-            title={index < (gitAvailable ? 7 : 8) ? `${title} · ⌘${index + (gitAvailable ? 3 : 2)}` : title}
+            title={index < 8 ? `${title} · ⌘${index + 2}` : title}
             onKeyDown={handleTabKeyDown}
             onClick={() => {
               if (paletteOpenRef.current) cancelPalette()
@@ -3604,7 +3572,7 @@ export function WorkspaceEditor({
           ariaLabel={t('editor.contentsOf', { name: editorContentLabel(file) })}
           maxBytes={maxEditableFileBytes}
           initialViewState={viewStatesRef.current.get(editorViewStateKey(group, file.path))}
-          navigationRequest={focused && paneOwnsCommands() && activePath !== null && !changesOpen && editorNavigation?.path === file.path ? editorNavigation : undefined}
+          navigationRequest={focused && paneOwnsCommands() && activePath !== null && editorNavigation?.path === file.path ? editorNavigation : undefined}
           onLimitExceeded={() => updateFile(file.path, current => ({
             ...current,
             error: t('editor.editSizeLimit', { size: formatByteSize(maxEditableFileBytes) })
@@ -3964,9 +3932,10 @@ export function WorkspaceEditor({
           }}
         />
     </>, filesHost)}
+    {!filesOnly && (!tabbedPane || paneActive) && !fileActive && chatHeader}
     <nav
       ref={splitTabStripRef}
-      hidden={filesOnly || (tabbedPane && !paneActive)}
+      hidden={filesOnly || (tabbedPane && !paneActive) || Boolean(chatHeader && !fileActive)}
       className={`workspace-editor-tab-strip${tabbedPane ? ' workspace-editor-tabbed-pane' : ''}${splitActive ? ` workspace-editor-tab-strip-split workspace-editor-${editorSplit.side}` : ''}`}
       aria-label={t('editor.workspaceTabs')}
       style={splitStyle}
@@ -3988,15 +3957,9 @@ export function WorkspaceEditor({
         className="workspace-editor-chat-panel"
         role="region"
         aria-labelledby={chatTabId}
-        hidden={editorOnly || changesOpen}
-        inert={tabbedPane && (editorOnly || changesOpen) ? true : undefined}
+        hidden={editorOnly}
+        inert={tabbedPane && editorOnly ? true : undefined}
       >{chatContent}</div>
-
-      {changesVisited && profileScope && <div id={`${instanceId}-changes-panel`} className="workspace-changes-host" hidden={!changesOpen}>
-        <Suspense fallback={<div className="workspace-editor-loading"><LoaderCircle size={17} className="spin" />{gitLabels.loading}</div>}>
-          <LazyWorkspaceChanges scope={profileScope} sessionId={session.id} active={changesOpen} readOnly={Boolean(session.archived)} />
-        </Suspense>
-      </div>}
 
       {splitActive && <div
         className="workspace-editor-split-handle"
@@ -4032,7 +3995,7 @@ export function WorkspaceEditor({
         role="tabpanel"
         tabIndex={-1}
         aria-labelledby={activeFile ? `${instanceId}-${pathToken(activeFile.path)}-tab` : undefined}
-        hidden={activePath === null || changesOpen}
+        hidden={activePath === null}
       >
         <div className={`workspace-editor-editor-groups${secondaryFile ? ' workspace-editor-editor-groups-split' : ''}`}>
           {renderEditorGroup(primaryFile, 'primary')}

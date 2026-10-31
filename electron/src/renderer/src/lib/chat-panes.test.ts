@@ -11,6 +11,22 @@ const split: ChatPaneLayout = {
 }
 
 describe('chat pane layout', () => {
+  it.each([
+    { enabled: undefined, id: 'workspace-main', title: undefined, paneCount: 1, secondary: null, expected: 0 },
+    { enabled: true, id: 'workspace-main', title: undefined, paneCount: 1, secondary: null, expected: 1 },
+    { enabled: undefined, id: 'workspace-main', title: 'Research', paneCount: 1, secondary: null, expected: 1 },
+    { enabled: undefined, id: 'created-id', title: undefined, paneCount: 1, secondary: null, expected: 1 },
+    { enabled: undefined, id: 'workspace-main', title: undefined, paneCount: 2, secondary: 'b', expected: 1 },
+    { enabled: undefined, id: 'workspace-main', title: undefined, paneCount: 1, secondary: 'b', expected: 1 }
+  ])('preserves explicit and customized workspaces during migration: $id $title $enabled $paneCount $secondary', data => {
+    const result = parseChatWorkspaces({ enabled: data.enabled, activeWorkspaceId: data.id, workspaces: [{
+      id: data.id, title: data.title, paneCount: data.paneCount, focusedPane: 'primary',
+      panes: { primary: 'a', secondary: data.secondary }
+    }] }, new Set(['a', 'b']))!
+    expect(result.workspaces).toHaveLength(data.expected)
+    expect(result.enabled).toBe(data.expected > 0)
+  })
+
   it('keeps session IDs distinct and focuses an already visible chat', () => {
     expect(selectChatInPane(split, 'chat-a', 'secondary')).toEqual({
       panes: split.panes,
@@ -111,7 +127,7 @@ describe('chat pane layout', () => {
       paneCount: 3, focusedPane: 'tertiary', columnRatio: 0.55, rowRatio: 0.45,
       threePaneLayout: 'columns', threeColumnRatios: [0.25, 0.7]
     }
-    const stored = { activeWorkspaceId: workspace.id, workspaces: [workspace] }
+    const stored = { enabled: true, activeWorkspaceId: workspace.id, workspaces: [workspace] }
     expect(parseChatWorkspaces(JSON.parse(JSON.stringify(stored)), new Set(['a', 'b', 'c', 'd']))).toEqual(stored)
     const metadata = { threePaneLayout: 'columns', threeColumnRatios: [0.25, 0.7] }
     expect(closeChatPane(workspace, 'secondary')).toMatchObject(metadata)
