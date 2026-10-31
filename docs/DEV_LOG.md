@@ -17,6 +17,12 @@
   the full desktop test suite and release-tooling Node/Python checks. Focused
   server merge checks pass after isolating inherited service selectors in the
   local test process. Native package and hosted source checks remain pending.
+- Hosted source CI and all eight canonical server shards passed. The separate
+  signing gate exposed a read-only preparation test comparing access timestamps;
+  its own file/link reads can change those timestamps. Compare contents and
+  exact inode, ownership, mode, size, link count and nanosecond write timestamps
+  instead. Runtime behavior is unchanged; rerun the signing gate from the new
+  committed test source before accepting any package.
 - See [candidate notes](RELEASE_1.0.12-beta.1.md) for public changes and the
   known idle Codex goal-resume limitation. Package and native acceptance remain
   pending; this entry records preparation, not publication or deployment.
