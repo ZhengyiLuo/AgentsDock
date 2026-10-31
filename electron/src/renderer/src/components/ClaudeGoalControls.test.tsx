@@ -169,6 +169,8 @@ describe('Claude native goals', () => {
     expect(screen.queryByRole('region', { name: 'Claude goal' })).not.toBeInTheDocument()
     expect(screen.getByText('The requested condition is impossible.')).toBeInTheDocument()
     expect(screen.getByText('00:45')).toBeInTheDocument()
+    // The verdict renders before the effect hydrates the editable condition.
+    await waitFor(() => expect(screen.getByRole('textbox', { name: 'Completion condition' })).toHaveValue(active.goal!.condition))
     expect(screen.getByRole('button', { name: 'Start goal' })).toBeEnabled()
     expect(screen.queryByRole('button', { name: 'Clear goal' })).not.toBeInTheDocument()
   })

@@ -3,8 +3,8 @@
 ## 2026-10-31 - Local review of activation diagnostics and runtime reliability
 
 - Integrate PRs #122, #112 and #111 on the previously accepted #134 preview,
-  retaining their original commits and contributor attribution. This remains
-  a local review branch, not a merged release. The earlier #123 changes are
+  retaining their original commits and contributor attribution. The combined
+  review is PR #135, not a published release. The earlier #123 changes are
   already included in that baseline and were not applied again.
 - Split-service activation failures identify the failed boundary and unsafe
   recovery-interpreter requirement without relaxing trust checks. Update the
@@ -34,6 +34,14 @@
   were disabled. Full installed-version upgrade/rollback, native Linux/Windows
   UI, and long-duration resource-load acceptance were not repeated. No release
   publication or production-service update is included.
+- Additional acceptance: all 5,727 desktop tests (five skipped), eight
+  packaging/license guards, TypeScript and production compilation pass.
+  Correct an older durability regression's script-block extraction and wait
+  for the goal editor's asynchronous hydration in its button assertion; both
+  failures reproduced in hosted CI. The 41 durability/activation tests pass.
+  Native Codex and Claude runs complete concurrently; a busy follow-up appears
+  in the queue and is delivered once. Switching chats and reloading preserves
+  an unsent draft without restoring a stale error banner.
 
 ## 2026-10-31 - Inline workspace-file naming and temporary empty buffers
 
