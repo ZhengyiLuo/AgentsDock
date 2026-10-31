@@ -10,7 +10,7 @@ import {
   type AndroidUpdaterNativeState,
 } from 'agentsdock-android-updater'
 import {
-  ANDROID_RELEASES_API_URL,
+  loadAndroidReleaseHistory,
   ANDROID_UPDATE_CHECK_INTERVAL_MS,
   cachedAndroidUpdate,
   latestAndroidUpdate,
@@ -92,7 +92,7 @@ export const useAndroidUpdaterStore = create<AndroidUpdaterState>((set, get) => 
       }
       set({ stage: 'checking', error: null })
       try {
-        const releases = await fetchJson(ANDROID_RELEASES_API_URL, 2_000_000)
+        const releases = await loadAndroidReleaseHistory(url => fetchJson(url, 2_000_000))
         const update = await latestAndroidUpdate(
           releases,
           nativeState.versionCode,
@@ -107,7 +107,7 @@ export const useAndroidUpdaterStore = create<AndroidUpdaterState>((set, get) => 
         set({ stage: update ? 'available' : 'up-to-date', update, error: null })
       } catch (error) {
         persistedState = {
-          checkedAt: now,
+          checkedAt: 0,
           update: cached,
           dismissedVersionCode: persistedState.dismissedVersionCode,
         }

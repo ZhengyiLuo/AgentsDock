@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { ActivityIndicator, Pressable, StyleSheet, View } from 'react-native'
-import { Circle, CircleCheck, Code2, RefreshCw, Sparkles } from 'lucide-react-native'
+import { Circle, CircleCheck, RefreshCw } from 'lucide-react-native'
 import { SETTINGS_AGENTS, settingsAgentAvailable } from '../lib/settings-agents'
 import { customProviderAvailable, customProviderSupported } from '../lib/provider-selection'
 import { useAppStore } from '../store/useAppStore'
@@ -58,10 +58,10 @@ function ScopedMyAgentsSettings() {
       const apiAvailable = connected && !failed && customProviderAvailable(health, runtime, agent.id)
       return <View key={agent.id} testID={`settings-agent-${agent.id}`} style={[styles.row, { borderColor: colors.border }]}>
         <View style={styles.agentHeader}>
-          <View style={[styles.mark, !available && !apiAvailable && { opacity: 0.4 }]}>{agent.id === 'opencode' ? <Code2 size={22} color={colors.text} /> : agent.id === 'gemini' ? <Sparkles size={22} color={colors.text} /> : <BackendMark backend={agent.id} size={22} />}</View>
+          <View style={[styles.mark, !available && !apiAvailable && { opacity: 0.4 }]}><BackendMark backend={agent.id} size={22} /></View>
           <Text style={[styles.name, { color: available || apiAvailable ? colors.text : colors.muted }]}>{agent.name}</Text>
         </View>
-        <ConnectionStatus testID={`settings-agent-${agent.id}-native`} name="Native" available={available} />
+        {agent.id !== 'gemini' ? <ConnectionStatus testID={`settings-agent-${agent.id}-native`} name="Native" available={available} /> : null}
         {configured ? <ConnectionStatus testID={`settings-agent-${agent.id}-custom`} name="Custom API" available={apiAvailable} /> : null}
       </View>
     })}</View>

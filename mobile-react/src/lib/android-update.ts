@@ -43,6 +43,19 @@ interface GitHubRelease {
 
 export type AndroidUpdateManifestLoader = (url: string) => Promise<unknown>
 
+export async function loadAndroidReleaseHistory(loadPage: AndroidUpdateManifestLoader): Promise<unknown[]> {
+  const releases: unknown[] = []
+  // Desktop and Android share a release repository. A single page can omit
+  // Android updates; fail explicitly rather than claiming an incomplete scan is current.
+  for (let page = 1; page <= 5; page++) {
+    const rows = await loadPage(`${ANDROID_RELEASES_API_URL}&page=${page}`)
+    if (!Array.isArray(rows) || rows.length > 100) throw new Error('Invalid Android release history')
+    releases.push(...rows)
+    if (rows.length < 100) return releases
+  }
+  throw new Error('Could not check the complete Android release history. Open the downloads page for the latest APK.')
+}
+
 export async function latestAndroidUpdate(
   releasesValue: unknown,
   currentVersionCode: number,

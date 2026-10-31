@@ -40,6 +40,19 @@ assert(queue.map(turn => turn.queued_id).join(',') === 'first', 'a promoted turn
 queue = updateQueuedTurns(queue, event('turn_queue_run_now', { queued_id: 'first' }))
 assert(queue.length === 0, 'a run-now acknowledgement must remove the promoted turn before turn_started arrives')
 
+const held: QueuedTurn = { queued_id: 'held', session_id: 'chat-1', prompt: 'Keep this request', file_ids: ['attachment-1'], promoted: true }
+const uncertain: QueuedTurn = { ...held, queued_id: 'uncertain', paused: true, pause_reason: 'delivery_uncertain' }
+const untouched: QueuedTurn = { ...held, queued_id: 'untouched' }
+const paused = updateQueuedTurns([held, uncertain, untouched], event('turn_queue_paused', { queued_ids: ['held', 'uncertain'] }))
+assert(paused[0].paused === true && paused[0].promoted === false, 'a bulk Stop must clear promotion and hold the matching row')
+assert(paused[0].pause_reason === 'stopped', 'a Stop hold must have the ordinary paused label')
+assert(paused[0].prompt === held.prompt && paused[0].file_ids === held.file_ids, 'Stop must preserve the queued text and attachments')
+assert(paused[1].pause_reason === 'delivery_uncertain' && paused[1].promoted === false, 'Stop must not erase an existing delivery-uncertainty fence')
+assert(paused[2] === untouched, 'Stop must not mutate unrelated queued messages')
+assert(updateQueuedTurns(paused, event('turn_queue_paused', { queued_ids: ['held', 'uncertain'] })) === paused, 'replayed Stop events must be idempotent')
+const singularPause = updateQueuedTurns([held], event('turn_queue_paused', { queued_id: 'held' }))
+assert(singularPause[0].paused === true && singularPause[0].promoted === false, 'legacy single-item Stop events must remain supported')
+
 queue = updateQueuedTurns(queue, event('turn_queue_delivery_fenced', {
   queued_id: 'first',
   prompt: 'Visible retry',
@@ -53,6 +66,7 @@ assert(queue[0]?.queued_id === 'first', 'a durable native-delivery fence must re
 assert(queue[0]?.prompt === 'Visible retry', 'a durable native-delivery fence must preserve the user-facing prompt')
 assert(queue[0]?.file_ids[0] === 'visible-file', 'a durable native-delivery fence must preserve visible attachments')
 assert(queue[0]?.model === 'gpt-5.4' && queue[0]?.effort === 'high', 'a durable native-delivery fence must preserve runtime choices')
+assert(queue[0]?.paused === true && queue[0]?.promoted === false && queue[0]?.pause_reason === 'delivery_uncertain', 'a durable delivery fence must restore a held, non-starting row even without redundant flags')
 
 const digest = updateQueuedTurns([], event('turn_queued', { queued_id: 'digest', purpose: 'handoff_digest', prompt: 'Digest' }))[0]
 assert(!isUserQueuedTurn(digest), 'handoff digest work must stay out of the user queue shelf')

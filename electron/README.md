@@ -121,6 +121,11 @@ offline servers fall back to the saved single address. Sharing does not switch
 the active server. The active card also contains restart controls.
 Persistent goals have no server-wide Settings toggle. Updated servers keep the
 capability available by default; each chat retains its own goal controls.
+With a matching server, Claude goals can be set or replaced during current
+work. The app shows the pending request until Claude applies it at its next
+native boundary; setting a goal does not interrupt the current tool or agents.
+Native refusals remain visible and leave the completion condition available
+for retry.
 The camera-enabled mobile app can scan it from **Servers > Add Server > Scan QR
 code** and authenticates before saving. Older mobile builds need an app update.
 The image does not make a loopback-only server reachable from a phone. See
@@ -128,6 +133,14 @@ The image does not make a loopback-only server reachable from a phone. See
 format and remaining acceptance checks.
 
 <a id="opencode-optional-beta-backend"></a>
+
+## Chat inbox instructions
+
+Expand a sender's inbox group and choose **Edit and send** on a read or unread
+message to place its complete text in that chat's composer. Existing draft text
+and attachments stay in place. Review or change the text, then use the normal
+Send button to issue it as your own instruction. The received message and its
+original sender metadata remain preserved.
 
 ## OpenCode
 
@@ -180,11 +193,19 @@ older history loads on upward navigation. Failed refreshes retain the cache.
 Incoming events are coalesced to one renderer publish per animation frame.
 Timeline rows are virtualized with stable semantic keys.
 
-The chat sidebar temporarily groups unread and running chats above ordinary
-folders, with a blue dot for Unread and green for Running. Running takes
-precedence while a turn is active. Chats appear only once; their saved folder
-and pinned state are unchanged. Reading a completed chat returns it to its
-ordinary section, and empty status groups disappear. Groups and folders use
+Settings → General has three sidebar switches, remembered locally per server:
+**Unread chats at the top** (on), **Include cron jobs in Unread** (off), and
+**Show Running section** (on). Turning a section off leaves its chats in their
+saved folders or pins, with unread and activity indicators intact. Active chats
+never move into Unread while Running is hidden. Cron-only unread output stays
+in its folder by default; an unread ordinary reply still promotes the chat even
+if a later cron result arrives. Explicit **Mark unread** also promotes it.
+Cron attribution requires the matching server change; older servers or pending
+history recovery retain ordinary unread grouping until provenance is known.
+
+Chats appear only once; their saved folder and pinned state are unchanged.
+Reading a completed chat returns it to its ordinary section, and empty status
+groups disappear. Groups and folders use
 right-aligned collapse arrows. Status collapse state lasts within the current
 workspace, and next/previous-chat shortcuts follow the visible group order.
 Pinned also collapses, remembers its state per server across reopening, and
@@ -206,8 +227,29 @@ that preference. Opening or selecting a file tab (including attachment and
 image/PDF previews) automatically opens the right panel on Files. Cancelling
 the file picker does not change the panel. In split chat, Files follows the focused chat and browsing
 does not cover the conversations until a file editor or dialog is needed.
+Opening a file waits for saved editor tabs to restore, so the requested file
+becomes selected instead of leaving the split-chat return screen visible.
+TIFF attachments and workspace images use a PNG preview of the first page in
+the desktop media viewer; downloading or opening the original keeps the TIFF
+file unchanged. Preview decoding runs outside the app's main thread.
 
-Chat remains the pinned default tab. Use `Cmd+O` to search
+Workspace layouts are opt-in: ordinary chats show their title and folder on
+the first line, with a copyable provider session ID beneath. **Create workspace**
+is an icon button beside Scheduled jobs and Terminal, creating the first default
+workspace and revealing the global workspace/layout bar. Existing named and multi-pane workspaces are retained;
+the old automatically created single-chat default is not treated as opt-in.
+Closing the last workspace returns to ordinary chat without deleting its chat
+or draft. These layouts are local, server-scoped preferences, not new folders
+on disk and not changes to a chat's working directory.
+
+Workspace chat headers stay compact: title, copyable session ID and actions on
+one line, without a folder chip. Use the chat menu's **Change folder** submenu
+to pick a saved folder; the current folder is checked. Folder changes affect
+that chat's sidebar grouping, not its working directory or other panes.
+
+The redundant pinned Chat/file strip is hidden while viewing a conversation.
+When a file is open, its tabs and the Chat return button remain available.
+Use the header's Open file button or `Cmd+O` to search
 and open a UTF-8 source file, switch explicitly from read-only to edit mode,
 and save with `Cmd+S`; `Shift+Cmd+O` remains the attachment picker. Syntax
 support is loaded only after a file opens, clean inactive files are evicted
@@ -215,19 +257,10 @@ from memory, and revision-checked saves prevent overwriting agent changes.
 Files above 512 KiB use a lightweight read-only text viewer instead of the
 syntax parser so opening source never competes with the chat renderer.
 
-The **Changes** tab reviews the selected workspace's entire Git worktree, not
-only changes attributed to an agent turn. Open it to inspect staged, unstaged,
-untracked and conflicted files; stage/unstage whole files; review and commit the
-staged set; or resolve text conflicts before continuing an existing merge or
-rebase. Abort requires confirmation. Git reads happen only on opening the tab,
-explicit refresh, file selection and action reconciliation—there is no polling.
-Repository revisions fence mutations against changes made by other agents or
-editors. This requires matching standalone AgentsServer Git endpoints and the
-native operator connection; shared-chat web guests have no Git controls.
-
-This first cut does not create branches/merges, push, or manage PRs/MRs. Binary
-conflicts and repositories requiring executable Git hooks/custom filters may
-need the terminal; the app reports that rather than bypassing repository policy.
+The **Changes** entry has been removed from this surface, including workspace
+mode. The underlying Git APIs and component are retained but are not exposed
+by the chat/file tab strip. `Cmd+1` returns to Chat and `Cmd+2` selects the first
+open file; there is no hidden Changes tab in keyboard navigation.
 
 See [FEATURE_PARITY.md](FEATURE_PARITY.md) for the implementation contract and
 verification status.

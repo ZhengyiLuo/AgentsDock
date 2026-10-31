@@ -56,7 +56,7 @@ class CandidateExtractionTests(unittest.TestCase):
             extract(self.receipt, self.receipt_hash, archive, digest, output)
 
     def test_reviewed_stable_has_exact_stable_inventory_and_remains_nonpublishing(self):
-        for version in ("1.0.9", "1.0.10"):
+        for version in ("1.0.9", "1.0.10", "1.0.11"):
             self.make_fixture(version)
             archive, digest = self.archive()
             output = self.root / f"stable-output-{version}"
@@ -66,7 +66,7 @@ class CandidateExtractionTests(unittest.TestCase):
             self.assertIs(json.loads(self.receipt.read_bytes())["publicationEligible"], False)
 
     def test_other_stable_versions_wrong_tracks_and_publishing_receipts_fail_before_extraction(self):
-        for version, changes in [("1.0.8", {}), ("1.0.11", {}), ("1.0.10+local", {}), ("1.0.10", {"track": "beta"}),
+        for version, changes in [("1.0.8", {}), ("1.0.12", {}), ("1.0.11", {"track": "beta"}), ("1.0.11", {"publicationEligible": True}), ("1.0.10+local", {}), ("1.0.10", {"track": "beta"}),
                                  ("1.0.10", {"publicationEligible": True}), ("1.0.9", {"track": "beta"}),
                                  ("1.0.8-beta.5", {"track": "stable"}), ("1.0.9", {"publicationEligible": True}),
                                  ("1.0.9", {"track": None})]:

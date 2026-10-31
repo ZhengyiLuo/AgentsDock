@@ -1,3 +1,4 @@
+import { isQueuedTurnStarting } from '@shared/queue'
 import type { Event, Health, QueuedRunNowResponse, QueuedTurn } from '@shared/types'
 import { isImportedHistoryRecord, isImportedProviderControlMetadata } from '@shared/provider-origin'
 
@@ -151,7 +152,7 @@ export function exactQueuedDeliveryReorderAvailable(health: Health | null | unde
 }
 
 export function isReorderableQueuedTurn(turn: QueuedTurn, mixedReorder = false): boolean {
-  return turn.promoted !== true && isVisibleQueuedTurn(turn) && (mixedReorder || !isImmutableQueuedTurn(turn))
+  return !isQueuedTurnStarting(turn) && isVisibleQueuedTurn(turn) && (mixedReorder || !isImmutableQueuedTurn(turn))
 }
 
 /** Stable server queue order, with transient positionless rows kept at the end. */
@@ -200,7 +201,7 @@ export function queuedTurnCrossChatFence(
   const index = ordered.findIndex(turn => turn.queued_id === queuedId)
   if (index < 0) return { runNow: false, moveEarlier: false, moveLater: false }
   return {
-    runNow: ordered.slice(0, index).some(turn => turn.promoted === true
+    runNow: ordered.slice(0, index).some(turn => isQueuedTurnStarting(turn)
       || (!asyncControls && isImmutableQueuedTurn(turn))),
     moveEarlier: index > 0 && !isReorderableQueuedTurn(ordered[index - 1], mixedReorder),
     moveLater: index + 1 < ordered.length && !isReorderableQueuedTurn(ordered[index + 1], mixedReorder)
@@ -275,7 +276,7 @@ async function performSteerQueuedTurn(
   const turns = await abortable(window.agentsDock.queue.list(sessionId), signal)
   return result?.deferred === true
     ? turns
-    : turns.filter(turn => turn.queued_id !== queuedId || turn.promoted === true)
+    : turns.filter(turn => turn.queued_id !== queuedId || turn.promoted === true || turn.paused === true)
 }
 
 export function steerQueuedTurn(
@@ -323,7 +324,7 @@ export async function steerFirstQueuedTurn(
   if (pending) return { steered: false, turns: await pending.promise }
 
   const turns = await window.agentsDock.queue.list(scope.sessionId)
-  if (turns.some(turn => turn.promoted === true)) return { steered: false, turns }
+  if (turns.some(isQueuedTurnStarting)) return { steered: false, turns }
   const first = queuedTurnsInPositionOrder(turns).find(turn => isUserQueuedTurn(turn)
     || (asyncControls && isAsyncAgentQueuedTurn(turn)))
 

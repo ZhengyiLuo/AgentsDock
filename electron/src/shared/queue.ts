@@ -3,6 +3,11 @@ import { isImportedProviderControlMetadata } from './provider-origin'
 import { isNativeGoalSteerEvent } from './semantic-timeline'
 import { isSharedChatCollaborator } from './chat-shares'
 
+/** A durable hold supersedes promotion, including snapshots from older servers. */
+export function isQueuedTurnStarting(turn: Pick<QueuedTurn, 'promoted' | 'paused'>): boolean {
+  return turn.promoted === true && turn.paused !== true
+}
+
 export function updateQueuedTurns(current: QueuedTurn[], event: Event): QueuedTurn[] {
   if (isImportedProviderControlMetadata(event)) return current
   if (event.type === 'turn_queued' && event.queued_id) {
@@ -63,7 +68,7 @@ export function updateQueuedTurns(current: QueuedTurn[], event: Event): QueuedTu
       created_at: event.ts,
       paused: true,
       pause_reason: 'delivery_uncertain',
-      promoted: event.promoted === true,
+      promoted: false,
       ...asyncQueuedMessageProjection(event, current.find(turn => turn.queued_id === event.queued_id))
     }
     return [...current.filter(turn => turn.queued_id !== next.queued_id), next].sort(queueSort)
@@ -75,10 +80,11 @@ export function updateQueuedTurns(current: QueuedTurn[], event: Event): QueuedTu
     const next = current.map(turn => {
       if (
         !pausedIds.has(turn.queued_id)
-        || (turn.paused === true && (turn.pause_reason === 'stopped' || turn.pause_reason === 'delivery_uncertain'))
+        || (turn.promoted !== true && turn.paused === true && (turn.pause_reason === 'stopped' || turn.pause_reason === 'delivery_uncertain'))
       ) return turn
       changed = true
-      return { ...turn, paused: true, pause_reason: 'stopped' as const }
+      return { ...turn, promoted: false, paused: true,
+        pause_reason: turn.pause_reason === 'delivery_uncertain' ? 'delivery_uncertain' as const : 'stopped' as const }
     })
     return changed ? next : current
   }

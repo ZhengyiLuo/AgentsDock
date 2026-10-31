@@ -6,6 +6,7 @@ import {
   androidUpdateManifest,
   cachedAndroidUpdate,
   latestAndroidUpdate,
+  loadAndroidReleaseHistory,
   safeReleaseDownloadUrl,
   updateDownloadPercent,
 } from './android-update'
@@ -27,6 +28,22 @@ function assertThrows(callback: () => unknown, pattern: RegExp): void {
 }
 
 const sha = 'a'.repeat(64)
+const pageRequests: string[] = []
+const paged = await loadAndroidReleaseHistory(async url => {
+  pageRequests.push(url)
+  return pageRequests.length === 1 ? Array.from({ length: 100 }, (_, index) => ({ tag_name: `desktop-${index}` })) : [{ tag_name: 'android-v0.1.1-beta.8' }]
+})
+assertEqual(paged.length, 101)
+assertEqual(pageRequests.length, 2)
+assertEqual(pageRequests[1], `${ANDROID_RELEASES_API_URL}&page=2`)
+let boundedReads = 0
+try {
+  await loadAndroidReleaseHistory(async () => { boundedReads++; return Array(100).fill({}) })
+  throw new Error('Expected incomplete history to fail')
+} catch (error) {
+  assert(/complete Android release history/.test(String(error)), 'Incomplete history must not mean up-to-date')
+}
+assertEqual(boundedReads, 5)
 assertEqual(
   ANDROID_RELEASES_API_URL,
   'https://api.github.com/repos/ZhengyiLuo/AgentsDock-Releases/releases?per_page=100',

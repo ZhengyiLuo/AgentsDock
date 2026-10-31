@@ -79,7 +79,7 @@ test('chat rows have press feedback but no selected background or blue rail', ()
 
 test('provider requests waiting for the user are unmistakable without polling', () => {
   assert.match(source, /waiting \? `\$\{runtimeSummary\(session, t\)\} · \$\{t\('waiting for you'\)\}`/)
-  assert.match(source, /const waitingProviderName = session\.backend === 'claude' \? 'Claude' : 'Codex'/)
+  assert.match(source, /const waitingProviderName = session\.backend === 'gemini' \? 'Gemini' : session\.backend === 'claude' \? 'Claude' : 'Codex'/)
   assert.match(source, /accessibilityLabel=\{`\$\{pendingInteractionCount\} \$\{waitingProviderName\} \$\{pendingInteractionCount === 1 \? 'request' : 'requests'\} waiting for you`\}/)
   assert.match(source, /style=\{\[styles\.waitingBadge, \{ backgroundColor: colors\.pink \}\]\}/)
   assert.doesNotMatch(source, /setInterval|setTimeout\([^)]*codex|pollCodex/i)

@@ -34,8 +34,25 @@ test('old servers retain native choices but cannot admit a custom selection', ()
   assert.equal(customProviderAvailable(health, runtime, 'cursor'), false)
 })
 
+test('stale native credentials do not override a confirmed unavailable CLI; API availability stays independent', () => {
+  const current: Health = { ...health, capabilities: { ...health.capabilities, cursor_backend: { version: 2, available: true } } }
+  for (const backend of ['claude', 'codex', 'cursor']) {
+    for (const status of ['missing', 'unauthenticated', 'error'] as const) {
+      const catalog: RuntimeCatalog = { backends: { [backend]: { models: [], efforts: [], available: true,
+        native_credentials_present: true, diagnostic: { backend, status, available: false }, custom_provider: custom } } }
+      assert.equal(nativeProviderAvailable(current, catalog, backend), false)
+      assert.equal(selectableChatBackendChoices(current, catalog).includes(backend as 'claude'), false)
+      if (backend !== 'cursor') assert.equal(customProviderAvailable(current, catalog, backend), true)
+    }
+  }
+  const failedTurn: RuntimeCatalog = { backends: { claude: { models: [], efforts: [], available: true,
+    native_credentials_present: true, diagnostic: { backend: 'claude', status: 'ready', available: true,
+      authenticated: true, last_error: 'An individual task failed' } } } }
+  assert.equal(nativeProviderAvailable(current, failedTurn, 'claude'), true)
+})
+
 test('Cursor-issued API credentials are selectable independently of native Cursor login', () => {
-  const cursorHealth: Health = { ...health, capabilities: { ...health.capabilities, cursor_backend: { available: true, version: 2 } } }
+  const cursorHealth: Health = { ...health, capabilities: { ...health.capabilities, provider_connections_v1: { per_chat: true, backends: ['claude', 'opencode', 'cursor'] }, cursor_backend: { available: true, version: 2 } } }
   const cursorRuntime: RuntimeCatalog = { backends: { ...runtime.backends, cursor: { native_credentials_present: false, models: [], efforts: [], custom_provider: { ...custom, model: 'auto' } } } }
   assert.equal(nativeProviderAvailable(cursorHealth, cursorRuntime, 'cursor'), false)
   assert.equal(customProviderAvailable(cursorHealth, cursorRuntime, 'cursor'), true)
@@ -62,7 +79,7 @@ test('existing API chats can ask the server to run after removal; new API choice
 })
 
 test('workspace preferences retain API selection without storing credentials or leaking modes across agents', () => {
-  for (const choice of ['codex-custom', 'claude-custom', 'cursor-custom'] as const) {
+  for (const choice of ['codex-custom', 'claude-custom', 'cursor-custom', 'opencode-custom', 'gemini-custom'] as const) {
     const saved = normalizeWorkspacePreferences({ chatDefaults: { ...chatBackendSelection(choice), model: 'api-model', api_key: 'not-a-real-key' } }).chatDefaults!
     assert.equal(chatBackendChoice(saved), choice)
     assert.equal(saved.model, 'api-model')
@@ -70,4 +87,26 @@ test('workspace preferences retain API selection without storing credentials or 
   }
   const native = normalizeWorkspacePreferences({ chatDefaults: { backend: 'cursor', codex_provider: 'custom', provider_connection: 'default' } }).chatDefaults!
   assert.equal(chatBackendChoice(native), 'cursor')
+})
+
+test('optional agents require server contracts; OpenCode free models do not require a login', () => {
+  const current: Health = { ok: true, capabilities: {
+    opencode_backend: { available: true, version: 1 },
+    gemini_backend: { available: true, version: 1, client_capability: 'gemini_acp_v1' },
+    provider_connections_v1: { per_chat: true, backends: ['opencode', 'gemini'] },
+  } }
+  const catalog: RuntimeCatalog = { backends: {
+    opencode: { models: [], efforts: [], available: true, native_credentials_present: false, custom_provider: custom },
+    gemini: { models: [], efforts: [], available: false, native_credentials_present: true, custom_provider: custom },
+  } }
+  assert.deepEqual(selectableChatBackendChoices(current, catalog), ['claude', 'codex', 'opencode', 'opencode-custom', 'gemini-custom'])
+  assert.equal(chatBackendLabel('opencode'), 'OpenCode')
+  assert.equal(chatBackendLabel('gemini-custom'), 'Gemini - Custom API')
+  for (const choice of ['opencode', 'opencode-custom', 'gemini-custom'] as const) assert.equal(chatBackendChoice(chatBackendSelection(choice)), choice)
+  assert.equal(nativeProviderAvailable(current, catalog, 'gemini'), false)
+  assert.equal(nativeProviderAvailable(current, catalog, 'opencode'), true)
+  assert.equal(providerSelectionError(current, catalog, chatBackendSelection('gemini-custom'), true), null)
+  assert.match(providerSelectionError({ ok: true }, catalog, chatBackendSelection('gemini-custom'))!, /Update AgentsServer/)
+  assert.deepEqual(selectableChatBackendChoices({ ok: true }, catalog), ['claude', 'codex'])
+  assert.equal(selectableChatBackendChoices(current, null).includes('opencode'), false)
 })

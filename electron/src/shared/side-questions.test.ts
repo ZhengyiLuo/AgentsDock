@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { parseSideQuestionAnswer, parseSyncedSideChat, sideChatRuntimeSettingsAvailable, sideQuestionsAvailable, validateSideQuestionInput, type SideQuestionInput } from './side-questions'
+import { sideQuestionLimit, parseSideQuestionAnswer, parseSyncedSideChat, sideChatRuntimeSettingsAvailable, sideQuestionsAvailable, validateSideQuestionInput, type SideQuestionInput } from './side-questions'
 
 const input = { request_id: 'side-a', question: 'Why?' }
 const history = [{ role: 'user' as const, text: ' First question\n' }, { role: 'assistant' as const, text: 'First answer.' }]
@@ -34,6 +34,21 @@ describe('side chat input validation', () => {
     expect(sideChatRuntimeSettingsAvailable(health, 'claude')).toBe(false)
     expect(sideChatRuntimeSettingsAvailable({ ...health, capabilities: { side_questions: { ...capability, runtime_settings: undefined } } }, 'codex')).toBe(false)
   })
+
+  it('honors larger server limits through desktop validation and retains older server compatibility', () => {
+    const capability = { available: true, version: 2, native_context: true,
+      backends: ['codex' as const], max_question_chars: 512 * 1024 }
+    const health = { ok: true, capabilities: { side_questions: capability } }
+    const question = 'Context for this side question.\n'.repeat(1000)
+    expect(sideQuestionLimit(health)).toBe(512 * 1024)
+    expect(validateSideQuestionInput({ ...input, question }, sideQuestionLimit(health)).question).toBe(question.trim())
+    // Main-process validation uses the default before forwarding HTTP.
+    expect(validateSideQuestionInput({ ...input, question }).question).toBe(question.trim())
+    const olderHealth = { ...health, capabilities: { side_questions: { ...capability, max_question_chars: 8000 } } }
+    expect(sideQuestionLimit(olderHealth)).toBe(8000)
+    expect(() => validateSideQuestionInput({ ...input, question }, sideQuestionLimit(olderHealth))).toThrow('side_question_invalid_question')
+  })
+
   it('preserves the native conversation identity and preceding accepted request', () => {
     const native = { ...input, side_chat_id: 'side-chat-a', after_request_id: 'previous-a' }
     expect(validateSideQuestionInput(native)).toEqual(native)

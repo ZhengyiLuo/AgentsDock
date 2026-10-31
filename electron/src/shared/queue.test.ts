@@ -110,3 +110,34 @@ describe('streamed async queued message bodies', () => {
     expect(ordinary[0].message_body).toBeUndefined()
   })
 })
+
+
+describe('Stop during queued handoff', () => {
+  it('clears Starting on a durable pause and permits an explicit retry', () => {
+    const promoted = updateQueuedTurns(queue, {
+      ...interruption, imported: false, type: 'turn_queue_run_now',
+      queued_id: 'queued-1', superseded_queued_ids: []
+    })
+    expect(promoted[0]).toMatchObject({ promoted: true, paused: false })
+    const stopped = updateQueuedTurns(promoted, {
+      ...interruption, imported: false, type: 'turn_queue_paused', queued_ids: ['queued-1']
+    })
+    expect(stopped[0]).toMatchObject({ promoted: false, paused: true, pause_reason: 'stopped' })
+    expect(stopped[1]).toBe(promoted[1])
+    expect(updateQueuedTurns(stopped, {
+      ...interruption, imported: false, type: 'turn_queue_run_now',
+      queued_id: 'queued-1', superseded_queued_ids: []
+    })[0]).toMatchObject({ promoted: true, paused: false, pause_reason: null })
+  })
+
+  it('repairs an already paused Starting row without clearing delivery uncertainty', () => {
+    const stale = [{ ...queue[0], promoted: true, paused: true, pause_reason: 'delivery_uncertain' as const }]
+    const stopped = updateQueuedTurns(stale, {
+      ...interruption, imported: false, type: 'turn_queue_paused', queued_ids: ['queued-1']
+    })
+    expect(stopped[0]).toMatchObject({ promoted: false, paused: true, pause_reason: 'delivery_uncertain' })
+    expect(updateQueuedTurns(stopped, {
+      ...interruption, imported: false, type: 'turn_queue_paused', queued_ids: ['queued-1']
+    })).toBe(stopped)
+  })
+})

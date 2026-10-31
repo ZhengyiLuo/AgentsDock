@@ -1,12 +1,33 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { Session } from '@shared/types'
-import { trackConfirmedSessionChange, trackImportedAPIResults } from './session-analytics'
+import { messageAnalyticsProps, trackConfirmedSessionChange, trackImportedAPIResults } from './session-analytics'
 import { useAppStore } from '../store/app-store'
 
 const analytics = vi.hoisted(() => ({ trackEvent: vi.fn() }))
 vi.mock('./analytics', () => analytics)
 const base: Session = { id: 'private-chat', title: 'Private title', backend: 'codex', cwd: '/private', model: 'private-model' }
 beforeEach(() => analytics.trackEvent.mockClear())
+
+describe('message connection kind', () => {
+  it.each(['codex', 'claude', 'cursor', 'opencode', 'gemini'] as const)('classifies explicit %s routing only', backend => {
+    const field = backend === 'codex' ? 'codex_provider' : 'provider_connection'
+    for (const [connection, kind] of [['default', 'default'], ['custom', 'custom_api']] as const) {
+      expect(messageAnalyticsProps({...base, backend, [field]:connection})).toEqual({backend,connection_kind:kind})
+    }
+    for (const connection of [undefined, null, '', 'private-api-host']) {
+      expect(messageAnalyticsProps({...base, backend, [field]:connection} as Session)).toEqual({backend})
+    }
+  })
+  it('does not infer from the other provider field or carry content', () => {
+    expect(messageAnalyticsProps({...base,provider_connection:'custom'})).toEqual({backend:'codex'})
+    expect(messageAnalyticsProps({...base,backend:'claude',codex_provider:'custom'})).toEqual({backend:'claude'})
+    expect(messageAnalyticsProps(undefined)).toEqual({})
+    const session: Session = {...base,codex_provider:'custom'}
+    const snapshot = messageAnalyticsProps(session)
+    session.codex_provider = 'default'
+    expect(snapshot).toEqual({backend:'codex',connection_kind:'custom_api'})
+  })
+})
 
 describe('confirmed explicit session metrics', () => {
   it.each([

@@ -161,6 +161,28 @@ test('stable 1.0.10 replay remains nonpublishing and checks both independently s
   assert.throws(() => validateCandidateReceipt({...f.value, publicationEligible: true}))
 })
 
+test('stable 1.0.11 keeps its frozen baseline rehearsals exact and nonpublishing', async t => {
+  const f = scopedFixture(t, '1.0.11'), replay = await createCandidateReplay(f.options)
+  assert.equal(replay.identity.track, 'stable')
+  assert.equal(replay.identity.publicationEligible, false)
+  assert(replay.inventory().some(item => item.url.endsWith('/latest/download/latest-mac.yml')))
+  assert.deepEqual(replayBaselineMetadata('1.0.6', '1.0.11', true),
+    {track: 'stable', metadata: 'latest-mac.yml', prerelease: false})
+  for (const previous of ['1.0.9', '1.0.11-beta.11', '1.0.11', '1.0.12']) {
+    assert.throws(() => replayBaselineMetadata(previous, '1.0.11', true))
+  }
+  assert.deepEqual(replayBaselineMetadata('1.0.10', '1.0.11', true), {track: 'stable', metadata: 'latest-mac.yml', prerelease: false})
+  assert.deepEqual(replayBaselineMetadata('1.0.11-beta.12', '1.0.11', true), {track: 'beta', metadata: 'beta-mac.yml', prerelease: true})
+  const baselineDesktopDirectory = join(f.root, 'legacy-baseline')
+  mkdirSync(baselineDesktopDirectory)
+  writeFileSync(join(baselineDesktopDirectory, 'SHA256SUMS'), 'substituted baseline manifest')
+  for (const baselineVersion of ['1.0.6', '1.0.10', '1.0.11-beta.12']) {
+    await assert.rejects(() => createCandidateReplay({...f.options, baselineDesktopDirectory, baselineVersion}), /independently pinned bytes/)
+  }
+  await assert.rejects(() => createProductReplay(f.options), /candidate/)
+  assert.throws(() => validateCandidateReceipt({...f.value, publicationEligible: true}))
+})
+
 test('stable 1.0.10 allows only reviewed older stable and beta promotion routes', () => {
   for (const previous of ['1.0.6', '1.0.9']) assert.deepEqual(replayBaselineMetadata(previous, '1.0.10', true),
     {track: 'stable', metadata: 'latest-mac.yml', prerelease: false})
@@ -714,6 +736,22 @@ test('Node origin probe preserves native TLS verification and exact peer/leaf/bo
   chmodSync(f.caPath, 0o644)
   assert.equal((await run()).code, 'INPUT_REJECTED')
   assert.equal(requestCount, afterTimeout)
+})
+
+test('1.0.12-beta.1 replay rejects substituted contemporary baseline bytes', async t => {
+  const f = scopedFixture(t, '1.0.12-beta.1')
+  const replay = await createCandidateReplay(f.options)
+  assert.equal(replay.identity.track, 'beta')
+  assert.equal(replay.identity.publicationEligible, false)
+  const baselineDesktopDirectory = join(f.root, 'substituted-baseline')
+  mkdirSync(baselineDesktopDirectory)
+  writeFileSync(join(baselineDesktopDirectory, 'SHA256SUMS'), 'substituted baseline manifest')
+  for (const baselineVersion of ['1.0.6', '1.0.11', '1.0.11-beta.12']) {
+    await assert.rejects(() => createCandidateReplay({...f.options, baselineDesktopDirectory, baselineVersion}), /independently pinned bytes/)
+  }
+  for (const baselineVersion of ['1.0.10', '1.0.11-beta.11', '1.0.12-beta.1', '1.0.12-beta.2']) {
+    assert.throws(() => replayBaselineMetadata(baselineVersion, '1.0.12-beta.1', true))
+  }
 })
 
 test('origin result parser refuses unbounded/raw/private fields and forged partial success', () => {

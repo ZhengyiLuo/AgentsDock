@@ -21,6 +21,8 @@ import type {
   ClaudeMcpControlInput,
   ClaudeMcpSnapshot,
   ClaudeRuntimeSnapshot,
+  GeminiRuntimeSnapshot,
+  ProviderPendingInteraction,
   ChatReference,
   TeamReference,
   CreateJobInput,
@@ -349,6 +351,8 @@ export class AgentServerClient {
       codex_approvals_reviewer: input.codex_approvals_reviewer ?? null,
       claude_permission_mode: input.claude_permission_mode ?? null,
       cursor_permission_mode: input.cursor_permission_mode ?? null,
+      opencode_permission_mode: input.opencode_permission_mode ?? null,
+      gemini_permission_mode: input.gemini_permission_mode ?? null,
       provider_jobs_access: input.provider_jobs_access ?? null,
       provider_session_id: input.providerId || null,
       import_history: Boolean(input.providerId),
@@ -539,6 +543,17 @@ export class AgentServerClient {
     return this.get(`/api/sessions/${encodeURIComponent(sessionId)}/claude/runtime`)
   }
 
+  geminiRuntime(sessionId: string): Promise<GeminiRuntimeSnapshot> {
+    return this.request(`/api/sessions/${encodeURIComponent(sessionId)}/gemini/runtime`, {}, 30_000, false, 'native-control')
+  }
+
+  async resolveGeminiInteraction(sessionId: string, interactionId: string, response: Record<string, JsonValue>): Promise<ProviderPendingInteraction> {
+    return (await this.request<{ interaction: ProviderPendingInteraction }>(
+      `/api/sessions/${encodeURIComponent(sessionId)}/gemini/interactions/${encodeURIComponent(interactionId)}/resolve`,
+      { method: 'POST', body: JSON.stringify({ response }) }, 30_000, false, 'native-control',
+    )).interaction
+  }
+
   claudeMcp(sessionId: string): Promise<ClaudeMcpSnapshot> {
     return this.get(`/api/sessions/${encodeURIComponent(sessionId)}/claude/mcp`)
   }
@@ -649,7 +664,7 @@ export class AgentServerClient {
     )).handoff
   }
   agentHandoffRoutes(sessionId: string): Promise<AgentCrossChatRoutesSnapshot> {
-    return this.get(`/api/sessions/${encodeURIComponent(sessionId)}/agent-handoff-routes`)
+    return this.get(`/api/sessions/${encodeURIComponent(sessionId)}/agent-handoff-routes?unlimited_routes=true`)
   }
   deleteAgentHandoffRoute(sessionId: string, routeId: string, expectedRevision: string): Promise<DeleteAgentCrossChatRouteResponse> {
     if (!expectedRevision.trim()) throw new Error('Refresh this grant before revoking it.')
@@ -1093,6 +1108,9 @@ export class AgentServerClient {
       if (error instanceof Error && (error.name === 'AbortError'
         || /^fetch failed:\s*(?:FetchRequestCanceledException:\s*)?Fetch request has been cancel(?:l)?ed\b/i.test(error.message))) {
         throw new AgentServerRequestInterruptedError()
+      }
+      if (error instanceof Error && /^fetch failed:\s*The request timed out\.?$/i.test(error.message)) {
+        throw new AgentServerRequestTimeoutError()
       }
       throw error
     } finally {

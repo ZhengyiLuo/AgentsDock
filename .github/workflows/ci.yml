@@ -31,7 +31,7 @@ on:
         type: boolean
         default: false
       candidate_tag:
-        description: Exact unpublished numbered-beta or reviewed stable 1.0.9/1.0.10 candidate tag
+        description: Exact unpublished numbered-beta or reviewed stable 1.0.9/1.0.10/1.0.11 candidate tag
         type: string
         default: ''
       candidate_receipt_sha256:
@@ -86,7 +86,7 @@ jobs:
             git check-ref-format "$GITHUB_REF"
             test "$GITHUB_WORKFLOW_REF" = "$GITHUB_REPOSITORY/.github/workflows/ci.yml@$GITHUB_REF"
             [[ "$GITHUB_SHA" =~ ^[0-9a-f]{40}$ ]] || exit 1
-            [[ "$CANDIDATE_TAG" == candidate-replay-v1.0.9 || "$CANDIDATE_TAG" == candidate-replay-v1.0.10 || "$CANDIDATE_TAG" =~ ^candidate-replay-v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)-beta\.[1-9][0-9]*$ ]] || exit 1
+            [[ "$CANDIDATE_TAG" == candidate-replay-v1.0.9 || "$CANDIDATE_TAG" == candidate-replay-v1.0.10 || "$CANDIDATE_TAG" == candidate-replay-v1.0.11 || "$CANDIDATE_TAG" =~ ^candidate-replay-v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)-beta\.[1-9][0-9]*$ ]] || exit 1
             [[ "$CANDIDATE_RECEIPT_SHA256" =~ ^[0-9a-f]{64}$ && "$CANDIDATE_BUNDLE_SHA256" =~ ^[0-9a-f]{64}$ ]] || exit 1
             exit 0
           fi
@@ -212,6 +212,21 @@ jobs:
       - run: pnpm test:history
         working-directory: mobile-react
       - run: pnpm test:server-setup
+        working-directory: mobile-react
+      - name: Verify mobile provider defaults, approvals, and update discovery
+        run: |
+          node scripts/run-history-tests.mjs src/store/useAppStore.session-creation.test.ts --native-mocks
+          node scripts/run-history-tests.mjs src/lib/new-chat-recovery.test.ts --native-mocks
+          node scripts/run-history-tests.mjs src/lib/provider-selection.test.ts --native-mocks
+          node scripts/run-history-tests.mjs src/lib/optional-agent-permissions.test.ts --native-mocks
+          node scripts/run-history-tests.mjs src/api/AgentServerClient.test.ts --native-mocks
+          node scripts/run-history-tests.mjs src/lib/android-update.test.ts --native-mocks
+          node --test tests/gemini-interactions.test.mjs tests/settings-agents.test.mjs tests/settings-navigation.test.mjs tests/inspector-chat-actions.test.mjs tests/sidebar-selection.test.mjs
+        working-directory: mobile-react
+      - name: Verify stopped queue recovery without replay
+        run: |
+          node scripts/run-history-tests.mjs src/lib/queue.test.ts
+          node scripts/run-history-tests.mjs src/store/useAppStore.paused-queue.test.ts --native-mocks
         working-directory: mobile-react
       - name: Verify manual server connection and profile management
         run: |
@@ -659,7 +674,7 @@ jobs:
       matrix:
         kind: [legacy]
         legacy_mode: ['0755', '0750']
-        baseline_profile: ${{ fromJSON(inputs.candidate_tag == 'candidate-replay-v1.0.10' && '["legacy","stable109","beta1101"]' || inputs.candidate_tag == 'candidate-replay-v1.0.9' && '["legacy","stable108","beta1085"]' || (inputs.candidate_tag == 'candidate-replay-v1.0.10-beta.2' || inputs.candidate_tag == 'candidate-replay-v1.0.10-beta.3' || inputs.candidate_tag == 'candidate-replay-v1.0.10-beta.4' || inputs.candidate_tag == 'candidate-replay-v1.0.10-beta.5' || inputs.candidate_tag == 'candidate-replay-v1.0.10-beta.6') && '["legacy","beta1101"]' || '["legacy"]') }}
+        baseline_profile: ${{ fromJSON(inputs.candidate_tag == 'candidate-replay-v1.0.12-beta.1' && '["legacy","stable111","beta11112"]' || inputs.candidate_tag == 'candidate-replay-v1.0.11' && '["legacy","stable110","beta11112"]' || inputs.candidate_tag == 'candidate-replay-v1.0.10' && '["legacy","stable109","beta1101"]' || inputs.candidate_tag == 'candidate-replay-v1.0.9' && '["legacy","stable108","beta1085"]' || (inputs.candidate_tag == 'candidate-replay-v1.0.10-beta.2' || inputs.candidate_tag == 'candidate-replay-v1.0.10-beta.3' || inputs.candidate_tag == 'candidate-replay-v1.0.10-beta.4' || inputs.candidate_tag == 'candidate-replay-v1.0.10-beta.5' || inputs.candidate_tag == 'candidate-replay-v1.0.10-beta.6') && '["legacy","beta1101"]' || '["legacy"]') }}
         include:
           - kind: fresh
             legacy_mode: '0755'

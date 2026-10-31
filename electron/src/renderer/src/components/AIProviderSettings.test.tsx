@@ -1,9 +1,10 @@
-import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import type { AgentsDockAPI } from '@shared/ipc'
 import { setLocale } from '@shared/i18n'
 import { useAppStore } from '../store/app-store'
 import { AppSettingsDialog, SettingsDialog } from './Dialogs'
+import type { RuntimeCatalog } from '@shared/types'
 
 function bridge() {
   const api = {
@@ -153,4 +154,77 @@ it('uses matching CLI cards and loads only the expanded signed-in account withou
   expect(read).toHaveBeenCalledExactlyOnceWith({ profileId: 'studio', profileGeneration: 1 }, 'claude')
   fireEvent.click(screen.getByRole('button', { name: 'General' }))
   expect(screen.queryByText('Email: cli@example.test')).not.toBeInTheDocument()
+})
+
+function claudeCatalog(authenticated: boolean | null): RuntimeCatalog {
+  return { backends: { claude: {
+    models: [], efforts: [], native_credentials_present: true,
+    diagnostic: { backend: 'claude', installed: true, authenticated, available: authenticated === true,
+      status: authenticated === null ? 'unknown' : authenticated ? 'ready' : 'unauthenticated',
+      message: '', checked_at: authenticated ? '2026-10-01T12:01:00Z' : '2026-10-01T12:00:00Z' }
+  } } }
+}
+
+it.each(['en', 'zh-CN'] as const)('does not mark expired Claude credentials connected after Recheck (%s)', async locale => {
+  const api = bridge()
+  setLocale(locale)
+  useAppStore.setState({ runtimeCatalog: claudeCatalog(false) })
+  api.runtime.catalog.mockResolvedValue(claudeCatalog(false))
+  render(<AppSettingsDialog />)
+  fireEvent.click(screen.getByRole('button', { name: locale === 'en' ? 'My Agents' : '我的 Agent' }))
+  const check = () => {
+    const group = screen.getByText('Claude Code', { selector: 'summary strong' }).closest('details')!
+    expect(group).not.toHaveClass('is-connected')
+    expect(group.querySelector('.cli-account-card')).not.toHaveClass('connection-connected')
+    expect(within(group).getByText(locale === 'en' ? 'Not signed in' : '未登录')).toBeInTheDocument()
+    expect(within(group).getByText('claude auth login')).toBeInTheDocument()
+  }
+  check()
+  fireEvent.click(document.querySelector('.app-settings-provider-context button')!)
+  await waitFor(() => expect(api.runtime.catalog).toHaveBeenCalledExactlyOnceWith(true))
+  await waitFor(() => expect(document.querySelector('.app-settings-provider-context button')).toBeEnabled())
+  check()
+})
+
+it('shows detected credentials as unverified without a green check or mandatory re-login', () => {
+  bridge()
+  useAppStore.setState({ runtimeCatalog: claudeCatalog(null) })
+  render(<AppSettingsDialog />)
+  fireEvent.click(screen.getByRole('button', { name: 'My Agents' }))
+  const group = screen.getByText('Claude Code', { selector: 'summary strong' }).closest('details')!
+  expect(group).not.toHaveClass('is-connected')
+  expect(within(group).getAllByText('Sign-in not confirmed')).toHaveLength(2)
+  expect(within(group).getByText('Credentials found on the server. Sign-in is checked when you send a message.')).toBeInTheDocument()
+  expect(within(group).queryByText('claude auth login')).not.toBeInTheDocument()
+})
+
+it('restores the verified check after a later successful native authentication result', async () => {
+  const api = bridge()
+  useAppStore.setState({ runtimeCatalog: claudeCatalog(false) })
+  api.runtime.catalog.mockResolvedValue(claudeCatalog(true))
+  render(<AppSettingsDialog />)
+  fireEvent.click(screen.getByRole('button', { name: 'My Agents' }))
+  fireEvent.click(document.querySelector('.app-settings-provider-context button')!)
+  await waitFor(() => expect(screen.getByText('Claude Code', { selector: 'summary strong' }).closest('details')).toHaveClass('is-connected'))
+  const group = screen.getByText('Claude Code', { selector: 'summary strong' }).closest('details')!
+  expect(group.querySelector('.cli-account-card')).toHaveClass('connection-connected')
+  expect(within(group).getByText('Signed in')).toBeInTheDocument()
+  expect(within(group).queryByText('claude auth login')).not.toBeInTheDocument()
+})
+
+it('keeps a verified custom API connected without claiming that the native CLI is signed in', async () => {
+  bridge()
+  window.agentsDock.providerConnections = { request: vi.fn().mockResolvedValue({ configuration: {
+    backend: 'claude', scope: 'per_chat', revision: 1, configured: true, has_api_key: true,
+    base_url: 'https://api.example.test', model: 'test-model', protocol: 'anthropic', auth_header: 'x-api-key',
+    checked_at: '2026-10-01T12:00:00Z', last_result: 'verified'
+  } }) }
+  useAppStore.setState({ runtimeCatalog: claudeCatalog(false) })
+  render(<AppSettingsDialog />)
+  fireEvent.click(screen.getByRole('button', { name: 'My Agents' }))
+  const group = screen.getByText('Claude Code', { selector: 'summary strong' }).closest('details')!
+  await waitFor(() => expect(group).toHaveClass('is-connected'))
+  expect(within(group).getByRole('region', { name: 'Claude Code custom endpoint', hidden: true })).toHaveClass('connection-connected')
+  expect(group.querySelector('.cli-account-card')).not.toHaveClass('connection-connected')
+  expect(within(group).getByText('Not signed in')).toBeInTheDocument()
 })

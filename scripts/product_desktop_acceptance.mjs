@@ -79,7 +79,8 @@ export function desktopJourney(candidate, baseline, profile = 'legacy') {
   if (profile !== 'legacy') {
     const expected = candidateBaselineProfile(profile, candidate)
     assert.equal(baseline, expected.desktop.version, 'Desktop baseline differs from its exact profile')
-    return { initialTrack: expected.subscription, installedTrack: expected.subscription, switchToBeta: false }
+    const switchToBeta = candidate === '1.0.12-beta.1' && profile === 'stable111'
+    return { initialTrack: expected.subscription, installedTrack: switchToBeta ? 'beta' : expected.subscription, switchToBeta }
   }
   assert(!baseline.includes('-'), 'Legacy desktop journey requires its stable baseline')
   return { initialTrack: 'stable', installedTrack: candidate.includes('-beta.') ? 'beta' : 'stable',
@@ -98,7 +99,7 @@ export function parseDesktopAcceptanceArguments(argv) {
   }
   for (const key of required) if (!(options.scope === 'candidate' && key === 'preparation-run')) assert(options[key], `Missing --${key}`)
   assert(options.scope === undefined || options.scope === 'candidate', 'Unknown desktop acceptance scope')
-  assert(options['baseline-profile'] === undefined || ['legacy', 'stable108', 'beta1085', 'beta1101', 'stable109'].includes(options['baseline-profile']),
+  assert(options['baseline-profile'] === undefined || ['legacy', 'stable108', 'beta1085', 'beta1101', 'stable109', 'stable110', 'beta11112', 'stable111'].includes(options['baseline-profile']),
     'Unknown desktop baseline profile')
   assert(HASH.test(options['receipt-sha256']), 'Invalid accepted receipt hash')
   assert(VERSION.test(options['baseline-version']), 'Invalid baseline version')
@@ -545,7 +546,7 @@ export async function main(argv = process.argv.slice(2)) {
   try {
     observed('baseline-artifact-verification-starting')
     const previous = await extractVerifiedApp(options['baseline-directory'], options['baseline-version'], join(options.output, 'installation'))
-    if (baselineProfile === 'beta1101' || baselineProfile === 'stable109') {
+    if (['beta1101', 'stable109', 'stable110', 'beta11112', 'stable111'].includes(baselineProfile)) {
       const pinned = candidateBaselineProfile(baselineProfile, replay.identity.version).desktop
       assert.equal(run('/usr/libexec/PlistBuddy', ['-c', 'Print :CFBundleVersion', join(previous.app, 'Contents/Info.plist')]).trim(),
         pinned.buildNumber, 'Baseline native build differs from its independently pinned identity')

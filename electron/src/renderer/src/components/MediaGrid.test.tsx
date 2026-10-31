@@ -21,6 +21,28 @@ describe('MediaPreviewDialog', () => {
   beforeEach(() => useAppStore.setState({ activeProfileId: 'profile-a' }))
   afterEach(() => { cleanup(); resetTransientCloseStackForTests() })
 
+  it('shows a decode error for malformed TIFFs while keeping original download and retry on reopening', async () => {
+    const save = vi.fn().mockResolvedValue(null)
+    Object.defineProperty(window, 'agentsDock', {
+      configurable: true,
+      value: { files: {
+        mediaURL: vi.fn(() => 'agentsdock-media://file/profile-a/image-1'),
+        save
+      } } as unknown as AgentsDockAPI
+    })
+    const file: AgentFile = { id: 'image-1', filename: 'scan.tiff', content_type: 'image/tiff' }
+    const onClose = vi.fn()
+    const view = render(<MediaPreviewDialog sessionId="chat-1" file={file} onClose={onClose} />)
+    fireEvent.error(screen.getByRole('img', { name: 'scan.tiff' }))
+    expect(screen.getByRole('status')).toHaveTextContent('AgentsDock could not decode this image')
+    expect(screen.queryByRole('img')).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Download' }))
+    await waitFor(() => expect(save).toHaveBeenCalledWith('chat-1', file))
+    view.rerender(<MediaPreviewDialog sessionId="chat-1" file={null} onClose={onClose} />)
+    view.rerender(<MediaPreviewDialog sessionId="chat-1" file={file} onClose={onClose} />)
+    expect(screen.getByRole('img', { name: 'scan.tiff' })).toBeInTheDocument()
+  })
+
   it('owns the top-level close command while the viewer is open', () => {
     Object.defineProperty(window, 'agentsDock', {
       configurable: true,

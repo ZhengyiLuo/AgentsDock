@@ -337,6 +337,14 @@ describe('steerQueuedTurn', () => {
     await expect(steerQueuedTurn(chatOneScope, promoted.queued_id)).resolves.toEqual([promoted, later])
   })
 
+  it('retains a message paused after promotion even when the action returned success', async () => {
+    const stopped = { queued_id: 'queued-1', session_id: 'chat-1', prompt: 'Retry me',
+      file_ids: [], paused: true, promoted: false, pause_reason: 'stopped' as const }
+    runNow.mockResolvedValue({ ok: true, queued_id: stopped.queued_id })
+    list.mockResolvedValue([stopped])
+    await expect(steerQueuedTurn(chatOneScope, stopped.queued_id)).resolves.toEqual([stopped])
+  })
+
   it('keeps the queued item and resolves without an error when Force Send is deferred', async () => {
     const deferred = { queued_id: 'queued-1', session_id: 'chat-1', prompt: 'Wait for startup', file_ids: [] }
     const later = { queued_id: 'queued-2', session_id: 'chat-1', prompt: 'Later', file_ids: [] }
@@ -479,6 +487,15 @@ describe('steerFirstQueuedTurn', () => {
 
     await expect(steerFirstQueuedTurn(chatOneScope)).resolves.toEqual({ steered: true, turns: [later] })
     expect(runNow).toHaveBeenCalledWith('chat-1', 'first')
+  })
+
+  it('allows keyboard retry of a paused row with an obsolete Starting flag', async () => {
+    const stopped = { queued_id: 'queued-1', session_id: 'chat-1', prompt: 'Retry me',
+      file_ids: [], paused: true, promoted: true, pause_reason: 'stopped' as const }
+    list.mockResolvedValueOnce([stopped]).mockResolvedValueOnce([])
+    runNow.mockResolvedValue({ ok: true, queued_id: stopped.queued_id })
+    await expect(steerFirstQueuedTurn(chatOneScope)).resolves.toEqual({ steered: true, turns: [] })
+    expect(runNow).toHaveBeenCalledExactlyOnceWith('chat-1', stopped.queued_id)
   })
 
   it('does nothing when the refreshed server queue is empty', async () => {

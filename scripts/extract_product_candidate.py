@@ -43,8 +43,8 @@ def extract(receipt, receipt_hash, archive, archive_hash, output):
          and value.get("scope") == "darwin-app-server" and value.get("publicationEligible") is False,
          "Not a non-publishing candidate receipt")
     version = value.get("version", "")
-    track = "stable" if version in {"1.0.9", "1.0.10"} else "beta"
-    need((version in {"1.0.9", "1.0.10"} or re.fullmatch(r"(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)-beta\.[1-9]\d*", version))
+    track = "stable" if version in {"1.0.9", "1.0.10", "1.0.11"} else "beta"
+    need((version in {"1.0.9", "1.0.10", "1.0.11"} or re.fullmatch(r"(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)-beta\.[1-9]\d*", version))
          and value.get("track") == track, "Invalid reviewed candidate version or track")
     desktop = {f"AgentsDock-{version}-mac-universal.zip", f"AgentsDock-{version}-mac-universal.zip.blockmap",
                f"AgentsDock-{version}-mac-universal.dmg", f"{'beta' if track == 'beta' else 'latest'}-mac.yml", "agents-server-npm-manifest.json",

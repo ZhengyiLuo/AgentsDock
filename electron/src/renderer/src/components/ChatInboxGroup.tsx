@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { ChevronRight, Inbox, LoaderCircle, Trash2 } from 'lucide-react'
+import { ChevronRight, Inbox, LoaderCircle, Pencil, Trash2 } from 'lucide-react'
 import { sha256 } from '@noble/hashes/sha2.js'
 import { bytesToHex, utf8ToBytes } from '@noble/hashes/utils.js'
 import { t } from '@shared/i18n'
@@ -8,6 +8,7 @@ import type { ChatInboxMessage, CrossChatHandoff, WorkspaceProfileScope } from '
 import type { SystemItem } from '../lib/timeline'
 import { useLocale } from '../lib/i18n'
 import { formatTime } from '../lib/format'
+import { appendComposerDraft } from '../lib/composer-draft-append'
 import { useAppStore } from '../store/app-store'
 import { MarkdownContent } from './MarkdownContent'
 import { CrossChatPeerLink } from './CrossChatPeerLink'
@@ -28,12 +29,18 @@ export function ChatInboxGroup({ item, sessionId, profileScope }: {
   const [loadingMessage, setLoadingMessage] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
   const [deleting, setDeleting] = useState<string | null>(null)
+  const [draftMessage, setDraftMessage] = useState<string | null>(null)
   const [error, setError] = useState('')
   const generation = useRef(0)
   const children = item.mailboxMessages ?? [item]
+  const currentChildren = useRef(children)
+  currentChildren.current = children
+  const owner = JSON.stringify([item.key, sessionId, profileScope])
+  const currentOwner = useRef(owner)
+  currentOwner.current = owner
   useEffect(() => {
     generation.current++
-    setOpen(false); setVisibleLimit(25); setLoaded({}); setDetails({}); setExpandedMessages(new Set()); setDeleted(new Set()); setLoadedOnce(false); setLoadingMessage(null); setLoading(false); setDeleting(null); setError('')
+    setOpen(false); setVisibleLimit(25); setLoaded({}); setDetails({}); setExpandedMessages(new Set()); setDeleted(new Set()); setLoadedOnce(false); setLoadingMessage(null); setLoading(false); setDeleting(null); setDraftMessage(null); setError('')
     return () => { generation.current++ }
   }, [item.key, sessionId, profileScope?.profileId, profileScope?.profileGeneration, profileScope?.serverIdentity])
   const scopeCurrent = () => {
@@ -42,6 +49,13 @@ export function ChatInboxGroup({ item, sessionId, profileScope }: {
       && state.profileGeneration === profileScope.profileGeneration
       && (state.profiles.find(profile => profile.id === state.activeProfileId)?.serverIdentity ?? null) === profileScope.serverIdentity
   }
+  const messageCurrent = (child: SystemItem) => currentChildren.current.some(({ event }) =>
+    chatInboxMessageId(event) === chatInboxMessageId(child.event)
+    && event.source_session_id === child.event.source_session_id
+    && event.target_session_id === child.event.target_session_id
+    && event.conversation_id === child.event.conversation_id
+    && (event.message_revision ?? 0) === (child.event.message_revision ?? 0)
+    && event.handoff_body_sha256 === child.event.handoff_body_sha256)
   const effective = (child: SystemItem) => {
     const message = loaded[chatInboxMessageId(child.event)]
     return message && inboxMessageMatchesEvent(message, child.event) ? message : null
@@ -73,25 +87,44 @@ export function ChatInboxGroup({ item, sessionId, profileScope }: {
       if (request === generation.current && scopeCurrent()) setError(t('timeline.inbox.loadError'))
     } finally { if (request === generation.current && scopeCurrent()) setLoading(false) }
   }
-  const loadMessage = async (child: SystemItem) => {
-    if (loadingMessage || !scopeCurrent()) return
+  const loadMessage = async (child: SystemItem, forDraft = false): Promise<string | null> => {
+    if (loadingMessage || !scopeCurrent()) return null
     const event = child.event, id = chatInboxMessageId(event), request = generation.current
+    const current = () => request === generation.current && currentOwner.current === owner && scopeCurrent()
+      && messageCurrent(child)
     setLoadingMessage(id); setError('')
     try {
       const message = await window.agentsDock.handoffs.get(id)
-      if (request !== generation.current || !scopeCurrent()) return
+      if (!current()) return null
       if (message.id !== id || message.message_id !== id || message.delivery_mode !== 'mailbox'
         || message.conversation_mode !== 'async_route_v1' || message.conversation_id !== event.conversation_id
         || message.source_session_id !== event.source_session_id || message.target_session_id !== sessionId
         || message.message_revision !== (event.message_revision ?? 0)) throw Error('Wrong message')
       const body = message.message_revision! > 0 ? message.target_body : message.body
+      const bodyHash = event.handoff_body_sha256 || (message.message_revision === 0 ? message.body_sha256 : undefined)
+      const bodyChars = event.handoff_body_chars ?? (message.message_revision === 0 ? message.body_chars : undefined)
       if (typeof body !== 'string' || message.message_revision! > 0 && message.message_edited_by_user !== true
-        || event.handoff_body_sha256 && bytesToHex(sha256(utf8ToBytes(body))) !== event.handoff_body_sha256.toLowerCase()) throw Error('Wrong message body')
+        || bodyHash && bytesToHex(sha256(utf8ToBytes(body))) !== bodyHash.toLowerCase()
+        || forDraft && (!bodyHash || !body.trim() || typeof bodyChars === 'number' && Array.from(body).length !== bodyChars)) throw Error('Wrong message body')
       setDetails(current => ({ ...current, [id]: { ...message, body } }))
-      setExpandedMessages(current => new Set([...current, id]))
+      if (!forDraft) setExpandedMessages(current => new Set([...current, id]))
+      return body
     } catch {
-      if (request === generation.current && scopeCurrent()) setError(t('timeline.inbox.loadError'))
-    } finally { if (request === generation.current && scopeCurrent()) setLoadingMessage(null) }
+      if (current()) setError(t('timeline.inbox.loadError'))
+      return null
+    } finally { if (request === generation.current && currentOwner.current === owner && scopeCurrent()) setLoadingMessage(null) }
+  }
+  const editAndSend = async (child: SystemItem, source: HTMLButtonElement) => {
+    if (!profileScope || !scopeCurrent()) return
+    const request = generation.current
+    setDraftMessage(null)
+    const body = await loadMessage(child, true)
+    if (body === null || request !== generation.current || currentOwner.current !== owner || !scopeCurrent() || !messageCurrent(child)) return
+    if (!appendComposerDraft(source, profileScope, sessionId, body)) {
+      setError(t('timeline.inbox.composerUnavailable'))
+      return
+    }
+    setDraftMessage(chatInboxMessageId(child.event))
   }
   const remove = async (messageId: string) => {
     if (!available || !profileScope || deleting || !scopeCurrent()) return
@@ -141,6 +174,13 @@ export function ChatInboxGroup({ item, sessionId, profileScope }: {
             <div className={expanded ? 'chat-inbox-body expanded' : 'chat-inbox-body'}>
               <MarkdownContent text={expanded ? body : body.slice(0, 800)} sessionId={sessionId} fold={false} />
             </div>
+            {(state === 'unread' || state === 'read') && <div className="chat-inbox-draft-action">
+              <button className="quiet-button" type="button" disabled={Boolean(loadingMessage)}
+                title={t('timeline.inbox.editAndSendHint')} onClick={event => void editAndSend(child, event.currentTarget)}>
+                {loadingMessage === id ? <LoaderCircle className="spin" size={13} /> : <Pencil size={13} />}{t('timeline.inbox.editAndSend')}
+              </button>
+              {draftMessage === id && <small role="status">{t('timeline.inbox.draftReady')}</small>}
+            </div>}
             {hasMore
               && <button className="cross-chat-message-expand" disabled={Boolean(loadingMessage)} onClick={() => {
                 if (!expanded && needsFetch) { void loadMessage(child); return }

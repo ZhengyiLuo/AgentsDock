@@ -80,6 +80,19 @@ describe('shared video descriptors', () => {
     expect(isSharedVideoId(`video_${'a'.repeat(954)}.${'b'.repeat(64)}`)).toBe(false)
   })
 
+  it('retains accepted Claude follow-up provenance and scoped file/video attachments', () => {
+    const file = { id: `shared_file_YXR0YWNobWVudA.${'c'.repeat(64)}`, filename: 'notes.txt', content_type: 'text/plain', size: 12 }
+    const input = { ...event('turn_steered'), backend: 'claude', native_steer: true, native_followup: true,
+      provider_user_authored: true, provider_message_id: 'accepted-followup', shared_files: [file] } as Event
+    const projected = projectSharedVideoEvents([input], 'shared-one')
+    expect(projected.events[0]).toMatchObject({ provider_message_id: 'accepted-followup', native_followup: true, provider_user_authored: true })
+    const rows = renderTimelineItems(projectTimeline(projected.events, projected.files))
+    expect(rows.filter(row => row.kind === 'message' && row.role === 'user')).toHaveLength(1)
+    expect(rows[0]).toMatchObject({ role: 'user', files: expect.arrayContaining([
+      expect.objectContaining({ id: video.id }), expect.objectContaining({ id: file.id })
+    ]) })
+  })
+
   it.each(['text/plain', 'application/pdf', 'application/zip', 'image/png', 'text/html'])('projects sent %s files into native attachments and published artifacts', content_type => {
     const file = { id: `shared_file_YXR0YWNobWVudA.${'c'.repeat(64)}`, filename: 'attachment.bin', content_type, size: 0 }
     for (const type of ['turn_started', 'turn_steered', 'artifact_created']) {

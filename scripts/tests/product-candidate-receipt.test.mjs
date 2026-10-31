@@ -10,11 +10,12 @@ import { assertCandidateCheckout, assertCandidateServerCheckout, assertCandidate
   candidateBaselineProfile, BETA1101_BASELINE, BETA1101_CANDIDATE_VERSIONS, verifyBaselineDesktop, verifyBaselineServer } from '../product-candidate-receipt.mjs'
 import {STABLE_IDENTITY} from '../product_no_downgrade_desktop.mjs'
 
-test('only reviewed stable 1.0.9 and 1.0.10 extend the nonpublishing beta candidate contract', () => {
+test('only reviewed stable 1.0.9 through 1.0.11 extend the nonpublishing beta candidate contract', () => {
   assert.equal(candidateTrack('1.0.9'), 'stable')
   assert.equal(candidateTrack('1.0.10'), 'stable')
+  assert.equal(candidateTrack('1.0.11'), 'stable')
   assert.equal(candidateTrack('1.0.8-beta.5'), 'beta')
-  for (const version of ['1.0.8', '1.0.11', '1.0.10+local', '1.0.9-rc.1', '1.0.9+local', '1.0.9-beta.0']) assert.throws(() => candidateTrack(version))
+  for (const version of ['1.0.8', '1.0.12', '1.0.11+local', '1.0.10+local', '1.0.9-rc.1', '1.0.9+local', '1.0.9-beta.0']) assert.throws(() => candidateTrack(version))
   assert(candidateAssets('1.0.9', 'stable').includes('latest-mac.yml'))
   assert(!candidateAssets('1.0.9', 'stable').includes('beta-mac.yml'))
 })
@@ -32,6 +33,25 @@ test('stable baseline profiles retain independent immutable source/archive ident
   assert.equal(beta.subscription, 'beta')
   assert(Object.isFrozen(STABLE_BASELINES) && Object.isFrozen(beta.server) && Object.isFrozen(beta.desktop))
   for (const [name, version] of [['unknown', '1.0.9'], ['stable108', '1.0.8-beta.5'], ['beta1085', '1.0.10']]) assert.throws(() => stableBaselineProfile(name, version))
+})
+
+test('1.0.12-beta.1 binds stable 1.0.11 and beta.12 without admitting later candidates', () => {
+  const stable = candidateBaselineProfile('stable111', '1.0.12-beta.1')
+  const beta = candidateBaselineProfile('beta11112', '1.0.12-beta.1')
+  assert.equal(stable.desktop.version, '1.0.11')
+  assert.equal(stable.desktop.buildNumber, '1268')
+  assert.equal(stable.desktop.sourceSha, stable.server.sourceSha)
+  assert.equal(stable.desktop.checksumSha256, 'ca719f6885fdf4a4160cdde5b232e2bdcdc0f3476cb18255aebe5e2cf2327a62')
+  assert.equal(stable.server.manifestSha256, '034a8579031160b974bff378775b6114c627e64591da03d15e278f7dd7cb0d77')
+  assert.equal(stable.subscription, 'stable')
+  assert.equal(beta, candidateBaselineProfile('beta11112', '1.0.11'))
+  assert.equal(beta.subscription, 'beta')
+  for (const target of ['1.0.11', '1.0.12-beta.2', '1.0.12-beta.1+local', '1.0.12']) {
+    assert.throws(() => candidateBaselineProfile('stable111', target))
+  }
+  for (const name of ['stable110', 'stable109', 'beta1101']) {
+    assert.throws(() => candidateBaselineProfile(name, '1.0.12-beta.1'))
+  }
 })
 
 test('beta.1 baseline is independently pinned to build 1245 and exactly scoped to beta.2 through beta.6', () => {
@@ -381,7 +401,7 @@ test('exact stable and beta.2 through beta.6 matrices select independent npm bas
   const workflow = readFileSync(new URL('../../.github/workflows/ci.yml', import.meta.url), 'utf8')
   const inputs = readFileSync(new URL('../../.github/actions/product-candidate-inputs/action.yml', import.meta.url), 'utf8')
   const job = workflow.slice(workflow.indexOf('  candidate-native:'), workflow.indexOf('  candidate-no-downgrade:'))
-  assert.match(job, /baseline_profile: \$\{\{ fromJSON\(inputs\.candidate_tag == 'candidate-replay-v1\.0\.10' && '\["legacy","stable109","beta1101"\]' \|\| inputs\.candidate_tag == 'candidate-replay-v1\.0\.9' && '\["legacy","stable108","beta1085"\]' \|\| \(inputs\.candidate_tag == 'candidate-replay-v1\.0\.10-beta\.2' \|\| inputs\.candidate_tag == 'candidate-replay-v1\.0\.10-beta\.3' \|\| inputs\.candidate_tag == 'candidate-replay-v1\.0\.10-beta\.4' \|\| inputs\.candidate_tag == 'candidate-replay-v1\.0\.10-beta\.5' \|\| inputs\.candidate_tag == 'candidate-replay-v1\.0\.10-beta\.6'\) && '\["legacy","beta1101"\]' \|\| '\["legacy"\]'\) \}\}/)
+  assert.match(job, /baseline_profile: \$\{\{ fromJSON\(inputs\.candidate_tag == 'candidate-replay-v1\.0\.12-beta\.1' && '\[\"legacy\",\"stable111\",\"beta11112\"\]' \|\| inputs\.candidate_tag == 'candidate-replay-v1\.0\.11' && '\["legacy","stable110","beta11112"\]' \|\| inputs\.candidate_tag == 'candidate-replay-v1\.0\.10' && '\["legacy","stable109","beta1101"\]' \|\| inputs\.candidate_tag == 'candidate-replay-v1\.0\.9' && '\["legacy","stable108","beta1085"\]' \|\| \(inputs\.candidate_tag == 'candidate-replay-v1\.0\.10-beta\.2' \|\| inputs\.candidate_tag == 'candidate-replay-v1\.0\.10-beta\.3' \|\| inputs\.candidate_tag == 'candidate-replay-v1\.0\.10-beta\.4' \|\| inputs\.candidate_tag == 'candidate-replay-v1\.0\.10-beta\.5' \|\| inputs\.candidate_tag == 'candidate-replay-v1\.0\.10-beta\.6'\) && '\["legacy","beta1101"\]' \|\| '\["legacy"\]'\) \}\}/)
   const negative = workflow.slice(workflow.indexOf('  candidate-no-downgrade:'))
   assert.match(negative, /startsWith\(inputs\.candidate_tag, 'candidate-replay-v1\.0\.8-beta\.'\)/)
   assert.match(job, /INSTALL_KIND=npm-baseline/)
@@ -407,6 +427,11 @@ test('candidate composite shell parses and profile gates reject out-of-scope sel
     {BASELINE_PROFILE: 'stable109', CANDIDATE_TAG: 'candidate-replay-v1.0.10'},
     {BASELINE_PROFILE: 'beta1101', CANDIDATE_TAG: 'candidate-replay-v1.0.10'},
     {BASELINE_PROFILE: 'legacy', CANDIDATE_TAG: 'candidate-replay-v1.0.10'},
+    {BASELINE_PROFILE: 'legacy', CANDIDATE_TAG: 'candidate-replay-v1.0.11'},
+    {BASELINE_PROFILE: 'stable110', CANDIDATE_TAG: 'candidate-replay-v1.0.11'},
+    {BASELINE_PROFILE: 'stable111', CANDIDATE_TAG: 'candidate-replay-v1.0.12-beta.1'},
+    {BASELINE_PROFILE: 'beta11112', CANDIDATE_TAG: 'candidate-replay-v1.0.12-beta.1'},
+    {BASELINE_PROFILE: 'beta11112', CANDIDATE_TAG: 'candidate-replay-v1.0.11'},
     {BASELINE_PROFILE: 'beta1101', CANDIDATE_TAG: 'candidate-replay-v1.0.10-beta.2'},
     {BASELINE_PROFILE: 'beta1101', CANDIDATE_TAG: 'candidate-replay-v1.0.10-beta.3'},
     {BASELINE_PROFILE: 'beta1101', CANDIDATE_TAG: 'candidate-replay-v1.0.10-beta.4'},
@@ -416,6 +441,13 @@ test('candidate composite shell parses and profile gates reject out-of-scope sel
     assert.equal(spawnSync('/bin/bash', ['-c', gate], {env: {...env, ...change}}).status, 0)
   }
   for (const change of [{BASELINE_PROFILE: 'unknown'}, {CANDIDATE_TAG: 'candidate-replay-v1.0.8-beta.5'},
+    {BASELINE_PROFILE: 'stable110', CANDIDATE_TAG: 'candidate-replay-v1.0.10'},
+    {BASELINE_PROFILE: 'stable111', CANDIDATE_TAG: 'candidate-replay-v1.0.12-beta.2'},
+    {BASELINE_PROFILE: 'stable111', CANDIDATE_TAG: 'candidate-replay-v1.0.12-beta.1', EXECUTION_SCOPE: 'candidate-server-linux'},
+    {BASELINE_PROFILE: 'beta11112', CANDIDATE_TAG: 'candidate-replay-v1.0.11', EXECUTION_SCOPE: 'candidate-server-linux'},
+    {BASELINE_PROFILE: 'stable109', CANDIDATE_TAG: 'candidate-replay-v1.0.11'},
+    {BASELINE_PROFILE: 'beta1101', CANDIDATE_TAG: 'candidate-replay-v1.0.11'},
+    {BASELINE_PROFILE: 'legacy', CANDIDATE_TAG: 'candidate-replay-v1.0.12'},
     {BASELINE_PROFILE: 'stable109'}, {BASELINE_PROFILE: 'stable109', CANDIDATE_TAG: 'candidate-replay-v1.0.10-beta.6'},
     {BASELINE_PROFILE: 'stable109', CANDIDATE_TAG: 'candidate-replay-v1.0.10', EXECUTION_SCOPE: 'candidate-server-linux'},
     {BASELINE_PROFILE: 'beta1101', CANDIDATE_TAG: 'candidate-replay-v1.0.10', EXECUTION_SCOPE: 'candidate-server-linux'},
@@ -502,11 +534,11 @@ test('the real manual input gate keeps npm-only validation and candidate replay 
   const serverLinux = {...candidate, CANDIDATE_REPLAY: 'false', CANDIDATE_SERVER_ROLLBACK: 'true'}
   const run = env => spawnSync('/bin/bash', ['-e', '-c', script], { env, encoding: 'utf8' })
   for (const env of [common, candidate, npm, serverLinux, {...candidate, CANDIDATE_TAG: 'candidate-replay-v1.0.9'},
-    {...candidate, CANDIDATE_TAG: 'candidate-replay-v1.0.10'}]) assert.equal(run(env).status, 0)
+    {...candidate, CANDIDATE_TAG: 'candidate-replay-v1.0.10'}, {...candidate, CANDIDATE_TAG: 'candidate-replay-v1.0.11'}]) assert.equal(run(env).status, 0)
   for (const env of [{ ...candidate, NPM_NATIVE_VALIDATION: 'true' }, { ...npm, CANDIDATE_REPLAY: 'true' },
     { ...common, CANDIDATE_TAG: candidate.CANDIDATE_TAG }, { ...common, NPM_SOURCE_SHA: npm.NPM_SOURCE_SHA },
     { ...candidate, NPM_SOURCE_SHA: npm.NPM_SOURCE_SHA }, { ...candidate, CANDIDATE_RECEIPT_SHA256: '' },
-    { ...candidate, CANDIDATE_TAG: 'candidate-replay-v1.0.8' }, { ...candidate, CANDIDATE_TAG: 'candidate-replay-v1.0.11' },
+    { ...candidate, CANDIDATE_TAG: 'candidate-replay-v1.0.8' }, { ...candidate, CANDIDATE_TAG: 'candidate-replay-v1.0.12' },
     { ...candidate, GITHUB_EVENT_NAME: 'pull_request' },
     { ...candidate, GITHUB_REPOSITORY: 'fork/AgentsDock' }, { ...candidate, GITHUB_REF: 'refs/heads/main' },
     { ...candidate, GITHUB_WORKFLOW_REF: `${candidate.GITHUB_WORKFLOW_REF}-other` },
@@ -664,5 +696,23 @@ test('no-downgrade collector admits only its separate bounded non-publishing obs
     }
     assert(!existsSync(join(output, 'server.json')))
     assert(!existsSync(join(output, 'native.log')))
+  }
+})
+
+
+test('stable 1.0.11 binds its two contemporary baselines and rejects cross-version reuse', () => {
+  const stable = candidateBaselineProfile('stable110', '1.0.11')
+  const beta = candidateBaselineProfile('beta11112', '1.0.11')
+  assert.equal(stable.desktop.version, '1.0.10'); assert.equal(stable.desktop.buildNumber, '1251')
+  assert.equal(beta.desktop.version, '1.0.11-beta.12'); assert.equal(beta.desktop.buildNumber, '1267')
+  assert.equal(stable.subscription, 'stable'); assert.equal(beta.subscription, 'beta')
+  for (const value of [stable, beta]) {
+    assert.equal(value.desktop.sourceSha, value.server.sourceSha)
+    assert(Object.isFrozen(value) && Object.isFrozen(value.desktop) && Object.isFrozen(value.server))
+    for (const key of ['checksumSha256', 'zipSha256', 'metadataSha256']) assert.match(value.desktop[key], /^[a-f0-9]{64}$/)
+    for (const key of ['manifestSha256', 'signatureSha256', 'archiveSha256']) assert.match(value.server[key], /^[a-f0-9]{64}$/)
+  }
+  for (const name of ['stable110', 'beta11112']) for (const target of ['1.0.10', '1.0.11-beta.12', '1.0.11+local', '1.0.12']) {
+    assert.throws(() => candidateBaselineProfile(name, target))
   }
 })

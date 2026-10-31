@@ -7,11 +7,11 @@ import { resetTransientCloseStackForTests } from '../lib/transient-close'
 import { useAppStore } from '../store/app-store'
 import { Composer } from './Composer'
 
-const session: Session = { id: 'chat-1', title: 'Parent', backend: 'codex' }
+const session: Session = { id: 'chat-1', title: 'Parent', backend: 'codex', codex_thread_id: 'current-root' }
 const childEvent = (seq: number, status: string, patch: Partial<Event> = {}): Event => ({
   id: `child-event-${seq}`, seq, session_id: session.id, run_id: 'parent-run',
   type: 'subagent_state', backend: 'codex', ts: '2026-09-28T12:00:00Z',
-  subagent_id: 'native-child', subagent_status: status, ...patch
+  subagent_id: 'native-child', subagent_status: status, subagent_parent_thread_id: 'current-root', ...patch
 })
 function snapshot(events: Event[], owner = session) {
   return { session: owner, events, queuedTurns: [], files: [], hasMoreEvents: false, filesTotal: 0, cachedAt: 0 }
@@ -88,14 +88,14 @@ describe('Composer Stop with native Codex subagents', () => {
     expectNoStopControl()
   })
 
-  it.each(['turn_finished', 'turn_stopped'])('removes stale Stop when an unfinished spawn owner emits %s', terminal => {
+  it.each(['turn_finished', 'turn_stopped'])('requires a confirmed owned child before and after an unfinished spawn owner emits %s', terminal => {
     const owner: Session = { ...session, codex_thread_id: 'current-root' }
     const spawn: Event = { id: 'unfinished-spawn', seq: 1, session_id: session.id,
       run_id: 'parent-run', backend: 'codex', type: 'tool_started', ts: '2026-09-28T12:00:00Z',
       tool: { id: 'unfinished-call', name: 'spawn_agent', input: {} } }
     useAppStore.setState({ sessions: [owner], snapshots: { [session.id]: snapshot([spawn], owner) } })
     render(<Composer />)
-    expect(screen.getByRole('button', { name: 'Stop subagents' })).toBeEnabled()
+    expectNoStopControl()
     const finished: Event = { ...spawn, id: 'parent-ended', seq: 2, type: terminal, tool: undefined }
     act(() => useAppStore.setState({ snapshots: { [session.id]: snapshot([spawn, finished], owner) } }))
     expectNoStopControl()
@@ -160,10 +160,10 @@ describe('Composer Stop with native Codex subagents', () => {
   })
 
   it('keeps the Stop action scoped to the visible composer and does not infer Claude behavior', async () => {
-    const other: Session = { id: 'chat-2', title: 'Other', backend: 'codex' }
+    const other: Session = { id: 'chat-2', title: 'Other', backend: 'codex', codex_thread_id: 'other-root' }
     useAppStore.setState({ sessions: [session, other], snapshots: {
       [session.id]: snapshot([]),
-      [other.id]: snapshot([childEvent(1, 'running', { session_id: other.id })], other)
+      [other.id]: snapshot([childEvent(1, 'running', { session_id: other.id, subagent_parent_thread_id: 'other-root' })], other)
     } })
     const rendered = render(<Composer />)
     expectNoStopControl()

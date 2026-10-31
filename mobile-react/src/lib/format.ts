@@ -160,7 +160,7 @@ export function errorMessage(error: unknown): string {
 }
 
 export function backendLabel(backend: Backend): string {
-  return backend === 'codex' ? 'Codex' : backend === 'cursor' ? 'Cursor' : 'Claude'
+  return { codex: 'Codex', claude: 'Claude', cursor: 'Cursor', opencode: 'OpenCode', gemini: 'Gemini' }[backend] ?? backend
 }
 
 export function runtimeSummary(session: Session, translate: (source: string) => string = source => source): string {

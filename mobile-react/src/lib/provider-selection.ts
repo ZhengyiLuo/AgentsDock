@@ -2,7 +2,7 @@ import type { Backend, Health, RuntimeCatalog, Session } from '../types'
 import { runtimeDiagnosticFor } from './runtime'
 import { isBackendLocked, runtimeModelLockReason, runtimeSelectionError, selectableChatBackends } from './runtime-catalog'
 
-export type ChatBackendChoice = Backend | 'codex-custom' | 'claude-custom' | 'cursor-custom'
+export type ChatBackendChoice = Backend | `${Backend}-custom`
 type ProviderSelection = Pick<Session, 'backend' | 'codex_provider' | 'provider_connection'>
 type CatalogSelection = ProviderSelection & Partial<Session>
 
@@ -18,21 +18,26 @@ export function chatBackendSelection(choice: ChatBackendChoice): Required<Provid
   return {
     backend: choice.replace(/-custom$/, '') as Backend,
     codex_provider: choice === 'codex-custom' ? 'custom' : 'default',
-    provider_connection: choice === 'claude-custom' || choice === 'cursor-custom' ? 'custom' : 'default',
+    provider_connection: choice !== 'codex-custom' && choice.endsWith('-custom') ? 'custom' : 'default',
   }
 }
 
 export function chatBackendLabel(choice: ChatBackendChoice): string {
   const backend = choice.replace(/-custom$/, '')
-  const name = backend === 'codex' ? 'Codex' : backend === 'claude' ? 'Claude Code' : 'Cursor'
+  const name = { codex: 'Codex', claude: 'Claude Code', cursor: 'Cursor', opencode: 'OpenCode', gemini: 'Gemini' }[backend] ?? backend
   return choice.endsWith('-custom') ? `${name} - Custom API` : name
 }
 
 export function nativeProviderAvailable(health: Health | null, catalog: RuntimeCatalog | null, backend: string): boolean {
-  const native = catalog?.backends[backend]?.native_credentials_present
-  if (native !== undefined) return native
+  // OpenCode's free models work without account credentials; Gemini is API-only.
+  if (backend === 'opencode') return health?.capabilities?.opencode_backend?.available === true && catalog?.backends.opencode?.available === true
+  if (backend === 'gemini') return false
   const diagnostic = runtimeDiagnosticFor(health, catalog, backend)
-  if (diagnostic?.authenticated != null) return diagnostic.authenticated
+  if (diagnostic && (diagnostic.installed === false || diagnostic.authenticated === false
+    || ['missing', 'unauthenticated', 'error'].includes(diagnostic.status))) return false
+  const native = catalog?.backends[backend]?.native_credentials_present
+  if (native !== undefined) return native && catalog?.backends[backend]?.available !== false
+  if (diagnostic?.authenticated != null) return diagnostic.authenticated && diagnostic.available
   // Older servers do not distinguish credential sources. Keep their native UI usable.
   return diagnostic ? diagnostic.status === 'ready' && diagnostic.available : catalog?.backends[backend]?.available === true
 }
@@ -40,7 +45,9 @@ export function nativeProviderAvailable(health: Health | null, catalog: RuntimeC
 export function customProviderSupported(health: Health | null | undefined, backend: string): boolean {
   if (backend === 'codex') return health?.capabilities?.codex_provider_v1?.per_chat === true
     && health.capabilities.codex_provider_v1.per_chat_models === true
-  return ['claude', 'opencode', 'cursor'].includes(backend) && health?.capabilities?.provider_connections_v1?.per_chat === true
+  const capability = health?.capabilities?.provider_connections_v1
+  return ['claude', 'opencode', 'cursor', 'gemini'].includes(backend) && capability?.per_chat === true
+    && (!capability.backends || capability.backends.includes(backend))
 }
 
 export function customProviderAvailable(health: Health | null, catalog: RuntimeCatalog | null, backend: string): boolean {
@@ -50,13 +57,13 @@ export function customProviderAvailable(health: Health | null, catalog: RuntimeC
 
 export function selectableChatBackendChoices(health: Health | null, catalog: RuntimeCatalog | null): ChatBackendChoice[] {
   return selectableChatBackends(health).flatMap(backend => {
-    const legacyUnknown = backend !== 'cursor' && catalog?.backends[backend]?.native_credentials_present === undefined
+    const legacyUnknown = (backend === 'claude' || backend === 'codex') && catalog?.backends[backend]?.native_credentials_present === undefined
       && catalog?.backends[backend]?.available === undefined && !runtimeDiagnosticFor(health, catalog, backend)
     return [
       ...(nativeProviderAvailable(health, catalog, backend) || legacyUnknown ? [backend] : []),
       ...(customProviderAvailable(health, catalog, backend) ? [`${backend}-custom` as ChatBackendChoice] : []),
     ]
-  })
+  }).filter(choice => !providerSelectionError(health, catalog, chatBackendSelection(choice), true))
 }
 
 /** Custom chats never inherit a native account's model catalog or a different saved binding. */
@@ -74,6 +81,7 @@ export function providerRuntimeCatalog(catalog: RuntimeCatalog | null, selection
 }
 
 export function providerSelectionError(health: Health | null, catalog: RuntimeCatalog | null, selection: CatalogSelection, changingProvider = false): string | null {
+  if ((selection.backend === 'opencode' || selection.backend === 'gemini') && !selectableChatBackends(health).includes(selection.backend)) return 'Update AgentsServer to use this agent.'
   if (!isCustomProvider(selection)) return runtimeSelectionError(health, catalog, selection.backend, selection.model)
   if (changingProvider) {
     if (!customProviderSupported(health, selection.backend)) return 'Update AgentsServer to select Custom API chats.'

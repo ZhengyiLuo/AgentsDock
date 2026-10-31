@@ -7,6 +7,39 @@ All candidate receipts and observations remain `publicationEligible: false`;
 observations also remain `releaseAcceptance: false`. A successful job does not
 turn blocked or unobserved scenarios into full release acceptance.
 
+## 1.0.12-beta.1 rehearsal preparation
+
+Retain the previously reviewed stable 1.0.11 harness and historical pins.
+The exact `1.0.12-beta.1` candidate adds these contemporary baseline journeys,
+each with both `0755` and `0750` installation-root modes:
+
+- `stable111`: signed desktop/server `1.0.11`, desktop build 1268. Start with
+  Stable selected, explicitly opt into Beta through the app, and retain Beta
+  after installation.
+- `beta11112`: signed desktop/server `1.0.11-beta.12`, desktop build 1267.
+  Retain the existing Beta subscription throughout the upgrade.
+
+The public stable checksum manifest is
+`ca719f6885fdf4a4160cdde5b232e2bdcdc0f3476cb18255aebe5e2cf2327a62`;
+its signed npm descriptor is
+`034a8579031160b974bff378775b6114c627e64591da03d15e278f7dd7cb0d77`.
+These independently retrieved public bytes identify the incumbent, not the
+new candidate. Reject later beta candidates, mismatched profiles and modified
+baseline metadata. Existing legacy, fresh, rollback and retry journeys remain.
+
+The new installer adds the notification helper and unread-state module to the
+runtime inventory and compile checks, and makes that helper executable. Its
+lock, ownership and installation-root normalization logic match stable 1.0.11.
+The complete reviewed installer SHA-256 is
+`958d54c6a862a5449f7ee3db13f2fd908324a07abc5fe13ce140c1f34049c91b`.
+Historical installer pins are unchanged.
+
+This records preparation only. The new candidate requires its own signed
+artifacts, immutable receipts and successful native runs. Rehearsal reports
+remain `publicationEligible: false` and `releaseAcceptance: false`; they do not
+establish populated provider-history, busy-work, reboot or Windows update
+acceptance. The idle Codex goal-resume limitation remains separate.
+
 ## Stable 1.0.10 rehearsal preparation
 
 The new exact stable candidate is packaged from

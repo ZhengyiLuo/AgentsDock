@@ -67,10 +67,13 @@ BETA1112_ROOT_NORMALIZING_INSTALLER_SHA256 = "99ed504ea4a98bade394d0926dd83aea66
 # 1.0.11-beta.12 includes interactive pairing/QR files and shared-chat
 # analytics. Reviewed changes preserve lock, ownership and normalization rules.
 BETA11112_ROOT_NORMALIZING_INSTALLER_SHA256 = "1438e59d5f92be58520d08459ca33890a2309534ee9a028eca887a9f873d4364"
-NPM_BASELINE_VERSIONS = {"stable108": "1.0.8", "beta1085": "1.0.8-beta.5", "beta1101": "1.0.10-beta.1", "stable109": "1.0.9"}
+# 1.0.12-beta.1 adds only notification/unread modules and the executable helper
+# to the reviewed stable installer inventory. Lock and normalization stay intact.
+BETA1121_ROOT_NORMALIZING_INSTALLER_SHA256 = "958d54c6a862a5449f7ee3db13f2fd908324a07abc5fe13ce140c1f34049c91b"
+NPM_BASELINE_VERSIONS = {"stable108": "1.0.8", "beta1085": "1.0.8-beta.5", "beta1101": "1.0.10-beta.1", "stable109": "1.0.9", "stable110": "1.0.10", "beta11112": "1.0.11-beta.12", "stable111": "1.0.11"}
 NPM_BASELINE_TARGETS = {"stable108": ("1.0.9",), "beta1085": ("1.0.9",),
                         "beta1101": ("1.0.10-beta.2", "1.0.10-beta.3", "1.0.10-beta.4", "1.0.10-beta.5", "1.0.10-beta.6", "1.0.10"),
-                        "stable109": ("1.0.10",)}
+                        "stable109": ("1.0.10",), "stable110": ("1.0.11",), "beta11112": ("1.0.11", "1.0.12-beta.1"), "stable111": ("1.0.12-beta.1",)}
 ROLLBACK_STAGES = {"preflight", "start-request", "observe-rollback", "rollback-proof", "preservation",
                    "retry-request", "retry-health", "retry-completion", "retry-verification"}
 
@@ -1446,7 +1449,8 @@ def root_normalization_contract(bundle: Path, receipt: dict) -> str:
             with package.extractfile(members[0]) as stream:
                 installers.append(stream.read(2 * 1024 * 1024 + 1))
     # These reviewed candidates, including stable 1.0.10, retain the complete beta.1 installer.
-    expected_hash = (BETA11112_ROOT_NORMALIZING_INSTALLER_SHA256 if version == "1.0.11-beta.12"
+    expected_hash = (BETA1121_ROOT_NORMALIZING_INSTALLER_SHA256 if version == "1.0.12-beta.1"
+                     else BETA11112_ROOT_NORMALIZING_INSTALLER_SHA256 if version in {"1.0.11-beta.12", "1.0.11"}
                      else BETA1112_ROOT_NORMALIZING_INSTALLER_SHA256 if version == "1.0.11-beta.2"
                      else BETA1111_ROOT_NORMALIZING_INSTALLER_SHA256 if version == "1.0.11-beta.1"
                      else BETA1101_ROOT_NORMALIZING_INSTALLER_SHA256 if version in {"1.0.10-beta.1", "1.0.10-beta.2", "1.0.10-beta.3", "1.0.10-beta.4", "1.0.10-beta.5", "1.0.10-beta.6", "1.0.10"}
@@ -1466,7 +1470,7 @@ def native_root_state(fixture: dict) -> dict:
 
 
 def verify_root_normalization(before: dict, after: dict, installer_hash: str) -> dict:
-    need(installer_hash in {ROOT_NORMALIZING_INSTALLER_SHA256, STABLE109_ROOT_NORMALIZING_INSTALLER_SHA256, BETA1101_ROOT_NORMALIZING_INSTALLER_SHA256, BETA1111_ROOT_NORMALIZING_INSTALLER_SHA256, BETA1112_ROOT_NORMALIZING_INSTALLER_SHA256, BETA11112_ROOT_NORMALIZING_INSTALLER_SHA256},
+    need(installer_hash in {ROOT_NORMALIZING_INSTALLER_SHA256, STABLE109_ROOT_NORMALIZING_INSTALLER_SHA256, BETA1101_ROOT_NORMALIZING_INSTALLER_SHA256, BETA1111_ROOT_NORMALIZING_INSTALLER_SHA256, BETA1112_ROOT_NORMALIZING_INSTALLER_SHA256, BETA11112_ROOT_NORMALIZING_INSTALLER_SHA256, BETA1121_ROOT_NORMALIZING_INSTALLER_SHA256},
          "Root normalization requires the reviewed signed installer contract.")
     identity = before.get("rootIdentity")
     need(isinstance(identity, list) and len(identity) == 3
@@ -1977,7 +1981,7 @@ def verify_npm_baseline(profile: str, directory: Path, candidate_version: str) -
     expected_keys = {"version", "track", "sourceSha", "manifestSha256", "signatureSha256", "archiveSha256", "archiveBytes"}
     need(isinstance(identity, dict) and set(identity) == expected_keys
          and identity.get("version") == NPM_BASELINE_VERSIONS[profile]
-         and identity.get("track") == ("stable" if profile in {"stable108", "stable109"} else "beta")
+         and identity.get("track") == ("stable" if profile in {"stable108", "stable109", "stable110", "stable111"} else "beta")
          and isinstance(identity.get("sourceSha"), str) and re.fullmatch(r"[a-f0-9]{40}", identity["sourceSha"])
          and all(isinstance(identity.get(key), str) and re.fullmatch(r"[a-f0-9]{64}", identity[key])
                  for key in ("manifestSha256", "signatureSha256", "archiveSha256"))

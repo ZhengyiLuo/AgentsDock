@@ -273,6 +273,12 @@ assert(
   scheduledEmergencyRows.every(row => row.kind !== 'job' || !row.events.some(candidate => candidate.type === 'emergency_alert_raised')),
   'scheduled job folding must never swallow emergency alerts',
 )
+const agentNoticeRows = projectTimeline([
+  event(49, 'turn_started', { run_id: 'notice-run', prompt: 'Check the result' }),
+  event(50, 'agent_notification', { run_id: 'notice-run', notification_level: 'important', message: 'Please review the result.' }),
+  event(51, 'turn_finished', { run_id: 'notice-run', result_text: 'Done.' }),
+], [])
+assert(agentNoticeRows.some(row => row.kind === 'system' && row.event.type === 'agent_notification'), 'an agent-chosen notice must remain visible beside its run')
 
 const scheduledNativeStop = projectTimeline([
   event(49, 'job_ran', { run_id: 'scheduled-steer-run', job_id: 'scheduled-steer-job' }),

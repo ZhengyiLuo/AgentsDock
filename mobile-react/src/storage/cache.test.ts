@@ -1,5 +1,6 @@
 import AsyncStorage from '@react-native-async-storage/async-storage'
 import * as SecureStore from 'expo-secure-store'
+import { Platform } from 'react-native'
 import type { Event, PinnedItem, Session, Snapshot, StoredProfileSettings, WorkspacePreferences } from '../types'
 import { SNAPSHOT_CACHE_VERSION } from '../lib/history'
 import { profileCredentialKeySuffix } from '../lib/server-profiles'
@@ -450,5 +451,74 @@ try {
   AsyncStorage.setItem = originalSetItem
 }
 assertEqual((await loadSnapshot('snapshot-failure', 'chat-retry'))?.latestSeq, 2)
+
+const originalOS = Platform.OS
+Object.assign(Platform, { OS: 'android' })
+try {
+  const androidEvents = Array.from({ length: 300 }, (_, index) => ({
+    ...timelineEvent('chat-android-large', index + 1),
+    text: 'x'.repeat(3_000),
+  }))
+  await saveSnapshot('android-budget', timelineSnapshot('chat-android-large', androidEvents))
+  const largeRaw = await AsyncStorage.getItem('agentsdock.react.snapshot.android-budget.chat-android-large')
+  assert(largeRaw && largeRaw.length <= 400_000, 'Android snapshot rows must stay below the local SQLite read budget')
+  const largeCached = JSON.parse(largeRaw) as Snapshot
+  assert(largeCached.events.length < 240 && largeCached.events.length > 0, 'oversized Android history should keep a recent tail')
+  assertEqual(largeCached.hasMore, true)
+  for (let index = 0; index < 25; index += 1) {
+    await saveSnapshot('android-budget', timelineSnapshot(`chat-android-${index}`, [timelineEvent(`chat-android-${index}`, 1)]))
+  }
+  assertEqual(await AsyncStorage.getItem('agentsdock.react.snapshot.android-budget.chat-android-large'), null)
+  assertEqual(JSON.parse(await AsyncStorage.getItem('agentsdock.react.recent.android-budget') ?? '[]').length, 24)
+
+  const uncacheable = timelineSnapshot('chat-android-uncacheable', [timelineEvent('chat-android-uncacheable', 1)])
+  uncacheable.files = Array.from({ length: 50 }, (_, index) => ({
+    id: `file-${index}`,
+    session_id: 'chat-android-uncacheable',
+    filename: `file-${index}.txt`,
+    text: 'f'.repeat(20_000),
+  }))
+  await saveSnapshot('android-budget', uncacheable)
+  assertEqual(await AsyncStorage.getItem('agentsdock.react.snapshot.android-budget.chat-android-uncacheable'), null)
+  assertEqual(JSON.parse(await AsyncStorage.getItem('agentsdock.react.recent.android-budget') ?? '[]').includes('chat-android-uncacheable'), false)
+
+  const disposableKey = 'agentsdock.react.snapshot.android-recovery.chat-old'
+  const preservedKey = 'agentsdock.react.workspace.android-recovery'
+  await AsyncStorage.setItem(disposableKey, 'cached transcript')
+  await AsyncStorage.setItem(preservedKey, 'preserved draft')
+  AsyncStorage.setItem = async (key: string, value: string) => {
+    if (key === 'agentsdock.react.settings.v2' && await AsyncStorage.getItem(disposableKey) !== null) {
+      throw new Error('database or disk is full (Sqlite code 13 SQLITE_FULL)')
+    }
+    await originalSetItem(key, value)
+  }
+  try {
+    await saveProfileSettings(normalizedLegacySettings)
+  } finally {
+    AsyncStorage.setItem = originalSetItem
+  }
+  assertEqual(await AsyncStorage.getItem(disposableKey), null)
+  assertEqual(await AsyncStorage.getItem(preservedKey), 'preserved draft')
+  assertEqual((await loadProfileSettings()).activeProfileId, normalizedLegacySettings.activeProfileId)
+
+  const workspaceDisposableKey = 'agentsdock.react.snapshot.android-recovery.chat-older'
+  await AsyncStorage.setItem(workspaceDisposableKey, 'cached transcript')
+  AsyncStorage.setItem = async (key: string, value: string) => {
+    if (key === 'agentsdock.react.workspace.android-recovery' && await AsyncStorage.getItem(workspaceDisposableKey) !== null) {
+      throw new Error('database or disk is full (Sqlite code 13 SQLITE_FULL)')
+    }
+    await originalSetItem(key, value)
+  }
+  try {
+    await saveWorkspacePreferences('android-recovery', cachedWorkspace('new draft'))
+  } finally {
+    AsyncStorage.setItem = originalSetItem
+  }
+  assertEqual(await AsyncStorage.getItem(workspaceDisposableKey), null)
+  assertEqual((await loadWorkspacePreferences('android-recovery')).drafts['chat-a'], 'new draft')
+} finally {
+  AsyncStorage.setItem = originalSetItem
+  Object.assign(Platform, { OS: originalOS })
+}
 
 console.log('crash-safe profile storage regressions passed')

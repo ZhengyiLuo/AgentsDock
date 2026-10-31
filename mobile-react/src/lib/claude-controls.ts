@@ -70,6 +70,7 @@ export function sessionPendingInteractionCount(session: Pick<
   | 'claude_needs_user_action'
   | 'latest_event_type'
 >): number {
+  if (session.backend === 'gemini') return session.latest_event_type === 'gemini_interaction_requested' ? 1 : 0
   if (session.backend === 'claude') {
     const count = Math.max(0, session.claude_pending_interaction_count ?? 0)
     return session.claude_needs_user_action || session.latest_event_type === 'claude_interaction_requested'

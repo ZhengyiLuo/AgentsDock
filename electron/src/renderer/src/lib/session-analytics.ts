@@ -1,5 +1,17 @@
 import type { BulkImportSessionItem, BulkImportSessionResult, Session } from '@shared/types'
-import { trackEvent } from './analytics'
+import { trackEvent, type AnalyticsEventProps } from './analytics'
+
+/** Snapshot before submission, never infer from credentials or a later selected chat.
+ * "default" describes routing, not whether the CLI itself uses an API key. */
+export function messageAnalyticsProps(session: Session | undefined): AnalyticsEventProps {
+  if (!session) return {}
+  const connection = session.backend === 'codex' ? session.codex_provider : session.provider_connection
+  return {
+    backend: session.backend,
+    ...(connection === 'custom' ? { connection_kind: 'custom_api' as const }
+      : connection === 'default' ? { connection_kind: 'default' as const } : {})
+  }
+}
 
 type SessionPatch = Partial<Session> & { gemini_connect_api?: boolean }
 const permissionFields: Partial<Record<Session['backend'], (keyof Session)[]>> = {

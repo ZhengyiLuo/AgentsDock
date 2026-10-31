@@ -1,4 +1,4 @@
-export type Backend = 'claude' | 'codex' | 'cursor'
+export type Backend = 'claude' | 'codex' | 'cursor' | 'opencode' | 'gemini'
 export type ProviderMode = 'default' | 'custom'
 export type JsonValue = string | number | boolean | null | JsonValue[] | { [key: string]: JsonValue }
 
@@ -9,6 +9,15 @@ export type CodexSandboxMode = 'read-only' | 'workspace-write' | 'danger-full-ac
 export type CodexApprovalsReviewer = 'user' | 'auto_review' | 'guardian_subagent'
 export type ClaudePermissionMode = 'default' | 'acceptEdits' | 'plan' | 'bypassPermissions' | 'dontAsk' | 'auto'
 export type CursorPermissionMode = 'default' | 'full_access' | 'plan'
+export type OpenCodePermissionMode = 'default' | 'full_access' | 'plan'
+export type GeminiPermissionMode = 'default' | 'autoEdit' | 'yolo' | 'plan'
+
+export interface GeminiRuntimeSnapshot {
+  available: boolean
+  pending_interactions: ProviderPendingInteraction[]
+  permission_modes?: GeminiPermissionMode[]
+  permission_mode?: GeminiPermissionMode
+}
 export type ProviderJobsAccess = 'full' | 'read_only' | 'blocked'
 export type CodexGoalStatus = 'active' | 'paused' | 'blocked' | 'usageLimited' | 'budgetLimited' | 'complete'
 export type CodexThreadActiveFlag = 'waitingOnApproval' | 'waitingOnUserInput'
@@ -407,6 +416,11 @@ export interface Session {
   claude_needs_user_action?: boolean | null
   cursor_session_id?: string | null
   cursor_permission_mode?: CursorPermissionMode | null
+  opencode_session_id?: string | null
+  opencode_permission_mode?: OpenCodePermissionMode | null
+  gemini_session_id?: string | null
+  gemini_permission_mode?: GeminiPermissionMode | null
+  gemini_permission_modes?: GeminiPermissionMode[]
   provider_jobs_access?: ProviderJobsAccess | null
   parent_id?: string | null
   pinned?: boolean | null
@@ -425,6 +439,10 @@ export interface Session {
   last_read_agent_event_seq?: number | null
   last_read_agent_event_at?: string | null
   manual_unread?: boolean | null
+  unread_notification_level?: 'normal' | 'important' | 'emergency' | null
+  unread_notification_seq?: number | null
+  latest_notification_level?: 'normal' | 'important' | 'emergency' | null
+  latest_notification_message?: string | null
   emergency_alert?: EmergencyAlert | null
   unacknowledged_emergency_count?: number | null
 }
@@ -480,6 +498,7 @@ export interface CustomProviderCatalog {
   default_effort?: string | null
 }
 export interface RuntimeBackendCatalog {
+  permission_modes?: string[]
   native_credentials_present?: boolean
   custom_provider?: CustomProviderCatalog
   models: RuntimeOption[]
@@ -625,7 +644,7 @@ export interface AgentCrossChatRoute {
 
 export interface AgentCrossChatRoutesSnapshot {
   routes: AgentCrossChatRoute[]
-  max_routes: number
+  max_routes: number | null
 }
 
 export interface DeleteAgentCrossChatRouteResponse {
@@ -890,6 +909,7 @@ export interface Event {
   text?: string | null
   result_text?: string | null
   message?: string | null
+  notification_level?: 'normal' | 'important' | 'emergency' | null
   error?: JsonValue
   emergency_alert?: EmergencyAlert | null
   emergency_alert_id?: string | null
@@ -1198,6 +1218,8 @@ export interface AgentTeamMailCapability extends ServerCapability {
 }
 
 export interface HealthCapabilities {
+  opencode_backend?: { available?: boolean; version?: number; permission_modes?: string[] }
+  gemini_backend?: { available?: boolean; version?: number; client_capability?: string; permission_modes?: string[]; features?: Record<string, boolean> }
   codex_provider_v1?: { available?: boolean; per_chat?: boolean; per_chat_models?: boolean }
   provider_connections_v1?: { available?: boolean; per_chat?: boolean; backends?: string[] }
   scheduled_jobs?: ScheduledJobsCapability
@@ -1354,6 +1376,8 @@ export interface CreateSessionInput {
   codex_approvals_reviewer?: CodexApprovalsReviewer | null
   claude_permission_mode?: ClaudePermissionMode | null
   cursor_permission_mode?: CursorPermissionMode | null
+  opencode_permission_mode?: OpenCodePermissionMode | null
+  gemini_permission_mode?: GeminiPermissionMode | null
   provider_jobs_access?: ProviderJobsAccess
   providerId?: string
 }

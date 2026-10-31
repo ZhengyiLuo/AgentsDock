@@ -7,16 +7,19 @@ import { isTimelineError } from '../lib/timeline'
 import { useAppStore } from '../store/useAppStore'
 import { radius, usePalette } from '../theme'
 import { Text } from './AppText'
+import { backendLabel } from '../lib/format'
+import { isCustomProvider } from '../lib/provider-selection'
 
 export function RuntimeHealthNotice({ backend, sessionId }: { backend: Backend; sessionId: string }) {
   const health = useAppStore(state => state.health)
   const runtime = useAppStore(state => state.runtime)
   const events = useAppStore(state => state.snapshots[sessionId]?.events)
   const refresh = useAppStore(state => state.refreshRuntime)
+  const session = useAppStore(state => state.sessions.find(item => item.id === sessionId))
   const diagnostic = runtimeDiagnosticFor(health, runtime, backend)
   const chatError = latestChatRunError(events, backend)
   const unavailable = backend === 'cursor' && !cursorBackendAvailable(health, runtime)
-  const providerNeedsAttention = unavailable || Boolean(diagnostic && diagnostic.status !== 'ready')
+  const providerNeedsAttention = !(session && isCustomProvider(session)) && (unavailable || Boolean(diagnostic && diagnostic.status !== 'ready'))
   if (!chatError && !providerNeedsAttention) return null
   return <RuntimeRow backend={backend} diagnostic={diagnostic} compact detailOverride={chatError || (unavailable ? cursorBackendUnavailableReason(health, runtime) : null)} onRecheck={() => void refresh()} />
 }
@@ -43,7 +46,7 @@ function RuntimeRow({ backend, diagnostic, compact = false, detailOverride, onRe
   const tone = diagnostic?.status === 'ready' ? (diagnostic.last_error ? 'warning' : 'ready') : diagnostic?.status === 'unknown' || !diagnostic ? 'unknown' : 'error'
   const color = tone === 'ready' ? colors.green : tone === 'warning' ? colors.orange : tone === 'error' ? colors.red : colors.muted
   const Icon = tone === 'ready' ? CircleCheck : tone === 'warning' ? AlertTriangle : tone === 'error' ? CircleX : CircleHelp
-  const provider = backend === 'claude' ? 'Claude Code' : backend === 'cursor' ? 'Cursor' : 'Codex'
+  const provider = backendLabel(backend)
   const detail = detailOverride || diagnostic?.last_error || diagnostic?.message || `${provider} has not been checked yet.`
   return <View accessibilityRole={tone === 'error' ? 'alert' : 'text'} style={[styles.row, compact && styles.compact, { borderColor: tone === 'error' || tone === 'warning' ? color : colors.border, backgroundColor: colors.surface }]}>
     <Icon size={compact ? 15 : 17} color={color} />

@@ -84,6 +84,14 @@ await test('unexpected native cancellation is retryable interruption, not intent
   }
 }))
 
+await test('Expo native timeout is classified as a retryable timeout', () => withClient(async client => {
+  globalThis.fetch = async () => { throw new Error('fetch failed: The request timed out.') }
+  await assert.rejects(client.health(), {
+    name: 'AgentServerRequestTimeoutError',
+    message: 'The server request timed out. Please try again.',
+  })
+}))
+
 await test('a native body reader that never settles after abort cannot strand the request', { timeout: 1000 }, () => withClient(async client => {
   globalThis.fetch = async () => ({ ok: true, status: 200, json: () => new Promise(() => {}) }) as Response
   await assert.rejects(client.health(10), { name: 'AgentServerRequestTimeoutError' })

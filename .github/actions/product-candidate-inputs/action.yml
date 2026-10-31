@@ -3,7 +3,7 @@ description: Read and verify one pinned test-only draft before any installation 
 inputs:
   candidate_tag:
     required: true
-    description: Exact unpublished numbered-beta or reviewed stable 1.0.9/1.0.10 candidate tag
+    description: Exact unpublished numbered-beta or reviewed stable 1.0.9/1.0.10/1.0.11 candidate tag
   receipt_sha256:
     required: true
     description: Independently accepted candidate.json SHA-256
@@ -18,7 +18,7 @@ inputs:
     description: candidate (macOS app/server) or candidate-server-linux (server rollback only)
   baseline_profile:
     default: legacy
-    description: legacy; stable1.0.9-only stable108/beta1085; stable1.0.10-only stable109; exact 1.0.10-beta.2 through beta.6 or stable1.0.10 beta1101
+    description: legacy; stable1.0.11-only stable110/beta11112; stable1.0.9-only stable108/beta1085; stable1.0.10-only stable109; exact 1.0.10-beta.2 through beta.6 or stable1.0.10 beta1101
 outputs:
   version:
     value: ${{ steps.inputs.outputs.version }}
@@ -44,8 +44,8 @@ runs:
       run: |
         set -euo pipefail
         umask 077
-        [[ "$CANDIDATE_TAG" == candidate-replay-v1.0.9 || "$CANDIDATE_TAG" == candidate-replay-v1.0.10 || "$CANDIDATE_TAG" =~ ^candidate-replay-v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)-beta\.[1-9][0-9]*$ ]] || exit 1
-        [[ "$BASELINE_PROFILE" == legacy || ( "$EXECUTION_SCOPE" == candidate && ( ( "$CANDIDATE_TAG" == candidate-replay-v1.0.10 && ( "$BASELINE_PROFILE" == stable109 || "$BASELINE_PROFILE" == beta1101 ) ) || ( "$CANDIDATE_TAG" == candidate-replay-v1.0.9 && ( "$BASELINE_PROFILE" == stable108 || "$BASELINE_PROFILE" == beta1085 ) ) || ( ( "$CANDIDATE_TAG" == candidate-replay-v1.0.10-beta.2 || "$CANDIDATE_TAG" == candidate-replay-v1.0.10-beta.3 || "$CANDIDATE_TAG" == candidate-replay-v1.0.10-beta.4 || "$CANDIDATE_TAG" == candidate-replay-v1.0.10-beta.5 || "$CANDIDATE_TAG" == candidate-replay-v1.0.10-beta.6 ) && "$BASELINE_PROFILE" == beta1101 ) ) ) ]] || exit 1
+        [[ "$CANDIDATE_TAG" == candidate-replay-v1.0.9 || "$CANDIDATE_TAG" == candidate-replay-v1.0.10 || "$CANDIDATE_TAG" == candidate-replay-v1.0.11 || "$CANDIDATE_TAG" =~ ^candidate-replay-v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)-beta\.[1-9][0-9]*$ ]] || exit 1
+        [[ "$BASELINE_PROFILE" == legacy || ( "$EXECUTION_SCOPE" == candidate && ( ( "$CANDIDATE_TAG" == candidate-replay-v1.0.12-beta.1 && ( "$BASELINE_PROFILE" == stable111 || "$BASELINE_PROFILE" == beta11112 ) ) || ( "$CANDIDATE_TAG" == candidate-replay-v1.0.11 && ( "$BASELINE_PROFILE" == stable110 || "$BASELINE_PROFILE" == beta11112 ) ) || ( "$CANDIDATE_TAG" == candidate-replay-v1.0.10 && ( "$BASELINE_PROFILE" == stable109 || "$BASELINE_PROFILE" == beta1101 ) ) || ( "$CANDIDATE_TAG" == candidate-replay-v1.0.9 && ( "$BASELINE_PROFILE" == stable108 || "$BASELINE_PROFILE" == beta1085 ) ) || ( ( "$CANDIDATE_TAG" == candidate-replay-v1.0.10-beta.2 || "$CANDIDATE_TAG" == candidate-replay-v1.0.10-beta.3 || "$CANDIDATE_TAG" == candidate-replay-v1.0.10-beta.4 || "$CANDIDATE_TAG" == candidate-replay-v1.0.10-beta.5 || "$CANDIDATE_TAG" == candidate-replay-v1.0.10-beta.6 ) && "$BASELINE_PROFILE" == beta1101 ) ) ) ]] || exit 1
         [[ "$RECEIPT_SHA256" =~ ^[a-f0-9]{64}$ && "$BUNDLE_SHA256" =~ ^[a-f0-9]{64}$ ]] || exit 1
         case "$EXECUTION_SCOPE" in
           candidate)

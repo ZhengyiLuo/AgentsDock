@@ -1,6 +1,7 @@
 // Localized display strings use semantic catalog keys.
 import { t, getLocale } from '@shared/i18n'
 import { useLocale } from '../lib/i18n'
+import { CHAT_PANE_IDS, type ChatPane as ChatPaneId, type ChatPanes } from '../lib/chat-panes'
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import * as ContextMenu from '@radix-ui/react-context-menu'
 import {
@@ -19,7 +20,7 @@ import { activeEmergencyAlert } from '../lib/emergency-alert'
 import { backendLabel, runtimeLabel } from '../lib/format'
 import { openSessionHistoryResult } from '../lib/session-history-search'
 import { liveCodexSubagentCount, liveCodexSubagentLabel } from '../lib/subagents'
-import { rankSessionsForSearch, sidebarSessionGroups } from '../lib/sessions'
+import { rankSessionsForSearch, sidebarSessionGroups, type SidebarGroupingOptions } from '../lib/sessions'
 import { getWorkspacePreference, setWorkspacePreference } from '../lib/workspace-preferences'
 import { handleMenuCommand, selectMailHintPending, selectBulletinHintPending, sessionUnread, useAppStore } from '../store/app-store'
 import { BackendMark } from './BackendMark'
@@ -55,6 +56,8 @@ const sidebarCollisionDetection: CollisionDetection = (args) => {
 export function Sidebar({ hidden = false }: { hidden?: boolean }) {
   useLocale()
   const sessions = useAppStore(state => state.sessions)
+  const jobs = useAppStore(state => state.jobs)
+  const jobSessionIds = useMemo(() => new Set(jobs.map(job => job.session_id)), [jobs])
   const activeSessionIds = useAppStore(state => state.activeSessionIds)
   const selectedId = useAppStore(state => state.selectedSessionId)
   const chatPanes = useAppStore(state => state.chatPanes)
@@ -69,6 +72,9 @@ export function Sidebar({ hidden = false }: { hidden?: boolean }) {
   const folderOrder = useAppStore(state => state.folderOrder)
   const collapsed = useAppStore(state => state.collapsedFolders)
   const collapsedStatuses = useAppStore(state => state.collapsedStatusGroups)
+  const groupUnreadChats = useAppStore(state => state.groupUnreadChats)
+  const includeCronInUnread = useAppStore(state => state.includeCronInUnread)
+  const groupRunningChats = useAppStore(state => state.groupRunningChats)
   const pinnedCollapsed = useAppStore(state => state.pinnedCollapsed)
   const archivedCollapsed = useAppStore(state => state.archivedCollapsed)
   const catalog = useAppStore(state => state.runtimeCatalog)
@@ -83,7 +89,9 @@ export function Sidebar({ hidden = false }: { hidden?: boolean }) {
   const sidebarScrollingUntil = useRef(0)
   const sidebarScrollTimer = useRef<number | null>(null)
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: SIDEBAR_LONG_PRESS }))
-  const sections = useMemo(() => buildSections(sessions, folderOrder, '', new Set(), activeSessionIds), [sessions, folderOrder, activeSessionIds, getLocale()])
+  const sections = useMemo(() => buildSections(sessions, folderOrder, '', new Set(), activeSessionIds, {
+    groupUnreadChats, includeCronInUnread, groupRunningChats, jobSessionIds
+  }), [sessions, folderOrder, activeSessionIds, groupUnreadChats, includeCronInUnread, groupRunningChats, jobSessionIds, getLocale()])
   const computedFolders = useMemo(() => orderedFolders(
     [...new Set([...folderOrder, ...sessions.filter(session => !session.archived && !session.pinned).map(session => session.folder?.trim() || 'General')])],
     folderOrder
@@ -285,11 +293,11 @@ export function Sidebar({ hidden = false }: { hidden?: boolean }) {
 }
 
 function SidebarSection({ section, selectedId, chatPanes, collapsed, drop, runtime, suppressClick, folders, isSidebarScrolling }: {
-  section: Section; selectedId: string | null; chatPanes: { primary: string | null; secondary: string | null }; collapsed: boolean; drop: DropIndicator | null; runtime: (session: Session) => string; suppressClick: (id: string) => boolean
+  section: Section; selectedId: string | null; chatPanes: ChatPanes; collapsed: boolean; drop: DropIndicator | null; runtime: (session: Session) => string; suppressClick: (id: string) => boolean
   folders: string[]; isSidebarScrolling: () => boolean
 }) {
   useLocale()
-  const splitOpen = Boolean(chatPanes.primary && chatPanes.secondary && chatPanes.primary !== chatPanes.secondary)
+  const splitOpen = Object.values(chatPanes).filter(Boolean).length > 1
   const droppable = useDroppable({
     id: section.id,
     disabled: section.kind !== 'folder',
@@ -308,7 +316,7 @@ function SidebarSection({ section, selectedId, chatPanes, collapsed, drop, runti
     <section ref={droppable.setNodeRef} data-section-id={section.id} className={`sidebar-section ${boundaryIndicator}`}>
       <FolderHeader section={section} collapsed={collapsed} drop={drop} onToggle={toggle} suppressClick={suppressClick} />
       {!collapsed && section.sessions.map(session => (
-        <SessionRow key={session.id} session={session} selected={session.id === selectedId} visiblePane={splitOpen ? chatPanes.primary === session.id ? 'primary' : chatPanes.secondary === session.id ? 'secondary' : null : null} sectionId={section.id} dropIndicator={drop?.id === `session:${session.id}` ? `drop-${drop.placement}` : ''} runtime={runtime(session)} suppressClick={suppressClick} folders={folders} isSidebarScrolling={isSidebarScrolling} />
+        <SessionRow key={session.id} session={session} selected={session.id === selectedId} visiblePane={splitOpen ? CHAT_PANE_IDS.find(pane => chatPanes[pane] === session.id) ?? null : null} sectionId={section.id} dropIndicator={drop?.id === `session:${session.id}` ? `drop-${drop.placement}` : ''} runtime={runtime(session)} suppressClick={suppressClick} folders={folders} isSidebarScrolling={isSidebarScrolling} />
       ))}
     </section>
   )
@@ -346,7 +354,7 @@ function FolderHeader({ section, collapsed, drop, onToggle, suppressClick }: { s
 interface SessionRowProps {
   session: Session
   selected: boolean
-  visiblePane: 'primary' | 'secondary' | null
+  visiblePane: ChatPaneId | null
   sectionId: string
   dropIndicator: string
   runtime: string
@@ -367,7 +375,8 @@ const SessionRow = memo(function SessionRow({ session, selected, visiblePane, se
   const running = useAppStore(state => state.activeSessionIds.has(session.id))
   const liveChildren = useAppStore(state => session.backend === 'codex'
     ? liveCodexSubagentCount(state.snapshots[session.id]?.events,
-      state.snapshots[session.id]?.session.codex_thread_id || session.codex_thread_id)
+      state.snapshots[session.id]?.session.codex_thread_id || session.codex_thread_id
+        || state.snapshots[session.id]?.session.session_id || session.session_id)
     : 0)
   const childActivity = liveChildren > 0 ? liveCodexSubagentLabel(liveChildren) : ''
 
@@ -412,7 +421,7 @@ const SessionRow = memo(function SessionRow({ session, selected, visiblePane, se
           <span className="session-copy"><strong>{session.title}</strong><small title={emergency?.message || (needsUserAction ? t("ui.Sidebar.SessionRow.this_agent_is_paused_until_you_respond_82dc6e8") : childActivity || undefined)}>{emergency ? t("ui.Sidebar.SessionRow.emergency_89e4490", { "message": String(emergency.message) }) : needsUserAction ? t("ui.Sidebar.SessionRow.action_needed_c2d066a", { "chat": String(backendLabel(session.backend)) }) : childActivity ? `${childActivity} · ${backendLabel(session.backend)} · ${runtime}${running ? ' · running' : ''}` : `${backendLabel(session.backend)} · ${runtime}${running ? ' · running' : unread ? ' · new' : ''}`}</small></span>
           {session.archived && <span className="session-archive-badge">{t('chat.archived')}</span>}
           {emergency && <span key={emergency.id} className="sr-only" role="alert">{t('ui.sidebar.emergency', { title: session.title, message: emergency.message })}</span>}
-          {visiblePane && <span className="sr-only">{t(visiblePane === 'primary' ? 'ui.sidebar.firstPane' : 'ui.sidebar.secondPane')}</span>}
+          {visiblePane && <span className="sr-only">{visiblePane === 'primary' ? t('ui.sidebar.firstPane') : visiblePane === 'secondary' ? t('ui.sidebar.secondPane') : t('chatWorkspace.paneNumber', { number: CHAT_PANE_IDS.indexOf(visiblePane) + 1 })}</span>}
           {(emergency || needsUserAction || running || liveChildren > 0 || unread) && <span className={`status-dot ${emergency ? 'emergency' : needsUserAction ? 'attention' : running || liveChildren > 0 ? 'running' : 'unread'}`} aria-hidden="true" />}
         </div>
       </ContextMenu.Trigger>
@@ -462,10 +471,10 @@ function MenuItem({ icon: Icon, label, onSelect, danger, disabled, title }: { ic
   return <ContextMenu.Item className={`menu-item ${danger ? 'danger' : ''}`} disabled={disabled} title={title} onSelect={onSelect}><Icon size={14} />{label}</ContextMenu.Item>
 }
 
-export function buildSections(sessions: Session[], folderOrder: string[], query: string, historySessionIds: Set<string> = new Set(), activeSessionIds: ReadonlySet<string> = new Set()): Section[] {
+export function buildSections(sessions: Session[], folderOrder: string[], query: string, historySessionIds: Set<string> = new Set(), activeSessionIds: ReadonlySet<string> = new Set(), options: SidebarGroupingOptions = {}): Section[] {
   const filtered = rankSessionsForSearch(sessions, query, historySessionIds)
   if (query.trim()) return filtered.length ? [{ id: 'search', title: t("ui.Sidebar.buildSections.matches_98abff2"), sessions: filtered, kind: 'search' }] : []
-  const { running, unread, ordinary } = sidebarSessionGroups(filtered, activeSessionIds)
+  const { running, unread, ordinary } = sidebarSessionGroups(filtered, activeSessionIds, options)
   const pinned = ordinary.filter(session => session.pinned && !session.archived)
   const archived = filtered.filter(session => session.archived)
   const byFolder = new Map<string, Session[]>()

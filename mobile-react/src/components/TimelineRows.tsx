@@ -773,15 +773,18 @@ function SystemRowView({ row, fontScale }: { row: Extract<TimelineRow, { kind: '
   const colors = usePalette()
   const error = isTimelineError(row.event)
   const digest = isHandoffDigestEvent(row.event)
+  const notificationLevel = row.event.type === 'agent_notification' ? row.event.notification_level : null
   const generating = digest && !['handoff_digest_received', 'handoff_digest_sent', 'handoff_digest_error'].includes(row.event.type)
-  const title = digest ? digestStatusTitle(row.event) : row.event.type.replaceAll('_', ' ')
+  const title = notificationLevel
+    ? notificationLevel === 'emergency' ? 'Emergency' : notificationLevel === 'important' ? 'Important' : 'Notification'
+    : digest ? digestStatusTitle(row.event) : row.event.type.replaceAll('_', ' ')
   const text = digest ? digestStatusText(row.event) : messageText(row.event) || title
   const digestBody = row.event.type === 'handoff_digest_received' ? row.event.digest?.trim() : ''
   const [showDigest, setShowDigest] = useRecyclingState(false, [row.key])
-  const accent = error ? colors.red : digest ? colors.orange : colors.blue
-  return <View style={[styles.system, { backgroundColor: error ? `${colors.red}18` : digest ? `${colors.orange}18` : colors.surface, borderColor: accent }]}>
+  const accent = error || notificationLevel === 'emergency' ? colors.red : notificationLevel === 'important' ? colors.pink : digest ? colors.orange : colors.blue
+  return <View style={[styles.system, { backgroundColor: error || notificationLevel ? `${accent}18` : digest ? `${colors.orange}18` : colors.surface, borderColor: accent }]}>
     {error ? <AlertTriangle size={16} color={accent} /> : generating ? <ActivityIndicator size="small" color={accent} style={styles.digestSpinner} /> : digest ? <Sparkles size={16} color={accent} /> : <Check size={16} color={accent} />}
-    <View style={{ flex: 1 }}><Text style={[styles.systemTitle, { color: error ? colors.red : colors.muted }]}>{title}</Text><Text selectable style={[styles.systemText, { color: error ? colors.red : colors.text }]}>{text}</Text>{digestBody ? <><Pressable accessibilityRole="button" accessibilityLabel={showDigest ? 'Hide digest' : 'View digest'} accessibilityState={{ expanded: showDigest }} onPress={() => setShowDigest(value => !value)} style={styles.digestToggle}><Text style={{ color: colors.blue, fontSize: 12, fontWeight: '700' }} localize>{showDigest ? 'Hide digest' : 'View digest'}</Text></Pressable>{showDigest ? <MarkdownContent value={digestBody} fontScale={fontScale} /> : null}</> : null}</View>
+    <View style={{ flex: 1 }}><Text style={[styles.systemTitle, { color: error ? colors.red : colors.muted }]} localize={Boolean(notificationLevel)}>{title}</Text><Text selectable style={[styles.systemText, { color: error ? colors.red : colors.text }]}>{text}</Text>{digestBody ? <><Pressable accessibilityRole="button" accessibilityLabel={showDigest ? 'Hide digest' : 'View digest'} accessibilityState={{ expanded: showDigest }} onPress={() => setShowDigest(value => !value)} style={styles.digestToggle}><Text style={{ color: colors.blue, fontSize: 12, fontWeight: '700' }} localize>{showDigest ? 'Hide digest' : 'View digest'}</Text></Pressable>{showDigest ? <MarkdownContent value={digestBody} fontScale={fontScale} /> : null}</> : null}</View>
   </View>
 }
 

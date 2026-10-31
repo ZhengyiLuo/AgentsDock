@@ -143,6 +143,8 @@ export interface ClaudeRuntimeSnapshot {
   goal?: ClaudeGoal | null
   /** Native command accepted; awaiting an authoritative goal status record. */
   goal_starting?: boolean
+  /** A native goal command was accepted but later rejected by Claude. */
+  goal_error?: string | null
   /** The initial provider transcript goal projection is still loading. */
   goal_loading?: boolean
 }
@@ -399,6 +401,11 @@ export interface TurnStopResult {
   native_interrupt?: boolean
   goal_paused?: boolean
   message?: string | null
+  subagents?: {
+    pending?: string[]
+    errors?: string[]
+    interrupted?: string[]
+  }
 }
 
 export interface CodexRollbackInput {
@@ -516,6 +523,8 @@ export interface Session {
   latest_agent_event_seq?: number | null
   latest_agent_event_at?: string | null
   latest_agent_event_type?: string | null
+  /** Latest visible output outside scheduled jobs; omitted by older servers. */
+  latest_non_job_agent_event_seq?: number | null
   last_read_agent_event_seq?: number | null
   last_read_agent_event_at?: string | null
   manual_unread?: boolean | null
@@ -1250,6 +1259,8 @@ export interface Event extends SharedChatAttribution {
   native_steer?: boolean | null
   /** Accepted user input on the existing native goal owner; not a new turn or Stop. */
   native_goal_steer?: boolean | null
+  /** Accepted human follow-up on the existing Claude SDK run, without interruption. */
+  native_followup?: boolean | null
   superseded_by_run_id?: string | null
   steer_interrupted_run_id?: string | null
   codex_thread_status?: CodexThreadStatus | null
@@ -2380,6 +2391,10 @@ export interface BootstrapPayload {
   folderOrder: string[]
   collapsedFolders: string[]
   pinnedCollapsed?: boolean
+  /** Local server-scoped sidebar display preferences. */
+  groupUnreadChats?: boolean
+  includeCronInUnread?: boolean
+  groupRunningChats?: boolean
   archivedCollapsed: boolean
   inspectorVisible: boolean
   /** Present for profile-aware bootstraps; omitted by the legacy single-server path. */

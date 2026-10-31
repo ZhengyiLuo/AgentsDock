@@ -54,6 +54,13 @@ export function crossChatQueueRefreshSessionId(event: Event): string | null {
     ? event.session_id : null
 }
 
+/** Mobile hides a promoted row until admission. Stop may return it to the queue. */
+export function pausedQueueNeedsRefresh(turns: readonly QueuedTurn[], event: Event): boolean {
+  if (event.type !== 'turn_queue_paused') return false
+  const ids = event.queued_ids ?? (event.queued_id ? [event.queued_id] : [])
+  return ids.some(id => !turns.some(turn => turn.queued_id === id))
+}
+
 export function queuedTurnHasEarlierDeliveryBarrier(turns: readonly QueuedTurn[], queuedId: string): boolean {
   const ordered = orderedQueuedTurns(turns)
   const index = ordered.findIndex(turn => turn.queued_id === queuedId)
@@ -98,12 +105,12 @@ export function updateQueuedTurns(current: QueuedTurn[], event: Event): QueuedTu
       cross_chat_exchange_leg_id: event.cross_chat_exchange_leg_id,
       cross_chat_exchange_status: event.cross_chat_exchange_status,
       secure_peer_envelope_id: event.secure_peer_envelope_id,
-      promoted: event.promoted,
+      promoted: event.type === 'turn_queue_delivery_fenced' ? false : event.promoted,
       chat_references: event.chat_references,
       team_references: event.team_references,
       created_at: event.ts,
-      paused: event.paused,
-      pause_reason: event.pause_reason,
+      paused: event.type === 'turn_queue_delivery_fenced' ? true : event.paused,
+      pause_reason: event.type === 'turn_queue_delivery_fenced' ? 'delivery_uncertain' : event.pause_reason,
     }
     return [...current.filter(value => value.queued_id !== turn.queued_id), turn].sort(queueSort)
   }
@@ -123,12 +130,17 @@ export function updateQueuedTurns(current: QueuedTurn[], event: Event): QueuedTu
       pause_reason: event.pause_reason ?? value.pause_reason,
     } : value).sort(queueSort)
   }
-  if (event.type === 'turn_queue_paused' && event.queued_id) {
-    return current.map(value => value.queued_id === event.queued_id ? {
-      ...value,
-      paused: event.paused ?? true,
-      pause_reason: event.pause_reason ?? value.pause_reason,
-    } : value)
+  if (event.type === 'turn_queue_paused') {
+    const ids = new Set(event.queued_ids ?? (event.queued_id ? [event.queued_id] : []))
+    let changed = false
+    const next = current.map(value => {
+      if (!ids.has(value.queued_id)) return value
+      const pauseReason: QueuedTurn['pause_reason'] = value.pause_reason === 'delivery_uncertain' ? 'delivery_uncertain' : 'stopped'
+      if (value.paused === true && value.promoted !== true && value.pause_reason === pauseReason) return value
+      changed = true
+      return { ...value, paused: true, promoted: false, pause_reason: pauseReason }
+    })
+    return changed ? next : current
   }
   if (event.positions?.length) {
     const positions = new Map(event.positions.map(value => [value.queued_id, value.position]))

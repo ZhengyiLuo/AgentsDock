@@ -9,8 +9,14 @@ export default defineConfig({
       minify: true,
       sourcemap: false,
       rollupOptions: {
-        input: resolve(__dirname, 'src/main/index.ts'),
-        external: ['electron']
+        input: {
+          index: resolve(__dirname, 'src/main/index.ts'),
+          'tiff-preview-worker': resolve(__dirname, 'src/main/tiff-preview-worker.cjs')
+        },
+        external: ['electron'],
+        output: {
+          entryFileNames: chunk => chunk.name === 'tiff-preview-worker' ? '[name].cjs' : '[name].js'
+        }
       }
     }
   },

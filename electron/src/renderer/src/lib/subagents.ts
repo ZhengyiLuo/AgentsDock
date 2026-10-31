@@ -47,36 +47,38 @@ const LOG_LIMIT = 80
 
 const liveCodexChildren = new WeakMap<Event[], Map<string, number>>()
 
-/** Historical children from another thread or a fork source must not keep Stop alive. */
+/** Only native children with proven ownership can keep an idle chat's Stop alive. */
 export function liveCodexSubagentCount(events: Event[] | undefined, rootThreadId?: string | null): number {
-  if (!events?.length) return 0
-  const root = rootThreadId || ''
+  if (!events?.length || !rootThreadId) return 0
   const cached = liveCodexChildren.get(events)
-  if (cached?.has(root)) return cached.get(root)!
-  // Forks copy history, not ownership of the source's running agents.
-  const agents = subagentsFromEvents(events.filter(event => event.forked !== true), 'codex')
-  const descendants = new Set([root])
-  if (root) {
-    let changed = true
-    while (changed) {
-      changed = false
-      for (const agent of agents) {
-        if (agent.parentThreadId && descendants.has(agent.parentThreadId) && !descendants.has(agent.id)) {
-          descendants.add(agent.id)
-          changed = true
-        }
+  if (cached?.has(rootThreadId)) return cached.get(rootThreadId)!
+  const latest = new Map<string, Event>()
+  for (const event of events) {
+    if (event.type !== 'subagent_state' || !event.subagent_id || event.forked === true
+      || event.backend && event.backend !== 'codex' || event.subagent_id === rootThreadId) continue
+    const previous = latest.get(event.subagent_id)
+    if (!previous || event.seq > previous.seq) latest.set(event.subagent_id, event)
+  }
+  const descendants = new Set([rootThreadId])
+  let changed = true
+  while (changed) {
+    changed = false
+    for (const event of latest.values()) {
+      if (event.subagent_root_thread_id && event.subagent_root_thread_id !== rootThreadId) continue
+      if ((event.subagent_root_thread_id === rootThreadId
+        || event.subagent_parent_thread_id && descendants.has(event.subagent_parent_thread_id))
+        && !descendants.has(event.subagent_id!)) {
+        descendants.add(event.subagent_id!)
+        changed = true
       }
     }
   }
-  const live = agents.filter(agent => agent.backend === 'codex' && isSubagentActive(agent)
-    && (!root || (agent.rootThreadId ? agent.rootThreadId === root
-      : descendants.has(agent.id) || !agent.parentThreadId && !agent.key.startsWith('codex:subagent:')))).length
-  // Older servers can omit root metadata. Use their proven parent chain, not
-  // an assumed owner when the bounded history omits an identified ancestor.
-  const values = cached ?? new Map<string, number>()
-  values.set(root, live)
-  liveCodexChildren.set(events, values)
-  return live
+  const count = [...latest.values()].filter(event => descendants.has(event.subagent_id!)
+    && ACTIVE_STATUSES.has(normalizedStatus(event.subagent_status))).length
+  const counts = cached ?? new Map<string, number>()
+  counts.set(rootThreadId, count)
+  liveCodexChildren.set(events, counts)
+  return count
 }
 
 export function hasLiveCodexSubagents(events: Event[] | undefined, rootThreadId?: string | null): boolean {
@@ -394,7 +396,7 @@ export function subagentLogText(agent: SubagentActivity): string {
     agent.nickname && agent.nickname !== subagentDisplayName(agent) ? agent.nickname : '',
     agent.path && agent.path !== subagentDisplayName(agent) ? t('timeline.subagent.path', { path: agent.path }) : '',
     task && task !== agent.name && task !== agent.path ? t('timeline.subagent.task', { task }) : '',
-    `${agent.backend} · ${agent.kind || 'subagent'} · ${subagentStatusLabel(agent.status)}`,
+    `${agent.backend} · ${agent.kind || t('subagents.singular')} · ${subagentStatusLabel(agent.status)}`,
     agent.providerRef ? `Provider: ${agent.providerRef}` : ''
   ].filter(Boolean)
   return [...header, '', ...agent.log.map(entry => `${formatLogTime(entry.ts)}  ${entry.text}`)].join('\n')
@@ -410,7 +412,7 @@ export function subagentDisplayName(agent: SubagentActivity): string {
     if (leaf && leaf !== agent.id) return readableSubagentTask(leaf)
   }
   if (agent.nickname) return agent.nickname
-  return cleanIdentityText(agent.name) || (agent.backend === 'claude' ? 'Claude subagent' : 'Codex subagent')
+  return cleanIdentityText(agent.name) || t('subagents.providerName', { provider: agent.backend === 'claude' ? 'Claude' : 'Codex' })
 }
 
 function subagentTaskLabel(agent: SubagentActivity): string {
@@ -435,7 +437,7 @@ export function subagentDetailText(agent: SubagentActivity): string {
   const task = subagentTaskLabel(agent)
   if (task && task !== displayName) return task
   const activity = cleanIdentityText(agent.latestActivity)
-  return activity || agent.kind || 'subagent'
+  return activity || agent.kind || t('subagents.singular')
 }
 
 function parseRawEvent(value?: string | null): Record<string, unknown> {

@@ -599,7 +599,7 @@ function SessionRow({ session, profileScope, running, searchSnippet, opening, fo
   const attentionColor = attentionLevel === 'emergency' ? colors.red : attentionLevel === 'important' ? colors.pink : colors.blue
   const waiting = sessionNeedsProviderInteraction(session)
   const pendingInteractionCount = sessionPendingInteractionCount(session)
-  const waitingProviderName = session.backend === 'claude' ? 'Claude' : 'Codex'
+  const waitingProviderName = session.backend === 'gemini' ? 'Gemini' : session.backend === 'claude' ? 'Claude' : 'Codex'
   const activityDate = formatChatDate(session.latest_event_at ?? session.updated_at ?? session.created_at, new Date(), locale)
   const markRead = useAppStore(state => state.markRead)
   const markUnread = useAppStore(state => state.markUnread)

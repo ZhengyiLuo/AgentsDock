@@ -422,9 +422,8 @@ export function projectTimeline(events: Event[], knownFiles: AgentFile[]): Timel
       }
       continue
     }
-    // Emergency alerts are always chronological top-level transcript cards,
-    // even when the server emits them from inside a scheduled job run.
-    if (event.type === 'emergency_alert_raised') {
+    // Agent notices are chronological cards even inside an active run.
+    if (event.type === 'emergency_alert_raised' || event.type === 'agent_notification') {
       items.push({ kind: 'system', key: `event:${event.id}`, seq: event.seq, event })
       continue
     }

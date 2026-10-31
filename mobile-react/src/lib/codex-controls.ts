@@ -88,16 +88,23 @@ export function sessionNeedsCodexInteraction(session: Pick<
   )
 }
 
-export function isAgentActivityEvent(event: Pick<Event, 'type'>): boolean {
+export function isAgentActivityEvent(event: Pick<Event, 'type'> & Partial<Pick<Event, 'text' | 'result_text' | 'goal'>>): boolean {
+  if (event.type.startsWith('cross_chat_') || event.type.startsWith('chat_conversation_message_')) return true
+  if (event.type === 'assistant_text') return Boolean(event.text?.trim())
+  if (event.type === 'turn_finished') return Boolean(event.result_text?.trim())
+  if (event.type === 'codex_goal_updated') return event.goal?.status === 'complete'
   return [
-    'assistant_text',
-    'turn_finished',
+    'error',
+    'emergency_alert_raised',
+    'agent_notification',
     'artifact_created',
-    'file_uploaded',
+    'job_ran',
     'job_finished',
     'job_error',
+    'handoff_digest_received',
     'codex_interaction_requested',
     'claude_interaction_requested',
+    'gemini_interaction_requested',
   ].includes(event.type)
 }
 

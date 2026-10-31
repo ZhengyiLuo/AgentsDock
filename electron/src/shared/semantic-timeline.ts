@@ -43,15 +43,15 @@ export interface TimelineSemanticUnit {
   events: Event[]
 }
 
-/** A genuine user boundary within one still-running native Codex goal owner. */
+/** A proven human input boundary within one still-running native provider owner. */
 export function isNativeGoalSteerEvent(event: Event): boolean {
   return event.type === 'turn_steered'
-    && event.native_goal_steer === true
     && event.native_steer === true
-    && event.backend === 'codex'
-    && event.purpose === 'codex_goal_resume'
     && event.provider_user_authored === true
     && Boolean(event.run_id?.trim())
+    && ((event.native_goal_steer === true && event.backend === 'codex' && event.purpose === 'codex_goal_resume')
+      || (event.native_followup === true && event.backend === 'claude' && event.purpose == null
+        && event.provider_generated !== true && Boolean(event.provider_message_id?.trim())))
 }
 
 export function timelineSemanticUnits(events: Event[]): TimelineSemanticUnit[] {
@@ -139,6 +139,10 @@ export function timelineSemanticUnits(events: Event[]): TimelineSemanticUnit[] {
     // that run (or its scheduled-job card) when semantic history is rebuilt.
     if (event.type === 'team_message_sent' || event.type === 'provider_session_reset') {
       key = `event:${event.id || event.seq}`
+    } else if (isNativeGoalSteerEvent(event)) {
+      // The user can send a follow-up while a scheduled run still owns the
+      // provider. Keep that input outside its job card without moving output.
+      key = goalSegmentByRun.get(runId)!
     } else if (jobId) {
       const occurrenceGroupId = jobGroupByOccurrence.get(occurrenceKey) || ''
       key = event.job_timeline_group_id?.trim() || (

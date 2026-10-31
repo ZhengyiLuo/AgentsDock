@@ -8,8 +8,8 @@ const REQUIRED_BACKENDS = ['claude', 'codex'] as const
  * agent has started (server sets `backend_locked`, or any provider session id
  * is present), switching would orphan that transcript, so the picker locks.
  */
-export function isBackendLocked(session: Pick<Session, 'backend_locked' | 'session_id' | 'claude_session_id' | 'codex_thread_id' | 'cursor_session_id'>): boolean {
-  return Boolean(session.backend_locked || session.session_id || session.claude_session_id || session.codex_thread_id || session.cursor_session_id)
+export function isBackendLocked(session: Pick<Session, 'backend_locked' | 'session_id' | 'claude_session_id' | 'codex_thread_id' | 'cursor_session_id' | 'opencode_session_id' | 'gemini_session_id'>): boolean {
+  return Boolean(session.backend_locked || session.session_id || session.claude_session_id || session.codex_thread_id || session.cursor_session_id || session.opencode_session_id || session.gemini_session_id)
 }
 const EFFORT_ORDER = ['none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max', 'ultra'] as const
 export const CURSOR_BACKEND_CAPABILITY_VERSION = 2
@@ -32,7 +32,10 @@ export function cursorBackendAvailable(health: Health | null | undefined, catalo
 }
 
 export function selectableChatBackends(health: Health | null | undefined): Backend[] {
-  return cursorBackendSupported(health) ? ['claude', 'codex', 'cursor'] : ['claude', 'codex']
+  return ['claude', 'codex', ...(cursorBackendSupported(health) ? ['cursor' as const] : []),
+    ...(health?.capabilities?.opencode_backend?.available === true && health.capabilities.opencode_backend.version === 1 ? ['opencode' as const] : []),
+    ...(health?.capabilities?.gemini_backend?.available === true && health.capabilities.gemini_backend.version === 1
+      && health.capabilities.gemini_backend.client_capability === 'gemini_acp_v1' ? ['gemini' as const] : [])]
 }
 
 export function cursorBackendUnavailableReason(health: Health | null | undefined, catalog: RuntimeCatalog | null | undefined): string | null {
@@ -55,6 +58,9 @@ export function runtimeModelLockReason(catalog: RuntimeCatalog | null | undefine
 }
 
 export function runtimeSelectionError(health: Health | null | undefined, catalog: RuntimeCatalog | null | undefined, backend: Backend, model?: string | null): string | null {
+  if ((backend === 'opencode' || backend === 'gemini') && !selectableChatBackends(health).includes(backend)) return 'Update AgentsServer to use this agent.'
+  if (backend === 'gemini') return 'Select a configured Gemini Custom API on the server.'
+  if (backend === 'opencode' && catalog?.backends.opencode?.available !== true) return 'OpenCode is unavailable. Recheck My agents on the server.'
   if (backend === 'cursor' && !cursorBackendAvailable(health, catalog)) return cursorBackendUnavailableReason(health, catalog)
   const selected = model?.trim()
   if (backend === 'cursor' && selected && !catalog?.backends.cursor?.models.some(option => option.value === selected)) {

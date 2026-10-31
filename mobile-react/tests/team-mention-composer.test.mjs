@@ -39,6 +39,7 @@ const mocks = {
   './CodexPermissionMenu': `export const CodexPermissionMenu=()=>null;`,
   './ClaudePermissionMenu': `export const ClaudePermissionMenu=()=>null;`,
   './CursorPermissionMenu': `export const CursorPermissionMenu=()=>null;`,
+  './OptionalAgentPermissionMenu': `export const OptionalAgentPermissionMenu=()=>null;`,
   './CodexGoalBar': `export const CodexGoalBar=()=>null;`,
   './CodexRuntimeContext': `export const useCodexRuntime=()=>({refresh:async()=>{}});`,
   './ClaudeRuntimeContext': `export const useClaudeRuntime=()=>({refresh:async()=>{}});`,
@@ -417,6 +418,15 @@ test('route capacity blocks only new grants; existing and already-pending target
     await act(async()=>renderer.update(React.createElement(ChatTargetPicker,{...props,referenceLimitReached:true})))
     assert.equal(byID(renderer,'chat-target-target')[0].props.disabled,true)
     assert.equal(byID(renderer,'chat-route-revoke-route')[0].props.disabled,false,'Access may still be revoked when the draft reference limit is full')
+  }finally{await act(async()=>renderer.unmount())}
+})
+
+test('unlimited route metadata leaves new grants available',async()=>{
+  resetRoutes({agentRoutesBySession:{chat:{routes:[route()],max_routes:null}}})
+  const {renderer}=await renderChatPicker()
+  try{
+    assert.equal(byID(renderer,'chat-target-new')[0].props.disabled,false)
+    assert.equal(byID(renderer,'chat-route-capacity').length,0)
   }finally{await act(async()=>renderer.unmount())}
 })
 
