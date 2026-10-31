@@ -1099,7 +1099,100 @@ describe('WorkspaceEditor', () => {
     expect(screen.getByRole('button', { name: 'Open src/App.tsx' })).toBeEnabled()
   })
 
-  it('opens an editable untitled buffer and asks for its path only on first save', async () => {
+  it('names a new file inline, preserves its draft and detects Python from the extension', async () => {
+    const user = userEvent.setup()
+    renderEditor()
+    await screen.findByRole('button', { name: 'New file' })
+    await user.click(screen.getByRole('button', { name: 'New file' }))
+    const name = screen.getByRole('textbox', { name: 'New file name' })
+    expect(name).toHaveFocus()
+    expect(name).toHaveAttribute('placeholder', 'Untitled-1')
+    expect(screen.getByRole('tab', { name: 'Untitled-1' })).toHaveAttribute('aria-selected', 'true')
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+    expect(window.agentsDock.workspace.create).not.toHaveBeenCalled()
+    await user.type(screen.getByRole('textbox', { name: 'Contents of Untitled-1' }), 'print(42)')
+    await user.type(name, 'demo.py{Enter}')
+    await screen.findByRole('tab', { name: 'demo.py' })
+    expect(window.agentsDock.workspace.create).toHaveBeenCalledWith('chat-a', 'demo.py', 'file')
+    expect(window.agentsDock.workspace.write).toHaveBeenCalledWith('chat-a', 'demo.py', 'print(42)', 'rev-demo.py')
+    expect(screen.getByText('Python')).toBeVisible()
+    expect(screen.getByRole('textbox', { name: 'Contents of demo.py' })).toHaveValue('print(42)')
+    expect(screen.queryByRole('textbox', { name: 'New file name' })).not.toBeInTheDocument()
+  })
+
+  it('refocuses a pending inline name instead of creating duplicate empty tabs', async () => {
+    const user = userEvent.setup()
+    renderEditor()
+    await user.click(await screen.findByRole('button', { name: 'New file' }))
+    await user.type(screen.getByRole('textbox', { name: 'New file name' }), 'part')
+    await user.click(screen.getByRole('button', { name: 'New file' }))
+    expect(screen.getByRole('textbox', { name: 'New file name' })).toHaveFocus()
+    expect(screen.getByRole('textbox', { name: 'New file name' })).toHaveValue('part')
+    expect(screen.queryByRole('tab', { name: 'Untitled-2' })).not.toBeInTheDocument()
+    expect(window.agentsDock.workspace.create).not.toHaveBeenCalled()
+  })
+
+  it('never overwrites an existing file through inline creation, including repeated Enter', async () => {
+    const user = userEvent.setup()
+    renderEditor()
+    await screen.findByRole('button', { name: 'Open README.md' })
+    await user.click(screen.getByRole('button', { name: 'New file' }))
+    const name = screen.getByRole('textbox', { name: 'New file name' })
+    await user.type(name, 'README.md{Enter}{Enter}')
+    expect(screen.getByRole('alert')).toHaveTextContent('already exists. Choose a different filename.')
+    expect(window.agentsDock.workspace.create).not.toHaveBeenCalled()
+    expect(window.agentsDock.workspace.write).not.toHaveBeenCalled()
+    await user.clear(name)
+    await user.type(name, 'different.py{Enter}')
+    expect(await screen.findByRole('tab', { name: 'different.py' })).toBeVisible()
+  })
+
+  it('preserves an inline draft after a failed save and permits retry', async () => {
+    const user = userEvent.setup()
+    renderEditor()
+    await user.click(await screen.findByRole('button', { name: 'New file' }))
+    await user.type(screen.getByRole('textbox', { name: 'Contents of Untitled-1' }), 'print(42)')
+    vi.mocked(window.agentsDock.workspace.write).mockRejectedValueOnce(new Error('Disconnected'))
+    const name = screen.getByRole('textbox', { name: 'New file name' })
+    await user.type(name, 'retry.py{Enter}')
+    await waitFor(() => expect(name).toBeEnabled())
+    expect(screen.getByRole('textbox', { name: 'Contents of Untitled-1' })).toHaveValue('print(42)')
+    expect(window.agentsDock.workspace.remove).toHaveBeenCalledWith('chat-a', 'retry.py', 'entry-retry.py', false)
+    await user.type(name, '{Enter}')
+    expect(await screen.findByRole('tab', { name: 'retry.py' })).toBeVisible()
+  })
+
+  it.each([false, true])('drops only empty unnamed buffers when reopening a chat (cold restore: %s)', async cold => {
+    const user = userEvent.setup()
+    const first = renderEditor()
+    await user.click(await screen.findByRole('button', { name: 'New file' }))
+    await user.type(screen.getByRole('textbox', { name: 'New file name' }), 'empty.py{Enter}')
+    await screen.findByRole('tab', { name: 'empty.py' })
+    await user.click(screen.getByRole('button', { name: 'New file' }))
+    await user.type(screen.getByRole('textbox', { name: 'Contents of Untitled-2' }), 'draft to keep')
+    await user.type(screen.getByRole('textbox', { name: 'New file name' }), '{Escape}')
+    await user.click(screen.getByRole('button', { name: 'New file' }))
+    expect(screen.getByRole('tab', { name: 'Untitled-3' })).toBeVisible()
+    first.unmount()
+    const stored = vi.mocked(window.agentsDock.preferences.setScoped).mock.calls.at(-1)?.[2]
+    expect(stored).toMatchObject({ tabs: [
+      { path: 'empty.py' },
+      { untitled: true, draft: 'draft to keep' }
+    ] })
+    if (cold) {
+      resetWorkspaceEditorMemoryForTests()
+      vi.mocked(window.agentsDock.preferences.getScoped).mockResolvedValueOnce(stored)
+    }
+    renderEditor()
+    expect(await screen.findByRole('tab', { name: 'empty.py' })).toBeVisible()
+    expect(screen.getByRole('tab', { name: 'Untitled-2' })).toBeVisible()
+    expect(screen.queryByRole('tab', { name: 'Untitled-3' })).not.toBeInTheDocument()
+    await user.click(screen.getByRole('tab', { name: 'Untitled-2' }))
+    expect(screen.getByRole('textbox', { name: 'Contents of Untitled-2' })).toHaveValue('draft to keep')
+    expect(window.agentsDock.workspace.remove).not.toHaveBeenCalled()
+  })
+
+  it('can still use Save As for an untitled buffer instead of naming it inline', async () => {
     const user = userEvent.setup()
     renderEditor()
     act(() => {

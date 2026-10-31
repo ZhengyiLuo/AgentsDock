@@ -3007,6 +3007,62 @@ describe('emergency contact service fencing', () => {
   })
 })
 
+describe('code intelligence workspace scope fencing', () => {
+  const expected = { profileId: 'profile', profileGeneration: 4, serverIdentity: 'server-a' }
+  const operations = [
+    ['status', 'workspaceIntelligenceStatus'],
+    ['files', 'workspaceSearch'],
+    ['read', 'workspaceFile'],
+    ['socket', 'workspaceIntelligenceSocket']
+  ] as const
+
+  function fixture() {
+    const client = Object.fromEntries(operations.map(([, method]) => [method, vi.fn().mockResolvedValue({})]))
+    const scope = { profileId: expected.profileId, generation: expected.profileGeneration, client }
+    const service = Object.create(AppService.prototype) as AppService
+    const ensureValidatedScope = vi.fn().mockResolvedValue(undefined)
+    Object.assign(service, { scope, activeProfileId: expected.profileId, profileGeneration: expected.profileGeneration,
+      settings: { getProfile: () => ({ serverIdentity: expected.serverIdentity }) }, ensureValidatedScope })
+    const invoke = (kind: typeof operations[number][0], requested = expected) => kind === 'status'
+      ? service.workspaceIntelligenceStatus(requested, 'chat-a') : kind === 'files'
+        ? service.workspaceIntelligenceFiles(requested, 'chat-a', 'src', 40) : kind === 'read'
+          ? service.workspaceIntelligenceRead(requested, 'chat-a', 'src/main.py')
+          : service.workspaceIntelligenceSocket(requested, 'chat-a', 'python')
+    return { service, client, ensureValidatedScope, invoke }
+  }
+
+  it.each(operations)('rejects a stale %s scope before validation or transport', async (kind, method) => {
+    const f = fixture()
+    await expect(f.invoke(kind, { ...expected, profileGeneration: 3 })).rejects.toThrow()
+    await expect(f.invoke(kind, { ...expected, serverIdentity: 'different-server' })).rejects.toThrow()
+    expect(f.ensureValidatedScope).not.toHaveBeenCalled()
+    expect(f.client[method]).not.toHaveBeenCalled()
+  })
+
+  it.each(operations)('does not start %s if the profile changes while identity validation is pending', async (kind, method) => {
+    const f = fixture()
+    let finish!: () => void
+    f.ensureValidatedScope.mockReturnValue(new Promise<void>(resolve => { finish = resolve }))
+    const pending = f.invoke(kind)
+    Object.assign(f.service, { activeProfileId: 'new-profile', profileGeneration: 5 })
+    finish()
+    await expect(pending).rejects.toThrow()
+    expect(f.client[method]).not.toHaveBeenCalled()
+  })
+
+  it.each(operations.slice(0, 3))('rejects the old %s response after a profile switch', async (kind, method) => {
+    const f = fixture()
+    let finish!: (value: unknown) => void
+    f.client[method].mockReturnValue(new Promise(resolve => { finish = resolve }))
+    const pending = f.invoke(kind)
+    await Promise.resolve()
+    expect(f.client[method]).toHaveBeenCalledOnce()
+    Object.assign(f.service, { activeProfileId: 'new-profile', profileGeneration: 5 })
+    finish({ from: 'previous server' })
+    await expect(pending).rejects.toThrow()
+  })
+})
+
 describe('workspace Git scope fencing', () => {
   const expected = { profileId: 'profile', profileGeneration: 4, serverIdentity: 'server-a' }
   function fixture() {
@@ -3348,7 +3404,7 @@ describe('queued cross-chat capability forwarding', () => {
 
     await expect(service.updateQueued('chat-1', 'queued-1', 'Ask @Target', [reference], capabilities)).resolves.toBe(true)
 
-    expect(ensureValidatedScope).toHaveBeenCalledWith(scope)
+    expect(ensureValidatedScope).toHaveBeenCalledWith(scope, { waitForMetadata: false })
     expect(updateQueued).toHaveBeenCalledWith('chat-1', 'queued-1', 'Ask @Target', [reference], capabilities, undefined)
     expect(assertCurrentScope).toHaveBeenCalledTimes(1)
     expect(queue).not.toHaveBeenCalled()
@@ -3409,6 +3465,112 @@ describe('queued cross-chat capability forwarding', () => {
     })
     expect(projected.prompt.slice(chatReference.source_text_start, chatReference.source_text_end)).toBe('@Target')
     expect(projected.prompt.slice(teamReference.source_text_start, teamReference.source_text_end)).toBe('@@All')
+  })
+})
+
+describe('foreground queue identity readiness', () => {
+  function harness() {
+    const health = deferred<Health>()
+    const sessions = deferred<Session[]>()
+    const jobs = deferred<Job[]>()
+    const client = Object.assign(fakeClient({
+      health: () => health.promise, sessions: () => sessions.promise, jobs: () => jobs.promise
+    }), { updateQueued: vi.fn().mockResolvedValue(true) })
+    const other = Object.assign(fakeClient(), { updateQueued: vi.fn() })
+    const { settings } = profileSettings()
+    settings.setProfileServerIdentity('a', 'server-a')
+    const cache = new LocalCache(':memory:')
+    cache.putQueuedTurns('server-a', 'chat-1', [{ queued_id: 'queued-1', prompt: 'Original', file_ids: [] }])
+    const service = new AppService({ settings, cache,
+      clientFactory: url => (url === 'http://a.test:7850' ? client : other) as unknown as AgentServerClient })
+    cleanup.push(() => { service.stop(); cache.close() })
+    const internals = service as unknown as {
+      refreshAll(announce: boolean, includeJobs: boolean): Promise<void>
+      refreshInFlight: Map<number, Promise<void>>
+      refreshIdentityReady: Map<number, Promise<void>>
+    }
+    return { service, internals, cache, client, other, health, sessions, jobs }
+  }
+
+  it.each([false, true])('dispatches Save after verified health while list metadata is pending (join background=%s)', async background => {
+    const { service, internals, cache, client, health, sessions, jobs } = harness()
+    const backgroundRefresh = background ? internals.refreshAll(false, true) : null
+    const save = service.updateQueued('chat-1', 'queued-1', 'Edited')
+    const fullRefresh = internals.refreshInFlight.values().next().value!
+    let refreshFinished = false
+    void fullRefresh.then(() => { refreshFinished = true })
+    await settleBackgroundWork()
+    expect(client.updateQueued).not.toHaveBeenCalled()
+    expect(client.health).toHaveBeenCalledOnce()
+
+    health.resolve({ ok: true, server_identity: 'server-a' })
+    await settleBackgroundWork()
+    expect(client.updateQueued).toHaveBeenCalledOnce()
+    await expect(save).resolves.toBe(true)
+    expect(refreshFinished).toBe(false)
+    expect(client.health).toHaveBeenCalledOnce()
+    expect(client.sessions).toHaveBeenCalledOnce()
+    expect(cache.queuedTurns('server-a', 'chat-1')[0].prompt).toBe('Edited')
+
+    sessions.resolve([{ id: 'chat-1', title: 'Refreshed later', backend: 'claude' }])
+    jobs.resolve([])
+    await fullRefresh
+    await backgroundRefresh
+    expect((await service.bootstrap()).sessions[0].title).toBe('Refreshed later')
+    expect(internals.refreshIdentityReady.size).toBe(0)
+  })
+
+  it('keeps session mutations behind their earlier list refresh so the snapshot cannot overwrite the edit', async () => {
+    const { service, internals, client, health, sessions, jobs } = harness()
+    const renamed = { id: 'chat-1', title: 'Renamed', backend: 'claude' } satisfies Session
+    const updateSession = vi.fn().mockResolvedValue(renamed)
+    Object.assign(client, { updateSession })
+    const refresh = internals.refreshAll(false, true)
+    const rename = service.updateSession('chat-1', { title: 'Renamed' })
+
+    health.resolve({ ok: true, server_identity: 'server-a' })
+    await settleBackgroundWork()
+    expect(updateSession).not.toHaveBeenCalled()
+
+    sessions.resolve([{ ...renamed, title: 'Old snapshot' }])
+    jobs.resolve([])
+    await refresh
+    await expect(rename).resolves.toEqual(renamed)
+    expect(updateSession).toHaveBeenCalledOnce()
+    expect((await service.bootstrap()).sessions[0].title).toBe('Renamed')
+  })
+
+  it.each([
+    ['network', 'Health unavailable'],
+    ['unhealthy', 'Server health check reported unavailable'],
+    ['changed identity', 'Server identity changed'],
+    ['missing identity', 'Server identity changed']
+  ])('does not dispatch Save when health validation fails: %s', async (failure, expected) => {
+    const { service, client, health, sessions, jobs } = harness()
+    const save = service.updateQueued('chat-1', 'queued-1', 'Edited')
+    const rejected = expect(save).rejects.toThrow(expected)
+    if (failure === 'network') health.reject(new Error(expected))
+    else health.resolve({ ok: failure !== 'unhealthy',
+      ...(failure !== 'missing identity' ? { server_identity: failure === 'changed identity' ? 'different-server' : 'server-a' } : {}) })
+    await rejected
+    expect(client.updateQueued).not.toHaveBeenCalled()
+    sessions.resolve([])
+    jobs.resolve([])
+  })
+
+  it('rejects an awaiting Save when another profile wins before identity adoption', async () => {
+    const { service, internals, client, other, health, sessions, jobs } = harness()
+    const save = service.updateQueued('chat-1', 'queued-1', 'Edited')
+    const rejected = expect(save).rejects.toThrow('superseded')
+    await service.switchServer('b')
+    health.resolve({ ok: true, server_identity: 'server-a' })
+    await rejected
+    expect(client.updateQueued).not.toHaveBeenCalled()
+    expect(other.updateQueued).not.toHaveBeenCalled()
+    sessions.resolve([])
+    jobs.resolve([])
+    await settleBackgroundWork()
+    expect(internals.refreshIdentityReady.size).toBe(0)
   })
 })
 

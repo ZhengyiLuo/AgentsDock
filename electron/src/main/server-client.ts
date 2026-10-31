@@ -1,4 +1,6 @@
 import { createReadStream, openAsBlob } from 'node:fs'
+import NativeWebSocket from 'ws'
+import { CODE_INTELLIGENCE_PROTOCOL, codeIntelligenceLanguage, parseCodeIntelligenceStatus, type CodeIntelligenceLanguage, type CodeIntelligenceStatus } from '../shared/code-intelligence'
 import { parseProviderUsage, type ProviderUsageSnapshot, type UsageBackend } from '../shared/provider-usage'
 import { parseCodexAuthStatus } from '../shared/codex-auth'
 import { customModelBackend, customModelInput, parseCustomModels, type CustomModelBackend, type CustomModelInput } from '../shared/custom-models'
@@ -2111,6 +2113,33 @@ export class AgentServerClient {
     }
   }
 
+  async workspaceIntelligenceStatus(sessionId: string): Promise<CodeIntelligenceStatus> {
+    return parseCodeIntelligenceStatus(await this.privilegedNativeRequest(
+      `/api/sessions/${workspaceGitSessionId(sessionId)}/workspace/intelligence`))
+  }
+
+  workspaceIntelligenceSocket(sessionId: string, language: CodeIntelligenceLanguage): WebSocket {
+    const configuration = this.configuration
+    const endpoint = new URL(configurationURL(configuration,
+      `/api/sessions/${encodeURIComponent(workspaceGitSessionId(sessionId))}/workspace/intelligence/${codeIntelligenceLanguage(language)}`))
+    endpoint.protocol = endpoint.protocol === 'https:' ? 'wss:' : 'ws:'
+    // Native authority must not carry Origin or Sec-Fetch-* browser metadata.
+    // Node's built-in WebSocket adds Sec-Fetch-Mode: websocket automatically.
+    const socket = new NativeWebSocket(endpoint, [CODE_INTELLIGENCE_PROTOCOL, ...agentTokenWebSocketProtocols(configuration.token)],
+      { followRedirects: false, maxPayload: 0, handshakeTimeout: 15_000 })
+    // A profile can retire before the IPC owner attaches its error listener.
+    // Keep EventEmitter's unhandled-error behavior from crashing the main process.
+    socket.on('error', () => {})
+    const stop = (): void => {
+      configuration.transports.delete(stop)
+      if (socket.readyState < 2) socket.close(1000, 'Code intelligence closed')
+    }
+    configuration.transports.add(stop)
+    socket.addEventListener('close', () => configuration.transports.delete(stop))
+    if (configuration.abortController.signal.aborted) stop()
+    return socket as unknown as WebSocket
+  }
+
   /** Opens one authenticated loopback proxy scoped to a chat lifecycle. */
   portTunnelSocket(sessionId: string, remotePort: number): WebSocket {
     if (!Number.isSafeInteger(remotePort) || remotePort < 1_024 || remotePort > 65_535) {
@@ -3290,6 +3319,9 @@ function isPrivilegedNativeControlTarget(
   if (path === '/api/connection-addresses') return !target.search && method === 'GET'
   if (/^\/api\/sessions\/[A-Za-z0-9_-]{1,128}\/claude\/goal$/.test(path)) {
     return !target.search && (method === 'PUT' || method === 'DELETE')
+  }
+  if (/^\/api\/sessions\/[A-Za-z0-9_-]{1,128}\/workspace\/intelligence$/.test(path)) {
+    return !target.search && method === 'GET'
   }
   const workspaceGit = /^\/api\/sessions\/[A-Za-z0-9_-]{1,128}\/workspace\/git(?:\/(diff|conflict|action))?$/.exec(path)
   if (workspaceGit) {

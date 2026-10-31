@@ -1,5 +1,60 @@
 # Public development log
 
+## 2026-10-31 - Inline workspace-file naming and temporary empty buffers
+
+- New file in the desktop Files explorer opens an Untitled buffer and focuses
+  an inline filename field in the selected directory. Enter saves through the
+  existing revision-checked create/write path; extensions such as `.py` select
+  the editor language. Existing filenames cannot be overwritten inline. Save As
+  and folder creation remain available.
+- Empty unnamed buffers are not restored after leaving a chat or relaunching.
+  Nonempty drafts and named files, including empty files, remain intact; this
+  cleanup never deletes workspace files from disk.
+- Verified on the combined PR #127/#125/#123 source-preview baseline `01dd9b81`:
+  157 editor tests, all 5,704 desktop tests (five skipped), eight packaging/license
+  guards, TypeScript and production compilation pass. Regression cases cover
+  inline naming, Python detection, duplicate-name rejection, failed-write retry,
+  repeated clicks, and warm/cold restoration of empty versus nonempty drafts.
+- Exercised the compiled native macOS app against an isolated real test server:
+  inline creation, save, rename, Python definition navigation, folder creation,
+  duplicate-name rejection and chat-switch draft preservation. Files on the
+  server confirmed the results. Dark and light/narrow rendering were inspected;
+  light preference and viewport width were emulated in the native renderer.
+  Input used Electron's keyboard/mouse debugging interface, not React handlers.
+  QA analytics were disabled. No new server implementation is required.
+- Availability: local development build, not published or merged. Windows/Linux
+  native input and physical Mac function-key mappings were not exercised.
+
+## 2026-10-31 - Combined code intelligence and Claude integration check
+
+- Locally integrate PRs #127, #125 and #123 on the post-#129 main baseline.
+  Preserve their original commits. Resolve the workspace-editor conflict by
+  keeping code intelligence and the current navigation layout, without
+  restoring the removed Changes-panel condition.
+- Source baseline: `c9893949`; combined code: `d0392711`. The source-preview
+  labels remain Electron `0.2.0`/build `86` and server `1.0.7-beta.11`; these
+  are development metadata, not new published release versions.
+- The compiled native macOS app used its production IPC and authenticated
+  HTTP/WebSocket transport against a matching source-preview test server.
+  Files/Symbols inserted editable references from real Python and TypeScript
+  language services. Both editors showed diagnostics and unsaved-buffer
+  completions without changing files on disk; TypeScript definition and
+  reference navigation also worked.
+- A real Claude one-shot native cron moved from idle to running with Stop,
+  then returned to idle with its final reply. Reopening preserved chronological
+  output without an extra user bubble for the internal scheduled prompt.
+  During a separate real Claude turn, editing a queued message saved promptly;
+  Stop ended the current turn and the edited follow-up completed successfully.
+- Focused desktop checks: 1,171 tests pass. Claude runtime, history repair,
+  transcript and mailbox checks: 416 pass. Language-service bridge checks:
+  15 pass, including real Pyright and TypeScript servers. Eight build-output
+  and license checks, TypeScript and production compilation pass.
+- This is local integration acceptance, not a release. Windows/Linux packaging,
+  native schedule recovery after provider teardown, forced admission races,
+  and every provider-native thinking/content-parity case were not repeated in
+  this combined pass. Desktop input used Electron's debugging protocol because
+  the computer-use surface was unavailable. QA analytics were disabled.
+
 ## 2026-10-31 - Composer history isolation and deliberate queue shortcuts
 
 - Integrated prompt-history and empty-composer Enter shortcuts with main
@@ -294,6 +349,85 @@
   completion. Test telemetry is captured locally and cancelled before Mixpanel
   submission. Other live Custom API backends and a live queued-send scenario
   remain untested; their deterministic coverage is described above.
+## 2026-10-28 - Claude native cron activity
+
+- Track successful native CronCreate receipts and the native command/prompt
+  hook that identifies their later wakes. Give each observed wake its own run
+  for live activity, tools, output, Stop, and provider file delivery without
+  submitting a replacement prompt or restarting Claude.
+- Keep the chat idle between occurrences. A clean Stop interrupts the current
+  occurrence and preserves future native schedules. Preserve the schedule's
+  original authority across intervening human messages; successful CronDelete
+  and provider teardown retire the corresponding registration. Native cron
+  inputs stay out of ordinary user bubbles.
+- Exact schedule IDs are not exposed on SDK wake frames. Identical registered
+  prompts retain their candidate IDs and use the most recent matching original
+  owner, without combining grants. Simultaneous background-task provenance is
+  retained separately.
+- If a native wake wins before a human message reaches Claude, preserve the
+  original accepted run and its effects, then submit it once after the native
+  work finishes. Stop/delete can cancel that unsent message. Replies and activity
+  stay in execution order while the human input remains at its original position.
+  If Claude already accepted the input and folds it into native work, retain
+  proven progress and native acknowledgment/result boundaries without replay.
+- Cancellation during native-to-human ownership restoration emits one terminal
+  event and keeps the original accepted metadata until cleanup finishes. The
+  production-supervised regression covers cancellation before, during, and
+  after restoration without sending the canceled query or evicting Claude.
+- An isolated production-app baseline with real Claude reproduced a native
+  cron command executing while the app remained idle without Stop. The patched
+  app showed the wake as active, streamed its tools and reply, delivered its
+  attachment, and reopened without duplicate output or an internal user bubble.
+  The recurring app check stopped one occurrence, sent a human follow-up, then
+  observed the next occurrence and successful schedule deletion on the same
+  native thread. Scrolling the virtualized timeline confirmed exactly the
+  original user messages remained visible.
+- A deliberate admission delay through the actual app exercised a native cron
+  wake winning before human submission: the original human query arrived once
+  afterward, the connection survived, and replies appeared in the correct order
+  before and after reopening. A separate real native overlap probe exercised
+  Claude folding already-submitted human input into a scheduled turn, retaining
+  progress before acknowledgment without an extra query or synthetic result.
+- SDK, runner, admission, queue/recovery, and timeline regressions passed, along
+  with TypeScript, production compilation, and compiled-entry verification.
+  Two earlier app-harness assertions were corrected: a follow-up accidentally
+  prohibited future scheduled work, and a DOM count ignored virtualization.
+  They are not counted as passing acceptance; the corrected full run passed.
+- Scope: schedules observed in the current native connection. Recovery of
+  durable schedules after provider teardown is not established by these checks.
+  No app installation, release, or live-service change has been performed.
+## 2026-10-28 - Per-chat code intelligence
+
+- Add Python and TypeScript/JavaScript completion, hover information,
+  diagnostics, definition navigation, and references to the workspace editor.
+  Language analysis runs on the chat's connected server and uses its project
+  configuration. Separate editor connections preserve independent unsaved
+  buffers; navigation opens files in the originating pane.
+- Add Files/Symbols search beside the composer. Selected paths and optional
+  line ranges become ordinary editable draft text, with removable references.
+  Symbol startup waits for the language server's project index; it does not
+  send workspace contents or hidden instructions to a chat provider.
+- Discover existing Pyright and TypeScript language servers on demand. Missing
+  tools and connection failures show Setup/Retry while file editing and the
+  composer remain usable. Scope requests to the server, chat, and editor;
+  discard stale responses and reap only the owned language-server processes.
+- Validation: focused renderer, native HTTP/WebSocket, scope-fencing, real
+  language-server, lifecycle, packaging-manifest, and license checks passed.
+  TypeScript and production Electron compilation passed. Fresh TypeScript
+  independent-file symbol search also passed ten isolated process runs.
+- Exercised the compiled app in an isolated native offscreen Electron profile
+  against real authenticated AgentsServer instances and actual Pyright and
+  TypeScript language servers: completion, unsaved diagnostics with disk
+  preservation, F12 navigation, references, unopened-file symbols, editable
+  draft references, chat/server switching, missing tools, installation followed
+  by Retry, and language-process failure followed by Retry. Inspected English
+  light/dark, narrow layouts, Chinese labels, and diagnostic tooltips. No
+  renderer errors occurred in accepted runs. Provider catalog fixtures were
+  used only to create disposable chats; no AI-provider request was needed.
+- This change requires matching desktop/server support and the documented
+  language tools. No release, deployment, user installation, or live-server
+  restart was performed. Packaged Windows/Linux desktop validation remains
+  outside this local macOS acceptance.
 
 ## 2026-10-27 - Honest native sign-in status in My Agents
 
@@ -337,6 +471,97 @@
   and the renderer displayed it without errors. Screenshots stay local; account
   metadata is not attached to the public PR. Login renewal itself remains a
   native-provider operation, and this display fix does not prevent OAuth expiry.
+## 2026-10-26 - Claude scheduled-message import recovery
+
+- Keep source-proven scheduled inputs out of ordinary user bubbles on first
+  import. Preserve the scheduled-job card, result, genuine messages, and
+  separate occurrences of recurring jobs.
+- Recover native Claude transcripts containing NUL-only padding records without
+  changing source bytes, checkpoint hashes, or cursor offsets. Malformed JSON
+  and ambiguous ownership retain the existing behavior; server journals remain
+  strict.
+- Reader, history-repair, and provider-history synchronization regressions pass.
+  Native offscreen desktop acceptance against an isolated production server
+  reproduced the duplicate, then verified its removal with real Claude output.
+  One ordinary turn and two scheduled turns completed successfully; repeated
+  app reopen checks preserved both job results and the genuine user message.
+- An initial harness assertion incorrectly expected different job revisions to
+  share a card. The corrected assertion passed against the retained fixture.
+  A redundant fresh-provider rerun encountered expired authentication; later
+  history-reopen checks completed without additional provider calls.
+- Availability: source fix only. Desktop package unchanged; no release,
+  installation, live history rewrite, or server deployment performed.
+
+## 2026-10-27 - Queued-message saves during reconnect
+
+- Queued edits can finish as soon as the current server passes its existing
+  identity check, without waiting for an unrelated chat/job list refresh.
+  Reuse the same health request; retain profile-switch and validation failures.
+  Other mutations retain their existing metadata ordering.
+- Native offscreen production-app acceptance against an isolated full server
+  with real Claude reproduced the old blocked Save by delaying the chat-list
+  response after a simulated health failure. The corrected app persisted the
+  edit and closed the editor while the list remained delayed and Claude kept
+  working. Repeat save, Cancel, an injected save failure, manual retry, and
+  reopening all preserved the expected draft and queued message.
+- All 460 service tests, TypeScript, production compilation, and compiled-entry
+  verification passed. Regression tests fail against the previous service.
+  The transport delays/errors were controlled test faults; no live incident
+  timing or signed-package acceptance is claimed.
+- Availability: source fix only; no app installation or live-server change.
+
+## 2026-10-27 - Claude goal activity and recovered timeline order
+
+- Distinguish a saved Claude goal from live execution, waiting, idle, and an
+  unloaded session. Remove the wall-clock timer that implied continuous work.
+  Show only native evaluator duration and offer an explicit **Continue goal**
+  action in the same thread when Claude is idle or unloaded. Preserve native
+  failed verdicts and their reasons.
+- Place recovered provider replies between the appropriate native turns using
+  their original timestamps and identities. Keep separate replies separate,
+  retain genuine identical-text messages, and keep history imports from ending
+  the active turn. Live streaming remains incremental after catch-up.
+- Capture Claude's actual background-task completion wakes after the parent
+  result. Bind the observed wake to a new owned run before tools execute,
+  without submitting another prompt or keeping background Bash permanently
+  busy. Preserve the existing task authorization and native thread.
+- Native offscreen desktop checks used production IPC and authenticated HTTP
+  against isolated full servers. A real Claude goal exercised working, Stop,
+  idle, Continue, native completion, chat navigation, narrow/light/dark layouts,
+  and reopening with the same thread. The isolated server restart check reopened
+  the app; automatic reconnection after restart is not an accepted boundary.
+- Real Claude background tasks exercised idle between turns, live wake output,
+  file attachment through the provider helper, history reopening without a
+  duplicate, stopping a second wake, and a subsequent human message. Separate
+  synthetic journal fixtures through the actual app reproduced the old ordering
+  and verified corrected chronology after navigation and reopening.
+- Focused SDK, goal, history-repair, native-runner, shared-transcript, renderer,
+  and localization regressions pass, along with TypeScript and desktop
+  production compilation. Timeline coverage includes incremental projection,
+  pagination, a large import batch, and silent native-wake boundaries.
+- Availability: source changes and local production compilation only. No
+  release, installation, live history rewrite, or server deployment performed.
+
+## 2026-10-26 - Claude scheduled-message import recovery
+
+- Keep source-proven scheduled inputs out of ordinary user bubbles on first
+  import. Preserve the scheduled-job card, result, genuine messages, and
+  separate occurrences of recurring jobs.
+- Recover native Claude transcripts containing NUL-only padding records without
+  changing source bytes, checkpoint hashes, or cursor offsets. Malformed JSON
+  and ambiguous ownership retain the existing behavior; server journals remain
+  strict.
+- Reader, history-repair, and provider-history synchronization regressions pass.
+  Native offscreen desktop acceptance against an isolated production server
+  reproduced the duplicate, then verified its removal with real Claude output.
+  One ordinary turn and two scheduled turns completed successfully; repeated
+  app reopen checks preserved both job results and the genuine user message.
+- An initial harness assertion incorrectly expected different job revisions to
+  share a card. The corrected assertion passed against the retained fixture.
+  A redundant fresh-provider rerun encountered expired authentication; later
+  history-reopen checks completed without additional provider calls.
+- Availability: source fix only. Desktop package unchanged; no release,
+  installation, live history rewrite, or server deployment performed.
 
 ## 2026-10-25 - Mobile provider pre-merge validation
 

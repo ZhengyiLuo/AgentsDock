@@ -138,7 +138,7 @@ export interface ClaudeRuntimeSnapshot {
   context_usage_refreshed?: boolean
   /** Native Claude current/latest goal; absent on older servers. */
   goal?: ClaudeGoal | null
-  /** Native command accepted; awaiting an authoritative goal status record. */
+  /** Native goal request accepted; command confirmation can lag the goal record. */
   goal_starting?: boolean
   /** A native goal command was accepted but later rejected by Claude. */
   goal_error?: string | null
@@ -1046,6 +1046,19 @@ export interface Event extends SharedChatAttribution {
   mailbox_wake_id?: string | null
   mailbox_wake_through_seq?: number | null
   provider_generated?: boolean | null
+  /** Native background-task wake provenance; an empty input is a run boundary, not user text. */
+  parent_run_id?: string | null
+  parent_run_ids?: string[] | null
+  provider_task_id?: string | null
+  provider_task_ids?: string[] | null
+  provider_task_type?: string | null
+  provider_tool_use_id?: string | null
+  provider_wake_kind?: 'task' | 'schedule' | null
+  provider_schedule_id?: string | null
+  provider_schedule_ids?: string[] | null
+  provider_native_wake_id?: string | null
+  provider_concurrent_task_ids?: string[] | null
+  provider_admission_after_run_id?: string | null
   provider_input_sha256?: string | null
   phase?: string | null
   /** Durable summary placement at its first streamed section, without changing its ledger sequence. */

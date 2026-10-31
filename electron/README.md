@@ -126,6 +126,15 @@ work. The app shows the pending request until Claude applies it at its next
 native boundary; setting a goal does not interrupt the current tool or agents.
 Native refusals remain visible and leave the completion condition available
 for retry.
+The Claude goal banner distinguishes a saved goal from actual execution: it
+shows whether Claude is working, idle, waiting for input, or not loaded.
+Elapsed time is shown only when Claude reports it. An idle or unloaded goal
+offers **Continue goal**, which submits the native goal command in the same
+thread; it does not create an automatic restart loop. Native failed evaluations
+remain visible with their reported reason.
+Recovered provider messages use their original timestamps to appear between
+the appropriate live turns. History catch-up does not take ownership of an
+active turn or merge distinct native replies into one import batch.
 The camera-enabled mobile app can scan it from **Servers > Add Server > Scan QR
 code** and authenticates before saving. Older mobile builds need an app update.
 The image does not make a loopback-only server reachable from a phone. See
@@ -264,3 +273,41 @@ open file; there is no hidden Changes tab in keyboard navigation.
 
 See [FEATURE_PARITY.md](FEATURE_PARITY.md) for the implementation contract and
 verification status.
+
+## Code references and IntelliSense
+
+The composer's **Files and symbols** button opens **Files** and **Symbols** search
+within the selected chat's working directory on its connected server. Select a
+file or symbol, optionally adjust its line range, and attach it to the draft.
+References remain ordinary editable draft text; they are sent with your next
+message and can be edited or removed before sending. Symbol discovery starts
+when requested and uses the language server's project index.
+
+The Files explorer's **New file** action opens an Untitled editor and an inline
+filename field in the selected directory. Enter a name such as `demo.py` and
+press Enter to save it; the extension selects the editor language. Existing
+files are never overwritten by inline creation. Escape leaves the buffer
+unsaved, and Command/Control-S still offers Save As. Empty unnamed buffers are
+discarded when leaving and reopening a chat; nonempty drafts and named empty
+files are retained. **New folder** keeps its inline naming flow, and saved
+files can be renamed through their explorer context menu.
+
+Python and TypeScript/JavaScript source files in the workspace editor support
+project completion (**Ctrl+Space**), hover information, diagnostic underlines,
+**F12** to go to a definition, and **Shift+F12** to find references. The toolbar
+also exposes both navigation actions. Definition and reference selections open
+in the originating editor pane. Unsaved edits reach that editor's language
+server with debounced synchronization; they are saved only through the existing
+save workflow.
+
+This requires matching AgentsServer support and the appropriate tools on the
+server machine: Pyright for Python, or typescript-language-server with a
+compatible TypeScript installation for TypeScript/JavaScript. See
+[workspace intelligence setup](../server/docs/SERVER_REFERENCE.md#workspace-intelligence).
+The servers use native project configuration, including `pyrightconfig.json`
+and `tsconfig.json`. Each connection is rooted in the chat's workspace and is
+closed when its editor or context changes.
+
+If a tool is missing or a connection fails, **Setup** explains the requirement
+and **Retry** explicitly reconnects after it is resolved. File editing and chat
+remain available; the app does not install language servers automatically.
