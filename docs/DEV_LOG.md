@@ -1,5 +1,34 @@
 # Public development log
 
+## 2026-10-31 - Publish coordinated 1.0.12-beta.1
+
+- Publish the [direct desktop beta](https://github.com/ZhengyiLuo/AgentsDock/releases/tag/v1.0.12-beta.1),
+  build **1269**, with matching `@agentsdock/server` and `agentsdock` npm packages
+  and the signed legacy server bridge. Both npm `beta` tags advance to this
+  version; stable desktop and npm `latest` remain **1.0.11**.
+- Freeze artifact source at `c52aad2ed807a911000e41ffc0ade24d7edd4778`, combining
+  main through `827ed452140db0a09bfab39905aa133f736871be` with the fixes shipped
+  in stable 1.0.11. Publish identical desktop assets and final notes to the
+  canonical and legacy download repositories; no package is rebuilt during
+  publication.
+- Add named workspaces with up to four live chat panes, paired-chat user
+  delegation without a fresh mention, and inbox **Edit and send** that preserves
+  the matching draft. Retain released progress and Side chat behavior alongside
+  native child ownership, provider follow-up and composer fixes.
+- Hosted source/server checks, matched npm/CLI checks, four-platform package
+  verification, scoped macOS upgrade/recovery rehearsals and Linux rollback
+  checks passed. Fresh registry installation matched accepted archive contents
+  and the exact CLI/runtime version. macOS uses Developer ID and notarization;
+  Windows retains the disclosed unsigned-installer policy.
+- Isolated live Claude/Codex checks exercised conversations, cold context resume,
+  workspace restoration, paired mail, draft review/send and Codex Side chat
+  continuation through real app/server transports. Full provider-content parity,
+  populated customer-history migration, normal local quit/logout/reboot and
+  busy-work replacement remain outside accepted coverage.
+- The known idle Codex goal-resume mail-authority limitation remains. Mobile
+  builds and store submissions are separately scoped. See the
+  [release notes](RELEASE_1.0.12-beta.1.md) for details and verification links.
+
 ## 2026-10-31 - Prepare coordinated 1.0.12-beta.1
 
 - Integrate main `827ed452140db0a09bfab39905aa133f736871be` with stable
