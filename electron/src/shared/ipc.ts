@@ -218,6 +218,7 @@ import type {
 } from './secure-peer'
 
 export interface AgentsDockAPI {
+  intelligence: import('./code-intelligence').CodeIntelligenceAPI
   /** Native operator-only controls, deliberately absent from shared-chat clients. */
   workspaceGit?: {
     status(scope: WorkspaceProfileScope, sessionId: string): Promise<import('./workspace-git').WorkspaceGitStatus>

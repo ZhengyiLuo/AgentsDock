@@ -28,6 +28,8 @@ import { Compartment, EditorSelection, EditorState, Prec, Text, type Extension }
 import { EditorView, keymap, ViewPlugin, type MouseSelectionStyle, type ViewUpdate } from '@codemirror/view'
 import { tags } from '@lezer/highlight'
 import { basicSetup } from 'codemirror'
+import { useEditorCodeIntelligence, type EditorCodeIntelligenceContext } from '../lib/code-intelligence-editor'
+import { CodeIntelligenceControls } from './CodeIntelligenceControls'
 import {
   DEFAULT_EDITOR_APPEARANCE,
   clampEditorFontSize,
@@ -48,6 +50,7 @@ interface CodeMirrorEditorProps {
   maxBytes?: number
   initialViewState?: CodeMirrorViewState
   navigationRequest?: CodeMirrorNavigationRequest
+  intelligence?: EditorCodeIntelligenceContext
   onLimitExceeded?: () => void
   onNavigationHandled?: (requestId: number) => void
   onScrollElementChange?: (element: HTMLElement | null) => void
@@ -90,6 +93,7 @@ export function CodeMirrorEditor({
   maxBytes,
   initialViewState,
   navigationRequest,
+  intelligence,
   onLimitExceeded,
   onNavigationHandled,
   onScrollElementChange,
@@ -115,6 +119,7 @@ export function CodeMirrorEditor({
   const languageRequestRef = useRef(0)
   const readOnlyCompartment = useRef(new Compartment())
   const languageCompartment = useRef(new Compartment())
+  const intelligenceCompartment = useRef(new Compartment())
   const appearanceCompartment = useRef(new Compartment())
   const localeCompartment = useRef(new Compartment())
   const contentAttributesCompartment = useRef(new Compartment())
@@ -188,6 +193,7 @@ export function CodeMirrorEditor({
           EditorView.editable.of(!readOnly)
         ]),
         languageCompartment.current.of([]),
+        intelligenceCompartment.current.of([]),
         EditorState.transactionFilter.of(transaction => {
           const limit = maxBytesRef.current
           if (!transaction.docChanged || applyingExternalValue.current) return transaction
@@ -386,7 +392,12 @@ export function CodeMirrorEditor({
     }
   }, [value])
 
-  return <div ref={hostRef} className="workspace-editor-codemirror" />
+  const codeIntelligence = useEditorCodeIntelligence(viewRef, intelligenceCompartment.current, path, intelligence)
+
+  return <div className="workspace-editor-codemirror">
+    <CodeIntelligenceControls intelligence={codeIntelligence} />
+    <div ref={hostRef} className="workspace-editor-code-content" />
+  </div>
 }
 
 function documentEditorTheme(): EditorThemeMode {
