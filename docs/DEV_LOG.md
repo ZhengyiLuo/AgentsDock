@@ -20,6 +20,13 @@
   5,532 passed, 5 skipped. TypeScript and production build/output verification
   pass. Native Windows/Linux UI and live cross-server switching were not
   repeated. Source and local development app only; no release published.
+- CI follow-up: make the existing Team Hub maintenance-cancellation test use
+  event-loop notifications instead of blocking executor observers. Keep real
+  temporary-store snapshots, repeated cancellation and exact-fence assertions;
+  use explicit release gates and a bounded watchdog independent of filesystem
+  speed. The regression now runs with a single worker. Local before/after probes
+  reproduce the old failure with a constrained executor and a slow snapshot;
+  both pass with the revised synchronization. No server runtime behavior changed.
 
 ## 2026-10-28 - Optional desktop workspaces and single-row chat headers
 
