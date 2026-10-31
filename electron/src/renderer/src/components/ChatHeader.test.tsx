@@ -13,13 +13,14 @@ import { RenameChatDialog } from './Dialogs'
 const originalAcknowledgeEmergency = useAppStore.getState().acknowledgeEmergency
 const originalUpdateSession = useAppStore.getState().updateSession
 const originalForkSession = useAppStore.getState().forkSession
+const originalCreateChatWorkspace = useAppStore.getState().createChatWorkspace
 const styles = readFileSync(resolve(process.cwd(), 'src/renderer/src/styles.css'), 'utf8')
 
 describe('ChatHeader', () => {
   afterEach(() => {
     cleanup()
     vi.restoreAllMocks()
-    useAppStore.setState({ updateSession: originalUpdateSession, forkSession: originalForkSession })
+    useAppStore.setState({ updateSession: originalUpdateSession, forkSession: originalForkSession, createChatWorkspace: originalCreateChatWorkspace })
   })
 
   beforeEach(() => {
@@ -112,6 +113,25 @@ describe('ChatHeader', () => {
 
     expect(screen.queryByRole('menuitem', { name: 'Create digest' })).not.toBeInTheDocument()
     expect(screen.getByRole('menuitem', { name: 'Fork chat' })).toBeInTheDocument()
+  })
+
+  it('creates a workspace from the header chat rather than a different focused pane', async () => {
+    const session = { id: 'pane-chat', title: 'Pane chat', backend: 'codex' as const }
+    const createChatWorkspace = vi.fn().mockResolvedValue(undefined)
+    useAppStore.setState({
+      sessions: [session, { id: 'focused-chat', title: 'Focused chat', backend: 'codex' }],
+      selectedSessionId: 'focused-chat',
+      createChatWorkspace
+    })
+    render(<ChatHeader session={session} compact />)
+    const user = userEvent.setup()
+    const createButton = screen.getByRole('button', { name: 'Create workspace' })
+    expect(createButton.closest('.header-actions')).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: 'Chat actions' }))
+    expect(screen.queryByRole('menuitem', { name: 'Create workspace' })).not.toBeInTheDocument()
+    await user.keyboard('{Escape}')
+    await user.click(createButton)
+    expect(createChatWorkspace).toHaveBeenCalledExactlyOnceWith('pane-chat')
   })
 
   it.each(['running', 'admitting'] as const)('forks a %s chat through its completed prefix on a capable server', async state => {
@@ -413,17 +433,46 @@ describe('ChatHeader', () => {
     expect(openSplit).toHaveBeenCalledWith(candidate.id)
   })
 
+  it('changes the compact pane folder through a checked hover submenu, not a header chip', async () => {
+    const displayed = { id: 'pane-chat', title: 'Pane chat', backend: 'codex' as const, folder: 'Research' }
+    const updateSession = vi.fn().mockResolvedValue(undefined)
+    useAppStore.setState({
+      sessions: [displayed, { id: 'focused-chat', title: 'Other chat', backend: 'claude', folder: 'Pinned-only', pinned: true }],
+      selectedSessionId: 'focused-chat',
+      folderOrder: ['General', 'Research', 'Empty folder'],
+      updateSession
+    })
+    render(<ChatHeader session={displayed} compact />)
+    const user = userEvent.setup()
+    expect(screen.queryByRole('button', { name: 'Folder: Research' })).not.toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: 'Chat actions' }))
+    await user.hover(screen.getByRole('menuitem', { name: 'Change folder' }))
+    expect(await screen.findByRole('menuitemcheckbox', { name: 'Research' })).toHaveAttribute('aria-checked', 'true')
+    expect(screen.getByRole('menuitemcheckbox', { name: 'General' })).toHaveAttribute('aria-checked', 'false')
+    expect(screen.getByRole('menuitemcheckbox', { name: 'Empty folder' })).toBeVisible()
+    expect(screen.getByRole('menuitemcheckbox', { name: 'Pinned-only' })).toBeVisible()
+    fireEvent.click(screen.getByRole('menuitemcheckbox', { name: 'Research' }))
+    expect(updateSession).not.toHaveBeenCalled()
+    await user.keyboard('{Escape}')
+    await user.click(screen.getByRole('button', { name: 'Chat actions' }))
+    await user.click(screen.getByRole('menuitem', { name: 'Change folder' }))
+    fireEvent.click(await screen.findByRole('menuitemcheckbox', { name: 'General' }))
+    expect(updateSession).toHaveBeenCalledExactlyOnceWith('pane-chat', { folder: 'General', archived: false })
+  })
+
   it.each([
-    { backend: 'codex' as const, session_id: '01a04c9e-7ac-full-value' },
-    { backend: 'gemini' as const, gemini_session_id: '01a04c9e-7ac-full-value' }
-  ])('copies the full $backend session id from the header', async identity => {
+    { identity: { backend: 'codex' as const, session_id: '01a04c9e-7ac-full-value' }, compact: false },
+    { identity: { backend: 'codex' as const, session_id: '01a04c9e-7ac-full-value' }, compact: true },
+    { identity: { backend: 'gemini' as const, gemini_session_id: '01a04c9e-7ac-full-value' }, compact: false },
+    { identity: { backend: 'gemini' as const, gemini_session_id: '01a04c9e-7ac-full-value' }, compact: true }
+  ])('copies the full $identity.backend session id with compact=$compact', async ({ identity, compact }) => {
     const writeClipboard = vi.fn().mockResolvedValue(undefined)
     ;(window.agentsDock as unknown as { native: { writeClipboard: typeof writeClipboard } }).native = { writeClipboard }
     useAppStore.setState({
       sessions: [{ id: 'chat', title: 'Chat', ...identity }],
       selectedSessionId: 'chat'
     })
-    render(<ChatHeader />)
+    render(<ChatHeader compact={compact} />)
 
     fireEvent.click(screen.getByRole('button', { name: 'Copy session' }))
 
@@ -434,7 +483,7 @@ describe('ChatHeader', () => {
   it('explains an unavailable Gemini native identity without copying a fabricated id', () => {
     useAppStore.setState({ sessions: [{ id: 'chat', title: 'Chat', backend: 'gemini' }], selectedSessionId: 'chat' })
     render(<ChatHeader />)
-    expect(screen.getByText('session Not created yet')).toHaveAttribute('title', 'Gemini has not saved a resumable session yet. Check any sign-in, model or tool error below.')
+    expect(screen.getByText('session Not created yet').closest('small')).toHaveAttribute('title', 'Gemini has not saved a resumable session yet. Check any sign-in, model or tool error below.')
     expect(screen.queryByRole('button', { name: 'Copy session' })).not.toBeInTheDocument()
   })
 

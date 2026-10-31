@@ -92,6 +92,15 @@ describe('ChatWorkspaceGrid resize ownership', () => {
     expect(screen.getByRole('separator', { name: 'Resize last column' })).toHaveAttribute('aria-valuenow', '72')
   })
 
+  it('does not show workspace tabs or layout controls until a workspace exists', () => {
+    useAppStore.setState({ chatWorkspaces: [], activeChatWorkspaceId: '', chatPaneCount: 1 })
+    const view = render(<ChatWorkspaceGrid sidebarVisible terminalOpen={false}
+      onSidebarToggle={() => undefined} onTerminalToggle={() => undefined} sideChat={() => null} />)
+    expect(view.container.querySelector('.workspace-tabs-bar')).not.toBeInTheDocument()
+    expect(view.container.querySelector('.workspace-layout-picker')).not.toBeInTheDocument()
+    expect(view.container.querySelector('.chat-grid-workspace')).toHaveClass('plain-chat-mode')
+  })
+
   it('does not let either column divider collapse a neighboring pane', () => {
     render(<ChatWorkspaceGrid sidebarVisible terminalOpen={false}
       onSidebarToggle={() => undefined} onTerminalToggle={() => undefined} sideChat={() => null} />)

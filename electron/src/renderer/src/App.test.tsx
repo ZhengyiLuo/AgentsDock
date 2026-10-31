@@ -91,6 +91,7 @@ vi.mock('./components/WorkspaceEditor', async importOriginal => {
     available,
     workspaceKey,
     maxTextFileBytes,
+    chatHeader,
     chatContent,
     onReady,
     filesOnly,
@@ -101,6 +102,7 @@ vi.mock('./components/WorkspaceEditor', async importOriginal => {
     available: boolean | null
     workspaceKey: string
     maxTextFileBytes?: number
+    chatHeader?: ReactNode
     chatContent: ReactNode
     onReady?: () => void
     filesOnly?: boolean
@@ -123,7 +125,7 @@ vi.mock('./components/WorkspaceEditor', async importOriginal => {
       data-available={String(available)}
       data-workspace-key={workspaceKey}
       data-max-text-file-bytes={maxTextFileBytes}
-    >{onFileOpen && <button onClick={onFileOpen}>View file</button>}{onActivate && <button onClick={onActivate}>Activate file editor</button>}<div data-testid="code-editor" role="textbox" contentEditable suppressContentEditableWarning>code</div>{chatContent}</div>
+    >{onFileOpen && <button onClick={onFileOpen}>View file</button>}{onActivate && <button onClick={onActivate}>Activate file editor</button>}<div data-testid="code-editor" role="textbox" contentEditable suppressContentEditableWarning>code</div>{chatHeader}{chatContent}</div>
   }
   return { ...actual, WorkspaceEditor: (props: ComponentProps<typeof actual.WorkspaceEditor>) => workspaceEditorHarness.real
     ? <actual.WorkspaceEditor {...props} /> : <MockWorkspaceEditor {...props} /> }

@@ -225,7 +225,23 @@ TIFF attachments and workspace images use a PNG preview of the first page in
 the desktop media viewer; downloading or opening the original keeps the TIFF
 file unchanged. Preview decoding runs outside the app's main thread.
 
-Chat remains the pinned default tab. Use `Cmd+O` to search
+Workspace layouts are opt-in: ordinary chats show their title and folder on
+the first line, with a copyable provider session ID beneath. **Create workspace**
+is an icon button beside Scheduled jobs and Terminal, creating the first default
+workspace and revealing the global workspace/layout bar. Existing named and multi-pane workspaces are retained;
+the old automatically created single-chat default is not treated as opt-in.
+Closing the last workspace returns to ordinary chat without deleting its chat
+or draft. These layouts are local, server-scoped preferences, not new folders
+on disk and not changes to a chat's working directory.
+
+Workspace chat headers stay compact: title, copyable session ID and actions on
+one line, without a folder chip. Use the chat menu's **Change folder** submenu
+to pick a saved folder; the current folder is checked. Folder changes affect
+that chat's sidebar grouping, not its working directory or other panes.
+
+The redundant pinned Chat/file strip is hidden while viewing a conversation.
+When a file is open, its tabs and the Chat return button remain available.
+Use the header's Open file button or `Cmd+O` to search
 and open a UTF-8 source file, switch explicitly from read-only to edit mode,
 and save with `Cmd+S`; `Shift+Cmd+O` remains the attachment picker. Syntax
 support is loaded only after a file opens, clean inactive files are evicted
@@ -233,19 +249,10 @@ from memory, and revision-checked saves prevent overwriting agent changes.
 Files above 512 KiB use a lightweight read-only text viewer instead of the
 syntax parser so opening source never competes with the chat renderer.
 
-The **Changes** tab reviews the selected workspace's entire Git worktree, not
-only changes attributed to an agent turn. Open it to inspect staged, unstaged,
-untracked and conflicted files; stage/unstage whole files; review and commit the
-staged set; or resolve text conflicts before continuing an existing merge or
-rebase. Abort requires confirmation. Git reads happen only on opening the tab,
-explicit refresh, file selection and action reconciliation—there is no polling.
-Repository revisions fence mutations against changes made by other agents or
-editors. This requires matching standalone AgentsServer Git endpoints and the
-native operator connection; shared-chat web guests have no Git controls.
-
-This first cut does not create branches/merges, push, or manage PRs/MRs. Binary
-conflicts and repositories requiring executable Git hooks/custom filters may
-need the terminal; the app reports that rather than bypassing repository policy.
+The **Changes** entry has been removed from this surface, including workspace
+mode. The underlying Git APIs and component are retained but are not exposed
+by the chat/file tab strip. `Cmd+1` returns to Chat and `Cmd+2` selects the first
+open file; there is no hidden Changes tab in keyboard navigation.
 
 See [FEATURE_PARITY.md](FEATURE_PARITY.md) for the implementation contract and
 verification status.

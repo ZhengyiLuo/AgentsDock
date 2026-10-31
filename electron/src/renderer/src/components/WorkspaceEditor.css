@@ -23,6 +23,8 @@
   overflow: hidden;
 }
 
+.workspace-editor-tab-strip[hidden] { display: none; }
+
 .workspace-editor-file-tabs {
   min-width: 0;
   height: 38px;
