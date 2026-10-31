@@ -1,5 +1,35 @@
 # Public development log
 
+## 2026-10-31 - Combined code intelligence and Claude integration check
+
+- Locally integrate PRs #127, #125 and #123 on the post-#129 main baseline.
+  Preserve their original commits. Resolve the workspace-editor conflict by
+  keeping code intelligence and the current navigation layout, without
+  restoring the removed Changes-panel condition.
+- Source baseline: `c9893949`; combined code: `d0392711`. The source-preview
+  labels remain Electron `0.2.0`/build `86` and server `1.0.7-beta.11`; these
+  are development metadata, not new published release versions.
+- The compiled native macOS app used its production IPC and authenticated
+  HTTP/WebSocket transport against a matching source-preview test server.
+  Files/Symbols inserted editable references from real Python and TypeScript
+  language services. Both editors showed diagnostics and unsaved-buffer
+  completions without changing files on disk; TypeScript definition and
+  reference navigation also worked.
+- A real Claude one-shot native cron moved from idle to running with Stop,
+  then returned to idle with its final reply. Reopening preserved chronological
+  output without an extra user bubble for the internal scheduled prompt.
+  During a separate real Claude turn, editing a queued message saved promptly;
+  Stop ended the current turn and the edited follow-up completed successfully.
+- Focused desktop checks: 1,171 tests pass. Claude runtime, history repair,
+  transcript and mailbox checks: 416 pass. Language-service bridge checks:
+  15 pass, including real Pyright and TypeScript servers. Eight build-output
+  and license checks, TypeScript and production compilation pass.
+- This is local integration acceptance, not a release. Windows/Linux packaging,
+  native schedule recovery after provider teardown, forced admission races,
+  and every provider-native thinking/content-parity case were not repeated in
+  this combined pass. Desktop input used Electron's debugging protocol because
+  the computer-use surface was unavailable. QA analytics were disabled.
+
 ## 2026-10-31 - Composer history isolation and deliberate queue shortcuts
 
 - Integrated prompt-history and empty-composer Enter shortcuts with main
