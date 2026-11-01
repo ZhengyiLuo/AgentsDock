@@ -1,5 +1,47 @@
 # Public development log
 
+## 2026-10-31 - Keep Claude reports in compact history
+
+- Follow up on issue #50: a report emitted before several tool calls and a
+  short final acknowledgement could disappear from the compact history page.
+  Prioritize native Claude assistant text and legacy report-shaped commentary
+  alongside other essential output, using the existing per-turn and page caps.
+- Preserve original event types, sequence ordering and stored history. The
+  desktop's existing compatibility projection and final-answer deduplication
+  remain responsible for presentation. Actual thinking and other providers'
+  commentary are not promoted to report output.
+- Validation: 183 history-projection and Claude runner tests, plus 325 desktop
+  timeline/rendering tests pass; desktop type checks and production build pass.
+  Added regressions fail on the unmodified base
+  and cover native text, heading/table/long-form legacy reports, chronological
+  reloads, immutable storage, thinking exclusion and bounded responses.
+- Real-use verification: native mouse input in an isolated Electron window
+  reproduced missing reports against a real authenticated server process.
+  The fixed process shows both report formats without expansion after reload;
+  genuine thinking still expands and collapses through the run-trace endpoint.
+  A disposable live Claude turn emitted a report, performed five harmless
+  tool calls and completed. Its original server's compact response omitted
+  the report; replaying that generated output through the fixed history API
+  and native app preserved its visible content/order and one final reply.
+  This tests history presentation, not new provider-runtime behavior or a
+  blanket native-client parity claim. No mocked HTTP or provider success.
+- Source base: `4dd67629`; development app metadata 0.2.0 (build 86), test
+  service metadata 1.0.7-beta.11. Isolated acceptance disables analytics.
+  At the user's request, run the fixed source on the existing local test service
+  and restart the development app against it. A fresh real Claude report/tool/
+  final-reply turn remains visible after reload with activity collapsed; the
+  legacy history sample also renders directly. Preserve the original service
+  state and app settings, and leave the production service untouched.
+  Additional coverage verifies older-page navigation with a cold index,
+  native/legacy output caps, and report retention after stop, error or an empty
+  final reply. In an isolated native app on the fixed test service, stop a real
+  Claude turn after its report, reload, and send a contextual follow-up; the
+  report remains visible once, and the follow-up uses the previous context.
+  Switching chats and expanding/collapsing activity preserves report placement.
+  Update the source-extracted history test harness to load the new classifier;
+  historical cron, async-message and goal-follow-up projection checks also pass.
+  Server-source fix only; local test preview, no mobile change or public release.
+
 ## 2026-10-31 - Desktop Preferences settings
 
 - Add Preferences / 偏好设置 directly below General in Settings. Move Show
