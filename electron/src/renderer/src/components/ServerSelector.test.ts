@@ -115,6 +115,22 @@ describe('server selector labels', () => {
     expect(screen.getByRole('img', { name: `Degraded: ${message}` })).toHaveClass('degraded')
   })
 
+  it('explains background chat recovery while keeping the server connected', () => {
+    useAppStore.setState({
+      profiles: [alpha], activeProfileId: alpha.id, switchingProfileId: null,
+      health: { ok: true, server_identity: alpha.serverIdentity!, chat_readiness: {
+        ready: false, state: 'recovering', message: 'Queued messages are being restored after restart.'
+      } }
+    })
+    render(createElement(ServerSelector))
+    expect(screen.getByRole('img', { name: 'Connected — restoring queued chats' })).toHaveClass('online')
+
+    act(() => useAppStore.setState({
+      health: { ok: true, server_identity: alpha.serverIdentity!, chat_readiness: { ready: true, state: 'ready', message: null } }
+    }))
+    expect(screen.getByRole('img', { name: 'Online' })).toHaveClass('online')
+  })
+
   it('opens the Server category from the server menu', async () => {
     useAppStore.setState(state => ({
       profiles: [alpha],

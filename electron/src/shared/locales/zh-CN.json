@@ -343,6 +343,7 @@
   "serverProfile.remove": "移除",
   "serverProfile.confirmRemove": "确认移除",
   "serverProfile.status.online": "已连接",
+  "serverProfile.connection.restoringChats": "已连接 — 正在恢复聊天队列",
   "serverProfile.status.degraded": "连接受限",
   "serverProfile.status.connecting": "正在连接…",
   "serverProfile.status.retrying": "正在重连…",

@@ -7291,11 +7291,15 @@ function abortable<T>(promise: Promise<T>, signal: AbortSignal): Promise<T> {
 }
 
 function connectionStateForHealth(health: Health): ServerConnectionState {
-  return health.chat_readiness?.ready === false || health.capabilities?.tmux?.available === false ? 'degraded' : 'online'
+  // Restoring saved queues is normal startup work, not a failed connection.
+  // The server admits each chat as its queue is restored; keep actual failures
+  // and missing prerequisites visible without treating the whole scan as one.
+  return (health.chat_readiness?.ready === false && health.chat_readiness.state !== 'recovering')
+    || health.capabilities?.tmux?.available === false ? 'degraded' : 'online'
 }
 
 function connectionWarningForHealth(health: Health): string | null {
-  if (health.chat_readiness?.ready === false) {
+  if (health.chat_readiness?.ready === false && health.chat_readiness.state !== 'recovering') {
     return health.chat_readiness.message || 'Chat recovery is incomplete. Check the server before sending more messages.'
   }
   const tmux = health.capabilities?.tmux

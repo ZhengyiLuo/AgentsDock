@@ -1,5 +1,33 @@
 # Public development log
 
+## 2026-11-01 - Distinguish normal chat recovery from connection failures
+
+- Keep a healthy server connected while its startup queue-restoration task is
+  running. The server already admits each chat when its durable queue is ready;
+  do not label every chat or the connection degraded until the full scan ends.
+  Show “Connected — restoring queued chats” on the active server indicator and
+  menu, then “Online” when recovery completes. Include English and Chinese text.
+- Continue reporting failed recovery, unavailable tmux, authentication failures
+  and transport failures. Preserve per-chat queue admission, durable messages
+  and coordinated-update readiness requirements.
+- Treat a validated HTTP/WebSocket client disconnect as a normal gateway close,
+  without synthesizing an interrupted-execution error after closing its IPC
+  transport. Accepted worker cleanup continues; genuine worker interruptions
+  still report failures.
+- Validation: 490 affected desktop tests, 27 execution-transport tests,
+  TypeScript and production Electron compilation pass. New regressions fail
+  against the previous behavior. Independent review found no blocking issues.
+- Native app acceptance uses an offscreen Electron window, production renderer,
+  preload and IPC, and authenticated requests to the full isolated server.
+  Hold/fault its real startup recovery task to exercise restoring, ready,
+  failed and recovered status, using actual mouse input for the server menu
+  and refresh button. No provider turns are needed for connection presentation.
+  Actual TCP WebSocket → Uvicorn → Unix IPC acceptance also confirms a normal
+  code-1000 close produces no gateway error and preserves worker cleanup.
+- Source changes only; no live server restart, deployment or public release.
+  Windows/Linux native app acceptance and packaged distribution are untested.
+
+
 ## 2026-11-01 - Toggle workspace controls without creating a workspace
 
 - The chat-header workspace button now toggles the workspace toolbar on/off.
