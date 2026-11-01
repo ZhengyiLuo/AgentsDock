@@ -10,7 +10,7 @@
   desktop's existing compatibility projection and final-answer deduplication
   remain responsible for presentation. Actual thinking and other providers'
   commentary are not promoted to report output.
-- Validation: 157 compact-history and Claude runner tests, plus 325 desktop
+- Validation: 159 compact-history and Claude runner tests, plus 325 desktop
   timeline/rendering tests pass; desktop type checks and production build pass.
   Added regressions fail on the unmodified base
   and cover native text, heading/table/long-form legacy reports, chronological
@@ -32,6 +32,12 @@
   final-reply turn remains visible after reload with activity collapsed; the
   legacy history sample also renders directly. Preserve the original service
   state and app settings, and leave the production service untouched.
+  Additional coverage verifies older-page navigation with a cold index,
+  native/legacy output caps, and report retention after stop, error or an empty
+  final reply. In an isolated native app on the fixed test service, stop a real
+  Claude tool after its report, reload, and send a contextual follow-up; the
+  report remains visible once, and the follow-up uses the previous context.
+  Switching chats and expanding/collapsing activity preserves report placement.
   Server-source fix only; local test preview, no mobile change or public release.
 
 ## 2026-10-31 - Desktop Preferences settings

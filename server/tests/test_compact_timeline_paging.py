@@ -2227,21 +2227,78 @@ class CompactTimelinePagingTests(unittest.IsolatedAsyncioTestCase):
                 trace = agent_server.read_indexed_run_trace(self.session_id, "trace-run", anchor_seq=18)
                 self.assertIn(2, [event["seq"] for event in trace["events"]])
 
-    def test_legacy_claude_reports_keep_the_existing_per_turn_response_cap(self) -> None:
-        common = {"run_id": "many-reports", "backend": "claude"}
-        self.write_events([
-            self.event(1, "turn_started", **common),
-            *[self.event(seq, "reasoning_summary", phase="commentary", text=f"# Report {seq}", **common)
-              for seq in range(2, 102)],
-            self.event(102, "tool_finished", tool_id="save", **common),
-            self.event(103, "turn_finished", result_text="Saved.", **common),
-        ])
-        page = agent_server.read_semantic_timeline_page(self.session_id, limit=1, tail=True)
-        reports = [event for event in page["events"] if event["type"] == "reasoning_summary"]
-        self.assertEqual(len(reports), agent_server.SEMANTIC_TIMELINE_ESSENTIAL_LIMIT_PER_ITEM)
-        self.assertLessEqual(len(page["events"]),
-                             agent_server.SEMANTIC_TIMELINE_EVENT_BUDGET_PER_ITEM
-                             + agent_server.SEMANTIC_TIMELINE_ESSENTIAL_LIMIT_PER_ITEM + 1)
+    def test_claude_reports_keep_the_existing_per_turn_response_cap(self) -> None:
+        for event_type in ("reasoning_summary", "assistant_text"):
+            with self.subTest(event_type=event_type):
+                common = {"run_id": "many-reports", "backend": "claude"}
+                self.write_events([
+                    self.event(1, "turn_started", **common),
+                    *[self.event(seq, event_type, phase="commentary", text=f"# Report {seq}", **common)
+                      for seq in range(2, 102)],
+                    self.event(102, "tool_finished", tool_id="save", **common),
+                    self.event(103, "turn_finished", result_text="Saved.", **common),
+                ])
+                page = agent_server.read_semantic_timeline_page(self.session_id, limit=1, tail=True)
+                reports = [event for event in page["events"] if event["type"] == event_type]
+                self.assertEqual(len(reports), agent_server.SEMANTIC_TIMELINE_ESSENTIAL_LIMIT_PER_ITEM)
+                self.assertLessEqual(len(page["events"]),
+                                     agent_server.SEMANTIC_TIMELINE_EVENT_BUDGET_PER_ITEM
+                                     + agent_server.SEMANTIC_TIMELINE_ESSENTIAL_LIMIT_PER_ITEM + 1)
+
+    def test_claude_reports_survive_older_page_navigation_and_cold_index(self) -> None:
+        events = []
+        report_seqs = []
+        for index, event_type in enumerate(("assistant_text", "reasoning_summary", "assistant_text")):
+            start = index * 20 + 1
+            common = {"run_id": f"report-{index}", "backend": "claude"}
+            report_seqs.append(start + 1)
+            events.extend([
+                self.event(start, "turn_started", prompt=f"Report {index}", **common),
+                self.event(start + 1, event_type, phase="commentary", text=f"# Report {index}", **common),
+                *[self.event(seq, "tool_finished", tool_id=f"tool-{seq}", **common)
+                  for seq in range(start + 2, start + 17)],
+                self.event(start + 17, "turn_finished", result_text="Saved.", **common),
+            ])
+        self.write_events(events)
+        for _ in range(2):
+            agent_server.TIMELINE_INDEX_CACHE.clear()
+            cursor = None
+            seen = []
+            for index in reversed(range(3)):
+                page = agent_server.read_semantic_timeline_page(
+                    self.session_id, semantic_before=cursor, limit=1, tail=True,
+                )
+                self.assertEqual({event.get("run_id") for event in page["events"]}, {f"report-{index}"})
+                seqs = [event["seq"] for event in page["events"]]
+                self.assertEqual(seqs, sorted(set(seqs)))
+                self.assertIn(report_seqs[index], seqs)
+                seen.extend(seqs)
+                cursor = page["next_semantic_before"]
+            self.assertIsNone(cursor)
+            self.assertEqual(len(seen), len(set(seen)))
+
+    def test_claude_report_remains_after_stop_error_or_empty_final(self) -> None:
+        for terminal, payload in [
+            ("turn_stopped", {}),
+            ("error", {"message": "Synthetic tool failure"}),
+            ("turn_finished", {"result_text": ""}),
+        ]:
+            with self.subTest(terminal=terminal):
+                common = {"run_id": "partial-report", "backend": "claude"}
+                self.write_events([
+                    self.event(1, "turn_started", **common),
+                    self.event(2, "assistant_text", text="# Completed portion\n\nKeep this public output.", **common),
+                    *[self.event(seq, "tool_finished", tool_id=f"tool-{seq}", **common)
+                      for seq in range(3, 18)],
+                    self.event(18, terminal, **payload, **common),
+                ])
+                # Errors are their own semantic item; include both the report
+                # turn and its error rather than selecting only the last item.
+                page = agent_server.read_semantic_timeline_page(
+                    self.session_id, limit=2 if terminal == "error" else 1, tail=True,
+                )
+                self.assertEqual(sum(event["seq"] == 2 for event in page["events"]), 1)
+                self.assertIn(18, [event["seq"] for event in page["events"]])
 
     def test_trace_anchor_ignores_later_provider_session(self) -> None:
         self.write_events([
