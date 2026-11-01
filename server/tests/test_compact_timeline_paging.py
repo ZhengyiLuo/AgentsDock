@@ -2178,6 +2178,71 @@ class CompactTimelinePagingTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(anchors)
         self.assertEqual(anchors[-1]["type"], "tool_finished")
 
+    def test_claude_report_survives_tools_and_short_final_in_compact_history(self) -> None:
+        reports = [
+            ("assistant_text", {}, "Complete report from a native text block."),
+            ("reasoning_summary", {"phase": "commentary"}, "# Report\n\nDetailed findings."),
+            ("reasoning_summary", {"phase": "commentary"}, "Findings\n\n| Item | Result |\n| A | OK |"),
+            ("reasoning_summary", {"phase": "commentary"}, "完整报告。" * 300),
+        ]
+        for event_type, extra, report in reports:
+            with self.subTest(event_type=event_type, extra=extra, size=len(report)):
+                common = {"run_id": "report-run", "backend": "claude"}
+                events = [
+                    self.event(1, "turn_started", prompt="Write a report, then save it.", **common),
+                    self.event(2, event_type, text=report, **extra, **common),
+                    *[self.event(seq, "tool_finished", tool_id=f"tool-{seq}", output="saved", **common)
+                      for seq in range(3, 18)],
+                    self.event(18, "turn_finished", result_text="Saved.", **common),
+                ]
+                self.write_events(events)
+                stored = agent_server.events_path(self.session_id).read_bytes()
+                for _ in range(2):
+                    page = agent_server.read_semantic_timeline_page(self.session_id, limit=1, tail=True)
+                    self.assertIn(events[1], page["events"])
+                    self.assertEqual([event["seq"] for event in page["events"]],
+                                     sorted(event["seq"] for event in page["events"]))
+                    self.assertEqual(sum(event["seq"] == 2 for event in page["events"]), 1)
+                self.assertEqual(agent_server.events_path(self.session_id).read_bytes(), stored)
+
+    def test_report_retention_does_not_promote_thinking_or_other_provider_commentary(self) -> None:
+        for backend, event_type, phase in [
+            ("claude", "reasoning_summary", None),
+            ("claude", "reasoning_summary", "summary"),
+            ("claude", "reasoning_text", "reasoning"),
+            ("codex", "reasoning_summary", "commentary"),
+            ("cursor", "reasoning_summary", "commentary"),
+        ]:
+            with self.subTest(backend=backend, event_type=event_type, phase=phase):
+                common = {"run_id": "trace-run", "backend": backend}
+                self.write_events([
+                    self.event(1, "turn_started", **common),
+                    self.event(2, event_type, phase=phase, text="# Not a public report\n\n" + "Details. " * 200, **common),
+                    *[self.event(seq, "tool_finished", tool_id=f"tool-{seq}", **common)
+                      for seq in range(3, 18)],
+                    self.event(18, "turn_finished", result_text="Done.", **common),
+                ])
+                page = agent_server.read_semantic_timeline_page(self.session_id, limit=1, tail=True)
+                self.assertNotIn(2, [event["seq"] for event in page["events"]])
+                trace = agent_server.read_indexed_run_trace(self.session_id, "trace-run", anchor_seq=18)
+                self.assertIn(2, [event["seq"] for event in trace["events"]])
+
+    def test_legacy_claude_reports_keep_the_existing_per_turn_response_cap(self) -> None:
+        common = {"run_id": "many-reports", "backend": "claude"}
+        self.write_events([
+            self.event(1, "turn_started", **common),
+            *[self.event(seq, "reasoning_summary", phase="commentary", text=f"# Report {seq}", **common)
+              for seq in range(2, 102)],
+            self.event(102, "tool_finished", tool_id="save", **common),
+            self.event(103, "turn_finished", result_text="Saved.", **common),
+        ])
+        page = agent_server.read_semantic_timeline_page(self.session_id, limit=1, tail=True)
+        reports = [event for event in page["events"] if event["type"] == "reasoning_summary"]
+        self.assertEqual(len(reports), agent_server.SEMANTIC_TIMELINE_ESSENTIAL_LIMIT_PER_ITEM)
+        self.assertLessEqual(len(page["events"]),
+                             agent_server.SEMANTIC_TIMELINE_EVENT_BUDGET_PER_ITEM
+                             + agent_server.SEMANTIC_TIMELINE_ESSENTIAL_LIMIT_PER_ITEM + 1)
+
     def test_trace_anchor_ignores_later_provider_session(self) -> None:
         self.write_events([
             self.event(1, "turn_started", run_id="provider-run", prompt="Question"),
