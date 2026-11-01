@@ -1,5 +1,52 @@
 # Public development log
 
+## 2026-10-31 - Mobile reliability fixes on current main
+
+- Extract bug fixes from older mobile review branches without restoring their
+  broad UI redesigns or old release/build metadata. Close superseded PRs #3,
+  #6 and #19; preserve the remaining reviews pending their independent audit.
+- Keep received HTTP turn acceptance through body decoding, deadlines and
+  connection revalidation. Do not restore accepted text as an unsent draft or
+  automatically retry the submission. Preserve newer typing and attachments;
+  genuine rejected sends still retain a recoverable draft.
+- Clear the native composer on exact draft consumption, including asynchronous
+  recipient preflight, rather than on a later network completion.
+- Fence queue snapshots against concurrent live delivery, exact native goal
+  steering and server identity changes. Reconcile sparse membership with
+  bounded reads; preserve newer paused-after-Stop and delivery-barrier behavior.
+- Cancel obsolete sidebar history navigation when the search changes, without
+  letting an older completion reopen a result or clear a newer loading state.
+- Run the new accepted-send, queue reconciliation and exact search-target
+  regression suites in source CI.
+- Real-service search also exposes deduplicated final answers losing their
+  search identity. Retain exact represented event IDs on assistant rows while
+  preserving visible text, row keys, sequence anchors and chronology; do not
+  claim unrelated events in a sequence gap were loaded. Refresh row metadata
+  when a new terminal search identity arrives.
+- Preserve Android QR camera permission in composed native configuration, scope
+  translated iOS privacy strings to iOS and retain legacy media-save guards.
+- Validation: 433 rendered/contract tests and 105 library/API/store modules
+  pass, together with mobile TypeScript, iOS JavaScript export, native iOS
+  development builds and Android resource processing (197 Gradle tasks).
+- Native iPhone simulator against an isolated real service reproduces an
+  accepted message returning to the input before the fix. The same deliberate
+  response-body fault after real provider acceptance no longer restores it or
+  repeats the POST. Actual Claude replies remain visible.
+- Native Codex checks cover enqueue, Stop preserving the paused item, editing,
+  explicit Run now, a single provider reply and an empty queue. Search and
+  keyboard-open recipient-picker dismissal also pass through the real client.
+  Both Claude and Codex answer searches now open the exact visible reply after
+  the terminal-identity fix; the Claude case failed in the same native app
+  before the change.
+  Queue controls require scrolling/dismissing the keyboard on compact screens;
+  this pass does not claim to redesign that existing constrained layout.
+- A separate development app was installed and launched on a connected iPhone.
+  The tester confirmed normal send, queue editing/continuation and peer-message
+  workflows; the test-service records and device-local cache agreed on empty
+  queues and consumed drafts. This does not certify every visual interaction.
+  Android physical QR capture and synthetic stale-response race cases on real
+  devices remain unverified. This change does not publish or upload a release.
+
 ## 2026-10-31 - Local integration review of goal follow-ups and child lifecycle
 
 - Integrate PRs #105, #100, #99, #96 and #24 with their original contributor

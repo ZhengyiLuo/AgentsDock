@@ -87,6 +87,7 @@ export function Sidebar({ compact, profiles, activeProfileId, switchingProfileId
   const clearSearch = useAppStore(state => state.clearSearch)
   const select = useAppStore(state => state.selectSession)
   const seekTimelineResult = useAppStore(state => state.seekTimelineResult)
+  const cancelTimelineSeek = useAppStore(state => state.cancelTimelineSeek)
   const reorder = useAppStore(state => state.reorderSession)
   const refreshSessions = useAppStore(state => state.refreshSessions)
   const setFolderOrder = useAppStore(state => state.setFolderOrder)
@@ -102,17 +103,22 @@ export function Sidebar({ compact, profiles, activeProfileId, switchingProfileId
   const listState = useMemo(() => ({ active, openingSearchResultId }), [active, openingSearchResultId])
   const searchTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const searchInput = useRef<TextInput>(null)
-  const openingSearchResult = useRef(false)
+  const openingSearchResult = useRef<symbol | null>(null)
   const dismissSearchKeyboard = useCallback(() => {
     searchInput.current?.blur()
     dismissAppKeyboard()
   }, [])
   const handleSearchChange = useCallback((value: string) => {
+    if (openingSearchResult.current) {
+      openingSearchResult.current = null
+      if (profileScopeIsCurrent(profileScope)) cancelTimelineSeek()
+      setOpeningSearchResultId(null)
+    }
     // Clear synchronously with the edit so results for the previous query
     // never render under the new text while its debounce is pending.
     clearSearch()
     setQuery(value)
-  }, [clearSearch])
+  }, [cancelTimelineSeek, clearSearch, profileScope])
   const closeSearch = useCallback(() => {
     if (searchTimer.current) clearTimeout(searchTimer.current)
     searchTimer.current = null
@@ -146,7 +152,7 @@ export function Sidebar({ compact, profiles, activeProfileId, switchingProfileId
   }, [clearSearch, needsServerSetup, profileScope, query, search, switchingProfileId])
 
   useEffect(() => {
-    openingSearchResult.current = false
+    openingSearchResult.current = null
     setOpeningSearchResultId(null)
     setCollapsedStatuses(new Set())
   }, [profileScope])
@@ -258,15 +264,19 @@ export function Sidebar({ compact, profiles, activeProfileId, switchingProfileId
       void selection
       return
     }
-    openingSearchResult.current = true
+    const request = Symbol('sidebar-history-navigation')
+    openingSearchResult.current = request
     setOpeningSearchResultId(result.event_id)
     void seekTimelineResult(result, profileScope.profileGeneration).then(opened => {
-      if (opened && sessionScopeIsCurrent(profileScope, session.id)) {
+      if (opened && openingSearchResult.current === request && sessionScopeIsCurrent(profileScope, session.id)) {
+        openingSearchResult.current = null
+        setOpeningSearchResultId(null)
         closeSearch()
         onOpenChat?.()
       }
     }).finally(() => {
-      openingSearchResult.current = false
+      if (openingSearchResult.current !== request) return
+      openingSearchResult.current = null
       if (profileScopeIsCurrent(profileScope)) setOpeningSearchResultId(null)
     })
   }, [closeSearch, dismissSearchKeyboard, onOpenChat, profileScope, seekTimelineResult, select])

@@ -23,6 +23,7 @@ export function sameTimelineRow(left: TimelineRow, right: TimelineRow): boolean 
   if (left.kind === 'message' && right.kind === 'message') {
     return left.role === right.role
       && sameEvents(left.events, right.events)
+      && sameOptionalReferences(left.representedEventIds, right.representedEventIds)
       && sameReferences(left.files, right.files)
   }
   if (left.kind === 'trace' && right.kind === 'trace') {

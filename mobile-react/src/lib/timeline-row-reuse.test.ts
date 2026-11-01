@@ -196,11 +196,15 @@ const afterTerminalAggregate = reuseStableTimelineRows(beforeTerminalAggregate, 
 const afterTerminalAssistant = afterTerminalAggregate.find(row =>
   row.kind === 'message' && row.role === 'assistant'
 )
-assert.equal(
+assert.notEqual(
   afterTerminalAssistant,
   beforeTerminalAssistant,
-  'a duplicate terminal aggregate may move to the edge without replacing its unchanged assistant cell',
+  'a duplicate terminal aggregate must publish its newly represented search identity',
 )
+assert.equal(afterTerminalAssistant?.key, beforeTerminalAssistant?.key, 'completion preserves the cell key')
+assert.equal(afterTerminalAssistant?.seq, beforeTerminalAssistant?.seq, 'completion preserves the streamed anchor')
+assert.deepEqual(afterTerminalAssistant?.kind === 'message' && afterTerminalAssistant.representedEventIds,
+  ['assistant-stream', 'turn-finished'])
 assert.equal(
   afterTerminalAggregate.at(-1),
   afterTerminalAssistant,
@@ -255,11 +259,13 @@ const afterMediaTerminal = reuseStableTimelineRows(beforeMediaTerminal, projectT
 ], [generatedVideo]))
 const afterMediaAssistantIndex = afterMediaTerminal.findIndex(row => row.key === 'turn:run-media-final:assistant')
 const afterMediaRowIndex = afterMediaTerminal.findIndex(row => row.key === 'turn:run-media-final:media')
-assert.equal(
+assert.notEqual(
   afterMediaTerminal[afterMediaAssistantIndex],
   beforeMediaAssistant,
-  'terminal relocation must reuse the unchanged assistant cell',
+  'terminal relocation publishes the new search identity on the assistant row',
 )
+assert.equal(afterMediaTerminal[afterMediaAssistantIndex].key, beforeMediaAssistant?.key)
+assert.equal(afterMediaTerminal[afterMediaAssistantIndex].seq, beforeMediaAssistant?.seq)
 assert.equal(
   afterMediaTerminal[afterMediaRowIndex],
   beforeMediaRow,

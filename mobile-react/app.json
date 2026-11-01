@@ -91,7 +91,7 @@
         "expo-image-picker",
         {
           "photosPermission": "Allow AgentsDock to access photos and videos you choose to attach to agent messages.",
-          "cameraPermission": false,
+          "cameraPermission": "Allow AgentsDock to scan a server connection QR code.",
           "microphonePermission": false
         }
       ],
