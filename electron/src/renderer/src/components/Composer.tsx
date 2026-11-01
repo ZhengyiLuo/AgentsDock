@@ -1640,7 +1640,7 @@ export const Composer = memo(function Composer({ dropActive = false, sessionId, 
         const source = state.sessions.find(candidate => candidate.id === selectedId) ?? session
         return queuedTurnRuntimeAdmissionError(turn, source, state.health, state.runtimeCatalog)
       }, () => Boolean(confirmInboundDeliveryInterruption(selectedId, 'send_now', steerConsent)),
-      asyncQueuedMessageControlsAvailable(useAppStore.getState().health))
+      asyncQueuedMessageControlsAvailable(useAppStore.getState().health), message => reportSteeringNotice(steeringScope, message))
       if (profileIsActive(activeProfileId, profileGeneration)) {
         useAppStore.getState().applyQueuedTurnsResponse(selectedId, request, result.turns)
       }
@@ -4036,7 +4036,8 @@ const QueueShelf = memo(function QueueShelf({
         if (steer) {
           const promotion = useAppStore.getState().beginQueuedTurnsRequest(sessionId)
           const remaining = await steerQueuedTurn(steeringScope, editing.queued_id,
-            () => Boolean(confirmInboundDeliveryInterruption(sessionId, 'send_now', steerConsent)))
+            () => Boolean(confirmInboundDeliveryInterruption(sessionId, 'send_now', steerConsent)),
+            message => reportSteeringNotice(steeringScope, message))
           if (profileIsActive(profileId, profileGeneration)) useAppStore.getState().applyQueuedTurnsResponse(sessionId, promotion, remaining)
         }
         return
@@ -4112,7 +4113,8 @@ const QueueShelf = memo(function QueueShelf({
         const turns = await steerQueuedTurn(
           steeringScope,
           editing.queued_id,
-          () => Boolean(confirmInboundDeliveryInterruption(sessionId, 'send_now', steerConsent))
+          () => Boolean(confirmInboundDeliveryInterruption(sessionId, 'send_now', steerConsent)),
+          message => reportSteeringNotice(steeringScope, message)
         )
         if (!profileIsActive(profileId, profileGeneration)) return
         useAppStore.getState().applyQueuedTurnsResponse(sessionId, request, turns)
@@ -4540,7 +4542,8 @@ function QueuedRow({ profileId, profileGeneration, steeringScope, turn, sourceSe
       const turns = await steerQueuedTurn(
         steeringScope,
         turn.queued_id,
-        () => Boolean(confirmInboundDeliveryInterruption(sessionId, 'send_now', steerConsent))
+        () => Boolean(confirmInboundDeliveryInterruption(sessionId, 'send_now', steerConsent)),
+        message => reportSteeringNotice(steeringScope, message)
       )
       if (profileIsActive(profileId, profileGeneration)) {
         useAppStore.getState().applyQueuedTurnsResponse(sessionId, request, turns)
@@ -4717,6 +4720,14 @@ function mentionSessionStatus(session: Session, activeSessionIds: Set<string>, q
 
 function reportActionError(error: unknown): void {
   useAppStore.getState().setError(error instanceof Error ? error.message : String(error))
+}
+
+function reportSteeringNotice(scope: SteeringScope, message: string): void {
+  const state = useAppStore.getState()
+  if (profileIsActive(scope.profileId, scope.profileGeneration)
+    && activeIdentity(state) === scope.serverIdentity && state.selectedSessionId === scope.sessionId) {
+    state.setError(message)
+  }
 }
 
 function cleanActionError(error: unknown): string {

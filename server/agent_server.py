@@ -24223,6 +24223,7 @@ def native_steer_requeue_event_payload(
         ),
         "model": selected.get("model"),
         "effort": selected.get("effort"),
+        "skill_selection": selected.get("skill_selection"),
         "prompt": display_prompt,
         "request_prompt": str(selected.get("prompt") or ""),
         "display_prompt": selected.get("display_prompt"),
@@ -24525,21 +24526,45 @@ def codex_goal_followup_requires_native(
 
 
 def codex_goal_steer_selection_is_plain(selected: dict[str, Any]) -> bool:
-    """User text/attachments may steer without changing runtime authority."""
+    """Claude's current native lane accepts text/files, not new route or skill grants."""
     routes = selected.get("provider_cross_chat_route_snapshot")
     return (
         str(selected.get("prompt") or "").strip().split(maxsplit=1)[:1] != ["/mail"]
         and selected.get("skill_selection") is None
-        # Saved/ambient snapshots are automatic queue metadata and are never
-        # applied by the owner-preserving goal lane. Explicit new @ grants
-        # still require separate work, even without their structured refs.
         and not any(
             isinstance(route, dict)
             and route.get("route_kind") == PROVIDER_CROSS_CHAT_ROUTE_KIND_REFERENCE
             for route in (routes if isinstance(routes, list) else [])
         )
         and not any(selected.get(field) for field in (
-        "purpose", "chat_references", "team_references",
+            "purpose", "chat_references", "team_references",
+            "secure_peer_route_snapshots", "cross_chat_obligation_ids",
+            "cross_chat_exchange_ids", "cross_chat_envelope_id",
+            "cross_chat_exchange_id", "cross_chat_exchange_leg_id",
+        ))
+    )
+
+
+def codex_goal_steer_selection_is_supported(selected: dict[str, Any]) -> bool:
+    """User follow-ups keep the current run owner and explicitly selected input."""
+    routes = selected.get("provider_cross_chat_route_snapshot")
+    references = selected.get("chat_references") or []
+    return (
+        str(selected.get("prompt") or "").strip().split(maxsplit=1)[:1] != ["/mail"]
+        and isinstance(references, list)
+        and all(isinstance(reference, dict) and reference.get("target_kind") is None
+                and reference.get("action") == "route"
+                and reference.get("grant_intent") is True
+                and reference.get("route_action") is None for reference in references)
+        # Only exact current user selections extend chat access. Historical
+        # unattended-job route snapshots are not user-selected references.
+        and not any(
+            isinstance(route, dict)
+            and route.get("route_kind") == PROVIDER_CROSS_CHAT_ROUTE_KIND_REFERENCE
+            for route in (routes if isinstance(routes, list) else [])
+        )
+        and not any(selected.get(field) for field in (
+        "purpose", "team_references",
         "secure_peer_route_snapshots", "cross_chat_obligation_ids",
         "cross_chat_exchange_ids", "cross_chat_envelope_id",
         "cross_chat_exchange_id", "cross_chat_exchange_leg_id",
@@ -24732,14 +24757,14 @@ async def _run_queued_turn_now_once(
                             isinstance(STORE.sessions[session_id].get("codex_goal"), dict)
                             and STORE.sessions[session_id]["codex_goal"].get("status") == "active"
                             and not STORE.sessions[session_id].get("codex_goal_time_budget_exhausted")
-                            and codex_goal_steer_selection_is_plain(selected)
+                            and codex_goal_steer_selection_is_supported(selected)
                         )
                     )
-                    and not selected.get("chat_references")
+                    and (goal_followup or not selected.get("chat_references"))
                     and not selected.get("team_references")
                     and not selected.get("cross_chat_obligation_ids")
                     and not selected.get("cross_chat_exchange_ids")
-                    and selected.get("skill_selection") is None
+                    and (goal_followup or selected.get("skill_selection") is None)
                     # Only ordinary logical-run replacement issues fresh
                     # authority. A goal steer keeps its exact owner and does
                     # not replace the original turn's references or command.
@@ -24827,19 +24852,19 @@ async def _run_queued_turn_now_once(
                             owner_queued_id=queued_id,
                         ))
                 if goal_followup and not native_steer:
-                    unsupported_input = not codex_goal_steer_selection_is_plain(selected)
+                    unsupported_input = not codex_goal_steer_selection_is_supported(selected)
                     raise HTTPException(
                         status_code=409,
                         detail=force_send_conflict_detail(
                             session_id, queued_id,
                             guard="active_goal_requires_native_steer",
                             message=(
-                                "This queued action adds chat access or invokes a provider command, which cannot be applied inside the running Codex turn."
+                                "This queued action contains a Team, remote-chat or legacy delivery that needs a separate turn."
                                 if unsupported_input else
                                 "Codex does not have a running goal turn ready to receive this message."
                             ),
                             action=(
-                                "It remains queued for a new turn. Text and file follow-ups can be sent now."
+                                "It remains queued. Text, files, local skills and local @chat mentions can be sent now."
                                 if unsupported_input else
                                 "Your message remains queued. Retry Send now when Codex is running."
                             ),
@@ -31786,7 +31811,7 @@ def build_subagent_snapshot(session_id: str, limit: int = 64) -> dict[str, Any]:
             SUBAGENT_SNAPSHOT_STATE_LIMIT,
         )
         for state in claude.get("subagents") or []:
-            key = f"{str(state.get('backend') or BACKEND_CLAUDE)}:{state.get('subagent_id')}"
+            key = f"{str(state.get('backend') or BACKEND_CLAUDE)}:{state.get('run_id')}:{state.get('subagent_id')}"
             merged[key] = dict(state)
     with CODEX_SUBAGENT_INDEX_LOCK:
         codex_states = [dict(state) for state in CODEX_SUBAGENT_STATE.values()]
@@ -31839,6 +31864,69 @@ def codex_child_status_from_turn(turn: Any) -> str | None:
     if status in {"completed", "interrupted", "failed"}:
         return normalize_subagent_status(status)
     return None
+
+
+def reconcile_claude_subagent_snapshot(
+    session_id: str, snapshot: dict[str, Any], limit: int,
+) -> dict[str, Any]:
+    """Reconcile display state with existing ownership on the event loop.
+
+    History alone cannot establish present liveness after a restart, eviction,
+    or replacement run. This read neither contacts Claude nor writes history;
+    operational Stop/update guards continue to inspect the durable ledger.
+    """
+    try:
+        owner = (CLAUDE_SDK_MANAGER.subagent_tracking_snapshot(session_id)
+                 if CLAUDE_SDK_MANAGER is not None else {"run_id": "", "tasks": ()})
+        owned_runs = {str(owner.get("run_id") or "")} - {""}
+        active = ACTIVE.get(session_id) or {}
+        process = active.get("proc")
+        if (active.get("backend") == BACKEND_CLAUDE
+                and active.get("transport") == CLAUDE_TRANSPORT_PRINT
+                and process is not None and process.returncode is None
+                and active.get("run_id")):
+            owned_runs.add(str(active.get("run_id") or ""))
+        receipts = tuple(owner.get("tasks") or ())
+    except Exception:
+        # An inspection failure is not evidence that a known owner has gone.
+        logger.warning("Claude subagent ownership inspection failed session=%s", session_id, exc_info=True)
+        return {**snapshot, "subagents": list(snapshot.get("subagents") or [])[:limit]}
+
+    states = []
+    for original in snapshot.get("subagents") or []:
+        state = dict(original)
+        if (state.get("backend") == BACKEND_CLAUDE
+                and state.get("subagent_status") in {"starting", "running"}):
+            run_id = str(state.get("run_id") or "")
+            status = None
+            for receipt in receipts:
+                if (receipt.get("owner_run_id") == run_id and run_id in owned_runs
+                        and (receipt.get("task_id") == state.get("subagent_id")
+                             or (receipt.get("tool_use_id")
+                                 and receipt.get("tool_use_id") == state.get("subagent_tool_id")))):
+                    status = normalize_subagent_status(receipt.get("status"))
+                    break
+            if status not in {None, "starting", "running"}:
+                state["subagent_status"] = status
+                state["subagent_activity"] = f"Subagent {status.replace('_', ' ')}"
+            elif run_id not in owned_runs:
+                state["subagent_status"] = "tracking_lost"
+                state["subagent_activity"] = "Background task tracking lost; completion is not confirmed"
+            if state["subagent_status"] != original.get("subagent_status"):
+                state["subagent_log"] = [
+                    *(state.get("subagent_log") or []),
+                    {"ts": state.get("ts"), "text": state["subagent_activity"]},
+                ][-SUBAGENT_SNAPSHOT_LOG_LIMIT:]
+        states.append(state)
+    states.sort(key=lambda state: (
+        0 if state.get("subagent_status") in {"starting", "running"} else 1,
+        -(durable_event_seq(state) or 0),
+    ))
+    return {
+        **snapshot,
+        "subagents": states[:limit],
+        "active_count": sum(state.get("subagent_status") in {"starting", "running"} for state in states),
+    }
 
 
 async def reconcile_codex_subagents(
@@ -32395,11 +32483,18 @@ def build_claude_subagent_snapshot(session_id: str, limit: int = 64) -> dict[str
         started = [value for value in (primary["started_at"], secondary["started_at"]) if value]
         if started:
             primary["started_at"] = min(started)
-        if int(secondary["seq"]) > int(primary["seq"]):
+        def status_priority(state: dict[str, Any]) -> int:
+            if not state["terminal_confirmed"]:
+                return 0
+            return 1 if state["status"] == "tracking_lost" else 2
+        primary_priority, secondary_priority = status_priority(primary), status_priority(secondary)
+        if ((secondary_priority > primary_priority)
+                or (primary_priority == secondary_priority and int(secondary["seq"]) > int(primary["seq"]))):
             primary["updated_at"] = secondary["updated_at"]
             primary["activity"] = secondary["activity"] or primary["activity"]
             primary["summary"] = secondary["summary"] or primary["summary"]
             primary["status"] = secondary["status"]
+            primary["terminal_confirmed"] = secondary["terminal_confirmed"]
         primary["seq"] = max(int(primary["seq"]), int(secondary["seq"]))
         primary["background"] = bool(primary["background"] or secondary["background"])
         primary["saw_task_started"] = bool(primary["saw_task_started"] or secondary["saw_task_started"])
@@ -32426,13 +32521,23 @@ def build_claude_subagent_snapshot(session_id: str, limit: int = 64) -> dict[str
         kind: Any = "",
         status: str = "running",
         background: bool | None = None,
-    ) -> dict[str, Any]:
+        terminal_confirmed: bool = True,
+    ) -> dict[str, Any] | None:
         run_id = str(event.get("run_id") or "")
         task_state_key = task_keys.get(scoped(run_id, task_id)) if task_id else None
         tool_state_key = tool_keys.get(scoped(run_id, tool_id)) if tool_id else None
         if task_state_key and tool_state_key and task_state_key != tool_state_key:
             merge_states(task_state_key, tool_state_key)
         state_key, state = find(run_id, task_id, tool_id)
+        ignore_update = False
+        if state is not None and state["terminal_confirmed"]:
+            incoming_status = normalize_subagent_status(status)
+            # Provider snapshots/progress can arrive after terminal receipts.
+            # Never reopen that task or replace its final activity with stale
+            # progress. A lost task may still acquire an explicit final receipt.
+            if (incoming_status in {"starting", "running"}
+                    or (state["status"] != "tracking_lost" and incoming_status != state["status"])):
+                ignore_update = True
         if state is None:
             provider_id = task_id or tool_id
             state_key = f"{run_id}\x00{provider_id}\x00{event.get('seq', 0)}"
@@ -32443,6 +32548,7 @@ def build_claude_subagent_snapshot(session_id: str, limit: int = 64) -> dict[str
                 "name": compact_subagent_text(name) or "Claude subagent",
                 "kind": compact_subagent_text(kind) or "agent",
                 "status": normalize_subagent_status(status),
+                "terminal_confirmed": terminal_confirmed and normalize_subagent_status(status) not in {"starting", "running"},
                 "started_at": str(event.get("ts") or ""),
                 "updated_at": str(event.get("ts") or ""),
                 "seq": int(event.get("seq") or 0),
@@ -32459,6 +32565,8 @@ def build_claude_subagent_snapshot(session_id: str, limit: int = 64) -> dict[str
         if tool_id:
             state["tool_id"] = tool_id
             tool_keys[scoped(run_id, tool_id)] = state_key
+        if ignore_update:
+            return None
         clean_name = compact_subagent_text(name)
         clean_kind = compact_subagent_text(kind)
         if clean_name:
@@ -32468,6 +32576,7 @@ def build_claude_subagent_snapshot(session_id: str, limit: int = 64) -> dict[str
         if background is not None:
             state["background"] = bool(background)
         state["status"] = normalize_subagent_status(status)
+        state["terminal_confirmed"] = terminal_confirmed and state["status"] not in {"starting", "running"}
         state["updated_at"] = str(event.get("ts") or state["updated_at"])
         state["seq"] = max(int(state["seq"]), int(event.get("seq") or 0))
         states.move_to_end(state_key)
@@ -32513,6 +32622,8 @@ def build_claude_subagent_snapshot(session_id: str, limit: int = 64) -> dict[str
                             kind="" if previous is not None else receipt["task_type"],
                             status=receipt["status"], background=True,
                         )
+                        if state is None:
+                            continue
                         note(state, event, (
                             "Background task tracking lost; completion is not confirmed"
                             if receipt["status"] == "tracking_lost"
@@ -32534,6 +32645,8 @@ def build_claude_subagent_snapshot(session_id: str, limit: int = 64) -> dict[str
                         status="starting",
                         background=tool_input.get("run_in_background") is True,
                     )
+                    if state is None:
+                        continue
                     note(state, event, f"Starting {state['name']}")
                     continue
 
@@ -32541,10 +32654,11 @@ def build_claude_subagent_snapshot(session_id: str, limit: int = 64) -> dict[str
                     tool = event.get("tool") if isinstance(event.get("tool"), dict) else {}
                     tool_id = str(event.get("tool_id") or tool.get("id") or "")
                     _, state = find(run_id, tool_id=tool_id)
-                    if state is None:
+                    if state is None or state["status"] not in {"starting", "running"}:
                         continue
                     if event.get("is_error") is True:
                         state["status"] = "failed"
+                        state["terminal_confirmed"] = True
                         note(state, event, "Subagent failed")
                     elif state["background"] or state["saw_task_started"]:
                         if state["status"] == "starting":
@@ -32552,6 +32666,9 @@ def build_claude_subagent_snapshot(session_id: str, limit: int = 64) -> dict[str
                         note(state, event, state["activity"])
                     elif state["status"] in {"starting", "running"}:
                         state["status"] = "completed"
+                        # A foreground tool result is only a fallback: Claude
+                        # may report its native async launch/task identity later.
+                        state["terminal_confirmed"] = False
                         note(state, event, "Subagent completed")
                     continue
 
@@ -32588,6 +32705,8 @@ def build_claude_subagent_snapshot(session_id: str, limit: int = 64) -> dict[str
                                     status="running",
                                     background=True,
                                 )
+                                if state is None:
+                                    continue
                                 note(state, event, "Subagent running")
                         continue
 
@@ -32606,6 +32725,8 @@ def build_claude_subagent_snapshot(session_id: str, limit: int = 64) -> dict[str
                                 status=normalize_subagent_status(task.get("status")),
                                 background=True,
                             )
+                            if state is None:
+                                continue
                             note(state, event, task.get("description") or f"Subagent {state['status']}")
                         continue
 
@@ -32618,6 +32739,8 @@ def build_claude_subagent_snapshot(session_id: str, limit: int = 64) -> dict[str
                             kind=raw.get("subagent_type"),
                             status="running",
                         )
+                        if state is None:
+                            continue
                         state["saw_task_started"] = True
                         note(state, event, raw.get("description") or "Subagent started")
                         continue
@@ -32634,6 +32757,8 @@ def build_claude_subagent_snapshot(session_id: str, limit: int = 64) -> dict[str
                             kind=raw.get("subagent_type"),
                             status="running",
                         )
+                        if state is None:
+                            continue
                         state["status"] = "running"
                         note(state, event, claude_subagent_progress_activity(raw) or "Working")
                         continue
@@ -32641,6 +32766,9 @@ def build_claude_subagent_snapshot(session_id: str, limit: int = 64) -> dict[str
                     if raw.get("type") == "system" and subtype == "task_updated" and task_id:
                         patch = raw.get("patch") if isinstance(raw.get("patch"), dict) else {}
                         _, state = find(run_id, task_id, tool_id)
+                        if (state is not None and state["terminal_confirmed"]
+                                and not (patch.get("status") or raw.get("status"))):
+                            continue
                         is_agent = state is not None or raw.get("task_type") == "local_agent" or bool(raw.get("subagent_type"))
                         if not is_agent:
                             continue
@@ -32652,7 +32780,10 @@ def build_claude_subagent_snapshot(session_id: str, limit: int = 64) -> dict[str
                             kind=raw.get("subagent_type"),
                             status=normalize_subagent_status(status_value),
                             background=True if patch.get("is_backgrounded") is True else None,
+                            terminal_confirmed=bool(patch.get("status") or raw.get("status")),
                         )
+                        if state is None:
+                            continue
                         state["status"] = normalize_subagent_status(status_value)
                         summary = compact_subagent_text(patch.get("summary") or raw.get("summary"))
                         if summary:
@@ -32673,6 +32804,8 @@ def build_claude_subagent_snapshot(session_id: str, limit: int = 64) -> dict[str
                             kind=raw.get("subagent_type"),
                             status=normalize_subagent_status(raw.get("status")),
                         )
+                        if state is None:
+                            continue
                         state["status"] = normalize_subagent_status(raw.get("status"))
                         state["summary"] = compact_subagent_text(raw.get("summary"))
                         note(state, event, state["summary"] or f"Subagent {state['status']}")
@@ -32682,7 +32815,7 @@ def build_claude_subagent_snapshot(session_id: str, limit: int = 64) -> dict[str
                     if parent_tool_id:
                         _, state = find(run_id, tool_id=parent_tool_id)
                         activity = claude_subagent_child_activity(raw)
-                        if state is not None and activity:
+                        if state is not None and state["status"] in {"starting", "running"} and activity:
                             note(state, event, activity)
                     continue
 
@@ -32701,6 +32834,7 @@ def build_claude_subagent_snapshot(session_id: str, limit: int = 64) -> dict[str
                         if event_type == "turn_finished" and state["background"]:
                             continue
                         state["status"] = terminal_status
+                        state["terminal_confirmed"] = terminal_status != "completed"
                         note(state, event, activity)
                     continue
 
@@ -32725,6 +32859,7 @@ def build_claude_subagent_snapshot(session_id: str, limit: int = 64) -> dict[str
                         ):
                             continue
                         state["status"] = "stopped"
+                        state["terminal_confirmed"] = True
                         note(state, event, "Stopped with parent chat")
 
     active_statuses = {"starting", "running"}
@@ -45137,9 +45272,10 @@ async def reserve_async_provider_route_message(
     if (str(capability.get("source_run_id") or "") != source_run_id
             or live_provider_cross_chat_route(source_session_id, issued) != live):
         raise HTTPException(status_code=403, detail="permanent chat pair or source turn changed")
-    delegation_action = next((action for action in ("instruction", "request_reply", "route")
+    route_instruction = (capability.get("provider_route_source_instructions") or {}).get(route_id)
+    delegation_action = "route" if route_instruction is not None else next((action for action in ("instruction", "request_reply", "route")
         if (target_session_id, action) in (capability.get("user_delegation_grants") or set())), "")
-    recorded_instruction = str(capability.get("source_user_instruction") or "")
+    recorded_instruction = str(route_instruction if route_instruction is not None else capability.get("source_user_instruction") or "")
     fallback_delegation = (not delegation_action and capability.get("source_is_user_turn") is True
             and recorded_instruction.strip()
             and len(recorded_instruction) <= CROSS_CHAT_SOURCE_USER_INSTRUCTION_MAX_CHARS)
@@ -50325,6 +50461,36 @@ def history_timeline_message_keys(
                 if len(provider_runs) > maximum:
                     provider_runs.pop(next(iter(provider_runs)))
             before_window = raw_seq <= after_seq
+            if (event_type == "turn_started" and event.get("backend") == BACKEND_CLAUDE
+                    and event.get("purpose") == "provider_background_wake"
+                    and event.get("metadata_only") is True
+                    and event.get("provider_generated") is True
+                    and event.get("imported") is not True and event.get("prompt") in (None, "")
+                    and not event.get("file_ids")
+                    and event.get("provider_user_authored") is not True):
+                # Native task/schedule completion opens a lifecycle-only run.
+                # Claude's notification is intentionally absent from imported
+                # user messages. An empty credit here would block matching its
+                # reply and every subsequent real user/assistant occurrence.
+                continue
+            if (event_type == "turn_started" and event.get("backend") == BACKEND_CODEX
+                    and event.get("purpose") == "codex_goal_resume"
+                    and event.get("imported") is not True and event.get("prompt") in (None, "")
+                    and not event.get("file_ids")
+                    and event.get("provider_user_authored") is not True):
+                # Resuming a native goal records a lifecycle boundary, not a
+                # provider user message. An empty ownership credit would block
+                # every subsequent assistant match in this cursor window.
+                continue
+            if (event.get("purpose") == "codex_goal_resume" and event.get("imported") is not True
+                    and event.get("backend") in (None, "", BACKEND_CODEX)
+                    and (event_type in {"assistant_text", "turn_finished", "job_summary"} or (
+                        event_type == "reasoning_summary" and event.get("phase") == "commentary"))):
+                # Goal continuations can repeat words in distinct native items.
+                # Their exact item/turn/thread ownership is reconciled by the
+                # native import filter; a text credit could consume a genuine
+                # external repeat before reaching the owned source item.
+                continue
             if event_type == "turn_started" or is_native_goal_steer_event(event):
                 key = history_dedup_key("user", event.get("prompt"), source_text_sha256=event.get("source_text_sha256"))
             elif event_type == "assistant_text":
@@ -57484,6 +57650,7 @@ async def acquire_codex_control_thread(
                     "provider_turn_id": None,
                     "provider_turn_ready": False,
                     "interactive_app_server": True,
+                    "cwd": cwd,
                     "codex_approval_policy": effective_codex_approval_policy(session),
                     "codex_native_operation": True,
                     "codex_native_operation_kind": None,
@@ -57846,6 +58013,7 @@ def suspend_codex_goal_steer_user_delegation(
             continue
         previous = {key: capability[key] for key in (
             "source_user_instruction", "source_is_user_turn", "user_delegation_grants",
+            "provider_route_source_instructions",
         ) if key in capability}
         records.append((token_hash, capability, previous))
         # No await occurs here or between before_send and the transport write.
@@ -57853,6 +58021,9 @@ def suspend_codex_goal_steer_user_delegation(
         # route grants, capability token and logical run identity do not change.
         capability["source_is_user_turn"] = False
         capability["user_delegation_grants"] = set()
+        # Route-specific provenance is also task authority. Do not let a prior
+        # @ selection bypass the uncertain-write fence or attest a later task.
+        capability.pop("provider_route_source_instructions", None)
         capability["_goal_steer_user_delegation_marker"] = marker
     request["_goal_steer_user_delegation"] = (marker, records, instruction)
 
@@ -57882,12 +58053,181 @@ def settle_codex_goal_steer_user_delegation(
             # A plain goal follow-up supplies no new explicit reference grants.
             capability["user_delegation_grants"] = set()
         elif restore:
-            for key in ("source_user_instruction", "source_is_user_turn", "user_delegation_grants"):
+            for key in ("source_user_instruction", "source_is_user_turn", "user_delegation_grants", "provider_route_source_instructions"):
                 if key in previous:
                     capability[key] = previous[key]
                 else:
                     capability.pop(key, None)
         # Uncertain acceptance leaves attestation disabled without blocking mail.
+
+
+async def prepare_codex_goal_route_steer(
+    session_id: str, run_id: str, selected: dict[str, Any],
+) -> dict[str, Any] | None:
+    """Validate an exact local @ selection without changing live authority."""
+    raw_references = selected.get("chat_references")
+    if not raw_references:
+        return None
+    prompt = str(selected.get("prompt") or "")
+    try:
+        references = [ChatReference.model_validate(value) for value in raw_references]
+        if selected.get("purpose") is not None or any(
+            reference.target_kind is not None or reference.action != "route"
+            or reference.grant_intent is not True or reference.route_action is not None
+            for reference in references
+        ):
+            raise ValueError("Only explicit local @Chat access can be added to a running goal")
+        references = validate_chat_references(
+            session_id, prompt, references, selected.get("client_capabilities") or [],
+        )
+    except (HTTPException, ValueError, TypeError) as exc:
+        raise NativeSteerHandoffError(
+            str(exc.detail) if isinstance(exc, HTTPException) else str(exc),
+            safe_to_requeue=True,
+        ) from exc
+    targets = {reference.session_id for reference in references}
+    # Queued snapshots may also contain unmentioned permanent pairs. Only
+    # the exact visible selection can extend this already-running owner.
+    routes = [route for route in provider_cross_chat_route_snapshot_for_authority(
+        selected.get("provider_cross_chat_route_snapshot"), references,
+        source_session_id=session_id,
+    ) if route.get("target_session_id") in targets and route.get("pair_id")
+        and live_provider_cross_chat_route(session_id, route) is not None]
+    if {route.get("target_session_id") for route in routes} != targets:
+        raise NativeSteerHandoffError(
+            "Selected chat access was revoked or changed; the follow-up remains queued",
+            safe_to_requeue=True,
+        )
+    async with CROSS_CHAT_CAPABILITY_LOCK:
+        matches = [(key, value) for key, value in CROSS_CHAT_CAPABILITIES.items()
+                   if value.get("source_session_id") == session_id
+                   and value.get("source_run_id") == run_id
+                   and not value.get("native_transition_nonce")]
+        active = ACTIVE.get(session_id) or {}
+        current = CURRENT_TURNS.get(session_id) or {}
+        resumed_owner_without_authority = bool(
+            not matches and re.fullmatch(r"run_[A-Za-z0-9_-]+", run_id)
+            and active.get("run_id") == current.get("run_id") == run_id
+            and active.get("codex_native_operation_kind") == "goal_resume"
+            and active.get("codex_control_reservation_id")
+            == current.get("codex_control_reservation_id")
+            and active.get("codex_control_reservation_id")
+        )
+        if (not provider_capability_is_attached_to_live_run(session_id, run_id)
+                or not resumed_owner_without_authority and (
+                    len(matches) != 1 or matches[0][1].get("server_identity") != server_identity()
+                    or matches[0][1].get("async_route_v1") is not True
+                    or float(matches[0][1].get("expires_at") or 0) <= time.time()
+                )):
+            raise NativeSteerHandoffError(
+                "This running goal has no compatible chat-access authority; the follow-up remains queued",
+                safe_to_requeue=True,
+            )
+        token_hash, capability = matches[0] if matches else (None, None)
+        # Capture the registry object as well as its key: a replacement run or
+        # capability cannot inherit this admission after native acknowledgement.
+        return {
+            "token_hash": token_hash, "capability": capability,
+            "routes": tuple(copy.deepcopy(route) for route in routes),
+            "source_user_instruction": prompt,
+        }
+
+
+async def commit_codex_goal_route_steer(
+    session_id: str, run_id: str, prepared: dict[str, Any] | None,
+) -> bool:
+    """Extend only the accepted owner's live routes; never revive revoked access."""
+    if prepared is None:
+        return True
+    async with CROSS_CHAT_CAPABILITY_LOCK:
+        capability = CROSS_CHAT_CAPABILITIES.get(prepared["token_hash"])
+        if (capability is None or capability is not prepared["capability"]
+                or capability.get("source_session_id") != session_id
+                or capability.get("source_run_id") != run_id
+                or capability.get("server_identity") != server_identity()
+                or capability.get("native_transition_nonce")
+                or float(capability.get("expires_at") or 0) <= time.time()
+                or not provider_capability_is_attached_to_live_run(session_id, run_id)):
+            return False
+        routes = [live_provider_cross_chat_route(session_id, route) for route in prepared["routes"]]
+        if any(route is None for route in routes):
+            return False
+        # Keep handles, reply bindings, action ceilings and consumed effects
+        # from the original run. The static tool reads this environment afresh.
+        actions = set(capability.get("actions") or set()) | {"agent_cross_chat_routes"}
+        runtime_env = validate_provider_runtime_env({
+            **(capability.get("provider_runtime_env") or {}),
+            "AGENTSDOCK_PROVIDER_AUTHORITY_ACTIONS": ",".join(sorted(actions)),
+            "AGENTSDOCK_CROSS_CHAT_MODE": "async_route_v1",
+        })
+        grants = dict(capability.get("provider_route_grants") or {})
+        instructions = dict(capability.get("provider_route_source_instructions") or {})
+        for route in routes:
+            assert route is not None
+            previous = grants.get(route["route_id"])
+            if previous is None or any(previous.get(key) != route.get(key) for key in (
+                "revision", "alias", "target_session_id", "pair_id", "paired_route_id",
+            )):
+                grants[route["route_id"]] = copy.deepcopy(route)
+            instructions[route["route_id"]] = prepared["source_user_instruction"]
+        capability.update({
+            "provider_route_grants": grants,
+            "provider_route_source_instructions": instructions,
+            "actions": actions, "provider_runtime_env": runtime_env,
+        })
+        return True
+
+
+async def issue_codex_goal_route_steer_authority(
+    session_id: str, run_id: str, prepared: dict[str, Any],
+) -> bool:
+    """Bind accepted user references to a resumed goal without replacing it."""
+    active = ACTIVE.get(session_id) or {}
+    if (active.get("codex_native_operation_kind") != "goal_resume"
+            or not provider_capability_is_attached_to_live_run(session_id, run_id)
+            or any(live_provider_cross_chat_route(session_id, route) is None
+                   for route in prepared["routes"])):
+        return False
+    async with CROSS_CHAT_CAPABILITY_LOCK:
+        if any(value.get("source_run_id") == run_id
+               for value in CROSS_CHAT_CAPABILITIES.values()):
+            return False
+    authority_path = None
+    try:
+        authority_path = await issue_cross_chat_capability(
+            session_id, run_id, [],
+            source_user_instruction=prepared["source_user_instruction"],
+            actions={"agent_cross_chat_routes"},
+            provider_route_snapshot=list(prepared["routes"]),
+            async_route_v1=True,
+        )
+        if authority_path is None:
+            return False
+        await provider_authority_runtime_env(run_id, authority_path, session_id, [])
+        async with CROSS_CHAT_CAPABILITY_LOCK:
+            matches = [(key, value) for key, value in CROSS_CHAT_CAPABILITIES.items()
+                       if value.get("source_run_id") == run_id
+                       and value.get("authority_path") == str(authority_path)]
+            if (len(matches) == 1
+                    and provider_capability_is_attached_to_live_run(session_id, run_id)):
+                prepared["token_hash"], prepared["capability"] = matches[0]
+                return True
+    except Exception as exc:
+        # Input is already accepted. Never return it to the queue after a
+        # local authority failure, or deliver it twice on the next goal turn.
+        logger.warning("could not bind accepted goal chat access session=%s: %s",
+                       session_id, concise_error_message(exc))
+    finally:
+        if authority_path is not None and prepared["capability"] is None:
+            # Remove exactly our new record; never revoke the original owner
+            # or a capability installed by later work in the same chat.
+            async with CROSS_CHAT_CAPABILITY_LOCK:
+                for key, value in list(CROSS_CHAT_CAPABILITIES.items()):
+                    if value.get("source_run_id") == run_id and value.get("authority_path") == str(authority_path):
+                        CROSS_CHAT_CAPABILITIES.pop(key, None)
+            with suppress(OSError):
+                authority_path.unlink()
+    return False
 
 
 async def send_codex_goal_steer(
@@ -57897,6 +58237,11 @@ async def send_codex_goal_steer(
 ) -> dict[str, Any]:
     """Steer one exact native goal turn without replacing its authority/owner."""
     selected = request["selected"]
+    selected_command = selected.get("skill_selection")
+    command_selection = dict(selected_command) if isinstance(selected_command, dict) else selected_command
+    user_prompt = str(selected.get("prompt") or "")
+    reference_selection = copy.deepcopy(selected.get("chat_references"))
+    route_steer = None
     expected_turn_id = str(request.get("expected_provider_turn_id") or "")
     generation = manager.generation
 
@@ -57952,10 +58297,20 @@ async def send_codex_goal_steer(
             and str(current.get("run_id") or "") == operation_id
             and str(active.get("codex_control_reservation_id") or "") == reservation_id
             and str(current.get("codex_control_reservation_id") or "") == reservation_id
-            and codex_goal_steer_selection_is_plain(selected)
-            # Only text/files are sent. The current turn's command, references,
-            # runtime and authority stay intact, regardless of picker changes
-            # or capability metadata on an older queued message.
+            and codex_goal_steer_selection_is_supported(selected)
+            and selected.get("skill_selection") == command_selection
+            and str(selected.get("prompt") or "") == user_prompt
+            and selected.get("chat_references") == reference_selection
+            and (route_steer is None or route_steer["capability"] is None or (
+                CROSS_CHAT_CAPABILITIES.get(route_steer["token_hash"]) is route_steer["capability"]
+                and float(route_steer["capability"].get("expires_at") or 0) > time.time()
+            ))
+            and (route_steer is None or all(
+                live_provider_cross_chat_route(session_id, route) is not None
+                for route in route_steer["routes"]
+            ))
+            # Runtime and the original command remain pinned. Only accepted,
+            # explicitly selected references add to the same owner's routes.
         )
 
     async def validate_delivery_owner() -> None:
@@ -57971,16 +58326,28 @@ async def send_codex_goal_steer(
         if not delivery_owner_valid():
             return False
         suspend_codex_goal_steer_user_delegation(
-            session_id, operation_id, request, user_instruction,
+            session_id, operation_id, request, user_prompt,
         )
         return True
 
     try:
         await validate_delivery_owner()
-        user_instruction = str(selected.get("prompt") or "")
+        command = None
+        if command_selection is not None:
+            owner_session = {**(STORE.sessions.get(session_id) or {}),
+                             "cwd": (ACTIVE.get(session_id) or {}).get("cwd")
+                                    or (STORE.sessions.get(session_id) or {}).get("cwd")}
+            command = await resolve_provider_command_selection(
+                session_id, owner_session, SkillSelection.model_validate(command_selection),
+                prompt=user_prompt, purpose=None, provider_context_mode="chat",
+                client_capabilities=list(selected.get("client_capabilities") or []),
+                refresh_native=True, codex_manager=manager,
+            )
         prompt = build_user_provider_prompt(
-            session_id, user_instruction, list(selected.get("file_ids") or []),
+            session_id, user_prompt, list(selected.get("file_ids") or []),
         )
+        input_items = codex_provider_command_turn_input(prompt, command)
+        route_steer = await prepare_codex_goal_route_steer(session_id, operation_id, selected)
         await fence_native_steer_delivery(session_id, selected, backend=BACKEND_CODEX)
         # Stop/Pause, budget/goal changes, and native turn rollover can win
         # during the durable fence. Check again at the RPC boundary.
@@ -57988,7 +58355,7 @@ async def send_codex_goal_steer(
         request["_goal_steer_rpc_started"] = True
         acknowledged_turn_id, watermark = await manager.steer_turn_with_notification_watermark(
             thread_id, expected_turn_id,
-            [{"type": "text", "text": prompt, "text_elements": []}],
+            input_items,
             client_user_message_id=str(selected.get("queued_id") or ""),
             notification_subscription=subscription,
             before_send=before_send,
@@ -57999,7 +58366,11 @@ async def send_codex_goal_steer(
                 request_sent=True, safe_to_retry=False,
             )
         settle_codex_goal_steer_user_delegation(request, accepted=True)
-        return {"request": request, "watermark": watermark, "provider_turn_id": expected_turn_id}
+        return {"request": request, "watermark": watermark, "provider_turn_id": expected_turn_id,
+                "route_steer": route_steer,
+                **({"skill_selection": command_selection,
+                    "source_text_sha256": history_dedup_key("user", codex_provider_command_turn_input(user_prompt, command)[0]["text"])[1]}
+                   if command is not None else {})}
     except NativeSteerHandoffError as exc:
         settle_codex_goal_steer_user_delegation(
             request, accepted=False, restore=exc.safe_to_requeue,
@@ -58049,11 +58420,14 @@ async def commit_codex_goal_steer(
         if selected.get("display_file_ids") is not None
         else selected.get("file_ids") or []
     )
+    reference_fields = ({"chat_references": selected["chat_references"]}
+                        if selected.get("chat_references") else {})
     await append_durable_event_batch(session_id, [
         ("turn_queue_run_now", {
             "queued_id": selected.get("queued_id"), "run_id": operation_id,
             "backend": BACKEND_CODEX, "prompt": display_prompt,
             "file_ids": display_file_ids,
+            **reference_fields,
             "native_steer": True, "native_goal_steer": True,
             "interrupted": False, "replays_interrupted_message": False,
             "remaining": request.get("remaining", 0), "superseded_queued_ids": [],
@@ -58065,12 +58439,26 @@ async def commit_codex_goal_steer(
             "queued_id": selected.get("queued_id"), "prompt": display_prompt,
             "file_ids": display_file_ids, "native_steer": True, "native_goal_steer": True,
             "provider_user_authored": True,
+            **reference_fields,
+            **({"skill_selection": pending["skill_selection"],
+                "source_text_sha256": pending["source_text_sha256"]}
+               if pending.get("skill_selection") is not None else {}),
         }),
     ])
+    route_steer = pending.get("route_steer")
+    access_applied = True
+    if route_steer is not None:
+        if route_steer["capability"] is None:
+            access_applied = await issue_codex_goal_route_steer_authority(session_id, operation_id, route_steer)
+        if access_applied:
+            access_applied = await commit_codex_goal_route_steer(session_id, operation_id, route_steer)
     return {
         "ok": True, "queued_id": selected.get("queued_id"), "run_id": operation_id,
         "interrupted": False, "native_steer": True, "native_goal_steer": True,
         "replays_interrupted_message": False, "superseded_queued_ids": [],
+        **({"chat_access_applied": access_applied} if route_steer is not None else {}),
+        **({"message": "Message sent, but the selected chat access was revoked or became unavailable. The message will not be resent."}
+           if not access_applied else {}),
     }
 
 
@@ -58588,6 +58976,8 @@ async def consume_codex_native_turn(
                                 **({"phase": phase} if phase in {"commentary", "final_answer"} else {}),
                                 "text": text,
                                 "purpose": f"codex_{operation}",
+                                **({"backend": BACKEND_CODEX, "provider_thread_id": thread_id}
+                                   if goal_resume else {}),
                             },
                         )
                 elif item_type in {"reasoning", "plan"}:
@@ -58893,6 +59283,13 @@ async def consume_codex_native_turn(
                         },
                     )
             finally:
+                if goal_resume:
+                    authority_cleanup = asyncio.create_task(revoke_cross_chat_capability(operation_id))
+                    try:
+                        await asyncio.shield(authority_cleanup)
+                    except BaseException:
+                        with suppress(BaseException):
+                            await join_task_despite_caller_cancellation(authority_cleanup)
                 STOPPED_RUNS.discard(operation_id)
                 if terminal_claimed:
                     # The slot is already exactly released. Remove the admission
@@ -62276,6 +62673,7 @@ async def discover_session_provider_commands(
     session: dict[str, Any],
     *,
     refresh: bool = False,
+    codex_manager: CodexAppServerManager | None = None,
 ) -> tuple[dict[str, Any], ProviderCommandInventory]:
     """Read one backend's native inventory without exposing provider metadata."""
 
@@ -62363,7 +62761,7 @@ async def discover_session_provider_commands(
 
     if backend == BACKEND_CODEX:
         try:
-            manager = await codex_app_server_manager(session)
+            manager = codex_manager if codex_manager is not None else await codex_app_server_manager(session)
             raw = await manager.request(
                 "skills/list",
                 {"cwds": [cwd], "forceReload": bool(refresh)},
@@ -62521,6 +62919,7 @@ async def resolve_provider_command_selection(
     provider_context_mode: str,
     client_capabilities: list[str],
     refresh_native: bool = False,
+    codex_manager: CodexAppServerManager | None = None,
 ) -> ProviderCommandRecord | None:
     """Revalidate an opaque provider command at every actual admission."""
 
@@ -62559,6 +62958,7 @@ async def resolve_provider_command_selection(
         # Revalidate against the exact current provider generation. Do not
         # evict it here: Claude command inventories can vary across connects.
         refresh=bool(refresh_native and backend == BACKEND_CODEX),
+        **({"codex_manager": codex_manager} if codex_manager is not None else {}),
     )
     if snapshot["support"].get("available") is not True:
         deterministic_transport_mismatch = (
@@ -83922,14 +84322,23 @@ async def codex_provider_mcp(request: Request) -> Response:
         client_meta = turn_meta
     run_id = str(client_meta.get("agentsdock_run_id") or "")
     proof = str(client_meta.get("agentsdock_run_proof") or "")
+    native_goal_metadata = (
+        all(key not in metadata for metadata in (
+                turn_meta, turn_meta.get("responsesapi_client_metadata"),
+                turn_meta.get("responsesapiClientMetadata"),
+            ) if isinstance(metadata, dict)
+            for key in ("agentsdock_run_id", "agentsdock_run_proof"))
+    )
     core_call_id = str(meta.get("callId") or "")
     if (
         not thread_id
         or len(thread_id) > 256
         or not turn_id
         or len(turn_id) > 256
-        or re.fullmatch(r"run_[A-Za-z0-9_-]{1,128}", run_id) is None
-        or re.fullmatch(r"[0-9a-f]{64}", proof) is None
+        or not native_goal_metadata and (
+            re.fullmatch(r"run_[A-Za-z0-9_-]{1,128}", run_id) is None
+            or re.fullmatch(r"[0-9a-f]{64}", proof) is None
+        )
         or not core_call_id
     ):
         return codex_provider_mcp_jsonrpc_error(request_id, -32602, "Incomplete turn metadata")
@@ -83937,6 +84346,26 @@ async def codex_provider_mcp(request: Request) -> Response:
         return codex_provider_mcp_jsonrpc_error(request_id, -32602, "Invalid call identity")
     standalone_active_owner = False
     async with ACTIVE_LOCK:
+        if native_goal_metadata:
+            # thread/goal/set cannot carry responsesapiClientMetadata. The
+            # authenticated static MCP still supplies provider-owned thread
+            # and turn IDs; bind those only to one exact live goal reservation.
+            # Supplied partial, invalid or stale proofs never use this lane.
+            native_owners = []
+            for candidate, active in ACTIVE.items():
+                candidate_run = str(active.get("run_id") or "")
+                manager = existing_codex_app_server_manager(STORE.sessions.get(candidate))
+                matches, _ready = provider_tool_active_matches(
+                    candidate, candidate_run, backend=BACKEND_CODEX,
+                    provider_thread_id=thread_id, provider_turn_id=turn_id,
+                )
+                if (re.fullmatch(r"run_[A-Za-z0-9_-]{1,128}", candidate_run)
+                        and manager is not None and manager.ready and matches
+                        and codex_native_mailbox_owner_matches(candidate, candidate_run, thread_id, turn_id)):
+                    native_owners.append(candidate_run)
+            if len(native_owners) != 1:
+                return codex_provider_mcp_jsonrpc_error(request_id, -32602, "Incomplete turn metadata")
+            run_id = native_owners[0]
         owners = [
             session_id
             for session_id, active in ACTIVE.items()
@@ -83971,7 +84400,7 @@ async def codex_provider_mcp(request: Request) -> Response:
     ):
         return codex_provider_mcp_jsonrpc_error(request_id, -32602, "Ambiguous thread owner")
     expected_proof = codex_provider_mcp_run_proof(session_id, thread_id, run_id)
-    if not hmac.compare_digest(proof, expected_proof):
+    if not native_goal_metadata and not hmac.compare_digest(proof, expected_proof):
         return codex_provider_mcp_jsonrpc_error(request_id, -32602, "Invalid turn proof")
     try:
         text, is_error = await execute_provider_tool_once(
@@ -89281,6 +89710,13 @@ async def get_session_subagents(
                 session_id,
                 concise_error_message(exc),
             )
+    if str(session.get("backend") or "") == BACKEND_CLAUDE:
+        # Fold all bounded states first: reconciling only the response page
+        # would leave active_count wrong and let stale rows hide live children.
+        snapshot = await asyncio.to_thread(
+            build_subagent_snapshot, session_id, SUBAGENT_SNAPSHOT_STATE_LIMIT,
+        )
+        return reconcile_claude_subagent_snapshot(session_id, snapshot, limit)
     return await asyncio.to_thread(build_subagent_snapshot, session_id, limit)
 
 
@@ -91272,6 +91708,7 @@ CLAUDE_GOAL_PATHS: dict[str, Path] = {}
 CLAUDE_GOAL_LOCKS: dict[str, asyncio.Lock] = {}
 CLAUDE_GOAL_PENDING: dict[str, dict[str, Any]] = {}
 CLAUDE_GOAL_ERRORS: dict[str, str] = {}
+CLAUDE_GOAL_CLEAR_ARGUMENTS = frozenset({"clear", "stop", "off", "reset", "none", "cancel"})
 
 
 async def settle_claude_goal_command(
@@ -91343,7 +91780,41 @@ def require_claude_goal_session(session_id: str) -> dict[str, Any]:
     return session
 
 
-async def start_claude_goal_command(session_id: str, argument: str) -> dict[str, Any]:
+async def queued_claude_goal(session_id: str) -> dict[str, Any] | None:
+    """Project the next durable goal request, separately from native goal state."""
+    await wait_for_queue_recovery_admission(session_id)
+    session = STORE.sessions.get(session_id) or {}
+    async with QUEUE_LOCK:
+        promoted = RUN_NOW_TURNS.get(session_id)
+        rows = ([promoted] if promoted is not None else []) + list(QUEUED_TURNS.get(session_id) or [])
+        goals = []
+        for position, item in enumerate(rows, 1):
+            selection = item.get("skill_selection")
+            prompt = str(item.get("prompt") or "")
+            # Selection admission (including queue edits) validates the exact
+            # native invocation. Plain slash-looking user text is not a goal.
+            if (item.get("_durable") is False or not item.get("queued_id")
+                    or item.get("purpose") is not None
+                    or str(item.get("backend") or session.get("backend") or DEFAULT_BACKEND) != BACKEND_CLAUDE
+                    or not isinstance(selection, dict) or not selection.get("id") or not selection.get("revision")
+                    or not provider_command_prompt_matches(prompt, "/goal")):
+                continue
+            condition = prompt[len("/goal"):].strip()
+            if not condition or len(condition) > 4000 or condition.lower() in CLAUDE_GOAL_CLEAR_ARGUMENTS:
+                continue
+            uncertain = item.get("_native_delivery_fenced") is True
+            paused = uncertain or item.get("_paused_after_stop") is True
+            goals.append({
+                "queued_id": str(item["queued_id"]), "condition": condition,
+                "position": position, "paused": paused,
+                "pause_reason": "delivery_uncertain" if uncertain else "stopped" if paused else None,
+            })
+    return {**goals[0], "queued_count": len(goals)} if goals else None
+
+
+async def start_claude_goal_command(
+    session_id: str, argument: str, *, queue_if_busy: bool = False,
+) -> dict[str, Any]:
     session = require_claude_goal_session(session_id)
     snapshot, inventory = await discover_session_provider_commands(session_id, session)
     command = next((record for record in inventory.records
@@ -91400,7 +91871,7 @@ async def start_claude_goal_command(session_id: str, argument: str) -> dict[str,
         prompt=f"/goal {argument}",
         skill_selection=SkillSelection(id=command.public["id"], revision=inventory.revision),
         client_capabilities=[CLAUDE_SDK_INTERACTIVE_CLIENT_CAPABILITY],
-    ), queue_if_busy=False)
+    ), queue_if_busy=queue_if_busy)
 
 
 class ClaudeGoalRequest(BaseModel):
@@ -91411,10 +91882,13 @@ class ClaudeGoalRequest(BaseModel):
 async def put_claude_goal(session_id: str, req: ClaudeGoalRequest) -> dict[str, Any]:
     require_claude_goal_session(session_id)
     condition = req.condition.strip()
-    if not condition or condition.lower() in {"clear", "stop", "off", "reset", "none", "cancel"}:
+    if not condition or condition.lower() in CLAUDE_GOAL_CLEAR_ARGUMENTS:
         raise HTTPException(status_code=400, detail="Enter a completion condition for Claude")
     previous = await refresh_claude_goal(session_id, notify=False)
-    accepted = await start_claude_goal_command(session_id, condition)
+    # Loaded SDK owners use native goal delivery at their safe boundary.
+    # During admission without a loaded owner, retain ordinary durable queue
+    # cancellation/recovery instead of interrupting or rejecting existing work.
+    accepted = await start_claude_goal_command(session_id, condition, queue_if_busy=True)
     # Bind pending display state only after actual admission. A competing
     # request or an older run's cleanup cannot clear the winner's operation.
     async with ACTIVE_LOCK:
@@ -91516,6 +91990,7 @@ async def claude_runtime_snapshot(session_id: str) -> dict[str, Any]:
         "goal_starting": bool(session_id in CLAUDE_GOAL_PENDING
                               and not CLAUDE_GOAL_PENDING[session_id].get("delivery_uncertain")),
         "goal_error": CLAUDE_GOAL_ERRORS.get(session_id),
+        "queued_goal": await queued_claude_goal(session_id) if is_claude else None,
         "goal_loading": bool(is_claude and claude_provider_id_for_session(session)
                              and not getattr(CLAUDE_GOAL_PROJECTIONS.get(session_id), "caught_up", False)),
         "stop_fence_pending": session_id in CLAUDE_STOP_FENCE_SESSIONS,
@@ -91867,7 +92342,7 @@ async def _put_codex_goal_locked(
             blocker = await turn_start_blocker(ignore_session_id=session_id)
             if blocker:
                 raise HTTPException(status_code=503, detail=f"agent launch deferred: {blocker}")
-            operation_id = f"codexgoal_{uuid.uuid4().hex[:16]}"
+            operation_id = f"run_codexgoal_{uuid.uuid4().hex[:16]}"
             subscription = manager.subscribe_thread(thread_id)
             provider_model, provider_effort, provider_service_tier = codex_runtime_settings(stored_session)
             async with ACTIVE_LOCK:

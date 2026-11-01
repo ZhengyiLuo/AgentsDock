@@ -142,6 +142,15 @@ export interface ClaudeRuntimeSnapshot {
   goal_starting?: boolean
   /** A native goal command was accepted but later rejected by Claude. */
   goal_error?: string | null
+  /** Next durable goal command waiting in the existing message queue. */
+  queued_goal?: {
+    queued_id: string
+    condition: string
+    position: number
+    paused: boolean
+    pause_reason: 'stopped' | 'delivery_uncertain' | null
+    queued_count: number
+  } | null
   /** The initial provider transcript goal projection is still loading. */
   goal_loading?: boolean
 }
@@ -989,6 +998,7 @@ export interface QueuedRunNowResponse {
   retryable?: boolean
   delivery_uncertain?: boolean
   native_steer?: boolean
+  chat_access_applied?: boolean
   replays_interrupted_message?: boolean
   message?: string | null
   remaining?: number | null

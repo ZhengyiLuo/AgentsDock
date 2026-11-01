@@ -25,12 +25,14 @@ export function ClaudeGoalControls({ open, onOpenChange, disabled = false }: {
   const activeProfileId = useAppStore(state => state.activeProfileId)
   const profileGeneration = useAppStore(state => state.profileGeneration)
   const switchingProfileId = useAppStore(state => state.switchingProfileId)
+  const lifecycleBusy = useAppStore(state => Boolean(session?.id && state.activeSessionIds.has(session.id)))
   const scope = `${activeProfileId}:${profileGeneration}:${session?.id}`
   const scopeRef = useRef(scope)
   scopeRef.current = scope
   const goal = runtime?.goal ?? null
   const active = goal?.status === 'active'
-  const busy = runtime?.status?.type === 'active'
+  const busy = lifecycleBusy || runtime?.status?.type === 'active'
+  const queuedGoal = runtime?.queued_goal
   const [condition, setCondition] = useState('')
   const [error, setError] = useState<string | null>(null)
   const errorAction = useRef<'set' | 'clear' | null>(null)
@@ -112,6 +114,10 @@ export function ClaudeGoalControls({ open, onOpenChange, disabled = false }: {
   const goalError = error || runtime?.goal_error || null
   const clearLabel = busy ? t('claudeGoal.clearAndStop') : t('claudeGoal.clear')
   const clearHint = busy ? t('claudeGoal.clearAndStopHint') : t('claudeGoal.clear')
+  const queuedFeedback = queuedGoal && <p className="goal-feedback" role="status">
+    <strong>{t(queuedGoal.paused ? 'claudeGoal.queuedPaused' : 'claudeGoal.queued')}</strong>{' '}{queuedGoal.condition}<br />
+    {t(queuedGoal.paused ? 'claudeGoal.queuedPausedHint' : 'claudeGoal.queuedHint')}
+  </p>
 
   if (session?.backend !== 'claude' || window.agentsDock.sharedChat) return null
   return <>
@@ -124,6 +130,7 @@ export function ClaudeGoalControls({ open, onOpenChange, disabled = false }: {
         <button type="button" className="quiet-button" aria-label={clearHint} title={clearHint} disabled={blocked || mutating} onClick={() => void changeGoal(null)}>{clearLabel}</button>
       </>} />}
     {!open && (goalError || waiting) && <p className={`goal-feedback goal-composer-feedback${goalError ? ' error' : ''}`} role={goalError ? 'alert' : 'status'}>{goalError || waitingMessage}</p>}
+    {!open && queuedFeedback}
     <Dialog.Root open={open} onOpenChange={onOpenChange}>
       <GoalDialogContent title={t('claudeGoal.title')} description={t('claudeGoal.description')} closeLabel={t('claudeGoal.close')} busy={mutating}>
           <form onSubmit={event => { event.preventDefault(); if (trimmedCondition && condition.length <= 4000) void changeGoal(trimmedCondition) }}>
@@ -136,6 +143,7 @@ export function ClaudeGoalControls({ open, onOpenChange, disabled = false }: {
               value={condition} disabled={blocked || mutating} onChange={value => { conditionEdited.current = true; setCondition(value) }} />
             {(goalError || runtimeError) && <p className="goal-feedback error" role="alert">{goalError || runtimeError}</p>}
             {waiting && <p className="goal-feedback" role="status">{waitingMessage}</p>}
+            {queuedFeedback}
             <footer className="claude-goal-footer">
               {active && <button type="button" className="quiet-button" aria-label={clearHint} title={clearHint} disabled={blocked || mutating} onClick={() => void changeGoal(null)}>{clearLabel}</button>}
               {canContinue && goal && <button type="button" className="quiet-button" disabled={blocked || mutating || waiting} onClick={() => void changeGoal(goal.condition)}>{t('claudeGoal.continue')}</button>}

@@ -1,5 +1,77 @@
 # Public development log
 
+## 2026-10-31 - Local integration review of goal follow-ups and child lifecycle
+
+- Integrate PRs #105, #100, #99, #96 and #24 with their original contributor
+  commits. The editor line-ending implementation from #24 is already equivalent
+  to main; retain it together with newer editor and language-service behavior.
+- Preserve main's native Claude goal delivery during active SDK turns rather
+  than replacing it with the older end-of-turn queue design. Expose actual
+  durable queued goals separately, and preserve pending-command exclusion.
+- Combine Codex goal steering of explicitly selected local chat references and
+  skills with current task-provenance, retry and authorization fences. Suspend
+  per-route source instructions during uncertain writes as well as ordinary
+  provenance. Keep Claude's narrower follow-up admission independent.
+- Reconcile resumed Codex output by exact native item ownership, not equal text.
+  Preserve Claude child completion and retire stale unowned activity into history.
+- Focused checks: 942 desktop tests and 723 server tests pass; desktop type check
+  and production compilation pass. Tests include exact-authority retries,
+  rejected/uncertain steering, goal history, child lifecycle and editor line endings.
+- Real native Electron/provider checks: steer a running Codex goal with a local
+  chat mention, deliver and receive one peer exchange without replacing the run,
+  resume the native goal and reopen history without new imported duplicates;
+  run a real Claude child and retain its completed history after reload; edit and
+  save a CRLF file through the real server while preserving its bytes.
+- The combined review exposed an existing Claude history-sync boundary: an
+  empty native background-wake lifecycle was counted as user input and blocked
+  subsequent occurrence matching. Exclude only proven metadata-only wakes;
+  keep genuine user input, files, external repeats and native goal commands.
+- Repair already-imported user copies through exact native reply ownership and
+  sentinel-proven goal-command ancestry, including bounded historical pages.
+  Preserve unknown or conflicting provenance and distinct repeated inputs.
+  Repair changes the projection, not either original history file.
+- Expanded checks: 830 focused server tests and 942 desktop tests pass, along
+  with desktop type checking and production compilation. Both new regressions
+  fail against the pre-fix implementation. A native Electron/Claude run confirms
+  background completion, a goal admitted during the same active run, goal
+  achievement, history reload, old-copy repair and two intentional equal-text
+  submissions remaining distinct. An unrelated split-pane draft remains intact.
+- Final pre-merge desktop checks pass: 5,757 tests (five skipped), eight
+  packaging/license guards, TypeScript and production compilation.
+- Additional native Electron checks exercise a catalog-selected skill during a
+  Codex goal, Stop with a paused unsent queue, reload without automatic resend,
+  and explicit Send now delivering once on the original provider thread.
+  Claude checks cover cancelling a pending goal, replacing an active goal,
+  Clear & stop, child retirement, and completed/cleared state after reconnect.
+- This pass also catches normalized Claude goal commands being reimported:
+  exact native reply ownership plus command metadata or a goal sentinel now
+  recognizes both XML and canonical slash representations. Unproven commands,
+  quotations and distinct repeated inputs remain visible. Start/clear
+  regressions fail before the change; the 95 focused repair/goal tests pass.
+  Real-app reloading repairs existing copies and preserves fresh commands once.
+- The final combined server pass after this repair passes 743 tests across 26
+  goal, steering, history, native transport and child-lifecycle modules.
+- Hosted CI also exposed a blocking observer in the existing concurrent catalog
+  auth-change test. Replace its executor-based entry wait with thread-safe
+  event-loop notification, keeping a two-worker pool to exercise overlap.
+  The old fixture fails under that constraint; the corrected 14-test module
+  and 30 repetitions pass with unchanged runtime assertions and production code.
+- A hosted rerun additionally exceeds the test's five-second watchdog during
+  an event-loop scheduling stall. Give this ordering test a bounded 30-second
+  watchdog and release both worker gates even on assertion failure. An isolated
+  6.3-second stall reproduces the old timeout and passes with the corrected
+  fixture; the full 14-test module remains green. This is not a change to
+  runtime timeouts or an assertion of provider latency.
+- Native acceptance uses an isolated macOS Electron profile, real IPC/HTTP and
+  live Codex/Claude. Mouse, keyboard and scrolling are driven through Electron's
+  debugging interface; analytics are disabled. No mocked provider result is
+  counted as live acceptance. Existing imported-control grouping is unchanged.
+- Acceptance is local only. An earlier foreground sleep command was refused by
+  the native Claude harness and was not counted as successful execution; the
+  later background and read-only-file workflows completed through the real
+  provider. Native Windows/Linux and forced real-provider transport failures
+  were not exercised. No release or merge is claimed by this review.
+
 ## 2026-10-31 - Local review of activation diagnostics and runtime reliability
 
 - Integrate PRs #122, #112 and #111 on the previously accepted #134 preview,
@@ -1329,6 +1401,29 @@
 - Availability: source branch and local test-server patch only. A server
   update is required; no Electron UI change, public release or deployment to
   other servers is included. This does not establish broader provider parity.
+## 2026-10-20 — Prevent duplicate replies after resumed Codex goals
+
+- Native goal replies now retain their provider thread identity. History sync
+  excludes goal lifecycle records and output from text-only matching, then
+  reconciles public replies by their exact native thread, turn and item.
+  Genuine repeated text from another item remains visible.
+- Existing imported copies can be recognized from an older goal's recorded
+  start and native output identities. Repair is a read-only presentation;
+  original replies and stored history remain unchanged, including after an
+  interrupted goal with multiple native turns.
+- Source is based on `df15d18b`; Electron UI code is unchanged. All 172 focused
+  server tests pass, covering import prevention, existing-history repair,
+  repeated reads, conflicting ownership, interruption and both history matching
+  stages. The added ownership regression fails against the original code.
+- An isolated offscreen native Electron app exercised production IPC and
+  authenticated HTTP against the actual server with synthetic provider history.
+  Duplicate replies changed from two copies to one; two intentional equal-text
+  replies stayed visible. History refresh, repeated chat navigation, full app
+  reopen and scrolling passed. Source and event-log hashes stayed unchanged.
+  Desktop type checking, production compilation and compiled-entry verification
+  also passed. No live provider generation was exercised.
+- Availability: source only. Requires a server update; no installed-app
+  replacement, live-service restart, deployment or public release was performed.
 
 ## 2026-10-20 — Verify history repair in the local desktop
 
@@ -1489,6 +1584,66 @@
   preference before repeating the workflow. Mobile source and native dependencies
   were unchanged by upstream; no new physical-device acceptance was performed.
 - Source integration only: no commit, push, publication or server restart.
+## 2026-10-18 — Queue Claude goals during running work
+
+- Allow a completion condition to be submitted while Claude is running. The
+  desktop offers Queue goal or Queue replacement and shows the saved request
+  separately from the provider's active goal. The existing message queue
+  supplies cancellation and recovery; the current run is not interrupted.
+- Retain the exact native command selection through queue admission and drain.
+  Clear remains the explicit clear-and-stop operation. A queued replacement
+  takes effect after the current run finishes, including its native goal loop;
+  this is not an immediate change to a running goal.
+- Queue events refresh the selected chat's goal display without polling or
+  requests while typing. Native clear-command aliases remain separate from
+  completion conditions. Both English and Chinese controls describe timing.
+- Validation: 129 focused server checks and 239 desktop checks passed, followed
+  by final goal/header checks, TypeScript and production desktop compilation.
+  An isolated offscreen native desktop reproduced the disabled baseline.
+  The corrected desktop sent a real Claude SDK turn, queued a goal through
+  authenticated native IPC/HTTP while its shell tool ran, observed the original
+  task finish successfully, and then observed the goal become active and
+  achieved. The provider session ID stayed unchanged and no stop occurred.
+  A separate native-desktop fixture passed queue cancellation, failed-request
+  retry, chat switching/reopening, and replacement while preserving the original
+  task. English/dark and Chinese/light dialogs and keyboard focus were checked
+  at the supported minimum width. This fixture used synthetic provider state;
+  the live-provider result above was a separate test.
+- Availability: source change and local compiled desktop only. App and server
+  updates are both required; no installed app, live service or release changed.
+## 2026-10-18 — Allow ordinary chat mentions while steering Codex goals
+
+- Send selected native skills and local `@Chat` follow-ups into the current
+  Codex goal turn. Preserve its native thread, running tools, goal and original
+  chat access; add only the explicitly selected live chat routes after delivery.
+  Ordinary text with a local chat mention is a supported follow-up; it does not
+  need a skill or command. Saved chat routes also remain compatible with steering.
+- Bind provider tools from native goal activation to their exact live owner
+  when Codex omits client metadata. Keep ordinary-turn proofs and rejection of
+  stale, partial or ambiguous ownership. Preserve selected skills in durable
+  queue recovery and retain per-route user instructions across mailbox retries.
+- Show actionable Send now failures and deferred outcomes without Electron's
+  IPC wrapper. If input was accepted but chat access subsequently disappeared,
+  explain that outcome without replaying the message.
+- Exclude promptless goal-control starts from native history matching so a
+  later sync does not import the accepted follow-up and reply a second time.
+- Validation on main base `126c74f7`: 434 targeted server tests, 516 desktop
+  tests, Python compilation, TypeScript and production Electron compilation.
+  Native offscreen Electron acceptance used disposable state and real Codex:
+  selected a skill and a local chat through the actual pickers, queued each
+  follow-up and clicked Send now while the original shell remained running.
+  Both goals received the input and completed without changing their thread
+  or interrupting work. The chat case reused a thread with prior conversation,
+  verified the selected route through the real provider tool, and returned to
+  idle. History was checked again after switching away and reopening the chat.
+  Team/remote mentions and legacy/internal deliveries remain separate-turn
+  operations. Live mailbox sends, cross-device and custom-endpoint provider
+  acceptance are outside these checks. Source only; no release or deployment.
+- Additional regression: an ordinary local mention with five saved routes and
+  no skill or special-purpose metadata fails the old admission guard and passes
+  the updated guard. Plain-text controls pass both. The full admission suite
+  passes 35 tests; native-turn projection passes 14 tests after completing its
+  isolated cleanup fixture dependency and asserting capability revocation.
 
 ## 2026-10-17 — Refresh privacy-limited desktop and sharing metrics
 
@@ -2867,6 +3022,31 @@
   earlier repeated Settings opening/closing. No server profile was changed
   by these checks. Full regression and device coverage are deferred until the
   UI iteration is complete. Availability: local development preview only.
+## 2026-10-17 — Reconcile stale Claude subagent status
+
+- Reconcile the subagent panel's historical Claude records against the existing
+  runtime owner. Untracked old work moves to **Tracking lost** history instead
+  of accumulating hours under **Active now**. Preserve confirmed completion,
+  genuine tracked work, and separate identities for reused task IDs across runs.
+  This read does not start providers, interrupt work, or rewrite chat history.
+- Accept corrected server snapshots in the desktop cache, including corrections
+  whose journal sequence is unchanged or older than a stale projection. Ignore
+  delayed running updates for retired children and reconcile launch-tool aliases
+  without duplicating rows or overriding authoritative task state.
+- Validation covers historical missing completion, owner replacement, live work,
+  delayed events, terminal receipts, cache repair, reload and chat switching.
+  Focused server/desktop tests, TypeScript and production compilation passed.
+- Personally exercised the compiled desktop offscreen through native IPC and a
+  real authenticated disposable server. The baseline reproduced 39 stale active
+  rows; the corrected app showed them in history, preserved a controlled live
+  owner, and rejected delayed running updates. Task history and the live-owner
+  fixture were synthetic. A separate real disposable Claude request rejected
+  the legacy Agent launch as unavailable and correctly produced a failed task;
+  a real child's successful full lifecycle remains unverified.
+- Rechecked the existing Team Space stop-hosting/join fix in the same candidate
+  with two isolated real servers, including a lost reply, TLS joining, message
+  delivery, reload and preservation of the original team. No installed app or
+  production service was changed; these changes are source-only.
 
 ## 2026-10-17 — Let a Team Space host stop hosting and join another team
 

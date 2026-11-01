@@ -23,18 +23,24 @@ const STATE_LIMIT = 256
 export class SubagentEventProjector {
   private states = new Map<string, LiveSubagentState>()
   private taskByTool = new Map<string, string>()
+  private taskAliases = new Map<string, string>()
 
   reset(): void {
     this.states.clear()
     this.taskByTool.clear()
+    this.taskAliases.clear()
   }
 
-  project(event: Event): Event | null {
+  project(event: Event, source: 'stream' | 'snapshot' = 'stream'): Event | null {
     if (event.type === 'subagent_state' && event.backend === 'claude' && event.subagent_id && event.run_id) {
-      const stateKey = key(event.session_id, event.run_id, event.subagent_id)
+      const stateKey = this.stateKey(event.session_id, event.run_id, event.subagent_id, event.subagent_tool_id || '')
       const previous = this.states.get(stateKey)
       const status = normalizeStatus(event.subagent_status)
-      if (previous && event.seq < previous.seq) return null
+      // A reconciled snapshot can repair an older client's resurrected state
+      // without inventing a new journal sequence for the lifecycle correction.
+      const retiresActiveState = source === 'snapshot' && previous
+        && isActiveStatus(previous.status) && !isActiveStatus(status)
+      if (previous && event.seq < previous.seq && !retiresActiveState) return null
       if (previous && !isActiveStatus(previous.status) && isActiveStatus(status)) return null
       const state: LiveSubagentState = {
         seq: event.seq,
@@ -66,7 +72,7 @@ export class SubagentEventProjector {
     const runId = String(event.run_id || '')
 
     if (raw.type === 'system' && subtype === 'task_started' && raw.task_type === 'local_agent' && taskId) {
-      const stateKey = key(event.session_id, runId, taskId)
+      const stateKey = this.stateKey(event.session_id, runId, taskId, toolId)
       const previous = this.states.get(stateKey)
       if (previous && event.seq < previous.seq) return null
       if (previous && !isActiveStatus(previous.status)) return null
@@ -93,7 +99,7 @@ export class SubagentEventProjector {
     }
 
     if (raw.type === 'system' && subtype === 'task_progress' && taskId) {
-      const state = this.states.get(key(event.session_id, runId, taskId))
+      const state = this.states.get(this.stateKey(event.session_id, runId, taskId, toolId))
       if (!state || event.seq < state.seq || !isActiveStatus(state.status)) return null
       state.status = 'running'
       this.note(state, event, raw.description || 'Working')
@@ -101,7 +107,7 @@ export class SubagentEventProjector {
     }
 
     if (raw.type === 'system' && (subtype === 'task_notification' || subtype === 'task_updated') && taskId) {
-      const state = this.states.get(key(event.session_id, runId, taskId))
+      const state = this.states.get(this.stateKey(event.session_id, runId, taskId, toolId))
       if (!state || event.seq < state.seq) return null
       const patch = subtype === 'task_updated' && raw.patch && typeof raw.patch === 'object' ? raw.patch : {}
       const status = normalizeStatus(patch.status || raw.status || state.status)
@@ -122,6 +128,17 @@ export class SubagentEventProjector {
     }
 
     return null
+  }
+
+  private stateKey(sessionId: string, runId: string, taskId: string, toolId: string): string {
+    const taskKey = key(sessionId, runId, taskId)
+    const stateKey = this.taskAliases.get(taskKey)
+      || (this.states.has(taskKey) ? taskKey : toolId ? this.taskByTool.get(key(sessionId, runId, toolId)) : undefined)
+    if (!stateKey || !this.states.has(stateKey)) return taskKey
+    // Old journals may know only the Agent tool ID. Learn its task alias even
+    // when rejecting late progress so an eventual final receipt still resolves.
+    if (taskKey !== stateKey) this.taskAliases.set(taskKey, stateKey)
+    return stateKey
   }
 
   private note(state: LiveSubagentState, event: Event, value: unknown): void {
@@ -146,9 +163,12 @@ export class SubagentEventProjector {
     for (const [stateKey, state] of this.states) {
       if (state.status === 'running' || state.status === 'starting') continue
       this.states.delete(stateKey)
-      if (this.states.size <= STATE_LIMIT) return
+      if (this.states.size <= STATE_LIMIT) break
     }
     while (this.states.size > STATE_LIMIT) this.states.delete(this.states.keys().next().value as string)
+    for (const [alias, stateKey] of this.taskAliases) {
+      if (!this.states.has(stateKey)) this.taskAliases.delete(alias)
+    }
   }
 }
 

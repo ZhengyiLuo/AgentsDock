@@ -78,6 +78,21 @@ describe('Claude header controls', () => {
     expect(setGoal).toHaveBeenCalledExactlyOnceWith(session.id, 'All changes pass validation.')
   })
 
+  it.each(['idle', 'active'] as const)('offers native goal admission from the running header with native %s status', async type => {
+    runtime.mockResolvedValue({ ...idle, status: { type, activeFlags: [] } })
+    useAppStore.setState({ activeSessionIds: new Set([session.id]) })
+    render(surface())
+    const user = userEvent.setup()
+    await user.click(await screen.findByRole('button', { name: 'Claude controls: Running' }))
+    await user.click(screen.getByRole('button', { name: 'Goal…' }))
+    const dialog = await screen.findByRole('dialog', { name: 'Claude goal' })
+    await user.type(within(dialog).getByRole('textbox', { name: 'Completion condition' }), 'All changes pass validation.')
+    expect(within(dialog).queryByText('This goal will apply after the current turn finishes.')).not.toBeInTheDocument()
+    await user.click(within(dialog).getByRole('button', { name: 'Start goal' }))
+    expect(setGoal).toHaveBeenCalledExactlyOnceWith(session.id, 'All changes pass validation.')
+    expect(clearGoal).not.toHaveBeenCalled()
+  })
+
   it('resolves pending native approval from the status panel through the Claude bridge', async () => {
     const interaction = { id: 'permission-1', session_id: session.id, tool_use_id: 'tool-1', method: 'item/commandExecution/requestApproval',
       params: { toolName: 'Bash', displayName: 'Run shell command', toolInput: { command: 'git status --short' }, availableDecisions: ['accept', 'decline'] }, created_at: 'now' }
