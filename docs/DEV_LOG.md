@@ -51,6 +51,11 @@
   Real-app reloading repairs existing copies and preserves fresh commands once.
 - The final combined server pass after this repair passes 743 tests across 26
   goal, steering, history, native transport and child-lifecycle modules.
+- Hosted CI also exposed a blocking observer in the existing concurrent catalog
+  auth-change test. Replace its executor-based entry wait with thread-safe
+  event-loop notification, keeping a two-worker pool to exercise overlap.
+  The old fixture fails under that constraint; the corrected 14-test module
+  and 30 repetitions pass with unchanged runtime assertions and production code.
 - Native acceptance uses an isolated macOS Electron profile, real IPC/HTTP and
   live Codex/Claude. Mouse, keyboard and scrolling are driven through Electron's
   debugging interface; analytics are disabled. No mocked provider result is
