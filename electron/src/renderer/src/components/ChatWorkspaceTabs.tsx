@@ -84,6 +84,7 @@ export function ChatWorkspaceTabs() {
   }
 
   return <div className="workspace-tab-controls">
+    {!workspaces.length && <span className="workspace-empty-label">{t('chatWorkspace.tabs')}</span>}
     <DndContext sensors={sensors} collisionDetection={args => {
       const point = args.pointerCoordinates
       const rect = tabsRef.current?.getBoundingClientRect()

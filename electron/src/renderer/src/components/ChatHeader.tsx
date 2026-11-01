@@ -52,6 +52,7 @@ export function ChatHeader({
   const sessions = useAppStore(state => state.sessions)
   const folderOrder = useAppStore(state => state.folderOrder)
   const chatPanes = useAppStore(state => state.chatPanes)
+  const workspaceBarVisible = useAppStore(state => state.chatWorkspaceBarVisible)
   const running = useAppStore(state => (session ? state.activeSessionIds.has(session.id) : false))
   const admitting = useAppStore(state => (session ? Boolean(state.turnAdmissionTokens[session.id]) : false))
   const codexControlsSupported = useCodexRuntime().supported
@@ -186,7 +187,7 @@ export function ChatHeader({
         </DropdownMenu.Content></DropdownMenu.Portal></DropdownMenu.Root>
         {sidebarButton}
         <ScheduledJobsPopover session={session} />
-        <button type="button" className="icon-button" title={t('chatWorkspace.create')} aria-label={t('chatWorkspace.create')} onClick={() => void useAppStore.getState().createChatWorkspace(session.id)}><LayoutGrid size={16} /></button>
+        <button type="button" className="icon-button" title={t(workspaceBarVisible ? 'chatWorkspace.hide' : 'chatWorkspace.show')} aria-label={t(workspaceBarVisible ? 'chatWorkspace.hide' : 'chatWorkspace.show')} aria-expanded={workspaceBarVisible} onClick={() => useAppStore.getState().toggleChatWorkspaceBar()}><LayoutGrid size={16} /></button>
         {onSwapPanes && <button className="icon-button" title={t("ui.ChatHeader.ChatHeader.swap_chat_panes_7129f59")} aria-label={t("ui.ChatHeader.ChatHeader.swap_chat_panes_7129f59")} onClick={onSwapPanes}><ArrowLeftRight size={15} /></button>}
         {focused && onTerminalToggle && <ShortcutTooltip shortcut="toggleTerminal" label={terminalOpen ? t("ui.ChatHeader.ChatHeader.close_terminal_panel_48e963f") : t("ui.ChatHeader.ChatHeader.open_terminal_panel_3284242")}><button
           className={`icon-button terminal-toggle${terminalOpen ? ' active' : ''}`}

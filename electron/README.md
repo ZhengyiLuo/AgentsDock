@@ -264,9 +264,16 @@ the desktop media viewer; downloading or opening the original keeps the TIFF
 file unchanged. Preview decoding runs outside the app's main thread.
 
 Workspace layouts are opt-in: ordinary chats show their title and folder on
-the first line, with a copyable provider session ID beneath. **Create workspace**
-is an icon button beside Scheduled jobs and Terminal, creating the first default
-workspace and revealing the global workspace/layout bar. Existing named and multi-pane workspaces are retained;
+the first line, with a copyable provider session ID beneath. **Show workspaces**
+is an icon button beside Scheduled jobs and Terminal. It toggles the global
+workspace bar on/off; repeated clicks never create or delete layouts, change the
+current chat, or discard drafts. Existing split panes remain in place while the
+bar is hidden. Its tooltip changes between Show workspaces and Hide workspaces.
+Use the bar's **+ / New workspace** button to create the first default workspace
+around the current chat, or add subsequent workspaces. Layout controls appear
+after a workspace exists. Bar visibility is remembered per server, independently
+of existing workspaces.
+Existing named and multi-pane workspaces are retained;
 the old automatically created single-chat default is not treated as opt-in.
 Closing the last workspace returns to ordinary chat without deleting its chat
 or draft. These layouts are local, server-scoped preferences, not new folders

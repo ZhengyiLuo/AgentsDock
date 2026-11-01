@@ -215,6 +215,7 @@ interface AppState {
   focusedChatPane: ChatPane
   chatPaneCount: ChatPaneCount
   chatWorkspaces: ChatWorkspace[]
+  chatWorkspaceBarVisible: boolean
   activeChatWorkspaceId: string
   selectedSessionId: string | null
   snapshots: Record<string, SessionSnapshot>
@@ -266,6 +267,7 @@ interface AppState {
   closeChatPane(pane: ChatPane): void
   swapChatPanes(): void
   createChatWorkspace(sessionId?: string): Promise<void>
+  toggleChatWorkspaceBar(): void
   selectChatWorkspace(workspaceId: string): Promise<void>
   closeChatWorkspace(workspaceId: string): Promise<void>
   renameChatWorkspace(workspaceId: string, title: string): void
@@ -596,6 +598,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   focusedChatPane: 'primary',
   chatPaneCount: 1,
   chatWorkspaces: [],
+  chatWorkspaceBarVisible: false,
   activeChatWorkspaceId: '',
   selectedSessionId: null,
   snapshots: {},
@@ -1596,6 +1599,14 @@ export const useAppStore = create<AppState>((set, get) => ({
     const layout = swapChatPaneLayout(before)
     if (layout === before) return
     set(current => focusedPaneAliases(current, layout))
+    persistChatPaneState(get())
+  },
+
+  toggleChatWorkspaceBar() {
+    const state = get()
+    if (state.switchingProfileId) return
+    // Visibility alone must not create/delete layouts, select a chat or reload history.
+    set({ chatWorkspaceBarVisible: !state.chatWorkspaceBarVisible })
     persistChatPaneState(get())
   },
 
@@ -2938,6 +2949,7 @@ function currentChatWorkspaceState(state: AppState, layout = currentChatPaneLayo
   const workspaces = state.chatWorkspaces ?? []
   return {
     enabled: workspaces.length > 0,
+    barVisible: state.chatWorkspaceBarVisible,
     activeWorkspaceId,
     workspaces: workspaces.map(workspace => workspace.id === activeWorkspaceId ? workspaceWithLayout(workspace, layout) : workspace)
   }
@@ -2959,6 +2971,7 @@ function chatWorkspaceAliases(state: AppState, workspaces: ChatWorkspaceState): 
       panes: { primary: state.selectedSessionId, secondary: null }, focusedPane: 'primary', paneCount: 1
     }, false),
     activeChatWorkspaceId: active?.id ?? '',
+    chatWorkspaceBarVisible: workspaces.barVisible ?? workspaces.workspaces.length > 0,
     chatWorkspaces: workspaces.workspaces
   }
 }
@@ -3334,6 +3347,7 @@ function workspaceStateFromBootstrap(
     focusedChatPane: layout.focusedPane,
     chatPaneCount: chatPaneCount(layout),
     chatWorkspaces: workspaceState.workspaces,
+    chatWorkspaceBarVisible: workspaceState.barVisible ?? workspaceState.workspaces.length > 0,
     activeChatWorkspaceId: workspaceState.activeWorkspaceId,
     selectedSessionId: focusedSessionId,
     snapshots: {},
@@ -3777,6 +3791,7 @@ function releaseFailedNamespaceAdoption(
     focusedChatPane: 'primary',
     chatPaneCount: 1,
     chatWorkspaces: [],
+    chatWorkspaceBarVisible: false,
     activeChatWorkspaceId: '',
     snapshots: {},
     loadingSessionIds: new Set(),

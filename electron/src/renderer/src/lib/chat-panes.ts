@@ -29,6 +29,8 @@ export interface ChatWorkspace extends ChatPaneLayout {
 export interface ChatWorkspaceState {
   /** Distinguishes explicit workspaces from the old auto-created default. */
   enabled?: boolean
+  /** Toolbar visibility is independent of whether layouts have been created. */
+  barVisible?: boolean
   activeWorkspaceId: string
   workspaces: ChatWorkspace[]
 }
@@ -151,7 +153,10 @@ export function parseChatWorkspaces(value: unknown, validSessionIds: ReadonlySet
   if (!value || typeof value !== 'object') return null
   const stored = value as Partial<ChatWorkspaceState>
   if (!Array.isArray(stored.workspaces)) return null
-  if (!stored.workspaces.length) return { enabled: false, activeWorkspaceId: '', workspaces: [] }
+  if (!stored.workspaces.length) return {
+    enabled: false, activeWorkspaceId: '', workspaces: [],
+    ...(stored.barVisible === true ? { barVisible: true } : {})
+  }
   const workspaces: ChatWorkspace[] = []
   const ids = new Set<string>()
   for (const raw of stored.workspaces) {
@@ -180,5 +185,10 @@ export function parseChatWorkspaces(value: unknown, validSessionIds: ReadonlySet
     && !CHAT_PANE_IDS.slice(1).some(pane => only.panes[pane])) {
     return { enabled: false, activeWorkspaceId: '', workspaces: [] }
   }
-  return { enabled: true, activeWorkspaceId: typeof stored.activeWorkspaceId === 'string' && ids.has(stored.activeWorkspaceId) ? stored.activeWorkspaceId : workspaces[0].id, workspaces }
+  return {
+    enabled: true,
+    ...(typeof stored.barVisible === 'boolean' ? { barVisible: stored.barVisible } : {}),
+    activeWorkspaceId: typeof stored.activeWorkspaceId === 'string' && ids.has(stored.activeWorkspaceId) ? stored.activeWorkspaceId : workspaces[0].id,
+    workspaces
+  }
 }
