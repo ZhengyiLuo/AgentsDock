@@ -38,7 +38,7 @@ describe('ChatWorkspaceGrid resize ownership', () => {
       ...initialState, activeProfileId: 'a', profileGeneration: 1, profiles: [profile('a')],
       switchingProfileId: null, sessions: [], selectedSessionId: null,
       chatPanes: { primary: null, secondary: null }, focusedChatPane: 'primary', chatPaneCount: 2,
-      activeChatWorkspaceId: 'workspace-main', chatWorkspaces: [workspace('workspace-main')]
+      activeChatWorkspaceId: 'workspace-main', chatWorkspaceBarVisible: true, chatWorkspaces: [workspace('workspace-main')]
     })
   })
 
@@ -92,13 +92,51 @@ describe('ChatWorkspaceGrid resize ownership', () => {
     expect(screen.getByRole('separator', { name: 'Resize last column' })).toHaveAttribute('aria-valuenow', '72')
   })
 
-  it('does not show workspace tabs or layout controls until a workspace exists', () => {
-    useAppStore.setState({ chatWorkspaces: [], activeChatWorkspaceId: '', chatPaneCount: 1 })
+  it('does not show workspace tabs or layout controls before opting in', () => {
+    useAppStore.setState({ chatWorkspaces: [], chatWorkspaceBarVisible: false, activeChatWorkspaceId: '', chatPaneCount: 1 })
     const view = render(<ChatWorkspaceGrid sidebarVisible terminalOpen={false}
       onSidebarToggle={() => undefined} onTerminalToggle={() => undefined} sideChat={() => null} />)
     expect(view.container.querySelector('.workspace-tabs-bar')).not.toBeInTheDocument()
     expect(view.container.querySelector('.workspace-layout-picker')).not.toBeInTheDocument()
     expect(view.container.querySelector('.chat-grid-workspace')).toHaveClass('plain-chat-mode')
+  })
+
+  it('reveals an empty bar and creates workspaces only with its plus button', async () => {
+    useAppStore.setState({ chatWorkspaces: [], chatWorkspaceBarVisible: false, activeChatWorkspaceId: '', chatPaneCount: 1 })
+    const view = render(<ChatWorkspaceGrid sidebarVisible terminalOpen={false}
+      onSidebarToggle={() => undefined} onTerminalToggle={() => undefined} sideChat={() => null} />)
+    act(() => useAppStore.getState().toggleChatWorkspaceBar())
+    expect(view.container.querySelector('.workspace-tabs-bar')).toBeInTheDocument()
+    expect(view.container.querySelector('.workspace-layout-picker')).not.toBeInTheDocument()
+    expect(view.container.querySelector('.chat-grid-workspace')).not.toHaveClass('plain-chat-mode')
+    expect(screen.queryAllByRole('tab')).toHaveLength(0)
+    act(() => useAppStore.getState().toggleChatWorkspaceBar())
+    expect(view.container.querySelector('.workspace-tabs-bar')).not.toBeInTheDocument()
+    expect(useAppStore.getState().chatWorkspaces).toHaveLength(0)
+    act(() => useAppStore.getState().toggleChatWorkspaceBar())
+    await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'New workspace' })) })
+    expect(screen.getAllByRole('tab')).toHaveLength(1)
+    expect(view.container.querySelector('.workspace-layout-picker')).toBeInTheDocument()
+    act(() => useAppStore.getState().toggleChatWorkspaceBar())
+    expect(view.container.querySelector('.workspace-tabs-bar')).not.toBeInTheDocument()
+    expect(useAppStore.getState().chatWorkspaces).toHaveLength(1)
+    act(() => useAppStore.getState().toggleChatWorkspaceBar())
+    expect(screen.getAllByRole('tab')).toHaveLength(1)
+    await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'New workspace' })) })
+    expect(screen.getAllByRole('tab')).toHaveLength(2)
+  })
+
+  it('hides existing workspace controls without removing the split panes', () => {
+    const view = render(<ChatWorkspaceGrid sidebarVisible terminalOpen={false}
+      onSidebarToggle={() => undefined} onTerminalToggle={() => undefined} sideChat={() => null} />)
+    const grid = view.container.querySelector('.workspace-chat-grid')!
+    act(() => useAppStore.getState().toggleChatWorkspaceBar())
+    expect(view.container.querySelector('.workspace-tabs-bar')).not.toBeInTheDocument()
+    expect(grid).toHaveAttribute('data-pane-count', '2')
+    expect(useAppStore.getState().chatWorkspaces).toHaveLength(1)
+    act(() => useAppStore.getState().toggleChatWorkspaceBar())
+    expect(view.container.querySelector('.workspace-chat-grid')).toBe(grid)
+    expect(screen.getAllByRole('tab')).toHaveLength(1)
   })
 
   it('does not let either column divider collapse a neighboring pane', () => {

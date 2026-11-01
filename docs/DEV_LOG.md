@@ -1,5 +1,39 @@
 # Public development log
 
+## 2026-11-01 - Toggle workspace controls without creating a workspace
+
+- The chat-header workspace button now toggles the workspace toolbar on/off.
+  Repeated clicks do not create/delete layouts, change the current chat or reload
+  history. Use the toolbar's plus button to create the first or another
+  workspace; existing split panes remain in place while the toolbar is hidden.
+  Update the tooltip and accessible expanded state to match visibility.
+- Preserve toolbar visibility independently of layouts in server-scoped preferences.
+  Show layout controls only after a workspace exists. Closing the last
+  workspace returns to the ordinary chat view. Keep drafts and existing
+  workspace restoration unchanged.
+- Validation: 117 focused tests, 5,818 desktop tests and eight packaging/license
+  checks pass; five desktop tests remain skipped. TypeScript and the Electron
+  production build pass. Source base: `7a41121a`; development app metadata
+  0.2.0 (build 86), test service metadata 1.0.7-beta.11.
+- Actual-app verification uses an isolated native Electron window with real
+  authenticated server transport and persisted workspace preferences. Reproduce
+  the old header behavior creating a layout on each click. Verify the fixed
+  header alternates visibility with the count unchanged, plus adds one workspace,
+  reload and a full app restart preserve visibility and the unsent draft,
+  workspace switching and split layouts still work, and closing the last
+  workspace restores the ordinary chat.
+  Exercise mouse and keyboard activation and English/dark and Chinese/light
+  layouts, including a narrow viewport. The isolated fixture disables analytics
+  and stubs its credential store only; no server responses or UI action handlers
+  are mocked. No new provider turns are needed for this presentation-only change.
+- Restart the user's local development app on request with the same profile and
+  credentials. Verify existing layouts, current chats and drafts survive, and
+  the header toggles visibility without adding a workspace in that running app.
+  Close the isolated preview to avoid duplicate test windows.
+- Local desktop source/build only; no server restart, mobile changes or public
+  release. Windows/Linux native acceptance and packaged distribution were not
+  exercised.
+
 ## 2026-10-31 - Isolate Claude native messages from chat routes
 
 - Address issue #53: Claude's native ListAgents/SendMessage namespace can

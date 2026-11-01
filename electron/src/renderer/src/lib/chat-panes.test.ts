@@ -11,6 +11,22 @@ const split: ChatPaneLayout = {
 }
 
 describe('chat pane layout', () => {
+  it.each([true, false])('restores explicit toolbar visibility %s without discarding existing workspaces', barVisible => {
+    const result = parseChatWorkspaces({ enabled: true, barVisible, activeWorkspaceId: 'workspace-main', workspaces: [{
+      id: 'workspace-main', paneCount: 2, focusedPane: 'secondary', panes: { primary: 'a', secondary: 'b' }
+    }] }, new Set(['a', 'b']))!
+    expect(result.barVisible).toBe(barVisible)
+    expect(result.workspaces).toHaveLength(1)
+    expect(result.workspaces[0]).toMatchObject({ paneCount: 2, focusedPane: 'secondary', panes: { primary: 'a', secondary: 'b' } })
+  })
+  it('restores an explicitly revealed empty toolbar without manufacturing a workspace', () => {
+    expect(parseChatWorkspaces({ barVisible: true, workspaces: [] }, new Set())).toEqual({
+      enabled: false, barVisible: true, activeWorkspaceId: '', workspaces: []
+    })
+    expect(parseChatWorkspaces({ barVisible: 'true', workspaces: [] }, new Set())).toEqual({
+      enabled: false, activeWorkspaceId: '', workspaces: []
+    })
+  })
   it.each([
     { enabled: undefined, id: 'workspace-main', title: undefined, paneCount: 1, secondary: null, expected: 0 },
     { enabled: true, id: 'workspace-main', title: undefined, paneCount: 1, secondary: null, expected: 1 },

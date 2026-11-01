@@ -22,6 +22,7 @@ export function ChatWorkspaceGrid({ sidebarVisible, terminalOpen, onSidebarToggl
 }) {
   useLocale()
   const workspaces = useAppStore(state => state.chatWorkspaces)
+  const barVisible = useAppStore(state => state.chatWorkspaceBarVisible)
   const activeId = useAppStore(state => state.activeChatWorkspaceId)
   const profileId = useAppStore(state => state.activeProfileId)
   const profileGeneration = useAppStore(state => state.profileGeneration)
@@ -53,7 +54,7 @@ export function ChatWorkspaceGrid({ sidebarVisible, terminalOpen, onSidebarToggl
     notifyTimelineViewportLayout('begin')
     const frame = requestAnimationFrame(() => notifyTimelineViewportLayout('end'))
     return () => cancelAnimationFrame(frame)
-  }, [count, threeColumns, activeId])
+  }, [count, threeColumns, activeId, barVisible])
 
   const bounds = (axis: ResizeAxis) => axis === 'first' ? [20, ratioRef.current.second - 20]
     : axis === 'second' ? [ratioRef.current.first + 20, 80] : [25, 75]
@@ -145,11 +146,11 @@ export function ChatWorkspaceGrid({ sidebarVisible, terminalOpen, onSidebarToggl
     }}
   />
 
-  return <div className={`chat-grid-workspace${workspaces.length ? '' : ' plain-chat-mode'}`}>
-    {workspaces.length > 0 && <header className="workspace-tabs-bar">
+  return <div className={`chat-grid-workspace${barVisible ? '' : ' plain-chat-mode'}`}>
+    {barVisible && <header className="workspace-tabs-bar">
       {!sidebarVisible && <button type="button" className="icon-button" onClick={onSidebarToggle} aria-label={t('chatWorkspace.showSidebar')}><PanelLeft size={16} /></button>}
       <ChatWorkspaceTabs key={JSON.stringify([profileId, profileGeneration, serverIdentity])} />
-      <div className="workspace-layout-picker" role="group" aria-label={t('chatWorkspace.layout')}>
+      {workspaces.length > 0 && <div className="workspace-layout-picker" role="group" aria-label={t('chatWorkspace.layout')}>
         {([1, 2, 3, 'columns', 4] as const).map(value => <button key={value} type="button" className="icon-button"
           aria-label={value === 'columns' ? t('chatWorkspace.threeColumns') : t('chatWorkspace.paneCount', { count: value })} title={value === 'columns' ? t('chatWorkspace.threeColumns') : t('chatWorkspace.paneCount', { count: value })}
           aria-pressed={value === 'columns' ? threeColumns : count === value && !threeColumns}
@@ -158,7 +159,7 @@ export function ChatWorkspaceGrid({ sidebarVisible, terminalOpen, onSidebarToggl
             : useAppStore.getState().setChatPaneCount(value)}>
           {value === 1 ? <Square size={15} /> : value === 2 ? <Columns2 size={15} /> : value === 'columns' ? <Columns3 size={15} /> : value === 4 ? <Grid2X2 size={15} /> : <span className="three-pane-icon" aria-hidden="true"><span /><span /><span /></span>}
         </button>)}
-      </div>
+      </div>}
     </header>}
     <div ref={gridRef} className={`workspace-chat-grid chat-split-view${count >= 3 && !threeColumns ? ' short' : ''}`} data-pane-count={count} data-three-pane-layout={threeColumns ? 'columns' : 'split'}
       style={{ '--workspace-column': `${ratios.column}%`, '--workspace-row': `${ratios.row}%`,

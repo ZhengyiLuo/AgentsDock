@@ -14,13 +14,14 @@ const originalAcknowledgeEmergency = useAppStore.getState().acknowledgeEmergency
 const originalUpdateSession = useAppStore.getState().updateSession
 const originalForkSession = useAppStore.getState().forkSession
 const originalCreateChatWorkspace = useAppStore.getState().createChatWorkspace
+const originalToggleChatWorkspaceBar = useAppStore.getState().toggleChatWorkspaceBar
 const styles = readFileSync(resolve(process.cwd(), 'src/renderer/src/styles.css'), 'utf8')
 
 describe('ChatHeader', () => {
   afterEach(() => {
     cleanup()
     vi.restoreAllMocks()
-    useAppStore.setState({ updateSession: originalUpdateSession, forkSession: originalForkSession, createChatWorkspace: originalCreateChatWorkspace })
+    useAppStore.setState({ updateSession: originalUpdateSession, forkSession: originalForkSession, createChatWorkspace: originalCreateChatWorkspace, toggleChatWorkspaceBar: originalToggleChatWorkspaceBar })
   })
 
   beforeEach(() => {
@@ -35,6 +36,7 @@ describe('ChatHeader', () => {
     })
     useAppStore.setState({
       connected: false,
+      chatWorkspaceBarVisible: false,
       health: null,
       activeSessionIds: new Set(),
       turnAdmissionTokens: {},
@@ -115,23 +117,31 @@ describe('ChatHeader', () => {
     expect(screen.getByRole('menuitem', { name: 'Fork chat' })).toBeInTheDocument()
   })
 
-  it('creates a workspace from the header chat rather than a different focused pane', async () => {
+  it('toggles the workspace bar without creating a workspace from any header', async () => {
     const session = { id: 'pane-chat', title: 'Pane chat', backend: 'codex' as const }
     const createChatWorkspace = vi.fn().mockResolvedValue(undefined)
+    const toggleChatWorkspaceBar = vi.fn(() => useAppStore.setState(state => ({ chatWorkspaceBarVisible: !state.chatWorkspaceBarVisible })))
     useAppStore.setState({
       sessions: [session, { id: 'focused-chat', title: 'Focused chat', backend: 'codex' }],
       selectedSessionId: 'focused-chat',
-      createChatWorkspace
+      createChatWorkspace, toggleChatWorkspaceBar
     })
     render(<ChatHeader session={session} compact />)
     const user = userEvent.setup()
-    const createButton = screen.getByRole('button', { name: 'Create workspace' })
-    expect(createButton.closest('.header-actions')).toBeInTheDocument()
+    const showButton = screen.getByRole('button', { name: 'Show workspaces' })
+    expect(showButton.closest('.header-actions')).toBeInTheDocument()
     await user.click(screen.getByRole('button', { name: 'Chat actions' }))
     expect(screen.queryByRole('menuitem', { name: 'Create workspace' })).not.toBeInTheDocument()
     await user.keyboard('{Escape}')
-    await user.click(createButton)
-    expect(createChatWorkspace).toHaveBeenCalledExactlyOnceWith('pane-chat')
+    expect(showButton).toHaveAttribute('aria-expanded', 'false')
+    await user.click(showButton)
+    const hideButton = screen.getByRole('button', { name: 'Hide workspaces' })
+    expect(hideButton).toHaveAttribute('aria-expanded', 'true')
+    await user.click(hideButton)
+    expect(screen.getByRole('button', { name: 'Show workspaces' })).toHaveAttribute('aria-expanded', 'false')
+    expect(toggleChatWorkspaceBar).toHaveBeenCalledTimes(2)
+    expect(createChatWorkspace).not.toHaveBeenCalled()
+    expect(useAppStore.getState().selectedSessionId).toBe('focused-chat')
   })
 
   it.each(['running', 'admitting'] as const)('forks a %s chat through its completed prefix on a capable server', async state => {

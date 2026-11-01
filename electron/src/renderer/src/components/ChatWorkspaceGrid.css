@@ -5,6 +5,7 @@
 .workspace-tabs-bar button, .workspace-tabs-bar input { -webkit-app-region: no-drag; }
 .workspace-tab-controls { display: flex; align-items: center; gap: 5px; flex: 1; min-width: 0; }
 .workspace-add { flex-shrink: 0; }
+.workspace-empty-label { color: var(--muted); font-size: var(--text-size-label); }
 .chat-workspace-tabs { display: flex; min-width: 0; flex: 0 1 auto; gap: 2px; overflow-x: auto; scrollbar-width: thin; -webkit-app-region: no-drag; }
 .chat-workspace-tab { position: relative; display: flex; align-items: center; flex-shrink: 0; height: 32px; max-width: 220px; border: 0; border-radius: 0; }
 .chat-workspace-tab.active { background: var(--interaction-hover); }
