@@ -1,4 +1,4 @@
-import { act, cleanup, render, screen } from '@testing-library/react'
+import { act, cleanup, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { setLocale } from '@shared/i18n'
@@ -37,6 +37,11 @@ it('controls the three sidebar groups independently and keeps the cron choice av
   useAppStore.setState({ setGroupUnreadChats, setIncludeCronInUnread, setGroupRunningChats })
   render(<AppSettingsDialog />)
   await screen.findByText('Version 1.0.0')
+  expect(screen.queryByRole('switch')).not.toBeInTheDocument()
+  await user.click(screen.getByRole('button', { name: 'Preferences' }))
+  expect(screen.getByRole('heading', { name: 'Preferences' })).toBeInTheDocument()
+  expect(screen.getAllByRole('switch')).toHaveLength(4)
+  expect(screen.getByRole('switch', { name: 'Show reasoning traces' })).toBeInTheDocument()
 
   const unread = screen.getByRole('switch', { name: 'Unread chats at the top' })
   const cron = screen.getByRole('switch', { name: 'Include cron jobs in Unread' })
@@ -73,16 +78,41 @@ it('controls the three sidebar groups independently and keeps the cron choice av
 })
 
 it('updates all grouping labels and descriptions when the language changes', async () => {
+  const user = userEvent.setup()
   render(<AppSettingsDialog />)
   await screen.findByText('Version 1.0.0')
+  await user.click(screen.getByRole('button', { name: 'Preferences' }))
   const unread = screen.getByRole('switch', { name: 'Unread chats at the top' })
   const cron = screen.getByRole('switch', { name: 'Include cron jobs in Unread' })
   const running = screen.getByRole('switch', { name: 'Show Running section' })
   act(() => setLocale('zh-CN'))
+  expect(screen.getByRole('heading', { name: '偏好设置' })).toBeInTheDocument()
+  expect(screen.getByRole('button', { name: '偏好设置' })).toHaveAttribute('aria-current', 'page')
   expect(screen.getByRole('switch', { name: '在顶部显示未读会话' })).toBe(unread)
   expect(screen.getByRole('switch', { name: '在未读分组中包含 Cron 任务' })).toBe(cron)
   expect(screen.getByRole('switch', { name: '显示运行中分组' })).toBe(running)
   expect(unread).toHaveAccessibleDescription('在文件夹上方单独显示未读会话分组。')
   expect(cron).toHaveAccessibleDescription('将有未读 Cron 输出的会话纳入未读分组。')
   expect(running).toHaveAccessibleDescription('在文件夹上方单独显示运行中的会话。')
+})
+
+it('supports Preferences navigation, keeps saved values and restores focus when reopening', async () => {
+  const user = userEvent.setup()
+  useAppStore.setState({ groupUnreadChats: false, includeCronInUnread: true, groupRunningChats: false })
+  render(<AppSettingsDialog />)
+  await screen.findByText('Version 1.0.0')
+  act(() => window.dispatchEvent(new CustomEvent('agentsdock:app-settings-section', { detail: 'preferences' })))
+  expect(screen.getByRole('button', { name: 'Preferences' })).toHaveAttribute('aria-current', 'page')
+  expect(screen.getByRole('switch', { name: 'Unread chats at the top' })).not.toBeChecked()
+  expect(screen.getByRole('switch', { name: 'Include cron jobs in Unread' })).toBeChecked()
+  expect(screen.getByRole('switch', { name: 'Show Running section' })).not.toBeChecked()
+  await user.click(screen.getByRole('button', { name: 'General' }))
+  expect(screen.queryByRole('switch')).not.toBeInTheDocument()
+  expect(screen.getByRole('combobox', { name: 'App theme' })).toBeInTheDocument()
+  expect(screen.getByText('Version 1.0.0')).toBeInTheDocument()
+  await user.click(screen.getByRole('button', { name: 'Preferences' }))
+  act(() => useAppStore.getState().setModal('appSettings', false))
+  act(() => useAppStore.getState().setModal('appSettings', true))
+  await waitFor(() => expect(screen.getByRole('button', { name: 'Preferences' })).toHaveFocus())
+  expect(screen.getByRole('switch', { name: 'Include cron jobs in Unread' })).toBeChecked()
 })

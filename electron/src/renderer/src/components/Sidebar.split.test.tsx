@@ -163,6 +163,7 @@ describe('sidebar split pane context', () => {
 
     expect(within(project).getByText('2 chats')).toBeInTheDocument()
     expect(within(project).getAllByRole('button').map(button => button.getAttribute('aria-label'))).toEqual([
+      'Sort by',
       'Create folder',
       'Search chats'
     ])

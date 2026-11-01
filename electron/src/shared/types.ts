@@ -2368,6 +2368,8 @@ export interface TimelinePinsChanged {
   updated_at: string
 }
 
+export type SidebarSortMode = 'default' | 'latest' | 'name'
+
 export interface BootstrapPayload {
   /** A local write failed due to storage exhaustion during this app session. */
   storageFull?: boolean
@@ -2385,6 +2387,7 @@ export interface BootstrapPayload {
   groupUnreadChats?: boolean
   includeCronInUnread?: boolean
   groupRunningChats?: boolean
+  sidebarSortMode?: SidebarSortMode
   archivedCollapsed: boolean
   inspectorVisible: boolean
   /** Present for profile-aware bootstraps; omitted by the legacy single-server path. */

@@ -19,14 +19,15 @@ import { trackEvent } from '../lib/analytics'
 import { activeEmergencyAlert } from '../lib/emergency-alert'
 import { backendLabel, runtimeLabel } from '../lib/format'
 import { openSessionHistoryResult } from '../lib/session-history-search'
-import { rankSessionsForSearch, sidebarSessionGroups, type SidebarGroupingOptions } from '../lib/sessions'
+import { rankSessionsForSearch, sidebarSessionGroups, sortSidebarSessions, type SidebarGroupingOptions } from '../lib/sessions'
 import { getWorkspacePreference, setWorkspacePreference } from '../lib/workspace-preferences'
 import { handleMenuCommand, selectMailHintPending, selectBulletinHintPending, sessionUnread, useAppStore } from '../store/app-store'
 import { BackendMark } from './BackendMark'
 import { ServerSelector } from './ServerSelector'
 import { ShortcutTooltip } from './ShortcutTooltip'
+import { SidebarSortMenu } from './SidebarSortMenu'
 
-interface Section { id: string; title: string; sessions: Session[]; kind: 'pinned' | 'folder' | 'archived' | 'search' | 'unread' | 'running' }
+interface Section { id: string; title: string; sessions: Session[]; kind: 'pinned' | 'folder' | 'archived' | 'search' | 'unread' | 'running' | 'sorted' }
 interface DropIndicator { id: string; placement: 'before' | 'after' | 'inside' }
 interface DragItemData { type: 'session' | 'folder'; label?: string; section?: string }
 
@@ -74,6 +75,7 @@ export function Sidebar({ hidden = false }: { hidden?: boolean }) {
   const groupUnreadChats = useAppStore(state => state.groupUnreadChats)
   const includeCronInUnread = useAppStore(state => state.includeCronInUnread)
   const groupRunningChats = useAppStore(state => state.groupRunningChats)
+  const sortMode = useAppStore(state => state.sidebarSortMode)
   const pinnedCollapsed = useAppStore(state => state.pinnedCollapsed)
   const archivedCollapsed = useAppStore(state => state.archivedCollapsed)
   const catalog = useAppStore(state => state.runtimeCatalog)
@@ -89,8 +91,8 @@ export function Sidebar({ hidden = false }: { hidden?: boolean }) {
   const sidebarScrollTimer = useRef<number | null>(null)
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: SIDEBAR_LONG_PRESS }))
   const sections = useMemo(() => buildSections(sessions, folderOrder, '', new Set(), activeSessionIds, {
-    groupUnreadChats, includeCronInUnread, groupRunningChats, jobSessionIds
-  }), [sessions, folderOrder, activeSessionIds, groupUnreadChats, includeCronInUnread, groupRunningChats, jobSessionIds, getLocale()])
+    groupUnreadChats, includeCronInUnread, groupRunningChats, jobSessionIds, sortMode
+  }), [sessions, folderOrder, activeSessionIds, groupUnreadChats, includeCronInUnread, groupRunningChats, jobSessionIds, sortMode, getLocale()])
   const computedFolders = useMemo(() => orderedFolders(
     [...new Set([...folderOrder, ...sessions.filter(session => !session.archived && !session.pinned).map(session => session.folder?.trim() || 'General')])],
     folderOrder
@@ -175,7 +177,7 @@ export function Sidebar({ hidden = false }: { hidden?: boolean }) {
   }
 
   const onDragStart = (event: DragStartEvent) => {
-    if (switchingProfileId) return
+    if (switchingProfileId || sortMode !== 'default') return
     const data = event.active.data.current as DragItemData | undefined
     if (!data) return
     if (suppressClickTimer.current != null) window.clearTimeout(suppressClickTimer.current)
@@ -208,7 +210,7 @@ export function Sidebar({ hidden = false }: { hidden?: boolean }) {
     updateDrop({ id: overId, placement })
   }
   const onDragEnd = async (event: DragEndEvent) => {
-    if (switchingProfileId) { finishDrag(); return }
+    if (switchingProfileId || sortMode !== 'default') { finishDrag(); return }
     const operation = resolveSidebarDrop(
       String(event.active.id),
       event.active.data.current as DragItemData | undefined,
@@ -258,7 +260,10 @@ export function Sidebar({ hidden = false }: { hidden?: boolean }) {
         }}><Undo2 size={15} /><span>{t("ui.Sidebar.Sidebar.resume_d640c74")}</span></button>
       </div>
       <div className="sidebar-project-header">
-        <span className="sidebar-project-label">{chatCount} {chatCount === 1 ? 'chat' : 'chats'}</span>
+        <div className="sidebar-project-heading">
+          <span className="sidebar-project-label">{chatCount} {chatCount === 1 ? 'chat' : 'chats'}</span>
+          <SidebarSortMenu key={`${activeProfileId}:${profileGeneration}:${serverIdentity}`} value={sortMode} disabled={Boolean(switchingProfileId) || Boolean(dragging)} onChange={value => useAppStore.getState().setSidebarSortMode(value)} />
+        </div>
         <div className="sidebar-project-actions" role="group" aria-label={t("ui.Sidebar.Sidebar.chat_list_actions_43ea56a")}>
           <button type="button" className="sidebar-project-action" title={t("ui.Sidebar.Sidebar.create_folder_82b9e1e")} aria-label={t("ui.Sidebar.Sidebar.create_folder_82b9e1e")} disabled={Boolean(switchingProfileId)} onClick={() => useAppStore.getState().setModal('folder', true)}><FolderPlus size={14} /></button>
           <ShortcutTooltip shortcut="findChat" label={t("ui.Sidebar.Sidebar.search_chats_02a39c4")} side="right"><button type="button" className="sidebar-project-action" aria-label={t("ui.Sidebar.Sidebar.search_chats_02a39c4")} disabled={Boolean(switchingProfileId)} onClick={() => handleMenuCommand('find-chat', useAppStore.getState, value => useAppStore.setState(value))}><Search size={14} /></button></ShortcutTooltip>
@@ -278,6 +283,7 @@ export function Sidebar({ hidden = false }: { hidden?: boolean }) {
               suppressClick={suppressClick}
               folders={folders}
               isSidebarScrolling={isSidebarScrolling}
+              reorderDisabled={sortMode !== 'default'}
             />
           ))}
           {!sections.some(section => section.sessions.length) && <div className="sidebar-empty">{t("ui.Sidebar.Sidebar.no_chats_found_14dbfb5")}</div>}
@@ -291,9 +297,9 @@ export function Sidebar({ hidden = false }: { hidden?: boolean }) {
   )
 }
 
-function SidebarSection({ section, selectedId, chatPanes, collapsed, drop, runtime, suppressClick, folders, isSidebarScrolling }: {
+function SidebarSection({ section, selectedId, chatPanes, collapsed, drop, runtime, suppressClick, folders, isSidebarScrolling, reorderDisabled }: {
   section: Section; selectedId: string | null; chatPanes: ChatPanes; collapsed: boolean; drop: DropIndicator | null; runtime: (session: Session) => string; suppressClick: (id: string) => boolean
-  folders: string[]; isSidebarScrolling: () => boolean
+  folders: string[]; isSidebarScrolling: () => boolean; reorderDisabled: boolean
 }) {
   useLocale()
   const splitOpen = Object.values(chatPanes).filter(Boolean).length > 1
@@ -313,9 +319,9 @@ function SidebarSection({ section, selectedId, chatPanes, collapsed, drop, runti
   }
   return (
     <section ref={droppable.setNodeRef} data-section-id={section.id} className={`sidebar-section ${boundaryIndicator}`}>
-      <FolderHeader section={section} collapsed={collapsed} drop={drop} onToggle={toggle} suppressClick={suppressClick} />
+      {section.kind !== 'sorted' && <FolderHeader section={section} collapsed={collapsed} drop={drop} onToggle={toggle} suppressClick={suppressClick} />}
       {!collapsed && section.sessions.map(session => (
-        <SessionRow key={session.id} session={session} selected={session.id === selectedId} visiblePane={splitOpen ? CHAT_PANE_IDS.find(pane => chatPanes[pane] === session.id) ?? null : null} sectionId={section.id} dropIndicator={drop?.id === `session:${session.id}` ? `drop-${drop.placement}` : ''} runtime={runtime(session)} suppressClick={suppressClick} folders={folders} isSidebarScrolling={isSidebarScrolling} />
+        <SessionRow key={session.id} session={session} selected={session.id === selectedId} visiblePane={splitOpen ? CHAT_PANE_IDS.find(pane => chatPanes[pane] === session.id) ?? null : null} sectionId={section.id} dropIndicator={drop?.id === `session:${session.id}` ? `drop-${drop.placement}` : ''} runtime={runtime(session)} suppressClick={suppressClick} folders={folders} isSidebarScrolling={isSidebarScrolling} reorderDisabled={reorderDisabled} />
       ))}
     </section>
   )
@@ -360,14 +366,15 @@ interface SessionRowProps {
   suppressClick: (id: string) => boolean
   folders: string[]
   isSidebarScrolling: () => boolean
+  reorderDisabled: boolean
 }
 
-const SessionRow = memo(function SessionRow({ session, selected, visiblePane, sectionId, dropIndicator, runtime, suppressClick, folders, isSidebarScrolling }: SessionRowProps) {
+const SessionRow = memo(function SessionRow({ session, selected, visiblePane, sectionId, dropIndicator, runtime, suppressClick, folders, isSidebarScrolling, reorderDisabled }: SessionRowProps) {
   useLocale()
   const id = `session:${session.id}`
   const searchResult = sectionId === 'search'
-  const draggable = useDraggable({ id, disabled: searchResult, data: { type: 'session', label: session.title, section: sectionId } })
-  const droppable = useDroppable({ id, disabled: searchResult || isStatusSection(sectionId), data: { type: 'session', section: sectionId } })
+  const draggable = useDraggable({ id, disabled: searchResult || reorderDisabled, data: { type: 'session', label: session.title, section: sectionId } })
+  const droppable = useDroppable({ id, disabled: searchResult || reorderDisabled || isStatusSection(sectionId), data: { type: 'session', section: sectionId } })
   const ref = (node: HTMLElement | null) => { draggable.setNodeRef(node); droppable.setNodeRef(node) }
   const unread = sessionUnread(session)
   const emergency = activeEmergencyAlert(session)
@@ -406,8 +413,9 @@ const SessionRow = memo(function SessionRow({ session, selected, visiblePane, se
           onMouseEnter={schedulePrefetch}
           onMouseLeave={cancelPrefetch}
           onKeyDown={event => { if (event.key === 'Enter') select() }}
-          {...draggable.listeners}
-          {...draggable.attributes}
+          role="button" tabIndex={0}
+          {...(!reorderDisabled ? draggable.listeners : {})}
+          {...(!reorderDisabled ? draggable.attributes : {})}
         >
           {session.archived ? <Archive size={18} aria-label={t('chat.archived')} /> : <BackendMark backend={session.backend} size={18} />}
           <span className="session-copy"><strong>{session.title}</strong><small title={emergency?.message || (needsUserAction ? t("ui.Sidebar.SessionRow.this_agent_is_paused_until_you_respond_82dc6e8") : undefined)}>{emergency ? t("ui.Sidebar.SessionRow.emergency_89e4490", { "message": String(emergency.message) }) : needsUserAction ? t("ui.Sidebar.SessionRow.action_needed_c2d066a", { "chat": String(backendLabel(session.backend)) }) : `${backendLabel(session.backend)} · ${runtime}${running ? ' · running' : unread ? ' · new' : ''}`}</small></span>
@@ -466,11 +474,13 @@ function MenuItem({ icon: Icon, label, onSelect, danger, disabled, title }: { ic
 export function buildSections(sessions: Session[], folderOrder: string[], query: string, historySessionIds: Set<string> = new Set(), activeSessionIds: ReadonlySet<string> = new Set(), options: SidebarGroupingOptions = {}): Section[] {
   const filtered = rankSessionsForSearch(sessions, query, historySessionIds)
   if (query.trim()) return filtered.length ? [{ id: 'search', title: t("ui.Sidebar.buildSections.matches_98abff2"), sessions: filtered, kind: 'search' }] : []
-  const { running, unread, ordinary } = sidebarSessionGroups(filtered, activeSessionIds, options)
+  const ordered = sortSidebarSessions(filtered, options.sortMode)
+  const { running, unread, ordinary } = sidebarSessionGroups(ordered, activeSessionIds, options)
   const pinned = ordinary.filter(session => session.pinned && !session.archived)
-  const archived = filtered.filter(session => session.archived)
+  const archived = ordered.filter(session => session.archived)
+  const regular = ordinary.filter(session => !session.pinned && !session.archived)
   const byFolder = new Map<string, Session[]>()
-  for (const session of ordinary.filter(session => !session.pinned && !session.archived)) {
+  for (const session of regular) {
     const folder = session.folder?.trim() || 'General'
     byFolder.set(folder, [...(byFolder.get(folder) ?? []), session])
   }
@@ -479,7 +489,9 @@ export function buildSections(sessions: Session[], folderOrder: string[], query:
     ...(unread.length ? [{ id: 'status:unread', title: t('ui.sidebar.unreadGroup'), sessions: unread, kind: 'unread' as const }] : []),
     ...(running.length ? [{ id: 'status:running', title: t('ui.sidebar.runningGroup'), sessions: running, kind: 'running' as const }] : []),
     ...(pinned.length ? [{ id: 'pinned', title: t("ui.Sidebar.buildSections.pinned_f20c879"), sessions: pinned, kind: 'pinned' as const }] : []),
-    ...folders.map(folder => ({ id: `folder:${folder}`, title: folder, sessions: byFolder.get(folder) ?? [], kind: 'folder' as const })),
+    ...(options.sortMode && options.sortMode !== 'default'
+      ? regular.length ? [{ id: 'sorted', title: '', sessions: regular, kind: 'sorted' as const }] : []
+      : folders.map(folder => ({ id: `folder:${folder}`, title: folder, sessions: byFolder.get(folder) ?? [], kind: 'folder' as const }))),
     ...(archived.length ? [{ id: 'archived', title: t("ui.Sidebar.buildSections.archived_bdb8650"), sessions: archived, kind: 'archived' as const }] : [])
   ]
 }
@@ -502,6 +514,7 @@ function sessionRowPropsEqual(current: SessionRowProps, next: SessionRowProps): 
     || current.runtime !== next.runtime
     || current.suppressClick !== next.suppressClick
     || current.isSidebarScrolling !== next.isSidebarScrolling
+    || current.reorderDisabled !== next.reorderDisabled
     || !stringArraysEqual(current.folders, next.folders)
   ) return false
   const left = current.session

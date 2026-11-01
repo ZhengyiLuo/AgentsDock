@@ -107,6 +107,25 @@ not reopen the old setup dialog. Before the first message, use the composer's
 Agent picker to switch agents or open My Agents. Credentials, native session
 identity, goals and delegated/job authorization are not copied.
 
+Clicking the sorting button beside the sidebar chat count cycles through
+**Folders → Latest → Name → Folders**. Enter/Space also cycle; hovering or
+pressing ArrowDown opens the checked selection menu for a direct choice.
+A small, regular-weight label in the shared status green beside the button
+confirms the selected mode for two seconds.
+Further selections replace the label and restart its timer; hovering alone does
+not show a confirmation or change the sort order.
+Pointer selections leave no focus halo; keyboard navigation retains its focus indicator.
+**Folders** preserves existing folders and manual ordering;
+**Latest** and **Name** show a flat list without folder headers.
+Latest uses the server's last agent-visible output time, falling back to
+creation time when unavailable, never last-opened/read or generic update time.
+The button sits immediately after the count; a quiet, theme-aware solid divider
+with breathing room separates pinned chats from the ordinary list.
+Unread/running, pinned and archived sections retain their existing priority and
+visibility rules. Sorting is remembered separately for each server, and
+next/previous-chat shortcuts follow the visible order. Drag reordering is only
+available in Folders mode; changing the display order never moves a chat's folder.
+
 Settings → Server starts with collapsed cards showing each saved server's name,
 URL and connection status. Add server is above the cards. Expand a card for
 separate version and identity rows. A token field shows its first four characters
@@ -202,7 +221,9 @@ older history loads on upward navigation. Failed refreshes retain the cache.
 Incoming events are coalesced to one renderer publish per animation frame.
 Timeline rows are virtualized with stable semantic keys.
 
-Settings → General has three sidebar switches, remembered locally per server:
+Settings → General contains language, appearance and version information.
+Settings → Preferences contains Show reasoning traces and three sidebar switches,
+with sidebar choices remembered locally per server:
 **Unread chats at the top** (on), **Include cron jobs in Unread** (off), and
 **Show Running section** (on). Turning a section off leaves its chats in their
 saved folders or pins, with unread and activity indicators intact. Active chats
