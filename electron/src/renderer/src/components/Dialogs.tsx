@@ -457,7 +457,7 @@ export function Dialogs() {
   </>
 }
 
-type AppSettingsSection = 'general' | 'shortcuts' | 'server' | 'providers' | 'updates'
+type AppSettingsSection = 'general' | 'preferences' | 'shortcuts' | 'server' | 'providers' | 'updates'
 
 export function AppSettingsDialog({ serverSettings, serverUpdates, onServerUpdatesVisible, onServerReleaseChecksVisible, onCoordinatedServerUpdate }: {
   serverSettings?: ReactNode; serverUpdates?: ReactNode; onServerUpdatesVisible?: (visible: boolean) => void
@@ -500,7 +500,7 @@ export function AppSettingsDialog({ serverSettings, serverUpdates, onServerUpdat
         return
       }
       if (next === 'appearance') setSection('general')
-      else if (next === 'general' || next === 'shortcuts' || next === 'server' || next === 'providers' || next === 'updates') setSection(next)
+      else if (next === 'general' || next === 'preferences' || next === 'shortcuts' || next === 'server' || next === 'providers' || next === 'updates') setSection(next)
     }
     window.addEventListener('agentsdock:app-settings-section', selectSection)
     return () => window.removeEventListener('agentsdock:app-settings-section', selectSection)
@@ -595,6 +595,7 @@ export function AppSettingsDialog({ serverSettings, serverUpdates, onServerUpdat
           <Dialog.Title>{t('settings.title')}</Dialog.Title>
           <nav aria-label={t('settings.sections')}>
             <button ref={section === 'general' ? activeSectionRef : undefined} type="button" className={section === 'general' ? 'active' : ''} aria-current={section === 'general' ? 'page' : undefined} onClick={() => setSection('general')}><span>{t('settings.general')}</span></button>
+            <button ref={section === 'preferences' ? activeSectionRef : undefined} type="button" className={section === 'preferences' ? 'active' : ''} aria-current={section === 'preferences' ? 'page' : undefined} onClick={() => setSection('preferences')}><span>{t('settings.preferences')}</span></button>
             <button ref={section === 'shortcuts' ? activeSectionRef : undefined} type="button" className={section === 'shortcuts' ? 'active' : ''} aria-current={section === 'shortcuts' ? 'page' : undefined} onClick={() => setSection('shortcuts')}><span>{t('settings.keyboardShortcuts')}</span></button>
             <button ref={section === 'server' ? activeSectionRef : undefined} type="button" className={section === 'server' ? 'active' : ''} aria-current={section === 'server' ? 'page' : undefined} onClick={() => setSection('server')}><span>{t('settings.server')}</span></button>
             <button ref={section === 'providers' ? activeSectionRef : undefined} type="button" className={section === 'providers' ? 'active' : ''} aria-current={section === 'providers' ? 'page' : undefined} onClick={() => setSection('providers')}><span>{t('settings.aiProviders')}</span></button>
@@ -626,6 +627,19 @@ export function AppSettingsDialog({ serverSettings, serverUpdates, onServerUpdat
                   <option value="dark">{t('settings.darkTheme')}</option>
                 </select>
               </label>
+              <div className="app-settings-row">
+                <strong className="app-settings-row-title">AgentsDock</strong>
+                <span className="app-settings-value">{update?.currentVersion ? t('settings.version', { version: update.currentVersion }) : t('settings.versionUnavailable')}</span>
+              </div>
+              <div className="app-settings-row">
+                <strong className="app-settings-row-title">AgentsServer</strong>
+                <span className="app-settings-value">{serverVersion ? t('settings.version', { version: serverVersion }) : t('settings.versionUnavailable')}</span>
+              </div>
+            </div>
+          </section>}
+          {section === 'preferences' && <section className="app-settings-section" aria-labelledby="app-settings-preferences-title">
+            <header><h2 id="app-settings-preferences-title">{t('settings.preferences')}</h2></header>
+            <div className="app-settings-list">
               <ReasoningDisplaySettings />
               <label className="app-settings-row">
                 <div className="app-settings-row-copy"><strong>{t('settings.groupUnreadChats')}</strong><span id="group-unread-chats-help">{t('settings.groupUnreadChatsHelp')}</span></div>
@@ -639,14 +653,6 @@ export function AppSettingsDialog({ serverSettings, serverUpdates, onServerUpdat
                 <div className="app-settings-row-copy"><strong>{t('settings.groupRunningChats')}</strong><span id="group-running-chats-help">{t('settings.groupRunningChatsHelp')}</span></div>
                 <Switch.Root className="settings-switch" aria-label={t('settings.groupRunningChats')} aria-describedby="group-running-chats-help" checked={groupRunningChats} onCheckedChange={value => useAppStore.getState().setGroupRunningChats(value)}><Switch.Thumb className="settings-switch-thumb" /></Switch.Root>
               </label>
-              <div className="app-settings-row">
-                <strong className="app-settings-row-title">AgentsDock</strong>
-                <span className="app-settings-value">{update?.currentVersion ? t('settings.version', { version: update.currentVersion }) : t('settings.versionUnavailable')}</span>
-              </div>
-              <div className="app-settings-row">
-                <strong className="app-settings-row-title">AgentsServer</strong>
-                <span className="app-settings-value">{serverVersion ? t('settings.version', { version: serverVersion }) : t('settings.versionUnavailable')}</span>
-              </div>
             </div>
           </section>}
           {section === 'shortcuts' && <KeyboardShortcutsSettings />}

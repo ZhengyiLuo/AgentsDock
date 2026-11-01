@@ -174,6 +174,12 @@ describe('AppSettingsDialog', () => {
     expect(within(dialog).queryByText('Chat font')).not.toBeInTheDocument()
     expect(within(dialog).queryByRole('button', { name: 'Appearance' })).not.toBeInTheDocument()
     expect(within(dialog).getByRole('combobox', { name: 'App theme' })).toHaveValue('system')
+    expect(within(dialog).queryByRole('switch')).not.toBeInTheDocument()
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Preferences' }))
+    expect(within(dialog).getByRole('heading', { name: 'Preferences' })).toBeInTheDocument()
+    expect(within(dialog).getAllByRole('switch')).toHaveLength(4)
+    expect(within(dialog).queryByRole('combobox', { name: 'App theme' })).not.toBeInTheDocument()
+    fireEvent.click(within(dialog).getByRole('button', { name: 'General' }))
     expect(within(dialog).queryByText('Set the color theme used throughout AgentsDock.')).not.toBeInTheDocument()
     // The usage analytics opt-out was removed from Settings on purpose; keep it out.
     expect(within(dialog).queryByRole('switch', { name: 'Share usage analytics' })).not.toBeInTheDocument()

@@ -1,5 +1,82 @@
 # Public development log
 
+## 2026-10-31 - Desktop Preferences settings
+
+- Add Preferences / 偏好设置 directly below General in Settings. Move Show
+  reasoning traces, Unread chats at the top, Include cron jobs in Unread and
+  Show Running section into that page. Preserve their existing handlers,
+  saved values and storage scopes; no migration or reset is needed.
+- Keep language, theme and version information in General. Updates remains
+  a separate page. Support direct Preferences navigation and accessible
+  focus restoration when reopening Settings.
+- Validation: 104 focused tests, 5,811 desktop tests and eight packaging/license
+  checks pass; five desktop tests remain skipped. TypeScript and the Electron
+  production build pass. Source base is `0229fb3e`; development metadata remains
+  0.2.0 (build 86), not a new release.
+- Exercise an isolated native Electron app connected to an authenticated test
+  service (1.0.7-beta.11), using native Chromium mouse and keyboard input. Toggle
+  all four controls, navigate between pages, close/reopen and reload; verify
+  persistence and restore the original values. Inspect English/dark and
+  Chinese/light layouts at narrow width, including the reachable close button.
+  No test chats or provider turns are created; provider behavior is unchanged.
+  The isolated fixture disables analytics. Desktop-only local preview; no
+  server update, release or mobile changes.
+
+## 2026-10-31 - Desktop sidebar sorting
+
+- Add a compact up/down-arrow Sort by button immediately after the chat count.
+  Click or Enter/Space cycles Folders → Latest → Name → Folders; hover or
+  ArrowDown opens the selection menu. Offer concise English and Simplified
+  Chinese labels; do not add an oldest-first option.
+- Confirm an explicit sort selection with a green label beside the button for
+  two seconds. Use the existing status-green color with 11px regular-weight
+  text, keeping the brief confirmation quieter than the main controls.
+  Repeated clicks replace the text and restart its timeout; keep
+  keyboard/menu selection and screen-reader announcements consistent. Clear
+  feedback when switching servers or disabling the control, not on ordinary
+  pointer movement. Initial rendering and hovering alone show no confirmation.
+  Suppress the sort button's pointer-selection focus halo without blurring it;
+  retain normal focus indication for keyboard navigation and menu dismissal.
+- Latest follows the server's agent-visible output timestamp, with
+  creation time as the fallback. Opening/reading a chat, sending a prompt or
+  editing metadata does not promote it. Separate pins from the ordinary list
+  beneath them with a quiet theme-aware solid divider and 12px of
+  breathing room on each side, including when pins are collapsed.
+- Keep existing unread/running, pinned and archived grouping rules above the
+  chosen ordering. Non-default modes hide folder headings, including empty and
+  collapsed folders, without modifying folder membership or manual order.
+- Persist the choice per server and align next/previous-chat navigation with
+  the visible list. Disable drag reordering in automatic-sort modes. Reject
+  preference changes during server switching and normalize unknown saved modes.
+- Validation: 5,811 desktop tests pass, five are skipped, and eight packaging/
+  license checks pass. TypeScript and the Electron production build pass.
+- Exercise an isolated native Electron app against a real authenticated test
+  server: click and hover the menu, switch all three orders, reload and restart
+  to verify persistence, return to folders, mark a chat unread, and observe an
+  actual provider turn in the running group while changing sort order. Check
+  English/dark and Chinese/light presentations with a narrow window. The system
+  computer-use bridge was unavailable; interaction used native Chromium input
+  events in the actual Electron window, not component-handler invocation.
+- Source base: main at `0229fb3e`; development package metadata remains 0.2.0
+  (build 86), not a new release; test service version 1.0.7-beta.11.
+  Server-scope isolation is also regression-tested. Verify two real provider
+  replies reorder the list and reopening the older chat leaves that order intact;
+  check the divider while pins are collapsed and the button/count spacing.
+  Recheck the softened solid divider and spacing in all three sort modes,
+  with pins expanded/collapsed, in both themes through the native app.
+  Verify native repeated clicks cycle exactly once, hover remains independently
+  selectable, Enter/Space cycle and ArrowDown opens the menu, with the chosen
+  mode retained after reloading. Verify the green label through actual clicks,
+  keyboard and menu selection in English/dark and Chinese/light; the latest
+  selection remains visible past the previous timer's deadline, disappears
+  after two seconds, does not overlap the header actions and is absent after
+  reload. Native clicks and hover-menu selection leave no blue halo; Enter,
+  Space and Tab-away/back retain the keyboard focus indicator in both themes.
+  The feedback follow-up creates no test chats.
+  Remove the disposable test chats after acceptance. The local source preview
+  is refreshed on request with the existing user's profile retained.
+  Desktop-only; no server update or mobile changes required. Not published.
+
 ## 2026-10-31 - Desktop send connection recovery
 
 - Preserve the original transport, server-token or identity error when an

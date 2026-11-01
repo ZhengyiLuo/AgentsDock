@@ -2,7 +2,7 @@ import { create } from 'zustand'
 import type {
   AgentCrossChatRoutesSnapshot, AgentFile, Backend, BootstrapPayload, ChatReference, ChatSyncStatus, CreateSessionInput, Event, ForwardedPort, Health, Job, NativeFileRef, QueuedTurn, TeamReference,
   ProfileBootstrapPayload, ProfileConnectionEvent, ProfileNotificationRoute, ProviderCommandSelection, PublicServerProfile, RuntimeCatalog, Session, SessionSnapshot,
-  ServerForceRestartConfirmation, TimelinePage, UpdateServerProfilePatch, WorkspaceProfileScope
+  ServerForceRestartConfirmation, SidebarSortMode, TimelinePage, UpdateServerProfilePatch, WorkspaceProfileScope
 } from '@shared/types'
 import { updateQueuedTurns as reduceQueuedTurns } from '@shared/queue'
 import type { TeamHubScope } from '@shared/team-hub'
@@ -22,7 +22,7 @@ import { isImportedAPIConnection, trackConfirmedSessionChange } from '../lib/ses
 import { secureRandomUUID } from '../lib/browser-crypto'
 import { nudgeChatFontSize, setChatFontFamily, setChatFontSize } from '../lib/chat-font'
 import { activeEmergencyAlert } from '../lib/emergency-alert'
-import { isUnread, isUntouchedNewChat, navigableSessions, type SidebarStatus } from '../lib/sessions'
+import { isUnread, isUntouchedNewChat, navigableSessions, normalizeSidebarSortMode, type SidebarStatus } from '../lib/sessions'
 import { isAgentVisibleEvent } from '../lib/timeline'
 import {
   AGENT_CROSS_CHAT_ROUTES_CLIENT_CAPABILITY,
@@ -236,6 +236,7 @@ interface AppState {
   groupUnreadChats: boolean
   includeCronInUnread: boolean
   groupRunningChats: boolean
+  sidebarSortMode: SidebarSortMode
   pinnedCollapsed: boolean
   archivedCollapsed: boolean
   inspectorVisible: boolean
@@ -317,6 +318,7 @@ interface AppState {
   setGroupUnreadChats(value: boolean): void
   setIncludeCronInUnread(value: boolean): void
   setGroupRunningChats(value: boolean): void
+  setSidebarSortMode(value: SidebarSortMode): void
   setFolderOrder(order: string[]): void
   setArchivedCollapsed(value: boolean): void
   setPinnedCollapsed(value: boolean): void
@@ -617,6 +619,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   groupUnreadChats: true,
   includeCronInUnread: false,
   groupRunningChats: true,
+  sidebarSortMode: 'default',
   inspectorVisible: false,
   activeSessionIds: new Set(),
   turnAdmissionTokens: {},
@@ -1737,6 +1740,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       groupUnreadChats: state.groupUnreadChats,
       includeCronInUnread: state.includeCronInUnread,
       groupRunningChats: state.groupRunningChats,
+      sortMode: state.sidebarSortMode,
       jobSessionIds: new Set(state.jobs.map(job => job.session_id))
     })
     if (!visible.length) return
@@ -2801,6 +2805,13 @@ export const useAppStore = create<AppState>((set, get) => ({
     set({ groupRunningChats: value })
     void setWorkspacePreference(scope, 'groupRunningChats', value).catch(() => undefined)
   },
+  setSidebarSortMode(value) {
+    if (get().switchingProfileId) return
+    const scope = captureWorkspaceScope(get())
+    const sidebarSortMode = normalizeSidebarSortMode(value)
+    set({ sidebarSortMode })
+    void setWorkspacePreference(scope, 'sidebarSortMode', sidebarSortMode).catch(() => undefined)
+  },
   toggleFolder(folder) {
     const next = new Set(get().collapsedFolders)
     if (next.has(folder)) next.delete(folder); else next.add(folder)
@@ -3344,6 +3355,7 @@ function workspaceStateFromBootstrap(
     groupUnreadChats: payload.groupUnreadChats !== false,
     includeCronInUnread: payload.includeCronInUnread === true,
     groupRunningChats: payload.groupRunningChats !== false,
+    sidebarSortMode: normalizeSidebarSortMode(payload.sidebarSortMode),
     pinnedCollapsed: payload.sessions.some(session => session.pinned && !session.archived && activeEmergencyAlert(session))
       ? false
       : payload.pinnedCollapsed ?? false,
@@ -3535,6 +3547,7 @@ async function runProfileRefresh(
       groupUnreadChats: payload.groupUnreadChats !== false,
       includeCronInUnread: payload.includeCronInUnread === true,
       groupRunningChats: payload.groupRunningChats !== false,
+      sidebarSortMode: normalizeSidebarSortMode(payload.sidebarSortMode),
       archivedCollapsed: payload.archivedCollapsed,
       inspectorVisible: payload.inspectorVisible
     })

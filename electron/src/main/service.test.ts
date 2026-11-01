@@ -1104,8 +1104,8 @@ describe('sidebar grouping preferences', () => {
       'http://a.test:7850': [fakeClient(), fakeClient()],
       'http://b.test:7850': [fakeClient()]
     })
-    const defaults = { groupUnreadChats: true, includeCronInUnread: false, groupRunningChats: true }
-    const saved = { groupUnreadChats: false, includeCronInUnread: true, groupRunningChats: false }
+    const defaults = { groupUnreadChats: true, includeCronInUnread: false, groupRunningChats: true, sidebarSortMode: 'default' }
+    const saved = { groupUnreadChats: false, includeCronInUnread: true, groupRunningChats: false, sidebarSortMode: 'name' }
     expect(await service.bootstrap()).toMatchObject(defaults)
     for (const [key, value] of Object.entries(saved)) cache.putPreference('profile:a', key, value)
     expect(await service.bootstrap()).toMatchObject(saved)
