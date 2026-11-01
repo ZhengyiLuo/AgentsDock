@@ -14,7 +14,9 @@
 - Fence asynchronous reconnection and runtime rechecks to their original
   server generation and notice context. Do not let stale cached login status
   show an authentication warning during a successful Codex or Claude run.
-- Validation: 5,789 desktop tests and eight packaging/license checks pass;
+- Keep native server reconnection out of the restricted shared-browser bridge;
+  shared pages retain their existing stream-recovery controls.
+- Validation: 5,790 desktop tests and eight packaging/license checks pass;
   five tests remain skipped. TypeScript and the Electron production build pass.
 - In an isolated visible native Electron app, reproduce the old green
   provider-status/network-error mismatch, then exercise the fixed send path

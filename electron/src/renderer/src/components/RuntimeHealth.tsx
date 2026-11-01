@@ -153,7 +153,9 @@ function RuntimeStatus({
     noticeContextRef.current = noticeContext
     return () => { noticeContextRef.current = null }
   }, [noticeContext])
-  const connectionFailure = compact && isServerConnectionError(admissionError)
+  // The shared browser owns its stream recovery and has no native server
+  // management bridge. Keep its existing Retry flow instead.
+  const connectionFailure = compact && !window.agentsDock.sharedChat && isServerConnectionError(admissionError)
   const reconnect = async () => {
     if (!profileId || reconnecting) return
     const previousError = useAppStore.getState().error

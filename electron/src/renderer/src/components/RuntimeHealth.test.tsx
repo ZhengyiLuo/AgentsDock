@@ -28,6 +28,13 @@ describe('server transport failures are separate from provider authentication', 
     expect(screen.queryByText('Configure API')).not.toBeInTheDocument()
     expect(screen.queryByText('Recheck')).not.toBeInTheDocument()
   })
+  it('does not offer desktop server reconnection in the restricted shared browser', () => {
+    setupConnection()
+    Object.assign(window.agentsDock, { sharedChat: true })
+    render(<RuntimeHealthNotice backend="codex" sessionId="chat" admissionError="Failed to fetch" />)
+    expect(screen.queryByRole('button', { name: 'Reconnect server' })).not.toBeInTheDocument()
+    expect(window.agentsDock.servers.refresh).not.toHaveBeenCalled()
+  })
   it('reconnects only the captured server and clears its failure after verification, without rechecking login or sending', async () => {
     setupConnection()
     const recovered = vi.fn()
