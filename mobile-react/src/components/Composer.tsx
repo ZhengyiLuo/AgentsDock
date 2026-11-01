@@ -641,6 +641,21 @@ export function Composer({ sessionId, keyboardVisible, onSent, onOpenMcp }: { se
         }
         if (!remoteComposerScopeIsCurrent(activeProfileId, profileGeneration, sessionId)) return
       }
+      let nativeAdmissionObserved = false
+      const beforeConsumption = useAppStore.getState()
+      const clearConsumedInput = (state: ReturnType<typeof useAppStore.getState>, previous: ReturnType<typeof useAppStore.getState>) => {
+        if (!consumeComposer || nativeAdmissionObserved || previous.sendingSessionIds.has(sessionId)
+          || !state.sendingSessionIds.has(sessionId)) return
+        // Draft consumption may follow an async recipient preflight. Observe
+        // its atomic transition, not the HTTP result that could clear newer
+        // typing. Retire even when a newer draft was preserved.
+        nativeAdmissionObserved = true
+        if (!composerScopeIsCurrent(activeProfileId, profileGeneration, sessionId)
+          || state.turnAdmissionTokens[sessionId] !== admissionToken
+          || (state.drafts[sessionId] ?? '').length) return
+        inputRef.current?.clear()
+      }
+      const unsubscribeConsumption = consumeComposer ? useAppStore.subscribe(clearConsumedInput) : () => {}
       try {
         const request = sendPrompt(steer, profileGeneration, sessionId, {
           promptOverride,
@@ -651,19 +666,14 @@ export function Composer({ sessionId, keyboardVisible, onSent, onOpenMcp }: { se
           chatReferences: outgoingReferences,
           teamReferences: outgoingTeamReferences,
         })
-        // sendPrompt consumes an accepted composer draft synchronously, before
-        // its first network await. Clear the focused native buffer in the same
-        // turn so iOS cannot echo the submitted text back through onChangeText.
-        if (
-          consumeComposer
-          && useAppStore.getState().sendingSessionIds.has(sessionId)
-          && !(useAppStore.getState().drafts[sessionId] ?? '').length
-        ) inputRef.current?.clear()
+        clearConsumedInput(useAppStore.getState(), beforeConsumption)
         const sent = await request
         if (sent) trackEvent('message_sent')
         if (sent && remoteComposerScopeIsCurrent(activeProfileId, profileGeneration, sessionId)) onSent()
       } catch {
         // The store surfaces request failures; keep the draft available to retry.
+      } finally {
+        unsubscribeConsumption()
       }
     } finally {
       useAppStore.getState().endTurnAdmission(sessionId, admissionToken)

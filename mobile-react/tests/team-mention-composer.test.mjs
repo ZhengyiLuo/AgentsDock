@@ -12,7 +12,7 @@ globalThis.IS_REACT_ACT_ENVIRONMENT = true
 globalThis.requestAnimationFrame ??= callback => setTimeout(() => callback(Date.now()), 0)
 globalThis.cancelAnimationFrame ??= clearTimeout
 const store = create(() => ({}))
-const fixture = { store, alerts: [], reads: [], sends: [], routeReads: [], revokes: [], skips: [], width: 390, scheme: 'dark', client: { isValidated: true, validationRevision: 1 } }
+const fixture = { store, nativeClears: 0, alerts: [], reads: [], sends: [], routeReads: [], revokes: [], skips: [], width: 390, scheme: 'dark', client: { isValidated: true, validationRevision: 1 } }
 globalThis.__teamComposerFixture = fixture
 const mocks = {
   'react-native': `import { createElement } from 'react'; const fixture=globalThis.__teamComposerFixture;
@@ -64,6 +64,7 @@ function health() { return { ok: true, server_identity: 'local-server', server_i
   team_hub_v1: { available: true, version: 1, server_session_base_path: '/api/team-hub-server', hub_id: 'hub' },
 } } }
 function reset(patch = {}) {
+  fixture.nativeClears = 0
   fixture.alerts.length=0; fixture.reads.length=0; fixture.sends.length=0; fixture.client.isValidated=true; fixture.client.validationRevision=1
   fixture.routeReads.length=0;fixture.revokes.length=0;fixture.skips.length=0;fixture.width=390;fixture.scheme='dark'
   fixture.client.teamNetworkGet = async (base, endpoint) => {
@@ -93,7 +94,7 @@ function reset(patch = {}) {
 }
 async function render() {
   let renderer
-  await act(async()=>{renderer=TestRenderer.create(React.createElement(Composer,{sessionId:'chat',keyboardVisible:true,onSent(){},onOpenMcp(){}}),{createNodeMock:()=>({focus(){},clear(){},setNativeProps(){}})})})
+  await act(async()=>{renderer=TestRenderer.create(React.createElement(Composer,{sessionId:'chat',keyboardVisible:true,onSent(){},onOpenMcp(){}}),{createNodeMock:()=>({focus(){},clear(){fixture.nativeClears++},setNativeProps(){}})})})
   return renderer
 }
 const byID=(renderer,id)=>renderer.root.findAll(node=>typeof node.type==='string'&&node.props.testID===id)
@@ -153,6 +154,35 @@ test('composer native-host harness keeps ordinary draft typing local without tea
 
 const deferred=()=>{let resolve,reject;const promise=new Promise((yes,no)=>{resolve=yes;reject=no});return {promise,resolve,reject}}
 const click=async(renderer,id)=>act(async()=>byID(renderer,id)[0].props.onPress())
+
+for (const newerDraft of [false, true]) {
+  test(`async send admission clears only its consumed native input (newer draft: ${newerDraft})`, async () => {
+    const preflight = deferred(), response = deferred()
+    reset({ sendPrompt: async () => {
+      await preflight.promise
+      store.setState(state => ({ sendingSessionIds: new Set(['chat']),
+        drafts: state.drafts.chat === 'Submitted' ? { chat: '' } : state.drafts }))
+      await response.promise
+      return true
+    } })
+    const renderer = await render()
+    let sending
+    try {
+      await type(renderer, 'Submitted')
+      await act(async () => { sending = byID(renderer, 'chat-send')[0].props.onPress(); await Promise.resolve() })
+      assert.equal(fixture.nativeClears, 0)
+      if (newerDraft) await type(renderer, 'Keep newer typing')
+      await act(async () => { preflight.resolve(); await Promise.resolve() })
+      assert.equal(fixture.nativeClears, newerDraft ? 0 : 1)
+      await type(renderer, 'Another draft')
+      await act(async () => { response.resolve(); await sending })
+      assert.equal(fixture.nativeClears, newerDraft ? 0 : 1, 'HTTP completion must not clear newer input')
+      assert.equal(store.getState().drafts.chat, 'Another draft')
+      await act(async () => { store.setState({ sendingSessionIds: new Set() }); store.setState({ sendingSessionIds: new Set(['chat']), drafts: { chat: '' } }) })
+      assert.equal(fixture.nativeClears, newerDraft ? 0 : 1, 'finished observer is unsubscribed')
+    } finally { preflight.resolve(); response.resolve(); await act(async () => renderer.unmount()) }
+  })
+}
 const recipient=renderer=>renderer.root.findAllByType('Pressable').find(node=>node.props.accessibilityLabel==='Reference Mac Studio in My team')
 async function renderPicker(overrides={}){
   let renderer

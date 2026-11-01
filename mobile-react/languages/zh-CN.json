@@ -1,6 +1,8 @@
 {
-  "NSLocalNetworkUsageDescription": "AgentsDock 需要连接同一局域网或 Tailscale 网络中的 Agent 服务器。",
-  "NSCameraUsageDescription": "允许 AgentsDock 扫描服务器连接二维码。",
-  "NSPhotoLibraryUsageDescription": "允许 AgentsDock 访问你选择发送给 Agent 的照片和视频。",
-  "NSPhotoLibraryAddUsageDescription": "允许 AgentsDock 将你选择的图片和视频保存到相册。"
+  "ios": {
+    "NSLocalNetworkUsageDescription": "AgentsDock 需要连接同一局域网或 Tailscale 网络中的 Agent 服务器。",
+    "NSCameraUsageDescription": "允许 AgentsDock 扫描服务器连接二维码。",
+    "NSPhotoLibraryUsageDescription": "允许 AgentsDock 访问你选择发送给 Agent 的照片和视频。",
+    "NSPhotoLibraryAddUsageDescription": "允许 AgentsDock 将你选择的图片和视频保存到相册。"
+  }
 }

@@ -322,7 +322,7 @@ test('QR scanning registers camera only, without microphone, image import or con
   assert.match(camera.cameraPermission, /scan.*QR/)
   assert.equal(camera.microphonePermission, false)
   assert.equal(camera.recordAudioAndroid, false)
-  assert.equal(app.plugins.find(plugin => Array.isArray(plugin) && plugin[0] === 'expo-image-picker')[1].cameraPermission, false)
+  assert.equal(app.plugins.find(plugin => Array.isArray(plugin) && plugin[0] === 'expo-image-picker')[1].cameraPermission, camera.cameraPermission)
   assert.equal(app.scheme, 'com.zhengyiluo.ZenithDock')
   const shell = await fs.readFile('src/components/AppShell.tsx', 'utf8')
   assert.doesNotMatch(shell, /pairing|agentsdock:\\?\//i)

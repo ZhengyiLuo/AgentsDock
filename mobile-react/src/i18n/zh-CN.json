@@ -668,6 +668,7 @@
   "Steer": "调整",
   "Steer current turn": "调整当前任务",
   "Stop": "停止",
+  "Stop agent": "停止 Agent",
   "Stop all terminals": "停止所有终端",
   "Stop or wait for this Claude turn before changing access.": "请先停止或等待当前 Claude 任务完成，再更改访问权限。",
   "Stop or wait for this Cursor turn before changing access.": "请先停止或等待当前 Cursor 任务完成，再更改访问权限。",

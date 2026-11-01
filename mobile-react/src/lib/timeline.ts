@@ -4,7 +4,7 @@ import { foldMarkdownSource } from './math'
 import { importedCrossChatDelivery, type ImportedCrossChatDelivery } from './imported-cross-chat-delivery'
 
 export type TimelineRow = MessageRow | TraceRow | ProgressRow | MediaRow | SystemRow | JobRow
-export interface MessageRow { kind: 'message'; key: string; seq: number; role: 'user' | 'assistant'; events: Event[]; files: AgentFile[] }
+export interface MessageRow { kind: 'message'; key: string; seq: number; role: 'user' | 'assistant'; events: Event[]; files: AgentFile[]; representedEventIds?: string[] }
 export interface TraceRow { kind: 'trace'; key: string; seq: number; events: Event[]; promotedCommentaryIds: string[]; runId?: string | null; active: boolean }
 export interface ProgressRow { kind: 'progress'; key: string; seq: number; events: Event[]; hiddenCount: number }
 export interface MediaRow { kind: 'media'; key: string; seq: number; files: AgentFile[] }
@@ -32,6 +32,7 @@ interface Turn {
   seq: number
   user?: Event
   assistant: Event[]
+  assistantEventIds: string[]
   assistantNormalizedSet: Set<string>
   trace: Event[]
   promotedCommentaryIds: string[]
@@ -253,6 +254,7 @@ export function projectTimeline(events: Event[], knownFiles: AgentFile[]): Timel
       runId: event.run_id,
       seq: event.seq,
       assistant: [],
+      assistantEventIds: [],
       assistantNormalizedSet: new Set(),
       trace: [],
       promotedCommentaryIds: [],
@@ -633,6 +635,7 @@ export function projectTimeline(events: Event[], knownFiles: AgentFile[]): Timel
         seq: item.assistant[0].seq,
         role: 'assistant',
         events: item.assistant,
+        representedEventIds: item.assistantEventIds,
         files: [],
       }
       rows.push(assistantRow)
@@ -1311,7 +1314,12 @@ function traceHasContent(events: Event[]): boolean {
 
 function appendAssistant(turn: Turn, event: Event, candidate: string, aggregate: boolean): void {
   const normalized = candidate.replace(/\s+/g, ' ').trim()
-  if (!normalized || turn.assistantNormalizedSet.has(normalized)) return
+  if (!normalized) return
+  // Search can point at a terminal aggregate omitted from visible text by
+  // deduplication. Keep exact identity, without widening sequence ranges or
+  // altering content, chronological placement or the streamed row anchor.
+  if (!turn.assistantEventIds.includes(event.id)) turn.assistantEventIds.push(event.id)
+  if (turn.assistantNormalizedSet.has(normalized)) return
   if (aggregate && normalizedAggregateCovers(turn.assistantNormalizedSet, normalized)) {
     turn.assistant.splice(0, turn.assistant.length, event)
     turn.assistantNormalizedSet.clear()

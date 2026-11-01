@@ -107,6 +107,15 @@ jobs:
           node scripts/run-history-tests.mjs src/lib/queue.test.ts
           node scripts/run-history-tests.mjs src/store/useAppStore.paused-queue.test.ts --native-mocks
         working-directory: mobile-react
+      - name: Verify accepted sends, live queue reconciliation and search targets
+        run: |
+          node scripts/run-history-tests.mjs src/store/useAppStore.send-reconciliation.test.ts --native-mocks
+          node scripts/run-history-tests.mjs src/lib/queue-reconciliation.test.ts
+          node scripts/run-history-tests.mjs src/store/useAppStore.queue-reconciliation.test.ts --native-mocks
+          node scripts/run-history-tests.mjs src/lib/timeline-history-navigation.test.ts
+          node scripts/run-history-tests.mjs src/lib/timeline-row-reuse.test.ts
+          node --test tests/sidebar-search-navigation.test.mjs
+        working-directory: mobile-react
       - name: Verify manual server connection and profile management
         run: |
           node --test tests/server-manual-connection.test.mjs tests/server-profiles.test.mjs tests/server-qr-scanner.test.mjs tests/multi-server-isolation.test.mjs

@@ -148,3 +148,29 @@ await test('a failed mutation is never automatically replayed', () => withClient
   await assert.rejects(client.markRead('chat', 1), { name: 'AgentServerRequestInterruptedError' })
   assert.equal(calls, 1)
 }))
+
+await test('received turn success survives an unreadable body, without retrying the POST', () => withClient(async client => {
+  for (const body of ['not JSON', 'null', '{}', '{"session":{"id":"wrong-chat"}}']) {
+    let calls = 0
+    globalThis.fetch = async () => { calls++; return new Response(body, { status: 200 }) }
+    await assert.rejects(client.sendTurn('chat', 'Hello', []), { name: 'AgentServerTurnAcceptedError' })
+    assert.equal(calls, 1)
+  }
+}))
+
+await test('received success with a stalled body stays accepted when the transport deadline expires', () => withClient(async client => {
+  const setTimer = globalThis.setTimeout
+  globalThis.setTimeout = ((handler: TimerHandler, delay?: number, ...args: unknown[]) =>
+    setTimer(handler, delay === 30_000 ? 10 : delay, ...args)) as typeof setTimeout
+  try {
+    globalThis.fetch = async () => ({ ok: true, status: 200, json: () => new Promise(() => {}) }) as Response
+    await assert.rejects(client.sendTurn('chat', 'Hello', []), { name: 'AgentServerTurnAcceptedError' })
+  } finally { globalThis.setTimeout = setTimer }
+}))
+
+await test('a rejection or pre-response failure never claims turn acceptance', () => withClient(async client => {
+  globalThis.fetch = async () => new Response(JSON.stringify({ detail: 'Rejected' }), { status: 409 })
+  await assert.rejects(client.sendTurn('chat', 'Hello', []), error => error instanceof ServerError && error.status === 409)
+  globalThis.fetch = async () => { throw nativeCancellation() }
+  await assert.rejects(client.sendTurn('chat', 'Hello', []), { name: 'AgentServerRequestInterruptedError' })
+}))
