@@ -1,5 +1,40 @@
 # Public development log
 
+## 2026-10-31 - Desktop send connection recovery
+
+- Preserve the original transport, server-token or identity error when an
+  explicit send joins a background reconnect. Background refreshes remain
+  quiet without swallowing the error needed by foreground callers.
+- Distinguish server connection failures from provider sign-in failures in
+  the composer. Use a warning state, retain the reported server version and
+  offer explicit server reconnection without retrying the message submission.
+- Preserve drafts, uncertain-send receipts and live running/thinking updates.
+  Invalidate HTTP admission after a transport failure without discarding a
+  healthy receive socket. Keep server-token and identity checks intact.
+- Fence asynchronous reconnection and runtime rechecks to their original
+  server generation and notice context. Do not let stale cached login status
+  show an authentication warning during a successful Codex or Claude run.
+- Keep native server reconnection out of the restricted shared-browser bridge;
+  shared pages retain their existing stream-recovery controls.
+- Validation: 5,790 desktop tests and eight packaging/license checks pass;
+  five tests remain skipped. TypeScript and the Electron production build pass.
+- In an isolated visible native Electron app, reproduce the old green
+  provider-status/network-error mismatch, then exercise the fixed send path
+  through production IPC and an authenticated real test service. Codex and
+  Claude both return actual replies. A real test-service restart preserves
+  the draft; explicit reconnect sends nothing, and manual retry succeeds.
+  Check English/dark and Chinese/light layouts, including a narrow window.
+  Test analytics is disabled and the production service is untouched.
+- Additional native-input checks cover repeated reconnect clicks, typing
+  while verification is pending, preserving separate drafts after chat
+  navigation, and switching to an unreachable test-server profile before
+  the old health response returns. Returning to the reachable profile keeps
+  the draft; a manual retry submits once and produces an actual provider reply.
+- Transport fault injection, old-server version compatibility, token failures
+  and identity mismatches also have deterministic coverage. The reporting
+  user's remote installation and its separate installer-permission error
+  have not been reproduced; no server update or security bypass is included.
+
 ## 2026-10-31 - Mobile reliability fixes on current main
 
 - Extract bug fixes from older mobile review branches without restoring their
