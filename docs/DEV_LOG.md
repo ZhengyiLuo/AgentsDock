@@ -22,10 +22,25 @@
   resume the native goal and reopen history without new imported duplicates;
   run a real Claude child and retain its completed history after reload; edit and
   save a CRLF file through the real server while preserving its bytes.
-- Acceptance remains local and pending: a Claude active-goal/history sequence
-  exposed reimported user input requiring investigation. A foreground sleep
-  command was refused by the native Claude harness, so that command's completion
-  was not counted as passed. No release or merge is claimed by this review.
+- The combined review exposed an existing Claude history-sync boundary: an
+  empty native background-wake lifecycle was counted as user input and blocked
+  subsequent occurrence matching. Exclude only proven metadata-only wakes;
+  keep genuine user input, files, external repeats and native goal commands.
+- Repair already-imported user copies through exact native reply ownership and
+  sentinel-proven goal-command ancestry, including bounded historical pages.
+  Preserve unknown or conflicting provenance and distinct repeated inputs.
+  Repair changes the projection, not either original history file.
+- Expanded checks: 830 focused server tests and 942 desktop tests pass, along
+  with desktop type checking and production compilation. Both new regressions
+  fail against the pre-fix implementation. A native Electron/Claude run confirms
+  background completion, a goal admitted during the same active run, goal
+  achievement, history reload, old-copy repair and two intentional equal-text
+  submissions remaining distinct. An unrelated split-pane draft remains intact.
+- Acceptance is local only. An earlier foreground sleep command was refused by
+  the native Claude harness and was not counted as successful execution; the
+  later background and read-only-file workflows completed through the real
+  provider. Native Windows/Linux and forced real-provider transport failures
+  were not exercised. No release or merge is claimed by this review.
 
 ## 2026-10-31 - Local review of activation diagnostics and runtime reliability
 
