@@ -78,7 +78,7 @@ describe('Claude header controls', () => {
     expect(setGoal).toHaveBeenCalledExactlyOnceWith(session.id, 'All changes pass validation.')
   })
 
-  it.each(['idle', 'active'] as const)('offers goal queuing from the running header with native %s status', async type => {
+  it.each(['idle', 'active'] as const)('offers native goal admission from the running header with native %s status', async type => {
     runtime.mockResolvedValue({ ...idle, status: { type, activeFlags: [] } })
     useAppStore.setState({ activeSessionIds: new Set([session.id]) })
     render(surface())
@@ -87,8 +87,8 @@ describe('Claude header controls', () => {
     await user.click(screen.getByRole('button', { name: 'Goal…' }))
     const dialog = await screen.findByRole('dialog', { name: 'Claude goal' })
     await user.type(within(dialog).getByRole('textbox', { name: 'Completion condition' }), 'All changes pass validation.')
-    expect(within(dialog).getByText('This goal will apply after the current turn finishes.')).toBeInTheDocument()
-    await user.click(within(dialog).getByRole('button', { name: 'Queue goal' }))
+    expect(within(dialog).queryByText('This goal will apply after the current turn finishes.')).not.toBeInTheDocument()
+    await user.click(within(dialog).getByRole('button', { name: 'Start goal' }))
     expect(setGoal).toHaveBeenCalledExactlyOnceWith(session.id, 'All changes pass validation.')
     expect(clearGoal).not.toHaveBeenCalled()
   })

@@ -1,5 +1,32 @@
 # Public development log
 
+## 2026-10-31 - Local integration review of goal follow-ups and child lifecycle
+
+- Integrate PRs #105, #100, #99, #96 and #24 with their original contributor
+  commits. The editor line-ending implementation from #24 is already equivalent
+  to main; retain it together with newer editor and language-service behavior.
+- Preserve main's native Claude goal delivery during active SDK turns rather
+  than replacing it with the older end-of-turn queue design. Expose actual
+  durable queued goals separately, and preserve pending-command exclusion.
+- Combine Codex goal steering of explicitly selected local chat references and
+  skills with current task-provenance, retry and authorization fences. Suspend
+  per-route source instructions during uncertain writes as well as ordinary
+  provenance. Keep Claude's narrower follow-up admission independent.
+- Reconcile resumed Codex output by exact native item ownership, not equal text.
+  Preserve Claude child completion and retire stale unowned activity into history.
+- Focused checks: 942 desktop tests and 723 server tests pass; desktop type check
+  and production compilation pass. Tests include exact-authority retries,
+  rejected/uncertain steering, goal history, child lifecycle and editor line endings.
+- Real native Electron/provider checks: steer a running Codex goal with a local
+  chat mention, deliver and receive one peer exchange without replacing the run,
+  resume the native goal and reopen history without new imported duplicates;
+  run a real Claude child and retain its completed history after reload; edit and
+  save a CRLF file through the real server while preserving its bytes.
+- Acceptance remains local and pending: a Claude active-goal/history sequence
+  exposed reimported user input requiring investigation. A foreground sleep
+  command was refused by the native Claude harness, so that command's completion
+  was not counted as passed. No release or merge is claimed by this review.
+
 ## 2026-10-31 - Local review of activation diagnostics and runtime reliability
 
 - Integrate PRs #122, #112 and #111 on the previously accepted #134 preview,
