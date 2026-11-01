@@ -11,11 +11,15 @@
   with release-line cleanup, and advance the SDK configuration identity for the
   combined configuration. Preserve a retired Claude child's exact tool alias
   when a delayed structured task identity arrives.
+- Keep internal native Codex goal-resume lifecycle markers out of user bubbles.
+  Preserve genuine input with identical text and the chronological live steer
+  boundary, activity and final answer. Reproduced and verified through the
+  native desktop/server/provider path in an isolated offscreen profile.
 - Prepare matching desktop/server/CLI version `1.0.12-beta.2`. Keep stable
   `1.0.11` unchanged. Bind scoped native rehearsal to independently verified
   stable 1.0.11 and beta.1 bytes, preserving historical replay identities and
   installer recovery/permission checks.
-- Desktop type checking, production compilation, 5,945 desktop tests (six
+- Desktop type checking, production compilation, 5,947 desktop tests (six
   skipped), eight packaging/license checks and 393 release-tooling tests pass.
   Targeted server/recovery checks and hosted native acceptance remain in progress.
   See [candidate notes](RELEASE_1.0.12-beta.2.md). This entry records preparation

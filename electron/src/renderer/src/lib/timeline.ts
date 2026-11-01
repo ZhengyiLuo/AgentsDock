@@ -743,7 +743,10 @@ export class TimelineProjector {
       const prior = event.run_id ? this.turnByRun.get(event.run_id) : this.activeTurn
       const followsSilentInput = event.run_id ? this.silentInputRuns.delete(event.run_id) : false
       this.activeTurn = this.writableTurn(this.ensureTurn(event, Boolean(prior?.user) || followsSilentInput))
-      if (!isDigestDeliveryTurn(event) && !isNativeMailboxWakeInput(event) && !isNativeBackgroundWakeInput(event)) this.activeTurn.user = event
+      // Resuming a persistent native goal starts an execution, not a human
+      // message. Genuine later corrections enter through the steer branch.
+      const nativeGoalResume = event.backend === 'codex' && event.purpose === 'codex_goal_resume'
+      if (!nativeGoalResume && !isDigestDeliveryTurn(event) && !isNativeMailboxWakeInput(event) && !isNativeBackgroundWakeInput(event)) this.activeTurn.user = event
       this.activeTurn.seq = Math.min(this.activeTurn.seq, event.seq)
       this.activeTurn.startedAt = event.ts
       this.activeTurn.purpose = event.purpose

@@ -30,7 +30,8 @@ subscriptions remain on `1.0.11`.
   cross-chat delivery still requires the user's delegation and an accepted
   AgentsDock receipt.
 - Preserve Codex goal follow-up ownership and history, including explicitly
-  selected chat references and skills. Retain existing child-only Stop behavior,
+  selected chat references and skills. Keep internal goal-resume markers out of
+  user message bubbles. Retain existing child-only Stop behavior,
   Side chat controls, custom-endpoint isolation and signed-update protections.
 - Improve runtime discovery/transport cleanup and identify the actual failed
   activation boundary without weakening installer ownership or recovery checks.
