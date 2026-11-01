@@ -16,17 +16,18 @@ import {
   runtimeDiagnosticNeedsAttention,
   runtimeDiagnosticTone,
 } from '@shared/runtime-catalog'
-import { memo, useState } from 'react'
+import { memo, useEffect, useRef, useState } from 'react'
 import { useAppStore } from '../store/app-store'
 import { eventErrorText, isTimelineError } from '../lib/timeline'
 import { NativeProviderSignIn } from './NativeProviderSignIn'
 import { openAIProviderSettings } from '../lib/provider-settings'
 import { CopyErrorButton } from './CopyErrorButton'
+import { isServerConnectionError } from '@shared/connection-error'
 
-export const RuntimeHealthNotice = memo(function RuntimeHealthNotice({ backend, sessionId, codexProvider, admissionError }: { backend: Backend; sessionId: string; codexProvider?: CodexProvider; admissionError?: string }) {
+export const RuntimeHealthNotice = memo(function RuntimeHealthNotice({ backend, sessionId, codexProvider, admissionError, onConnectionRecovered }: { backend: Backend; sessionId: string; codexProvider?: CodexProvider; admissionError?: string; onConnectionRecovered?: () => void }) {
   useLocale()
   const { refreshing, recheck } = useRuntimeRecheck()
-  return <RuntimeStatus backend={backend} codexProvider={codexProvider} admissionError={admissionError} compact sessionId={sessionId} refreshing={refreshing} onRecheck={recheck} />
+  return <RuntimeStatus backend={backend} codexProvider={codexProvider} admissionError={admissionError} onConnectionRecovered={onConnectionRecovered} compact sessionId={sessionId} refreshing={refreshing} onRecheck={recheck} />
 })
 
 export function RuntimeHealthPanel() {
@@ -54,11 +55,14 @@ export function RuntimeHealthPanel() {
 export function useRuntimeRecheck() {
   const [refreshing, setRefreshing] = useState(false)
   const recheck = async () => {
+    const { activeProfileId, profileGeneration } = useAppStore.getState()
+    const current = () => useAppStore.getState().activeProfileId === activeProfileId && useAppStore.getState().profileGeneration === profileGeneration
     setRefreshing(true)
     try {
       const runtimeCatalog = runtimeCatalogAfterExplicitRecheck(
         await window.agentsDock.runtime.catalog(true)
       )
+      if (!current()) return
       const refreshedDiagnostics = Object.fromEntries(
         Object.entries(runtimeCatalog.backends).flatMap(([backend, value]) => (
           value.diagnostic ? [[backend, value.diagnostic] as const] : []
@@ -72,7 +76,7 @@ export function useRuntimeRecheck() {
         error: null,
       }))
     } catch (error) {
-      useAppStore.getState().setError(error instanceof Error ? error.message : String(error))
+      if (current()) useAppStore.getState().setError(error instanceof Error ? error.message : String(error))
     } finally {
       setRefreshing(false)
     }
@@ -123,6 +127,7 @@ function RuntimeStatus({
   sessionId,
   refreshing = false,
   onRecheck,
+  onConnectionRecovered,
 }: {
   backend: Backend
   codexProvider?: CodexProvider
@@ -131,6 +136,7 @@ function RuntimeStatus({
   sessionId?: string
   refreshing?: boolean
   onRecheck?: () => Promise<void>
+  onConnectionRecovered?: () => void
 }) {
   useLocale()
   const health = useAppStore(state => state.health)
@@ -138,6 +144,37 @@ function RuntimeStatus({
   const connected = useAppStore(state => state.connected)
   const profileId = useAppStore(state => state.activeProfileId)
   const profileGeneration = useAppStore(state => state.profileGeneration)
+  const serverVersion = useAppStore(state => state.profiles.find(profile => profile.id === state.activeProfileId)?.serverVersion)
+  const [reconnecting, setReconnecting] = useState(false)
+  const noticeContext = `${profileId}:${profileGeneration}:${sessionId}:${admissionError}`
+  const noticeContextRef = useRef<string | null>(noticeContext)
+  noticeContextRef.current = noticeContext
+  useEffect(() => {
+    noticeContextRef.current = noticeContext
+    return () => { noticeContextRef.current = null }
+  }, [noticeContext])
+  const connectionFailure = compact && isServerConnectionError(admissionError)
+  const reconnect = async () => {
+    if (!profileId || reconnecting) return
+    const previousError = useAppStore.getState().error
+    const current = () => {
+      const state = useAppStore.getState()
+      return noticeContextRef.current === noticeContext && state.activeProfileId === profileId && state.profileGeneration === profileGeneration
+    }
+    setReconnecting(true)
+    try {
+      const result = await window.agentsDock.servers.refresh(profileId, profileGeneration)
+      if (!current()) return
+      if (result.health?.ok === true) {
+        if (useAppStore.getState().error === previousError) useAppStore.getState().setError(null)
+        onConnectionRecovered?.()
+      } else {
+        useAppStore.getState().setError(result.profiles.find(profile => profile.id === profileId)?.lastConnectionError || t('connections.serverRetryFailed'))
+      }
+    } catch (error) {
+      if (current()) useAppStore.getState().setError(error instanceof Error ? error.message : String(error))
+    } finally { setReconnecting(false) }
+  }
   const cursorCapability = backend === 'opencode' ? health?.capabilities?.opencode_backend : health?.capabilities?.cursor_backend
   // Keep compact notices independent from ordinary live timeline growth. The
   // selector still observes a newly relevant run error, but its stable string
@@ -163,7 +200,7 @@ function RuntimeStatus({
   // Only an actual failed send/run belongs above the composer. Cached login
   // status can outlive reconnection and must never demand configuration here.
   if (compact && !chatError && !admissionError) return null
-  const tone = chatError ? 'warning' : !compact && diagnostic?.installed !== false
+  const tone = connectionFailure || chatError ? 'warning' : compact && cursorUnavailable ? 'error' : admissionError ? 'warning' : !compact && diagnostic?.installed !== false
     ? connected && diagnostic?.authenticated === true && diagnostic.status === 'ready' ? 'ready' : 'unknown'
     : cursorUnavailable ? 'error' : runtimeDiagnosticTone(diagnostic)
   const Icon = tone === 'ready' ? CheckCircle2 : tone === 'error' ? XCircle : tone === 'warning' ? AlertTriangle : CircleHelp
@@ -177,26 +214,29 @@ function RuntimeStatus({
     || (!compact ? runtimeDiagnosticCurrentError(diagnostic) : '')
     || diagnostic?.message
     || `${provider} has not been checked yet.`
-  const label = !compact && !connected ? t('connections.unavailable')
+  const label = connectionFailure ? t('connections.serverCheckFailed') : !compact && !connected ? t('connections.unavailable')
     : !compact && diagnostic?.installed !== false
       ? tone === 'ready' ? t('connections.signedIn') : diagnostic?.authenticated === false ? t('codexAuth.signedOut') : t('connections.loginUnknown')
       : compact && admissionError ? t('connections.checkFailed') : compact && chatError ? 'Latest chat error' : cursorUnavailable ? 'Unavailable' : runtimeDiagnosticLabel(diagnostic)
   const cursorAction = diagnostic?.action?.trim() || cursorCapability?.action?.trim()
-  const action = cursorUnavailable
+  const action = connectionFailure ? undefined : cursorUnavailable
     ? cursorAction && !cursorUnavailableDetail.includes(cursorAction) ? cursorAction : undefined
     : diagnostic?.action
   return <div className={`runtime-health-row ${tone} ${compact ? 'compact' : ''}`} role={tone === 'error' ? 'alert' : 'status'}>
     <Icon size={compact ? 15 : 17} />
     <div>
-      <strong>{provider} <span>{label}</span></strong>
+      <strong>{connectionFailure ? 'AgentsServer' : provider} <span>{label}</span></strong>
+      {connectionFailure && <small className="runtime-detail">{t('connections.serverRetryHelp')}</small>}
       <small className="runtime-detail">{detail}</small>
+      {connectionFailure && (serverVersion || health?.server_version) && <small>{t('connections.serverReportedVersion', { version: serverVersion || health!.server_version! })}</small>}
       {action ? <small className="runtime-action">{action}</small> : null}
       {!compact && tone !== 'ready' && <NativeProviderSignIn key={`${backend}:${profileId}:${profileGeneration}`} backend={backend} disabled={!connected} />}
     </div>
     {compact && <div className="runtime-health-actions">
     <CopyErrorButton key={`${detail}:${action}`} text={[detail, action && !detail.includes(action) ? action : null].filter(Boolean).join('\n')} />
-    {(codexProvider === 'custom' || backend === 'gemini') && <button type="button" className="quiet-button runtime-recheck-button" onClick={() => openAIProviderSettings(backend)}>{t('connections.configure')}</button>}
-    {codexProvider !== 'custom' && backend !== 'gemini' && providerNeedsAttention && onRecheck
+    {connectionFailure && <button type="button" className="quiet-button runtime-recheck-button" disabled={reconnecting || !profileId} onClick={() => void reconnect()}><RefreshCw className={reconnecting ? 'spin' : ''} size={12} />{t('connections.reconnectServer')}</button>}
+    {!connectionFailure && (codexProvider === 'custom' || backend === 'gemini') && <button type="button" className="quiet-button runtime-recheck-button" onClick={() => openAIProviderSettings(backend)}>{t('connections.configure')}</button>}
+    {!connectionFailure && codexProvider !== 'custom' && backend !== 'gemini' && providerNeedsAttention && onRecheck
       ? <button
           type="button"
           className="quiet-button runtime-recheck-button"

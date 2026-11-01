@@ -118,6 +118,70 @@ describe('durable send request identity', () => {
   })
 })
 
+describe('send validation during background reconnect', () => {
+  it('marks failed HTTP sending as retrying while keeping a live receive stream and its running events', async () => {
+    const failure = new TypeError('fetch failed')
+    const client = Object.assign(fakeClient(), { sendTurn: vi.fn().mockRejectedValue(failure) })
+    const { service } = createProfileService({ 'http://a.test:7850': [client] })
+    const connection = vi.fn(), stop = vi.fn()
+    Object.assign(service, { validatedGeneration: 1, emitConnection: connection,
+      timelineSubscriptions: new Map([['chat', { connected: true, stop }]]) })
+    await expect(service.sendTurn({ sessionId: 'chat', prompt: 'hello', fileIds: [] })).rejects.toBe(failure)
+    expect(connection).toHaveBeenCalledWith(expect.anything(), true, undefined, 'fetch failed')
+    expect((service as unknown as { validatedGeneration: number | null }).validatedGeneration).toBeNull()
+    expect((await service.bootstrap()).profiles.find(p => p.id === 'a')?.connectionState).toBe('retrying')
+    expect(stop).not.toHaveBeenCalled()
+    expect(client.sendTurn).toHaveBeenCalledOnce()
+  })
+
+  it.each([
+    new TypeError('fetch failed'),
+    new ServerError(401, 'Invalid server token'),
+    new ServerError(503, 'Service temporarily unavailable')
+  ])('preserves the real failure when a send joins background health: %s', async failure => {
+    const health = deferred<Health>()
+    const client = Object.assign(fakeClient({ health: () => health.promise }), { sendTurn: vi.fn() })
+    const { service } = createProfileService({ 'http://a.test:7850': [client] })
+    const internals = service as unknown as { scope: unknown; refreshAll(announce: boolean, jobs: boolean, scope: unknown): Promise<void> }
+    const background = internals.refreshAll(false, false, internals.scope)
+    const sent = service.sendTurn({ sessionId: 'chat', prompt: 'hello', fileIds: [] })
+    const rejected = expect(sent).rejects.toBe(failure)
+    health.reject(failure)
+    await background
+    await rejected
+    expect(client.health).toHaveBeenCalledOnce()
+    expect(client.sendTurn).not.toHaveBeenCalled()
+  })
+
+  it('preserves identity mismatch on a shared refresh and never dispatches to the replacement server', async () => {
+    const health = deferred<Health>()
+    const client = Object.assign(fakeClient({ health: () => health.promise }), { sendTurn: vi.fn() })
+    const { service, settings } = createProfileService({ 'http://a.test:7850': [client] })
+    settings.setProfileServerIdentity('a', 'trusted')
+    const internals = service as unknown as { scope: unknown; refreshAll(announce: boolean, jobs: boolean, scope: unknown): Promise<void> }
+    const background = internals.refreshAll(false, false, internals.scope)
+    const rejected = expect(service.sendTurn({ sessionId: 'chat', prompt: 'hello', fileIds: [] })).rejects.toThrow('Server identity changed')
+    health.resolve({ ok: true, server_identity: 'unexpected' })
+    await background
+    await rejected
+    expect(client.sendTurn).not.toHaveBeenCalled()
+  })
+
+  it('allows an explicit retry on a compatible older server after a transport failure, without automatic submission', async () => {
+    const client = Object.assign(fakeClient({ health: async () => ({ ok: true, server_version: '0.1.25' }) }), {
+      sendTurn: vi.fn().mockResolvedValue({ session: { id: 'chat', title: 'Chat', backend: 'codex' } })
+    })
+    const { service } = createProfileService({ 'http://a.test:7850': [client] })
+    client.health.mockRejectedValueOnce(new TypeError('fetch failed'))
+    const input = { sessionId: 'chat', prompt: 'hello', fileIds: [] }
+    await expect(service.sendTurn(input)).rejects.toThrow('fetch failed')
+    expect(client.sendTurn).not.toHaveBeenCalled()
+    await expect(service.sendTurn(input)).resolves.toMatchObject({ session: { id: 'chat' } })
+    expect(client.sendTurn).toHaveBeenCalledOnce()
+    expect(client.health).toHaveBeenCalledTimes(2)
+  })
+})
+
 describe('main-owned passive Team Mail hints', () => {
   const arrival = (seq: number) => ({ through_sequence: seq, arrival_id: seq ? `tmsg_${seq.toString(16).padStart(32, '0')}` : null })
   const capability = { enabled: true, version: 1, websocket_path: TEAM_MAIL_HINTS_PATH,

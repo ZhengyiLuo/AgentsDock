@@ -3748,7 +3748,18 @@ export class AppService {
       input.teamReferences ?? [],
       input.skillSelection,
       requestId
-    )
+    ).catch(error => {
+      if (this.isCurrentScope(scope) && (error instanceof TypeError || error instanceof Error && error.name === 'TimeoutError')) {
+        // A live receive socket is not proof that HTTP sends still work.
+        // Preserve its running/thinking updates, but revalidate before the
+        // next mutation. Never resubmit a possibly accepted message here.
+        this.validatedGeneration = null
+        const message = errorText(error)
+        this.setProfileRuntime(scope.profileId, { connectionState: 'retrying', lastConnectionError: message, lastConnectionCheckedAt: Date.now() })
+        this.emitConnection(scope, this.hasConnectedTimelineSubscription(), undefined, message)
+      }
+      throw error
+    })
     // Acceptance wins even if local cleanup fails. Keep the receipt in that
     // case, so a retry can only replay the accepted result.
     try { this.cache.putPreference(scope.namespace, receiptKey, null) } catch { /* storage health reports the failure */ }
@@ -5381,14 +5392,15 @@ export class AppService {
     const existing = this.refreshInFlight.get(scope.generation)
     if (existing) {
       if (!deferApplyDuringInteraction) this.bypassBackgroundApplyQuietWait(scope)
-      return existing
+      return announce ? existing : existing.catch(() => undefined)
     }
     if (deferApplyDuringInteraction) this.foregroundSensitiveRefreshes.add(scope.generation)
     let identityReady!: () => void
     this.refreshIdentityReady.set(scope.generation, new Promise<void>(resolve => { identityReady = resolve }))
-    const task = this.performRefreshAll(scope, announce, includeJobs, deferApplyDuringInteraction, identityReady)
-    this.refreshInFlight.set(scope.generation, task)
-    return task.finally(() => {
+    // Share the rejecting operation, not a background caller's swallowed
+    // failure. A foreground send joining it must see the actual network,
+    // token or identity error instead of a generic unvalidated-profile error.
+    const task = this.performRefreshAll(scope, includeJobs, deferApplyDuringInteraction, identityReady).finally(() => {
       if (this.refreshInFlight.get(scope.generation) === task) {
         this.refreshInFlight.delete(scope.generation)
         this.refreshIdentityReady.delete(scope.generation)
@@ -5396,11 +5408,12 @@ export class AppService {
       this.foregroundSensitiveRefreshes.delete(scope.generation)
       this.foregroundApplyBypassGenerations.delete(scope.generation)
     })
+    this.refreshInFlight.set(scope.generation, task)
+    return announce ? task : task.catch(() => undefined)
   }
 
   private async performRefreshAll(
     scope: ConnectionScope,
-    announce: boolean,
     includeJobs: boolean,
     deferApplyDuringInteraction: boolean,
     identityReady: () => void
@@ -5481,10 +5494,7 @@ export class AppService {
       if (this.healthFailureCount >= 2 && !this.hasConnectedTimelineSubscription()) this.emitConnection(scope, false, undefined, message)
     }
 
-    if (announcedError) {
-      if (announce) throw announcedError
-      return
-    }
+    if (announcedError) throw announcedError
     const namespaceWasAdopted = activeScope !== scope
     if (!this.isCurrentScope(activeScope)) return
     // Queue edits need the verified identity, not unrelated list

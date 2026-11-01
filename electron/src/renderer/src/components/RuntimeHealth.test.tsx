@@ -1,4 +1,4 @@
-import { cleanup, render, screen, waitFor } from '@testing-library/react'
+import { act, cleanup, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { AgentsDockAPI } from '@shared/ipc'
@@ -7,6 +7,101 @@ import { useAppStore } from '../store/app-store'
 import { RuntimeHealthNotice, RuntimeHealthPanel } from './RuntimeHealth'
 
 afterEach(cleanup)
+
+describe('server transport failures are separate from provider authentication', () => {
+  const setupConnection = () => {
+    useAppStore.setState({ activeProfileId: 'test', profileGeneration: 1, connected: true,
+      health: { ok: true, server_version: '0.1.25' }, runtimeCatalog: readyCatalog,
+      sessions: [], snapshots: {}, profiles: [], error: 'fetch failed' })
+    Object.assign(window.agentsDock, { servers: { refresh: vi.fn().mockResolvedValue({
+      health: { ok: true }, profiles: []
+    }) } })
+  }
+  it.each(['codex', 'claude', 'cursor', 'gemini'] as const)('labels %s transport failure as a server warning without login instructions', backend => {
+    setupConnection()
+    const { container } = render(<RuntimeHealthNotice backend={backend} sessionId="chat" admissionError="TypeError: fetch failed" />)
+    expect(screen.getByText('AgentsServer')).toBeInTheDocument()
+    expect(screen.getByText('Reported server version: 0.1.25')).toBeInTheDocument()
+    expect(container.querySelector('.runtime-health-row')).toHaveClass('warning')
+    expect(container.querySelector('.runtime-health-row')).not.toHaveClass('ready')
+    expect(screen.getByRole('button', { name: 'Reconnect server' })).toBeEnabled()
+    expect(screen.queryByText('Configure API')).not.toBeInTheDocument()
+    expect(screen.queryByText('Recheck')).not.toBeInTheDocument()
+  })
+  it('reconnects only the captured server and clears its failure after verification, without rechecking login or sending', async () => {
+    setupConnection()
+    const recovered = vi.fn()
+    render(<RuntimeHealthNotice backend="codex" sessionId="chat" admissionError="fetch failed" onConnectionRecovered={recovered} />)
+    await userEvent.click(screen.getByRole('button', { name: 'Reconnect server' }))
+    expect(window.agentsDock.servers.refresh).toHaveBeenCalledExactlyOnceWith('test', 1)
+    expect(window.agentsDock.runtime.catalog).not.toHaveBeenCalled()
+    expect(recovered).toHaveBeenCalledOnce()
+    expect(useAppStore.getState().error).toBeNull()
+  })
+  it('keeps the failure when verification fails and allows another explicit reconnect', async () => {
+    setupConnection()
+    vi.mocked(window.agentsDock.servers.refresh).mockResolvedValue({ health: null,
+      profiles: [{ id: 'test', lastConnectionError: 'Invalid server token' }] } as never)
+    const recovered = vi.fn()
+    render(<RuntimeHealthNotice backend="codex" sessionId="chat" admissionError="fetch failed" onConnectionRecovered={recovered} />)
+    await userEvent.click(screen.getByRole('button', { name: 'Reconnect server' }))
+    expect(recovered).not.toHaveBeenCalled()
+    expect(useAppStore.getState().error).toBe('Invalid server token')
+    expect(screen.getByRole('button', { name: 'Reconnect server' })).toBeEnabled()
+  })
+  it('ignores a late reconnect after switching server', async () => {
+    setupConnection()
+    let resolve!: (value: never) => void
+    vi.mocked(window.agentsDock.servers.refresh).mockImplementation(() => new Promise(r => { resolve = r }))
+    const recovered = vi.fn()
+    render(<RuntimeHealthNotice backend="codex" sessionId="chat" admissionError="fetch failed" onConnectionRecovered={recovered} />)
+    await userEvent.click(screen.getByRole('button', { name: 'Reconnect server' }))
+    act(() => useAppStore.setState({ activeProfileId: 'another', profileGeneration: 2, error: 'Keep other error' }))
+    await act(async () => resolve({ health: { ok: true } } as never))
+    expect(recovered).not.toHaveBeenCalled()
+    expect(useAppStore.getState().error).toBe('Keep other error')
+  })
+  it.each(['chat', 'error', 'unmount'] as const)('ignores a late reconnect after the notice changes: %s', async change => {
+    setupConnection()
+    let resolve!: (value: never) => void
+    vi.mocked(window.agentsDock.servers.refresh).mockImplementation(() => new Promise(r => { resolve = r }))
+    const recovered = vi.fn()
+    const { rerender, unmount } = render(<RuntimeHealthNotice backend="codex" sessionId="chat" admissionError="fetch failed" onConnectionRecovered={recovered} />)
+    await userEvent.click(screen.getByRole('button', { name: 'Reconnect server' }))
+    if (change === 'unmount') unmount()
+    else rerender(<RuntimeHealthNotice backend="codex" sessionId={change === 'chat' ? 'another-chat' : 'chat'} admissionError={change === 'error' ? 'Failed to fetch' : 'fetch failed'} onConnectionRecovered={recovered} />)
+    await act(async () => resolve({ health: { ok: true } } as never))
+    expect(recovered).not.toHaveBeenCalled()
+    expect(useAppStore.getState().error).toBe('fetch failed')
+  })
+  it.each(['success', 'failure'] as const)('does not apply another server’s late CLI recheck %s', async outcome => {
+    setupConnection()
+    let resolve!: (value: RuntimeCatalog) => void
+    let reject!: (error: Error) => void
+    vi.mocked(window.agentsDock.runtime.catalog).mockImplementation(() => new Promise((r, j) => { resolve = r; reject = j }))
+    render(<RuntimeHealthPanel />)
+    await userEvent.click(screen.getByRole('button', { name: 'Recheck CLIs' }))
+    const nextCatalog: RuntimeCatalog = { backends: {} }
+    act(() => useAppStore.setState({ activeProfileId: 'another', profileGeneration: 2, runtimeCatalog: nextCatalog, error: 'Keep other error' }))
+    await act(async () => {
+      if (outcome === 'success') resolve(readyCatalog)
+      else reject(new Error('Old server failed'))
+    })
+    expect(useAppStore.getState().runtimeCatalog).toBe(nextCatalog)
+    expect(useAppStore.getState().error).toBe('Keep other error')
+  })
+  it.each(['codex', 'claude'] as const)('keeps a running %s chat quiet despite cached signed-out diagnostics', backend => {
+    setupConnection()
+    useAppStore.setState({ runtimeCatalog: { backends: { [backend]: { models: [], efforts: [], diagnostic: {
+      backend, status: 'unauthenticated', available: false, authenticated: false, message: 'Old login error', action: 'Please log in'
+    } } } }, snapshots: { chat: { session: { id: 'chat', backend, title: 'Chat' }, events: [
+      { id: '1', seq: 1, session_id: 'chat', backend, ts: '', type: 'error', run_id: 'old', message: 'Old login error' },
+      { id: '2', seq: 2, session_id: 'chat', backend, ts: '', type: 'turn_started', run_id: 'new' }
+    ], queuedTurns: [], files: [], hasMoreEvents: false, filesTotal: 0, cachedAt: 0 } } })
+    const { container } = render(<RuntimeHealthNotice backend={backend} sessionId="chat" />)
+    expect(container).toBeEmptyDOMElement()
+  })
+})
 
 it('labels a Gemini API error as Gemini, not Codex', () => {
   useAppStore.setState({ health: null, runtimeCatalog: null, snapshots: {}, sessions: [] })
