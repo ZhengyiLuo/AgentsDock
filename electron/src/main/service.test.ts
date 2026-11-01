@@ -9921,6 +9921,36 @@ describe('server profile lifecycle', () => {
     expect(bProbe.dispose).toHaveBeenCalledOnce()
   })
 
+  it('keeps normal background queue recovery connected and clears a prior recovery warning', async () => {
+    let readiness: NonNullable<Health['chat_readiness']> = {
+      ready: false, state: 'failed', message: 'Queued message recovery failed.'
+    }
+    const a = fakeClient({ health: async () => ({ ok: true, server_identity: 'server-a', chat_readiness: readiness }) })
+    const { service, settings } = createProfileService({
+      'http://a.test:7850': [a], 'http://b.test:7850': [fakeClient()]
+    })
+    settings.setProfileServerIdentity('a', 'server-a')
+    const bootstrap = await service.bootstrap()
+    await service.refreshServer('a', bootstrap.profileGeneration)
+    expect((await service.bootstrap()).profiles.find(profile => profile.id === 'a')).toMatchObject({
+      connectionState: 'degraded', lastConnectionError: readiness.message
+    })
+
+    readiness = { ready: false, state: 'recovering', message: 'Queued messages are being restored after restart.' }
+    await service.refreshServer('a', bootstrap.profileGeneration)
+    const recovering = await service.bootstrap()
+    expect(recovering.health?.chat_readiness).toEqual(readiness)
+    expect(recovering.profiles.find(profile => profile.id === 'a')).toMatchObject({
+      connectionState: 'online', lastConnectionError: null
+    })
+
+    readiness = { ready: true, state: 'ready', message: null }
+    await service.refreshServer('a', bootstrap.profileGeneration)
+    expect((await service.bootstrap()).profiles.find(profile => profile.id === 'a')).toMatchObject({
+      connectionState: 'online', lastConnectionError: null
+    })
+  })
+
   it('keeps recovery controls connected while reporting failed chat readiness', async () => {
     const message = 'Queued message recovery failed. Restart the managed server.'
     let ready = false

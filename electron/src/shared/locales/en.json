@@ -343,6 +343,7 @@
   "serverProfile.remove": "Remove",
   "serverProfile.confirmRemove": "Confirm removal",
   "serverProfile.status.online": "Connected",
+  "serverProfile.connection.restoringChats": "Connected — restoring queued chats",
   "serverProfile.status.degraded": "Limited",
   "serverProfile.status.connecting": "Connecting…",
   "serverProfile.status.retrying": "Reconnecting…",
