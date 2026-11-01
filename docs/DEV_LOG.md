@@ -36,6 +36,25 @@
   background completion, a goal admitted during the same active run, goal
   achievement, history reload, old-copy repair and two intentional equal-text
   submissions remaining distinct. An unrelated split-pane draft remains intact.
+- Final pre-merge desktop checks pass: 5,757 tests (five skipped), eight
+  packaging/license guards, TypeScript and production compilation.
+- Additional native Electron checks exercise a catalog-selected skill during a
+  Codex goal, Stop with a paused unsent queue, reload without automatic resend,
+  and explicit Send now delivering once on the original provider thread.
+  Claude checks cover cancelling a pending goal, replacing an active goal,
+  Clear & stop, child retirement, and completed/cleared state after reconnect.
+- This pass also catches normalized Claude goal commands being reimported:
+  exact native reply ownership plus command metadata or a goal sentinel now
+  recognizes both XML and canonical slash representations. Unproven commands,
+  quotations and distinct repeated inputs remain visible. Start/clear
+  regressions fail before the change; the 95 focused repair/goal tests pass.
+  Real-app reloading repairs existing copies and preserves fresh commands once.
+- The final combined server pass after this repair passes 743 tests across 26
+  goal, steering, history, native transport and child-lifecycle modules.
+- Native acceptance uses an isolated macOS Electron profile, real IPC/HTTP and
+  live Codex/Claude. Mouse, keyboard and scrolling are driven through Electron's
+  debugging interface; analytics are disabled. No mocked provider result is
+  counted as live acceptance. Existing imported-control grouping is unchanged.
 - Acceptance is local only. An earlier foreground sleep command was refused by
   the native Claude harness and was not counted as successful execution; the
   later background and read-only-file workflows completed through the real
@@ -4596,7 +4615,6 @@
 - Add regressions for line-ending preservation, external reloads, LF inserts in
   CRLF documents, byte limits, cursor clamping and fold restoration.
 
-<<<<<<< HEAD
 ## 2026-09-27 — Custom API live acceptance and API-only chat routing
 
 - Cursor and OpenCode advertise cross-chat transport when their CLI is installed
@@ -7914,8 +7932,6 @@ Forget is in the API card's three-dot menu and requires confirmation.
 - Add focused service coverage for successful opens, native error responses,
   and download failures using synthetic data and mocked native boundaries.
 
-=======
->>>>>>> origin/pr-review-24
 ## 2026-09-14 — Desktop 1.0.0 replacement accepted
 
 - Published desktop `1.0.0`, build `1167`, from committed source
