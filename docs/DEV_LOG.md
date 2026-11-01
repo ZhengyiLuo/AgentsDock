@@ -56,6 +56,12 @@
   event-loop notification, keeping a two-worker pool to exercise overlap.
   The old fixture fails under that constraint; the corrected 14-test module
   and 30 repetitions pass with unchanged runtime assertions and production code.
+- A hosted rerun additionally exceeds the test's five-second watchdog during
+  an event-loop scheduling stall. Give this ordering test a bounded 30-second
+  watchdog and release both worker gates even on assertion failure. An isolated
+  6.3-second stall reproduces the old timeout and passes with the corrected
+  fixture; the full 14-test module remains green. This is not a change to
+  runtime timeouts or an assertion of provider latency.
 - Native acceptance uses an isolated macOS Electron profile, real IPC/HTTP and
   live Codex/Claude. Mouse, keyboard and scrolling are driven through Electron's
   debugging interface; analytics are disabled. No mocked provider result is
