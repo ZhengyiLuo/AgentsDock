@@ -1,5 +1,37 @@
 # Public development log
 
+## 2026-10-31 - Isolate Claude native messages from chat routes
+
+- Address issue #53: Claude's native ListAgents/SendMessage namespace can
+  resolve a similarly named provider session instead of an AgentsDock @Chat.
+  Route AgentsDock messages through the run-bound Chats helper and exact
+  server-issued route; native success is not an AgentsDock delivery receipt.
+- Apply PreToolUse guards in both the Claude SDK and print-mode compatibility
+  path. Deny native cross-session discovery/delivery while preserving messages
+  to exact native child IDs observed by SubagentStart and their replies to main.
+  Keep child ownership across SDK reloads, scoped to the chat and provider
+  session. Preserve native permission checks, custom API settings, existing
+  AgentsDock authorization and durable delivery receipts.
+- Include the new runtime module in server package, install and deployment
+  manifests. No global Claude configuration or desktop/mobile code changes.
+- Validation: 294 targeted routing, SDK, runtime-settings, terminal-context
+  and packaging tests pass; shell syntax and Python compilation checks pass.
+  Cover permission modes, legacy tool fields, mismatched identities, symlinks,
+  reconnect isolation and private custom-endpoint settings.
+- Real-use verification: native input in an isolated Electron app on an
+  authenticated test server exercises two Claude-to-Codex @Chat round trips,
+  with one accepted message per send and matching read/reply receipts. A
+  same-name unrelated Claude chat receives neither message. Real child-agent
+  creation, continuation, replies to main and continuation after Reload Claude
+  succeed. Actual Claude print-mode ListAgents and external SendMessage calls
+  are denied even with permission bypass enabled.
+  A subsequent user-driven send is accepted once, read by the intended Codex
+  recipient and acknowledged in that recipient's chat, with no delivery to
+  the same-name Claude chat. A local reply is not a cross-chat return receipt.
+- Source base: `7f53e589`; native Claude 2.1.304 and SDK 0.2.130. Local server
+  preview only, no public release. Live acceptance ran on macOS; Windows and
+  every permission mode were not separately exercised end to end.
+
 ## 2026-10-31 - Keep Claude reports in compact history
 
 - Follow up on issue #50: a report emitted before several tool calls and a
