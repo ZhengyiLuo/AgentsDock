@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it } from 'vitest'
 import { setLocale } from '@shared/i18n'
 import type { Event } from '@shared/types'
-import { liveCodexSubagentCount, isSubagentActive, subagentDetailText, subagentDisplayName, subagentLogText, subagentStatusLabel, subagentsFromEvents } from './subagents'
+import { liveCodexSubagentCount, liveCodexSubagentLabel, hasLiveCodexSubagents, isSubagentActive, subagentDetailText, subagentDisplayName, subagentLogText, subagentStatusLabel, subagentsFromEvents } from './subagents'
 afterEach(() => setLocale('en'))
 
 const event = (seq: number, type: string, patch: Partial<Event> = {}): Event => ({
@@ -15,6 +15,112 @@ const event = (seq: number, type: string, patch: Partial<Event> = {}): Event => 
 })
 
 describe('subagentsFromEvents', () => {
+  it('does not infer a known root owner from incomplete identified-child ancestry', () => {
+    const unknown = event(1, 'subagent_state', { backend: 'codex', subagent_id: 'unknown-child', subagent_status: 'running' })
+    const nested = event(2, 'subagent_state', { backend: 'codex', subagent_id: 'nested-child', subagent_status: 'running', subagent_parent_thread_id: 'omitted-parent' })
+    expect(hasLiveCodexSubagents([unknown], 'current-root')).toBe(false)
+    expect(hasLiveCodexSubagents([nested], 'current-root')).toBe(false)
+    expect(hasLiveCodexSubagents([{ ...nested, subagent_root_thread_id: 'current-root' }], 'current-root')).toBe(true)
+    expect(liveCodexSubagentCount([unknown, nested], 'current-root')).toBe(0)
+    expect(liveCodexSubagentCount([{ ...nested, subagent_root_thread_id: 'current-root' }], 'current-root')).toBe(1)
+  })
+
+  it('keeps separately identified children separate when their snapshots share a wait call', () => {
+    const states = ['child-one', 'child-two'].map((id, index) => event(index + 1, 'subagent_state', {
+      backend: 'codex', subagent_id: id, subagent_tool_id: 'shared-wait-call',
+      subagent_status: 'running', subagent_parent_thread_id: 'current-root'
+    }))
+    expect(subagentsFromEvents(states, 'codex').map(agent => agent.id).sort()).toEqual(['child-one', 'child-two'])
+    expect(hasLiveCodexSubagents(states, 'current-root')).toBe(true)
+  })
+
+  it.each([undefined, 'fork-root'])('excludes copied fork history from live work (root=%s)', root => {
+    const inherited = [
+      event(1, 'tool_started', { forked: true, tool: { id: 'old-spawn', name: 'spawn_agent', input: {} } }),
+      event(2, 'subagent_state', { forked: true, subagent_id: 'old-child', subagent_status: 'running' }),
+      event(3, 'turn_stopped', { forked: true })
+    ]
+    // History still contains the parent's activity; only live controls exclude it.
+    expect(subagentsFromEvents(inherited, 'codex').length).toBeGreaterThan(0)
+    expect(hasLiveCodexSubagents(inherited, root)).toBe(false)
+    const current = [...inherited, event(4, 'tool_started', {
+      run_id: 'fork-run', tool: { id: 'new-spawn', name: 'spawn_agent', input: {} }
+    })]
+    // A new spawn call alone does not prove a live child owned by this fork.
+    expect(hasLiveCodexSubagents(current, root)).toBe(false)
+    expect(hasLiveCodexSubagents([...current, event(5, 'subagent_state', {
+      run_id: 'fork-run', subagent_tool_id: 'new-spawn', subagent_id: 'new-child',
+      subagent_status: 'completed', subagent_root_thread_id: root
+    })], root)).toBe(false)
+  })
+
+  it.each(['starting', 'running'])('joins a reconciled native child across runs without leaving a %s spawn', status => {
+    const events = [
+      event(1, 'tool_started', { backend: 'codex', tool: { id: 'native-call', name: 'spawn_agent', input: {} } }),
+      ...(status === 'running' ? [event(2, 'tool_finished', {
+        backend: 'codex', tool_id: 'native-call', tool: { name: 'spawn_agent', input: {} }
+      })] : []),
+      event(3, 'turn_finished'),
+      event(8, 'subagent_state', {
+        backend: 'codex', run_id: 'reconciled-run', subagent_id: 'native-child',
+        subagent_tool_id: 'native-call', subagent_status: 'completed', subagent_parent_thread_id: 'root'
+      })
+    ]
+    expect(subagentsFromEvents(events, 'codex')).toMatchObject([{ id: 'native-child', status: 'completed' }])
+    expect(subagentsFromEvents(events, 'codex')).toHaveLength(1)
+    expect(hasLiveCodexSubagents(events, 'root')).toBe(false)
+    const live = [...events, event(9, 'subagent_state', {
+      backend: 'codex', run_id: 'new-run', subagent_id: 'live-child',
+      subagent_status: 'running', subagent_parent_thread_id: 'root'
+    })]
+    expect(hasLiveCodexSubagents(live, 'root')).toBe(true)
+  })
+
+  it.each(['turn_finished', 'turn_stopped'])('retires an unconfirmed spawn after its owner %s', terminal => {
+    const start = event(1, 'tool_started', { backend: 'codex', tool: { id: 'unconfirmed-call', name: 'spawn_agent', input: {} } })
+    expect(hasLiveCodexSubagents([start], 'root')).toBe(false)
+    const ended = [start, event(2, terminal)]
+    expect(hasLiveCodexSubagents(ended, 'root')).toBe(false)
+    expect(subagentsFromEvents(ended, 'codex')).toMatchObject([{ status: 'tracking_lost' }])
+    // A delayed, identified child can establish actual ownership afterward.
+    const confirmed = [...ended, event(3, 'subagent_state', { backend: 'codex', subagent_id: 'real-child',
+      subagent_tool_id: 'unconfirmed-call', subagent_status: 'running', subagent_parent_thread_id: 'root' })]
+    expect(hasLiveCodexSubagents(confirmed, 'root')).toBe(true)
+    expect(subagentsFromEvents(confirmed, 'codex')).toHaveLength(1)
+  })
+
+  it('counts only live owned children, including descendants, without counting fork history', () => {
+    const events = [
+      event(1, 'subagent_state', { subagent_id: 'a', subagent_parent_thread_id: 'root', subagent_status: 'running' }),
+      event(2, 'subagent_state', { subagent_id: 'b', subagent_parent_thread_id: 'a', subagent_status: 'running' }),
+      event(3, 'subagent_state', { subagent_id: 'foreign', subagent_parent_thread_id: 'other', subagent_status: 'running' }),
+      event(4, 'subagent_state', { subagent_id: 'copied', subagent_parent_thread_id: 'root', subagent_status: 'running', forked: true })
+    ]
+    expect(liveCodexSubagentCount(events, 'root')).toBe(2)
+    expect(liveCodexSubagentCount(events, 'root')).toBe(2)
+    expect(liveCodexSubagentCount(events, 'other')).toBe(1)
+    expect(liveCodexSubagentCount([...events, event(5, 'subagent_state', { subagent_id: 'b', subagent_parent_thread_id: 'a', subagent_status: 'completed' })], 'root')).toBe(1)
+  })
+
+  it('localizes singular and plural child activity labels', () => {
+    expect(liveCodexSubagentLabel(1)).toBe('1 subagent running')
+    expect(liveCodexSubagentLabel(2)).toBe('2 subagents running')
+    setLocale('zh-CN')
+    expect(liveCodexSubagentLabel(1)).toBe('1 个子 Agent 正在运行')
+    expect(liveCodexSubagentLabel(2)).toBe('2 个子 Agent 正在运行')
+  })
+
+  it('keeps confirmed children stoppable after the parent ends without treating unconfirmed calls as owned children', () => {
+    const events = [
+      event(1, 'tool_started', { backend: 'codex', tool: { id: 'unconfirmed-call', name: 'spawn_agent', input: {} } }),
+      event(2, 'subagent_state', { backend: 'codex', subagent_id: 'real-child', subagent_status: 'running', subagent_parent_thread_id: 'root' }),
+      event(3, 'turn_finished')
+    ]
+    expect(hasLiveCodexSubagents(events, 'root')).toBe(true)
+    expect(hasLiveCodexSubagents([events[0], event(3, 'turn_finished', { run_id: 'other-run' })], 'root')).toBe(false)
+  })
+
+
   it.each(['codex', 'claude'] as const)('localizes only the %s display fallback, preserving native identity and output', backend => {
     const [agent] = subagentsFromEvents([event(1, 'subagent_state', {
       backend, subagent_id: 'child', subagent_status: 'stopped', subagent_activity: 'Original subagent output'

@@ -411,6 +411,7 @@ export interface AgentsDockAPI {
     around(sessionId: string, anchorSeq: number, limit?: number): Promise<TimelinePage>
     trace(sessionId: string, runId: string, anchorSeq: number, after?: number, limit?: number): Promise<TimelineTracePage>
     index(sessionId: string): Promise<TimelineIndex>
+    findEvent(sessionId: string, eventId: string): Promise<TimelineSearchResult | null>
     search(sessionId: string, query: string, limit?: number): Promise<TimelineSearchResult[]>
     subscribe(sessionId: string, after: number): Promise<void>
     unsubscribe(sessionId: string): Promise<void>
@@ -457,6 +458,7 @@ export interface AgentsDockAPI {
     ): Promise<CodexPendingInteraction>
     permissionProfiles(sessionId: string): Promise<CodexPermissionProfile[]>
     goal(sessionId: string): Promise<CodexGoalSnapshot>
+    blockedGoalReport?(sessionId: string): Promise<{ goal: CodexGoalSnapshot['goal']; report: string | null }>
     setGoal(sessionId: string, input: CodexGoalInput): Promise<CodexGoalSnapshot>
     clearGoal(sessionId: string): Promise<CodexGoalSnapshot>
     compact(sessionId: string): Promise<CodexOperationAccepted>

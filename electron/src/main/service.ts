@@ -1,3 +1,4 @@
+import { blockedGoalReport } from '../shared/blocked-goal'
 import type { ProviderUsageScope, ProviderUsageSnapshot, UsageBackend } from '../shared/provider-usage'
 import type { CodeIntelligenceLanguage, CodeIntelligenceStatus } from '../shared/code-intelligence'
 import { customModelBackend, customModelInput, type CustomModelBackend, type CustomModelInput } from '../shared/custom-models'
@@ -22,7 +23,7 @@ import { TeamMailHintController } from './team-mail-hint-controller'
 import { ActivityHealthProjection, type ActivityHealthRequest } from './activity-health'
 import type { CoordinatedConnection, CoordinatedProfile } from './coordinated-updates'
 import { SideQuestionRequests } from './side-question-requests'
-import { sideChatSyncAvailable, type SyncedSideChat, sideQuestionLimit, sideQuestionsAvailable, validateSideQuestionInput, type SideQuestionAnswer, type SideQuestionCancellation, type SideQuestionInput, type SideQuestionScope } from '../shared/side-questions'
+import { sideChatSyncAvailable, sideChatRuntimeSettingsAvailable, type SyncedSideChat, sideQuestionLimit, sideQuestionsAvailable, validateSideQuestionInput, type SideQuestionAnswer, type SideQuestionCancellation, type SideQuestionInput, type SideQuestionScope } from '../shared/side-questions'
 import { parseBulletinHintRefresh } from '../shared/team-bulletin-hints'
 import {
   cursorLocalSessionImportSupported,
@@ -486,7 +487,9 @@ export class AppService {
   } | null = null
 
   constructor(options: AppServiceOptions = {}) {
-    this.localServerDiscovery = options.localServerDiscovery ?? (options.settings || options.clientFactory ? async () => [] : discoverLocalServers)
+    this.localServerDiscovery = options.localServerDiscovery ?? (options.settings || options.clientFactory
+      ? async () => []
+      : () => process.env.AGENTSDOCK_DISABLE_LOCAL_SERVER_DISCOVERY === '1' ? Promise.resolve([]) : discoverLocalServers())
     appLog('startup', 'loading settings')
     this.settings = options.settings ?? new SettingsStore()
     appLog('startup', 'settings loaded')
@@ -1567,10 +1570,30 @@ export class AppService {
         if (existing) {
           // Only fill an unconfigured bootstrap profile. Never overwrite saved
           // remote credentials, a trusted identity, or a user's selection.
-          if (!existing.hasAccessToken && !existing.serverIdentity && existing.serverUrl.replace(/\/$/, '') === server.serverUrl) {
-            this.settings.updateProfile(existing.id, { accessToken: server.accessToken, serverIdentity: server.serverIdentity, serverSetupComplete: true }, process.platform === 'darwin')
-            if (existing.id === this.activeProfileId && intent === this.profileSelectionIntent) await this.switchServer(existing.id, true)
-          }
+          await this.withProfileAuthorityOperation(existing.id, async () => {
+            if (!this.running || this.shutdownEpoch !== epoch || this.profileSelectionIntent !== intent) return
+            this.requireProfileNotRemoving(existing.id)
+            const current = this.settings.getProfile(existing.id)
+            if (!current || current.hasAccessToken || current.serverIdentity || current.serverUrl.replace(/\/$/, '') !== server.serverUrl) return
+            const active = existing.id === this.activeProfileId
+            // Discovery already authenticated this exact credential. Prepare its
+            // client before persistence and do not yield between committing the
+            // identity and retiring the old generation. An async credential read
+            // here exposed a canonical identity on the old renderer scope.
+            const nextClient = active ? this.clientFactory(server.serverUrl, server.accessToken) : undefined
+            try {
+              this.settings.updateProfile(existing.id, { accessToken: server.accessToken, serverIdentity: server.serverIdentity, serverSetupComplete: true }, process.platform === 'darwin')
+            } catch (error) {
+              try { nextClient?.dispose() } catch { /* prospective cleanup must not mask the storage failure */ }
+              throw error
+            }
+            this.profileHealthAccessTokens.delete(existing.id)
+            if (active) this.activateProfile(existing.id, false, true, nextClient)
+            else {
+              this.invalidateProfileHealthProbe(existing.id)
+              this.emitProfiles()
+            }
+          })
           continue
         }
         const profile = this.settings.addProfile({ ...server, serverSetupComplete: true }, process.platform === 'darwin')
@@ -2536,6 +2559,19 @@ export class AppService {
       this.health = { ...this.health, runtimes: { ...this.health.runtimes, codex: diagnostic } }
       this.emitConnection(scope, true, this.health)
     }
+    // Session catalogs describe the active endpoint and may differ from the
+    // server default while work finishes. Refresh the visible chat once after
+    // an explicit save/reset/discovery, including on servers without notices.
+    const focused = this.sessions.find(session => session.id === this.focusedSessionId)
+    if (focused?.backend === 'codex' && (focused.codex_provider === 'custom'
+      || focused.codex_provider_control?.requested_provider === 'custom')) {
+      try {
+        const page = await scope.client.sessionPage(focused.id, { limit: 1 })
+        this.assertCurrentScope(scope)
+        this.upsertSession(scope, page.session)
+      } catch { /* The saved setting remains valid if this detail refresh fails. */ }
+      this.assertCurrentScope(scope)
+    }
   }
 
   async codexServerSubagents(expected: CodexServerSettingsScope): Promise<CodexSubagentsConfiguration> {
@@ -3191,6 +3227,17 @@ export class AppService {
     return diff
   }
 
+  async findTimelineEvent(sessionId: string, eventId: string): Promise<TimelineSearchResult | null> {
+    const scope = this.captureScope()
+    await this.ensureValidatedScope(scope)
+    const result = await scope.client.findTimelineEvent(sessionId, eventId)
+    this.assertCurrentScope(scope)
+    if (result && (result.session_id !== sessionId || result.event_id !== eventId)) {
+      throw new Error('The pinned message response belongs to a different message')
+    }
+    return result
+  }
+
   async searchTimeline(sessionId: string, query: string, limit = 40): Promise<TimelineSearchResult[]> {
     const clean = query.trim()
     if (clean.length < 2) return []
@@ -3686,7 +3733,14 @@ export class AppService {
   submitSyncedSideChat(scope: SideQuestionScope, sessionId: string, input: SideQuestionInput): Promise<SyncedSideChat> {
     const question = validateSideQuestionInput(input, sideQuestionLimit(this.health))
     if (!question.side_chat_id || question.history !== undefined) return Promise.reject(new Error('side_question_invalid_request'))
-    return this.syncedSideChatOperation(scope, sessionId, client => client.submitSyncedSideChat(sessionId, question))
+    return this.syncedSideChatOperation(scope, sessionId, client => {
+      const session = this.sessions.find(candidate => candidate.id === sessionId)
+      if (!sideChatRuntimeSettingsAvailable(this.health, session?.backend)) {
+        delete question.model
+        delete question.effort
+      }
+      return client.submitSyncedSideChat(sessionId, question)
+    })
   }
   stopSyncedSideChat(scope: SideQuestionScope, sessionId: string, requestId: string): Promise<SyncedSideChat> {
     return this.syncedSideChatOperation(scope, sessionId, client => client.stopSyncedSideChat(sessionId, requestId))
@@ -3706,6 +3760,10 @@ export class AppService {
         && expected.serverIdentity !== (this.settings.getProfile(scope.profileId)?.serverIdentity ?? null)) throw staleProfileError()
       const session = this.sessions.find(candidate => candidate.id === sessionId)
       if (!session || !sideQuestionsAvailable(this.health, session.backend)) throw new Error('side_question_unsupported')
+      if (!sideChatRuntimeSettingsAvailable(this.health, session.backend)) {
+        delete question.model
+        delete question.effort
+      }
       validateSideQuestionInput(question, sideQuestionLimit(this.health))
       // A dedicated transport preserves native follow-ups and cancellation
       // ownership even while another server is selected.
@@ -3891,6 +3949,16 @@ export class AppService {
 
   async codexPermissionProfiles(sessionId: string): Promise<CodexPermissionProfile[]> {
     return this.codexRequest(scope => scope.client.codexPermissionProfiles(sessionId))
+  }
+
+  async codexBlockedGoalReport(sessionId: string): Promise<{ goal: CodexGoalSnapshot['goal']; report: string | null }> {
+    return this.codexRequest(async scope => {
+      // Read control records only on explicit expansion, without changing the
+      // semantic timeline, its cache, or the native provider's goal state.
+      const page = await scope.client.sessionPage(sessionId, { limit: 500, tail: true, visible: false, compact: false })
+      const goal = page.session.codex_goal ?? null
+      return { goal, report: blockedGoalReport(goal, page.events, sessionId) }
+    })
   }
 
   async codexGoal(sessionId: string): Promise<CodexGoalSnapshot> {
@@ -5615,6 +5683,9 @@ export class AppService {
     const providerRevision = this.providerCatalogRevision ?? 0
     try {
       const catalog = await scope.client.runtimeCatalog(forceProbe)
+      // Refresh probes CLI/catalog metadata, including after a restart.
+      // It must never request an authentication handoff; the server owns
+      // native login change detection independently of connected clients.
       if (!this.isCurrentScope(scope)) return
       if (providerRevision !== (this.providerCatalogRevision ?? 0)) return
       if (!runtimeCatalogHasSelectableModels(catalog)) {
@@ -7041,6 +7112,7 @@ export class AppService {
 
   private emitProviderRuntimeChanged(scope: ConnectionScope, event: ProviderRuntimeChanged): void {
     if (!this.isCurrentScope(scope)) return
+    if (event.runtime === 'codex_provider') this.upsertSession(scope, event.session)
     this.emit('server:provider-runtime', {
       profileId: scope.profileId,
       profileGeneration: scope.generation,
@@ -7900,19 +7972,47 @@ export function mergeSessionSummaries(previous: Session[], incoming: Session[]):
 }
 
 function preserveCustomProviderModels(previous: Session, incoming: Session): Session {
-  const codex = incoming.backend === 'codex'
-  const field = codex ? 'codex_provider_catalog' : 'provider_connection_catalog'
-  const choice = codex ? 'codex_provider' : 'provider_connection'
-  const saved = previous[field]
-  const summary = incoming[field]
-  if (incoming.backend !== previous.backend || incoming[choice] !== 'custom' || previous[choice] !== 'custom' || !saved || !summary
-    || !summary.configured || saved.base_url !== summary.base_url || summary.models !== undefined) return incoming
-  return { ...incoming, [field]: {
+  if (incoming.backend !== previous.backend) return incoming
+  if (incoming.backend !== 'codex') {
+    if (incoming.provider_connection !== 'custom' || previous.provider_connection !== 'custom') return incoming
+    const catalog = preserveProviderCatalogModels([previous.provider_connection_catalog], incoming.provider_connection_catalog)
+    return catalog === incoming.provider_connection_catalog ? incoming : { ...incoming, provider_connection_catalog: catalog ?? undefined }
+  }
+  const previousControl = previous.codex_provider_control
+  const catalogs = [
+    previous.codex_provider === 'custom' ? previous.codex_provider_catalog : undefined,
+    previousControl?.pending && previousControl.requested_provider === 'custom'
+      ? previousControl.requested_catalog : undefined
+  ]
+  let merged = incoming
+  if (incoming.codex_provider === 'custom') {
+    const catalog = preserveProviderCatalogModels(catalogs, incoming.codex_provider_catalog)
+    if (catalog !== incoming.codex_provider_catalog) merged = { ...merged, codex_provider_catalog: catalog ?? undefined }
+  }
+  const control = incoming.codex_provider_control
+  if (control?.pending && control.requested_provider === 'custom') {
+    const catalog = preserveProviderCatalogModels(catalogs, control.requested_catalog)
+    if (catalog !== control.requested_catalog) merged = { ...merged,
+      codex_provider_control: { ...control, requested_catalog: catalog }
+    }
+  }
+  return merged
+}
+
+function preserveProviderCatalogModels(
+  savedCatalogs: Array<Session['codex_provider_catalog'] | null>,
+  summary: Session['codex_provider_catalog'] | null
+): Session['codex_provider_catalog'] | null {
+  if (!summary?.configured || summary.models !== undefined) return summary
+  const saved = savedCatalogs.find(catalog => catalog?.models !== undefined
+    && catalog.base_url === summary.base_url && catalog.credential_id === summary.credential_id)
+  if (!saved) return summary
+  return {
     ...summary,
-    ...(saved.models !== undefined ? { models: saved.models } : {}),
+    models: saved.models,
     ...(saved.model_efforts !== undefined ? { model_efforts: saved.model_efforts } : {}),
     ...(saved.model_capabilities !== undefined ? { model_capabilities: saved.model_capabilities } : {})
-  } }
+  }
 }
 
 export function mergePolledSessionSummaries(previous: Session[], incoming: Session[]): Session[] {

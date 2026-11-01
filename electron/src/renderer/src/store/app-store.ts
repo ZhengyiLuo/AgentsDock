@@ -10,7 +10,7 @@ import { mailHintPending, type MailArrivalCursor, type MailboxCoverage, type Mai
 import { bulletinHintPending, type BulletinHintRefresh } from '@shared/team-bulletin-hints'
 import { applyOpenCodeSessionEvent, openCodeProviderCommandsAvailable } from '@shared/opencode'
 import { t } from '@shared/i18n'
-import { chatBackendSelection, runtimeSendAdmissionError, selectableChatBackendChoices } from '@shared/runtime-catalog'
+import { chatBackendSelection, runtimeSendAdmissionError, sessionRuntimeForNextTurn, selectableChatBackendChoices } from '@shared/runtime-catalog'
 import { isAsyncCrossChatMessage, isNativeGoalSteerEvent, isNativeSteerTransitionStop, timelineSemanticUnits } from '@shared/semantic-timeline'
 import { turnSendErrorMessage } from '@shared/server-errors'
 import { completedPrefixForkAvailable, RUNNING_FORK_UNAVAILABLE } from '@shared/session-fork'
@@ -149,6 +149,7 @@ interface RendererProfileScope {
 
 interface PendingNamespaceAdoption extends RendererProfileScope {
   canonicalProfiles: PublicServerProfile[]
+  blockedReason?: string
 }
 
 interface StartupChatCleanup {
@@ -953,6 +954,25 @@ export const useAppStore = create<AppState>((set, get) => ({
       window.agentsDock.events.on('server:runtime', payload => {
         if (profileEventMatches(payload, get())) set({ runtimeCatalog: payload.runtimeCatalog })
       }),
+      window.agentsDock.events.on('server:provider-runtime', payload => {
+        if (!profileEventMatches(payload, get()) || !['subagent_limit', 'codex_provider'].includes(payload.event.runtime)) return
+        const event = payload.event
+        set(state => {
+          const session = state.sessions.find(candidate => candidate.id === event.session_id)
+          if (!session || session.backend !== 'codex') return state
+          const patch = event.runtime === 'codex_provider' ? event.session
+            : event.runtime === 'subagent_limit' ? { subagent_limit: event.subagent_limit, subagent_limit_control: event.subagent_limit_control }
+              : {}
+          const updated = { ...session, ...patch }
+          const snapshot = state.snapshots[session.id]
+          return {
+            sessions: state.sessions.map(candidate => candidate.id === session.id ? updated : candidate),
+            snapshots: snapshot ? { ...state.snapshots, [session.id]: {
+              ...snapshot, session: { ...snapshot.session, ...patch }
+            } } : state.snapshots
+          }
+        })
+      }),
       window.agentsDock.events.on('ports:changed', payload => {
         const current = get()
         const changingToAnotherProfile = Boolean(
@@ -972,26 +992,50 @@ export const useAppStore = create<AppState>((set, get) => ({
       }),
       window.agentsDock.events.on('server:profiles', payload => {
         const current = get()
-        if (current.switchingProfileId || payload.activeProfileId !== current.activeProfileId || payload.profileGeneration < current.profileGeneration) return
-        if (payload.profileGeneration !== current.profileGeneration) {
+        if (payload.activeProfileId !== current.activeProfileId || payload.profileGeneration < current.profileGeneration) return
+        const generationChanged = payload.profileGeneration !== current.profileGeneration
+        const supersedesAdoption = generationChanged && current.activeProfileId
+          && pendingNamespaceAdoptionMatches(current.activeProfileId, current.profileGeneration, captureProfileScope(current))
+        if (current.switchingProfileId && !supersedesAdoption) return
+        const before = current.profiles.find(profile => profile.id === current.activeProfileId)
+        const after = payload.profiles.find(profile => profile.id === current.activeProfileId)
+        if (supersedesAdoption && pendingNamespaceAdoption
+          && pendingNamespaceAdoption.canonicalProfiles.find(profile => profile.id === current.activeProfileId)?.serverIdentity !== after?.serverIdentity) {
+          const detail = 'The server identity changed before this workspace could be saved. Your drafts remain here; reconnect the original server before continuing.'
+          pendingNamespaceAdoption.blockedReason = detail
+          profileRefreshes.delete(`${current.activeProfileId}:${current.profileGeneration}:${profileSwitchEpoch}`)
+          activeWorkspaceTransition?.cancel()
+          // Keep the original ownership and unsaved content. Adopting the new
+          // identity here would either leak drafts into it or silently discard
+          // them. A later original-authority event may resume the migration.
+          set({ error: detail })
+          return
+        }
+        if (!(before?.serverIdentity ?? null) && after?.serverIdentity) {
+          if (generationChanged) clearProfileVolatileState()
+          pendingNamespaceAdoption = { ...captureProfileScope(current), profileGeneration: payload.profileGeneration, canonicalProfiles: payload.profiles }
+          set({
+            switchingProfileId: current.activeProfileId,
+            profileGeneration: payload.profileGeneration,
+            profiles: payload.profiles.map(profile => profile.id === current.activeProfileId
+              ? { ...profile, serverIdentity: before?.serverIdentity ?? null }
+              : profile)
+          })
+          const recovery = refreshProfileAfterBootstrap(current.activeProfileId!, payload.profileGeneration, get, set, true)
+          if (generationChanged) {
+            // The old-generation refresh can no longer finish this workspace.
+            // Retire only its wait barrier; response/scope fences still reject
+            // late results and the replacement canonical migration owns close.
+            const transition = beginWorkspaceTransition()
+            transition.follow(recovery)
+            transition.finish()
+          } else followWorkspaceRecovery(recovery)
+        } else if (generationChanged) {
           clearProfileVolatileState()
           set({ profiles: payload.profiles, profileGeneration: payload.profileGeneration, mailHints: consumeBufferedMailHints({ ...current, profiles: payload.profiles, profileGeneration: payload.profileGeneration }, current.mailHints), forwardedPorts: [], forwardedPortsRevision: 0, loadingSessionIds: new Set(), loadingSessionId: null, syncBySession: {}, turnAdmissionTokens: {}, pendingTurnSubmissions: {}, stoppingSessionIds: new Set() })
           queueMicrotask(() => void hydrateVisibleChatPanes(get))
         } else {
-          const before = current.profiles.find(profile => profile.id === current.activeProfileId)
-          const after = payload.profiles.find(profile => profile.id === current.activeProfileId)
-          if (!(before?.serverIdentity ?? null) && after?.serverIdentity) {
-            pendingNamespaceAdoption = { ...captureProfileScope(current), canonicalProfiles: payload.profiles }
-            set({
-              switchingProfileId: current.activeProfileId,
-              profiles: payload.profiles.map(profile => profile.id === current.activeProfileId
-                ? { ...profile, serverIdentity: before?.serverIdentity ?? null }
-                : profile)
-            })
-            followWorkspaceRecovery(refreshProfileAfterBootstrap(current.activeProfileId!, current.profileGeneration, get, set, true))
-          } else {
-            set({ profiles: payload.profiles, mailHints: consumeBufferedMailHints({ ...current, profiles: payload.profiles }, current.mailHints) })
-          }
+          set({ profiles: payload.profiles, mailHints: consumeBufferedMailHints({ ...current, profiles: payload.profiles }, current.mailHints) })
         }
       }),
       window.agentsDock.events.on('server:files', payload => {
@@ -2069,7 +2113,8 @@ export const useAppStore = create<AppState>((set, get) => ({
       set({ error: 'The selected chat is no longer available.' })
       return false
     }
-    const runtimeError = runtimeSendAdmissionError(get().health, currentTarget.backend, currentTarget.provider_connection === 'custom' ? 'custom' : currentTarget.codex_provider)
+    const selectedRuntime = sessionRuntimeForNextTurn(currentTarget)
+    const runtimeError = runtimeSendAdmissionError(get().health, selectedRuntime.backend, selectedRuntime.provider_connection === 'custom' ? 'custom' : selectedRuntime.codex_provider)
     if (runtimeError) {
       set({ error: runtimeError })
       return false
@@ -2123,8 +2168,8 @@ export const useAppStore = create<AppState>((set, get) => ({
         prompt,
         fileIds: uploads.map(file => file.id),
         ...(pendingSubmission.sharedChatRequestId ? { sharedChatRequestId: pendingSubmission.sharedChatRequestId } : {}),
-        model: session?.model,
-        effort: session?.effort,
+        model: selectedRuntime.model,
+        effort: selectedRuntime.effort,
         clientCapabilities: interactiveClientCapabilities(session, get().health, Boolean(options?.skillSelection)),
         chatReferences,
         teamReferences,
@@ -2431,8 +2476,27 @@ export const useAppStore = create<AppState>((set, get) => ({
     const previousSession = get().sessions.find(session => session.id === sessionId)
     const version = ++pendingSessionPatchVersion
     const existing = pendingSessionPatches.get(sessionId)?.patch ?? {}
-    pendingSessionPatches.set(sessionId, { version, patch: { ...existing, ...patch } })
-    set(state => ({ sessions: state.sessions.map(session => session.id === sessionId ? { ...session, ...patch } as Session : session) }))
+    const pendingControl = previousSession?.backend === 'codex' && previousSession.codex_provider_control?.pending
+      ? previousSession.codex_provider_control : null
+    const displayPatch: Partial<Session> = pendingControl && ['codex_provider', 'model', 'effort'].some(key => key in patch)
+      ? { ...patch,
+        // Keep the in-flight provider owner intact while projecting the new
+        // selection through the same fields returned by the server.
+        ...('codex_provider' in patch ? { codex_provider: previousSession?.codex_provider } : {}),
+        ...('model' in patch ? { model: previousSession?.model } : {}),
+        ...('effort' in patch ? { effort: previousSession?.effort } : {}),
+        codex_provider_control: {
+        ...pendingControl,
+        ...('codex_provider' in patch ? {
+          requested_provider: patch.codex_provider ?? 'default',
+          ...(patch.codex_provider !== pendingControl.requested_provider ? { requested_catalog: null } : {})
+        } : {}),
+        ...('model' in patch ? { requested_model: patch.model } : {}),
+        ...('effort' in patch ? { requested_effort: patch.effort } : {})
+      } }
+      : patch
+    pendingSessionPatches.set(sessionId, { version, patch: { ...existing, ...displayPatch } })
+    set(state => ({ sessions: state.sessions.map(session => session.id === sessionId ? { ...session, ...displayPatch } as Session : session) }))
     try {
       const updated = await window.agentsDock.sessions.update(sessionId, normalizeSessionPatch(patch))
       if (!profileScopeMatches(scope, get())) return
@@ -2886,9 +2950,11 @@ function beginWorkspaceTransition(): WorkspaceTransition {
 
 /** Waits for the current cached switch and canonical-identity refresh to settle. */
 export async function waitForWorkspaceReady(): Promise<void> {
+  if (pendingNamespaceAdoption?.blockedReason) throw new Error(pendingNamespaceAdoption.blockedReason)
   while (activeWorkspaceTransition) {
     const transition = activeWorkspaceTransition
     await transition.promise
+    if (pendingNamespaceAdoption?.blockedReason) throw new Error(pendingNamespaceAdoption.blockedReason)
     if (activeWorkspaceTransition === transition) return
   }
 }
@@ -3588,6 +3654,11 @@ async function runProfileRefresh(
         const selectedSessionId = selectedSessionFromBootstrap(recovered)
         const layout = await restoredChatPaneLayout(recovered, selectedSessionId)
         if (!isLatestRefresh()) return
+        const afterLayout = get()
+        if (requestedScope.switchEpoch !== profileSwitchEpoch
+          || afterLayout.activeProfileId !== profileId || afterLayout.profileGeneration !== profileGeneration
+          || !pendingNamespaceAdoptionMatches(profileId, profileGeneration, requestedScope)
+          || pendingNamespaceAdoption?.canonicalProfiles.find(profile => profile.id === profileId)?.serverIdentity !== recoveredIdentity) return
         clearProfileVolatileState()
         pendingNamespaceAdoption = null
         set(workspaceStateFromBootstrap(recovered, selectedSessionId, true, layout))
@@ -3876,12 +3947,14 @@ function profileEventMatches(
 }
 
 export async function flushActiveWorkspace(): Promise<void> {
+  if (pendingNamespaceAdoption?.blockedReason) throw new Error(pendingNamespaceAdoption.blockedReason)
   const pending: Promise<unknown>[] = []
   const collect = (promise: PromiseLike<unknown> | unknown): void => { pending.push(Promise.resolve(promise)) }
   const detail: DraftFlushDetail = { pending, promises: pending, waitUntil: collect, add: collect }
   window.dispatchEvent(new CustomEvent<DraftFlushDetail>('agentsdock:flush-draft', { detail }))
   window.dispatchEvent(new CustomEvent<DraftFlushDetail>('agentsdock:capture-timeline', { detail }))
   const results = await Promise.allSettled(pending)
+  if (pendingNamespaceAdoption?.blockedReason) throw new Error(pendingNamespaceAdoption.blockedReason)
   const failure = results.find((result): result is PromiseRejectedResult => result.status === 'rejected')
   if (failure) throw failure.reason
 }

@@ -160,6 +160,26 @@ beforeEach(() => {
   useAppStore.setState({ error: null })
 })
 
+it.each([
+  'Codex sign-in handoff is waiting: Codex could not report this chat\'s goal state. Your message has not been sent. Retry the message to check again.',
+  'Refreshing Codex sign-in. Wait for this chat\'s running work, approvals, goals and background terminals to finish, then retry. Your message has not been sent to Codex.',
+])('shows a handoff wait without suggesting another login or CLI refresh', message => {
+  useAppStore.setState({ connected: true, health: null, snapshots: {}, sessions: [],
+    runtimeCatalog: { ...readyCatalog, backends: { ...readyCatalog.backends, codex: {
+      ...readyCatalog.backends.codex, diagnostic: {
+        backend: 'codex', status: 'unauthenticated', installed: true, authenticated: false, available: false,
+        message: 'Cached login error', action: 'Run codex login again.',
+      },
+    } } },
+  })
+  render(<RuntimeHealthNotice backend="codex" sessionId="existing-chat" admissionError={message} />)
+  expect(screen.getByText('Waiting for sign-in handoff')).toBeInTheDocument()
+  expect(screen.getByText(message)).toBeInTheDocument()
+  expect(screen.queryByText('Run codex login again.')).not.toBeInTheDocument()
+  expect(screen.queryByRole('button', { name: /recheck/i })).not.toBeInTheDocument()
+  expect(screen.queryByText('Check failed')).not.toBeInTheDocument()
+})
+
 it('copies the complete error and command, including text beyond the old 520-character cutoff', async () => {
   const message = 'Long diagnostic. '.repeat(50) + 'Run `codex unarchive example-thread` to unarchive it first.'
   useAppStore.setState({ health: null, runtimeCatalog: null, snapshots: {}, sessions: [] })

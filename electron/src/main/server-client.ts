@@ -1266,6 +1266,30 @@ export class AgentServerClient {
     return this.requestText(`/api/sessions/${encodeURIComponent(sessionId)}/diffs/${encodeURIComponent(runId)}`)
   }
 
+  async findTimelineEvent(sessionId: string, eventId: string): Promise<TimelineSearchResult | null> {
+    const configuration = this.configuration
+    try {
+      const response = await this.get<{ event: TimelineSearchResult | null }>(
+        `/api/sessions/${encodeURIComponent(sessionId)}/timeline-event/${encodeURIComponent(eventId)}`, configuration)
+      return response.event
+    } catch (error) {
+      if (!(error instanceof ServerError) || error.status !== 404) throw error
+    }
+    // Older servers have no identity endpoint. Read exact IDs through their
+    // existing history API; do not search a shortened/merged display preview.
+    let before: number | undefined
+    for (;;) {
+      if (this.configuration !== configuration) throw new Error('Server changed while locating the pinned message')
+      const page = await this.sessionPageWithConfiguration(configuration, sessionId, { before, limit: 1000, tail: true, visible: true })
+      const event = page.events.find(event => event.session_id === sessionId && event.id === eventId)
+      if (event) return { session_id: sessionId, event_id: event.id, seq: event.seq, ts: event.ts, role: 'system', snippet: '' }
+      if (!page.has_more) return null
+      const next = page.next_before ?? page.before ?? page.events[0]?.seq
+      if (next == null || before != null && next >= before) throw new Error('Unable to load older history for this pinned message')
+      before = next
+    }
+  }
+
   async searchTimeline(sessionId: string, query: string, limit = 40): Promise<TimelineSearchResult[]> {
     const params = new URLSearchParams({ q: query, limit: String(limit) })
     const response = await this.get<{ results?: TimelineSearchResult[] }>(`/api/sessions/${encodeURIComponent(sessionId)}/search?${params}`)
@@ -1305,8 +1329,8 @@ export class AgentServerClient {
       prompt,
       ...(clientRequestId ? { client_request_id: clientRequestId } : {}),
       file_ids: fileIds,
-      model: model ?? '',
-      effort: effort ?? '',
+      ...(model !== undefined ? { model: model ?? '' } : {}),
+      ...(effort !== undefined ? { effort: effort ?? '' } : {}),
       client_capabilities: clientCapabilities,
       ...(chatReferences.length ? { chat_references: chatReferences } : {}),
       ...(teamReferences.length ? { team_references: teamReferences } : {}),
@@ -2380,8 +2404,8 @@ export class AgentServerClient {
             if (notice.session_id === sessionId && (notice.backend === 'codex' || notice.backend === 'claude')) onProviderUsageChanged?.(notice.backend)
             return
           }
-          if (isProviderRuntimeChanged(packet)) {
-            if (packet.session_id === sessionId) onProviderRuntime?.(packet)
+          if (packet && typeof packet === 'object' && 'type' in packet && packet.type === 'provider_runtime_changed') {
+            if (isProviderRuntimeChanged(packet) && packet.session_id === sessionId) onProviderRuntime?.(packet)
             return
           }
           if (isTimelinePinsChanged(packet)) {
@@ -2943,12 +2967,32 @@ function isEmergencySessionPacket(value: unknown): value is Session {
 function isProviderRuntimeChanged(value: unknown): value is ProviderRuntimeChanged {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return false
   const packet = value as Record<string, unknown>
-  return packet.type === 'provider_runtime_changed'
+  const envelope = packet.type === 'provider_runtime_changed'
     && packet.ephemeral === true
-    && packet.runtime === 'context_usage'
     && (packet.backend === 'claude' || packet.backend === 'codex')
     && typeof packet.session_id === 'string'
     && packet.session_id.length > 0
+  if (!envelope) return false
+  if (packet.runtime === 'context_usage') return true
+  if (packet.runtime === 'codex_provider') {
+    const session = packet.session
+    if (packet.backend !== 'codex' || !session || typeof session !== 'object' || Array.isArray(session)) return false
+    const fields = session as Record<string, unknown>
+    return fields.id === packet.session_id && fields.backend === 'codex'
+      && typeof fields.title === 'string'
+      && (fields.codex_provider === 'default' || fields.codex_provider === 'custom')
+  }
+  if (packet.runtime !== 'subagent_limit' || packet.backend !== 'codex') return false
+  const limit = (value: unknown) => value === null || (typeof value === 'number' && Number.isSafeInteger(value) && value > 0)
+  const control = packet.subagent_limit_control
+  if (!control || typeof control !== 'object' || Array.isArray(control)) return false
+  const fields = control as Record<string, unknown>
+  return limit(packet.subagent_limit)
+    && fields.supported === true
+    && fields.applies_to === 'automatically_when_idle'
+    && ['applied', 'pending', 'next_start'].includes(String(fields.application_state))
+    && limit(fields.requested_limit)
+    && limit(fields.effective_limit)
 }
 
 function isTimelinePinsChanged(value: unknown): value is TimelinePinsChanged {

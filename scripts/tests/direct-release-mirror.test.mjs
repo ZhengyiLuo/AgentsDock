@@ -54,6 +54,12 @@ class FakeGitHub {
     this.writes.push(['publish', repo])
     Object.assign(this.entries.get(repo).release, { draft: false, prerelease: track === 'beta' })
   }
+  updateNotes(repo, tag, body) {
+    assert.equal(tag, this.entries.get(repo).release.tag_name)
+    assert.equal(this.entries.get(repo).release.draft, true)
+    this.writes.push(['notes', repo])
+    this.entries.get(repo).release.body = body
+  }
   verifySourceTag(release, sha) { assert.equal(release.target_commitish, sha, 'wrong public tag target') }
 }
 
@@ -117,6 +123,48 @@ test('rejects source mismatch on a same-version published peer without writes', 
   github.entries.get(REPOSITORIES[1]).release.prerelease = true
   await assert.rejects(mirror.publish({ ...accepted, assets: undefined }), /sourceSha changed/)
   assert.equal(github.writes.length, 2)
+})
+
+test('copies final canonical testing limits to the draft mirror before publishing either release', async t => {
+  const { github, mirror, accepted } = await staged(t)
+  const sealed = () => [...github.entries].map(([repo, entry]) => [repo, [...entry.bytes].map(([name, bytes]) => [name, digest(bytes)]), structuredClone(entry.release.assets), entry.release.target_commitish])
+  const before = sealed()
+  github.entries.get(REPOSITORIES[0]).release.body = `Documented testing limits: reboot survival remains unvalidated.\n\n${github.release(REPOSITORIES[0]).body}`
+  await mirror.publish({ ...accepted, assets: undefined })
+  assert.equal(github.release(REPOSITORIES[1]).body, github.release(REPOSITORIES[0]).body)
+  assert.deepEqual(github.writes.slice(2), [['notes', REPOSITORIES[1]], ...REPOSITORIES.map(repo => ['publish', repo])])
+  assert.deepEqual(sealed(), before)
+  await mirror.publish({ ...accepted, assets: undefined })
+  assert.equal(github.writes.length, 5, 'retry must not edit published notes or republish')
+})
+
+test('a failed or ineffective draft note update blocks both publications', async t => {
+  for (const fails of [true, false]) {
+    const { github, mirror, accepted } = await staged(t)
+    github.entries.get(REPOSITORIES[0]).release.body = `Final limits.\n${github.release(REPOSITORIES[0]).body}`
+    github.updateNotes = () => { if (fails) throw new Error('notes denied') }
+    await assert.rejects(mirror.publish({ ...accepted, assets: undefined }), fails ? /notes denied/ : /notes did not match/)
+    assert.ok(REPOSITORIES.every(repo => github.release(repo).draft))
+    assert.equal(github.writes.length, 2)
+  }
+})
+
+test('does not rewrite notes on an already-published mirror', async t => {
+  const { github, mirror, accepted } = await staged(t)
+  await mirror.publish({ ...accepted, assets: undefined })
+  github.entries.get(REPOSITORIES[0]).release.body = `Later canonical clarification.\n${github.release(REPOSITORIES[0]).body}`
+  const oldMirrorNotes = github.release(REPOSITORIES[1]).body
+  await mirror.publish({ ...accepted, assets: undefined })
+  assert.equal(github.release(REPOSITORIES[1]).body, oldMirrorNotes)
+  assert.equal(github.writes.length, 4)
+})
+
+test('GitHub note edits pass text as one argument without changing draft state or payload', () => {
+  const calls = []
+  const client = new GitHubClient((_command, args) => { calls.push(args); return '' })
+  const body = 'Limits: unvalidated\nLiteral $TEXT and `text`.'
+  client.updateNotes(REPOSITORIES[1], `v${VERSION}`, body)
+  assert.deepEqual(calls, [['release', 'edit', `v${VERSION}`, '--repo', REPOSITORIES[1], '--tag', `v${VERSION}`, '--notes', body]])
 })
 
 test('rejects changed mirror payload even if the asset names still match', async t => {

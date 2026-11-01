@@ -184,6 +184,51 @@ class NativeCliGuardTests(unittest.TestCase):
         for private in ("private-token", "private-path", str(self.home)):
             self.assertNotIn(private, text)
 
+    def named_chain_fixture(self, health_values, clock=None):
+        old = {"server_identity": "named", "server_instance_id": "old"}
+        default = {"server_identity": "default", "server_instance_id": "unchanged"}
+        observations, events = {}, []
+
+        def command(argv, **kwargs):
+            events.append(argv[1])
+
+        values = iter(health_values)
+
+        def health(*args, **kwargs):
+            events.append("health")
+            result = next(values)
+            if isinstance(result, Exception):
+                raise result
+            return result
+
+        with patch.object(native, "command", side_effect=command), patch.object(native, "health", side_effect=health), \
+                patch.object(native.time, "sleep", side_effect=lambda _: events.append("sleep")), \
+                patch.object(native.time, "monotonic", side_effect=clock or (lambda: 0)):
+            result = native.exercise_immediate_named_chain("fixture-cli", {}, "1.0.10", 9999, "synthetic", old,
+                                                           "synthetic-default", default, observations, lambda *args: None)
+        return result, observations, events
+
+    def test_named_chain_runs_stop_start_without_an_observer_between_them(self):
+        fresh = {"server_identity": "named", "server_instance_id": "fresh"}
+        default = {"server_identity": "default", "server_instance_id": "unchanged"}
+        result, observations, events = self.named_chain_fixture([
+            {"server_identity": "named", "server_instance_id": "old"}, RuntimeError("not ready"), fresh, fresh, default])
+        self.assertEqual(events[:2], ["stop", "start"])
+        self.assertEqual(result, fresh)
+        self.assertTrue(observations["immediateNamedStopStartFreshStableHealthAndDefaultUnaffected"])
+
+    def test_named_chain_does_not_accept_stale_or_unstable_health(self):
+        old = {"server_identity": "named", "server_instance_id": "old"}
+        fresh = {**old, "server_instance_id": "fresh"}
+        with self.assertRaisesRegex(RuntimeError, "did not reach fresh"):
+            self.named_chain_fixture([old], clock=[0, 181])
+        with self.assertRaisesRegex(RuntimeError, "did not stay healthy"):
+            self.named_chain_fixture([fresh, RuntimeError("gone")])
+        with self.assertRaisesRegex(RuntimeError, "changed again"):
+            self.named_chain_fixture([fresh, {**fresh, "server_instance_id": "another"}])
+        with self.assertRaisesRegex(RuntimeError, "disturbed default"):
+            self.named_chain_fixture([fresh, fresh, {"server_identity": "default", "server_instance_id": "changed"}])
+
     def default_removal_fixture(self, change=None):
         # Inert commands/native-state observations and disposable files only.
         # Never invokes exercise(), starts a service, or spoofs a hosted runner.

@@ -46,6 +46,40 @@ function browserHeaders(request: IncomingMessage): string[] {
 afterEach(() => { vi.useRealTimers(); vi.restoreAllMocks(); vi.unstubAllGlobals() })
 
 describe('side-question native HTTP contract', () => {
+  it.each(['synced', 'legacy'] as const)('carries independent model and effort changes through %s native HTTP', async mode => {
+    const requests: Array<{ method?: string; url?: string; payload: unknown }> = []
+    const choices = [
+      { model: 'gpt-6-sol', effort: 'low' },
+      { model: 'gpt-6-sol', effort: 'high' },
+      { model: 'gpt-6-astra', effort: '' }
+    ]
+    await localTransport(async (request, response) => {
+      expect(browserHeaders(request)).toEqual([])
+      expect(request.headers['x-agentsdock-token']).toBe(token)
+      const payload = JSON.parse(await body(request))
+      requests.push({ method: request.method, url: request.url, payload })
+      const runtime = { model: payload.model, effort: payload.effort }
+      json(response, mode === 'synced' ? {
+        session_id: 'chat-a', side_chat_id: 'side-a', revision: requests.length,
+        last_request_id: payload.request_id, exchanges: [], ...runtime
+      } : { ...answer, request_id: payload.request_id, ...runtime }, mode === 'synced' ? 202 : 200)
+    }, async client => {
+      for (const [index, choice] of choices.entries()) {
+        const followup = { ...input, request_id: `request-${index}`, ...choice,
+          ...(index ? { after_request_id: `request-${index - 1}` } : {}) }
+        const result = mode === 'synced'
+          ? await client.submitSyncedSideChat('chat-a', followup)
+          : await client.askSideQuestion('chat-a', followup)
+        expect(result).toMatchObject(choice)
+      }
+    })
+    expect(requests).toEqual(choices.map((choice, index) => ({
+      method: 'POST', url: mode === 'synced' ? '/api/sessions/chat-a/side-chat' : path,
+      payload: { ...input, request_id: `request-${index}`, ...choice,
+        ...(index ? { after_request_id: `request-${index - 1}` } : {}) }
+    })))
+  })
+
   it('uses native authenticated transport for synced reads, submission, Stop and Clear', async () => {
     const requests: Array<{ method?: string; url?: string; body: string }> = []
     const snapshot = { session_id: 'chat-a', side_chat_id: 'side-a', revision: 0, last_request_id: null, exchanges: [] }

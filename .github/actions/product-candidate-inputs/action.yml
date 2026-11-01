@@ -1,0 +1,171 @@
+name: Verify unpublished macOS candidate inputs
+description: Read and verify one pinned test-only draft before any installation or trust changes
+inputs:
+  candidate_tag:
+    required: true
+    description: Exact unpublished numbered-beta or reviewed stable 1.0.9/1.0.10/1.0.11 candidate tag
+  receipt_sha256:
+    required: true
+    description: Independently accepted candidate.json SHA-256
+  bundle_sha256:
+    required: true
+    description: Independently accepted candidate-bundle.zip SHA-256
+  github_token:
+    required: true
+    description: Built-in job token for reading the unpublished draft; never inherited by installed apps
+  execution_scope:
+    default: candidate
+    description: candidate (macOS app/server) or candidate-server-linux (server rollback only)
+  baseline_profile:
+    default: legacy
+    description: legacy; beta1.0.12-beta.2-only stable111/beta1121; stable1.0.11-only stable110/beta11112; stable1.0.9-only stable108/beta1085; stable1.0.10-only stable109; exact 1.0.10-beta.2 through beta.6 or stable1.0.10 beta1101
+outputs:
+  version:
+    value: ${{ steps.inputs.outputs.version }}
+    description: Verified candidate version
+  track:
+    value: ${{ steps.inputs.outputs.track }}
+    description: Verified candidate payload track
+  baseline_version:
+    value: ${{ steps.inputs.outputs.baseline_version }}
+    description: Independently verified desktop baseline version
+runs:
+  using: composite
+  steps:
+    - id: inputs
+      shell: bash
+      env:
+        GH_TOKEN: ${{ inputs.github_token }}
+        CANDIDATE_TAG: ${{ inputs.candidate_tag }}
+        RECEIPT_SHA256: ${{ inputs.receipt_sha256 }}
+        BUNDLE_SHA256: ${{ inputs.bundle_sha256 }}
+        EXECUTION_SCOPE: ${{ inputs.execution_scope }}
+        BASELINE_PROFILE: ${{ inputs.baseline_profile }}
+      run: |
+        set -euo pipefail
+        umask 077
+        [[ "$CANDIDATE_TAG" == candidate-replay-v1.0.9 || "$CANDIDATE_TAG" == candidate-replay-v1.0.10 || "$CANDIDATE_TAG" == candidate-replay-v1.0.11 || "$CANDIDATE_TAG" =~ ^candidate-replay-v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)-beta\.[1-9][0-9]*$ ]] || exit 1
+        [[ "$BASELINE_PROFILE" == legacy || ( "$EXECUTION_SCOPE" == candidate && ( ( "$CANDIDATE_TAG" == candidate-replay-v1.0.12-beta.2 && ( "$BASELINE_PROFILE" == stable111 || "$BASELINE_PROFILE" == beta1121 ) ) || ( "$CANDIDATE_TAG" == candidate-replay-v1.0.12-beta.1 && ( "$BASELINE_PROFILE" == stable111 || "$BASELINE_PROFILE" == beta11112 ) ) || ( "$CANDIDATE_TAG" == candidate-replay-v1.0.11 && ( "$BASELINE_PROFILE" == stable110 || "$BASELINE_PROFILE" == beta11112 ) ) || ( "$CANDIDATE_TAG" == candidate-replay-v1.0.10 && ( "$BASELINE_PROFILE" == stable109 || "$BASELINE_PROFILE" == beta1101 ) ) || ( "$CANDIDATE_TAG" == candidate-replay-v1.0.9 && ( "$BASELINE_PROFILE" == stable108 || "$BASELINE_PROFILE" == beta1085 ) ) || ( ( "$CANDIDATE_TAG" == candidate-replay-v1.0.10-beta.2 || "$CANDIDATE_TAG" == candidate-replay-v1.0.10-beta.3 || "$CANDIDATE_TAG" == candidate-replay-v1.0.10-beta.4 || "$CANDIDATE_TAG" == candidate-replay-v1.0.10-beta.5 || "$CANDIDATE_TAG" == candidate-replay-v1.0.10-beta.6 ) && "$BASELINE_PROFILE" == beta1101 ) ) ) ]] || exit 1
+        [[ "$RECEIPT_SHA256" =~ ^[a-f0-9]{64}$ && "$BUNDLE_SHA256" =~ ^[a-f0-9]{64}$ ]] || exit 1
+        case "$EXECUTION_SCOPE" in
+          candidate)
+            RUNNER_OPERATION=validate-runner
+            IMPORT_SCOPE=true
+            node --input-type=module -e 'import {assertCandidateRunner} from "./scripts/product-candidate-receipt.mjs"; assertCandidateRunner()'
+            ;;
+          candidate-server-linux)
+            RUNNER_OPERATION=validate-server-runner
+            IMPORT_SCOPE=server-linux
+            node --input-type=module -e 'import {assertCandidateServerRunner} from "./scripts/product-candidate-receipt.mjs"; assertCandidateServerRunner()'
+            ;;
+          *) echo 'Unknown candidate execution scope.' >&2; exit 1 ;;
+        esac
+        mkdir "$RUNNER_TEMP/candidate-inputs"
+        gh release view "$CANDIDATE_TAG" --repo "$GITHUB_REPOSITORY" \
+          --json tagName,isDraft,isPrerelease,targetCommitish,assets > "$RUNNER_TEMP/candidate-inputs/draft.json"
+        node --input-type=module - "$RUNNER_TEMP/candidate-inputs/draft.json" <<'NODE'
+        import assert from 'node:assert/strict'
+        import {readFileSync} from 'node:fs'
+        const draft = JSON.parse(readFileSync(process.argv[2]))
+        assert(draft.tagName === process.env.CANDIDATE_TAG && draft.isDraft === true && draft.isPrerelease === true)
+        assert.deepEqual(draft.assets.map(asset => asset.name).sort(), ['candidate-bundle.zip', 'candidate.json'])
+        NODE
+        gh release download "$CANDIDATE_TAG" --repo "$GITHUB_REPOSITORY" \
+          --pattern candidate.json --pattern candidate-bundle.zip --dir "$RUNNER_TEMP/candidate-inputs"
+        python3 scripts/extract_product_candidate.py "$RUNNER_TEMP/candidate-inputs/candidate.json" "$RECEIPT_SHA256" \
+          "$RUNNER_TEMP/candidate-inputs/candidate-bundle.zip" "$BUNDLE_SHA256" "$RUNNER_TEMP/candidate-inputs/payload"
+        node scripts/product-candidate-receipt.mjs inspect "$RUNNER_TEMP/candidate-inputs/candidate.json" "$RECEIPT_SHA256" \
+          "$RUNNER_TEMP/candidate-inputs/payload/server" "$RUNNER_TEMP/candidate-inputs/payload/desktop" > /dev/null
+        node scripts/product-candidate-receipt.mjs "$RUNNER_OPERATION" "$RUNNER_TEMP/candidate-inputs/candidate.json" "$RECEIPT_SHA256" \
+          > "$RUNNER_TEMP/candidate-inputs/harness-identity.json"
+        node --input-type=module - "$RUNNER_TEMP/candidate-inputs/candidate.json" "$RUNNER_TEMP/candidate-inputs/draft.json" <<'NODE' >> "$GITHUB_OUTPUT"
+        import assert from 'node:assert/strict'
+        import {readFileSync} from 'node:fs'
+        const receipt = JSON.parse(readFileSync(process.argv[2]))
+        const draft = JSON.parse(readFileSync(process.argv[3]))
+        assert(draft.targetCommitish === receipt.sourceSha, 'Draft target must remain the immutable packaged source commit')
+        assert(receipt.sourceRef === process.env.GITHUB_REF_NAME)
+        assert(process.env.CANDIDATE_TAG === `candidate-replay-v${receipt.version}`)
+        console.log(`version=${receipt.version}`)
+        console.log(`track=${receipt.track}`)
+        NODE
+        PRODUCT_VERSION="$(node -p 'JSON.parse(require("fs").readFileSync(process.argv[1])).version' "$RUNNER_TEMP/candidate-inputs/candidate.json")"
+        ARTIFACT_SOURCE_SHA="$(node -p 'JSON.parse(require("fs").readFileSync(process.argv[1])).sourceSha' "$RUNNER_TEMP/candidate-inputs/candidate.json")"
+        SIGNER_RUN="$(node -p 'JSON.parse(require("fs").readFileSync(process.argv[1])).signerRunId' "$RUNNER_TEMP/candidate-inputs/candidate.json")"
+        node scripts/import_product_server.mjs inspect --assets "$RUNNER_TEMP/candidate-inputs/payload/server" \
+          --archive "$RUNNER_TEMP/candidate-inputs/payload/signer-artifact.zip" --source-sha "$ARTIFACT_SOURCE_SHA" --candidate-rehearsal "$IMPORT_SCOPE" \
+          --source-ref "$GITHUB_REF_NAME" --version "$PRODUCT_VERSION" --signer-run-id "$SIGNER_RUN" \
+          --report "$RUNNER_TEMP/candidate-inputs/server-import-live.json" > /dev/null
+        cmp "$RUNNER_TEMP/candidate-inputs/server-import-live.json" "$RUNNER_TEMP/candidate-inputs/payload/server-import.json"
+        # Retain the original signed legacy archive path. Beta candidates select
+        # Beta in the app; the reviewed stable candidate keeps Stable selected.
+        if [[ "$BASELINE_PROFILE" == legacy ]]; then
+        BASELINE_PAIRS=(AgentsServer:1.0.7-beta.21)
+        if [[ "$EXECUTION_SCOPE" == candidate ]]; then BASELINE_PAIRS+=(AgentsDock-Releases:1.0.6); fi
+        for pair in "${BASELINE_PAIRS[@]}"; do
+          BASELINE_REPO="${pair%%:*}"
+          BASELINE_VERSION="${pair#*:}"
+          gh release view "v$BASELINE_VERSION" --repo "ZhengyiLuo/$BASELINE_REPO" \
+            --json tagName,isDraft,isPrerelease > "$RUNNER_TEMP/candidate-inputs/$BASELINE_REPO.json"
+          node --input-type=module - "$RUNNER_TEMP/candidate-inputs/$BASELINE_REPO.json" "$BASELINE_VERSION" <<'NODE'
+        import assert from 'node:assert/strict'
+        import {readFileSync} from 'node:fs'
+        const baseline = JSON.parse(readFileSync(process.argv[2]))
+        assert(baseline.tagName === `v${process.argv[3]}` && baseline.isDraft === false
+          && baseline.isPrerelease === process.argv[3].includes('-beta.'))
+        NODE
+        done
+        replay_baseline=()
+        if [[ "$EXECUTION_SCOPE" == candidate ]]; then
+          gh release download v1.0.6 --repo ZhengyiLuo/AgentsDock-Releases \
+            --pattern AgentsDock-1.0.6-mac-universal.zip --pattern SHA256SUMS --pattern latest-mac.yml \
+            --dir "$RUNNER_TEMP/candidate-inputs/baseline-desktop"
+          replay_baseline=(--baseline-desktop "$RUNNER_TEMP/candidate-inputs/baseline-desktop" --baseline-version 1.0.6)
+        fi
+        gh release download v1.0.7-beta.21 --repo ZhengyiLuo/AgentsServer \
+          --pattern agents-server-1.0.7-beta.21.tar.gz --pattern agents-server-manifest.json --pattern agents-server-manifest.sig \
+          --dir "$RUNNER_TEMP/candidate-inputs/baseline-server"
+        echo 'baseline_version=1.0.6' >> "$GITHUB_OUTPUT"
+        else
+          # Independent incumbent identities, never substituted into candidate receipts.
+          read -r BASELINE_REPO BASELINE_VERSION BASELINE_TRACK BASELINE_SERVER_VERSION < <(
+            node --input-type=module - "$BASELINE_PROFILE" "$PRODUCT_VERSION" <<'NODE'
+        import {candidateBaselineProfile} from './scripts/product-candidate-receipt.mjs'
+        const profile = candidateBaselineProfile(process.argv[2], process.argv[3])
+        console.log([profile.desktop.repository, profile.desktop.version, profile.desktop.track, profile.server.version].join(' '))
+        NODE
+          )
+          gh release view "v$BASELINE_VERSION" --repo "ZhengyiLuo/$BASELINE_REPO" \
+            --json tagName,isDraft,isPrerelease,targetCommitish > "$RUNNER_TEMP/candidate-inputs/baseline-release.json"
+          node --input-type=module - "$RUNNER_TEMP/candidate-inputs/baseline-release.json" "$BASELINE_PROFILE" "$PRODUCT_VERSION" <<'NODE'
+        import assert from 'node:assert/strict'
+        import {readFileSync} from 'node:fs'
+        import {candidateBaselineProfile} from './scripts/product-candidate-receipt.mjs'
+        const release = JSON.parse(readFileSync(process.argv[2]))
+        const expected = candidateBaselineProfile(process.argv[3], process.argv[4]).desktop
+        assert(release.tagName === `v${expected.version}` && release.isDraft === false && release.isPrerelease === (expected.track === 'beta'))
+        if (expected.sourceSha) assert.equal(release.targetCommitish, expected.sourceSha)
+        NODE
+          BASELINE_METADATA=latest-mac.yml
+          if [[ "$BASELINE_TRACK" == beta ]]; then BASELINE_METADATA=beta-mac.yml; fi
+          gh release download "v$BASELINE_VERSION" --repo "ZhengyiLuo/$BASELINE_REPO" \
+            --pattern "AgentsDock-$BASELINE_VERSION-mac-universal.zip" --pattern SHA256SUMS --pattern "$BASELINE_METADATA" \
+            --dir "$RUNNER_TEMP/candidate-inputs/baseline-desktop"
+          gh release download "npm-candidate-v$BASELINE_SERVER_VERSION" --repo ZhengyiLuo/AgentsDock \
+            --pattern "server-$BASELINE_SERVER_VERSION.tgz" --pattern agents-server-npm-manifest.json --pattern agents-server-npm-manifest.sig \
+            --dir "$RUNNER_TEMP/candidate-inputs/baseline-server"
+          BASELINE_REGISTRY_STATUS="$(curl --disable --fail --silent --show-error --proto '=https' --tlsv1.2 --max-time 120 \
+            "https://registry.npmjs.org/@agentsdock/server/-/server-$BASELINE_SERVER_VERSION.tgz" \
+            --output "$RUNNER_TEMP/candidate-inputs/baseline-registry.tgz" --write-out '%{http_code}')"
+          test "$BASELINE_REGISTRY_STATUS" = 200
+          cmp "$RUNNER_TEMP/candidate-inputs/baseline-registry.tgz" "$RUNNER_TEMP/candidate-inputs/baseline-server/server-$BASELINE_SERVER_VERSION.tgz"
+          node scripts/product-candidate-receipt.mjs verify-baseline-server "$BASELINE_PROFILE" "$RUNNER_TEMP/candidate-inputs/baseline-server" "$PRODUCT_VERSION" > /dev/null
+          node scripts/product-candidate-receipt.mjs verify-baseline-desktop "$BASELINE_PROFILE" "$RUNNER_TEMP/candidate-inputs/baseline-desktop" "$PRODUCT_VERSION" > /dev/null
+          replay_baseline=(--baseline-desktop "$RUNNER_TEMP/candidate-inputs/baseline-desktop" --baseline-version "$BASELINE_VERSION")
+          echo "baseline_version=$BASELINE_VERSION" >> "$GITHUB_OUTPUT"
+        fi
+        node scripts/product-release-replay.mjs inspect --scope "$EXECUTION_SCOPE" \
+          --receipt "$RUNNER_TEMP/candidate-inputs/candidate.json" --receipt-sha256 "$RECEIPT_SHA256" \
+          --server-assets "$RUNNER_TEMP/candidate-inputs/payload/server" --desktop-assets "$RUNNER_TEMP/candidate-inputs/payload/desktop" \
+          "${replay_baseline[@]}" \
+          > "$RUNNER_TEMP/candidate-inputs/replay-inventory.json"

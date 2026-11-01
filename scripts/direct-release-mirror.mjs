@@ -177,6 +177,9 @@ export class GitHubClient {
   publish(repo, tag, track) {
     this.run(['release', 'edit', tag, '--repo', repo, '--tag', tag, '--draft=false', ...(track === 'beta' ? ['--prerelease', '--latest=false'] : ['--prerelease=false', '--latest'])])
   }
+  updateNotes(repo, tag, body) {
+    this.run(['release', 'edit', tag, '--repo', repo, '--tag', tag, '--notes', body])
+  }
   verifySourceTag(release, sourceSha) {
     requireValue(release.target_commitish === sourceSha, 'Public release target is not the pinned source SHA.')
     let object = this.optional(`repos/${PRIMARY}/git/ref/tags/${release.tag_name}`)?.object
@@ -290,6 +293,16 @@ export class ReleaseMirror {
     sourceIdentity(options)
     const accepted = await this.inspect(options)
     if (accepted.coordinatedUpdates) await this.publicationVerifier(accepted.coordinatedDescriptor, { publicKey: this.publicKey })
+    // Final testing limits may be documented after staging. Carry the reviewed
+    // canonical notes to the still-private mirror without touching any assets,
+    // tags or already-public notes. Revalidate before either publication write.
+    const mirror = await this.existing(REPOSITORIES[1], options, accepted)
+    requireValue(mirror, 'Accepted mirror disappeared before publication.')
+    if (mirror.release.draft && mirror.release.body !== accepted.release.body) {
+      this.client.updateNotes(REPOSITORIES[1], mirror.release.tag_name, accepted.release.body)
+      const updated = await this.existing(REPOSITORIES[1], options, accepted)
+      requireValue(updated?.release.draft && updated.release.body === accepted.release.body, 'Mirror release notes did not match the reviewed canonical notes; refusing publication.')
+    }
     for (const repo of REPOSITORIES) {
       const current = await this.existing(repo, options, accepted)
       requireValue(current, 'Accepted mirror disappeared before publication.')

@@ -257,7 +257,15 @@ jobs:
           APPLE_API_KEY: ${{ runner.temp }}/agentsdock-private-keys/AuthKey_${{ secrets.APPLE_API_KEY_ID }}.p8
           APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
           APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
-        run: ./scripts/build_electron_release.sh
+        run: |
+          # Product source remains the explicit frozen pin. Only the reviewed
+          # build orchestrator comes from this dispatch's workflow commit.
+          git fetch --no-tags origin "$GITHUB_SHA"
+          git show "$GITHUB_SHA:scripts/build_macos_with_staple_recovery.mjs" > "$RUNNER_TEMP/build_macos_with_staple_recovery.mjs"
+          mkdir -p "$RUNNER_TEMP/staple-recovery-tests"
+          git show "$GITHUB_SHA:scripts/tests/build_macos_with_staple_recovery.test.mjs" > "$RUNNER_TEMP/staple-recovery-tests/build_macos_with_staple_recovery.test.mjs"
+          node --test "$RUNNER_TEMP/staple-recovery-tests/build_macos_with_staple_recovery.test.mjs"
+          node "$RUNNER_TEMP/build_macos_with_staple_recovery.mjs" "$GITHUB_WORKSPACE" '${{ inputs.source_sha }}' '${{ inputs.version }}'
 
       - name: Remove temporary Apple signing credentials
         if: ${{ always() }}

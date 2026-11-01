@@ -107,18 +107,20 @@ TEMP_ROOT="${TMPDIR:-/tmp}"
 TEMP_DIR="$(/usr/bin/mktemp -d "${TEMP_ROOT%/}/agentsdock-release.XXXXXX")"
 MOUNT_DIR="$TEMP_DIR/dmg"
 DMG_ATTACHED=false
-SMOKE_PID=""
+PRESERVE_SMOKE_EVIDENCE=false
 cleanup() {
-  if [[ -n "$SMOKE_PID" ]] && /bin/kill -0 "$SMOKE_PID" 2>/dev/null; then
-    /bin/kill -TERM "$SMOKE_PID" 2>/dev/null || true
-  fi
   if [[ "$DMG_ATTACHED" == true ]]; then
     /usr/bin/hdiutil detach "$MOUNT_DIR" -quiet >/dev/null 2>&1 || /usr/bin/hdiutil detach "$MOUNT_DIR" -force -quiet >/dev/null 2>&1 || true
   fi
-  /bin/rm -rf "$TEMP_DIR"
+  if [[ "$PRESERVE_SMOKE_EVIDENCE" == true ]]; then
+    echo "Private isolated smoke evidence retained at $TEMP_DIR (not an accepted release)." >&2
+  else
+    /bin/rm -rf "$TEMP_DIR"
+  fi
 }
 trap cleanup EXIT
 
+python3 "$ROOT/scripts/verify_electron_app_zip.py" "$ZIP_PATH"
 /usr/bin/ditto -x -k "$ZIP_PATH" "$TEMP_DIR/zip"
 APP_PATH="$(/usr/bin/find "$TEMP_DIR/zip" -maxdepth 2 -type d -name 'AgentsDock.app' -print -quit)"
 [[ -n "$APP_PATH" ]] || { echo "Zip does not contain AgentsDock.app" >&2; exit 2; }
@@ -186,19 +188,8 @@ DMG_CDHASH="$(/usr/bin/codesign -d --verbose=4 "$DMG_APP_PATH" 2>&1 | /usr/bin/a
 /usr/bin/xcrun stapler validate "$DMG_APP_PATH"
 
 SMOKE_DATA="$TEMP_DIR/user-data"
-/bin/mkdir -p "$SMOKE_DATA"
-AGENTSDOCK_DISABLE_ANALYTICS=1 AGENTSDOCK_USER_DATA="$SMOKE_DATA" "$MAIN_EXECUTABLE" >"$TEMP_DIR/smoke.log" 2>&1 &
-SMOKE_PID=$!
-for _ in {1..10}; do
-  if ! /bin/kill -0 "$SMOKE_PID" 2>/dev/null; then
-    /usr/bin/tail -80 "$TEMP_DIR/smoke.log" >&2 || true
-    echo "Signed macOS app exited during the clean-runner smoke window" >&2
-    exit 2
-  fi
-  /bin/sleep 1
-done
-/bin/kill -TERM "$SMOKE_PID" 2>/dev/null || true
-wait "$SMOKE_PID" 2>/dev/null || true
-SMOKE_PID=""
+PRESERVE_SMOKE_EVIDENCE=true
+node "$ROOT/scripts/verify_electron_smoke.mjs" "$MAIN_EXECUTABLE" "$SMOKE_DATA" "$TEMP_DIR/smoke.log"
+PRESERVE_SMOKE_EVIDENCE=false
 
-echo "Verified AgentsDock $EXPECTED_VERSION ($EXPECTED_TRACK): exact metadata/assets, blockmap/SHA-512, universal Developer ID app parity, Gatekeeper, notarization, updater feed, DMG signature, and clean-runner launch."
+echo "Verified AgentsDock $EXPECTED_VERSION ($EXPECTED_TRACK): exact metadata/assets, blockmap/SHA-512, universal Developer ID app parity, Gatekeeper, notarization, updater feed, DMG signature, and isolated launch/termination (interactive quit acceptance is separate)."

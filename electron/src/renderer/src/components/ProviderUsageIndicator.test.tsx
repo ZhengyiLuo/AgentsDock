@@ -28,7 +28,15 @@ function fixture(value: ProviderUsageSnapshot = snapshot) {
   return { usage, listeners }
 }
 
-afterEach(() => { cleanup(); setLocale('en'); vi.useRealTimers(); Reflect.deleteProperty(window, 'agentsDock') })
+afterEach(async () => {
+  cleanup()
+  // Radix dispatches its owned unmount-focus event on the next task. Complete
+  // that work before Vitest restores globals/disposes this jsdom realm.
+  await act(async () => { await new Promise(resolve => setTimeout(resolve, 0)) })
+  setLocale('en')
+  vi.useRealTimers()
+  Reflect.deleteProperty(window, 'agentsDock')
+})
 
 describe('provider account usage', () => {
   it('shows remaining allowance and credits, refreshes on opening, and makes no request while typing elsewhere', async () => {

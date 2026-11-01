@@ -677,6 +677,43 @@ describe('Codex controls', () => {
     expect(screen.getByText(label)).toBeVisible()
   })
 
+  it('loads a blocked report only on expansion and retries after reopening', async () => {
+    runtimeResponse = { ...runtime, goal: { ...runtime.goal!, status: 'blocked' } }
+    const fetchReport = vi.fn().mockResolvedValue({ goal: runtimeResponse.goal, report: 'Please supply calibration.csv.' })
+    window.agentsDock.codex.blockedGoalReport = fetchReport
+    renderControls(false, true)
+    const summary = await screen.findByText('Why is this goal blocked?')
+    expect(fetchReport).not.toHaveBeenCalled()
+    await userEvent.click(summary)
+    expect(await screen.findByText('Please supply calibration.csv.')).toBeVisible()
+    expect(fetchReport).toHaveBeenCalledTimes(1)
+    expect(fetchReport).toHaveBeenCalledWith('chat-1')
+    await userEvent.click(summary)
+    await userEvent.click(summary)
+    await waitFor(() => expect(fetchReport).toHaveBeenCalledTimes(2))
+    expect(setGoal).not.toHaveBeenCalled()
+  })
+
+  it('does not show a report from a replaced goal', async () => {
+    runtimeResponse = { ...runtime, goal: { ...runtime.goal!, status: 'blocked' } }
+    window.agentsDock.codex.blockedGoalReport = vi.fn().mockResolvedValue({ goal: { ...runtimeResponse.goal!, createdAt: -1 }, report: 'Wrong goal report' })
+    renderControls(false, true)
+    await userEvent.click(await screen.findByText('Why is this goal blocked?'))
+    expect(await screen.findByText(/Codex does not provide a separate blocked reason/)).toBeVisible()
+    expect(screen.queryByText('Wrong goal report')).not.toBeInTheDocument()
+  })
+
+  it('makes the unavailable blocked explanation explicit in the bar and goal dialog', async () => {
+    runtimeResponse = { ...runtime, goal: { ...runtime.goal!, status: 'blocked' } }
+    renderControls(false, true)
+    await userEvent.click(await screen.findByText('Why is this goal blocked?'))
+    expect(screen.getByText(/Codex does not provide a separate blocked reason/)).toBeVisible()
+    await userEvent.click(screen.getByRole('button', { name: 'Edit goal' }))
+    const dialog = await screen.findByRole('dialog')
+    expect(dialog.querySelector('.goal-blocked-details summary')?.textContent).toBe('Why is this goal blocked?')
+    expect(setGoal).not.toHaveBeenCalled()
+  })
+
   it('shows immediate resume progress and sends only one status update while pending', async () => {
     runtimeResponse = {
       ...runtime,

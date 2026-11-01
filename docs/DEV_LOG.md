@@ -1,5 +1,26 @@
 # Public development log
 
+## 2026-11-01 - Prepare coordinated 1.0.12-beta.2
+
+- Integrate reviewed main through `9f6f1f13704e767717b5131e2df1213306a58abd`
+  with the shipped beta.1 release line. Preserve installer/update protections,
+  signed runtime metadata, custom-provider and Side chat behavior while retaining
+  the new workspace, composer, code-intelligence, sorting and Claude fixes.
+- Reconcile native Claude goal status with retained continuation-limit details;
+  retain failed evaluation outcomes. Combine current goal/route ownership checks
+  with release-line cleanup, and advance the SDK configuration identity for the
+  combined configuration. Preserve a retired Claude child's exact tool alias
+  when a delayed structured task identity arrives.
+- Prepare matching desktop/server/CLI version `1.0.12-beta.2`. Keep stable
+  `1.0.11` unchanged. Bind scoped native rehearsal to independently verified
+  stable 1.0.11 and beta.1 bytes, preserving historical replay identities and
+  installer recovery/permission checks.
+- Desktop type checking, production compilation, 5,945 desktop tests (six
+  skipped), eight packaging/license checks and 393 release-tooling tests pass.
+  Targeted server/recovery checks and hosted native acceptance remain in progress.
+  See [candidate notes](RELEASE_1.0.12-beta.2.md). This entry records preparation
+  only, not signed-package acceptance, publication, deployment or a mobile release.
+
 ## 2026-11-01 - Toggle workspace controls without creating a workspace
 
 - The chat-header workspace button now toggles the workspace toolbar on/off.
@@ -541,6 +562,61 @@
   Escape while idle did nothing. Claude was not exercised (no Claude login in
   the isolated environment); the stop request itself is provider-agnostic.
   Availability: source only.
+## 2026-10-31 - Publish coordinated 1.0.12-beta.1
+
+- Publish the [direct desktop beta](https://github.com/ZhengyiLuo/AgentsDock/releases/tag/v1.0.12-beta.1),
+  build **1269**, with matching `@agentsdock/server` and `agentsdock` npm packages
+  and the signed legacy server bridge. Both npm `beta` tags advance to this
+  version; stable desktop and npm `latest` remain **1.0.11**.
+- Freeze artifact source at `c52aad2ed807a911000e41ffc0ade24d7edd4778`, combining
+  main through `827ed452140db0a09bfab39905aa133f736871be` with the fixes shipped
+  in stable 1.0.11. Publish identical desktop assets and final notes to the
+  canonical and legacy download repositories; no package is rebuilt during
+  publication.
+- Add named workspaces with up to four live chat panes, paired-chat user
+  delegation without a fresh mention, and inbox **Edit and send** that preserves
+  the matching draft. Retain released progress and Side chat behavior alongside
+  native child ownership, provider follow-up and composer fixes.
+- Hosted source/server checks, matched npm/CLI checks, four-platform package
+  verification, scoped macOS upgrade/recovery rehearsals and Linux rollback
+  checks passed. Fresh registry installation matched accepted archive contents
+  and the exact CLI/runtime version. macOS uses Developer ID and notarization;
+  Windows retains the disclosed unsigned-installer policy.
+- Isolated live Claude/Codex checks exercised conversations, cold context resume,
+  workspace restoration, paired mail, draft review/send and Codex Side chat
+  continuation through real app/server transports. Full provider-content parity,
+  populated customer-history migration, normal local quit/logout/reboot and
+  busy-work replacement remain outside accepted coverage.
+- The known idle Codex goal-resume mail-authority limitation remains. Mobile
+  builds and store submissions are separately scoped. See the
+  [release notes](RELEASE_1.0.12-beta.1.md) for details and verification links.
+
+## 2026-10-31 - Prepare coordinated 1.0.12-beta.1
+
+- Integrate main `827ed452140db0a09bfab39905aa133f736871be` with stable
+  `1.0.11` release protections for the next beta desktop, npm server, short
+  CLI and signed legacy bridge. Preserve the stable channel and existing
+  immutable release artifacts.
+- Retain main's native child ownership checks together with the released
+  subagent activity labels, Side chat progress and per-turn runtime settings.
+  Preserve mailbox delivery for older paired-route callers while carrying
+  main's server-attested user delegation and reply identity checks.
+- Advance Claude's runtime configuration revision so existing release sessions
+  receive the updated native tool policy. Include notification and unread-state
+  modules consistently in both runtime package formats.
+- Local validation: desktop TypeScript and production build pass, along with
+  the full desktop test suite and release-tooling Node/Python checks. Focused
+  server merge checks pass after isolating inherited service selectors in the
+  local test process. Native package and hosted source checks remain pending.
+- Hosted source CI and all eight canonical server shards passed. The separate
+  signing gate exposed a read-only preparation test comparing access timestamps;
+  its own file/link reads can change those timestamps. Compare contents and
+  exact inode, ownership, mode, size, link count and nanosecond write timestamps
+  instead. Runtime behavior is unchanged; rerun the signing gate from the new
+  committed test source before accepting any package.
+- See [candidate notes](RELEASE_1.0.12-beta.1.md) for public changes and the
+  known idle Codex goal-resume limitation. Package and native acceptance remain
+  pending; this entry records preparation, not publication or deployment.
 
 ## 2026-10-31 - Workspace toolbar entry and contextual chat headers
 
@@ -1648,6 +1724,194 @@
   CLI version, mobile change, public release or production deployment is included;
   this source fix requires a server update.
 
+## 2026-10-26 — Prepare stable 1.0.11 from the published beta.12 source
+
+- Start the stable candidate at published beta.12 product source
+  `ab95ad3284f91997c2b249ac413b155f99c09ce6`. Preserve its desktop, server and CLI
+  functionality; only the release version and preparation documentation change.
+  Later main changes are outside this release.
+- Prepare matching desktop, npm runtime, short CLI and signed legacy bridge
+  packages as version `1.0.11`. Exact new package verification and local native
+  upgrade acceptance remain pending; prior beta checks are not relabeled.
+- Hold public publication until populated provider-history retention,
+  busy/queued work, restart and recovery observations have been reviewed.
+  No mobile build or publication is included. See [candidate notes](RELEASE_1.0.11.md).
+
+## 2026-10-21 — Prepare 1.0.11-beta.12 source
+
+- Integrate main through `b21ef7ea20bd8bc1121708590fa3bc21785c0984` with the
+  published beta.2 release line. Retain the shipped Codex streaming, pending
+  update, CLI PATH and managed service lifecycle protections.
+- Include CLI pairing QR output, shared-chat analytics, connection recovery,
+  Claude fork timestamps, and the server's Codex goal summary fields used by
+  notification clients. Existing mobile changes come from main; no mobile
+  package is built or uploaded as part of this preparation.
+- Pin the reviewed beta.12 installer separately from every historical pin.
+  Keep historical release exception tests tied to their exact original source
+  fixtures, and include the pairing modules in the inert npm PATH test package.
+- Focused desktop checks (1,263 cases), TypeScript and production compilation
+  pass. CLI, installer, packaging, session-summary and release-tooling checks
+  also pass after correcting isolated test setup. Full source CI and exact
+  signed candidate acceptance remain pending.
+- This is source preparation only. The new candidate still requires native
+  first-install and upgrade acceptance, active-work safety, and notification
+  checks through the actual client/server boundary. No new npm package,
+  desktop release, bridge, mobile build or installed service is changed.
+
+## 2026-10-21 — Verify public bridge and npm server upgrades
+
+- On disposable GitHub-hosted Macs, exercise the published signed desktop app
+  against real managed servers: `1.0.3` → legacy bridge `1.0.10` → npm
+  `1.0.11-beta.2`, and npm-capable `1.0.9` → npm `1.0.10` → npm
+  `1.0.11-beta.2`.
+- Observe real public TLS download hosts without replacing payloads or
+  disabling signature verification. The legacy first hop uses GitHub release
+  assets; npm-capable hops use `registry.npmjs.org`.
+- Verify automatic recovery after an offline start, a refused npm connection
+  that leaves the incumbent usable, and successful retry through the App's
+  visible **Retry server update** control. Preserve server identity, token,
+  saved test session/event and settings. Compare all 120 stable and 129 beta
+  runtime files with their independently verified public packages.
+- Both scoped native jobs pass in [run 39557877984](https://github.com/ZhengyiLuo/AgentsDock/actions/runs/39557877984).
+  Live provider history, busy/queued work, activation rollback, logout or reboot,
+  other desktop platforms and desktop binary replacement remain outside this
+  acceptance. This verifies the published versions, not the new beta.12 source.
+
+## 2026-10-18 — Publish 1.0.11-beta.2
+
+- Complete [paired npm publication, attempt 2](https://github.com/ZhengyiLuo/AgentsDock/actions/runs/39103091104)
+  after the accepted runtime becomes publicly available. Verify and skip that
+  unchanged runtime, publish the exact matching CLI through its separate Trusted
+  Publisher, and verify both public archives. Both `beta` tags now resolve to
+  `1.0.11-beta.2`; both stable `latest` tags remain `1.0.10`.
+- A fresh isolated registry installation with setup scripts disabled resolves
+  the matched CLI/runtime pair and exact dependency, and exercises command help
+  without operating existing services. Native first-install and lifecycle
+  acceptance remains the separately recorded candidate check below.
+- [Desktop publication](https://github.com/ZhengyiLuo/AgentsDock/actions/runs/39177990728)
+  passes all four native platform verifiers and publishes the
+  [canonical beta](https://github.com/ZhengyiLuo/AgentsDock/releases/tag/v1.0.11-beta.2)
+  and [compatibility mirror](https://github.com/ZhengyiLuo/AgentsDock-Releases/releases/tag/v1.0.11-beta.2).
+  The signed [legacy server bridge](https://github.com/ZhengyiLuo/AgentsServer/releases/tag/v1.0.11-beta.2)
+  is public as well. Preserve product source
+  `853dcd285ef442176370632149deba21ef732eda`, native build 1261 and asset-manifest
+  digest `bff0ef6024feb840c7b8e9d1a8c84817b775fc1c23711aa3f29132c96e71ec8c`.
+  No accepted artifact was rebuilt, repacked or replaced.
+- Keep stable releases, mobile builds and existing installations unchanged.
+  Retain the disclosed clean-quit, unsigned Windows, native Windows/Linux UI,
+  populated-history/busy-upgrade and logout/reboot limits. Gemini is included
+  for desktop/server API connections, not mobile or Google/CLI sign-in.
+
+## 2026-10-18 — Accept the 1.0.11-beta.2 candidate
+
+- Freeze product source `853dcd285ef442176370632149deba21ef732eda`, native
+  build 1261. [Desktop preparation](https://github.com/ZhengyiLuo/AgentsDock/actions/runs/39100809951)
+  passes all four native platforms, including Developer ID signing, Apple
+  notarization and the exact asset-set verification. The separate orchestration
+  commit `197f07b9ca949c1a81441d18b46a048764d6dd2d` does not change product code.
+  The sealed asset-manifest digest is
+  `bff0ef6024feb840c7b8e9d1a8c84817b775fc1c23711aa3f29132c96e71ec8c`.
+- Exercise the unmodified signed macOS app and exact packaged server through
+  real UI, IPC, HTTP and Gemini CLI 0.64.0 against Google inference: connected
+  API settings, direct new chat, a long first prompt, automatic short title,
+  two turns with the same native session, and retained replies/title on reload.
+  Title generation inserts no extra user turn. Temporary credentials and
+  disposable server state are removed afterward; existing installations remain
+  unchanged. Test cleanup required force-closing the owned app, so this is not
+  clean-quit acceptance.
+- Pass 5,392 desktop tests (six skipped), the full hosted server suite, 18 native
+  Gemini CLI/HTTP cases and a 40-turn, four-chat streaming/reconnect stress check.
+  [Native npm acceptance](https://github.com/ZhengyiLuo/AgentsDock/actions/runs/39099183063)
+  passes on macOS and Linux, including first setup, exact runtime inventory,
+  default/named lifecycle, repeat installation and preserved state on removal.
+- [Paired npm publication](https://github.com/ZhengyiLuo/AgentsDock/actions/runs/39103091104)
+  initially accepted the runtime upload, then exhausted 61 read-only visibility
+  checks. At candidate acceptance, the CLI upload and public desktop/bridge
+  release remained pending; the completion receipt above supersedes that state.
+  Candidate acceptance alone was not a completed public release. Mobile Gemini,
+  unsigned Windows warnings, native Windows/Linux UI, populated-history/busy
+  upgrades and logout/reboot remain the disclosed boundaries.
+
+## 2026-10-18 — Bound macOS release ticket-download recovery
+
+- Keep product source and signed server/npm candidates frozen independently of
+  the reviewed build orchestrator. Recover only a recognized network failure
+  while attaching an already-accepted outer DMG notarization ticket.
+- Retry the same artifact with bounded delays; require its ticket, Developer ID
+  signature and every original package/updater check before accepting a build.
+  Compilation, test, signing, notarization rejection and other failures still
+  block release. No artifact is published by the recovery helper.
+
+## 2026-10-18 — Prepare 1.0.11-beta.2
+
+- Integrate current main and the built-in Gemini desktop/server provider with
+  the prior published beta line. Preserve existing native ownership, login
+  handoff, next-turn provider selection, CLI PATH and lifecycle protections.
+- Include terminal-only first-install connection details, service logs,
+  latest-first history recovery, file-link handling and copied diagnostics.
+  Mobile Gemini and mobile publication remain outside this release.
+- Combine Gemini's runtime files with the existing Codex runtime inventory.
+  Pin the reviewed beta.2 installer separately; do not alter historical pins,
+  signed artifacts, stable channels or existing installations.
+- This is source preparation, not a publication or candidate acceptance receipt.
+  Signed-package and real-app acceptance must precede public publication.
+
+## 2026-10-13 — Accept imports and publish 1.0.11-beta.1
+
+- Publish immutable source `e93391294af2cb0c35f5f04fe8e94cce77810458`, native
+  build 1252. No accepted package was rebuilt, repacked or replaced.
+- Exercise the signed/notarized macOS app and matching packaged server through
+  the real client/server boundary with isolated data. Import a 300 MiB Claude
+  image record and a 64 MiB Codex tool record; preserve native titles, surrounding
+  text and Unicode. Confirm subagent/archive filtering, cancellation, repeat
+  discovery, unchanged provider files and no duplicate incremental imports.
+- Import and continue real Claude and Codex sessions with their original native
+  IDs and remembered context. Four imported chats survive an isolated relaunch.
+  Excessive retained text fails with the observed amount, limit, record ordinal
+  and byte offset without creating a partial chat. All 103 focused regressions
+  pass. These checks do not establish new image rendering or live Cursor parity.
+- Hosted source checks and macOS/Linux native CLI lifecycle checks pass.
+  [Paired npm publication](https://github.com/ZhengyiLuo/AgentsDock/actions/runs/38370285507)
+  verifies both exact public archives through their separate Trusted Publishers.
+  A fresh registry installation with lifecycle scripts disabled verifies both
+  package versions and command help. Both `beta` tags are `1.0.11-beta.1`;
+  both `latest` tags remain `1.0.10`.
+- [Desktop publication](https://github.com/ZhengyiLuo/AgentsDock/actions/runs/38431444310)
+  passes all four native platform verifiers and publishes the
+  [canonical beta](https://github.com/ZhengyiLuo/AgentsDock/releases/tag/v1.0.11-beta.1)
+  and [compatibility mirror](https://github.com/ZhengyiLuo/AgentsDock-Releases/releases/tag/v1.0.11-beta.1)
+  with the same 16 sealed assets. The signed
+  [legacy server bridge](https://github.com/ZhengyiLuo/AgentsServer/releases/tag/v1.0.11-beta.1)
+  is also public. The asset-manifest digest remains
+  `dbed888a33160639ba00992bbb5ec1d1f9ba0650c7329c27c7701f55df9579cd`.
+- Retain the disclosed limits: unsigned Windows installer; no new live Cursor
+  resume or native Windows/Linux app interaction acceptance; no full populated
+  history, active/queued upgrade, logout/reboot or Windows updater acceptance.
+  The isolated relaunch check is not clean-quit lifecycle acceptance. Temporary
+  test credentials/state were removed; existing apps and servers were untouched.
+
+## 2026-10-13 — Prepare the 1.0.11 beta integration
+
+- Start `release/1.0.11-beta.1` from the frozen 1.0.10 release line and merge
+  main through `2b666a9f`. Include streaming native-history import, the Files
+  inspector, simplified server settings and connection sharing, recoverable
+  empty chats, and provider/permission inheritance for new chats.
+- Preserve release-line native writer handoff, pending provider selection,
+  mailbox-only delivery authority, CLI service PATH and stop/start fixes.
+  Combine observational catalog refresh and attributed login-reload diagnostics
+  with those existing ownership protections rather than restoring older code.
+- Keep the new transcript reader in every runtime manifest and compile check.
+  Pin the new installer separately for this exact beta; historical installer
+  hashes and accepted 1.0.10 artifacts remain unchanged.
+- Local checks: 5,266 Electron tests passed (six skipped), eight build/license
+  checks passed, TypeScript and production compilation passed; 407 release/CLI
+  checks and 196 Python release-tooling checks passed. Targeted import,
+  provenance, login, cross-chat, cleanup, goal, instance and restart regressions
+  passed after resolving the runtime inventory ordering mismatch.
+- Availability: source preparation only. New-beta signed packages, hosted
+  native lifecycle/update checks and real-app feature acceptance are pending.
+  These source checks do not establish a public release or native provider
+  resume acceptance. No mobile package is built by this preparation.
 ## 2026-10-20 — Fix Claude running-chat fork timestamp precision
 
 - Fix #94: recognize millisecond native timestamps within a second-truncated

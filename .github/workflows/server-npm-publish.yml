@@ -38,7 +38,7 @@ on:
         description: Publish only; SHA-256 of the exact CLI receipt accepted with the signed runtime
         type: string
       expected_cli_latest:
-        description: Publish only; observed agentsdock stable latest, or absent for first publication
+        description: Publish only; observed agentsdock latest (an exact beta is allowed when promoting to stable), or absent
         type: string
       expected_runtime_latest:
         description: Publish only; observed scoped runtime stable latest (preserved by beta publication)
@@ -141,7 +141,8 @@ jobs:
           [[ "$ACCEPTED_CLI_RECEIPT_SHA256" =~ ^[0-9a-f]{64}$ ]] || exit 1
           stable='^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$'
           [[ "$EXPECTED_NPM_LATEST" =~ $stable ]] || exit 1
-          [[ "$EXPECTED_CLI_LATEST" == absent || "$EXPECTED_CLI_LATEST" =~ $stable ]] || exit 1
+          cli_baseline='^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-beta\.[1-9][0-9]*)?$'
+          [[ "$EXPECTED_CLI_LATEST" == absent || "$EXPECTED_CLI_LATEST" =~ $cli_baseline ]] || exit 1
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
         with:
           ref: ${{ inputs.source_sha }}

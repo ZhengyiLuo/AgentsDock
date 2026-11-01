@@ -25,6 +25,8 @@ export interface SubagentActivity {
   updatedAt: string
   latestActivity?: string
   summary?: string
+  rootThreadId?: string
+  parentThreadId?: string
   providerRef?: string
   log: SubagentLogEntry[]
 }
@@ -77,6 +79,14 @@ export function liveCodexSubagentCount(events: Event[] | undefined, rootThreadId
   counts.set(rootThreadId, count)
   liveCodexChildren.set(events, counts)
   return count
+}
+
+export function hasLiveCodexSubagents(events: Event[] | undefined, rootThreadId?: string | null): boolean {
+  return liveCodexSubagentCount(events, rootThreadId) > 0
+}
+
+export function liveCodexSubagentLabel(count: number): string {
+  return t(count === 1 ? 'subagents.runningOne' : 'subagents.runningMany', { count })
 }
 
 export function subagentsFromEvents(events: Event[], ownerBackend?: 'claude' | 'codex'): SubagentActivity[] {
@@ -167,6 +177,15 @@ export function subagentsFromEvents(events: Event[], ownerBackend?: 'claude' | '
         taskKeys.get(taskAlias(backend, childId, runId))
         || (projectedToolId ? toolKeys.get(toolAlias(backend, runId, projectedToolId)) : undefined)
       )
+      // A reconciled state may carry a later server run for the same native
+      // spawn. Join only one exact provisional call, never an identified child.
+      const nativeSpawnMatches = backend === 'codex' && projectedToolId
+        ? [...agents.values()].filter(candidate => candidate.backend === 'codex'
+          && candidate.id === projectedToolId && !authoritativeKeys.has(candidate.key))
+        : []
+      const aliased = existingKey ? agents.get(existingKey)
+        : nativeSpawnMatches.length === 1 ? nativeSpawnMatches[0] : undefined
+      const provisional = aliased && !authoritativeKeys.has(aliased.key) ? aliased : undefined
       const fallback = [...agents.values()]
         .filter(candidate => (
           candidate.backend === backend
@@ -177,7 +196,7 @@ export function subagentsFromEvents(events: Event[], ownerBackend?: 'claude' | '
           && (agentStartSeqs.get(candidate.key) ?? Number.MAX_SAFE_INTEGER) <= event.seq
         ))
         .sort((a, b) => (agentStartSeqs.get(b.key) ?? 0) - (agentStartSeqs.get(a.key) ?? 0))[0]
-      const existing = agents.get(key) || (existingKey ? agents.get(existingKey) : undefined) || fallback
+      const existing = agents.get(key) || (backend === 'claude' ? aliased : provisional) || fallback
       // A retired Claude execution cannot become live again from a delayed
       // snapshot. A new owner has its own key, even if a task ID is reused.
       // A tool launch receipt alone does not establish the child lifecycle.
@@ -208,6 +227,8 @@ export function subagentsFromEvents(events: Event[], ownerBackend?: 'claude' | '
       agent.startedAt = event.subagent_started_at || agent.startedAt
       agent.updatedAt = event.ts
       agent.summary = event.subagent_summary || agent.summary
+      agent.rootThreadId = typeof event.subagent_root_thread_id === 'string' ? event.subagent_root_thread_id : agent.rootThreadId
+      agent.parentThreadId = typeof event.subagent_parent_thread_id === 'string' ? event.subagent_parent_thread_id : agent.parentThreadId
       agent.providerRef = event.subagent_provider_ref || agent.providerRef
       if (event.subagent_log?.length) agent.log = event.subagent_log.slice(-LOG_LIMIT)
       authoritativeKeys.add(key)
@@ -336,6 +357,15 @@ export function subagentsFromEvents(events: Event[], ownerBackend?: 'claude' | '
 
     if (event.type === 'turn_finished' || event.type === 'turn_stopped' || event.type === 'error') {
       for (const agent of agents.values()) {
+        // A spawn request alone is not proof that a child was created. Missing
+        // completion records must not keep an idle chat's Stop control alive.
+        // Identified children and successful spawns may outlive their parent.
+        if (agent.backend === 'codex' && agent.status === 'starting'
+          && !authoritativeKeys.has(agent.key) && runId && agent.runId === runId
+          && (event.type === 'turn_finished' || event.type === 'turn_stopped')) {
+          agent.status = 'tracking_lost'
+          note(agent, event.ts, timelineStatusLabel('tracking_lost'))
+        }
         if (
           agent.backend !== 'claude'
           || authoritativeKeys.has(agent.key)

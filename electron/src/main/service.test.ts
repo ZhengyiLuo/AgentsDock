@@ -37,6 +37,8 @@ import type {
 } from '../shared/types'
 
 const electronHarness = vi.hoisted(() => ({
+  userDataPath: '/tmp',
+  localServerDiscovery: vi.fn(async () => []),
   copyText: vi.fn(),
   notificationSupported: false,
   showOpenDialog: vi.fn(),
@@ -52,7 +54,7 @@ const electronHarness = vi.hoisted(() => ({
 
 vi.mock('electron', () => ({
   clipboard: { writeText: (...args: unknown[]) => electronHarness.copyText(...args) },
-  app: { getPath: () => '/tmp' },
+  app: { getPath: () => electronHarness.userDataPath },
   BrowserWindow: class {},
   dialog: {
     showOpenDialog: (...args: unknown[]) => electronHarness.showOpenDialog(...args),
@@ -78,6 +80,8 @@ vi.mock('electron', () => ({
     openPath: (...args: unknown[]) => electronHarness.shellOpenPath(...args)
   }
 }))
+
+vi.mock('./local-server-discovery', () => ({ discoverLocalServers: electronHarness.localServerDiscovery }))
 
 import { LocalCache, TIMELINE_PAGING_SCHEMA_VERSION } from './persistence'
 import {
@@ -350,6 +354,7 @@ afterEach(() => {
   electronHarness.showSaveDialog.mockReset()
   electronHarness.shellOpenExternal.mockReset()
   electronHarness.shellOpenPath.mockReset()
+  electronHarness.localServerDiscovery.mockClear()
 })
 
 describe('concurrent artifact downloads', () => {
@@ -481,6 +486,40 @@ describe('opening artifact files externally', () => {
 })
 
 describe('session summary merging', () => {
+  it('retains pending effort options across compact updates and the completed endpoint handoff', () => {
+    const catalog = { configured: true, available: true, model: 'custom', base_url: 'https://requested.example/v1', credential_id: 'same-revision',
+      models: [{ value: 'custom', label: 'Custom' }], model_efforts: { custom: [{ value: 'high', label: 'High' }] },
+      model_capabilities: { custom: { kind: 'chat' as const, compatibility: 'unverified' as const, reasoning_efforts: ['high'], reasoning_supported: true, reasoning_summary_supported: null } } }
+    const control: NonNullable<Session['codex_provider_control']> = { pending: true, active_provider: 'default', requested_provider: 'custom',
+      active_base_url: null, requested_base_url: catalog.base_url, requested_model: 'custom', requested_effort: 'high', requested_catalog: catalog }
+    const existing: Session = { id: 'chat', title: 'Chat', backend: 'codex', codex_provider: 'default', model: 'normal', effort: 'low', codex_provider_control: control }
+    const { models: _models, model_efforts: _efforts, model_capabilities: _capabilities, ...compact } = catalog
+    const incoming = { ...existing, codex_provider_control: { ...control, requested_catalog: compact } }
+    const merged = mergeSessionSummaries([existing], [incoming])[0]
+    expect(merged.codex_provider_control?.requested_effort).toBe('high')
+    expect(merged.codex_provider_control?.requested_catalog).toEqual(catalog)
+    expect(mergeSessionSummaries([merged], [incoming])[0]).toBe(merged)
+    const applied = mergeSessionSummaries([merged], [{ ...existing, codex_provider: 'custom', model: 'custom', effort: 'high',
+      codex_provider_catalog: compact, codex_provider_control: { ...control, pending: false, active_provider: 'custom', requested_catalog: null } }])[0]
+    expect(applied.codex_provider_catalog).toEqual(catalog)
+    expect(applied.codex_provider_control?.requested_catalog).toBeNull()
+  })
+
+  it('never carries a pending catalog across changed credentials, endpoints, or explicit discovery results', () => {
+    const catalog = { configured: true, available: true, model: 'custom', base_url: 'https://requested.example/v1', credential_id: 'revision-one',
+      models: [{ value: 'custom', label: 'Custom' }], model_efforts: { custom: [{ value: 'high', label: 'High' }] } }
+    const control: NonNullable<Session['codex_provider_control']> = { pending: true, active_provider: 'default', requested_provider: 'custom',
+      active_base_url: null, requested_base_url: catalog.base_url, requested_model: 'custom', requested_effort: 'high', requested_catalog: catalog }
+    const existing: Session = { id: 'chat', title: 'Chat', backend: 'codex', codex_provider: 'default', codex_provider_control: control }
+    const { models: _models, model_efforts: _efforts, ...compact } = catalog
+    for (const next of [{ ...compact, credential_id: 'revision-two' }, { ...compact, base_url: 'https://different.example/v1' }, { ...compact, models: [], model_efforts: {} }]) {
+      const merged = mergeSessionSummaries([existing], [{ ...existing, codex_provider_control: { ...control, requested_catalog: next } }])[0]
+      expect(merged.codex_provider_control?.requested_catalog).toEqual(next)
+    }
+    const cleared = mergeSessionSummaries([existing], [{ ...existing, codex_provider_control: { ...control, pending: false, requested_catalog: null } }])[0]
+    expect(cleared.codex_provider_control?.requested_catalog).toBeNull()
+  })
+
   it.each(['gemini', 'claude', 'opencode', 'cursor'] as const)('retains %s models through slim polls, but honors Forget and a changed endpoint', backend => {
     const catalog = { configured: true, available: true, model: null, base_url: 'https://first.example/v1',
       models: [{ value: 'test-model', label: 'Test model' }] }
@@ -498,6 +537,16 @@ describe('session summary merging', () => {
     const { models: _models, model_efforts: _efforts, ...summary } = catalog
     expect(mergeSessionSummaries([existing], [{ ...existing, codex_provider_catalog: summary }])[0].codex_provider_catalog).toEqual(catalog)
     expect(mergeSessionSummaries([existing], [{ ...existing, codex_provider_catalog: { ...summary, base_url: 'https://second.example/v1' } }])[0].codex_provider_catalog?.models).toBeUndefined()
+  })
+  it('drops the previous account model list when credentials change at the same endpoint', () => {
+    const catalog = { configured: true, available: true, model: null, base_url: 'https://first.example/v1', credential_id: 'revision-one',
+      models: [{ value: 'old-account/model', label: 'Old account model' }], model_efforts: { 'old-account/model': [{ value: 'high', label: 'High' }] } }
+    const existing: Session = { id: 'chat', title: 'Chat', backend: 'codex', codex_provider: 'custom', codex_provider_catalog: catalog }
+    const { models: _models, model_efforts: _efforts, ...summary } = catalog
+    const merged = mergeSessionSummaries([existing], [{ ...existing, codex_provider_catalog: { ...summary, credential_id: 'revision-two' } }])[0]
+    expect(merged.codex_provider_catalog?.models).toBeUndefined()
+    expect(merged.codex_provider_catalog?.model_efforts).toBeUndefined()
+    expect(merged.codex_provider_catalog?.credential_id).toBe('revision-two')
   })
   it('preserves selected-session details omitted by compact polling', () => {
     const previous: Session[] = [{
@@ -1360,11 +1409,12 @@ describe('Codex endpoint request profile isolation', () => {
   const testResult = { ok: true, status: 'ready', message: '' }
   function harness() {
     const client = { codexProviderModels: vi.fn().mockRejectedValue(new Error('offline discovery')), codexProvider: vi.fn().mockResolvedValue(configuration), testCodexProvider: vi.fn().mockResolvedValue(testResult),
-      setCodexProvider: vi.fn().mockResolvedValue(configuration), resetCodexProvider: vi.fn().mockResolvedValue(configuration) }
+      setCodexProvider: vi.fn().mockResolvedValue(configuration), resetCodexProvider: vi.fn().mockResolvedValue(configuration), sessionPage: vi.fn() }
     const service = Object.create(AppService.prototype) as AppService
     const refreshRuntime = vi.fn().mockResolvedValue(undefined)
     Object.assign(service, { scope: { profileId: caller.profileId, generation: 1, namespace: 'profile:provider-a', client },
       activeProfileId: caller.profileId, profileGeneration: 1, validatedGeneration: 1,
+      sessions: [], focusedSessionId: null, upsertSession: vi.fn(),
       health: { capabilities: { codex_provider_v1: { available: true, per_chat: true, per_chat_models: true } } },
       profileResetIsPending: vi.fn().mockReturnValue(false), refreshRuntime })
     return { service, client, refreshRuntime }
@@ -1412,6 +1462,37 @@ describe('Codex endpoint request profile isolation', () => {
     client.codexProviderModels.mockImplementation(() => new Promise(() => {}))
     await expect(service.setCodexProvider(caller, input)).resolves.toEqual(configuration)
     expect(client.codexProviderModels).toHaveBeenCalledOnce()
+  })
+  it('refreshes the visible custom chat catalog after saving and after model discovery completes', async () => {
+    const { service, client } = harness()
+    const original: Session = { id: 'chat', title: 'Chat', backend: 'codex', codex_provider: 'custom', codex_thread_id: 'native',
+      codex_provider_catalog: { configured: true, available: true, model: 'old-model', base_url: 'https://old.example/v1' } }
+    const updated: Session = { ...original, model: 'new-model', codex_provider_catalog: {
+      configured: true, available: true, model: 'new-model', base_url: configuration.base_url,
+      models: [{ value: 'new-model', label: 'New model' }]
+    } }
+    const discovery = deferred<never>()
+    client.codexProviderModels.mockReturnValue(discovery.promise)
+    client.sessionPage.mockResolvedValue({ session: updated })
+    Object.assign(service, { sessions: [original], focusedSessionId: original.id })
+    await expect(service.setCodexProvider(caller, input)).resolves.toEqual(configuration)
+    expect(client.sessionPage).toHaveBeenCalledExactlyOnceWith('chat', { limit: 1 })
+    expect((service as any).upsertSession).toHaveBeenCalledWith((service as any).scope, updated)
+    discovery.resolve({} as never)
+    await vi.waitFor(() => expect(client.sessionPage).toHaveBeenCalledTimes(2))
+  })
+  it('does not apply a late endpoint session refresh to another server', async () => {
+    const { service, client } = harness()
+    const session: Session = { id: 'chat', title: 'Chat', backend: 'codex', codex_provider: 'custom' }
+    const response = deferred<{ session: Session }>(), started = deferred<void>()
+    Object.assign(service, { sessions: [session], focusedSessionId: session.id })
+    client.sessionPage.mockImplementation(() => { started.resolve(); return response.promise })
+    const pending = service.setCodexProvider(caller, input)
+    await started.promise
+    Object.assign(service, { activeProfileId: 'provider-b', profileGeneration: 2 })
+    response.resolve({ session })
+    await expect(pending).rejects.toThrow('superseded')
+    expect((service as any).upsertSession).not.toHaveBeenCalled()
   })
   it('does not configure a custom endpoint on older global-override servers, but permits recovery reset', async () => {
     const { service, client } = harness()
@@ -8877,6 +8958,137 @@ describe('credential-free profile metadata and asynchronous authentication', () 
   })
 })
 
+describe('managed local discovery profile adoption', () => {
+  it.each([undefined, '0', '1'])('disables only default discovery for the explicit isolation flag %s', async value => {
+    const directory = mkdtempSync(join(tmpdir(), 'agentsdock-discovery-default-'))
+    const previousPath = electronHarness.userDataPath
+    const previousFlag = process.env.AGENTSDOCK_DISABLE_LOCAL_SERVER_DISCOVERY
+    electronHarness.userDataPath = directory
+    if (value === undefined) delete process.env.AGENTSDOCK_DISABLE_LOCAL_SERVER_DISCOVERY
+    else process.env.AGENTSDOCK_DISABLE_LOCAL_SERVER_DISCOVERY = value
+    const cache = new LocalCache(':memory:')
+    let service: AppService | undefined
+    try {
+      service = new AppService({ cache })
+      const internal = service as unknown as { localServerDiscovery(): Promise<unknown[]> }
+      await expect(internal.localServerDiscovery()).resolves.toEqual([])
+      expect(electronHarness.localServerDiscovery).toHaveBeenCalledTimes(value === '1' ? 0 : 1)
+    } finally {
+      service?.stop()
+      cache.close()
+      electronHarness.userDataPath = previousPath
+      if (previousFlag === undefined) delete process.env.AGENTSDOCK_DISABLE_LOCAL_SERVER_DISCOVERY
+      else process.env.AGENTSDOCK_DISABLE_LOCAL_SERVER_DISCOVERY = previousFlag
+      rmSync(directory, { recursive: true, force: true })
+    }
+  })
+
+  function prepare() {
+    const directory = mkdtempSync(join(tmpdir(), 'agentsdock-discovery-adoption-'))
+    const values = new Map<string, string>()
+    const readAsync = vi.fn(() => new Promise<string>(() => undefined))
+    const settings = new SettingsStore({ path: join(directory, 'settings.json'), createProfileId: () => 'local',
+      isMacAppStoreBuild: () => false,
+      keychain: { read: account => values.get(account) ?? '', readAsync,
+        write: (account, token) => { values.set(account, token); return true }, delete: account => { values.delete(account) } },
+      safeStorage: { isEncryptionAvailable: () => false, encryptString: value => Buffer.from(value), decryptString: value => value.toString() }
+    })
+    settings.updateProfile('local', { serverUrl: 'http://127.0.0.1:7850' })
+    const cache = new LocalCache(':memory:')
+    const found = deferred<Array<{ name: string; serverUrl: string; serverIdentity: string; accessToken: string }>>()
+    const clientFactory = vi.fn(() => fakeClient() as unknown as AgentServerClient)
+    const service = new AppService({ settings, cache, clientFactory, localServerDiscovery: () => found.promise })
+    const internal = service as unknown as {
+      running: boolean; profileSelectionIntent: number; shutdownEpoch: number
+      profileRemovals: Map<string, Promise<boolean>>; profileAuthorityOperations: Map<string, Promise<void>>
+      discoverManagedLocalServers(): Promise<void>; refreshInactiveProfileHealth(): Promise<void>
+    }
+    internal.running = true
+    vi.spyOn(internal, 'refreshInactiveProfileHealth').mockResolvedValue(undefined)
+    const send = vi.fn()
+    service.addWindow({ isDestroyed: () => false, on: vi.fn(), webContents: { id: 91, on: vi.fn(), send } } as never)
+    cleanup.push(() => { service.stop(); cache.close(); rmSync(directory, { recursive: true, force: true }) })
+    const discover = () => {
+      const task = internal.discoverManagedLocalServers()
+      found.resolve([{ name: 'Local test', serverUrl: 'http://127.0.0.1:7850', serverIdentity: 'local-server', accessToken: 'fixture-token' }])
+      return task
+    }
+    return { service, settings, cache, internal, clientFactory, readAsync, send, discover, found }
+  }
+
+  it('publishes identity and replacement generation together without rereading the discovered credential', async () => {
+    const { service, settings, cache, readAsync, send, discover } = prepare()
+    const pending = discover()
+    await settleBackgroundWork()
+    const snapshot = await service.bootstrap()
+    expect(snapshot.profileGeneration).toBe(2)
+    expect(snapshot.profiles?.[0].serverIdentity).toBe('local-server')
+    expect(readAsync).not.toHaveBeenCalled()
+    await pending
+    const publications = send.mock.calls.filter(([name]) => name === 'server:profiles').map(([, body]) => body)
+    expect(publications.some(body => body.profileGeneration === 2 && body.profiles[0].serverIdentity === 'local-server')).toBe(true)
+    expect(publications.some(body => body.profileGeneration === 1 && body.profiles[0].serverIdentity)).toBe(false)
+    expect(settings.serverIdentity('local')).toBe('local-server')
+    service.putScopedPreference({ profileId: 'local', profileGeneration: 2, serverIdentity: 'local-server' }, 'draft:test', 'kept')
+    expect(cache.preference('local-server', 'draft:test', '')).toBe('kept')
+    expect(() => service.putScopedPreference({ profileId: 'local', profileGeneration: 1, serverIdentity: null }, 'draft:test', 'stale')).toThrow()
+  })
+
+  it('retains an explicitly injected discovery dependency with isolation enabled', async () => {
+    const previousFlag = process.env.AGENTSDOCK_DISABLE_LOCAL_SERVER_DISCOVERY
+    process.env.AGENTSDOCK_DISABLE_LOCAL_SERVER_DISCOVERY = '1'
+    try {
+      const { service, discover } = prepare()
+      await discover()
+      expect((await service.bootstrap()).profileGeneration).toBe(2)
+    } finally {
+      if (previousFlag === undefined) delete process.env.AGENTSDOCK_DISABLE_LOCAL_SERVER_DISCOVERY
+      else process.env.AGENTSDOCK_DISABLE_LOCAL_SERVER_DISCOVERY = previousFlag
+    }
+  })
+
+  it.each(['new selection', 'removal', 'shutdown', 'credential edit'] as const)('does not overwrite an adoption superseded by %s', async reason => {
+    const { service, settings, internal, discover } = prepare()
+    const pending = discover()
+    if (reason === 'new selection') internal.profileSelectionIntent += 1
+    if (reason === 'removal') internal.profileRemovals.set('local', Promise.resolve(true))
+    if (reason === 'shutdown') internal.shutdownEpoch += 1
+    if (reason === 'credential edit') settings.updateProfile('local', { accessToken: 'user-token' })
+    await pending
+    expect(settings.serverIdentity('local')).toBeNull()
+    expect((await service.bootstrap()).profileGeneration).toBe(1)
+  })
+
+  it('rechecks authority and selection after a queued profile operation', async () => {
+    const { settings, internal, discover } = prepare()
+    const gate = deferred<void>()
+    internal.profileAuthorityOperations.set('local', gate.promise)
+    const pending = discover()
+    await settleBackgroundWork()
+    expect(settings.serverIdentity('local')).toBeNull()
+    internal.profileSelectionIntent += 1
+    gate.resolve()
+    await pending
+    expect(settings.serverIdentity('local')).toBeNull()
+  })
+
+  it.each([false, true])('retains the original scope if persistence fails even when prospective disposal throws: %s', async disposalThrows => {
+    const { service, settings, clientFactory, discover } = prepare()
+    if (disposalThrows) {
+      const next = fakeClient()
+      next.dispose.mockImplementation(() => { throw new Error('fixture disposal failure') })
+      clientFactory.mockReturnValueOnce(next as unknown as AgentServerClient)
+    }
+    vi.spyOn(settings, 'updateProfile').mockImplementation(() => { throw new Error('fixture storage failure') })
+    await discover()
+    expect(settings.serverIdentity('local')).toBeNull()
+    expect((await service.bootstrap()).profileGeneration).toBe(1)
+    expect(clientFactory).toHaveBeenCalledTimes(2)
+    expect(clientFactory.mock.results[1].value.dispose).toHaveBeenCalledOnce()
+    expect(clientFactory.mock.results[0].value.dispose).not.toHaveBeenCalled()
+  })
+})
+
 describe('server profile lifecycle', () => {
 
   it('rebinds freshly dropped image and video paths to another chat while rejecting stale replay', async () => {
@@ -9091,7 +9303,12 @@ describe('server profile lifecycle', () => {
     utimesSync(stale, old, old)
     // Node cannot express or inspect Windows ACLs with POSIX mode bits. Keep
     // this candidate recent there and exercise the private-mode guard on POSIX.
-    if (process.platform !== 'win32') utimesSync(unsafe, old, old)
+    if (process.platform !== 'win32') {
+      // mkdir's requested mode is filtered by the host umask. This fixture
+      // specifically exercises rejection of a non-private directory.
+      chmodSync(unsafe, 0o755)
+      utimesSync(unsafe, old, old)
+    }
     chmodSync(stale, 0o700)
     // chmod changes ctime but not the mtime used by the conservative scavenger.
     const { service } = createProfileService(

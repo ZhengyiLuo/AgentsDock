@@ -1,6 +1,7 @@
 import { isQueuedTurnStarting } from '@shared/queue'
 // Localized display strings use semantic catalog keys.
 import { t, getLocale } from '@shared/i18n'
+import { isCodexLoginHandoffMessage } from '@shared/codex-auth'
 import { openAIProviderSettings } from '../lib/provider-settings'
 import { isSharedChatCollaborator } from '@shared/chat-shares'
 import { issueReportURL } from '@shared/issue-report'
@@ -15,7 +16,7 @@ import { effectiveFileContentType } from '@shared/file-content-type'
 import { localSessionImportSupported } from '@shared/local-session-import'
 import type { AgentCrossChatRoute, AgentTeamMailRoute, AgentTeamMailRoutesSnapshot, AgentFile, ChatReference, ChatReferenceAction, ClaudePermissionMode, Event as AgentEvent, Health, NativeFileRef, ProviderCommand, ProviderCommandSelection, ProviderCommandsSnapshot, QueuedTurn, RuntimeCatalog, Session, TeamReference } from '@shared/types'
 import { teamAllServersAliasAvailable, teamBulletinAliasAvailable, type TeamNetworkServer } from '@shared/team-network'
-import { chatBackendChoice, chatBackendSelection, codexCustomProviderAvailable, cursorBackendAvailable, cursorBackendUnavailableReason, runtimeCatalogOptions, runtimeEffortOptions, runtimeSelectionError, runtimeSendAdmissionError, selectableChatBackendChoices } from '@shared/runtime-catalog'
+import { chatBackendChoice, chatBackendSelection, codexCustomProviderAvailable, cursorBackendAvailable, cursorBackendUnavailableReason, runtimeCatalogOptions, runtimeEffortAfterModelChange, runtimeEffortOptions, runtimeSelectionError, runtimeSendAdmissionError, sessionRuntimeForNextTurn, selectableChatBackendChoices } from '@shared/runtime-catalog'
 import { trackEvent } from '../lib/analytics'
 import { messageAnalyticsProps } from '../lib/session-analytics'
 import { COMPOSER_DRAFT_APPEND_EVENT, type ComposerDraftAppendDetail } from '../lib/composer-draft-append'
@@ -32,7 +33,7 @@ import { GeminiPermissionMenu } from './GeminiPermissionMenu'
 import { nativeFileRefsFromFiles } from '../lib/native-files'
 import { profileSessionKey } from '../lib/profile-scope'
 import { orderedActiveSessions, rankSessionsForSearch } from '../lib/sessions'
-import { liveCodexSubagentCount } from '../lib/subagents'
+import { liveCodexSubagentCount, liveCodexSubagentLabel } from '../lib/subagents'
 import {
   assertTeamNetworkExpectedIdentity,
   loadTeamNetworkServers as loadCachedTeamNetworkServers,
@@ -529,6 +530,7 @@ export const Composer = memo(function Composer({ dropActive = false, sessionId, 
       state.snapshots[selectedId]?.session.codex_thread_id || session.codex_thread_id
         || state.snapshots[selectedId]?.session.session_id || session.session_id)
     : 0)
+  const canStop = running || liveCodexChildren > 0
   const stopLabel = !running && liveCodexChildren > 0 ? t('subagents.stop') : t('ui.Composer.Composer.stop_cae7d57')
   const admitting = useAppStore(state => selectedId ? Boolean(state.turnAdmissionTokens[selectedId]) : false)
   const pendingSubmission = useAppStore(state => selectedId ? state.pendingTurnSubmissions[selectedId] : undefined)
@@ -1529,7 +1531,12 @@ export const Composer = memo(function Composer({ dropActive = false, sessionId, 
       submissionAccepted = sent
       if (!sent && composerSessionIsCurrent(activeProfileId, profileGeneration, serverIdentity, session.id, draftContextRef, mountedRef)) {
         const message = useAppStore.getState().error
-        if (message) setSendFailure({ context: sendContext, message })
+        if (message) {
+          setSendFailure({ context: sendContext, message })
+          // Keep this recoverable wait beside the restored draft. A duplicate
+          // global toast covers the Send button and makes retry inaccessible.
+          if (isCodexLoginHandoffMessage(cleanActionError(message))) useAppStore.getState().setError(null)
+        }
       }
       if (sent) {
         if (consumeComposer && promptOverride === undefined && workspaceKey) {
@@ -2019,7 +2026,7 @@ export const Composer = memo(function Composer({ dropActive = false, sessionId, 
         updateComposerDraft(next, from)
       }} />
       <GeminiImportConnection key={`${activeProfileId}:${profileGeneration}:${session.id}`} session={session} />
-      <RuntimeHealthNotice backend={session.backend} codexProvider={(session.provider_connection === 'custom' ? 'custom' : session.codex_provider)} sessionId={session.id} admissionError={(sendFailure?.context === sendContext ? cleanActionError(sendFailure.message) : undefined) || (geminiImportRecovery ? undefined : selectedRuntimeError) || undefined}
+      <RuntimeHealthNotice backend={session.backend} codexProvider={(session.provider_connection === 'custom' ? 'custom' : sessionRuntimeForNextTurn(session).codex_provider)} sessionId={session.id} admissionError={(sendFailure?.context === sendContext ? cleanActionError(sendFailure.message) : undefined) || (geminiImportRecovery ? undefined : selectedRuntimeError) || undefined}
         onConnectionRecovered={() => setSendFailure(previous => previous === sendFailure ? null : previous)} />
       {activeInboundDeliveryKind && activeInboundDeliveryKind !== 'unknown' && <span className="chat-reference-warning" role="status">{activeInboundDeliveryKind === 'secure_peer'
           ? 'An incoming encrypted peer delivery is running. Stop or Send now will interrupt it.'
@@ -2391,6 +2398,7 @@ export const Composer = memo(function Composer({ dropActive = false, sessionId, 
           ? useAppStore.getState().revokeAgentRoute(selectedId, routeId, revision)
           : Promise.resolve(false)}
       />}
+      {!window.agentsDock.sharedChat && <PendingCodexEndpoint key={`${activeProfileId}:${profileGeneration}:${session.id}`} session={session} disabled={writeDisabled || running || admitting} />}
       <fieldset className="composer-bar composer-write-controls" disabled={writeDisabled}>
         <div className="composer-secondary-controls">
           <DropdownMenu.Root>
@@ -2449,15 +2457,16 @@ export const Composer = memo(function Composer({ dropActive = false, sessionId, 
                   ? t('timeline.status.running')
                 : t("ui.Composer.Composer.starting_bbe5fc3")
           }</span></span>}
-          {(running || liveCodexChildren > 0) && <ShortcutTooltip
+          {canStop && <ShortcutTooltip
             shortcut="stopAgent"
-            label={stopping ? t("ui.Composer.Composer.stopping_agent_ec42789") : t("ui.Composer.Composer.stop_f9da57a", { "provider": String(session.title) })}
+            label={stopping ? t("ui.Composer.Composer.stopping_agent_ec42789") : liveCodexChildren > 0 ? `${liveCodexSubagentLabel(liveCodexChildren)} · ${t(running ? 'subagents.stopAllDescription' : 'subagents.stopDescription')}` : t("ui.Composer.Composer.stop_f9da57a", { "provider": String(session.title) })}
           ><button
             type="button"
             className="stop-button"
             aria-label={stopping ? t("ui.Composer.Composer.stopping_bbe8574") : stopLabel}
             disabled={writeDisabled || stopping}
             onClick={requestStop}
+            title={stopping ? t("ui.Composer.Composer.stopping_agent_ec42789") : liveCodexChildren > 0 ? `${liveCodexSubagentLabel(liveCodexChildren)} · ${t(running ? 'subagents.stopAllDescription' : 'subagents.stopDescription')}` : t("ui.Composer.Composer.stop_f9da57a", { "provider": String(session.title) })}
           ><span className="activity-ring" /><Square size={12} fill="currentColor" /><span className="stop-button-label">{stopping ? t("ui.Composer.Composer.stopping_bbe8574") : stopLabel}</span></button></ShortcutTooltip>}
           <ShortcutTooltip shortcut={running && session.backend !== 'opencode' ? ['sendMessage', 'steerMessage'] : 'sendMessage'} label={running ? session.backend === 'opencode' ? t("ui.Composer.Composer.queue_message_891d4ef") : activeCodexGoal ? t('composer.queueMessageDuringGoal') : t("ui.Composer.Composer.queue_message_steer_now_eea53cb") : t("ui.Composer.Composer.send_message_93a26b1")}><button className="send-button" aria-label={sessionId === undefined ? (running ? t("ui.Composer.Composer.queue_message_891d4ef") : t("ui.Composer.Composer.send_message_93a26b1")) : t(running ? 'ui.composer.queueFor' : 'ui.composer.sendTo', { title: session.title })} disabled={!canSend} onClick={() => void send()}><Send size={17} /></button></ShortcutTooltip>
         </div>
@@ -3143,6 +3152,7 @@ function composerCommandValue(
   claudePermissionMode?: ClaudePermissionMode
 ): string {
   if (command.provider) return command.provider.command.invocation
+  session = sessionRuntimeForNextTurn(session)
   if (command.id === 'model') {
     return runtimeCatalogOptions(catalog, session.backend, 'models', session.model, (session.provider_connection === 'custom' ? 'custom' : session.codex_provider), (session.provider_connection_catalog ?? session.codex_provider_catalog))
       .find(option => option.value === (session.model ?? ''))?.label ?? 'Default'
@@ -3430,7 +3440,7 @@ function teamReferenceLabel(reference: TeamReference): string {
 }
 
 function RuntimeMenu({
-  session,
+  session: activeSession,
   running,
   admitting,
   open,
@@ -3448,6 +3458,7 @@ function RuntimeMenu({
   const catalog = useAppStore(state => state.runtimeCatalog)
   const codexRuntime = useCodexRuntime()
   const claudeRuntime = useClaudeRuntime()
+  const session = sessionRuntimeForNextTurn(activeSession)
   const models = runtimeCatalogOptions(catalog, session.backend, 'models', session.model, (session.provider_connection === 'custom' ? 'custom' : session.codex_provider), (session.provider_connection_catalog ?? session.codex_provider_catalog))
   const efforts = runtimeEffortOptions(catalog, session.backend, session.model, session.effort, (session.provider_connection === 'custom' ? 'custom' : session.codex_provider), (session.provider_connection_catalog ?? session.codex_provider_catalog))
   const profileId = useAppStore(state => state.activeProfileId)
@@ -3562,8 +3573,45 @@ function RuntimeMenu({
   )
 }
 
-function BackendMenu({ session, running, admitting }: { session: Session; running: boolean; admitting: boolean }) {
+function PendingCodexEndpoint({ session, disabled }: { session: Session; disabled: boolean }) {
   useLocale()
+  const [stoppingCommands, setStoppingCommands] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const control = session.codex_provider_control
+  if (session.backend !== 'codex' || !control?.pending) return null
+  const reason = control.pending_reason
+  const reasonKey = reason === 'background_terminals' ? 'commands'
+    : reason === 'live_subagents' ? 'subagents'
+    : reason === 'active_goal' || reason === 'native_goal_active' ? 'goal'
+    : reason === 'side_question' ? 'sideChat'
+    : reason === 'turn_tasks' || reason === 'active_turn' || reason === 'native_thread_in_use' ? 'turn'
+    : reason === 'ownership_unverified' || reason === 'ownership_deadline' || reason === 'native_unsubscribe_incomplete' ? 'retry'
+    : 'finishing'
+  const stopCommands = async () => {
+    setStoppingCommands(true)
+    setError(null)
+    try {
+      await window.agentsDock.codex.cleanBackgroundTerminals(session.id, { confirmed: true })
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : String(cause))
+    } finally { setStoppingCommands(false) }
+  }
+  return <div className="codex-endpoint-pending" role="status">
+    <span>{t('codexProvider.switchStatus', {
+      active: control.active_base_url || backendLabel('codex', control.active_provider),
+      requested: control.requested_base_url || backendLabel('codex', control.requested_provider)
+    })}</span>
+    <span>{t(`codexProvider.waiting.${reasonKey}`)}</span>
+    {reason === 'background_terminals' && <button type="button" disabled={disabled || stoppingCommands} onClick={() => void stopCommands()}>
+      {stoppingCommands ? t('codexProvider.stoppingCommands') : t('codexProvider.stopCommandsAndSwitch')}
+    </button>}
+    {error && <span role="alert">{error}</span>}
+  </div>
+}
+
+function BackendMenu({ session: activeSession, running, admitting }: { session: Session; running: boolean; admitting: boolean }) {
+  useLocale()
+  const session = sessionRuntimeForNextTurn(activeSession)
   const healthRevision = useAppStore(state => queueShelfHealthContractRevision(state.health))
   const health = useMemo(() => useAppStore.getState().health, [healthRevision])
   const catalog = useAppStore(state => state.runtimeCatalog)
@@ -3571,21 +3619,33 @@ function BackendMenu({ session, running, admitting }: { session: Session; runnin
   const cursorUnavailableReason = cursorBackendUnavailableReason(health, catalog)
   const openCodeAvailable = opencodeBackendAvailable(health, catalog)
   const openCodeUnavailableReason = opencodeBackendUnavailableReason(health, catalog)
-  const backends = selectableChatBackendChoices(health, catalog)
   const providerLocked = isBackendLocked(session)
-  const disabled = providerLocked || running || admitting
-  const title = providerLocked
+  // Both endpoint choices use the same native Codex conversation. The server
+  // saves changes made during a turn and applies them at its idle boundary.
+  const codexEndpointOnly = session.backend === 'codex' && (providerLocked || running || admitting)
+  const backends = codexEndpointOnly
+    ? ['codex', 'codex-custom'] as const
+    : selectableChatBackendChoices(health, catalog)
+  const disabled = !codexEndpointOnly && (providerLocked || running || admitting)
+  const title = codexEndpointOnly
+    ? t('codexProvider.changeEndpoint')
+    : providerLocked
     ? 'Backend is fixed after the provider session starts'
     : running
       ? 'Wait for the active turn to finish before changing backend'
       : admitting
         ? 'Wait for the message to be accepted before changing backend'
         : t('ui.composer.changeAgent')
-  const providerLabel = backendLabel(session.backend, (session.provider_connection === 'custom' ? 'custom' : session.codex_provider))
-  const compactLabel = session.backend === 'codex' && (session.provider_connection === 'custom' ? 'custom' : session.codex_provider) === 'custom'
+  const activeProvider = session.provider_connection === 'custom' ? 'custom' : (activeSession.codex_provider_control?.active_provider ?? activeSession.codex_provider)
+  const providerLabel = backendLabel(session.backend, activeProvider)
+  const compactLabel = session.backend === 'codex' && activeProvider === 'custom'
     ? t('codexProvider.compactLabel')
     : providerLabel
-  const chip = <button className="backend-chip" title={title} aria-label={providerLabel} disabled={disabled}><BackendMark backend={session.backend} size={17} /><span>{compactLabel}</span>{!disabled && <ChevronDown size={12} />}</button>
+  const pending = session.codex_provider_control?.pending === true
+  const selectedChoice = pending
+    ? chatBackendChoice({ backend: session.backend, codex_provider: session.codex_provider_control!.requested_provider })
+    : chatBackendChoice(session)
+  const chip = <button className="backend-chip" title={title} aria-label={providerLabel} disabled={disabled}><BackendMark backend={session.backend} size={17} /><span>{compactLabel}</span>{pending && <span title={t('codexProvider.pending')} aria-label={t('codexProvider.pending')}> · {t('codexProvider.saved')}</span>}{!disabled && <ChevronDown size={12} />}</button>
   if (disabled) return chip
   return <Tooltip.Provider delayDuration={250}><DropdownMenu.Root><DropdownMenu.Trigger asChild>{chip}</DropdownMenu.Trigger><DropdownMenu.Portal><DropdownMenu.Content className="menu-content" side="top" align="start">{backends.map(choice => {
     const { backend, codex_provider, provider_connection } = chatBackendSelection(choice)
@@ -3606,7 +3666,10 @@ function BackendMenu({ session, running, admitting }: { session: Session; runnin
       </Tooltip.Trigger>
       <Tooltip.Portal><Tooltip.Content className="shortcut-tooltip backend-unavailable-tooltip" side="right" sideOffset={7}><span>{unavailableReason}</span><Tooltip.Arrow className="shortcut-tooltip-arrow" /></Tooltip.Content></Tooltip.Portal>
     </Tooltip.Root>
-    return <DropdownMenu.CheckboxItem key={choice} className="menu-item" checked={chatBackendChoice(session) === choice} onCheckedChange={() => void useAppStore.getState().updateSession(session.id, { backend, codex_provider, provider_connection, model: null, effort: null })}><BackendMark backend={backend} size={15} />{backendLabel(backend, provider_connection === 'custom' ? 'custom' : codex_provider)}</DropdownMenu.CheckboxItem>
+    return <DropdownMenu.CheckboxItem key={choice} className="menu-item" checked={selectedChoice === choice} onCheckedChange={() => {
+      if (selectedChoice !== choice) void useAppStore.getState().updateSession(session.id, { backend, codex_provider, provider_connection, model: null, effort: null })
+      else if (pending) void useAppStore.getState().updateSession(session.id, { backend, codex_provider, provider_connection })
+    }}><BackendMark backend={backend} size={15} />{backendLabel(backend, provider_connection === 'custom' ? 'custom' : codex_provider)}</DropdownMenu.CheckboxItem>
   })}<DropdownMenu.Separator className="menu-separator" /><DropdownMenu.Item className="menu-item" onSelect={() => openAIProviderSettings()}><Plus size={15} />{t('connections.addAgent')}</DropdownMenu.Item></DropdownMenu.Content></DropdownMenu.Portal></DropdownMenu.Root></Tooltip.Provider>
 }
 
@@ -4691,7 +4754,8 @@ function sessionRuntimeAdmissionError(
   health: Parameters<typeof runtimeSelectionError>[0],
   catalog: Parameters<typeof runtimeSelectionError>[1]
 ): string | null {
-  return session ? runtimeSendAdmissionError(health, session.backend, session.provider_connection === 'custom' ? 'custom' : session.codex_provider) : null
+  const selected = session ? sessionRuntimeForNextTurn(session) : null
+  return selected ? runtimeSendAdmissionError(health, selected.backend, selected.provider_connection === 'custom' ? 'custom' : selected.codex_provider) : null
 }
 
 function queuedTurnRuntimeAdmissionError(

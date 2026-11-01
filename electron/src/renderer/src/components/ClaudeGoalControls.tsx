@@ -89,6 +89,7 @@ export function ClaudeGoalControls({ open, onOpenChange, disabled = false }: {
       const snapshot = await (next === null ? clearGoal() : setGoal(next))
       if (scopeRef.current !== requestScope || !snapshot) return
       setClearRequested(next === null && snapshot.goal?.status === 'active')
+      if (next !== null) onOpenChange(false)
     } catch (cause) {
       if (scopeRef.current !== requestScope) return
       errorAction.current = next === null ? 'clear' : 'set'
@@ -111,6 +112,7 @@ export function ClaudeGoalControls({ open, onOpenChange, disabled = false }: {
   const waiting = runtime?.goal_starting === true || clearRequested
   const waitingMessage = t(clearRequested ? 'claudeGoal.clearRequested' : 'claudeGoal.requested')
   const canContinue = active && (runtimeStatus?.type === 'idle' || runtimeStatus?.type === 'notLoaded')
+  const stopReason = active && !busy && !waiting && goal?.execution_stop_reason === 'continuation_limit' ? t('claudeGoal.continuationLimit') : null
   const goalError = error || runtime?.goal_error || null
   const clearLabel = busy ? t('claudeGoal.clearAndStop') : t('claudeGoal.clear')
   const clearHint = busy ? t('claudeGoal.clearAndStopHint') : t('claudeGoal.clear')
@@ -131,6 +133,7 @@ export function ClaudeGoalControls({ open, onOpenChange, disabled = false }: {
       </>} />}
     {!open && (goalError || waiting) && <p className={`goal-feedback goal-composer-feedback${goalError ? ' error' : ''}`} role={goalError ? 'alert' : 'status'}>{goalError || waitingMessage}</p>}
     {!open && queuedFeedback}
+    {!open && stopReason && <p className="goal-feedback" role="status">{stopReason}</p>}
     <Dialog.Root open={open} onOpenChange={onOpenChange}>
       <GoalDialogContent title={t('claudeGoal.title')} description={t('claudeGoal.description')} closeLabel={t('claudeGoal.close')} busy={mutating}>
           <form onSubmit={event => { event.preventDefault(); if (trimmedCondition && condition.length <= 4000) void changeGoal(trimmedCondition) }}>
@@ -138,7 +141,7 @@ export function ClaudeGoalControls({ open, onOpenChange, disabled = false }: {
             {available && runtime?.goal_loading && <p className="goal-feedback" role="status">{t('claudeGoal.loading')}</p>}
             {goal && <GoalProgress label={t('claudeGoal.current')} status={goalStatus} condition={goal.condition}
               metrics={[{ label: t('claudeGoal.elapsed'), value: elapsed ?? '—' }, { label: t('claudeGoal.iterations'), value: goal.iterations ?? '—' }]}
-              reason={goal.last_reason ? { label: t('claudeGoal.reason'), text: goal.last_reason } : null} />}
+              reason={stopReason || goal.last_reason ? { label: t('claudeGoal.reason'), text: stopReason || goal.last_reason! } : null} />}
             <GoalConditionField label={t('claudeGoal.condition')} placeholder={t('claudeGoal.placeholder')}
               value={condition} disabled={blocked || mutating} onChange={value => { conditionEdited.current = true; setCondition(value) }} />
             {(goalError || runtimeError) && <p className="goal-feedback error" role="alert">{goalError || runtimeError}</p>}

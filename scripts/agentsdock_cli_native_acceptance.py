@@ -41,7 +41,8 @@ PHASES = {"inputs", "clean-host", "automatic-setup", "default-health", "repeat-i
           "read-only-commands", "named-create", "named-lifecycle", "named-removal",
           "default-lifecycle", "cache-independence", "default-removal", "complete"}
 PUBLIC_CHECKS = {"private-token-file", "npm-output-token-privacy", "authenticated-default-health",
-                 "service-path-independence", "exact-runtime-bytes-and-modes"}
+                 "service-path-independence", "exact-runtime-bytes-and-modes",
+                 "named-chain-stop-command", "named-chain-start-command", "named-chain-fresh-stable-health"}
 
 
 def need(condition, message):
@@ -429,6 +430,36 @@ def exercise_default_removal(home, binary, env, version, last, runtime, count, o
     observations["defaultRemovalRequiresConfirmationAndPreservesSyntheticState"] = True
 
 
+def exercise_immediate_named_chain(binary, env, version, named_port, named_token, previous,
+                                   default_token, default_health, observations, progress):
+    progress("named-lifecycle", "named-chain-stop-command")
+    command([binary, "stop", "cli-native"], env=env, timeout=240)
+    # No status query, health request or sleep between the two user commands.
+    progress("named-lifecycle", "named-chain-start-command")
+    command([binary, "start", "cli-native"], env=env, timeout=240)
+    progress("named-lifecycle", "named-chain-fresh-stable-health")
+    deadline, fresh_id = time.monotonic() + 180, None
+    while True:
+        try:
+            value = health(named_port, named_token, version, identity=previous["server_identity"], timeout=0)
+        except RuntimeError:
+            value = None
+        if value is not None and value["server_instance_id"] != previous["server_instance_id"]:
+            if fresh_id is not None:
+                need(value["server_instance_id"] == fresh_id, "Named process changed again during restart observation.")
+                break
+            fresh_id = value["server_instance_id"]
+        else:
+            need(fresh_id is None, "Fresh named process did not stay healthy.")
+        need(time.monotonic() < deadline, "Immediate stop/start did not reach fresh stable authenticated health.")
+        time.sleep(0.1)
+    current_default = health(7850, default_token, version, identity=default_health["server_identity"])
+    need(current_default["server_instance_id"] == default_health["server_instance_id"],
+         "Named immediate stop/start disturbed default server.")
+    observations["immediateNamedStopStartFreshStableHealthAndDefaultUnaffected"] = True
+    return value
+
+
 def exercise(args, home, descriptor, receipt, observations, progress):
     progress("clean-host")
     ensure_empty(home)
@@ -507,6 +538,8 @@ def exercise(args, home, descriptor, receipt, observations, progress):
         need(health(7850, token, version, identity=first["server_identity"])["server_instance_id"] == first["server_instance_id"],
              "Named action disturbed default server.")
     observations["namedStartStopRestartAndDefaultUnaffected"] = True
+    named_first = exercise_immediate_named_chain(binary, env, version, named_port, named_token, named_first,
+                                                  token, first, observations, progress)
     progress("named-removal")
     cancelled = command([binary, "remove", "cli-native"], env=env, allowed=(1,))
     need(b"Not confirmed" in cancelled.stderr and marker.is_file(), "Unconfirmed removal did not preserve state.")

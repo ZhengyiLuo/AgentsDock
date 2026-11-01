@@ -100,7 +100,7 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
     const allowed = new Set(['assets', 'npm-assets', 'version', 'track', 'source-sha', 'source-ref',
       'accepted-receipt-sha256', 'accepted-manifest-sha256', 'expected-latest'])
     need(['inspect', 'stage'].includes(command) && args.length === 18,
-      'Usage: agentsdock-cli-candidate-release.mjs inspect|stage --assets DIRECTORY --npm-assets DIRECTORY --version VERSION --track TRACK --source-sha SHA --source-ref REF --accepted-receipt-sha256 SHA256 --accepted-manifest-sha256 SHA256 --expected-latest STABLE_OR_absent')
+      'Usage: agentsdock-cli-candidate-release.mjs inspect|stage --assets DIRECTORY --npm-assets DIRECTORY --version VERSION --track TRACK --source-sha SHA --source-ref REF --accepted-receipt-sha256 SHA256 --accepted-manifest-sha256 SHA256 --expected-latest OBSERVED_VERSION_OR_absent')
     const options = {}
     for (let index = 0; index < args.length; index += 2) {
       const name = args[index].slice(2), key = name.replace(/-([a-z])/g, (_, letter) => letter.toUpperCase())
