@@ -121,10 +121,14 @@ describe('ChatPane', () => {
   it('uses the two-line ordinary header until workspace mode is enabled', () => {
     const view = render(<ChatPane pane="primary" session={primary} focused split={false} terminalOpen={false} />)
     expect(screen.getByTestId('chat-header')).toHaveAttribute('data-compact', 'false')
-    act(() => useAppStore.setState({ chatWorkspaces: [{
+    act(() => useAppStore.setState({ chatWorkspaceBarVisible: true, chatWorkspaces: [{
       id: 'workspace-main', panes: { primary: primary.id, secondary: null }, focusedPane: 'primary', paneCount: 1,
       columnRatio: 0.5, rowRatio: 0.5
     }] }))
+    expect(screen.getByTestId('chat-header')).toHaveAttribute('data-compact', 'true')
+    act(() => useAppStore.setState({ chatWorkspaceBarVisible: false }))
+    expect(screen.getByTestId('chat-header')).toHaveAttribute('data-compact', 'false')
+    act(() => useAppStore.setState({ chatWorkspaceBarVisible: true }))
     expect(screen.getByTestId('chat-header')).toHaveAttribute('data-compact', 'true')
     act(() => useAppStore.setState({ chatWorkspaces: [] }))
     view.rerender(<ChatPane pane="primary" session={primary} focused split={false} terminalOpen={false} />)

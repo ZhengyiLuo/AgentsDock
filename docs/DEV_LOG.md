@@ -1,5 +1,58 @@
 # Public development log
 
+## 2026-11-02 - Exit workspace mode into a single chat
+
+- Hide workspaces now exits the entire multi-pane view, including empty chat
+  selectors, and restores the ordinary header for the focused conversation.
+  Reopening restores saved pane assignments and layout instead of creating a
+  workspace. Sidebar navigation while closed cannot overwrite that layout.
+- Retain drafts and server-scoped preferences through toggles, reloads and
+  server switching; release hidden timeline subscriptions without stopping
+  provider runs. Ignore late hidden-pane loads and reconcile deleted chats
+  before reopening. Migrate previously hidden-but-still-split saved layouts.
+- Regression cases failed before the fix. The beta-based preview passed 5,956
+  desktop tests (six skipped). The main-based PR passed 5,827 tests (five
+  skipped), eight packaging/license checks, typecheck and production build.
+  Native offscreen Electron with real authenticated test-server transport
+  exercised three-pane selection, focused-chat exit, unsent draft retention,
+  reload, repeated reopening, keyboard activation, and dark/light/narrow views.
+  Credential storage was isolated; no provider message was submitted.
+- Local user window refreshed to the updated compiled renderer; no server
+  update/restart, mobile change or release. Native Windows/Linux acceptance
+  and packaged distribution remain outside this local preview.
+
+## 2026-11-02 - Restore file split controls inside chat workspaces
+
+- Restore Show chat / Full screen, Editor left / Editor right, Split right,
+  and the Files tree's Open to the Side in tabbed chat panes. Retain the
+  workspace model and its focused-pane/profile ownership guards; do not bring
+  back the removed Changes tab. Restore secondary editor selection and layout
+  preferences independently of pane ownership, including unsaved file drafts.
+- Bound editor grid tracks and wrap narrow toolbars so restored buttons are
+  not clipped in chat-plus-two-file layouts. Reuse existing controls, labels,
+  themes and resizing behavior without changing the provider/server contract.
+- Regression: the three focused cases fail before the fix; 5,949 desktop
+  tests and eight packaging/license checks pass, with six tests skipped.
+  TypeScript and production compilation pass; final grid sizing is additionally
+  covered by the 19 editor-style/design-system checks.
+- Actual native offscreen Electron verification uses real authenticated test
+  server file transport: open two fixture files, show chat beside them, switch
+  editor left/right, save only the focused secondary file, retain an unsaved
+  secondary draft and layout after reload, and inspect dark/light and narrow
+  layouts for clipped controls. Test credentials are supplied by an isolated
+  credential-store fixture; file reads/writes, IPC and renderer handlers are real.
+  No provider turn is required for this editor-layout change.
+- Initially reproduced and verified on beta.2 artifact source `9e816c6b`.
+  Ported only these two UI fixes onto main `9f6f1f13`, without release-line
+  changes. Repeated native workspace exit/restoration and chat/two-file split
+  workflows with the main-based renderer, preload and service transport.
+  Local source and compiled preview only; no server restart, mobile change or publication.
+  Restarted the local user App with its existing profile and confirmed the
+  selected chat, open file and server connection were retained. Exercised
+  Show chat in that window and confirmed the restored layout controls and
+  visible chat/file panes. Packaged distribution and native Windows/Linux
+  acceptance are not part of this change.
+
 ## 2026-11-01 - Toggle workspace controls without creating a workspace
 
 - The chat-header workspace button now toggles the workspace toolbar on/off.
