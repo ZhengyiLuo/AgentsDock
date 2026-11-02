@@ -1,5 +1,40 @@
 # Public development log
 
+## 2026-11-01 - Let agents create chats with automatic mailbox connections
+
+- Add run-bound `chats create --title ... --folder ...` for independent
+  AgentsDock conversations. Create a permanent bidirectional mailbox route
+  between creator and child automatically and expose it to the creating run
+  immediately. Existing send, inbox, read and reply actions handle communication.
+  Creation itself does not start a provider turn.
+- Inherit applicable runtime settings, including a custom provider connection,
+  without copying native thread IDs, transcript, goals or other peer routes.
+  The new chat appears in its requested folder through the existing desktop
+  API. There is no new chat-count quota or route-approval dialog.
+- Persist explicit retry keys across logical runs and restarts. Repeated
+  creation returns the existing chat. A failed route grant preserves the
+  already-visible child and repairs it on retry; disconnects do not duplicate
+  creation. Exact-route sends discover the current mailbox mode even from a
+  shell opened before creation. Keep private creation-admission records out of
+  client timelines.
+- Validation: 59 helper tests, four creation regressions, 50 existing pair,
+  discovery and provider-input tests, and 13 session/custom-provider tests pass.
+  Server syntax checks and the unchanged Electron production build pass.
+- Isolated full-server acceptance exercises the production helper over HTTP,
+  actual capability authentication, immediate send, child read/reply, creator
+  read, and explicit-key recovery in a new logical run after restart. Native
+  offscreen Electron uses production IPC and authenticated transport to select
+  the created chat and display its folder and mailbox cards. These transport
+  checks use synthetic provider run bindings and are not generation acceptance.
+- Real Codex acceptance separately exercises normal turn admission and the
+  run-bound provider tool: the creator creates and messages a child, the child
+  automatically wakes to read and reply, and the creator automatically wakes
+  and reads that reply. Both chats use disposable state; temporary authentication
+  is removed and fixture processes are stopped afterward. Claude and other
+  providers have not received live generation acceptance for this change.
+- Server/helper change based on `9f6f1f13`; no desktop contract migration,
+  production server restart, installation, release or mobile change.
+
 ## 2026-11-01 - Toggle workspace controls without creating a workspace
 
 - The chat-header workspace button now toggles the workspace toolbar on/off.
