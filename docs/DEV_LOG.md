@@ -1,5 +1,33 @@
 # Public development log
 
+## 2026-11-02 - Publish coordinated 1.0.12-beta.2
+
+- Publish direct desktop build **1270**, npm runtime/short CLI and the matching
+  signed legacy server bridge from frozen source
+  `9e816c6b3b73508a47764b4d4ea546e41bcd3857`. Preserve stable `1.0.11` across npm
+  and both desktop feeds. This is a beta release, with no mobile submission or
+  deployment to existing services.
+- [Paired npm publication](https://github.com/ZhengyiLuo/AgentsDock/actions/runs/41391793355)
+  and [desktop publication](https://github.com/ZhengyiLuo/AgentsDock/actions/runs/41392454191)
+  pass. Independently verify fresh scripts-disabled npm installation, exact
+  runtime dependency, installed files/modes and CLI help; verify both desktop
+  asset sets, source tag, signed descriptors, beta feeds and bridge publicly.
+- Exercise real Claude/Codex contextual follow-ups and repeated messages through
+  the exact signed native app and matching runtime in an isolated hidden window.
+  Verify retained history, workspace/editor state and the lifecycle-marker fix.
+  The app was launched directly; local macOS LaunchServices relaunch acceptance
+  remains incomplete, and further restart checks were explicitly deferred for
+  this beta. Do not count that boundary as passed.
+- All 11 scoped Mac update/recovery cases, both legacy-permission Linux rollback
+  cases and macOS/Linux CLI acceptance pass. Preserve the reports' limits for
+  populated customer history, fresh interaction, busy replacement and reboot.
+  Full native-provider content parity, Windows native updates and idle Codex
+  goal-resume mail authority remain unverified. QA analytics collection was off.
+- macOS is Developer ID signed and notarized. Windows remains explicitly
+  unsigned. See [release notes](RELEASE_1.0.12-beta.2.md) for changes, download
+  links, validation evidence and limitations. Documentation updates do not move
+  the artifact source or trigger rebuilding accepted bytes.
+
 ## 2026-11-01 - Prepare coordinated 1.0.12-beta.2
 
 - Integrate reviewed main through `9f6f1f13704e767717b5131e2df1213306a58abd`
