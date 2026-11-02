@@ -38,6 +38,13 @@ describe('workspace tab interactions', () => {
     active: { id: active }, over: over ? { id: over } : null
   } as DragEndEvent))
 
+  it.each(['workspace-main', 'workspace-main:unique-id'])('preserves the default label for %s', id => {
+    useAppStore.setState(state => ({ activeChatWorkspaceId: id,
+      chatWorkspaces: [{ ...state.chatWorkspaces[0], id, title: undefined }] }))
+    render(<ChatWorkspaceTabs />)
+    expect(screen.getByRole('tab', { name: 'Default workspace' })).toHaveAttribute('aria-selected', 'true')
+  })
+
   it('reorders inactive and active tabs through drag completion without selecting another workspace', () => {
     render(<ChatWorkspaceTabs />)
     act(() => drag.start())
