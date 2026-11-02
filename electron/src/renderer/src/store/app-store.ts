@@ -296,7 +296,7 @@ interface AppState {
   removeUpload(fileId: string): void
   removeUploadForSession(sessionId: string, fileId: string): void
   refreshSessions(cleanupEmpty?: boolean): Promise<void>
-  requestNewChat(): Promise<void>
+  requestNewChat(target?: { workspaceId: string; pane: ChatPane }): Promise<void>
   updateSession(
     sessionId: string,
     patch: Partial<Session> & { gemini_connect_api?: boolean },
@@ -942,7 +942,11 @@ export const useAppStore = create<AppState>((set, get) => ({
             })
           }
         }
-        if (!get().selectedSessionId) {
+        // Plain chat mode can start with an empty cache and receive its first
+        // sessions later. Workspace panes stay intentionally empty, and a
+        // pending create keeps ownership of its destination until it finishes.
+        const current = get()
+        if (!current.selectedSessionId && !current.chatWorkspaces.length && !current.creatingChat) {
           const first = sessions.find(session => !session.archived)
           if (first) queueMicrotask(() => void get().selectSession(first.id))
         }
@@ -1614,7 +1618,7 @@ export const useAppStore = create<AppState>((set, get) => ({
     const state = get()
     if (state.switchingProfileId || (sessionId && !state.sessions.some(session => session.id === sessionId))) return
     const workspaces = currentChatWorkspaceState(state).workspaces
-    const workspace = newChatWorkspace(workspaces.length ? secureRandomUUID() : 'workspace-main', {
+    const workspace = newChatWorkspace(workspaces.length ? secureRandomUUID() : `workspace-main:${secureRandomUUID()}`, {
       panes: { primary: sessionId ?? (workspaces.length ? null : state.selectedSessionId), secondary: null }, focusedPane: 'primary', paneCount: 1
     })
     captureChatTimelines(state.chatPanes)
@@ -2355,9 +2359,12 @@ export const useAppStore = create<AppState>((set, get) => ({
     } catch (error) { if (profileScopeMatches(scope, get())) set({ error: errorMessage(error) }) }
   },
 
-  async requestNewChat() {
+  async requestNewChat(target) {
     const initial = get()
     if (initial.switchingProfileId || initial.creatingChat) return
+    const destination = target ? { ...target,
+      sessionId: currentChatWorkspaceState(initial).workspaces.find(workspace => workspace.id === target.workspaceId)?.panes[target.pane] ?? null
+    } : null
     const preferenceScope = captureWorkspaceScope(initial)
     if (!preferenceScope) {
       set({ error: t('newChat.connectFirst') })
@@ -2417,7 +2424,25 @@ export const useAppStore = create<AppState>((set, get) => ({
       if (!workspaceScopeMatches(preferenceScope, get()) || !profileScopeMatches(profileScope, get())) return
       await get().refreshSessions()
       if (!workspaceScopeMatches(preferenceScope, get()) || !profileScopeMatches(profileScope, get())) return
-      await get().selectSession(session.id)
+      if (!destination) {
+        await get().selectSession(session.id)
+      } else {
+        const state = get()
+        const workspaces = currentChatWorkspaceState(state)
+        const workspace = workspaces.workspaces.find(candidate => candidate.id === destination.workspaceId)
+        // Navigation or another explicit selection wins over this late create.
+        // The new conversation remains available in the sidebar if its slot
+        // or workspace was replaced while the request was in flight.
+        if (!workspace || (workspace.panes[destination.pane] ?? null) !== destination.sessionId) return
+        if (workspace.id === workspaces.activeWorkspaceId && CHAT_PANE_IDS.indexOf(destination.pane) < workspace.paneCount) {
+          await state.selectSessionInPane(session.id, destination.pane, false, state.focusedChatPane === destination.pane)
+        } else {
+          set({ chatWorkspaces: workspaces.workspaces.map(candidate => candidate.id === workspace.id
+            ? { ...candidate, panes: { ...candidate.panes, [destination.pane]: session.id } }
+            : candidate) })
+          persistChatPaneState(get())
+        }
+      }
     } catch (error) {
       if (workspaceScopeMatches(preferenceScope, get()) && profileScopeMatches(profileScope, get())) set({ error: errorMessage(error) })
     } finally {
@@ -2958,9 +2983,11 @@ function currentChatWorkspaceState(state: AppState, layout = currentChatPaneLayo
 // Only explicit create/split/layout actions may opt into workspace mode.
 function enabledChatWorkspaceState(state: AppState): ChatWorkspaceState {
   const current = currentChatWorkspaceState(state)
-  return current.workspaces.length ? current : {
-    enabled: true, activeWorkspaceId: 'workspace-main',
-    workspaces: [newChatWorkspace('workspace-main', currentChatPaneLayout(state))]
+  if (current.workspaces.length) return current
+  const id = `workspace-main:${secureRandomUUID()}`
+  return {
+    enabled: true, activeWorkspaceId: id,
+    workspaces: [newChatWorkspace(id, currentChatPaneLayout(state))]
   }
 }
 

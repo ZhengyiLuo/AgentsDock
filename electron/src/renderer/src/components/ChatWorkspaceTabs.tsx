@@ -19,7 +19,7 @@ export function ChatWorkspaceTabs() {
   const dragScope = useRef<string | null>(null)
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 6 } }))
   const title = (workspace: ChatWorkspace) => workspace.title
-    || (workspace.id === 'workspace-main' ? t('chatWorkspace.default') : '')
+    || (workspace.id === 'workspace-main' || workspace.id.startsWith('workspace-main:') ? t('chatWorkspace.default') : '')
     || sessions.find(session => session.id === workspace.panes.primary)?.title
     || t('chatWorkspace.untitled')
   const scope = () => {
