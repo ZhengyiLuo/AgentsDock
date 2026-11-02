@@ -91,7 +91,7 @@ describe('opt-in chat workspaces', () => {
     const created = useAppStore.getState()
     useAppStore.getState().toggleChatWorkspaceBar()
     expect(useAppStore.getState().chatWorkspaceBarVisible).toBe(false)
-    expect(useAppStore.getState().chatWorkspaces).toBe(created.chatWorkspaces)
+    expect(useAppStore.getState().chatWorkspaces).toEqual(created.chatWorkspaces)
     expect(useAppStore.getState().selectedSessionId).toBe(created.selectedSessionId)
     await initialize()
     expect(useAppStore.getState()).toMatchObject({ chatWorkspaceBarVisible: false, activeChatWorkspaceId: created.activeChatWorkspaceId })
@@ -167,6 +167,116 @@ describe('tabbed chat workspaces', () => {
     api.timeline.subscribe.mockClear()
     api.timeline.unsubscribe.mockClear()
   })
+  it('exits the whole workspace into its focused chat and restores panes, drafts and subscriptions', async () => {
+    await useAppStore.getState().openSessionInSplit('b')
+    useAppStore.getState().setChatPaneCount(3)
+    useAppStore.getState().focusChatPane('secondary')
+    useAppStore.getState().setDraftForSession('a', 'draft A')
+    useAppStore.getState().setDraftForSession('b', 'draft B')
+    const saved = structuredClone(useAppStore.getState().chatWorkspaces)
+    api.timeline.open.mockClear()
+    api.timeline.cached.mockClear()
+    api.timeline.subscribe.mockClear()
+    api.timeline.unsubscribe.mockClear()
+
+    useAppStore.getState().toggleChatWorkspaceBar()
+    expect(useAppStore.getState()).toMatchObject({ chatWorkspaceBarVisible: false, chatPaneCount: 1,
+      chatPanes: { primary: 'b', secondary: null }, focusedChatPane: 'primary', selectedSessionId: 'b' })
+    expect(useAppStore.getState().chatWorkspaces).toEqual(saved)
+    expect(api.timeline.unsubscribe).toHaveBeenCalledExactlyOnceWith('a')
+    expect(api.timeline.open).not.toHaveBeenCalled()
+    expect(api.timeline.cached).not.toHaveBeenCalled()
+    expect(api.timeline.subscribe).not.toHaveBeenCalled()
+
+    useAppStore.getState().toggleChatWorkspaceBar()
+    await Promise.resolve()
+    expect(useAppStore.getState()).toMatchObject({ chatWorkspaceBarVisible: true, chatPaneCount: 3,
+      chatPanes: { primary: 'a', secondary: 'b', tertiary: null }, focusedChatPane: 'secondary', selectedSessionId: 'b' })
+    expect(useAppStore.getState().chatWorkspaces).toEqual(saved)
+    expect(useAppStore.getState().drafts).toMatchObject({ a: 'draft A', b: 'draft B' })
+    expect(api.timeline.subscribe).toHaveBeenCalledExactlyOnceWith('a', 1)
+  })
+
+  it('keeps ordinary navigation, reload and server switching outside the saved workspace', async () => {
+    await useAppStore.getState().openSessionInSplit('b')
+    useAppStore.getState().setChatPaneCount(4)
+    const saved = structuredClone(useAppStore.getState().chatWorkspaces)
+    useAppStore.getState().toggleChatWorkspaceBar()
+    for (const id of ['a', 'c']) {
+      await useAppStore.getState().selectSession(id)
+      expect(useAppStore.getState()).toMatchObject({ chatWorkspaceBarVisible: false, chatPaneCount: 1,
+        chatPanes: { primary: id, secondary: null }, selectedSessionId: id })
+      expect(useAppStore.getState().chatWorkspaces).toEqual(saved)
+    }
+    await initialize()
+    expect(useAppStore.getState()).toMatchObject({ chatWorkspaceBarVisible: false, chatPaneCount: 1, selectedSessionId: 'c' })
+    await useAppStore.getState().switchServer('two')
+    await useAppStore.getState().switchServer('one')
+    expect(useAppStore.getState()).toMatchObject({ chatWorkspaceBarVisible: false, chatPaneCount: 1, selectedSessionId: 'c' })
+    expect(useAppStore.getState().chatWorkspaces).toEqual(saved)
+    useAppStore.getState().toggleChatWorkspaceBar()
+    expect(useAppStore.getState()).toMatchObject({ chatWorkspaceBarVisible: true, chatPaneCount: 4, selectedSessionId: 'b' })
+  })
+
+  it('leaves an empty focused slot for an existing chat without deleting the empty slots', async () => {
+    useAppStore.getState().setChatPaneCount(3)
+    useAppStore.getState().focusChatPane('tertiary')
+    useAppStore.getState().toggleChatWorkspaceBar()
+    expect(useAppStore.getState()).toMatchObject({ selectedSessionId: 'a', chatPaneCount: 1, focusedChatPane: 'primary' })
+    useAppStore.getState().toggleChatWorkspaceBar()
+    expect(useAppStore.getState()).toMatchObject({ selectedSessionId: null, chatPaneCount: 3, focusedChatPane: 'tertiary' })
+  })
+
+  it('migrates a hidden toolbar with a still-split layout to a single chat on reload', async () => {
+    await useAppStore.getState().openSessionInSplit('b')
+    useAppStore.getState().setChatPaneCount(3)
+    const saved = structuredClone(useAppStore.getState().chatWorkspaces)
+    const stored = persisted.get('server-one:chatWorkspaces') as Record<string, unknown>
+    persisted.set('server-one:chatWorkspaces', { ...stored, barVisible: false })
+    await initialize()
+    expect(useAppStore.getState()).toMatchObject({ chatWorkspaceBarVisible: false, chatPaneCount: 1,
+      chatPanes: { primary: 'b', secondary: null }, selectedSessionId: 'b' })
+    expect(useAppStore.getState().chatWorkspaces).toEqual(saved)
+  })
+
+  it('allows an explicit split action to reenter the saved workspace', async () => {
+    await useAppStore.getState().openSessionInSplit('b')
+    useAppStore.getState().toggleChatWorkspaceBar()
+    await useAppStore.getState().openSessionInSplit('c')
+    expect(useAppStore.getState().chatWorkspaceBarVisible).toBe(true)
+    expect(useAppStore.getState().chatPaneCount).toBeGreaterThan(1)
+    expect(Object.values(useAppStore.getState().chatPanes)).toContain('c')
+  })
+
+  it('does not let a late hidden-pane load reenter the ordinary chat', async () => {
+    await useAppStore.getState().openSessionInSplit('b')
+    let finish!: (value: SessionSnapshot) => void
+    api.timeline.cached.mockResolvedValueOnce(null)
+    api.timeline.open.mockImplementationOnce(() => new Promise<SessionSnapshot>(resolve => { finish = resolve }))
+    const loading = useAppStore.getState().selectSessionInPane('c', 'tertiary', true, false)
+    await vi.waitFor(() => expect(finish).toBeTypeOf('function'))
+    useAppStore.getState().toggleChatWorkspaceBar()
+    finish(snapshot('c'))
+    await loading
+    expect(useAppStore.getState()).toMatchObject({ chatWorkspaceBarVisible: false, chatPaneCount: 1,
+      selectedSessionId: 'b', chatPanes: { primary: 'b', secondary: null } })
+    expect(useAppStore.getState().snapshots.c).toBeUndefined()
+    expect(useAppStore.getState().loadingSessionIds.has('c')).toBe(false)
+  })
+
+  it('reconciles deleted chats before restoring a saved hidden workspace', async () => {
+    await useAppStore.getState().openSessionInSplit('b')
+    useAppStore.getState().toggleChatWorkspaceBar()
+    useAppStore.setState(state => ({ sessions: state.sessions.filter(session => session.id !== 'a') }))
+    api.timeline.cached.mockClear()
+    api.timeline.open.mockClear()
+    useAppStore.getState().toggleChatWorkspaceBar()
+    expect(useAppStore.getState().chatPanes).toEqual({ primary: null, secondary: 'b' })
+    expect(useAppStore.getState().selectedSessionId).toBe('b')
+    expect(api.timeline.cached).not.toHaveBeenCalledWith('a')
+    expect(api.timeline.open).not.toHaveBeenCalledWith('a', expect.anything())
+  })
+
   it('persists reordered workspaces without changing active panes, drafts, files or subscriptions', async () => {
     const first = useAppStore.getState().activeChatWorkspaceId
     for (const id of ['b', 'c', 'd']) await useAppStore.getState().openSessionInSplit(id)

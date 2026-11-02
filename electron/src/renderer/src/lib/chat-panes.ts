@@ -29,7 +29,7 @@ export interface ChatWorkspace extends ChatPaneLayout {
 export interface ChatWorkspaceState {
   /** Distinguishes explicit workspaces from the old auto-created default. */
   enabled?: boolean
-  /** Toolbar visibility is independent of whether layouts have been created. */
+  /** Workspace view visibility; saved layouts survive while ordinary chat is shown. */
   barVisible?: boolean
   activeWorkspaceId: string
   workspaces: ChatWorkspace[]

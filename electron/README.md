@@ -265,13 +265,16 @@ file unchanged. Preview decoding runs outside the app's main thread.
 
 Workspace layouts are opt-in: ordinary chats show their title and folder on
 the first line, with a copyable provider session ID beneath. **Show workspaces**
-is an icon button beside Scheduled jobs and Terminal. It toggles the global
-workspace bar on/off; repeated clicks never create or delete layouts, change the
-current chat, or discard drafts. Existing split panes remain in place while the
-bar is hidden. Its tooltip changes between Show workspaces and Hide workspaces.
+is an icon button beside Scheduled jobs and Terminal. Turning it off leaves
+workspace mode entirely: only the focused chat remains, with its ordinary
+header, and empty pane selectors disappear. Turning it on restores the saved
+workspace and its pane assignments. Neither action creates or deletes layouts
+or discards drafts. Ordinary sidebar navigation while workspace mode is off
+does not reopen or overwrite the saved layout. Its tooltip changes between
+Show workspaces and Hide workspaces.
 Use the bar's **+ / New workspace** button to create the first default workspace
 around the current chat, or add subsequent workspaces. Layout controls appear
-after a workspace exists. Bar visibility is remembered per server, independently
+after a workspace exists. View visibility is remembered per server, independently
 of existing workspaces.
 Existing named and multi-pane workspaces are retained;
 the old automatically created single-chat default is not treated as opt-in.
@@ -293,6 +296,12 @@ support is loaded only after a file opens, clean inactive files are evicted
 from memory, and revision-checked saves prevent overwriting agent changes.
 Files above 512 KiB use a lightweight read-only text viewer instead of the
 syntax parser so opening source never competes with the chat renderer.
+
+File tabs retain **Show chat / Full screen**, **Editor left / Editor right**,
+and **Split right** inside each chat pane, including workspace layouts. The
+Files tree's **Open to the Side** targets that pane's second editor group.
+Split layout and unsaved files are restored per chat; shortcuts still belong
+only to the focused chat and editor. Narrow editor toolbars wrap their controls.
 
 The **Changes** entry has been removed from this surface, including workspace
 mode. The underlying Git APIs and component are retained but are not exposed
