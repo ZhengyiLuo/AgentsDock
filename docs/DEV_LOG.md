@@ -1,5 +1,20 @@
 # Public development log
 
+## 2026-11-02 - Preserve Claude tool ownership during connection startup
+
+- Keep the callback settings used to construct a Claude connection attached to
+  that connection while concurrent command/MCP discovery supplies newer options.
+  Those newer settings apply on the next reconnect.
+- This prevents a connecting client from retaining unbound AgentsDock tool
+  callbacks while ownership is assigned to a different settings object.
+- Validation: the delayed-connect race fails before the fix and passes after it.
+  All 13 focused ownership, reconnect, fork, native continuation and Side chat
+  checks pass. An isolated real Claude SDK run performs a concurrent runtime
+  lookup during controlled connection startup, then reads the inbox through
+  the production provider tool and HTTP authorization successfully. Temporary
+  fixture processes are stopped afterward; no production service changes or
+  deployment.
+
 ## 2026-11-02 - Exit workspace mode into a single chat
 
 - Hide workspaces now exits the entire multi-pane view, including empty chat
