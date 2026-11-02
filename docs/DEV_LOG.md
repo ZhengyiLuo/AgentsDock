@@ -1,5 +1,69 @@
 # Public development log
 
+## 2026-11-02 - Treat Claude /compact as a completed command
+
+- A native Claude local command such as `/compact` produces no model reply;
+  Claude only marks its result with `local_command`. AgentsDock flagged that
+  as "Claude returned no response…" and failed the turn. Such results now
+  complete normally, and the replayed `<local-command-stdout>` (e.g.
+  "Compacted") is shown as the reply with its native message ID. The output
+  is promoted only after the structured `local_command` field proves it; a
+  human message quoting the markup is not.
+- Applies to the Agent SDK and `claude -p` transports. The print path no
+  longer crashes on string-valued replayed user content.
+- Regression cases for SDK and print `/compact` turns fail before the fix;
+  297 focused server tests pass. An isolated source server (temporary
+  state/config, loopback) took real authenticated HTTP turns on the Agent SDK
+  path, using the desktop's native command selection, against a real Claude
+  (Haiku): message, `/compact`, follow-up, `/compact` again, then reopening
+  the chat. Before the fix this reproduced the empty-turn error and imported
+  wrapper bubbles. With this and the preceding history fix, both compactions
+  show "Compacted" with exit 0 and sync imports nothing. The same sequence on
+  the real `claude -p` transport (no SDK capability) also completes both
+  compactions with "Compacted" and exit 0.
+- Desktop acceptance: an isolated unpacked Electron 43.1.1 build of main,
+  offscreen in a private headless Wayland compositor with a private session
+  bus and keyring, connected through the real setup dialog and production
+  IPC/authenticated transport to an isolated source server running real
+  Claude Code 2.1.316 (Opus, Agent SDK). `/compact` was chosen from the native
+  command palette twice, around a follow-up, then the renderer was reloaded
+  and the chat reopened. Before the fix: two "Claude returned no response…"
+  errors. After it: both turns end with an assistant "Compacted", no errors,
+  and identical results after reopening. Limits: `--no-sandbox` (the setuid
+  helper needs root), and Linux only.
+- Source only; no server deploy/restart, desktop release or mobile change.
+
+## 2026-11-02 - Stop importing Claude command rows as user messages
+
+- Claude Code records a local slash command such as `/compact` as user-role
+  transcript rows: a metadata caveat, a `<command-name>` wrapper and its
+  `<local-command-stdout>` output. Provider-history sync imported the wrapper
+  and output as human bubbles and, because they matched nothing on the
+  timeline, re-imported everything since that point.
+- Rows proven by the native caveat → command → output parent chain now project
+  as the typed command (`/compact`) and its output ("Compacted"), keyed by the
+  native message ID, so they match the live turn instead of duplicating it.
+  Quoted markup without that chain stays ordinary user text; `/goal` keeps its
+  dedicated normalizer. Full import and incremental cursor sync both apply it.
+  Output rows must share the command occurrence's `promptId` (one stdout and
+  one stderr each), so a later human prompt quoting the markup stays human.
+  Incremental seeding recovers complete preceding records within the
+  transcript reader's 32 MiB record bound, so long command arguments keep
+  their provenance across a cursor boundary.
+- Regression cases use transcript records captured from Claude Code 2.1.316
+  and fail before the fix; 191 focused server tests pass.
+- Desktop acceptance (with the follow-up live-turn fix): an isolated unpacked
+  Electron 43.1.1 build of main, offscreen in a private headless Wayland
+  compositor with a private session bus and keyring, connected through the
+  real setup dialog to an isolated source server over authenticated
+  transport. A real Claude Opus chat ran message → `/compact` (from the native
+  command palette) → follow-up → `/compact` → renderer reload and reopen.
+  Before the fix, each compaction added two imported "You" bubbles with raw
+  wrapper markup. After it, the timeline shows four user and four assistant
+  messages, both "Compacted", no markup, and no imported rows on the server.
+- Rows already imported into existing chats are unchanged. Source only; no
+  server deploy/restart, desktop release or mobile change.
+
 ## 2026-11-02 - Exit workspace mode into a single chat
 
 - Hide workspaces now exits the entire multi-pane view, including empty chat
