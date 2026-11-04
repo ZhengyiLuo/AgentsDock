@@ -19,6 +19,8 @@ export interface MessageItem {
   events: Event[]
   role: 'user' | 'assistant'
   files: AgentFile[]
+  /** Exact owning input for presentation of native Claude compact diagnostics. */
+  claudeCompactInput?: Event
   /** Renderer-only outbound message that has not been accepted by AgentsServer yet. */
   pending?: boolean
   pendingPhase?: 'preflight' | 'submitting' | 'submitted'
@@ -2140,6 +2142,8 @@ function renderTimelineItem(item: TimelineItem): RenderTimelineItem[] {
       rows.push({
         kind: 'message', id: `${item.id}:assistant${suffix}`, key: `${item.key}:assistant${suffix}`,
         seq: segment.finals[0].seq, event, events: segment.finals, role: 'assistant', files: item.files,
+        ...(item.user?.backend === 'claude' && /^\/compact(?:\s|$)/u.test(item.user.prompt ?? '')
+          ? { claudeCompactInput: item.user } : {}),
       })
     }
   }
@@ -2253,6 +2257,7 @@ export function reconcileRenderTimelineItems(previous: RenderTimelineItem[], nex
     if (!before || before.kind !== item.kind) return item
     if (before === item) return before
     if (before.kind === 'message' && item.kind === 'message' && before.event === item.event &&
+      before.claudeCompactInput === item.claudeCompactInput &&
       before.role === item.role && sameReferences(before.events, item.events) &&
       sameReferences(before.files, item.files)) return before
     if (before.kind === 'trace' && item.kind === 'trace' && before.active === item.active &&

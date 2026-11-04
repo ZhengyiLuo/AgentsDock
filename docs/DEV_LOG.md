@@ -1,5 +1,32 @@
 # Public development log
 
+## 2026-11-03 - Present Claude compact hook output as command diagnostics
+
+- Follow up on the Claude reliability integration below: native `/compact`
+  output from PostCompact hooks is command text, not Markdown. Show a concise
+  completion label and a disclosure containing the unchanged native output.
+  Only a recognized successful single-hook envelope with empty output starts
+  collapsed; failures, warnings, non-empty output and unknown envelopes remain
+  expanded. Copying and stored history retain the complete original text.
+- Apply this presentation only to source-identified Claude output paired with
+  its exact same-session, same-run `/compact` input. Ordinary messages, user
+  quotes and other providers keep their existing rendering. Reconciliation
+  updates the row if the owning input arrives later.
+- On integration base `503ae3aa`, 378 targeted desktop tests, 483 focused server
+  tests, TypeScript, production compilation and compile-output verification
+  pass. The new rendering regression fails against the previous renderer.
+  The follow-up changes desktop presentation only; it adds no server mutation.
+- An isolated native offscreen Electron app exercises production IPC and real
+  authenticated server/Claude Code 2.1.304 requests: compact, contextual follow-up,
+  mouse and keyboard disclosure controls, English/dark and Chinese/light narrow
+  layouts, and reload. Native diagnostic bytes remain intact, shell text no
+  longer becomes mathematical notation, and the remembered phrase survives
+  compaction. Only credential storage is a fixture. Hook failures are covered
+  by automated tests rather than changes to the user's hook configuration.
+- Local compiled preview only. No release, remote push or PR merge. Real print
+  transport, forced connection-race timing, credential rotation and a full
+  24-hour cache interval are not claimed as live tests in this follow-up.
+
 ## 2026-11-03 - Integrate the Claude reliability review batch for local acceptance
 
 - Combine PRs #150, #147, #148 and #149 on main base `f1af8090`, retaining
