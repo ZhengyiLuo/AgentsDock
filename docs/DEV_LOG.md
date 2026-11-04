@@ -1,5 +1,32 @@
 # Public development log
 
+## 2026-11-03 - Extend connection and background-sync acceptance
+
+- Revalidate integration `d73e5748`: 772 focused desktop tests across service,
+  transport, persistence, settings, server selection and locale contracts pass;
+  47 focused server tests and TypeScript pass again. No functional source change
+  is needed after these checks; the previous production compilation still applies.
+- Use an isolated native offscreen Electron profile, production IPC and real
+  authenticated Claude and Codex turns. Confirm hidden completed replies reach
+  the semantic cache before opening their chats, repeated navigation retains
+  chat-owned drafts, and replies remain distinct without cross-chat leakage.
+  Scroll the longer Claude history to verify earlier replies remain available.
+- Interrupt only the isolated client's real TCP connection through a transparent
+  test proxy. Cached replies remain readable and the draft survives offline
+  navigation. Restore connectivity and open a cached chat: the online indicator
+  returns in about 0.3 seconds in this local run, without waiting for the regular
+  poll. This timing is an observation, not a remote-network latency guarantee.
+- Disconnect again after a real Claude turn is accepted. The server completes
+  that original turn while the client is offline; reconnecting prefetches the
+  complete result without a second execution or duplicate completion. A later
+  real Codex request succeeds. Fully quit and relaunch the isolated app: the
+  selected chat, unsent draft and cached replies persist. Only credential storage
+  is a fixture; the proxy forwards unmodified traffic and injects socket loss.
+- The user's visible preview and the server stay running throughout these fault
+  tests. Slow startup recovery and failed-readiness presentation remain automated
+  regression coverage; packaged Windows/Linux acceptance is not claimed. Local
+  verification only, without a remote push, merge or release.
+
 ## 2026-11-03 - Integrate connection recovery and background reply synchronization
 
 - Combine PRs #143 and #151 on main base `897a40e2`, preserving both original
