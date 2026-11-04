@@ -1,5 +1,20 @@
 # Public development log
 
+## 2026-11-04 - Avoid worker starvation in the runtime-catalog concurrency test
+
+- The connection/sync integration's full CI repeatedly timed out in an unchanged
+  catalog test. Its blocking entry observer used the same default executor that
+  scope reads and catalog discovery needed. A one-worker executor reproduces the
+  fixture deadlock deterministically, even though ordinary local runs pass.
+- Signal an asyncio event from the synthetic provider workers instead of using
+  another worker to observe them. Deliberately constrain the test's default pool
+  to one worker. Preserve the five-second entry watchdog, all 24 overlapping
+  requests, exact per-provider call counts, response equality and cleanup checks.
+- The constrained case fails before the change and passes afterward. Twenty
+  repetitions plus the entire catalog-concurrency module pass (34 tests). This
+  changes test synchronization only, not provider discovery, authentication,
+  release artifacts or the running local app.
+
 ## 2026-11-03 - Extend connection and background-sync acceptance
 
 - Revalidate integration `d73e5748`: 772 focused desktop tests across service,
