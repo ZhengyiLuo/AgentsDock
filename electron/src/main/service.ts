@@ -5002,6 +5002,9 @@ export class AppService {
   async terminalAction(profileId: string, profileGeneration: number, sessionId: string, action: TerminalAction, target?: string): Promise<TerminalWindowsSnapshot> {
     const scope = this.requireProfileScope(profileId, profileGeneration)
     await this.ensureValidatedScope(scope)
+    this.assertCurrentScope(scope)
+    // A window/pane switch must not inherit a wheel batch for the old target.
+    this.terminalConnections.get(sessionId)?.cancelScroll()
     const windows = await scope.client.terminalAction(sessionId, action, target)
     this.assertCurrentScope(scope)
     return windows

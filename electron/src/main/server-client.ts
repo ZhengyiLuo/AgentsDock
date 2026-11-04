@@ -311,6 +311,7 @@ export interface TerminalConnection {
   write(data: string): void
   resize(columns: number, rows: number): void
   scroll(delta: number): void
+  cancelScroll(): void
   close(): void
 }
 
@@ -1959,9 +1960,24 @@ export class AgentServerClient {
     let fatalError: string | null = null
     let columns = options.columns
     let rows = options.rows
+    let scrollTimer: NodeJS.Timeout | null = null
+    let pendingScroll = 0
+    const cancelScroll = (): void => {
+      if (scrollTimer) clearTimeout(scrollTimer)
+      scrollTimer = null
+      pendingScroll = 0
+    }
+    const flushScroll = (): void => {
+      const delta = pendingScroll
+      cancelScroll()
+      if (delta && !stopped && socket?.readyState === 1) {
+        socket.send(JSON.stringify({ type: 'scroll', delta }))
+      }
+    }
     const stop = (): void => {
       if (stopped) return
       stopped = true
+      cancelScroll()
       if (retry) clearTimeout(retry)
       if (activeConnectWatchdog) clearTimeout(activeConnectWatchdog)
       if (resizeSync) clearTimeout(resizeSync)
@@ -2009,6 +2025,8 @@ export class AgentServerClient {
       const reconnect = (error?: string | null): void => {
         if (stopped || disconnected || socket !== current) return
         disconnected = true
+        cancelScroll()
+        socket = null
         clearConnectWatchdog()
         onState({ sessionId, state: 'reconnecting', error: error || null })
         const jitter = Math.floor(Math.random() * Math.min(250, retryDelay / 3))
@@ -2095,20 +2113,30 @@ export class AgentServerClient {
     return {
       write(data: string): void {
         if (stopped) return
+        flushScroll()
         if (socket?.readyState === 1) socket.send(new TextEncoder().encode(data))
       },
       resize(nextColumns: number, nextRows: number): void {
         if (stopped) return
+        flushScroll()
         columns = nextColumns
         rows = nextRows
         if (socket?.readyState === 1) socket.send(JSON.stringify({ type: 'resize', columns, rows }))
         syncTerminalSize()
       },
       scroll(delta: number): void {
-        if (stopped) return
+        if (stopped || socket?.readyState !== 1 || !Number.isFinite(delta)) return
         const bounded = Math.max(-80, Math.min(80, Math.trunc(delta)))
-        if (bounded && socket?.readyState === 1) socket.send(JSON.stringify({ type: 'scroll', delta: bounded }))
+        if (!bounded) return
+        // Keep direction changes ordered, and stay within the existing server's
+        // 80-line packet limit. A fixed (not sliding) deadline keeps scrolling
+        // responsive without one tmux subprocess chain per trackpad event.
+        if (pendingScroll && (Math.sign(pendingScroll) !== Math.sign(bounded) || Math.abs(pendingScroll + bounded) > 80)) flushScroll()
+        pendingScroll += bounded
+        if (Math.abs(pendingScroll) === 80) flushScroll()
+        else if (!scrollTimer) scrollTimer = setTimeout(flushScroll, 16)
       },
+      cancelScroll,
       close: stop
     }
   }

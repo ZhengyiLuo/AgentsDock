@@ -1,5 +1,39 @@
 # Public development log
 
+## 2026-11-03 - Reduce terminal input delay after scrolling
+
+- Coalesce same-direction desktop wheel input on a fixed 16 ms deadline while
+  preserving the existing 80-line packet limit and total scroll distance.
+  Flush before typing, resizing or reversing direction; discard pending wheel
+  input when detaching, reconnecting, changing profile or switching tmux targets.
+  Ordinary keyboard input is not delayed or retried.
+- Reduce repeated server history scrolling from four tmux processes to two by
+  using the mode query as the existence check and combining the scroll with its
+  final mode query. Preserve manually owned copy mode, bottom-of-history exit,
+  and the older-tmux hidden-indicator fallback. No terminal protocol change.
+- Same-machine authenticated WebSocket/PTY/tmux benchmark: 10,000 history lines,
+  60 five-line wheel steps at requested 8 ms intervals, then an input echo.
+  The final repeated comparison (eight trials per version) reduced median
+  post-scroll echo delay from 390 ms to 18.6 ms; observed maxima were 504 ms and
+  20.8 ms. Idle echo medians remained 0.84 ms and 0.86 ms. Earlier runs varied
+  with host load but also improved; these are local measurements, not remote
+  network or foreground paint guarantees. Both mixed client/server combinations
+  were additionally exercised against the unchanged wire protocol.
+- Verification on main base `6dbb6673`, development metadata 0.2.0/build 86:
+  676 focused desktop tests, 65 server tests, TypeScript and production build
+  pass. New client regressions fail without the fix. Native offscreen Electron
+  exercises real IPC, authenticated transport, PTY and tmux: ordinary typing,
+  repeated scroll/input, direction reversal, Ctrl-C, window creation, split,
+  resize, reconnect, close/reopen with retained contents, manual copy-mode
+  ownership and mouse-capture toggling. Post-scroll input-to-renderer-data
+  median was 31 ms across four native-app trials (not a paint measurement).
+  Only credential storage and the synthetic terminal workload are fixtures;
+  no provider request is required for this terminal change.
+- Source/local test build only; existing user services and App are unchanged.
+  Client batching works with the previous server; the server process reduction
+  requires the corresponding server update. No release, deployment, mobile
+  change or native Windows/Linux acceptance is included.
+
 ## 2026-11-02 - Exit workspace mode into a single chat
 
 - Hide workspaces now exits the entire multi-pane view, including empty chat

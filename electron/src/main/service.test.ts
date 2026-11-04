@@ -3777,7 +3777,7 @@ interface FakeClientOptions {
     onSessions: (sessions: Session[], snapshot: boolean, removedSessionId?: string) => void,
     onState: (connected: boolean, error?: string) => void
   ) => () => void
-  terminal?: () => { write(data: string): void; resize(columns: number, rows: number): void; scroll(delta: number): void; close(): void }
+  terminal?: () => { write(data: string): void; resize(columns: number, rows: number): void; scroll(delta: number): void; cancelScroll(): void; close(): void }
   portTunnelSocket?: (sessionId: string, remotePort: number) => WebSocket
 }
 
@@ -3976,7 +3976,7 @@ function fakeClient(options: FakeClientOptions = {}) {
     }))),
     stream: vi.fn(options.stream ?? (() => vi.fn())),
     emergencyStream: vi.fn(options.emergencyStream ?? (() => vi.fn())),
-    terminal: vi.fn(options.terminal ?? (() => ({ write: vi.fn(), resize: vi.fn(), scroll: vi.fn(), close: vi.fn() }))),
+    terminal: vi.fn(options.terminal ?? (() => ({ write: vi.fn(), resize: vi.fn(), scroll: vi.fn(), cancelScroll: vi.fn(), close: vi.fn() }))),
     portTunnelSocket: vi.fn(options.portTunnelSocket ?? (() => ({ close: vi.fn() } as unknown as WebSocket)))
   }
 }
@@ -9551,7 +9551,7 @@ describe('server profile lifecycle', () => {
     const internals = service as unknown as {
       timelineSubscriptions: Map<string, { lease: number; stop: () => void; connected: boolean; initializing: boolean }>
       emergencyStreamStop: (() => void) | null
-      terminalConnections: Map<string, { write(data: string): void; resize(columns: number, rows: number): void; scroll(delta: number): void; close(): void }>
+      terminalConnections: Map<string, { write(data: string): void; resize(columns: number, rows: number): void; scroll(delta: number): void; cancelScroll(): void; close(): void }>
       portTunnels: { disposeAll(): void }
       subagentProjector: { reset(): void }
     }
@@ -9560,7 +9560,7 @@ describe('server profile lifecycle', () => {
     })
     internals.emergencyStreamStop = emergencyStop
     internals.terminalConnections.set('chat-a', {
-      write: vi.fn(), resize: vi.fn(), scroll: vi.fn(), close: terminalClose
+      write: vi.fn(), resize: vi.fn(), scroll: vi.fn(), cancelScroll: vi.fn(), close: terminalClose
     })
     internals.portTunnels.disposeAll = tunnelDispose
     internals.subagentProjector.reset = projectionReset
@@ -10942,11 +10942,29 @@ describe('rapid profile resource teardown', () => {
     expect(() => service.listForwardedPorts('a', initial.profileGeneration)).toThrow('superseded')
   })
 
+  it('cancels a pending wheel batch before changing the terminal pane', async () => {
+    const order: string[] = []
+    const connection = { write: vi.fn(), resize: vi.fn(), scroll: vi.fn(), close: vi.fn(),
+      cancelScroll: vi.fn(() => order.push('cancel')) }
+    const client = Object.assign(fakeClient({ terminal: () => connection }), {
+      terminalAction: vi.fn(async () => { order.push('action'); return { windows: [] } })
+    })
+    const { service } = createProfileService({ 'http://a.test:7850': [client] })
+    const payload = await service.bootstrap()
+    await service.refreshServer('a', payload.profileGeneration)
+    await service.connectTerminal('a', payload.profileGeneration, 'chat', { columns: 80, rows: 24 })
+    await service.terminalAction('a', payload.profileGeneration, 'chat', 'select-window', '1')
+    expect(order).toEqual(['cancel', 'action'])
+    await expect(service.terminalAction('b', payload.profileGeneration, 'chat', 'select-window', '1')).rejects.toThrow()
+    expect(order).toEqual(['cancel', 'action'])
+    service.disconnectTerminal('chat')
+  })
+
   it('closes each old client and terminal exactly once across ten switches', async () => {
     const terminalConnections: Array<{ write: ReturnType<typeof vi.fn>; resize: ReturnType<typeof vi.fn>; scroll: ReturnType<typeof vi.fn>; close: ReturnType<typeof vi.fn> }> = []
     const makeClient = () => fakeClient({
       terminal: () => {
-        const connection = { write: vi.fn(), resize: vi.fn(), scroll: vi.fn(), close: vi.fn() }
+        const connection = { write: vi.fn(), resize: vi.fn(), scroll: vi.fn(), cancelScroll: vi.fn(), close: vi.fn() }
         terminalConnections.push(connection)
         return connection
       }
@@ -10989,7 +11007,7 @@ describe('rapid profile resource teardown', () => {
         close: ReturnType<typeof vi.fn>
       }> = []
       const terminalFor = (owner: string) => () => {
-        const connection = { owner, write: vi.fn(), resize: vi.fn(), scroll: vi.fn(), close: vi.fn() }
+        const connection = { owner, write: vi.fn(), resize: vi.fn(), scroll: vi.fn(), cancelScroll: vi.fn(), close: vi.fn() }
         terminalConnections.push(connection)
         return connection
       }
