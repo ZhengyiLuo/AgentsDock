@@ -80,6 +80,7 @@ vi.mock('electron', () => ({
 }))
 
 import { LocalCache, TIMELINE_PAGING_SCHEMA_VERSION } from './persistence'
+import { clearStorageError, localStorageWasFull } from './storage-health'
 import {
   ServerError,
   TeamHubBootstrapTransportError,
@@ -4276,6 +4277,265 @@ describe('background connection event publication', () => {
   })
 })
 
+describe('finished background chat prefetch', () => {
+  const finished: Session = {
+    id: 'chat', title: 'Finished chat', backend: 'codex',
+    latest_agent_event_seq: 9, last_read_agent_event_seq: 4, latest_agent_event_at: '2026-11-02T10:00:00Z'
+  }
+  const earlier: Event = { id: 'earlier', session_id: 'chat', seq: 4, type: 'assistant_text', ts: 'now', text: 'Earlier answer' }
+  const reply: Event = { id: 'reply', session_id: 'chat', seq: 9, type: 'assistant_text', ts: 'now', text: 'Final reply' }
+
+  function latestPage(session: Session, events: Event[], latestSeq: number): TimelinePage {
+    return { session, events, queued_turns: [], has_more: false, latest_seq: latestSeq, semantic_item_count: events.length }
+  }
+
+  function cacheOpenedChat(cache: LocalCache, session: Session, event: Event, namespace = 'profile:a'): void {
+    cache.putSession(namespace, session)
+    cache.putEvents(namespace, session.id, [{ ...event, session_id: session.id }])
+    cache.putTimelineState(namespace, session.id, false, event.seq, 1, null, true)
+  }
+
+  /** A validated service whose cache holds each chat as last seen (null: never opened). */
+  function finishedChatService(
+    options: FakeClientOptions,
+    chats: Session[] = [finished],
+    cachedEvent: (chat: Session) => Event | null = () => earlier
+  ) {
+    const client = fakeClient({ sessions: async () => chats, ...options })
+    const { service, cache } = createProfileService({ 'http://a.test:7850': [client] }, value => {
+      for (const chat of chats) {
+        const event = cachedEvent(chat)
+        if (event) cacheOpenedChat(value, chat, event)
+      }
+    })
+    Object.assign(service, { validatedGeneration: 1 })
+    const send = vi.fn()
+    service.addWindow({ isDestroyed: () => false, on: vi.fn(), webContents: { send } } as never)
+    const timelineSends = () => send.mock.calls.filter(([channel]) => channel === 'server:timeline')
+    return { client, service, cache, timelineSends }
+  }
+
+  async function poll(service: AppService): Promise<void> {
+    const internals = service as unknown as { scope: unknown; refreshAll(a: boolean, b: boolean, scope: unknown): Promise<void> }
+    await internals.refreshAll(false, false, internals.scope)
+    await settleBackgroundWork()
+  }
+
+  function connectedStream(...[, , , onState]: Parameters<AgentServerClient['stream']>) {
+    onState(true)
+    return vi.fn()
+  }
+
+  it('caches the reply of an unread chat that finished out of view, once', async () => {
+    const { client, service, cache, timelineSends } = finishedChatService({ sessionPage: async () => latestPage(finished, [reply], 9) })
+
+    await poll(service)
+    await poll(service)
+
+    expect(client.sessionPage).toHaveBeenCalledExactlyOnceWith('chat', { pageMode: 'semantic', limit: 48, tail: true, visible: true })
+    expect(cache.snapshot('profile:a', 'chat')?.events).toEqual([reply])
+    expect(timelineSends()).toEqual([['server:timeline', expect.objectContaining({
+      sessionId: 'chat', mode: 'replace', authoritativeTail: true,
+      snapshot: expect.objectContaining({ historyVerified: true, events: [reply] })
+    })]])
+    expect(client.stream).not.toHaveBeenCalled()
+  })
+
+  it('leaves visible, running, read, archived, never-opened and current chats to their normal paths', async () => {
+    const chats = ['visible', 'running', 'read', 'archived', 'unopened', 'current'].map(id => ({
+      ...finished, id, title: id,
+      ...(id === 'read' ? { last_read_agent_event_seq: 9 } : {}),
+      ...(id === 'archived' ? { archived: true } : {})
+    }))
+    const { client, service } = finishedChatService({
+      health: async () => ({ ok: true, active: ['running'] }),
+      sessionPage: async sessionId => latestPage({ ...finished, id: sessionId }, [], 9),
+      stream: connectedStream
+    }, chats, chat => chat.id === 'unopened' ? null : chat.id === 'current' ? reply : earlier)
+    await service.subscribeTimeline('visible', 0)
+    await settleBackgroundWork()
+    client.sessionPage.mockClear()
+
+    await poll(service)
+
+    expect(client.sessionPage).not.toHaveBeenCalled()
+  })
+
+  it('lets a chat opened during its prefetch wait for that read instead of reading again', async () => {
+    const pending = deferred<TimelinePage>()
+    const { client, service, cache, timelineSends } = finishedChatService({ sessionPage: () => pending.promise, stream: connectedStream })
+    await poll(service)
+    await service.subscribeTimeline('chat', 0)
+    await settleBackgroundWork()
+
+    pending.resolve(latestPage(finished, [reply], 9))
+    await settleBackgroundWork()
+
+    expect(client.sessionPage).toHaveBeenCalledOnce()
+    expect(cache.snapshot('profile:a', 'chat')?.events).toEqual([reply])
+    expect(client.stream).toHaveBeenCalledOnce()
+    expect(client.stream.mock.calls[0]?.[1]).toBe(9)
+    expect(timelineSends()).toHaveLength(1)
+  })
+
+  it('reads directly when the prefetch an open waited for fails', async () => {
+    const pending = deferred<TimelinePage>()
+    let reads = 0
+    const { client, service, cache } = finishedChatService({
+      sessionPage: () => ++reads === 1 ? pending.promise : Promise.resolve(latestPage(finished, [reply], 9)),
+      stream: connectedStream
+    })
+    await poll(service)
+    await service.subscribeTimeline('chat', 0)
+    await settleBackgroundWork()
+
+    pending.reject(new ServerError(503, 'Server is busy'))
+    await settleBackgroundWork()
+
+    expect(client.sessionPage).toHaveBeenCalledTimes(2)
+    expect(cache.snapshot('profile:a', 'chat')?.events).toEqual([reply])
+    expect(client.stream.mock.calls[0]?.[1]).toBe(9)
+  })
+
+  it('never replaces newer cached history with an older background page', async () => {
+    const pending = deferred<TimelinePage>()
+    const newer: Event = { ...reply, id: 'newer', seq: 10, text: 'Cached meanwhile' }
+    const { service, cache, timelineSends } = finishedChatService({ sessionPage: () => pending.promise })
+    await poll(service)
+    cache.putEvents('profile:a', 'chat', [newer])
+
+    pending.resolve(latestPage(finished, [reply], 9))
+    await settleBackgroundWork()
+
+    expect(cache.snapshot('profile:a', 'chat')?.events.map(event => event.id)).toEqual(['earlier', 'newer'])
+    expect(timelineSends()).toEqual([])
+  })
+
+  it('reads a reply once even when the page lags the chat summary', async () => {
+    const { client, service } = finishedChatService({ sessionPage: async () => latestPage(finished, [], 7) })
+
+    await poll(service)
+    await poll(service)
+
+    expect(client.sessionPage).toHaveBeenCalledOnce()
+  })
+
+  it('retries a failed read after a pause, and at once for a newer reply', async () => {
+    let now = Date.parse('2026-11-02T10:00:00Z')
+    const clock = vi.spyOn(Date, 'now').mockImplementation(() => now)
+    cleanup.push(() => clock.mockRestore())
+    let summary = finished
+    let available = false
+    const { client, service, cache } = finishedChatService({
+      sessions: async () => [summary],
+      sessionPage: async () => {
+        if (!available) throw new ServerError(503, 'Server is busy')
+        return latestPage(summary, [reply], summary.latest_agent_event_seq ?? 0)
+      }
+    })
+
+    await poll(service)
+    await poll(service)
+    expect(client.sessionPage).toHaveBeenCalledOnce()
+    now += 60_000
+    await poll(service)
+    expect(client.sessionPage).toHaveBeenCalledTimes(2)
+
+    summary = { ...finished, latest_agent_event_seq: 10 }
+    available = true
+    await poll(service)
+    expect(client.sessionPage).toHaveBeenCalledTimes(3)
+    expect(cache.snapshot('profile:a', 'chat')?.events).toEqual([reply])
+  })
+
+  it('reports a full disk from a background read', async () => {
+    cleanup.push(clearStorageError)
+    const { service, cache } = finishedChatService({ sessionPage: async () => latestPage(finished, [reply], 9) })
+    vi.spyOn(cache, 'replaceEvents').mockImplementationOnce(() => {
+      throw Object.assign(new Error('database or disk is full'), { code: 'SQLITE_FULL' })
+    })
+
+    await poll(service)
+
+    expect(localStorageWasFull()).toBe(true)
+  })
+
+  it('keeps a previous server read from blocking or writing to the next server', async () => {
+    const pendingA = deferred<TimelinePage>()
+    const clientA = fakeClient({ sessions: async () => [finished], sessionPage: () => pendingA.promise })
+    const clientB = fakeClient({ sessions: async () => [finished], sessionPage: async () => latestPage(finished, [reply], 9) })
+    const { service, cache } = createProfileService({ 'http://a.test:7850': [clientA], 'http://b.test:7850': [clientB] }, value => {
+      cacheOpenedChat(value, finished, earlier)
+    })
+    const internals = service as unknown as { scope: { generation: number; namespace: string } }
+    Object.assign(service, { validatedGeneration: 1 })
+    const send = vi.fn()
+    service.addWindow({ isDestroyed: () => false, on: vi.fn(), webContents: { send } } as never)
+    await poll(service)
+    await service.switchServer('b')
+    Object.assign(service, { validatedGeneration: internals.scope.generation })
+    const namespaceB = internals.scope.namespace
+    cacheOpenedChat(cache, finished, earlier, namespaceB)
+
+    await poll(service)
+    expect(clientB.sessionPage).toHaveBeenCalledOnce()
+    expect(cache.snapshot(namespaceB, 'chat')?.events).toEqual([reply])
+    send.mockClear()
+
+    pendingA.resolve(latestPage(finished, [reply], 9))
+    await settleBackgroundWork()
+    expect(cache.snapshot('profile:a', 'chat')?.events).toEqual([earlier])
+    expect(send).not.toHaveBeenCalledWith('server:timeline', expect.objectContaining({ profileId: 'a' }))
+  })
+
+  it('reads at most three finished chats per poll, one at a time and newest first', async () => {
+    const chats = [1, 2, 3, 4, 5].map(n => ({ ...finished, id: `chat-${n}`, latest_agent_event_at: `2026-11-02T10:0${n}:00Z` }))
+    const pages = new Map<string, ReturnType<typeof deferred<TimelinePage>>>()
+    const { client, service } = finishedChatService({
+      sessionPage: sessionId => {
+        const page = deferred<TimelinePage>()
+        pages.set(sessionId, page)
+        return page.promise
+      }
+    }, chats)
+    const reads = () => client.sessionPage.mock.calls.map(([sessionId]) => sessionId)
+    const answer = async (sessionId: string) => {
+      pages.get(sessionId)!.resolve(latestPage({ ...finished, id: sessionId }, [{ ...reply, session_id: sessionId }], 9))
+      await settleBackgroundWork()
+    }
+
+    await poll(service)
+    expect(reads()).toEqual(['chat-5'])
+    await answer('chat-5')
+    await answer('chat-4')
+    await answer('chat-3')
+    expect(reads()).toEqual(['chat-5', 'chat-4', 'chat-3'])
+
+    await poll(service)
+    expect(reads()).toEqual(['chat-5', 'chat-4', 'chat-3', 'chat-2'])
+  })
+
+  it('revalidates at once when a cached chat opens after a failed health check', async () => {
+    let healthChecks = 0
+    const { client, service } = finishedChatService({
+      health: async () => {
+        if (++healthChecks === 1) throw new TypeError('fetch failed')
+        return { ok: true }
+      },
+      sessionPage: async sessionId => emptyTimelinePage(sessionId)
+    }, [])
+    await poll(service)
+    expect((service as unknown as { validatedGeneration: number | null }).validatedGeneration).toBeNull()
+
+    await service.subscribeTimeline('chat', 0)
+    await settleBackgroundWork()
+
+    expect(client.health).toHaveBeenCalledTimes(2)
+    expect(client.sessionPage).toHaveBeenCalledWith('chat', expect.objectContaining({ tail: true }))
+    expect(client.stream).toHaveBeenCalledOnce()
+  })
+})
+
 describe('split-chat timeline subscriptions', () => {
   it('does not replace a progressing catch-up on the ordinary background refresh', async () => {
     const client = fakeClient({
@@ -4589,15 +4849,19 @@ describe('split-chat timeline subscriptions', () => {
       sessionPage: async sessionId => emptyTimelinePage(sessionId)
     })
     const { service } = createProfileService({ 'http://a.test:7850': [client] })
+    // Opening before identity validation revalidates at once; the stream
+    // starts after health, while the session list is still pending.
     await service.subscribeTimeline('chat-a', 0)
     await settleBackgroundWork()
-    expect(client.stream).not.toHaveBeenCalled()
+    expect(client.health).toHaveBeenCalledOnce()
+    expect(client.stream).toHaveBeenCalledOnce()
     const internals = service as unknown as {
       scope: unknown
       refreshAll(announce: boolean, includeJobs: boolean, scope: unknown): Promise<void>
     }
     const refreshing = internals.refreshAll(false, false, internals.scope)
     await settleBackgroundWork()
+    expect(client.health).toHaveBeenCalledOnce()
     expect(client.stream).toHaveBeenCalledOnce()
     sessionList.resolve([])
     await refreshing
@@ -9919,6 +10183,36 @@ describe('server profile lifecycle', () => {
     expect(bProbe.sessions).not.toHaveBeenCalled()
     expect(bProbe.jobs).not.toHaveBeenCalled()
     expect(bProbe.dispose).toHaveBeenCalledOnce()
+  })
+
+  it('keeps normal background queue recovery connected and clears a prior recovery warning', async () => {
+    let readiness: NonNullable<Health['chat_readiness']> = {
+      ready: false, state: 'failed', message: 'Queued message recovery failed.'
+    }
+    const a = fakeClient({ health: async () => ({ ok: true, server_identity: 'server-a', chat_readiness: readiness }) })
+    const { service, settings } = createProfileService({
+      'http://a.test:7850': [a], 'http://b.test:7850': [fakeClient()]
+    })
+    settings.setProfileServerIdentity('a', 'server-a')
+    const bootstrap = await service.bootstrap()
+    await service.refreshServer('a', bootstrap.profileGeneration)
+    expect((await service.bootstrap()).profiles.find(profile => profile.id === 'a')).toMatchObject({
+      connectionState: 'degraded', lastConnectionError: readiness.message
+    })
+
+    readiness = { ready: false, state: 'recovering', message: 'Queued messages are being restored after restart.' }
+    await service.refreshServer('a', bootstrap.profileGeneration)
+    const recovering = await service.bootstrap()
+    expect(recovering.health?.chat_readiness).toEqual(readiness)
+    expect(recovering.profiles.find(profile => profile.id === 'a')).toMatchObject({
+      connectionState: 'online', lastConnectionError: null
+    })
+
+    readiness = { ready: true, state: 'ready', message: null }
+    await service.refreshServer('a', bootstrap.profileGeneration)
+    expect((await service.bootstrap()).profiles.find(profile => profile.id === 'a')).toMatchObject({
+      connectionState: 'online', lastConnectionError: null
+    })
   })
 
   it('keeps recovery controls connected while reporting failed chat readiness', async () => {

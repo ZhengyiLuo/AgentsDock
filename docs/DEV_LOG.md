@@ -1,5 +1,87 @@
 # Public development log
 
+## 2026-11-04 - Keep catalog concurrency checks independent of runner pauses
+
+- The first fixture synchronization fix did not resolve full CI by itself.
+  Subsequent logs show the first HTTP test task stalling its event loop for
+  6.389 seconds, beyond the old five-second test watchdog. Injecting a matching
+  6.5-second stall locally reproduces that failure.
+- Use the existing neighboring concurrency test's 30-second bounded watchdog
+  for entry, join and synthetic-worker release. This test checks shared-work
+  ownership, not request latency: retain all 24 overlapping requests, one probe
+  per provider, identical responses, cleanup and single-worker regression guards.
+  Production discovery budgets and transport timeouts are unchanged.
+- The injected-stall case now passes; another 20 repetitions plus the complete
+  module pass (34 tests). Re-run the full shard and CI before merge. No running
+  app, provider behavior or release artifact changes are involved.
+
+## 2026-11-04 - Avoid worker starvation in the runtime-catalog concurrency test
+
+- The connection/sync integration's full CI repeatedly timed out in an unchanged
+  catalog test. Its blocking entry observer used the same default executor that
+  scope reads and catalog discovery needed. A one-worker executor reproduces the
+  fixture deadlock deterministically, even though ordinary local runs pass.
+- Signal an asyncio event from the synthetic provider workers instead of using
+  another worker to observe them. Deliberately constrain the test's default pool
+  to one worker. Preserve the five-second entry watchdog, all 24 overlapping
+  requests, exact per-provider call counts, response equality and cleanup checks.
+- The constrained case fails before the change and passes afterward. Twenty
+  repetitions plus the entire catalog-concurrency module pass (34 tests). This
+  changes test synchronization only, not provider discovery, authentication,
+  release artifacts or the running local app.
+
+## 2026-11-03 - Extend connection and background-sync acceptance
+
+- Revalidate integration `d73e5748`: 772 focused desktop tests across service,
+  transport, persistence, settings, server selection and locale contracts pass;
+  47 focused server tests and TypeScript pass again. No functional source change
+  is needed after these checks; the previous production compilation still applies.
+- Use an isolated native offscreen Electron profile, production IPC and real
+  authenticated Claude and Codex turns. Confirm hidden completed replies reach
+  the semantic cache before opening their chats, repeated navigation retains
+  chat-owned drafts, and replies remain distinct without cross-chat leakage.
+  Scroll the longer Claude history to verify earlier replies remain available.
+- Interrupt only the isolated client's real TCP connection through a transparent
+  test proxy. Cached replies remain readable and the draft survives offline
+  navigation. Restore connectivity and open a cached chat: the online indicator
+  returns in about 0.3 seconds in this local run, without waiting for the regular
+  poll. This timing is an observation, not a remote-network latency guarantee.
+- Disconnect again after a real Claude turn is accepted. The server completes
+  that original turn while the client is offline; reconnecting prefetches the
+  complete result without a second execution or duplicate completion. A later
+  real Codex request succeeds. Fully quit and relaunch the isolated app: the
+  selected chat, unsent draft and cached replies persist. Only credential storage
+  is a fixture; the proxy forwards unmodified traffic and injects socket loss.
+- The user's visible preview and the server stay running throughout these fault
+  tests. Slow startup recovery and failed-readiness presentation remain automated
+  regression coverage; packaged Windows/Linux acceptance is not claimed. Local
+  verification only, without a remote push, merge or release.
+
+## 2026-11-03 - Integrate connection recovery and background reply synchronization
+
+- Combine PRs #143 and #151 on main base `897a40e2`, preserving both original
+  contributor histories, including JiaCheng310's background-prefetch change.
+  Code merges cleanly; retain both development-log entries. Correct the Chinese
+  recovery label to use the established term “会话”, fixing the original
+  terminology-contract failure without changing behavior.
+- On integration commit `6e91eef6` plus that terminology correction, 699
+  targeted desktop tests, 47 focused server tests, TypeScript, production
+  compilation and compile-output verification pass. Development app metadata
+  remains 0.2.0; this is not a published version or an updater candidate.
+- An isolated native offscreen Electron app exercises production preload/IPC,
+  authenticated test-server transport and two real Claude turns. Leave the
+  responding chat, observe each completed reply in the local semantic cache
+  before reopening it, then return and reload. Both replies appear exactly once,
+  the contextual follow-up succeeds, and normal server refresh remains online.
+  Only credential storage is a fixture; the provider and server are real.
+- Restart the visible local preview on the integrated source, retaining the
+  existing profile and checking draft preservation. The updated test server is
+  required for the normal-disconnect handling. Long recovery and failed-recovery
+  presentation, late responses and retry ownership are covered by focused
+  regressions, not claimed as deliberately forced live scenarios in this run.
+  Packaged Windows/Linux and real network-loss acceptance remain untested here.
+- Local compiled preview only. No remote push, PR merge or release publication.
+
 ## 2026-11-03 - Present Claude compact hook output as command diagnostics
 
 - Follow up on the Claude reliability integration below: native `/compact`
@@ -240,6 +322,19 @@
 - Updated the Claude discovery docs, including marking the removed
   disposable-probe design as historical. Source only; no server
   deploy/restart, desktop release or mobile change.
+## 2026-11-02 - Prefetch replies of chats that finish out of view
+
+- A chat that finished while hidden opened with its cached messages and showed
+  the reply only after the latest page loaded. The background poll now reads
+  that page for unread chats this device has opened before, up to three per
+  poll, so opening the chat shows the reply at once. Each reply is read once;
+  a failed read is retried after a minute.
+- Opening a chat after a failed health check reconnects at once instead of
+  waiting for the next 30-second poll.
+- Verification: new service tests; typecheck, desktop tests and build pass.
+  Against a local test server with a stub Cursor CLI, the reply was cached
+  about 40 ms after the poll and still showed in the app with the server
+  stopped. Real Claude/Codex turns and packaged builds were not tested.
 
 ## 2026-11-02 - Exit workspace mode into a single chat
 
@@ -293,6 +388,33 @@
   Show chat in that window and confirmed the restored layout controls and
   visible chat/file panes. Packaged distribution and native Windows/Linux
   acceptance are not part of this change.
+## 2026-11-01 - Distinguish normal chat recovery from connection failures
+
+- Keep a healthy server connected while its startup queue-restoration task is
+  running. The server already admits each chat when its durable queue is ready;
+  do not label every chat or the connection degraded until the full scan ends.
+  Show “Connected — restoring queued chats” on the active server indicator and
+  menu, then “Online” when recovery completes. Include English and Chinese text.
+- Continue reporting failed recovery, unavailable tmux, authentication failures
+  and transport failures. Preserve per-chat queue admission, durable messages
+  and coordinated-update readiness requirements.
+- Treat a validated HTTP/WebSocket client disconnect as a normal gateway close,
+  without synthesizing an interrupted-execution error after closing its IPC
+  transport. Accepted worker cleanup continues; genuine worker interruptions
+  still report failures.
+- Validation: 490 affected desktop tests, 27 execution-transport tests,
+  TypeScript and production Electron compilation pass. New regressions fail
+  against the previous behavior. Independent review found no blocking issues.
+- Native app acceptance uses an offscreen Electron window, production renderer,
+  preload and IPC, and authenticated requests to the full isolated server.
+  Hold/fault its real startup recovery task to exercise restoring, ready,
+  failed and recovered status, using actual mouse input for the server menu
+  and refresh button. No provider turns are needed for connection presentation.
+  Actual TCP WebSocket → Uvicorn → Unix IPC acceptance also confirms a normal
+  code-1000 close produces no gateway error and preserves worker cleanup.
+- Source changes only; no live server restart, deployment or public release.
+  Windows/Linux native app acceptance and packaged distribution are untested.
+
 
 ## 2026-11-01 - Toggle workspace controls without creating a workspace
 
