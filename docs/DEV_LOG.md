@@ -88,6 +88,37 @@
   fixture processes are stopped afterward; no production service changes or
   deployment.
 
+## 2026-11-02 - Stop importing Claude command rows as user messages
+
+- Claude Code records a local slash command such as `/compact` as user-role
+  transcript rows: a metadata caveat, a `<command-name>` wrapper and its
+  `<local-command-stdout>` output. Provider-history sync imported the wrapper
+  and output as human bubbles and, because they matched nothing on the
+  timeline, re-imported everything since that point.
+- Rows proven by the native caveat → command → output parent chain now project
+  as the typed command (`/compact`) and its output ("Compacted"), keyed by the
+  native message ID, so they match the live turn instead of duplicating it.
+  Quoted markup without that chain stays ordinary user text; `/goal` keeps its
+  dedicated normalizer. Full import and incremental cursor sync both apply it.
+  Output rows must share the command occurrence's `promptId` (one stdout and
+  one stderr each), so a later human prompt quoting the markup stays human.
+  Incremental seeding recovers complete preceding records within the
+  transcript reader's 32 MiB record bound, so long command arguments keep
+  their provenance across a cursor boundary.
+- Regression cases use transcript records captured from Claude Code 2.1.316
+  and fail before the fix; 191 focused server tests pass.
+- Desktop acceptance (with the follow-up live-turn fix): an isolated unpacked
+  Electron 43.1.1 build of main, offscreen in a private headless Wayland
+  compositor with a private session bus and keyring, connected through the
+  real setup dialog to an isolated source server over authenticated
+  transport. A real Claude Opus chat ran message → `/compact` (from the native
+  command palette) → follow-up → `/compact` → renderer reload and reopen.
+  Before the fix, each compaction added two imported "You" bubbles with raw
+  wrapper markup. After it, the timeline shows four user and four assistant
+  messages, both "Compacted", no markup, and no imported rows on the server.
+- Rows already imported into existing chats are unchanged. Source only; no
+  server deploy/restart, desktop release or mobile change.
+
 ## 2026-11-02 - Exit workspace mode into a single chat
 
 - Hide workspaces now exits the entire multi-pane view, including empty chat
