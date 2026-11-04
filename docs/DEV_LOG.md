@@ -1,5 +1,32 @@
 # Public development log
 
+## 2026-11-03 - Integrate the Claude reliability review batch for local acceptance
+
+- Combine PRs #150, #147, #148 and #149 on main base `f1af8090`, retaining
+  their original contributor commits. Code merges cleanly; development-log
+  conflicts retain both entries. No desktop or mobile source change is needed.
+- On integration commit `5433f8d0`, 483 focused server tests, desktop TypeScript,
+  production compilation and compile-output verification pass. These changes
+  require the updated server; rebuilding the desktop alone is insufficient.
+- An isolated native offscreen Electron app uses production preload/IPC and
+  authenticated test-server transport with real Claude Code 2.1.304. Exercise
+  message, native-palette `/compact`, contextual follow-up, a second `/compact`,
+  renderer reload and explicit provider-history refresh. Both commands complete
+  without the false empty-response error, the follow-up retains the test phrase,
+  and history refresh adds no duplicate user or assistant content.
+- Native model names remain present after more than five minutes and a real
+  Settings reload. A structured mention of a disposable target authorizes a
+  real provider-tool inbox request successfully; the same request without a
+  scoped mention is denied. Temporary test authorization is removed afterward.
+  Deliberate connection-race timing and credential rotation are covered by
+  automated regressions, not claimed as forced real-app scenarios in this run.
+- Existing local PostCompact hooks append lengthy command diagnostics to the
+  native completion output. The output remains verbose in the desktop; this
+  integration does not claim to improve that presentation. Print-transport and
+  a full 24-hour cache interval were not repeated in this local acceptance run.
+- Local preview only: the visible app is restarted against the integrated code,
+  preserving its profile and unsent draft. No PR merge, remote push or release.
+
 ## 2026-11-03 - Revalidate empty-pane chat creation against current workspace behavior
 
 - Integrate the empty-pane New chat action with current workspace exit and
