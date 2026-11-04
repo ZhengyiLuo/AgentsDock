@@ -152,6 +152,41 @@
 - Rows already imported into existing chats are unchanged. Source only; no
   server deploy/restart, desktop release or mobile change.
 
+## 2026-11-02 - Keep versioned Claude model labels while chats stay open
+
+- The model picker and composer bar showed bare aliases such as `Opus`
+  instead of `Opus 5.5`. Versioned labels come passively from a real chat's
+  Claude initialization, which happens once when its process connects, but
+  were cached for only five minutes. Claude chat processes stay connected for
+  hours and the desktop re-reads the catalog every 15 minutes, so most reads
+  fell back to the alias list.
+- The passive label cache now lasts 24 hours. Its key still changes with the
+  Claude CLI binary, provider environment, user/managed settings and account
+  identity; each new connection replaces the entry and native authentication
+  failure clears it. The native credential file now counts only by presence
+  (login/logout), so same-account OAuth renewal no longer discards labels. No
+  disposable Claude process, version guessing or static pin was added. Before
+  any chat connects, aliases remain unversioned.
+- Regression: the long-lived-chat and credential-rotation cases fail before
+  the fix; 22 catalog tests pass. An isolated source server (temporary
+  state/config, loopback) with a real Claude Opus chat returned `Opus 5.5` immediately and, with the chat
+  still open, `Opus` after 320 seconds before the fix versus `Opus 5.5`
+  after it.
+- Desktop acceptance: an isolated unpacked Electron 43.1.1 build of main,
+  offscreen in a private headless Wayland compositor with a private session
+  bus and keyring, connected through the real setup dialog and production
+  IPC/authenticated transport to an isolated source server with a real
+  Claude Code 2.1.316 Opus chat. The composer read `Opus · high` until the
+  catalog refreshed, then `Opus 5.5 · high` after Settings → My Agents →
+  Reload settings. The picker listed Opus 5.5, Sonnet 5.5 and Haiku 5.5. After
+  341 seconds with the chat still open, a second reload kept `Opus 5.5 · high`
+  with the fix; on main it fell back to `Opus · high`. Real OAuth renewal was
+  not triggered; same-account rotation is covered by a regression only.
+  Limits: `--no-sandbox` (the setuid helper needs root), and Linux only.
+- Updated the Claude discovery docs, including marking the removed
+  disposable-probe design as historical. Source only; no server
+  deploy/restart, desktop release or mobile change.
+
 ## 2026-11-02 - Exit workspace mode into a single chat
 
 - Hide workspaces now exits the entire multi-pane view, including empty chat
