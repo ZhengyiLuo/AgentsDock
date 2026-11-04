@@ -240,6 +240,19 @@
 - Updated the Claude discovery docs, including marking the removed
   disposable-probe design as historical. Source only; no server
   deploy/restart, desktop release or mobile change.
+## 2026-11-02 - Prefetch replies of chats that finish out of view
+
+- A chat that finished while hidden opened with its cached messages and showed
+  the reply only after the latest page loaded. The background poll now reads
+  that page for unread chats this device has opened before, up to three per
+  poll, so opening the chat shows the reply at once. Each reply is read once;
+  a failed read is retried after a minute.
+- Opening a chat after a failed health check reconnects at once instead of
+  waiting for the next 30-second poll.
+- Verification: new service tests; typecheck, desktop tests and build pass.
+  Against a local test server with a stub Cursor CLI, the reply was cached
+  about 40 ms after the poll and still showed in the app with the server
+  stopped. Real Claude/Codex turns and packaged builds were not tested.
 
 ## 2026-11-02 - Exit workspace mode into a single chat
 
