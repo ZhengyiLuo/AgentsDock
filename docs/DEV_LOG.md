@@ -1,5 +1,44 @@
 # Public development log
 
+## 2026-11-03 - Revalidate empty-pane chat creation against current workspace behavior
+
+- Integrate the empty-pane New chat action with current workspace exit and
+  file-split behavior. Keep unique workspace identities and explicit layout
+  activation. A creation that finishes after exiting workspace mode updates
+  the saved workspace without reopening its panes or replacing the ordinary chat.
+- The new delayed-create regression fails without the visibility guard and
+  passes with it. On main base `7e590033`, 511 focused desktop tests, TypeScript
+  and production compilation pass; development metadata remains 0.2.0/build 86.
+- Actual native offscreen Electron input exercises production preload/IPC and
+  authenticated test-server requests: create four distinct persisted chats in
+  their destination panes, create with an empty search result and keyboard,
+  preserve four unsent drafts, exit/reenter workspace mode, and reload. Inspect
+  dark/light and narrow layouts. Only credential storage is a fixture; server
+  creation and responses are real. No provider turn is needed for this layout
+  change; packaged Windows/Linux acceptance is not claimed.
+- Local compiled preview and test-service validation only; no release publication.
+
+## 2026-11-01 - Create a new chat directly in an empty workspace pane
+
+- Add New chat above the existing-chat search in every empty pane. Create a
+  fresh server conversation in the clicked pane while retaining the other
+  chats, drafts and current workspace controls. Keep the action available when
+  the search has no matches, with English and Chinese labels.
+- Preserve empty workspace focus when background session lists arrive. Keep
+  ordinary chat-mode startup selection, and respect navigation or replacement
+  of the destination while creation is pending.
+- Validation uses an isolated offscreen native Electron app with production
+  preload/IPC and authenticated requests to a disposable full server. Click New
+  chat in three- and four-pane layouts, type into the new composers, and verify
+  distinct persisted conversations, empty histories and unchanged existing
+  drafts. Exercise dark and light themes and a narrow empty-search layout.
+  Existing histories and provider availability are fixtures; no provider turn,
+  packaged distribution, or native Windows/Linux acceptance is claimed.
+- Source based on `9f6f1f13`; development app metadata remains 0.2.0 (build 86).
+  Sixty focused workspace/component tests, TypeScript and Electron production
+  compilation pass. Source/build validation only; no server contract change
+  or deployment.
+
 ## 2026-11-03 - Reduce terminal input delay after scrolling
 
 - Coalesce same-direction desktop wheel input on a fixed 16 ms deadline while

@@ -72,6 +72,7 @@
 .empty-chat-pane.focused { background: var(--surface-2); }
 .empty-chat-pane > strong { font-size: 14px; font-weight: 500; }
 .empty-chat-pane input { width: 100%; min-width: 0; }
+.empty-chat-pane > :is(strong, input, .empty-pane-new-chat) { flex-shrink: 0; }
 .empty-pane-chat-list { overflow: auto; min-height: 0; }
 .empty-pane-chat-list button { display: flex; width: 100%; align-items: center; gap: 10px; padding: 9px 5px; border: 0; border-bottom: 1px solid var(--border); background: transparent; color: var(--text); text-align: left; }
 .empty-pane-chat-list button:hover { background: var(--interaction-hover); }

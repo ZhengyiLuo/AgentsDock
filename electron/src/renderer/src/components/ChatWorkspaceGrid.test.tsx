@@ -1,4 +1,4 @@
-import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { AgentsDockAPI } from '@shared/ipc'
 import type { PublicServerProfile } from '@shared/types'
@@ -70,6 +70,28 @@ describe('ChatWorkspaceGrid resize ownership', () => {
     expect(divider).toHaveAttribute('aria-valuenow', '64')
     return view
   }
+
+  it('creates in the initiating empty pane even when its search has no matches', () => {
+    const requestNewChat = vi.fn().mockResolvedValue(undefined)
+    useAppStore.setState({ requestNewChat })
+    const view = render(<ChatWorkspaceGrid sidebarVisible terminalOpen={false}
+      onSidebarToggle={() => undefined} onTerminalToggle={() => undefined} sideChat={() => null} />)
+    const pane = within(view.container.querySelector('[data-chat-pane="secondary"]') as HTMLElement)
+    fireEvent.change(pane.getByRole('searchbox'), { target: { value: 'no matching chat' } })
+    fireEvent.click(pane.getByRole('button', { name: 'New chat' }))
+    expect(requestNewChat).toHaveBeenCalledExactlyOnceWith({ workspaceId: 'workspace-main', pane: 'secondary' })
+  })
+
+  it('creates an ordinary chat before opting into workspaces', () => {
+    const requestNewChat = vi.fn().mockResolvedValue(undefined)
+    useAppStore.setState({ requestNewChat, chatWorkspaces: [], chatWorkspaceBarVisible: false,
+      activeChatWorkspaceId: '', chatPaneCount: 1 })
+    render(<ChatWorkspaceGrid sidebarVisible terminalOpen={false}
+      onSidebarToggle={() => undefined} onTerminalToggle={() => undefined} sideChat={() => null} />)
+    fireEvent.click(screen.getByRole('button', { name: 'New chat' }))
+    expect(requestNewChat).toHaveBeenCalledExactlyOnceWith(undefined)
+    expect(useAppStore.getState().chatWorkspaces).toEqual([])
+  })
 
   it('offers both three-pane arrangements and keeps independent widths', () => {
     const view = render(<ChatWorkspaceGrid sidebarVisible terminalOpen={false}
