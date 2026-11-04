@@ -1,5 +1,20 @@
 # Public development log
 
+## 2026-11-04 - Keep catalog concurrency checks independent of runner pauses
+
+- The first fixture synchronization fix did not resolve full CI by itself.
+  Subsequent logs show the first HTTP test task stalling its event loop for
+  6.389 seconds, beyond the old five-second test watchdog. Injecting a matching
+  6.5-second stall locally reproduces that failure.
+- Use the existing neighboring concurrency test's 30-second bounded watchdog
+  for entry, join and synthetic-worker release. This test checks shared-work
+  ownership, not request latency: retain all 24 overlapping requests, one probe
+  per provider, identical responses, cleanup and single-worker regression guards.
+  Production discovery budgets and transport timeouts are unchanged.
+- The injected-stall case now passes; another 20 repetitions plus the complete
+  module pass (34 tests). Re-run the full shard and CI before merge. No running
+  app, provider behavior or release artifact changes are involved.
+
 ## 2026-11-04 - Avoid worker starvation in the runtime-catalog concurrency test
 
 - The connection/sync integration's full CI repeatedly timed out in an unchanged
