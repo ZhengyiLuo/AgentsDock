@@ -870,6 +870,11 @@ body.column-resizing { cursor: col-resize; user-select: none; }
 .message-surface { min-width: 0; user-select: text; }
 .message-row.user .message-surface { width: fit-content; max-width: min(760px, 82%); padding: 12px 15px; background: var(--green-surface); border: 1px solid var(--green-border); border-radius: 9px; }
 .message-row.assistant .message-surface { width: 100%; padding: 3px 4px 3px 3px; }
+.claude-compact-output { min-width: 0; color: var(--text); font-family: var(--chat-font-family); font-size: var(--chat-font-size); line-height: 1.55; }
+.claude-compact-output > p { margin: 0 0 6px; }
+.claude-compact-output summary { width: fit-content; color: var(--muted); font-size: var(--text-size-label); cursor: pointer; }
+.claude-compact-output summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+.claude-compact-output pre { max-width: 100%; max-height: min(45vh, 420px); overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; padding: 10px 12px; color: var(--text); background: var(--surface-1); border: 1px solid var(--border); border-radius: 6px; font-size: var(--text-size-label); line-height: 1.5; }
 .message-surface > header, .system-row header { display: flex; align-items: center; gap: 7px; min-height: 20px; margin-bottom: 3px; color: var(--muted); font-size: var(--text-size-meta); font-weight: var(--text-weight-label); user-select: none; }
 .message-surface > header time, .system-row header time { color: var(--faint); font-weight: var(--text-weight-body); }
 .message-pending-status { display: inline-flex; align-items: center; gap: 5px; color: var(--muted); font-weight: var(--text-weight-body); }

@@ -1,5 +1,59 @@
 # Public development log
 
+## 2026-11-03 - Present Claude compact hook output as command diagnostics
+
+- Follow up on the Claude reliability integration below: native `/compact`
+  output from PostCompact hooks is command text, not Markdown. Show a concise
+  completion label and a disclosure containing the unchanged native output.
+  Only a recognized successful single-hook envelope with empty output starts
+  collapsed; failures, warnings, non-empty output and unknown envelopes remain
+  expanded. Copying and stored history retain the complete original text.
+- Apply this presentation only to source-identified Claude output paired with
+  its exact same-session, same-run `/compact` input. Ordinary messages, user
+  quotes and other providers keep their existing rendering. Reconciliation
+  updates the row if the owning input arrives later.
+- On integration base `503ae3aa`, 378 targeted desktop tests, 483 focused server
+  tests, TypeScript, production compilation and compile-output verification
+  pass. The new rendering regression fails against the previous renderer.
+  The follow-up changes desktop presentation only; it adds no server mutation.
+- An isolated native offscreen Electron app exercises production IPC and real
+  authenticated server/Claude Code 2.1.304 requests: compact, contextual follow-up,
+  mouse and keyboard disclosure controls, English/dark and Chinese/light narrow
+  layouts, and reload. Native diagnostic bytes remain intact, shell text no
+  longer becomes mathematical notation, and the remembered phrase survives
+  compaction. Only credential storage is a fixture. Hook failures are covered
+  by automated tests rather than changes to the user's hook configuration.
+- Local compiled preview only. No release, remote push or PR merge. Real print
+  transport, forced connection-race timing, credential rotation and a full
+  24-hour cache interval are not claimed as live tests in this follow-up.
+
+## 2026-11-03 - Integrate the Claude reliability review batch for local acceptance
+
+- Combine PRs #150, #147, #148 and #149 on main base `f1af8090`, retaining
+  their original contributor commits. Code merges cleanly; development-log
+  conflicts retain both entries. No desktop or mobile source change is needed.
+- On integration commit `5433f8d0`, 483 focused server tests, desktop TypeScript,
+  production compilation and compile-output verification pass. These changes
+  require the updated server; rebuilding the desktop alone is insufficient.
+- An isolated native offscreen Electron app uses production preload/IPC and
+  authenticated test-server transport with real Claude Code 2.1.304. Exercise
+  message, native-palette `/compact`, contextual follow-up, a second `/compact`,
+  renderer reload and explicit provider-history refresh. Both commands complete
+  without the false empty-response error, the follow-up retains the test phrase,
+  and history refresh adds no duplicate user or assistant content.
+- Native model names remain present after more than five minutes and a real
+  Settings reload. A structured mention of a disposable target authorizes a
+  real provider-tool inbox request successfully; the same request without a
+  scoped mention is denied. Temporary test authorization is removed afterward.
+  Deliberate connection-race timing and credential rotation are covered by
+  automated regressions, not claimed as forced real-app scenarios in this run.
+- Existing local PostCompact hooks append lengthy command diagnostics to the
+  native completion output. The output remains verbose in the desktop; this
+  integration does not claim to improve that presentation. Print-transport and
+  a full 24-hour cache interval were not repeated in this local acceptance run.
+- Local preview only: the visible app is restarted against the integrated code,
+  preserving its profile and unsent draft. No PR merge, remote push or release.
+
 ## 2026-11-03 - Revalidate empty-pane chat creation against current workspace behavior
 
 - Integrate the empty-pane New chat action with current workspace exit and
@@ -72,6 +126,120 @@
   Client batching works with the previous server; the server process reduction
   requires the corresponding server update. No release, deployment, mobile
   change or native Windows/Linux acceptance is included.
+
+## 2026-11-02 - Preserve Claude tool ownership during connection startup
+
+- Keep the callback settings used to construct a Claude connection attached to
+  that connection while concurrent command/MCP discovery supplies newer options.
+  Those newer settings apply on the next reconnect.
+- This prevents a connecting client from retaining unbound AgentsDock tool
+  callbacks while ownership is assigned to a different settings object.
+- Validation: the delayed-connect race fails before the fix and passes after it.
+  All 13 focused ownership, reconnect, fork, native continuation and Side chat
+  checks pass. An isolated real Claude SDK run performs a concurrent runtime
+  lookup during controlled connection startup, then reads the inbox through
+  the production provider tool and HTTP authorization successfully. Temporary
+  fixture processes are stopped afterward; no production service changes or
+  deployment.
+
+## 2026-11-02 - Treat Claude /compact as a completed command
+
+- A native Claude local command such as `/compact` produces no model reply;
+  Claude only marks its result with `local_command`. AgentsDock flagged that
+  as "Claude returned no response…" and failed the turn. Such results now
+  complete normally, and the replayed `<local-command-stdout>` (e.g.
+  "Compacted") is shown as the reply with its native message ID. The output
+  is promoted only after the structured `local_command` field proves it; a
+  human message quoting the markup is not.
+- Applies to the Agent SDK and `claude -p` transports. The print path no
+  longer crashes on string-valued replayed user content.
+- Regression cases for SDK and print `/compact` turns fail before the fix;
+  297 focused server tests pass. An isolated source server (temporary
+  state/config, loopback) took real authenticated HTTP turns on the Agent SDK
+  path, using the desktop's native command selection, against a real Claude
+  (Haiku): message, `/compact`, follow-up, `/compact` again, then reopening
+  the chat. Before the fix this reproduced the empty-turn error and imported
+  wrapper bubbles. With this and the preceding history fix, both compactions
+  show "Compacted" with exit 0 and sync imports nothing. The same sequence on
+  the real `claude -p` transport (no SDK capability) also completes both
+  compactions with "Compacted" and exit 0.
+- Desktop acceptance: an isolated unpacked Electron 43.1.1 build of main,
+  offscreen in a private headless Wayland compositor with a private session
+  bus and keyring, connected through the real setup dialog and production
+  IPC/authenticated transport to an isolated source server running real
+  Claude Code 2.1.316 (Opus, Agent SDK). `/compact` was chosen from the native
+  command palette twice, around a follow-up, then the renderer was reloaded
+  and the chat reopened. Before the fix: two "Claude returned no response…"
+  errors. After it: both turns end with an assistant "Compacted", no errors,
+  and identical results after reopening. Limits: `--no-sandbox` (the setuid
+  helper needs root), and Linux only.
+- Source only; no server deploy/restart, desktop release or mobile change.
+
+## 2026-11-02 - Stop importing Claude command rows as user messages
+
+- Claude Code records a local slash command such as `/compact` as user-role
+  transcript rows: a metadata caveat, a `<command-name>` wrapper and its
+  `<local-command-stdout>` output. Provider-history sync imported the wrapper
+  and output as human bubbles and, because they matched nothing on the
+  timeline, re-imported everything since that point.
+- Rows proven by the native caveat → command → output parent chain now project
+  as the typed command (`/compact`) and its output ("Compacted"), keyed by the
+  native message ID, so they match the live turn instead of duplicating it.
+  Quoted markup without that chain stays ordinary user text; `/goal` keeps its
+  dedicated normalizer. Full import and incremental cursor sync both apply it.
+  Output rows must share the command occurrence's `promptId` (one stdout and
+  one stderr each), so a later human prompt quoting the markup stays human.
+  Incremental seeding recovers complete preceding records within the
+  transcript reader's 32 MiB record bound, so long command arguments keep
+  their provenance across a cursor boundary.
+- Regression cases use transcript records captured from Claude Code 2.1.316
+  and fail before the fix; 191 focused server tests pass.
+- Desktop acceptance (with the follow-up live-turn fix): an isolated unpacked
+  Electron 43.1.1 build of main, offscreen in a private headless Wayland
+  compositor with a private session bus and keyring, connected through the
+  real setup dialog to an isolated source server over authenticated
+  transport. A real Claude Opus chat ran message → `/compact` (from the native
+  command palette) → follow-up → `/compact` → renderer reload and reopen.
+  Before the fix, each compaction added two imported "You" bubbles with raw
+  wrapper markup. After it, the timeline shows four user and four assistant
+  messages, both "Compacted", no markup, and no imported rows on the server.
+- Rows already imported into existing chats are unchanged. Source only; no
+  server deploy/restart, desktop release or mobile change.
+
+## 2026-11-02 - Keep versioned Claude model labels while chats stay open
+
+- The model picker and composer bar showed bare aliases such as `Opus`
+  instead of `Opus 5.5`. Versioned labels come passively from a real chat's
+  Claude initialization, which happens once when its process connects, but
+  were cached for only five minutes. Claude chat processes stay connected for
+  hours and the desktop re-reads the catalog every 15 minutes, so most reads
+  fell back to the alias list.
+- The passive label cache now lasts 24 hours. Its key still changes with the
+  Claude CLI binary, provider environment, user/managed settings and account
+  identity; each new connection replaces the entry and native authentication
+  failure clears it. The native credential file now counts only by presence
+  (login/logout), so same-account OAuth renewal no longer discards labels. No
+  disposable Claude process, version guessing or static pin was added. Before
+  any chat connects, aliases remain unversioned.
+- Regression: the long-lived-chat and credential-rotation cases fail before
+  the fix; 22 catalog tests pass. An isolated source server (temporary
+  state/config, loopback) with a real Claude Opus chat returned `Opus 5.5` immediately and, with the chat
+  still open, `Opus` after 320 seconds before the fix versus `Opus 5.5`
+  after it.
+- Desktop acceptance: an isolated unpacked Electron 43.1.1 build of main,
+  offscreen in a private headless Wayland compositor with a private session
+  bus and keyring, connected through the real setup dialog and production
+  IPC/authenticated transport to an isolated source server with a real
+  Claude Code 2.1.316 Opus chat. The composer read `Opus · high` until the
+  catalog refreshed, then `Opus 5.5 · high` after Settings → My Agents →
+  Reload settings. The picker listed Opus 5.5, Sonnet 5.5 and Haiku 5.5. After
+  341 seconds with the chat still open, a second reload kept `Opus 5.5 · high`
+  with the fix; on main it fell back to `Opus · high`. Real OAuth renewal was
+  not triggered; same-account rotation is covered by a regression only.
+  Limits: `--no-sandbox` (the setuid helper needs root), and Linux only.
+- Updated the Claude discovery docs, including marking the removed
+  disposable-probe design as historical. Source only; no server
+  deploy/restart, desktop release or mobile change.
 
 ## 2026-11-02 - Exit workspace mode into a single chat
 

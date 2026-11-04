@@ -1,4 +1,6 @@
 {
+  "timeline.compact.completed": "上下文已压缩",
+  "timeline.compact.output": "命令输出",
   "composer.modelCommand.chooseAvailable": "模型不存在、名称不唯一或不可用。请使用 /model 选择可用模型，或输入准确的模型 ID。",
   "subagents.title": "子 Agent",
   "subagents.singular": "子 Agent",
