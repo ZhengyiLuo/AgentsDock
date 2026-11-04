@@ -1,5 +1,30 @@
 # Public development log
 
+## 2026-11-03 - Integrate connection recovery and background reply synchronization
+
+- Combine PRs #143 and #151 on main base `897a40e2`, preserving both original
+  contributor histories, including JiaCheng310's background-prefetch change.
+  Code merges cleanly; retain both development-log entries. Correct the Chinese
+  recovery label to use the established term “会话”, fixing the original
+  terminology-contract failure without changing behavior.
+- On integration commit `6e91eef6` plus that terminology correction, 699
+  targeted desktop tests, 47 focused server tests, TypeScript, production
+  compilation and compile-output verification pass. Development app metadata
+  remains 0.2.0; this is not a published version or an updater candidate.
+- An isolated native offscreen Electron app exercises production preload/IPC,
+  authenticated test-server transport and two real Claude turns. Leave the
+  responding chat, observe each completed reply in the local semantic cache
+  before reopening it, then return and reload. Both replies appear exactly once,
+  the contextual follow-up succeeds, and normal server refresh remains online.
+  Only credential storage is a fixture; the provider and server are real.
+- Restart the visible local preview on the integrated source, retaining the
+  existing profile and checking draft preservation. The updated test server is
+  required for the normal-disconnect handling. Long recovery and failed-recovery
+  presentation, late responses and retry ownership are covered by focused
+  regressions, not claimed as deliberately forced live scenarios in this run.
+  Packaged Windows/Linux and real network-loss acceptance remain untested here.
+- Local compiled preview only. No remote push, PR merge or release publication.
+
 ## 2026-11-03 - Present Claude compact hook output as command diagnostics
 
 - Follow up on the Claude reliability integration below: native `/compact`
