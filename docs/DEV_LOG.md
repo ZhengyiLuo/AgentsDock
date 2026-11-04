@@ -88,6 +88,39 @@
   fixture processes are stopped afterward; no production service changes or
   deployment.
 
+## 2026-11-02 - Treat Claude /compact as a completed command
+
+- A native Claude local command such as `/compact` produces no model reply;
+  Claude only marks its result with `local_command`. AgentsDock flagged that
+  as "Claude returned no response…" and failed the turn. Such results now
+  complete normally, and the replayed `<local-command-stdout>` (e.g.
+  "Compacted") is shown as the reply with its native message ID. The output
+  is promoted only after the structured `local_command` field proves it; a
+  human message quoting the markup is not.
+- Applies to the Agent SDK and `claude -p` transports. The print path no
+  longer crashes on string-valued replayed user content.
+- Regression cases for SDK and print `/compact` turns fail before the fix;
+  297 focused server tests pass. An isolated source server (temporary
+  state/config, loopback) took real authenticated HTTP turns on the Agent SDK
+  path, using the desktop's native command selection, against a real Claude
+  (Haiku): message, `/compact`, follow-up, `/compact` again, then reopening
+  the chat. Before the fix this reproduced the empty-turn error and imported
+  wrapper bubbles. With this and the preceding history fix, both compactions
+  show "Compacted" with exit 0 and sync imports nothing. The same sequence on
+  the real `claude -p` transport (no SDK capability) also completes both
+  compactions with "Compacted" and exit 0.
+- Desktop acceptance: an isolated unpacked Electron 43.1.1 build of main,
+  offscreen in a private headless Wayland compositor with a private session
+  bus and keyring, connected through the real setup dialog and production
+  IPC/authenticated transport to an isolated source server running real
+  Claude Code 2.1.316 (Opus, Agent SDK). `/compact` was chosen from the native
+  command palette twice, around a follow-up, then the renderer was reloaded
+  and the chat reopened. Before the fix: two "Claude returned no response…"
+  errors. After it: both turns end with an assistant "Compacted", no errors,
+  and identical results after reopening. Limits: `--no-sandbox` (the setuid
+  helper needs root), and Linux only.
+- Source only; no server deploy/restart, desktop release or mobile change.
+
 ## 2026-11-02 - Stop importing Claude command rows as user messages
 
 - Claude Code records a local slash command such as `/compact` as user-role
