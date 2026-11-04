@@ -56,8 +56,17 @@
 }
 
 .workspace-editor-tabbed-pane .workspace-editor-editor-toolbar {
+  height: auto;
+  min-height: 42px;
   flex-wrap: wrap;
   gap: 4px;
+  padding-block: 6px;
+}
+
+.workspace-editor-tabbed-pane .workspace-editor-editor-actions {
+  flex: 0 1 auto;
+  max-width: 100%;
+  flex-wrap: wrap;
 }
 
 .workspace-editor-tabbed-pane .workspace-editor-breadcrumb {
@@ -585,6 +594,7 @@
 
 .workspace-editor-editor {
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   grid-template-rows: auto minmax(0, 1fr) auto;
   position: relative;
   background: #1b1b1b;

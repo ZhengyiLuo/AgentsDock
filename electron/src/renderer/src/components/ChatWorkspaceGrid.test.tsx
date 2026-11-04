@@ -148,16 +148,22 @@ describe('ChatWorkspaceGrid resize ownership', () => {
     expect(screen.getAllByRole('tab')).toHaveLength(2)
   })
 
-  it('hides existing workspace controls without removing the split panes', () => {
+  it('exits empty workspace slots with the toolbar and restores them when reopened', () => {
+    useAppStore.setState({ sessions: [{ id: 'a', title: 'Chat A', backend: 'codex' }],
+      chatPanes: { primary: 'a', secondary: null }, selectedSessionId: 'a',
+      chatWorkspaces: [{ ...workspace('workspace-main'), panes: { primary: 'a', secondary: null } }] })
     const view = render(<ChatWorkspaceGrid sidebarVisible terminalOpen={false}
       onSidebarToggle={() => undefined} onTerminalToggle={() => undefined} sideChat={() => null} />)
     const grid = view.container.querySelector('.workspace-chat-grid')!
     act(() => useAppStore.getState().toggleChatWorkspaceBar())
     expect(view.container.querySelector('.workspace-tabs-bar')).not.toBeInTheDocument()
-    expect(grid).toHaveAttribute('data-pane-count', '2')
+    expect(grid).toHaveAttribute('data-pane-count', '1')
+    expect(screen.queryByText('Choose a chat for this pane')).not.toBeInTheDocument()
     expect(useAppStore.getState().chatWorkspaces).toHaveLength(1)
     act(() => useAppStore.getState().toggleChatWorkspaceBar())
     expect(view.container.querySelector('.workspace-chat-grid')).toBe(grid)
+    expect(grid).toHaveAttribute('data-pane-count', '2')
+    expect(screen.getByText('Choose a chat for this pane')).toBeVisible()
     expect(screen.getAllByRole('tab')).toHaveLength(1)
   })
 

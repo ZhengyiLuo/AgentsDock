@@ -1,5 +1,23 @@
 # Public development log
 
+## 2026-11-03 - Revalidate empty-pane chat creation against current workspace behavior
+
+- Integrate the empty-pane New chat action with current workspace exit and
+  file-split behavior. Keep unique workspace identities and explicit layout
+  activation. A creation that finishes after exiting workspace mode updates
+  the saved workspace without reopening its panes or replacing the ordinary chat.
+- The new delayed-create regression fails without the visibility guard and
+  passes with it. On main base `7e590033`, 511 focused desktop tests, TypeScript
+  and production compilation pass; development metadata remains 0.2.0/build 86.
+- Actual native offscreen Electron input exercises production preload/IPC and
+  authenticated test-server requests: create four distinct persisted chats in
+  their destination panes, create with an empty search result and keyboard,
+  preserve four unsent drafts, exit/reenter workspace mode, and reload. Inspect
+  dark/light and narrow layouts. Only credential storage is a fixture; server
+  creation and responses are real. No provider turn is needed for this layout
+  change; packaged Windows/Linux acceptance is not claimed.
+- Local compiled preview and test-service validation only; no release publication.
+
 ## 2026-11-01 - Create a new chat directly in an empty workspace pane
 
 - Add New chat above the existing-chat search in every empty pane. Create a
@@ -20,6 +38,93 @@
   Sixty focused workspace/component tests, TypeScript and Electron production
   compilation pass. Source/build validation only; no server contract change
   or deployment.
+
+## 2026-11-03 - Reduce terminal input delay after scrolling
+
+- Coalesce same-direction desktop wheel input on a fixed 16 ms deadline while
+  preserving the existing 80-line packet limit and total scroll distance.
+  Flush before typing, resizing or reversing direction; discard pending wheel
+  input when detaching, reconnecting, changing profile or switching tmux targets.
+  Ordinary keyboard input is not delayed or retried.
+- Reduce repeated server history scrolling from four tmux processes to two by
+  using the mode query as the existence check and combining the scroll with its
+  final mode query. Preserve manually owned copy mode, bottom-of-history exit,
+  and the older-tmux hidden-indicator fallback. No terminal protocol change.
+- Same-machine authenticated WebSocket/PTY/tmux benchmark: 10,000 history lines,
+  60 five-line wheel steps at requested 8 ms intervals, then an input echo.
+  The final repeated comparison (eight trials per version) reduced median
+  post-scroll echo delay from 390 ms to 18.6 ms; observed maxima were 504 ms and
+  20.8 ms. Idle echo medians remained 0.84 ms and 0.86 ms. Earlier runs varied
+  with host load but also improved; these are local measurements, not remote
+  network or foreground paint guarantees. Both mixed client/server combinations
+  were additionally exercised against the unchanged wire protocol.
+- Verification on main base `6dbb6673`, development metadata 0.2.0/build 86:
+  676 focused desktop tests, 65 server tests, TypeScript and production build
+  pass. New client regressions fail without the fix. Native offscreen Electron
+  exercises real IPC, authenticated transport, PTY and tmux: ordinary typing,
+  repeated scroll/input, direction reversal, Ctrl-C, window creation, split,
+  resize, reconnect, close/reopen with retained contents, manual copy-mode
+  ownership and mouse-capture toggling. Post-scroll input-to-renderer-data
+  median was 31 ms across four native-app trials (not a paint measurement).
+  Only credential storage and the synthetic terminal workload are fixtures;
+  no provider request is required for this terminal change.
+- Source/local test build only; existing user services and App are unchanged.
+  Client batching works with the previous server; the server process reduction
+  requires the corresponding server update. No release, deployment, mobile
+  change or native Windows/Linux acceptance is included.
+
+## 2026-11-02 - Exit workspace mode into a single chat
+
+- Hide workspaces now exits the entire multi-pane view, including empty chat
+  selectors, and restores the ordinary header for the focused conversation.
+  Reopening restores saved pane assignments and layout instead of creating a
+  workspace. Sidebar navigation while closed cannot overwrite that layout.
+- Retain drafts and server-scoped preferences through toggles, reloads and
+  server switching; release hidden timeline subscriptions without stopping
+  provider runs. Ignore late hidden-pane loads and reconcile deleted chats
+  before reopening. Migrate previously hidden-but-still-split saved layouts.
+- Regression cases failed before the fix. The beta-based preview passed 5,956
+  desktop tests (six skipped). The main-based PR passed 5,827 tests (five
+  skipped), eight packaging/license checks, typecheck and production build.
+  Native offscreen Electron with real authenticated test-server transport
+  exercised three-pane selection, focused-chat exit, unsent draft retention,
+  reload, repeated reopening, keyboard activation, and dark/light/narrow views.
+  Credential storage was isolated; no provider message was submitted.
+- Local user window refreshed to the updated compiled renderer; no server
+  update/restart, mobile change or release. Native Windows/Linux acceptance
+  and packaged distribution remain outside this local preview.
+
+## 2026-11-02 - Restore file split controls inside chat workspaces
+
+- Restore Show chat / Full screen, Editor left / Editor right, Split right,
+  and the Files tree's Open to the Side in tabbed chat panes. Retain the
+  workspace model and its focused-pane/profile ownership guards; do not bring
+  back the removed Changes tab. Restore secondary editor selection and layout
+  preferences independently of pane ownership, including unsaved file drafts.
+- Bound editor grid tracks and wrap narrow toolbars so restored buttons are
+  not clipped in chat-plus-two-file layouts. Reuse existing controls, labels,
+  themes and resizing behavior without changing the provider/server contract.
+- Regression: the three focused cases fail before the fix; 5,949 desktop
+  tests and eight packaging/license checks pass, with six tests skipped.
+  TypeScript and production compilation pass; final grid sizing is additionally
+  covered by the 19 editor-style/design-system checks.
+- Actual native offscreen Electron verification uses real authenticated test
+  server file transport: open two fixture files, show chat beside them, switch
+  editor left/right, save only the focused secondary file, retain an unsaved
+  secondary draft and layout after reload, and inspect dark/light and narrow
+  layouts for clipped controls. Test credentials are supplied by an isolated
+  credential-store fixture; file reads/writes, IPC and renderer handlers are real.
+  No provider turn is required for this editor-layout change.
+- Initially reproduced and verified on beta.2 artifact source `9e816c6b`.
+  Ported only these two UI fixes onto main `9f6f1f13`, without release-line
+  changes. Repeated native workspace exit/restoration and chat/two-file split
+  workflows with the main-based renderer, preload and service transport.
+  Local source and compiled preview only; no server restart, mobile change or publication.
+  Restarted the local user App with its existing profile and confirmed the
+  selected chat, open file and server connection were retained. Exercised
+  Show chat in that window and confirmed the restored layout controls and
+  visible chat/file panes. Packaged distribution and native Windows/Linux
+  acceptance are not part of this change.
 
 ## 2026-11-01 - Toggle workspace controls without creating a workspace
 

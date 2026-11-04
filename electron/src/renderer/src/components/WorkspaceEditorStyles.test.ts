@@ -64,6 +64,18 @@ describe('workspace editor light theme', () => {
     )
   })
 
+  it('wraps split editor controls without clipping the toolbar in narrow panes', () => {
+    expect(styles).toMatch(
+      /\.workspace-editor-editor \{[^}]*grid-template-columns:\s*minmax\(0, 1fr\);/s
+    )
+    expect(styles).toMatch(
+      /\.workspace-editor-tabbed-pane \.workspace-editor-editor-toolbar \{[^}]*height:\s*auto;[^}]*min-height:\s*42px;[^}]*flex-wrap:\s*wrap;/s
+    )
+    expect(styles).toMatch(
+      /\.workspace-editor-tabbed-pane \.workspace-editor-editor-actions \{[^}]*max-width:\s*100%;[^}]*flex-wrap:\s*wrap;/s
+    )
+  })
+
   it('reserves palette layout space for a late workspace alert', () => {
     expect(styles).toMatch(
       /\.workspace-editor-palette-with-alert \{[^}]*display:\s*grid;[^}]*grid-template-rows:\s*auto auto auto minmax\(0, 1fr\);/s

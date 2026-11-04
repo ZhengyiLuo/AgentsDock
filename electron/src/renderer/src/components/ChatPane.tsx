@@ -50,7 +50,7 @@ export const ChatPane = memo(function ChatPane({
   const profileGeneration = useAppStore(state => state.profileGeneration)
   const serverIdentity = useAppStore(state => state.profiles.find(profile => profile.id === state.activeProfileId)?.serverIdentity ?? null)
   const switchingProfileId = useAppStore(state => state.switchingProfileId)
-  const workspaceMode = useAppStore(state => state.chatWorkspaces.length > 0)
+  const workspaceMode = useAppStore(state => state.chatWorkspaceBarVisible && state.chatWorkspaces.length > 0)
   const workspaceFilesAvailable = useAppStore(state => state.health === null ? null : state.health.capabilities?.workspace_files?.available === true)
   const workspaceFilesVersion = useAppStore(state => state.health?.capabilities?.workspace_files?.version)
   const workspaceFilesMaxBytes = useAppStore(state => state.health?.capabilities?.workspace_files?.max_text_file_bytes)
