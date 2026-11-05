@@ -1,5 +1,72 @@
 # Public development log
 
+## 2026-11-04 - Keep delegated worker tasks separate from creator orchestration
+
+- Follow up PR #145 integration on `e435f079`: clarify the provider policy,
+  idle mailbox wake and busy-run notice. The original user instruction bounds
+  authorization; the prepared message identifies the recipient's subtask.
+  A worker asked to calculate and reply must not repeat its creator's setup or
+  create another worker. Requested replies use Chats, not a local final answer.
+- Clarify that accepted-send fields are snapshots, not live execution status.
+  An empty inbox is not evidence that the peer has not started or read its task.
+  No delegation is promoted from body text, copied to outgoing peer messages,
+  or expanded into new permissions. Receipt formats and authorization checks
+  are unchanged.
+- Add policy regressions that fail before the clarification, plus a real-ledger
+  check preserving the recipient task separately from its exact user scope.
+  All 598 focused server tests and 493 desktop service tests pass; TypeScript,
+  production Electron compilation and compiled-output verification pass.
+- Exercise the native offscreen Electron app through actual mouse/keyboard,
+  production IPC and authenticated test-server transport with real Codex and
+  Claude. Each provider completes initial and repeat creation/calculation/reply
+  workflows: four children total, one task and reply per child, no descendant
+  creations, correct settings inheritance and parent result/read receipts.
+  Verify both rendered mailbox cards and replies, including return navigation
+  and Jump to latest. Only isolated credential storage is a fixture; provider
+  generation and mailbox transport are real.
+- Development preview metadata remains desktop 0.2.0 / server 1.0.7-beta.11.
+  The local test server runs the correction; no production restart, deployment,
+  release or mobile change. Provider instructions guide task interpretation;
+  they are not a new enforcement or transitive-delegation mechanism. Other
+  providers and packaged Windows/Linux acceptance are not retested here.
+
+## 2026-11-04 - Integrate agent-created chats for local acceptance
+
+- Integrate PR #145 on main `413e6fa7`, retaining the original contributor
+  commit `b8bf3b0` and both development-log histories. Independent chats inherit
+  applicable settings and receive an exact creator/child mailbox pair without
+  copying native conversation identity or history. Creation alone stays idle.
+- Correct a permission-ceiling regression found by the existing Claude native
+  continuation tests: capability issuance no longer adds chat creation to
+  explicitly restricted actions. Normal admission and steering opt in; a server
+  without authentication cannot grant creation. Keep the original strict
+  continuation assertions and add explicit empty/restricted-ceiling regressions.
+- Verify failed acceptance recovery, cancellation settlement, same-key retries,
+  different-setting rejection, denied creation without mutations, and revoked
+  pairs not being silently restored. All 472 focused server tests pass; 493
+  desktop service tests, TypeScript, production compilation and compiled-output
+  verification pass. The two original continuation failures reproduce before
+  the correction and pass afterward without weakening their assertions.
+- Exercise actual native offscreen Electron, production preload/IPC and the
+  authenticated test server with real Codex and Claude. Create independent
+  children, confirm inherited folder/runtime settings and no initial turn,
+  send one task through each new route, observe each idle child wake and return
+  exactly one reply, then observe each creator wake and read its reply.
+  Mouse navigation confirms the new chats and mailbox cards in the existing UI.
+- After an idle test-server restart, both providers' fresh same-key creation
+  calls return the original chat and route with `created: false` and
+  `duplicate: true`. An unsent draft survives the server restart and renderer
+  reload. Identical same-run Claude mutations replay their original receipt
+  through the existing tool replay guard, rather than creating another chat.
+- Restart the visible local preview on the integrated source and preserve its
+  existing draft. Development desktop metadata remains 0.2.0; server metadata
+  remains 1.0.7-beta.11. These identify local source previews, not new releases.
+  Only credential storage is a fixture in the isolated client. Custom endpoint
+  inheritance, denied requests, cancellation and revoke failure cases have
+  automated coverage, not all forced live-provider scenarios. Other providers
+  and packaged Windows/Linux acceptance remain untested. Local only; no remote
+  push, PR merge, production deployment, mobile change or release publication.
+
 ## 2026-11-04 - Keep catalog concurrency checks independent of runner pauses
 
 - The first fixture synchronization fix did not resolve full CI by itself.
@@ -415,6 +482,40 @@
 - Source changes only; no live server restart, deployment or public release.
   Windows/Linux native app acceptance and packaged distribution are untested.
 
+## 2026-11-01 - Let agents create chats with automatic mailbox connections
+
+- Add run-bound `chats create --title ... --folder ...` for independent
+  AgentsDock conversations. Create a permanent bidirectional mailbox route
+  between creator and child automatically and expose it to the creating run
+  immediately. Existing send, inbox, read and reply actions handle communication.
+  Creation itself does not start a provider turn.
+- Inherit applicable runtime settings, including a custom provider connection,
+  without copying native thread IDs, transcript, goals or other peer routes.
+  The new chat appears in its requested folder through the existing desktop
+  API. There is no new chat-count quota or route-approval dialog.
+- Persist explicit retry keys across logical runs and restarts. Repeated
+  creation returns the existing chat. A failed route grant preserves the
+  already-visible child and repairs it on retry; disconnects do not duplicate
+  creation. Exact-route sends discover the current mailbox mode even from a
+  shell opened before creation. Keep private creation-admission records out of
+  client timelines.
+- Validation: 59 helper tests, four creation regressions, 50 existing pair,
+  discovery and provider-input tests, and 13 session/custom-provider tests pass.
+  Server syntax checks and the unchanged Electron production build pass.
+- Isolated full-server acceptance exercises the production helper over HTTP,
+  actual capability authentication, immediate send, child read/reply, creator
+  read, and explicit-key recovery in a new logical run after restart. Native
+  offscreen Electron uses production IPC and authenticated transport to select
+  the created chat and display its folder and mailbox cards. These transport
+  checks use synthetic provider run bindings and are not generation acceptance.
+- Real Codex acceptance separately exercises normal turn admission and the
+  run-bound provider tool: the creator creates and messages a child, the child
+  automatically wakes to read and reply, and the creator automatically wakes
+  and reads that reply. Both chats use disposable state; temporary authentication
+  is removed and fixture processes are stopped afterward. Claude and other
+  providers have not received live generation acceptance for this change.
+- Server/helper change based on `9f6f1f13`; no desktop contract migration,
+  production server restart, installation, release or mobile change.
 
 ## 2026-11-01 - Toggle workspace controls without creating a workspace
 
