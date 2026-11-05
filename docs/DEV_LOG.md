@@ -1,5 +1,35 @@
 # Public development log
 
+## 2026-11-04 - Keep delegated worker tasks separate from creator orchestration
+
+- Follow up PR #145 integration on `e435f079`: clarify the provider policy,
+  idle mailbox wake and busy-run notice. The original user instruction bounds
+  authorization; the prepared message identifies the recipient's subtask.
+  A worker asked to calculate and reply must not repeat its creator's setup or
+  create another worker. Requested replies use Chats, not a local final answer.
+- Clarify that accepted-send fields are snapshots, not live execution status.
+  An empty inbox is not evidence that the peer has not started or read its task.
+  No delegation is promoted from body text, copied to outgoing peer messages,
+  or expanded into new permissions. Receipt formats and authorization checks
+  are unchanged.
+- Add policy regressions that fail before the clarification, plus a real-ledger
+  check preserving the recipient task separately from its exact user scope.
+  All 598 focused server tests and 493 desktop service tests pass; TypeScript,
+  production Electron compilation and compiled-output verification pass.
+- Exercise the native offscreen Electron app through actual mouse/keyboard,
+  production IPC and authenticated test-server transport with real Codex and
+  Claude. Each provider completes initial and repeat creation/calculation/reply
+  workflows: four children total, one task and reply per child, no descendant
+  creations, correct settings inheritance and parent result/read receipts.
+  Verify both rendered mailbox cards and replies, including return navigation
+  and Jump to latest. Only isolated credential storage is a fixture; provider
+  generation and mailbox transport are real.
+- Development preview metadata remains desktop 0.2.0 / server 1.0.7-beta.11.
+  The local test server runs the correction; no production restart, deployment,
+  release or mobile change. Provider instructions guide task interpretation;
+  they are not a new enforcement or transitive-delegation mechanism. Other
+  providers and packaged Windows/Linux acceptance are not retested here.
+
 ## 2026-11-04 - Integrate agent-created chats for local acceptance
 
 - Integrate PR #145 on main `413e6fa7`, retaining the original contributor
