@@ -1,5 +1,26 @@
 # Public development log
 
+## 2026-11-05 - Verify deployed Duet connector and server
+
+- Confirm native worker activation of `1.0.12-beta.3` from source
+  `8e51c8ac927cd778a05ede873f28297a8f798a7d`. The signed server archive SHA-256 is
+  `212bbe417df080f6462d981492fa7943490986b30b592abd5e9f253227a6427e`.
+  Verify its Ed25519 signature and all 138 installed source files against the
+  signed archive. The activation receipt retains the frozen 2,362-entry
+  dependency/runtime inventory verification and successful precommit Hub checks.
+- Exercise the installed native service boundary: worker health and API contract
+  28 pass; the existing gateway process and Team Hub identity/routes remain
+  unchanged. No pending native transaction or maintenance lease remains.
+- Exercise the live connector over HTTPS: OAuth and protected-resource discovery
+  return 200 with PKCE S256; anonymous MCP initialization returns 401 with the
+  OAuth challenge. A read-only external-mailbox request with the dedicated
+  credential returns 200 and `Cache-Control: no-store`. Preserve prior private
+  tunnel listeners and verify protected configuration hashes.
+- Availability: connector deployed and server worker activated. Actual Google
+  sign-in from Claude/Duet, an external message/reply round trip, live scheduled
+  Claude model behavior, and first daily-note acceptance remain unverified.
+  No synthetic external mail, personal-note edits, or daily-note cutover occurred.
+
 ## 2026-11-05 - Prepare private Duet server deployment
 
 - Reserve server version `1.0.12-beta.3` for the scoped external mailbox and
