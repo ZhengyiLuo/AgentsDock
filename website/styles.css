@@ -107,7 +107,16 @@ a { color: inherit; }
 .eyebrow, .section-kicker { margin: 0 0 20px; color: var(--clay); font-size: 13px; font-weight: 600; letter-spacing: .1em; text-transform: uppercase; }
 .live-dot { display: inline-block; width: 7px; height: 7px; margin-right: 8px; border-radius: 50%; background: var(--blue); box-shadow: 0 0 16px rgba(91,157,255,.9); }
 .hero h1 { margin: 0; font-size: clamp(54px, 8.5vw, 96px); line-height: .98; letter-spacing: -.02em; }
-.hero-lede { max-width: 660px; margin: 26px auto 40px; color: var(--muted-2); font-size: clamp(19px, 2.1vw, 22px); line-height: var(--line-loose); font-weight: 400; }
+.hero-lede { max-width: 660px; margin: 26px auto 20px; color: var(--muted-2); font-size: clamp(19px, 2.1vw, 22px); line-height: var(--line-loose); font-weight: 400; }
+.hero-providers { display: flex; justify-content: center; gap: 12px; margin: 0 auto 36px; padding: 0; list-style: none; }
+.hero-providers li { display: flex; }
+.hero-provider { position: relative; display: grid; place-items: center; width: 44px; height: 44px; flex: 0 0 44px; border: 1px solid rgba(255,255,255,.2); border-radius: 50%; background: transparent; text-decoration: none; transition: border-color .15s ease; }
+.hero-provider img { display: block; width: 28px; height: 28px; object-fit: contain; }
+.hero-provider:hover { border-color: var(--blue); }
+.hero-provider:focus-visible { outline: 2px solid var(--blue); outline-offset: 4px; }
+.hero-provider-tooltip { position: absolute; top: calc(100% + 6px); left: 50%; transform: translateX(-50%); z-index: 2; padding: 4px 8px; border: 1px solid var(--line); border-radius: 4px; background: var(--bg); color: var(--text); font-size: 12px; line-height: 1.4; letter-spacing: 0; white-space: nowrap; pointer-events: none; visibility: hidden; opacity: 0; transition: opacity .15s ease; }
+.hero-provider:hover .hero-provider-tooltip,
+.hero-provider:focus-visible .hero-provider-tooltip { visibility: visible; opacity: 1; }
 .hero-actions { display: flex; gap: 12px; flex-wrap: wrap; justify-content: center; align-items: center; }
 /* Button metrics mirrored from the Claude Code page: 40px tall, 8px/16px padding, 8px radius, line-height 1 */
 .download-button { height: 40px; min-width: 44px; padding: 8px 16px; display: inline-flex; align-items: center; justify-content: center; gap: 8px; border: none; border-radius: 8px; line-height: 1; color: var(--text); cursor: pointer; font-size: 17px; font-weight: 500; text-align: center; text-decoration: none; transition: color .1s ease-in-out, background-color .2s ease-in-out, box-shadow .2s ease-in-out; }

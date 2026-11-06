@@ -11,10 +11,10 @@ npm run dev
 
 Open `http://localhost:4175`.
 
-Run the release-link regression tests from the repository root:
+Run the website content and release-link regression tests from the repository root:
 
 ```bash
-node --test scripts/tests/website-release-links.test.mjs
+node --test scripts/tests/website-*.test.mjs
 ```
 
 ## Website languages

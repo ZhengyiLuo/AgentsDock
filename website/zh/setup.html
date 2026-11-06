@@ -3,12 +3,12 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <meta name="description" content="如何搭建 AgentsServer，在远程机器上登录要使用的提供方 CLI，并从 macOS、Windows、Linux、iPhone、iPad 或 Android 客户端连接 AgentsDock。" />
+    <meta name="description" content="如何搭建 AgentsServer，在远程机器上连接要使用的 agent provider，并从 macOS、Windows、Linux、iPhone、iPad 或 Android 客户端连接 AgentsDock。" />
     <!-- Social preview (Open Graph / Twitter) -->
     <meta property="og:type" content="website" />
     <meta property="og:site_name" content="AgentsDock" />
     <meta property="og:title" content="搭建指南 · AgentsDock" />
-    <meta property="og:description" content="如何搭建 AgentsServer，在远程机器上登录要使用的提供方 CLI，并从 macOS、Windows、Linux、iPhone、iPad 或 Android 客户端连接 AgentsDock。" />
+    <meta property="og:description" content="如何搭建 AgentsServer，在远程机器上连接要使用的 agent provider，并从 macOS、Windows、Linux、iPhone、iPad 或 Android 客户端连接 AgentsDock。" />
     <meta property="og:url" content="https://agentsdock.net/zh/setup.html" />
     <meta property="og:image" content="https://agentsdock.net/assets/og-card.png?v=82a3bdda" />
     <meta property="og:image:width" content="1200" />
@@ -16,7 +16,7 @@
     <meta property="og:image:alt" content="AgentsDock — an IDE designed for agentic AI research" />
     <meta name="twitter:card" content="summary_large_image" />
     <meta name="twitter:title" content="搭建指南 · AgentsDock" />
-    <meta name="twitter:description" content="如何搭建 AgentsServer，在远程机器上登录要使用的提供方 CLI，并从 macOS、Windows、Linux、iPhone、iPad 或 Android 客户端连接 AgentsDock。" />
+    <meta name="twitter:description" content="如何搭建 AgentsServer，在远程机器上连接要使用的 agent provider，并从 macOS、Windows、Linux、iPhone、iPad 或 Android 客户端连接 AgentsDock。" />
     <meta name="twitter:image" content="https://agentsdock.net/assets/og-card.png?v=82a3bdda" />
     <meta name="theme-color" content="#0d1013" />
     <meta name="robots" content="index,follow" />
@@ -125,7 +125,7 @@
           <li>一台由你掌控的远程机器（Linux，或 Apple silicon Mac）来运行服务器，已安装 Node.js 22.14 或更高版本及 npm。<code>tmux</code> 是可选的，只有应用内终端需要它。</li>
           <li>服务器机器上已安装 <strong><code>uv</code></strong>。它管理服务器的 Python 环境和依赖，AgentsDock 不会自动安装它。具体步骤见下方的<a href="#install-uv">先安装 uv</a>。</li>
           <li>一个 <a href="https://tailscale.com/download" target="_blank" rel="noopener">Tailscale</a> 账号（可选）——仅在需要从局域网之外访问远程机器时才用得到。在同一 Wi‑Fi 下可以直接用机器的局域网 IP；Tailscale 让你能从其他任何地方安全连接。</li>
-          <li>你计划使用的提供方 CLI（<strong>Claude Code</strong>、<strong>Codex</strong>、<strong>OpenCode</strong> 或 <strong>Cursor</strong>）已安装在远程机器上。</li>
+          <li>在远程机器上安装你计划使用的 provider 对应的 CLI 命令行工具：<strong>Claude Code</strong>、<strong>Codex</strong>、<strong>OpenCode</strong>、<strong>Cursor</strong> 或 <strong>Gemini</strong>。各 provider 的配置方式见<a href="./agents.html">连接 agents</a>。</li>
           <li>一台能运行 <strong>AgentsDock 客户端</strong>的设备：macOS、Windows、Linux、iPhone、iPad 或 Android。</li>
         </ul>
         <div class="guide-note">
@@ -168,8 +168,10 @@ agentsdock: <span class="term-success">Server 1.0.10 is ready</span> at <span cl
         <p class="legal-meta">更多运行信息可用 <code>agentsdock status</code> 查看。重启、更新和卸载等命令见<a href="./server.html">管理服务器</a>。</p>
         <p><a class="quickstart-docs" href="https://github.com/ZhengyiLuo/AgentsDock/tree/main/server" target="_blank" rel="noopener">在 GitHub 上查看 AgentsServer 源码 <span aria-hidden="true">&rarr;</span></a></p>
 
-        <h3 class="docs-step" id="remote-cli"><span class="step-n">2</span>在远程机器上登录提供方 CLI</h3>
+        <h3 class="docs-step" id="remote-cli"><span class="step-n">2</span>连接你的 agent provider</h3>
         <p>安装并登录你要让 AgentsDock 使用的提供方 CLI：<a href="https://code.claude.com/docs" target="_blank" rel="noopener">Claude Code</a>、<a href="https://developers.openai.com/codex/cli" target="_blank" rel="noopener">Codex</a>、<a href="https://dev.opencode.ai/docs/cli/" target="_blank" rel="noopener">OpenCode</a> 或 <a href="https://cursor.com/docs/cli/reference/authentication" target="_blank" rel="noopener">Cursor</a>。按提供方支持的正常方式登录即可，例如浏览器登录或配置 API key。自定义 endpoint 的配置见<a href="./agents.html">连接 agents</a>。</p>
+
+        <p><strong>Gemini</strong> 使用 API 连接，而不是 Google 账号或 CLI 登录。服务器上仍需安装兼容版本的 Gemini CLI 命令行工具。按照<a href="./agents.html#gemini-api">连接 Gemini API</a>中的说明安装，并在桌面客户端配置 API key。</p>
 
         <h3 class="docs-step" id="remote-tailscale"><span class="step-n">3</span>在远程机器上安装 Tailscale <span class="docs-step-opt">可选</span></h3>
         <p>仅在需要从局域网之外访问远程机器时才需要。如果你的设备和远程机器在同一 Wi‑Fi 下，可以跳过这一步，在第二步直接使用机器的局域网 IP。</p>

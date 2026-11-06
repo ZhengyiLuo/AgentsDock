@@ -3,12 +3,12 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <meta name="description" content="在 AgentsDock 里连接和管理 Claude Code、Codex、OpenCode、Cursor，以及自定义 API endpoint。" />
+    <meta name="description" content="在 AgentsDock 里连接和管理 Claude Code、Codex、OpenCode、Cursor、Gemini API，以及自定义 API endpoint。" />
     <!-- Social preview (Open Graph / Twitter) -->
     <meta property="og:type" content="website" />
     <meta property="og:site_name" content="AgentsDock" />
     <meta property="og:title" content="连接与管理 agents · AgentsDock" />
-    <meta property="og:description" content="在 AgentsDock 里连接和管理 Claude Code、Codex、OpenCode、Cursor，以及自定义 API endpoint。" />
+    <meta property="og:description" content="在 AgentsDock 里连接和管理 Claude Code、Codex、OpenCode、Cursor、Gemini API，以及自定义 API endpoint。" />
     <meta property="og:url" content="https://agentsdock.net/zh/agents.html" />
     <meta property="og:image" content="https://agentsdock.net/assets/og-card.png?v=82a3bdda" />
     <meta property="og:image:width" content="1200" />
@@ -16,7 +16,7 @@
     <meta property="og:image:alt" content="AgentsDock — an IDE designed for agentic AI research" />
     <meta name="twitter:card" content="summary_large_image" />
     <meta name="twitter:title" content="连接与管理 agents · AgentsDock" />
-    <meta name="twitter:description" content="在 AgentsDock 里连接和管理 Claude Code、Codex、OpenCode、Cursor，以及自定义 API endpoint。" />
+    <meta name="twitter:description" content="在 AgentsDock 里连接和管理 Claude Code、Codex、OpenCode、Cursor、Gemini API，以及自定义 API endpoint。" />
     <meta name="twitter:image" content="https://agentsdock.net/assets/og-card.png?v=82a3bdda" />
     <meta name="theme-color" content="#0d1013" />
     <meta name="robots" content="index,follow" />
@@ -78,6 +78,7 @@
             <a href="#providers">支持的 provider</a>
             <a href="#cli-login">CLI 登录</a>
             <a href="#custom-api">Custom API</a>
+            <a href="#gemini-api">Gemini API</a>
             <a href="#new-chat">在会话中使用</a>
             <a href="#manage">管理状态</a>
           </span>
@@ -114,7 +115,7 @@
       <article class="legal docs-body">
         <p class="section-kicker">文档</p>
         <h1>连接与管理 agents</h1>
-        <p class="legal-lead">AgentsDock 支持在你连接的服务器上使用 Claude Code、Codex、OpenCode 和 Cursor。连接 provider 有两种方式：在服务器上使用 provider 自己的 CLI 登录，或者为这个 provider 配置自定义 API endpoint。</p>
+        <p class="legal-lead">AgentsDock 支持在你连接的服务器上使用 Claude Code、Codex、OpenCode、Cursor 和 Gemini。根据 provider 的支持情况，可以使用 CLI 登录或自定义 API endpoint。Gemini 目前仅支持 API 连接。</p>
 
         <h2 id="providers">支持的 provider</h2>
         <div class="provider-grid" aria-label="支持的 agent provider">
@@ -134,11 +135,15 @@
             <span class="provider-logo"><img src="../assets/cursor-logo.png" alt="" /></span>
             <span><strong>Cursor</strong></span>
           </a>
+          <a class="provider-card" href="https://ai.google.dev/gemini-api/docs" target="_blank" rel="noopener">
+            <span class="provider-logo"><img src="../assets/gemini-logo.svg" alt="" /></span>
+            <span><strong>Gemini</strong></span>
+          </a>
         </div>
 
         <h2 id="ways">两种连接方式</h2>
         <ul class="docs-intro-list">
-          <li><strong>CLI Login</strong> 使用安装在远程服务器上的 provider CLI 或 runtime。</li>
+          <li><strong>CLI Login</strong> 使用安装并登录在远程服务器上的 Claude Code、Codex、OpenCode 或 Cursor。</li>
           <li><strong>Custom API</strong> 使用你为当前服务器配置的 endpoint 和 token/key。</li>
         </ul>
 
@@ -176,6 +181,11 @@ cursor-agent login</code></pre>
           <li><strong>Cursor</strong> 的 Custom API 使用 Cursor API endpoint 和 Cursor API key。</li>
         </ul>
         <p>Custom API 设置保存在当前服务器上。如果你有多台服务器，需要在每台想使用它的服务器上分别配置。</p>
+
+        <h3 id="gemini-api">连接 Gemini API</h3>
+        <p>Gemini 需要 AgentsDock 桌面客户端和 AgentsServer 1.0.11 或更高版本。它使用 <strong>Gemini Developer API</strong>，在 AgentsDock 中不支持 Google 账号或 CLI 登录。请先在服务器上安装兼容版本的 Gemini CLI 命令行工具：</p>
+        <pre><code>npm install -g @google/gemini-cli@0.64.0</code></pre>
+        <p>在桌面客户端打开 <strong>Settings &rarr; My Agents &rarr; Gemini</strong>，配置 API 连接。Base URL 使用 <code>https://generativelanguage.googleapis.com</code>，API key 可在 <a href="https://ai.google.dev/gemini-api/docs/api-key" target="_blank" rel="noopener">Google AI Studio</a> 创建，请勿分享。自定义 endpoint 必须支持原生 Gemini API，不能直接换成 OpenAI-compatible endpoint。</p>
 
         <h2 id="new-chat">在会话中使用</h2>
         <p>provider 连接好以后，新建会话，在左下角的 provider picker 里选择它。AgentsDock 会显示当前服务器上所有已经可用的 provider，所以切换服务器后列表可能会变化。如果同一个 provider 同时有 CLI 登录和自定义 endpoint，自定义 endpoint 会作为一个独立选项显示，不会和 CLI 登录混在一起。</p>

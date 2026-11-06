@@ -3,12 +3,12 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <meta name="description" content="AgentsDock documentation — set up the AgentsServer on a remote machine, sign in the provider CLIs you use, and connect from macOS, Windows, Linux, iPhone, iPad, or Android clients." />
+    <meta name="description" content="AgentsDock documentation — set up the AgentsServer on a remote machine, connect your agent providers, and connect from macOS, Windows, Linux, iPhone, iPad, or Android clients." />
     <!-- Social preview (Open Graph / Twitter) -->
     <meta property="og:type" content="website" />
     <meta property="og:site_name" content="AgentsDock" />
     <meta property="og:title" content="Documentation · AgentsDock" />
-    <meta property="og:description" content="AgentsDock documentation — set up the AgentsServer on a remote machine, sign in the provider CLIs you use, and connect from macOS, Windows, Linux, iPhone, iPad, or Android clients." />
+    <meta property="og:description" content="AgentsDock documentation — set up the AgentsServer on a remote machine, connect your agent providers, and connect from macOS, Windows, Linux, iPhone, iPad, or Android clients." />
     <meta property="og:url" content="https://agentsdock.net/setup.html" />
     <meta property="og:image" content="https://agentsdock.net/assets/og-card.png?v=82a3bdda" />
     <meta property="og:image:width" content="1200" />
@@ -16,7 +16,7 @@
     <meta property="og:image:alt" content="AgentsDock — an IDE designed for agentic AI research" />
     <meta name="twitter:card" content="summary_large_image" />
     <meta name="twitter:title" content="Documentation · AgentsDock" />
-    <meta name="twitter:description" content="AgentsDock documentation — set up the AgentsServer on a remote machine, sign in the provider CLIs you use, and connect from macOS, Windows, Linux, iPhone, iPad, or Android clients." />
+    <meta name="twitter:description" content="AgentsDock documentation — set up the AgentsServer on a remote machine, connect your agent providers, and connect from macOS, Windows, Linux, iPhone, iPad, or Android clients." />
     <meta name="twitter:image" content="https://agentsdock.net/assets/og-card.png?v=82a3bdda" />
     <meta name="theme-color" content="#0d1013" />
     <meta name="robots" content="index,follow" />
@@ -125,7 +125,7 @@
           <li>A <strong>remote machine</strong> you control — Linux, or Apple-silicon macOS — to run the server, with Node.js 22.14 or later and npm installed. <code>tmux</code> is optional, only needed for the in-app terminal.</li>
           <li><strong><code>uv</code></strong> installed on the server machine. It manages the server's Python environment and dependencies; AgentsDock does not install it automatically. See <a href="#install-uv">Install uv first</a> below.</li>
           <li>A <strong>Tailscale</strong> account <em>(optional)</em> — only needed to reach the remote from <strong>outside its local network</strong>. On the same Wi&#8209;Fi you can use the machine's local IP address; Tailscale is what lets you connect securely from anywhere else.</li>
-          <li>Any provider CLI you plan to use — <strong>Claude Code</strong>, <strong>Codex</strong>, <strong>OpenCode</strong>, or <strong>Cursor</strong> — installed on the remote.</li>
+          <li>The runtime for each provider you plan to use — <strong>Claude Code</strong>, <strong>Codex</strong>, <strong>OpenCode</strong>, <strong>Cursor</strong>, or <strong>Gemini</strong> — installed on the remote. See <a href="./agents.html">Connect agents</a> for each provider's setup.</li>
           <li>A device that can run an <strong>AgentsDock client</strong>: macOS, Windows, Linux, iPhone, iPad, or Android.</li>
         </ul>
         <div class="guide-note">
@@ -168,8 +168,10 @@ agentsdock: <span class="term-success">Server 1.0.10 is ready</span> at <span cl
         <p class="legal-meta">For more runtime details, use <code>agentsdock status</code>. Restart, update, and uninstall commands are on <a href="./server.html">Manage your server</a>.</p>
         <p><a class="quickstart-docs" href="https://github.com/ZhengyiLuo/AgentsDock/tree/main/server" target="_blank" rel="noopener">View AgentsServer source on GitHub <span aria-hidden="true">&rarr;</span></a></p>
 
-        <h3 class="docs-step" id="remote-cli"><span class="step-n">2</span>Sign in to provider CLIs on the remote</h3>
+        <h3 class="docs-step" id="remote-cli"><span class="step-n">2</span>Connect your agent providers</h3>
         <p>Install and sign in to whichever provider CLIs you want AgentsDock to use on the remote: <a href="https://code.claude.com/docs" target="_blank" rel="noopener">Claude Code</a>, <a href="https://developers.openai.com/codex/cli" target="_blank" rel="noopener">Codex</a>, <a href="https://dev.opencode.ai/docs/cli/" target="_blank" rel="noopener">OpenCode</a>, or <a href="https://cursor.com/docs/cli/reference/authentication" target="_blank" rel="noopener">Cursor</a>. Use that provider's normal login flow, such as browser sign-in or API-key configuration. For custom endpoints, see <a href="./agents.html">Connect agents</a>.</p>
+
+        <p><strong>Gemini</strong> uses an API connection, not Google account or CLI login. It still needs a compatible Gemini CLI runtime on the server. Follow <a href="./agents.html#gemini-api">Connect Gemini API</a> to install it and configure your API key in the desktop app.</p>
 
         <h3 class="docs-step" id="remote-tailscale"><span class="step-n">3</span>Install Tailscale on the remote <span class="docs-step-opt">optional</span></h3>
         <p><strong>Only needed to reach the remote from outside its local network.</strong> If your devices are on the same Wi&#8209;Fi as the remote, you can skip this and use the machine's local IP address in Part 2.</p>

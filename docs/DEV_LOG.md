@@ -22,6 +22,30 @@ painful to rediscover later.
   active server and push the latest server repository/code to GitHub so app and
   server contract versions do not drift.
 
+## 2026-11-05 - Add Gemini and provider logos to the website
+
+- Added Gemini to the English and Simplified Chinese homepage provider lists,
+  logo tiles, feature copy and page metadata, reusing the desktop logo asset.
+  Updated the hero supporting sentence to "Access your agent server from any
+  device" and its Chinese equivalent; kept provider names in the dedicated list.
+- Added five circular provider-logo links immediately below the hero introduction,
+  with accessible names, hover/focus tooltips and links to the connection guide.
+  Kept the circles transparent with thin outlines, without a fill or hover glow.
+  Verified a single row at 320 through 1440 pixels, loaded logos, keyboard focus,
+  tooltip placement and actual navigation; refreshed homepage stylesheet hashes.
+- Added a name-and-logo provider card and a Gemini API section to the connection
+  guides, including the supported CLI runtime, official endpoint and API-key
+  documentation. Clarified API-only authentication and linked the section from
+  the setup guides and the connection-page directory.
+- Eighteen focused content and release-link tests passed. Browser checks covered
+  all six changed pages at 1440, 768, 390 and 320 pixels, with no horizontal
+  overflow or script errors. Verified nonblank logo rendering, the mobile
+  setup-to-Gemini link, directory navigation and language switching.
+- Existing download URLs, release metadata and release-discovery code are
+  unchanged. Reviewed and approved for website publication and mirror sync on
+  November 5. No application/provider runtime changes, native installations,
+  application releases or server deployments are included.
+
 ## 2026-10-27 - Publish the reviewed website download updates
 
 - Updated English and Simplified Chinese desktop fallback links, release notes,
