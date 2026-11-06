@@ -1,5 +1,32 @@
 # Public development log
 
+## 2026-11-05 - Prepare external mailbox peers and scheduled Claude tools
+
+- Add an explicitly configured external mailbox principal with a dedicated
+  loopback credential, fixed recipient pair and recorded owner policy. Incoming
+  requests retain distinct external provenance; they do not fabricate native
+  sessions, runs or human turns. Native provider replies use the existing
+  asynchronous route and an ordered, resumable external reply endpoint.
+- Preserve live route ceilings, revocation, maintenance fences, idle wake rules
+  and transactional idempotency. Include the new module in server installation
+  and package manifests; invalid or absent peer configuration grants no access.
+- Route chat-context scheduled Claude turns through the SDK provider transport.
+  Keep standalone compatibility behavior and captured permissions; unattended
+  runs cannot wait for interactive approval or planning prompts.
+- Exercise the production FastAPI application over isolated loopback HTTP:
+  external authentication, provenance, replies, pagination, revocation and
+  maintenance checks. Exercise scheduled dispatch through SDK MCP registration,
+  the helper subprocess and the Jobs HTTP API. Model execution and host lifespan
+  remain outside this isolated acceptance test; no live model acceptance is
+  claimed. No production peer, schedule, service or release is changed.
+- Backport onto the existing `1.0.12-beta.2` lineage, preserving mailbox-only
+  delivery and release-specific runtime modules. Validation: 441 focused tests
+  pass, covering external mail, native routes, mailbox lifecycle, scheduled jobs,
+  Claude SDK ownership, and affected installer and release manifests. Another
+  33 release-lineage tests pass; two existing Codex goal tests fail identically
+  on the unchanged base (`509bfad8`). Python compilation, shell syntax and diff
+  checks pass. This is a local source preparation, not a release or deployment.
+
 ## 2026-11-01 - Prepare coordinated 1.0.12-beta.2
 
 - Integrate reviewed main through `9f6f1f13704e767717b5131e2df1213306a58abd`
