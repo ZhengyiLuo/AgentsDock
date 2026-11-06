@@ -1,5 +1,34 @@
 # Public development log
 
+## 2026-11-06 - Preserve external sender names in message cards
+
+- Resolve external mailbox names from registered peer metadata when projecting
+  lifecycle events. A later local-chat lookup previously overwrote that name
+  with `Untitled chat` for both incoming and outgoing cards.
+- Correct existing cards at shared client egress using the exact registered
+  peer, owning chat and pair. Preserve stored messages, identities and content;
+  unrelated or replaced pairs are not relabeled. No client update is needed.
+- Prepare worker `1.0.12-beta.5`, API contract 28. All 68 focused transport,
+  external-peer and history tests pass. Both new regressions fail the previous
+  implementation; the real HTTP check confirms renamed historical titles
+  without changing persisted bytes. Packaged-app acceptance and activation
+  are recorded separately when complete.
+
+## 2026-11-06 - Confirm scheduled-mailbox worker activation
+
+- Native WorkerControl confirms worker `1.0.12-beta.4`, the original gateway
+  process/version and healthy Team Hub identity. Signed source matches the
+  approved archive; no native transaction or maintenance lease remains.
+- Public TLS ingress passes OAuth/resource discovery (200) and anonymous MCP
+  rejection (401). Both dedicated external-mailbox reads return 200/no-store.
+  No credentials, reply content or synthetic external messages are exposed.
+- Notify the owning chat that it can create the previously requested schedule.
+  Actual scheduled model delivery remains pending its acceptance receipt.
+- The subsequent create attempt reaches the separate intended run-authority
+  guard: mailbox wakes cannot create durable scheduled chat grants. Creation
+  must happen from a normal user-origin turn in the owning chat; no authority
+  bypass or job creation was performed.
+
 ## 2026-11-05 - Verify signed scheduled-mailbox worker candidate
 
 - Build server `1.0.12-beta.4` from committed source
