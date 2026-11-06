@@ -1,5 +1,20 @@
 # Public development log
 
+## 2026-11-05 - Verify corrected Duet public ingress
+
+- Activate connector `0.1.1` on a dedicated HTTPS-443 tunnel. Verify both public
+  ingress relays with TLS certificate validation: OAuth and protected-resource
+  discovery return 200, and anonymous MCP initialization returns 401 with the
+  matching challenge. These checks explicitly bypass local tunnel DNS.
+- Native WorkerControl confirms worker `1.0.12-beta.3`, unchanged gateway
+  `1.0.12-beta.2`, API contract 28 and retained Team Hub identity. The dedicated
+  external-mailbox read returns 200/no-store. No server redeployment occurs.
+- Remove the obsolete public listener and verify the original tunnel's private
+  configuration exactly matches its predeployment baseline. The owner confirms
+  updating the Google callback; actual Google/Claude sign-in, a genuine mailbox
+  exchange and first daily-note acceptance remain pending. Existing daily-note
+  ownership stays unchanged.
+
 ## 2026-11-05 - Clarify Duet connector reachability acceptance
 
 - Claude custom connectors require HTTPS port 443. The initial connector
