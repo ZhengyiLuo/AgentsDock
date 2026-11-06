@@ -13,6 +13,17 @@
   implementation; the real HTTP check confirms renamed historical titles
   without changing persisted bytes. Packaged-app acceptance and activation
   are recorded separately when complete.
+- Verify installed desktop `1.0.12-beta.2` application code in an isolated
+  native offscreen Electron host against the patched HTTP server. The card
+  shows `Claude Duet` before and after reload; history bytes are unchanged
+  and no HTTP mutations occur. This validates rendering and production
+  transport, not signed-executable launch or live-provider execution.
+- Build signed worker source `dbf7955b669d1dd45ceef4cd922bf55aef7f216b`;
+  archive SHA-256
+  `f8e94803ee1809dbe3ecefedfba782c744b12769cefb50bdcd72fcf8f1393215`.
+  Native preflight verifies all 138 source files and 2,362 runtime entries,
+  retained gateway and Team Hub. Push source and matching standalone export;
+  activation uses the one-shot idle-only updater.
 
 ## 2026-11-06 - Confirm scheduled-mailbox worker activation
 
