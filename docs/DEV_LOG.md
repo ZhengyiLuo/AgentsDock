@@ -1,5 +1,18 @@
 # Public development log
 
+## 2026-11-05 - Clarify Duet connector reachability acceptance
+
+- Claude custom connectors require HTTPS port 443. The initial connector
+  address used another port and was rejected before OAuth discovery. Previous
+  HTTPS checks used local tunnel DNS and did not prove public ingress.
+- The connector correction uses a separate persistent tunnel identity so
+  existing private services remain private. Gateway validation now rejects
+  incompatible ports; 138 connector tests pass. Actual public ingress and
+  Google/Claude sign-in remain pending while the new identity is authenticated.
+- Native worker activation of `1.0.12-beta.3` remains confirmed. This connector
+  address correction does not change or redeploy the worker, gateway or Team
+  Hub. The existing daily-note routine remains unchanged pending real acceptance.
+
 ## 2026-11-05 - Verify deployed Duet connector and server
 
 - Confirm native worker activation of `1.0.12-beta.3` from source
