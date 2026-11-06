@@ -11,7 +11,9 @@
   28, preserved gateway and Team Hub identity. Only the worker version and
   server implementation change. Six private operator fixtures pass, covering
   busy admission, retained gateway and precommit rollback guards.
-- Activation remains pending idle admission. Direct external messages and
+- Push the maintained source and matching fast-forward standalone export.
+  Start the one-shot native updater; its receipt reports `waiting_for_idle`.
+  Activation remains pending idle admission. Direct external messages and
   replies are accepted; live scheduled model delivery remains unverified until
   activation and creation of the requested job by its owning chat.
 
