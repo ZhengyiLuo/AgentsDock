@@ -1,5 +1,22 @@
 # Public development log
 
+## 2026-11-05 - Prepare scheduled external mailbox delivery
+
+- Fix provider-created jobs rejecting an available external mailbox because
+  route validation incorrectly looked for that peer in the native chat table.
+  Preserve exact single-`@` selection and instruction-only delivery.
+- Save the owning chat, peer, revision, pair and both route identities with
+  each scheduled grant. Revalidate on create/update, dispatch and admission;
+  revocation or replacement requires explicit repair. Scheduled runs inherit
+  only selected routes, and ordinary turns cannot manufacture these grants.
+- Prepare server `1.0.12-beta.4` with API contract 28. All 219 focused tests
+  pass: 48 scheduler/provider checks, 53 existing mailbox/pair checks and 118
+  local/secure-peer reference compatibility checks. Independent security review
+  found no blockers. The isolated HTTP test exercises the real Jobs API,
+  scheduled dispatch, turn admission, capability issuance and mailbox delivery,
+  including revocation between dispatch and admission. Model execution is
+  stubbed; live scheduled delivery remains pending deployment.
+
 ## 2026-11-05 - Verify corrected Duet public ingress
 
 - Activate connector `0.1.1` on a dedicated HTTPS-443 tunnel. Verify both public
