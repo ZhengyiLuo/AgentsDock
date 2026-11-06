@@ -1,5 +1,20 @@
 # Public development log
 
+## 2026-11-05 - Verify signed scheduled-mailbox worker candidate
+
+- Build server `1.0.12-beta.4` from committed source
+  `41f8713be5fcd88a78de7d698f7d95683ceef4ad`; signed archive SHA-256:
+  `f6ef68159896e88f0737fee1dbb5fa302b8e79efa669931772888a2470b38b7b`.
+  Verify signature, npm/legacy runtime parity, all 138 packaged source files
+  and the frozen 2,362-entry installed runtime inventory.
+- Native preflight verifies the candidate and incumbent sources, API contract
+  28, preserved gateway and Team Hub identity. Only the worker version and
+  server implementation change. Six private operator fixtures pass, covering
+  busy admission, retained gateway and precommit rollback guards.
+- Activation remains pending idle admission. Direct external messages and
+  replies are accepted; live scheduled model delivery remains unverified until
+  activation and creation of the requested job by its owning chat.
+
 ## 2026-11-05 - Prepare scheduled external mailbox delivery
 
 - Fix provider-created jobs rejecting an available external mailbox because
