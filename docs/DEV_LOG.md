@@ -1,5 +1,19 @@
 # Public development log
 
+## 2026-11-05 - Prepare private Duet server deployment
+
+- Reserve server version `1.0.12-beta.3` for the scoped external mailbox and
+  scheduled Claude provider changes from `df51ddfc`. Desktop and mobile builds
+  are outside this server deployment.
+- Prepare a signed local server package from the reviewed beta.2-compatible
+  lineage. Retain API contract 28 and unchanged Team Hub, dependency and native
+  service lifecycle sources. Activation uses the native worker lifecycle with
+  idle admission, precommit Hub health checks and rollback.
+- Existing focused validation remains 474 passing tests, with two unchanged
+  baseline Codex goal failures documented above. Packaged verification and
+  live activation results will be recorded separately; this entry does not
+  claim deployment or successful Duet sign-in.
+
 ## 2026-11-05 - Prepare external mailbox peers and scheduled Claude tools
 
 - Add an explicitly configured external mailbox principal with a dedicated
