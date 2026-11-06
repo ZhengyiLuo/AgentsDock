@@ -1,5 +1,19 @@
 # Public development log
 
+## 2026-11-06 - Confirm external sender-label activation
+
+- Confirm live worker `1.0.12-beta.5` from signed source
+  `dbf7955b669d1dd45ceef4cd922bf55aef7f216b`. All 138 installed source files
+  match the package. The original gateway and Team Hub identity remain
+  unchanged; no native transaction or maintenance lease remains.
+- Actual authenticated history responses now label existing incoming and
+  outgoing external cards with the configured peer name. Public OAuth/resource
+  discovery returns 200, anonymous MCP returns 401, and both dedicated mailbox
+  reads return 200/no-store. No message content or credentials are exposed.
+- The prior scheduled external-route fix is active. The separate user-origin
+  requirement for creating durable scheduled access remains unchanged; live
+  hourly-report creation and delivery are not claimed as accepted.
+
 ## 2026-11-06 - Preserve external sender names in message cards
 
 - Resolve external mailbox names from registered peer metadata when projecting
