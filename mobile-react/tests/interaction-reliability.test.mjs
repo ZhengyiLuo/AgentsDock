@@ -129,7 +129,8 @@ test('large drafts collapse the composer immediately after send', () => {
   assert.match(composer, /if \(!text\.length\) setInputHeight\(COMPOSER_INPUT_MIN_HEIGHT\)/)
   assert.doesNotMatch(composer, /if \(!draft\.length \|\| !text\.length\)/)
   assert.match(composer, /const inputRef = useRef<TextInput>\(null\)/)
-  assert.match(composer, /const request = sendPrompt\([\s\S]*?sendingSessionIds\.has\(sessionId\)[\s\S]*?drafts\[sessionId\][\s\S]*?inputRef\.current\?\.clear\(\)[\s\S]*?const sent = await request/)
+  assert.match(composer, /sendingSessionIds\.has\(sessionId\)[\s\S]*?nativeAdmissionObserved = true[\s\S]*?turnAdmissionTokens\[sessionId\] !== admissionToken[\s\S]*?drafts\[sessionId\][\s\S]*?inputRef\.current\?\.clear\(\)/)
+  assert.match(composer, /useAppStore\.subscribe\(clearConsumedInput\)[\s\S]*?const request = sendPrompt\([\s\S]*?clearConsumedInput\(useAppStore\.getState\(\), beforeConsumption\)[\s\S]*?const sent = await request[\s\S]*?finally \{\s*unsubscribeConsumption\(\)/)
   assert.match(composer, /<TextInput[\s\S]*?ref=\{inputRef\}[\s\S]*?testID="chat-composer-input"/)
   assert.match(store, /let consumedDraft = false[\s\S]*?drafts = \{ \.\.\.state\.drafts, \[sessionId\]: '' \}[\s\S]*?if \(consumedDraft\) void saveCurrentWorkspace\(get\)[\s\S]*?await scope\.client\.sendTurn/)
   assert.match(store, /restoreFailedChatComposer\([\s\S]*?originalDraft,[\s\S]*?rawReferences,[\s\S]*?currentDraft,[\s\S]*?currentReferences,[\s\S]*?sessionId/)
@@ -154,18 +155,20 @@ test('new chat creation cannot silently discard a mobile tap or failed request',
   assert.match(codexPermissionDefaults, /codex_sandbox_mode: DEFAULT_CODEX_SANDBOX_MODE/)
   assert.match(codexPermissionDefaults, /codex_permission_profile: DEFAULT_CODEX_PERMISSION_PROFILE/)
   assert.match(codexPermissionDefaults, /codex_approvals_reviewer: DEFAULT_CODEX_APPROVALS_REVIEWER/)
-  // quickCreateSession reuses the configured runtime defaults and open chat's
-  // location, safely falls back for stale models, and shares one scoped request.
+  // quickCreateSession inherits the open chat, safely falls back for stale
+  // models, and shares one scoped request, including the permission lookup.
   const quickCreateStart = store.indexOf('\n  quickCreateSession(expectedGeneration) {')
   assert.ok(quickCreateStart >= 0)
   const quickCreate = store.slice(quickCreateStart, store.indexOf('\n  setChatDefaults(patch) {'))
   assert.match(quickCreate, /const scope = validatedConnectionOrReport\(get, set, expectedGeneration\)[\s\S]*?if \(!scope\) return Promise\.resolve\(false\)/)
   assert.match(quickCreate, /if \(quickCreateSessionInFlight\?\.scope === scope\) return quickCreateSessionInFlight\.promise/)
-  assert.match(quickCreate, /const choices = selectableChatBackendChoices\(state\.health, state\.runtime\)/)
-  assert.match(quickCreate, /choices\.includes\(preferred\) \? preferred : choices\[0\]/)
-  assert.match(quickCreate, /isCustomProvider\(state\.chatDefaults\) && !choices\.includes\(preferred\)[\s\S]*?return Promise\.resolve\(false\)/)
+  assert.match(quickCreate, /const defaults = source \?\? state\.chatDefaults/)
+  assert.match(quickCreate, /const choices = selectableChatBackendChoices\(get\(\)\.health, get\(\)\.runtime\)/)
+  assert.match(quickCreate, /chooseNewChatBackend\(choices, preferred\)/)
+  assert.doesNotMatch(quickCreate, /latestChatTurnFailed|previousFailed/)
+  assert.match(quickCreate, /choice === preferred[\s\S]*?CHAT_PERMISSION_FIELDS/)
   assert.match(quickCreate, /if \(choice !== preferred \|\| providerSelectionError[\s\S]*?model = ''[\s\S]*?effort = ''/)
-  assert.match(quickCreate, /const operation = get\(\)\.createSession\(\{[\s\S]*?title: 'New chat'[\s\S]*?\}, scope\.generation\)\.finally\(/)
+  assert.match(quickCreate, /return get\(\)\.createSession\(\{[\s\S]*?title: 'New chat'[\s\S]*?\}, scope\.generation, \[\]\)/)
   assert.match(quickCreate, /if \(quickCreateSessionInFlight\?\.promise === operation\) quickCreateSessionInFlight = null/)
   assert.match(quickCreate, /quickCreateSessionInFlight = \{ scope, promise: operation \}[\s\S]*?return operation/)
   // createSession keeps the same reliability contract, records the choices as

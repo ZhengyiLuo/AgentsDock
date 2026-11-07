@@ -27,11 +27,14 @@
 .goal-reason { margin-top: var(--space-5); }
 .goal-reason p { margin-bottom: 0; color: var(--muted); }
 .goal-feedback { margin: 0 var(--space-3) var(--space-3); color: var(--muted); font-size: var(--text-size-meta); overflow-wrap: anywhere; }
+.goal-composer-feedback { width: calc(100% - 34px); max-width: 1120px; margin: 0 auto var(--space-3); padding: 0 var(--space-3); box-sizing: border-box; }
 .goal-dialog .goal-feedback { margin: 0; }
 .goal-dialog-message { padding: var(--space-7); }
 .goal-feedback.error { color: var(--danger); }
 .goal-dialog footer { display: flex; justify-content: flex-end; gap: var(--space-4); }
 .goal-dialog footer .quiet-button { margin-right: auto; }
+.goal-dialog .claude-goal-footer { flex-wrap: wrap; }
+.goal-dialog .claude-goal-footer .quiet-button + .quiet-button { margin-right: 0; }
 
 .goal-summary-bar {
   display: flex;
@@ -62,6 +65,7 @@
 .goal-summary > svg { flex-shrink: 0; color: var(--accent); }
 .goal-summary-condition { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--text-size-label); }
 .goal-summary-meta { color: var(--muted); font-size: var(--text-size-meta); white-space: nowrap; }
+.claude-goal-summary-meta { white-space: normal; }
 .goal-summary-actions > .quiet-button { flex-shrink: 0; font-size: var(--text-size-meta); }
 @media (max-width: 540px) {
   .goal-summary { flex-wrap: wrap; }

@@ -1,10 +1,15 @@
 import assert from 'node:assert/strict'
 import { execFileSync } from 'node:child_process'
 import fs from 'node:fs'
+import { createRequire } from 'node:module'
 import path from 'node:path'
 import test from 'node:test'
 import vm from 'node:vm'
 import ts from 'typescript'
+
+const require = createRequire(import.meta.url)
+const expoRequire = createRequire(require.resolve('expo/package.json'))
+const { getResolvedLocalesAsync } = expoRequire('@expo/config-plugins/build/utils/locales')
 
 function loadTypeScript(filename, imports = {}) {
   const source = fs.readFileSync(filename, 'utf8')
@@ -87,6 +92,19 @@ test('native app advertises the same languages on iOS and Android', () => {
   assert.deepEqual(plugin[1].supportedLocales, ['en', 'zh-CN'])
   assert.equal(config.ios.infoPlist.CFBundleAllowMixedLocalizations, true)
   assert.ok(config.locales['zh-CN'])
+})
+
+test('Expo keeps Chinese privacy descriptions on iOS without undefined Android string resources', async () => {
+  const config = JSON.parse(fs.readFileSync('app.json', 'utf8')).expo
+  const ios = await getResolvedLocalesAsync(process.cwd(), config.locales, 'ios')
+  const android = await getResolvedLocalesAsync(process.cwd(), config.locales, 'android')
+  assert.deepEqual(ios.localesMap['zh-CN'], {
+    NSLocalNetworkUsageDescription: 'AgentsDock 需要连接同一局域网或 Tailscale 网络中的 Agent 服务器。',
+    NSCameraUsageDescription: '允许 AgentsDock 扫描服务器连接二维码。',
+    NSPhotoLibraryUsageDescription: '允许 AgentsDock 访问你选择发送给 Agent 的照片和视频。',
+    NSPhotoLibraryAddUsageDescription: '允许 AgentsDock 将你选择的图片和视频保存到相册。',
+  })
+  assert.deepEqual(android.localesMap['zh-CN'], {})
 })
 
 test('mobile translations stay in sync with desktop source terms and mobile overrides', () => {

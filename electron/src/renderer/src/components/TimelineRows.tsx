@@ -20,6 +20,7 @@ import { requirePinnedItemsScope } from '../lib/pinned-items'
 import { exactQueuedDeliverySkipAvailable } from '../lib/chat-references'
 import { useAppStore } from '../store/app-store'
 import { MarkdownContent } from './MarkdownContent'
+import { claudeCompactOutput } from '../lib/claude-compact-output'
 import { MediaGrid } from './MediaGrid'
 import { ChatInboxGroup } from './ChatInboxGroup'
 import { CrossChatPeerLink } from './CrossChatPeerLink'
@@ -99,7 +100,15 @@ function Message({ item, sessionId, profileScope, pinned }: { item: MessageItem;
           <button type="button" title={t('timeline.ui.copyFullMessage')} onClick={() => runTimelineAction(copy())}>{copied ? <Check size={12} /> : <Copy size={12} />}</button>
         </header>
         <div className="message-parts">
-          {events.map(part => <MarkdownContent
+          {events.map(part => {
+            const commandOutput = role === 'assistant' ? claudeCompactOutput(part, item.claudeCompactInput) : null
+            return commandOutput ? <div key={part.id} className="claude-compact-output">
+              <p>{t('timeline.compact.completed')}</p>
+              <details open={!commandOutput.collapsed}>
+                <summary>{t('timeline.compact.output')}</summary>
+                <pre>{commandOutput.text}</pre>
+              </details>
+            </div> : <MarkdownContent
             key={part.id}
             text={messageText(part)}
             files={files}
@@ -107,7 +116,7 @@ function Message({ item, sessionId, profileScope, pinned }: { item: MessageItem;
             inlineChatReferences={role === 'user' ? inlineTimelineChatReferences(part) : []}
             inlineTeamReferences={role === 'user' ? part.team_references ?? [] : []}
             onChatReferenceClick={selectTimelineChatReference}
-          />)}
+          />})}
         </div>
         {chatReferences.length > 0 && <div className="sent-chat-references" aria-label={t('timeline.ui.referencedChats')}>
           {chatReferences.map(reference => {
@@ -1206,8 +1215,7 @@ function timelineWorkspaceScopeCurrent(scope: TimelineWorkspaceScope): boolean {
     && (state.profiles.find(profile => profile.id === state.activeProfileId)?.serverIdentity ?? null) === scope.serverIdentity
     && (
       state.selectedSessionId === scope.sessionId
-      || state.chatPanes.primary === scope.sessionId
-      || state.chatPanes.secondary === scope.sessionId
+      || Object.values(state.chatPanes).includes(scope.sessionId)
     )
 }
 
@@ -1562,8 +1570,7 @@ function CrossChatExchangeView({ item, sessionId, profileScope }: { item: System
   const workspaceRevision = useAppStore(state => {
     const profile = state.profiles.find(candidate => candidate.id === state.activeProfileId)
     const visible = state.selectedSessionId === sessionId
-      || state.chatPanes.primary === sessionId
-      || state.chatPanes.secondary === sessionId
+      || Object.values(state.chatPanes).includes(sessionId)
     return JSON.stringify([
       state.activeProfileId, state.profileGeneration, profile?.serverIdentity ?? null,
       state.connected, state.connectionGeneration, state.health?.server_instance_id ?? null, visible
@@ -1855,8 +1862,7 @@ function CrossChatView({ item, sessionId, profileScope }: { item: SystemItem; se
   const workspaceRevision = useAppStore(state => {
     const profile = state.profiles.find(candidate => candidate.id === state.activeProfileId)
     const visible = state.selectedSessionId === sessionId
-      || state.chatPanes.primary === sessionId
-      || state.chatPanes.secondary === sessionId
+      || Object.values(state.chatPanes).includes(sessionId)
     return JSON.stringify([
       state.activeProfileId, state.profileGeneration, profile?.serverIdentity ?? null,
       state.connected, state.connectionGeneration, state.health?.server_instance_id ?? null, visible

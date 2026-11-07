@@ -12,7 +12,9 @@ Every desktop event has the same small app-owned envelope:
 - the event time; and
 - the Mixpanel project token used to route the event.
 
-Some operations include an event-specific `success` boolean and selected events allow the fixed `backend` enum, as listed below. The runtime sanitizer discards every other property and rejects unknown event names. A successful request is not proof that an agent completed its work or that an update finished installing. Network failures mean the client could not confirm the result, not necessarily that the server made no change.
+Some operations include an event-specific `success` boolean and selected events allow the fixed `backend` enum, as listed below. Only `message_sent` additionally allows `connection_kind`: `default` or `custom_api`. The runtime sanitizer discards every other property and rejects unknown event names. A successful request is not proof that an agent completed its work or that an update finished installing. Network failures mean the client could not confirm the result, not necessarily that the server made no change.
+
+`connection_kind` is a routing dimension, not a sixth Agent family. `custom_api` means an AgentsDock-managed API connection, including official-provider endpoints and Gemini API connections. `default` means the normal provider route; that CLI may independently use an API key, so this is not an OAuth/native-auth metric. Codex uses the submitting session's explicit `codex_provider`; the other four Agents use `provider_connection`. Missing, unknown and legacy values are omitted, not inferred from credentials or counted as default. The snapshot is taken at submission, never from a later selected chat. Historical events without this property remain unknown; do not backfill them as default. Queued/steered events are subsets of `message_sent`, not additional messages to sum with it. Failed submissions and `/model` settings changes do not emit `message_sent`.
 
 Never add message or prompt text, chat/job/agent/folder names, skill or command names, file names or contents, paths or working directories, URLs or access tokens, session/chat/job/route IDs, schedule expressions, exact run times, or destination metadata. The client posts directly with IP collection disabled, omits credentials and referrer data, and does not use SDK autocapture or session replay.
 
@@ -35,12 +37,12 @@ Never add message or prompt text, chat/job/agent/folder names, skill or command 
 | `chat_share_revoked` | Revoking an existing snapshot or interactive share succeeds. | None |
 | `chat_resumed` | A single external provider session is successfully resumed, including resume by session ID. Selecting an already-imported AgentsDock chat does not count. | `backend` |
 | `chats_bulk_imported` | At least one chat succeeds through the multi-select import workflow. A single-session Resume action no longer emits this event. | `success: true` |
-| `message_sent` | A composer message is accepted or queued successfully. | `backend` |
+| `message_sent` | A composer message is accepted or queued successfully. | `backend`, `connection_kind` when explicitly known |
 | `message_queued` | The server accepts a submitted message into its queue, including a message subsequently steered. Companion to, not a replacement for, `message_sent`. | `backend` |
 | `message_steered` | A direct steering submission is accepted or a newly queued submission is successfully promoted by the send-now path. A refused/cancelled promotion does not count. | `backend` |
 | `slash_skill_used` | An accepted message uses a provider inventory item classified as a skill. | None |
 | `slash_command_used` | An accepted message uses a provider inventory item classified as a non-skill command. | None |
-| `builtin_slash_command_used` | A built-in slash-menu action is selected. Measures selection, not successful completion. No command name is sent. | None |
+| `builtin_slash_command_used` | A built-in slash-menu action is selected, or a valid typed `/model` action is requested. Measures selection, not successful completion. No command name is sent. | None |
 | `chat_reference_sent` | An accepted message contains one or more structured `@Chat` route references. This measures use of the reference, not whether the agent later performs a handoff. | None |
 | `team_reference_sent` | An accepted message contains one or more structured Team Network (`@@`) references. | None |
 | `team_network_opened` | The Team Network surface transitions from closed to open. Navigating within an already-open Team Network does not count. | None |

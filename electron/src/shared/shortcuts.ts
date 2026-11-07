@@ -7,6 +7,8 @@ export const APP_SHORTCUTS = {
   findInChat: { label: 'Find in chat', accelerator: 'CmdOrCtrl+F', mac: '⌘F', other: 'Ctrl+F' },
   nextWorkspaceTab: { label: 'Next workspace tab', accelerator: 'Control+Tab', mac: '⌃⇥', other: 'Ctrl+Tab' },
   previousWorkspaceTab: { label: 'Previous workspace tab', accelerator: 'Control+Shift+Tab', mac: '⌃⇧⇥', other: 'Ctrl+Shift+Tab' },
+  nextChatWorkspace: { label: 'Next chat workspace', mac: '⌃⌘→', other: '' },
+  previousChatWorkspace: { label: 'Previous chat workspace', mac: '⌃⌘←', other: '' },
   focusLeftChatPane: { label: 'Focus left chat pane', mac: '⌥⌘←', other: 'Ctrl+Alt+←' },
   focusRightChatPane: { label: 'Focus right chat pane', mac: '⌥⌘→', other: 'Ctrl+Alt+→' },
   nextServer: { label: 'Next server', accelerator: 'CmdOrCtrl+Shift+]', mac: '⇧⌘]', other: 'Ctrl+Shift+]' },
@@ -21,7 +23,8 @@ export const APP_SHORTCUTS = {
   terminalSplitDown: { label: 'Split pane down', mac: '⇧⌘D', other: 'Ctrl+Shift+D' },
   terminalFind: { label: 'Find in terminal', mac: '⌘F', other: 'Ctrl+F' },
   sendMessage: { label: 'Send message', mac: '↩', other: 'Enter' },
-  steerMessage: { label: 'Steer now', mac: '⌘↩', other: 'Ctrl+Enter' }
+  steerMessage: { label: 'Steer now', mac: '⌘↩', other: 'Ctrl+Enter' },
+  stopAgent: { label: 'Stop agent', mac: '⎋', other: 'Esc' }
 } as const
 
 export type AppShortcutId = keyof typeof APP_SHORTCUTS
@@ -29,6 +32,8 @@ export type ShortcutPlatform = 'mac' | 'other'
 export type AppShortcutGroupId = 'general' | 'navigation' | 'terminal' | 'messaging'
 
 const MAC_ONLY_SHORTCUTS = new Set<AppShortcutId>([
+  'nextChatWorkspace',
+  'previousChatWorkspace',
   'terminalNewWindow',
   'terminalSplitRight',
   'terminalSplitDown'
@@ -41,7 +46,7 @@ export const APP_SHORTCUT_GROUPS = [
   },
   {
     id: 'navigation',
-    shortcuts: ['nextWorkspaceTab', 'previousWorkspaceTab', 'focusLeftChatPane', 'focusRightChatPane', 'nextServer', 'previousServer', 'toggleSidebar', 'toggleInspector', 'jumpLatest']
+    shortcuts: ['nextChatWorkspace', 'previousChatWorkspace', 'nextWorkspaceTab', 'previousWorkspaceTab', 'focusLeftChatPane', 'focusRightChatPane', 'nextServer', 'previousServer', 'toggleSidebar', 'toggleInspector', 'jumpLatest']
   },
   {
     id: 'terminal',
@@ -49,7 +54,7 @@ export const APP_SHORTCUT_GROUPS = [
   },
   {
     id: 'messaging',
-    shortcuts: ['sendMessage', 'steerMessage']
+    shortcuts: ['sendMessage', 'steerMessage', 'stopAgent']
   }
 ] as const satisfies ReadonlyArray<{
   id: AppShortcutGroupId

@@ -43,6 +43,42 @@ const CODEX_COORDINATION_OPERATIONS = new Set([
 ])
 const LOG_LIMIT = 80
 
+const liveCodexChildren = new WeakMap<Event[], Map<string, number>>()
+
+/** Only native children with proven ownership can keep an idle chat's Stop alive. */
+export function liveCodexSubagentCount(events: Event[] | undefined, rootThreadId?: string | null): number {
+  if (!events?.length || !rootThreadId) return 0
+  const cached = liveCodexChildren.get(events)
+  if (cached?.has(rootThreadId)) return cached.get(rootThreadId)!
+  const latest = new Map<string, Event>()
+  for (const event of events) {
+    if (event.type !== 'subagent_state' || !event.subagent_id || event.forked === true
+      || event.backend && event.backend !== 'codex' || event.subagent_id === rootThreadId) continue
+    const previous = latest.get(event.subagent_id)
+    if (!previous || event.seq > previous.seq) latest.set(event.subagent_id, event)
+  }
+  const descendants = new Set([rootThreadId])
+  let changed = true
+  while (changed) {
+    changed = false
+    for (const event of latest.values()) {
+      if (event.subagent_root_thread_id && event.subagent_root_thread_id !== rootThreadId) continue
+      if ((event.subagent_root_thread_id === rootThreadId
+        || event.subagent_parent_thread_id && descendants.has(event.subagent_parent_thread_id))
+        && !descendants.has(event.subagent_id!)) {
+        descendants.add(event.subagent_id!)
+        changed = true
+      }
+    }
+  }
+  const count = [...latest.values()].filter(event => descendants.has(event.subagent_id!)
+    && ACTIVE_STATUSES.has(normalizedStatus(event.subagent_status))).length
+  const counts = cached ?? new Map<string, number>()
+  counts.set(rootThreadId, count)
+  liveCodexChildren.set(events, counts)
+  return count
+}
+
 export function subagentsFromEvents(events: Event[], ownerBackend?: 'claude' | 'codex'): SubagentActivity[] {
   const agents = new Map<string, SubagentActivity>()
   const taskKeys = new Map<string, string>()
@@ -144,8 +180,14 @@ export function subagentsFromEvents(events: Event[], ownerBackend?: 'claude' | '
       const existing = agents.get(key) || (existingKey ? agents.get(existingKey) : undefined) || fallback
       // A retired Claude execution cannot become live again from a delayed
       // snapshot. A new owner has its own key, even if a task ID is reused.
-      if (backend === 'claude' && existing && !ACTIVE_STATUSES.has(existing.status)
-        && ACTIVE_STATUSES.has(normalizedStatus(event.subagent_status))) continue
+      // A tool launch receipt alone does not establish the child lifecycle.
+      if (backend === 'claude' && existing
+        && (authoritativeKeys.has(existing.key) || taskKeys.has(taskAlias(backend, childId, runId)))
+        && !ACTIVE_STATUSES.has(existing.status)
+        && ACTIVE_STATUSES.has(normalizedStatus(event.subagent_status))) {
+        taskKeys.set(taskAlias(backend, childId, runId), existing.key)
+        continue
+      }
       const agent = existing ? rekey(existing, key) : ensure(key, {
         id: childId,
         runId,
@@ -260,6 +302,8 @@ export function subagentsFromEvents(events: Event[], ownerBackend?: 'claude' | '
           startedAt: event.ts,
           updatedAt: event.ts
         })
+        taskKeys.set(taskAlias('claude', taskId, runId), key)
+        if (rawToolId) toolKeys.set(toolAlias('claude', runId, rawToolId), key)
         if (!ACTIVE_STATUSES.has(agent.status)) continue
         agent.id = taskId
         if (task) {
@@ -268,8 +312,6 @@ export function subagentsFromEvents(events: Event[], ownerBackend?: 'claude' | '
         }
         agent.kind = String(raw.subagent_type || agent.kind || 'agent')
         agent.status = 'running'
-        taskKeys.set(taskAlias('claude', taskId, runId), key)
-        if (rawToolId) toolKeys.set(toolAlias('claude', runId, rawToolId), key)
         note(agent, event.ts, raw.description || t('timeline.subagent.started'))
       } else if (raw.type === 'system' && subtype === 'task_progress' && taskId) {
         const agent = agents.get(taskKeys.get(taskAlias('claude', taskId, runId)) || '')
@@ -330,7 +372,7 @@ export function subagentLogText(agent: SubagentActivity): string {
     agent.nickname && agent.nickname !== subagentDisplayName(agent) ? agent.nickname : '',
     agent.path && agent.path !== subagentDisplayName(agent) ? t('timeline.subagent.path', { path: agent.path }) : '',
     task && task !== agent.name && task !== agent.path ? t('timeline.subagent.task', { task }) : '',
-    `${agent.backend} · ${agent.kind || 'subagent'} · ${subagentStatusLabel(agent.status)}`,
+    `${agent.backend} · ${agent.kind || t('subagents.singular')} · ${subagentStatusLabel(agent.status)}`,
     agent.providerRef ? `Provider: ${agent.providerRef}` : ''
   ].filter(Boolean)
   return [...header, '', ...agent.log.map(entry => `${formatLogTime(entry.ts)}  ${entry.text}`)].join('\n')
@@ -346,7 +388,7 @@ export function subagentDisplayName(agent: SubagentActivity): string {
     if (leaf && leaf !== agent.id) return readableSubagentTask(leaf)
   }
   if (agent.nickname) return agent.nickname
-  return cleanIdentityText(agent.name) || (agent.backend === 'claude' ? 'Claude subagent' : 'Codex subagent')
+  return cleanIdentityText(agent.name) || t('subagents.providerName', { provider: agent.backend === 'claude' ? 'Claude' : 'Codex' })
 }
 
 function subagentTaskLabel(agent: SubagentActivity): string {
@@ -371,7 +413,7 @@ export function subagentDetailText(agent: SubagentActivity): string {
   const task = subagentTaskLabel(agent)
   if (task && task !== displayName) return task
   const activity = cleanIdentityText(agent.latestActivity)
-  return activity || agent.kind || 'subagent'
+  return activity || agent.kind || t('subagents.singular')
 }
 
 function parseRawEvent(value?: string | null): Record<string, unknown> {

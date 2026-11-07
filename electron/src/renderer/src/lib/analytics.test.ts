@@ -68,6 +68,19 @@ describe('analytics privacy configuration', () => {
     expect(new Set(documented).size).toBe(documented.length)
   })
 
+  it('allows only coarse connection kinds on message_sent, never arbitrary API metadata', async () => {
+    const request = vi.fn().mockResolvedValue({ ok: true })
+    vi.stubGlobal('fetch', request)
+    const analytics = await loadAnalytics()
+    for (const connection_kind of ['default', 'custom_api', 'private-host', '', null]) {
+      analytics.trackEvent('message_sent', { backend:'claude', connection_kind, model:'private-model', api_key:'private-key', endpoint:'private-host' } as never)
+    }
+    analytics.trackEvent('chat_created', { connection_kind:'custom_api' })
+    const props = request.mock.calls.map(([, init]) => JSON.parse(init.body)[0].properties)
+    expect(props.map(p => p.connection_kind)).toEqual(['default', 'custom_api', undefined, undefined, undefined, undefined])
+    expect(JSON.stringify(props)).not.toMatch(/private-|api_key|endpoint/)
+  })
+
   it('treats a CI smoke-test launch (analyticsDisabled) as opted out, without touching storage', async () => {
     const request = vi.fn().mockResolvedValue({ ok: true })
     vi.stubGlobal('fetch', request)

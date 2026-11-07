@@ -21,6 +21,8 @@ import type {
   ClaudeMcpControlInput,
   ClaudeMcpSnapshot,
   ClaudeRuntimeSnapshot,
+  GeminiRuntimeSnapshot,
+  ProviderPendingInteraction,
   ChatReference,
   TeamReference,
   CreateJobInput,
@@ -135,6 +137,13 @@ export class AgentServerClientUnvalidatedError extends Error {
   constructor() {
     super('Agent server client has not passed server identity validation')
     this.name = 'AgentServerClientUnvalidatedError'
+  }
+}
+
+export class AgentServerTurnAcceptedError extends Error {
+  constructor(cause: unknown) {
+    super('The server accepted this message, but its response could not be reconciled. Refresh the chat before sending it again.', { cause })
+    this.name = 'AgentServerTurnAcceptedError'
   }
 }
 
@@ -349,6 +358,8 @@ export class AgentServerClient {
       codex_approvals_reviewer: input.codex_approvals_reviewer ?? null,
       claude_permission_mode: input.claude_permission_mode ?? null,
       cursor_permission_mode: input.cursor_permission_mode ?? null,
+      opencode_permission_mode: input.opencode_permission_mode ?? null,
+      gemini_permission_mode: input.gemini_permission_mode ?? null,
       provider_jobs_access: input.provider_jobs_access ?? null,
       provider_session_id: input.providerId || null,
       import_history: Boolean(input.providerId),
@@ -487,7 +498,7 @@ export class AgentServerClient {
     return (await this.get<{ results?: TimelineSearchResult[] }>(`/api/search?${params}`)).results ?? []
   }
 
-  sendTurn(
+  async sendTurn(
     sessionId: string,
     prompt: string,
     fileIds: string[],
@@ -508,7 +519,21 @@ export class AgentServerClient {
     if (clientCapabilities.length) body.client_capabilities = [...clientCapabilities]
     if (chatReferences.length) body.chat_references = chatReferences.map(reference => ({ ...reference }))
     if (teamReferences.length) body.team_references = teamReferences.map(reference => ({ ...reference }))
-    return this.post(`/api/sessions/${encodeURIComponent(sessionId)}/turns`, body)
+    let accepted = false
+    try {
+      const response = await this.request<{ session: Session; event?: Event; queued?: boolean; queued_id?: string; position?: number }>(
+        `/api/sessions/${encodeURIComponent(sessionId)}/turns`,
+        { method: 'POST', body: JSON.stringify(body) },
+        30_000, false, 'standard', () => { accepted = true },
+      )
+      if (!response?.session || response.session.id !== sessionId) throw new Error('Invalid turn response')
+      return response
+    } catch (error) {
+      // A received HTTP success is not an unsent draft, even if body reading,
+      // decoding or scope validation subsequently fails. Never replay it.
+      if (accepted) throw new AgentServerTurnAcceptedError(error)
+      throw error
+    }
   }
   async stopTurn(sessionId: string): Promise<TurnStopResult> {
     const response = await this.post<Partial<TurnStopResult>>(`/api/sessions/${encodeURIComponent(sessionId)}/stop`, {})
@@ -537,6 +562,17 @@ export class AgentServerClient {
 
   claudeRuntime(sessionId: string): Promise<ClaudeRuntimeSnapshot> {
     return this.get(`/api/sessions/${encodeURIComponent(sessionId)}/claude/runtime`)
+  }
+
+  geminiRuntime(sessionId: string): Promise<GeminiRuntimeSnapshot> {
+    return this.request(`/api/sessions/${encodeURIComponent(sessionId)}/gemini/runtime`, {}, 30_000, false, 'native-control')
+  }
+
+  async resolveGeminiInteraction(sessionId: string, interactionId: string, response: Record<string, JsonValue>): Promise<ProviderPendingInteraction> {
+    return (await this.request<{ interaction: ProviderPendingInteraction }>(
+      `/api/sessions/${encodeURIComponent(sessionId)}/gemini/interactions/${encodeURIComponent(interactionId)}/resolve`,
+      { method: 'POST', body: JSON.stringify({ response }) }, 30_000, false, 'native-control',
+    )).interaction
   }
 
   claudeMcp(sessionId: string): Promise<ClaudeMcpSnapshot> {
@@ -649,7 +685,7 @@ export class AgentServerClient {
     )).handoff
   }
   agentHandoffRoutes(sessionId: string): Promise<AgentCrossChatRoutesSnapshot> {
-    return this.get(`/api/sessions/${encodeURIComponent(sessionId)}/agent-handoff-routes`)
+    return this.get(`/api/sessions/${encodeURIComponent(sessionId)}/agent-handoff-routes?unlimited_routes=true`)
   }
   deleteAgentHandoffRoute(sessionId: string, routeId: string, expectedRevision: string): Promise<DeleteAgentCrossChatRouteResponse> {
     if (!expectedRevision.trim()) throw new Error('Refresh this grant before revoking it.')
@@ -1010,6 +1046,7 @@ export class AgentServerClient {
     timeoutMs = 30_000,
     allowUnvalidated = false,
     authentication: 'standard' | 'team-network' | 'native-control' = 'standard',
+    onAccepted?: () => void,
   ): Promise<T> {
     const scope = this.captureScope(allowUnvalidated)
     const headers = new Headers(init.headers)
@@ -1019,6 +1056,9 @@ export class AgentServerClient {
     for (const [key, value] of Object.entries(credentials)) headers.set(key, value)
     if (init.body && !(init.body instanceof FormData)) headers.set('Content-Type', 'application/json')
     return this.fetchWithTimeout(buildURL(scope.configuration.baseURL, path), { ...init, headers }, timeoutMs, scope.signal, async (response, signal) => {
+      // consume runs only while this request is live; late canceled responses
+      // must not change its outcome.
+      if (response.ok) onAccepted?.()
       if (!response.ok) {
         const error = await this.serverError(response)
         this.assertScopeActive(scope)

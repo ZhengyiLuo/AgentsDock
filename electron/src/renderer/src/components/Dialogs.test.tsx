@@ -3,6 +3,7 @@ import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { AgentsDockAPI } from '@shared/ipc'
 import { setLocale, t } from '@shared/i18n'
+import { APP_SHORTCUTS } from '@shared/shortcuts'
 import type { AppUpdateStatus, AppUpdateTrack, ChatReference, CrossChatHandoffsCapability, Health, ProfileBootstrapPayload, PublicServerProfile, RuntimeCatalog, Session, TeamReference, TimelineSearchResult } from '@shared/types'
 import { clearSessionHistorySearchCache } from '../lib/session-history-search'
 import { useAppStore } from '../store/app-store'
@@ -173,6 +174,12 @@ describe('AppSettingsDialog', () => {
     expect(within(dialog).queryByText('Chat font')).not.toBeInTheDocument()
     expect(within(dialog).queryByRole('button', { name: 'Appearance' })).not.toBeInTheDocument()
     expect(within(dialog).getByRole('combobox', { name: 'App theme' })).toHaveValue('system')
+    expect(within(dialog).queryByRole('switch')).not.toBeInTheDocument()
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Preferences' }))
+    expect(within(dialog).getByRole('heading', { name: 'Preferences' })).toBeInTheDocument()
+    expect(within(dialog).getAllByRole('switch')).toHaveLength(4)
+    expect(within(dialog).queryByRole('combobox', { name: 'App theme' })).not.toBeInTheDocument()
+    fireEvent.click(within(dialog).getByRole('button', { name: 'General' }))
     expect(within(dialog).queryByText('Set the color theme used throughout AgentsDock.')).not.toBeInTheDocument()
     // The usage analytics opt-out was removed from Settings on purpose; keep it out.
     expect(within(dialog).queryByRole('switch', { name: 'Share usage analytics' })).not.toBeInTheDocument()
@@ -186,8 +193,10 @@ describe('AppSettingsDialog', () => {
     fireEvent.click(within(dialog).getByRole('button', { name: 'Keyboard shortcuts' }))
     expect(within(dialog).getByRole('button', { name: 'Keyboard shortcuts' })).toHaveAttribute('aria-current', 'page')
     expect(within(dialog).getByRole('heading', { name: 'Keyboard shortcuts' })).toBeInTheDocument()
-    expect(within(dialog).getAllByRole('listitem')).toHaveLength(23)
+    expect(within(dialog).getAllByRole('listitem')).toHaveLength(Object.keys(APP_SHORTCUTS).length)
     expect(within(dialog).getByText('Toggle chat list')).toBeInTheDocument()
+    expect(within(dialog).getByText('Next chat workspace')).toBeInTheDocument()
+    expect(within(dialog).getByText('Previous chat workspace')).toBeInTheDocument()
 
     act(() => window.dispatchEvent(new CustomEvent('agentsdock:app-settings-section', { detail: 'appearance' })))
     expect(within(dialog).getByRole('button', { name: 'General' })).toHaveAttribute('aria-current', 'page')

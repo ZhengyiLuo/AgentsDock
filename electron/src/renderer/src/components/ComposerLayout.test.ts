@@ -36,38 +36,22 @@ describe('composer queue layout', () => {
 
   it('keeps the Stop/send rail fixed while narrow panes discard secondary labels first', () => {
     expect(composer).toMatch(/<div className="composer-secondary-controls">[\s\S]*<div className="composer-actions">/)
-    expect(composer).toMatch(/className="stop-button"[\s\S]*aria-label=\{stopping \? t\("ui\.Composer\.Composer\.stopping_[a-z0-9]+"\) : t\("ui\.Composer\.Composer\.stop_[a-z0-9]+"\)\}/)
+    expect(composer).toMatch(/className="stop-button"[\s\S]*aria-label=\{stopping \? t\("ui\.Composer\.Composer\.stopping_[a-z0-9]+"\) : stopLabel\}/)
+    expect(composer).toMatch(/const stopLabel = !running && liveCodexChildren > 0 \? t\('subagents\.stop'\) : t\('ui\.Composer\.Composer\.stop_[a-z0-9]+'\)/)
     expect(styles).toMatch(/\.composer-actions \{[^}]*flex: none;[^}]*display: flex;[^}]*margin-left: auto;/s)
     expect(styles).toMatch(/@container composer \(max-width: 360px\) \{[^}]*\.composer-secondary-controls > :not\(\.composer-add-button\) \{ display: none; \}/s)
     expect(styles).toMatch(/@container composer \(max-width: 160px\) \{[^}]*\.composer-secondary-controls \{ display: none; \}[^}]*\.steering-pending \{[^}]*position: absolute;[^}]*clip-path: inset\(50%\);/s)
   })
 
-  it('reserves an invariant bottom control rail and bounds expandable content in short or stacked panes', () => {
-    expect(app).toMatch(/<div className="chat-workspace-history">\s*<Timeline[^>]*\/>\s*<\/div>\s*<div className="chat-workspace-shelves">/)
+  it('reserves separate auxiliary, draft and action tracks in short or stacked panes', () => {
+    expect(app).toContain('<ChatWorkspaceGrid')
+    expect(readFileSync(resolve(process.cwd(), 'src/renderer/src/components/ChatWorkspaceGrid.tsx'), 'utf8')).toContain('<ChatPane')
     expect(pane).toMatch(/<div className="chat-workspace-history">\s*<Timeline[^>]*\/>\s*<\/div>\s*<div className="chat-workspace-shelves">/)
     expect(styles).toMatch(/\.chat-workspace \{[^}]*grid-template-rows: minmax\(0, 1fr\) auto auto auto;[^}]*overflow: hidden;/s)
     expect(styles).toMatch(/\.chat-workspace-shelves \{[^}]*max-height: min\(44vh, 460px\);[^}]*overflow-y: auto;/s)
     expect(readFileSync(resolve(process.cwd(), 'src/renderer/src/components/GoalDialog.css'), 'utf8')).toMatch(/\.goal-summary-bar \{[^}]*margin: 0 auto var\(--space-3\);/s)
-    expect(styles).toMatch(/\.chat-split-view\.stacked \.composer,\s*\.chat-split-view\.short \.composer \{[^}]*max-height: 75px;[^}]*grid-template-rows: minmax\(0, 1fr\) auto;[^}]*margin-bottom: 3px;/s)
+    expect(styles).toMatch(/\.chat-split-view\.stacked \.composer,\s*\.chat-split-view\.short \.composer \{[^}]*max-height: clamp\(90px, 65cqh, 240px\);[^}]*grid-template-rows: minmax\(auto, 1fr\) minmax\(32px, auto\) auto;[^}]*margin-bottom: 3px;/s)
     expect(styles).toMatch(/\.chat-split-view\.stacked \.emergency-timeline-dock,\s*\.chat-split-view\.short \.emergency-timeline-dock \{[^}]*height: 40px;[^}]*margin-bottom: 1px;[^}]*overflow: hidden;/s)
-  })
-
-  it.each([
-    ['stacked primary at 28%', 0, 168],
-    ['stacked secondary at 72%', 441, 159],
-    ['terminal-open horizontal pane', 0, 280]
-  ])('keeps Emergency and Stop inside the %s pane', (_label, top, height) => {
-    // These dimensions are the actual compact CSS track contract:
-    // 36px header + 40px Emergency + 1px gap + 75px composer + 3px gap.
-    const paneBottom = top + height
-    const composer = { top: paneBottom - 3 - 75, bottom: paneBottom - 3 }
-    const emergency = { top: composer.top - 1 - 40, bottom: composer.top - 1 }
-    const workspaceTop = top + 36
-
-    expect(emergency.top).toBeGreaterThanOrEqual(workspaceTop)
-    expect(emergency.bottom).toBeLessThanOrEqual(paneBottom)
-    expect(composer.top).toBeGreaterThanOrEqual(workspaceTop)
-    expect(composer.bottom).toBeLessThanOrEqual(paneBottom)
   })
 
   it('fits compact Emergency and Stop/send actions inside the 520x280 terminal-open worst-case pane', () => {

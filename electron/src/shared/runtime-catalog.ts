@@ -19,11 +19,24 @@ export function customProviderAvailable(health: Health | null | undefined, catal
   return health?.capabilities?.provider_connections_v1?.per_chat === true && ['claude', 'opencode', 'cursor', 'gemini'].includes(backend) && custom?.configured === true && custom.available === true
 }
 
+/** Credential discovery is a retry/selection hint, not proof of a valid login. */
 export function nativeProviderConnected(health: Health | null | undefined, catalog: RuntimeCatalog | null | undefined, backend: Backend): boolean {
   // Gemini CLI remains the runtime, but AgentsDock exposes API credentials only.
   // Also hide cached native-login availability from older preview servers.
   if (backend === 'gemini') return false
   return catalog?.backends?.[backend]?.native_credentials_present ?? runtimeDiagnosticFor(health, catalog, backend)?.authenticated === true
+}
+
+export type NativeProviderSignInStatus = 'signed-in' | 'unverified' | 'signed-out'
+
+/** My Agents must not let a leftover credential file override a failed login. */
+export function nativeProviderSignInStatus(health: Health | null | undefined, catalog: RuntimeCatalog | null | undefined, backend: Backend): NativeProviderSignInStatus {
+  if (backend === 'gemini') return 'signed-out'
+  const diagnostic = runtimeDiagnosticFor(health, catalog, backend)
+  if (diagnostic?.installed === false || diagnostic?.status === 'missing'
+    || diagnostic?.authenticated === false || diagnostic?.status === 'unauthenticated') return 'signed-out'
+  if (diagnostic?.authenticated === true) return 'signed-in'
+  return nativeProviderConnected(health, catalog, backend) ? 'unverified' : 'signed-out'
 }
 
 export function codexCustomProviderSupported(health: Health | null | undefined): boolean {

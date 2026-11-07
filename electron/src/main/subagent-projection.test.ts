@@ -14,6 +14,39 @@ const rawEvent = (seq: number, raw: object): Event => ({
 })
 
 describe('SubagentEventProjector', () => {
+  it.each(['raw', 'structured'])('keeps a retired tool alias inactive when a late %s task identity arrives', source => {
+    const projector = new SubagentEventProjector()
+    const lost: Event = { ...rawEvent(7, {}), type: 'subagent_state', raw: undefined,
+      subagent_id: 'tool-1', subagent_tool_id: 'tool-1', subagent_status: 'tracking_lost' }
+    projector.project(lost, 'snapshot')
+    const delayed = source === 'raw'
+      ? rawEvent(8, { type: 'system', subtype: 'task_started', task_id: 'real-task',
+        tool_use_id: 'tool-1', task_type: 'local_agent' })
+      : { ...lost, seq: 8, id: 'subagent:chat-1:run-1:real-task', subagent_id: 'real-task', subagent_status: 'running' }
+    expect(projector.project(delayed)).toBeNull()
+    expect(projector.project(rawEvent(9, { type: 'system', subtype: 'task_progress', task_id: 'real-task' }))).toBeNull()
+    expect(projector.project(rawEvent(10, { type: 'system', subtype: 'task_notification',
+      task_id: 'real-task', status: 'completed' }))).toMatchObject({ subagent_status: 'completed' })
+    expect(projector.project({ ...delayed, seq: 11, run_id: 'new-owner' })).toMatchObject({ subagent_status: 'running' })
+  })
+
+  it('accepts an authoritative older inactive snapshot without regressing live snapshots', () => {
+    const projector = new SubagentEventProjector()
+    const state = (seq: number, status: string): Event => ({
+      ...rawEvent(seq, {}), type: 'subagent_state', raw: undefined,
+      subagent_id: 'task-1', subagent_tool_id: 'tool-1', subagent_status: status
+    })
+    projector.project(state(9, 'running'))
+    expect(projector.project(state(7, 'running'), 'snapshot')).toBeNull()
+    expect(projector.project(state(7, 'tracking_lost'))).toBeNull()
+    expect(projector.project(state(7, 'tracking_lost'), 'snapshot')).toMatchObject({
+      seq: 7, subagent_status: 'tracking_lost'
+    })
+    expect(projector.project(state(10, 'running'), 'snapshot')).toBeNull()
+    expect(projector.project(state(10, 'running'))).toBeNull()
+    expect(projector.project(state(11, 'completed'))).toMatchObject({ subagent_status: 'completed' })
+  })
+
   it('honors exact-owner structured tracking loss without resurrecting late progress', () => {
     const projector = new SubagentEventProjector()
     const started = { type: 'system', subtype: 'task_started', task_id: 'task-1', tool_use_id: 'tool-1', task_type: 'local_agent' }

@@ -10,7 +10,8 @@ test('Fork exposes and enforces the active-turn and pending-message restrictions
   assert.match(inspector, /state\.stoppingSessionIds\.has\(sessionId\)/)
   assert.match(inspector, /Boolean\(state\.turnAdmissionTokens\[sessionId\]\) \|\| state\.sendingSessionIds\.has\(sessionId\)/)
   assert.match(inspector, /state\.snapshots\[sessionId\]\?\.queuedTurns\.some\(turn => state\.pendingQueuedRunIds\.has\(turn\.queued_id\)\)/)
-  assert.match(inspector, /const forkDisabled = !connected \|\| running \|\| stopping \|\| admitting/)
+  assert.match(inspector, /const forkSupported = session\?\.backend !== 'gemini' \|\| health\?\.capabilities\?\.gemini_backend\?\.features\?\.fork === true/)
+  assert.match(inspector, /const forkDisabled = !forkSupported \|\| !connected \|\| running \|\| stopping \|\| admitting/)
   assert.doesNotMatch(inspector, /state\.queuedRunStatus\[sessionId\]/, 'Historical queue notices must not lock Fork')
   assert.match(inspector, /testID="inspector-fork-chat" disabled=\{forkDisabled\}/)
   assert.match(inspector, /if \(!forkDisabled && scopeIsCurrent\(\)\) void fork\(sessionId, profileGeneration\)/)
@@ -20,7 +21,7 @@ test('Fork exposes and enforces the active-turn and pending-message restrictions
 })
 
 test('Copy session uses the full provider identifier and reports clipboard success or failure', () => {
-  for (const field of ['session_id', 'codex_thread_id', 'claude_session_id', 'cursor_session_id']) {
+  for (const field of ['session_id', 'codex_thread_id', 'claude_session_id', 'cursor_session_id', 'opencode_session_id', 'gemini_session_id']) {
     assert.match(inspector, new RegExp(`${field}: value\\.${field}`))
     assert.match(inspector, new RegExp(`session\\?\\.${field}\\?\\.trim\\(\\)`))
   }

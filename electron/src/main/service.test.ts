@@ -80,6 +80,7 @@ vi.mock('electron', () => ({
 }))
 
 import { LocalCache, TIMELINE_PAGING_SCHEMA_VERSION } from './persistence'
+import { clearStorageError, localStorageWasFull } from './storage-health'
 import {
   ServerError,
   TeamHubBootstrapTransportError,
@@ -115,6 +116,70 @@ describe('durable send request identity', () => {
     expect(identities[0]).toMatch(/^[a-f0-9-]{36}$/)
     expect(identities[1]).toBe(identities[0])
     expect(identities[2]).not.toBe(identities[0])
+  })
+})
+
+describe('send validation during background reconnect', () => {
+  it('marks failed HTTP sending as retrying while keeping a live receive stream and its running events', async () => {
+    const failure = new TypeError('fetch failed')
+    const client = Object.assign(fakeClient(), { sendTurn: vi.fn().mockRejectedValue(failure) })
+    const { service } = createProfileService({ 'http://a.test:7850': [client] })
+    const connection = vi.fn(), stop = vi.fn()
+    Object.assign(service, { validatedGeneration: 1, emitConnection: connection,
+      timelineSubscriptions: new Map([['chat', { connected: true, stop }]]) })
+    await expect(service.sendTurn({ sessionId: 'chat', prompt: 'hello', fileIds: [] })).rejects.toBe(failure)
+    expect(connection).toHaveBeenCalledWith(expect.anything(), true, undefined, 'fetch failed')
+    expect((service as unknown as { validatedGeneration: number | null }).validatedGeneration).toBeNull()
+    expect((await service.bootstrap()).profiles.find(p => p.id === 'a')?.connectionState).toBe('retrying')
+    expect(stop).not.toHaveBeenCalled()
+    expect(client.sendTurn).toHaveBeenCalledOnce()
+  })
+
+  it.each([
+    new TypeError('fetch failed'),
+    new ServerError(401, 'Invalid server token'),
+    new ServerError(503, 'Service temporarily unavailable')
+  ])('preserves the real failure when a send joins background health: %s', async failure => {
+    const health = deferred<Health>()
+    const client = Object.assign(fakeClient({ health: () => health.promise }), { sendTurn: vi.fn() })
+    const { service } = createProfileService({ 'http://a.test:7850': [client] })
+    const internals = service as unknown as { scope: unknown; refreshAll(announce: boolean, jobs: boolean, scope: unknown): Promise<void> }
+    const background = internals.refreshAll(false, false, internals.scope)
+    const sent = service.sendTurn({ sessionId: 'chat', prompt: 'hello', fileIds: [] })
+    const rejected = expect(sent).rejects.toBe(failure)
+    health.reject(failure)
+    await background
+    await rejected
+    expect(client.health).toHaveBeenCalledOnce()
+    expect(client.sendTurn).not.toHaveBeenCalled()
+  })
+
+  it('preserves identity mismatch on a shared refresh and never dispatches to the replacement server', async () => {
+    const health = deferred<Health>()
+    const client = Object.assign(fakeClient({ health: () => health.promise }), { sendTurn: vi.fn() })
+    const { service, settings } = createProfileService({ 'http://a.test:7850': [client] })
+    settings.setProfileServerIdentity('a', 'trusted')
+    const internals = service as unknown as { scope: unknown; refreshAll(announce: boolean, jobs: boolean, scope: unknown): Promise<void> }
+    const background = internals.refreshAll(false, false, internals.scope)
+    const rejected = expect(service.sendTurn({ sessionId: 'chat', prompt: 'hello', fileIds: [] })).rejects.toThrow('Server identity changed')
+    health.resolve({ ok: true, server_identity: 'unexpected' })
+    await background
+    await rejected
+    expect(client.sendTurn).not.toHaveBeenCalled()
+  })
+
+  it('allows an explicit retry on a compatible older server after a transport failure, without automatic submission', async () => {
+    const client = Object.assign(fakeClient({ health: async () => ({ ok: true, server_version: '0.1.25' }) }), {
+      sendTurn: vi.fn().mockResolvedValue({ session: { id: 'chat', title: 'Chat', backend: 'codex' } })
+    })
+    const { service } = createProfileService({ 'http://a.test:7850': [client] })
+    client.health.mockRejectedValueOnce(new TypeError('fetch failed'))
+    const input = { sessionId: 'chat', prompt: 'hello', fileIds: [] }
+    await expect(service.sendTurn(input)).rejects.toThrow('fetch failed')
+    expect(client.sendTurn).not.toHaveBeenCalled()
+    await expect(service.sendTurn(input)).resolves.toMatchObject({ session: { id: 'chat' } })
+    expect(client.sendTurn).toHaveBeenCalledOnce()
+    expect(client.health).toHaveBeenCalledTimes(2)
   })
 })
 
@@ -477,6 +542,51 @@ describe('session summary merging', () => {
       emergency_alert: null,
       unacknowledged_emergency_count: 0
     })])
+  })
+
+  it.each([0, 3])('clears a cached non-job cursor of %s after a server downgrade and accepts recovery', latestNonJob => {
+    const existing: Session = {
+      id: 'chat', title: 'Chat', backend: 'codex', latest_agent_event_seq: 8,
+      latest_non_job_agent_event_seq: latestNonJob, last_read_agent_event_seq: 4
+    }
+    const oldServer: Session = {
+      id: 'chat', title: 'Chat', backend: 'codex', latest_agent_event_seq: 8
+    }
+    const downgraded = mergeSessionSummaries([existing], [oldServer])
+    expect(downgraded[0].latest_non_job_agent_event_seq).toBeNull()
+
+    const advanced = mergeSessionSummaries(downgraded, [{ ...oldServer, latest_agent_event_seq: 9 }])
+    expect(advanced[0]).toMatchObject({ latest_agent_event_seq: 9, latest_non_job_agent_event_seq: null })
+
+    const recovered = mergeSessionSummaries(advanced, [{
+      ...oldServer, latest_agent_event_seq: 10, latest_non_job_agent_event_seq: 10
+    }])
+    expect(recovered[0]).toMatchObject({ latest_non_job_agent_event_seq: 10, last_read_agent_event_seq: 4 })
+    expect(existing.latest_non_job_agent_event_seq).toBe(latestNonJob)
+  })
+
+  it('retains the non-job cursor for partial metadata while honoring an explicit unknown cursor', () => {
+    const existing: Session = {
+      id: 'chat', title: 'Chat', backend: 'codex', latest_agent_event_seq: 8,
+      latest_non_job_agent_event_seq: 3
+    }
+    const partial: Session = { id: 'chat', title: 'Renamed', backend: 'codex' }
+    const renamed = mergeSessionSummaries([existing], [partial])
+    expect(renamed[0]).toMatchObject({ title: 'Renamed', latest_agent_event_seq: 8, latest_non_job_agent_event_seq: 3 })
+
+    expect(mergeSessionSummaries(renamed, [{
+      ...partial, latest_non_job_agent_event_seq: null
+    }])[0].latest_non_job_agent_event_seq).toBeNull()
+  })
+
+  it('normalizes an unknown non-job cursor in canonical polling even without an agent cursor', () => {
+    const summary: Session = { id: 'chat', title: 'Chat', backend: 'codex' }
+    const previous: Session[] = [{ ...summary, latest_non_job_agent_event_seq: 0 }]
+    expect(mergePolledSessionSummaries(previous, [summary])[0].latest_non_job_agent_event_seq).toBeNull()
+    expect(mergePolledSessionSummaries([], [summary])[0].latest_non_job_agent_event_seq).toBeNull()
+    expect(mergePolledSessionSummaries(previous, [{
+      ...summary, latest_non_job_agent_event_seq: 0
+    }])[0].latest_non_job_agent_event_seq).toBe(0)
   })
 })
 
@@ -986,6 +1096,24 @@ describe('inspector visibility preference', () => {
 
     cache.putPreference('profile:a', 'inspectorVisible', true)
     await expect(service.bootstrap()).resolves.toEqual(expect.objectContaining({ inspectorVisible: true }))
+  })
+})
+
+describe('sidebar grouping preferences', () => {
+  it('uses the requested defaults and restores independent choices for each server', async () => {
+    const { service, cache } = createProfileService({
+      'http://a.test:7850': [fakeClient(), fakeClient()],
+      'http://b.test:7850': [fakeClient()]
+    })
+    const defaults = { groupUnreadChats: true, includeCronInUnread: false, groupRunningChats: true, sidebarSortMode: 'default' }
+    const saved = { groupUnreadChats: false, includeCronInUnread: true, groupRunningChats: false, sidebarSortMode: 'name' }
+    expect(await service.bootstrap()).toMatchObject(defaults)
+    for (const [key, value] of Object.entries(saved)) cache.putPreference('profile:a', key, value)
+    expect(await service.bootstrap()).toMatchObject(saved)
+    await service.switchServer('b')
+    expect(await service.bootstrap()).toMatchObject(defaults)
+    await service.switchServer('a')
+    expect(await service.bootstrap()).toMatchObject(saved)
   })
 })
 
@@ -2918,7 +3046,7 @@ describe('emergency contact service fencing', () => {
     onSessions([active], true)
     onSessions([active], true)
 
-    expect(cache.session('server-b', 'remote-urgent')).toEqual(active)
+    expect(cache.session('server-b', 'remote-urgent')).toEqual({ ...active, latest_non_job_agent_event_seq: null })
     expect(cache.session('server-b', 'quiet')).toEqual({
       id: 'quiet', title: 'Quiet cached chat', backend: 'codex'
     })
@@ -2941,6 +3069,62 @@ describe('emergency contact service fencing', () => {
 
     onSessions([], false, 'remote-urgent')
     expect(cache.session('server-b', 'remote-urgent')).toBeNull()
+  })
+})
+
+describe('code intelligence workspace scope fencing', () => {
+  const expected = { profileId: 'profile', profileGeneration: 4, serverIdentity: 'server-a' }
+  const operations = [
+    ['status', 'workspaceIntelligenceStatus'],
+    ['files', 'workspaceSearch'],
+    ['read', 'workspaceFile'],
+    ['socket', 'workspaceIntelligenceSocket']
+  ] as const
+
+  function fixture() {
+    const client = Object.fromEntries(operations.map(([, method]) => [method, vi.fn().mockResolvedValue({})]))
+    const scope = { profileId: expected.profileId, generation: expected.profileGeneration, client }
+    const service = Object.create(AppService.prototype) as AppService
+    const ensureValidatedScope = vi.fn().mockResolvedValue(undefined)
+    Object.assign(service, { scope, activeProfileId: expected.profileId, profileGeneration: expected.profileGeneration,
+      settings: { getProfile: () => ({ serverIdentity: expected.serverIdentity }) }, ensureValidatedScope })
+    const invoke = (kind: typeof operations[number][0], requested = expected) => kind === 'status'
+      ? service.workspaceIntelligenceStatus(requested, 'chat-a') : kind === 'files'
+        ? service.workspaceIntelligenceFiles(requested, 'chat-a', 'src', 40) : kind === 'read'
+          ? service.workspaceIntelligenceRead(requested, 'chat-a', 'src/main.py')
+          : service.workspaceIntelligenceSocket(requested, 'chat-a', 'python')
+    return { service, client, ensureValidatedScope, invoke }
+  }
+
+  it.each(operations)('rejects a stale %s scope before validation or transport', async (kind, method) => {
+    const f = fixture()
+    await expect(f.invoke(kind, { ...expected, profileGeneration: 3 })).rejects.toThrow()
+    await expect(f.invoke(kind, { ...expected, serverIdentity: 'different-server' })).rejects.toThrow()
+    expect(f.ensureValidatedScope).not.toHaveBeenCalled()
+    expect(f.client[method]).not.toHaveBeenCalled()
+  })
+
+  it.each(operations)('does not start %s if the profile changes while identity validation is pending', async (kind, method) => {
+    const f = fixture()
+    let finish!: () => void
+    f.ensureValidatedScope.mockReturnValue(new Promise<void>(resolve => { finish = resolve }))
+    const pending = f.invoke(kind)
+    Object.assign(f.service, { activeProfileId: 'new-profile', profileGeneration: 5 })
+    finish()
+    await expect(pending).rejects.toThrow()
+    expect(f.client[method]).not.toHaveBeenCalled()
+  })
+
+  it.each(operations.slice(0, 3))('rejects the old %s response after a profile switch', async (kind, method) => {
+    const f = fixture()
+    let finish!: (value: unknown) => void
+    f.client[method].mockReturnValue(new Promise(resolve => { finish = resolve }))
+    const pending = f.invoke(kind)
+    await Promise.resolve()
+    expect(f.client[method]).toHaveBeenCalledOnce()
+    Object.assign(f.service, { activeProfileId: 'new-profile', profileGeneration: 5 })
+    finish({ from: 'previous server' })
+    await expect(pending).rejects.toThrow()
   })
 })
 
@@ -3285,7 +3469,7 @@ describe('queued cross-chat capability forwarding', () => {
 
     await expect(service.updateQueued('chat-1', 'queued-1', 'Ask @Target', [reference], capabilities)).resolves.toBe(true)
 
-    expect(ensureValidatedScope).toHaveBeenCalledWith(scope)
+    expect(ensureValidatedScope).toHaveBeenCalledWith(scope, { waitForMetadata: false })
     expect(updateQueued).toHaveBeenCalledWith('chat-1', 'queued-1', 'Ask @Target', [reference], capabilities, undefined)
     expect(assertCurrentScope).toHaveBeenCalledTimes(1)
     expect(queue).not.toHaveBeenCalled()
@@ -3346,6 +3530,112 @@ describe('queued cross-chat capability forwarding', () => {
     })
     expect(projected.prompt.slice(chatReference.source_text_start, chatReference.source_text_end)).toBe('@Target')
     expect(projected.prompt.slice(teamReference.source_text_start, teamReference.source_text_end)).toBe('@@All')
+  })
+})
+
+describe('foreground queue identity readiness', () => {
+  function harness() {
+    const health = deferred<Health>()
+    const sessions = deferred<Session[]>()
+    const jobs = deferred<Job[]>()
+    const client = Object.assign(fakeClient({
+      health: () => health.promise, sessions: () => sessions.promise, jobs: () => jobs.promise
+    }), { updateQueued: vi.fn().mockResolvedValue(true) })
+    const other = Object.assign(fakeClient(), { updateQueued: vi.fn() })
+    const { settings } = profileSettings()
+    settings.setProfileServerIdentity('a', 'server-a')
+    const cache = new LocalCache(':memory:')
+    cache.putQueuedTurns('server-a', 'chat-1', [{ queued_id: 'queued-1', prompt: 'Original', file_ids: [] }])
+    const service = new AppService({ settings, cache,
+      clientFactory: url => (url === 'http://a.test:7850' ? client : other) as unknown as AgentServerClient })
+    cleanup.push(() => { service.stop(); cache.close() })
+    const internals = service as unknown as {
+      refreshAll(announce: boolean, includeJobs: boolean): Promise<void>
+      refreshInFlight: Map<number, Promise<void>>
+      refreshIdentityReady: Map<number, Promise<void>>
+    }
+    return { service, internals, cache, client, other, health, sessions, jobs }
+  }
+
+  it.each([false, true])('dispatches Save after verified health while list metadata is pending (join background=%s)', async background => {
+    const { service, internals, cache, client, health, sessions, jobs } = harness()
+    const backgroundRefresh = background ? internals.refreshAll(false, true) : null
+    const save = service.updateQueued('chat-1', 'queued-1', 'Edited')
+    const fullRefresh = internals.refreshInFlight.values().next().value!
+    let refreshFinished = false
+    void fullRefresh.then(() => { refreshFinished = true })
+    await settleBackgroundWork()
+    expect(client.updateQueued).not.toHaveBeenCalled()
+    expect(client.health).toHaveBeenCalledOnce()
+
+    health.resolve({ ok: true, server_identity: 'server-a' })
+    await settleBackgroundWork()
+    expect(client.updateQueued).toHaveBeenCalledOnce()
+    await expect(save).resolves.toBe(true)
+    expect(refreshFinished).toBe(false)
+    expect(client.health).toHaveBeenCalledOnce()
+    expect(client.sessions).toHaveBeenCalledOnce()
+    expect(cache.queuedTurns('server-a', 'chat-1')[0].prompt).toBe('Edited')
+
+    sessions.resolve([{ id: 'chat-1', title: 'Refreshed later', backend: 'claude' }])
+    jobs.resolve([])
+    await fullRefresh
+    await backgroundRefresh
+    expect((await service.bootstrap()).sessions[0].title).toBe('Refreshed later')
+    expect(internals.refreshIdentityReady.size).toBe(0)
+  })
+
+  it('keeps session mutations behind their earlier list refresh so the snapshot cannot overwrite the edit', async () => {
+    const { service, internals, client, health, sessions, jobs } = harness()
+    const renamed = { id: 'chat-1', title: 'Renamed', backend: 'claude' } satisfies Session
+    const updateSession = vi.fn().mockResolvedValue(renamed)
+    Object.assign(client, { updateSession })
+    const refresh = internals.refreshAll(false, true)
+    const rename = service.updateSession('chat-1', { title: 'Renamed' })
+
+    health.resolve({ ok: true, server_identity: 'server-a' })
+    await settleBackgroundWork()
+    expect(updateSession).not.toHaveBeenCalled()
+
+    sessions.resolve([{ ...renamed, title: 'Old snapshot' }])
+    jobs.resolve([])
+    await refresh
+    await expect(rename).resolves.toEqual(renamed)
+    expect(updateSession).toHaveBeenCalledOnce()
+    expect((await service.bootstrap()).sessions[0].title).toBe('Renamed')
+  })
+
+  it.each([
+    ['network', 'Health unavailable'],
+    ['unhealthy', 'Server health check reported unavailable'],
+    ['changed identity', 'Server identity changed'],
+    ['missing identity', 'Server identity changed']
+  ])('does not dispatch Save when health validation fails: %s', async (failure, expected) => {
+    const { service, client, health, sessions, jobs } = harness()
+    const save = service.updateQueued('chat-1', 'queued-1', 'Edited')
+    const rejected = expect(save).rejects.toThrow(expected)
+    if (failure === 'network') health.reject(new Error(expected))
+    else health.resolve({ ok: failure !== 'unhealthy',
+      ...(failure !== 'missing identity' ? { server_identity: failure === 'changed identity' ? 'different-server' : 'server-a' } : {}) })
+    await rejected
+    expect(client.updateQueued).not.toHaveBeenCalled()
+    sessions.resolve([])
+    jobs.resolve([])
+  })
+
+  it('rejects an awaiting Save when another profile wins before identity adoption', async () => {
+    const { service, internals, client, other, health, sessions, jobs } = harness()
+    const save = service.updateQueued('chat-1', 'queued-1', 'Edited')
+    const rejected = expect(save).rejects.toThrow('superseded')
+    await service.switchServer('b')
+    health.resolve({ ok: true, server_identity: 'server-a' })
+    await rejected
+    expect(client.updateQueued).not.toHaveBeenCalled()
+    expect(other.updateQueued).not.toHaveBeenCalled()
+    sessions.resolve([])
+    jobs.resolve([])
+    await settleBackgroundWork()
+    expect(internals.refreshIdentityReady.size).toBe(0)
   })
 })
 
@@ -3488,7 +3778,7 @@ interface FakeClientOptions {
     onSessions: (sessions: Session[], snapshot: boolean, removedSessionId?: string) => void,
     onState: (connected: boolean, error?: string) => void
   ) => () => void
-  terminal?: () => { write(data: string): void; resize(columns: number, rows: number): void; scroll(delta: number): void; close(): void }
+  terminal?: () => { write(data: string): void; resize(columns: number, rows: number): void; scroll(delta: number): void; cancelScroll(): void; close(): void }
   portTunnelSocket?: (sessionId: string, remotePort: number) => WebSocket
 }
 
@@ -3687,7 +3977,7 @@ function fakeClient(options: FakeClientOptions = {}) {
     }))),
     stream: vi.fn(options.stream ?? (() => vi.fn())),
     emergencyStream: vi.fn(options.emergencyStream ?? (() => vi.fn())),
-    terminal: vi.fn(options.terminal ?? (() => ({ write: vi.fn(), resize: vi.fn(), scroll: vi.fn(), close: vi.fn() }))),
+    terminal: vi.fn(options.terminal ?? (() => ({ write: vi.fn(), resize: vi.fn(), scroll: vi.fn(), cancelScroll: vi.fn(), close: vi.fn() }))),
     portTunnelSocket: vi.fn(options.portTunnelSocket ?? (() => ({ close: vi.fn() } as unknown as WebSocket)))
   }
 }
@@ -3984,6 +4274,265 @@ describe('background connection event publication', () => {
     expect(connectionEvents()[1][1]).toEqual(expect.objectContaining({
       health: expect.objectContaining({ active: ['chat-running'] })
     }))
+  })
+})
+
+describe('finished background chat prefetch', () => {
+  const finished: Session = {
+    id: 'chat', title: 'Finished chat', backend: 'codex',
+    latest_agent_event_seq: 9, last_read_agent_event_seq: 4, latest_agent_event_at: '2026-11-02T10:00:00Z'
+  }
+  const earlier: Event = { id: 'earlier', session_id: 'chat', seq: 4, type: 'assistant_text', ts: 'now', text: 'Earlier answer' }
+  const reply: Event = { id: 'reply', session_id: 'chat', seq: 9, type: 'assistant_text', ts: 'now', text: 'Final reply' }
+
+  function latestPage(session: Session, events: Event[], latestSeq: number): TimelinePage {
+    return { session, events, queued_turns: [], has_more: false, latest_seq: latestSeq, semantic_item_count: events.length }
+  }
+
+  function cacheOpenedChat(cache: LocalCache, session: Session, event: Event, namespace = 'profile:a'): void {
+    cache.putSession(namespace, session)
+    cache.putEvents(namespace, session.id, [{ ...event, session_id: session.id }])
+    cache.putTimelineState(namespace, session.id, false, event.seq, 1, null, true)
+  }
+
+  /** A validated service whose cache holds each chat as last seen (null: never opened). */
+  function finishedChatService(
+    options: FakeClientOptions,
+    chats: Session[] = [finished],
+    cachedEvent: (chat: Session) => Event | null = () => earlier
+  ) {
+    const client = fakeClient({ sessions: async () => chats, ...options })
+    const { service, cache } = createProfileService({ 'http://a.test:7850': [client] }, value => {
+      for (const chat of chats) {
+        const event = cachedEvent(chat)
+        if (event) cacheOpenedChat(value, chat, event)
+      }
+    })
+    Object.assign(service, { validatedGeneration: 1 })
+    const send = vi.fn()
+    service.addWindow({ isDestroyed: () => false, on: vi.fn(), webContents: { send } } as never)
+    const timelineSends = () => send.mock.calls.filter(([channel]) => channel === 'server:timeline')
+    return { client, service, cache, timelineSends }
+  }
+
+  async function poll(service: AppService): Promise<void> {
+    const internals = service as unknown as { scope: unknown; refreshAll(a: boolean, b: boolean, scope: unknown): Promise<void> }
+    await internals.refreshAll(false, false, internals.scope)
+    await settleBackgroundWork()
+  }
+
+  function connectedStream(...[, , , onState]: Parameters<AgentServerClient['stream']>) {
+    onState(true)
+    return vi.fn()
+  }
+
+  it('caches the reply of an unread chat that finished out of view, once', async () => {
+    const { client, service, cache, timelineSends } = finishedChatService({ sessionPage: async () => latestPage(finished, [reply], 9) })
+
+    await poll(service)
+    await poll(service)
+
+    expect(client.sessionPage).toHaveBeenCalledExactlyOnceWith('chat', { pageMode: 'semantic', limit: 48, tail: true, visible: true })
+    expect(cache.snapshot('profile:a', 'chat')?.events).toEqual([reply])
+    expect(timelineSends()).toEqual([['server:timeline', expect.objectContaining({
+      sessionId: 'chat', mode: 'replace', authoritativeTail: true,
+      snapshot: expect.objectContaining({ historyVerified: true, events: [reply] })
+    })]])
+    expect(client.stream).not.toHaveBeenCalled()
+  })
+
+  it('leaves visible, running, read, archived, never-opened and current chats to their normal paths', async () => {
+    const chats = ['visible', 'running', 'read', 'archived', 'unopened', 'current'].map(id => ({
+      ...finished, id, title: id,
+      ...(id === 'read' ? { last_read_agent_event_seq: 9 } : {}),
+      ...(id === 'archived' ? { archived: true } : {})
+    }))
+    const { client, service } = finishedChatService({
+      health: async () => ({ ok: true, active: ['running'] }),
+      sessionPage: async sessionId => latestPage({ ...finished, id: sessionId }, [], 9),
+      stream: connectedStream
+    }, chats, chat => chat.id === 'unopened' ? null : chat.id === 'current' ? reply : earlier)
+    await service.subscribeTimeline('visible', 0)
+    await settleBackgroundWork()
+    client.sessionPage.mockClear()
+
+    await poll(service)
+
+    expect(client.sessionPage).not.toHaveBeenCalled()
+  })
+
+  it('lets a chat opened during its prefetch wait for that read instead of reading again', async () => {
+    const pending = deferred<TimelinePage>()
+    const { client, service, cache, timelineSends } = finishedChatService({ sessionPage: () => pending.promise, stream: connectedStream })
+    await poll(service)
+    await service.subscribeTimeline('chat', 0)
+    await settleBackgroundWork()
+
+    pending.resolve(latestPage(finished, [reply], 9))
+    await settleBackgroundWork()
+
+    expect(client.sessionPage).toHaveBeenCalledOnce()
+    expect(cache.snapshot('profile:a', 'chat')?.events).toEqual([reply])
+    expect(client.stream).toHaveBeenCalledOnce()
+    expect(client.stream.mock.calls[0]?.[1]).toBe(9)
+    expect(timelineSends()).toHaveLength(1)
+  })
+
+  it('reads directly when the prefetch an open waited for fails', async () => {
+    const pending = deferred<TimelinePage>()
+    let reads = 0
+    const { client, service, cache } = finishedChatService({
+      sessionPage: () => ++reads === 1 ? pending.promise : Promise.resolve(latestPage(finished, [reply], 9)),
+      stream: connectedStream
+    })
+    await poll(service)
+    await service.subscribeTimeline('chat', 0)
+    await settleBackgroundWork()
+
+    pending.reject(new ServerError(503, 'Server is busy'))
+    await settleBackgroundWork()
+
+    expect(client.sessionPage).toHaveBeenCalledTimes(2)
+    expect(cache.snapshot('profile:a', 'chat')?.events).toEqual([reply])
+    expect(client.stream.mock.calls[0]?.[1]).toBe(9)
+  })
+
+  it('never replaces newer cached history with an older background page', async () => {
+    const pending = deferred<TimelinePage>()
+    const newer: Event = { ...reply, id: 'newer', seq: 10, text: 'Cached meanwhile' }
+    const { service, cache, timelineSends } = finishedChatService({ sessionPage: () => pending.promise })
+    await poll(service)
+    cache.putEvents('profile:a', 'chat', [newer])
+
+    pending.resolve(latestPage(finished, [reply], 9))
+    await settleBackgroundWork()
+
+    expect(cache.snapshot('profile:a', 'chat')?.events.map(event => event.id)).toEqual(['earlier', 'newer'])
+    expect(timelineSends()).toEqual([])
+  })
+
+  it('reads a reply once even when the page lags the chat summary', async () => {
+    const { client, service } = finishedChatService({ sessionPage: async () => latestPage(finished, [], 7) })
+
+    await poll(service)
+    await poll(service)
+
+    expect(client.sessionPage).toHaveBeenCalledOnce()
+  })
+
+  it('retries a failed read after a pause, and at once for a newer reply', async () => {
+    let now = Date.parse('2026-11-02T10:00:00Z')
+    const clock = vi.spyOn(Date, 'now').mockImplementation(() => now)
+    cleanup.push(() => clock.mockRestore())
+    let summary = finished
+    let available = false
+    const { client, service, cache } = finishedChatService({
+      sessions: async () => [summary],
+      sessionPage: async () => {
+        if (!available) throw new ServerError(503, 'Server is busy')
+        return latestPage(summary, [reply], summary.latest_agent_event_seq ?? 0)
+      }
+    })
+
+    await poll(service)
+    await poll(service)
+    expect(client.sessionPage).toHaveBeenCalledOnce()
+    now += 60_000
+    await poll(service)
+    expect(client.sessionPage).toHaveBeenCalledTimes(2)
+
+    summary = { ...finished, latest_agent_event_seq: 10 }
+    available = true
+    await poll(service)
+    expect(client.sessionPage).toHaveBeenCalledTimes(3)
+    expect(cache.snapshot('profile:a', 'chat')?.events).toEqual([reply])
+  })
+
+  it('reports a full disk from a background read', async () => {
+    cleanup.push(clearStorageError)
+    const { service, cache } = finishedChatService({ sessionPage: async () => latestPage(finished, [reply], 9) })
+    vi.spyOn(cache, 'replaceEvents').mockImplementationOnce(() => {
+      throw Object.assign(new Error('database or disk is full'), { code: 'SQLITE_FULL' })
+    })
+
+    await poll(service)
+
+    expect(localStorageWasFull()).toBe(true)
+  })
+
+  it('keeps a previous server read from blocking or writing to the next server', async () => {
+    const pendingA = deferred<TimelinePage>()
+    const clientA = fakeClient({ sessions: async () => [finished], sessionPage: () => pendingA.promise })
+    const clientB = fakeClient({ sessions: async () => [finished], sessionPage: async () => latestPage(finished, [reply], 9) })
+    const { service, cache } = createProfileService({ 'http://a.test:7850': [clientA], 'http://b.test:7850': [clientB] }, value => {
+      cacheOpenedChat(value, finished, earlier)
+    })
+    const internals = service as unknown as { scope: { generation: number; namespace: string } }
+    Object.assign(service, { validatedGeneration: 1 })
+    const send = vi.fn()
+    service.addWindow({ isDestroyed: () => false, on: vi.fn(), webContents: { send } } as never)
+    await poll(service)
+    await service.switchServer('b')
+    Object.assign(service, { validatedGeneration: internals.scope.generation })
+    const namespaceB = internals.scope.namespace
+    cacheOpenedChat(cache, finished, earlier, namespaceB)
+
+    await poll(service)
+    expect(clientB.sessionPage).toHaveBeenCalledOnce()
+    expect(cache.snapshot(namespaceB, 'chat')?.events).toEqual([reply])
+    send.mockClear()
+
+    pendingA.resolve(latestPage(finished, [reply], 9))
+    await settleBackgroundWork()
+    expect(cache.snapshot('profile:a', 'chat')?.events).toEqual([earlier])
+    expect(send).not.toHaveBeenCalledWith('server:timeline', expect.objectContaining({ profileId: 'a' }))
+  })
+
+  it('reads at most three finished chats per poll, one at a time and newest first', async () => {
+    const chats = [1, 2, 3, 4, 5].map(n => ({ ...finished, id: `chat-${n}`, latest_agent_event_at: `2026-11-02T10:0${n}:00Z` }))
+    const pages = new Map<string, ReturnType<typeof deferred<TimelinePage>>>()
+    const { client, service } = finishedChatService({
+      sessionPage: sessionId => {
+        const page = deferred<TimelinePage>()
+        pages.set(sessionId, page)
+        return page.promise
+      }
+    }, chats)
+    const reads = () => client.sessionPage.mock.calls.map(([sessionId]) => sessionId)
+    const answer = async (sessionId: string) => {
+      pages.get(sessionId)!.resolve(latestPage({ ...finished, id: sessionId }, [{ ...reply, session_id: sessionId }], 9))
+      await settleBackgroundWork()
+    }
+
+    await poll(service)
+    expect(reads()).toEqual(['chat-5'])
+    await answer('chat-5')
+    await answer('chat-4')
+    await answer('chat-3')
+    expect(reads()).toEqual(['chat-5', 'chat-4', 'chat-3'])
+
+    await poll(service)
+    expect(reads()).toEqual(['chat-5', 'chat-4', 'chat-3', 'chat-2'])
+  })
+
+  it('revalidates at once when a cached chat opens after a failed health check', async () => {
+    let healthChecks = 0
+    const { client, service } = finishedChatService({
+      health: async () => {
+        if (++healthChecks === 1) throw new TypeError('fetch failed')
+        return { ok: true }
+      },
+      sessionPage: async sessionId => emptyTimelinePage(sessionId)
+    }, [])
+    await poll(service)
+    expect((service as unknown as { validatedGeneration: number | null }).validatedGeneration).toBeNull()
+
+    await service.subscribeTimeline('chat', 0)
+    await settleBackgroundWork()
+
+    expect(client.health).toHaveBeenCalledTimes(2)
+    expect(client.sessionPage).toHaveBeenCalledWith('chat', expect.objectContaining({ tail: true }))
+    expect(client.stream).toHaveBeenCalledOnce()
   })
 })
 
@@ -4300,15 +4849,19 @@ describe('split-chat timeline subscriptions', () => {
       sessionPage: async sessionId => emptyTimelinePage(sessionId)
     })
     const { service } = createProfileService({ 'http://a.test:7850': [client] })
+    // Opening before identity validation revalidates at once; the stream
+    // starts after health, while the session list is still pending.
     await service.subscribeTimeline('chat-a', 0)
     await settleBackgroundWork()
-    expect(client.stream).not.toHaveBeenCalled()
+    expect(client.health).toHaveBeenCalledOnce()
+    expect(client.stream).toHaveBeenCalledOnce()
     const internals = service as unknown as {
       scope: unknown
       refreshAll(announce: boolean, includeJobs: boolean, scope: unknown): Promise<void>
     }
     const refreshing = internals.refreshAll(false, false, internals.scope)
     await settleBackgroundWork()
+    expect(client.health).toHaveBeenCalledOnce()
     expect(client.stream).toHaveBeenCalledOnce()
     sessionList.resolve([])
     await refreshing
@@ -4534,31 +5087,82 @@ describe('split-chat timeline subscriptions', () => {
     expect(stops.get('chat-c')).not.toHaveBeenCalled()
   })
 
-  it('defensively bounds live streams to two sessions', async () => {
-    const stops = new Map<string, ReturnType<typeof vi.fn>>()
+  it('keeps primary hydration and completion events live while the third and fourth panes subscribe', async () => {
+    const primaryPage = deferred<TimelinePage>()
+    const streams = new Map<string, { onEvent: (event: Event) => void; stop: ReturnType<typeof vi.fn> }>()
+    const client = fakeClient({
+      sessionPage: async sessionId => sessionId === 'chat-a' ? primaryPage.promise : emptyTimelinePage(sessionId),
+      stream: (sessionId, _after, onEvent, onState) => {
+        const stream = { onEvent, stop: vi.fn() }
+        streams.set(sessionId, stream)
+        onState(true)
+        return stream.stop
+      }
+    })
+    const { service, cache } = createProfileService({ 'http://a.test:7850': [client] })
+    Object.assign(service, { validatedGeneration: 1 })
+    const send = vi.fn()
+    service.addWindow({ isDestroyed: () => false, on: vi.fn(), webContents: { send } } as never)
+
+    await service.subscribeTimeline('chat-a', 0)
+    await settleBackgroundWork()
+    expect(client.sessionPage).toHaveBeenCalledWith('chat-a', expect.objectContaining({ tail: true }))
+    await Promise.all(['chat-b', 'chat-c', 'chat-d'].map(sessionId => service.subscribeTimeline(sessionId, 0)))
+    await settleBackgroundWork()
+    expect(streams.has('chat-a')).toBe(false)
+
+    const reply: Event = { id: 'a-reply', session_id: 'chat-a', seq: 10, type: 'assistant_text', ts: 'now', text: 'Done.' }
+    primaryPage.resolve({ ...emptyTimelinePage('chat-a'), events: [reply], latest_seq: 10, total: 1, semantic_item_count: 1 })
+    await settleBackgroundWork()
+
+    expect([...streams.keys()].sort()).toEqual(['chat-a', 'chat-b', 'chat-c', 'chat-d'])
+    expect(send).toHaveBeenCalledWith('server:timeline', expect.objectContaining({
+      sessionId: 'chat-a', authoritativeTail: true, snapshot: expect.objectContaining({ events: [reply] })
+    }))
+    expect(send).not.toHaveBeenCalledWith('server:sync', expect.objectContaining({ state: 'idle' }))
+    for (const [sessionId, stream] of streams) {
+      const terminal: Event = { id: `${sessionId}-finished`, session_id: sessionId, seq: 11, type: 'turn_finished', ts: 'now', run_id: `${sessionId}-run` }
+      stream.onEvent(terminal)
+      expect(send).toHaveBeenCalledWith('server:event', expect.objectContaining({ event: terminal }))
+      expect(stream.stop).not.toHaveBeenCalled()
+    }
+    ;(service as unknown as { flushEventCache(): void }).flushEventCache()
+    expect(cache.snapshot('profile:a', 'chat-a')?.events).toEqual([reply, expect.objectContaining({ type: 'turn_finished' })])
+  })
+
+  it('retains visible streams during a replacement overlap until the hidden pane explicitly unsubscribes', async () => {
+    const streams = new Map<string, { onEvent: (event: Event) => void; stop: ReturnType<typeof vi.fn> }>()
     const client = fakeClient({
       sessionPage: async sessionId => emptyTimelinePage(sessionId),
-      stream: sessionId => {
-        const stop = vi.fn()
-        stops.set(sessionId, stop)
-        return stop
+      stream: (sessionId, _after, onEvent) => {
+        const stream = { onEvent, stop: vi.fn() }
+        streams.set(sessionId, stream)
+        return stream.stop
       }
     })
     const { service } = createProfileService({ 'http://a.test:7850': [client] })
     Object.assign(service, { validatedGeneration: 1 })
+    const send = vi.fn()
+    service.addWindow({ isDestroyed: () => false, on: vi.fn(), webContents: { send } } as never)
+    for (const sessionId of ['chat-a', 'chat-b', 'chat-c', 'chat-d', 'chat-e']) {
+      await service.subscribeTimeline(sessionId, 0)
+      await settleBackgroundWork()
+    }
+    for (const stream of streams.values()) expect(stream.stop).not.toHaveBeenCalled()
 
-    await service.subscribeTimeline('chat-a', 0)
-    await settleBackgroundWork()
-    await service.subscribeTimeline('chat-b', 0)
-    await settleBackgroundWork()
-    await service.subscribeTimeline('chat-c', 0)
-    await settleBackgroundWork()
-
-    expect(stops.get('chat-a')).toHaveBeenCalledOnce()
-    expect(stops.get('chat-b')).not.toHaveBeenCalled()
-    expect(stops.get('chat-c')).not.toHaveBeenCalled()
-    const subscriptions = (service as unknown as { timelineSubscriptions: Map<string, unknown> }).timelineSubscriptions
-    expect([...subscriptions.keys()]).toEqual(['chat-b', 'chat-c'])
+    service.unsubscribeTimeline('chat-b')
+    expect(streams.get('chat-b')!.stop).toHaveBeenCalledOnce()
+    send.mockClear()
+    for (const [sessionId, stream] of streams) {
+      const terminal: Event = { id: `${sessionId}-finished`, session_id: sessionId, seq: 1, type: 'turn_finished', ts: 'now' }
+      stream.onEvent(terminal)
+      if (sessionId === 'chat-b') {
+        expect(send).not.toHaveBeenCalledWith('server:event', expect.objectContaining({ event: terminal }))
+      } else {
+        expect(stream.stop).not.toHaveBeenCalled()
+        expect(send).toHaveBeenCalledWith('server:event', expect.objectContaining({ event: terminal }))
+      }
+    }
   })
 
   it('closes every session stream on profile switch and service disposal', async () => {
@@ -4620,6 +5224,85 @@ describe('split-chat timeline subscriptions', () => {
 })
 
 describe('subagent lifecycle hydration', () => {
+  it.each([
+    { correctedSeq: 7, taskId: 'child-1' },
+    { correctedSeq: 6, taskId: 'child-1' },
+    { correctedSeq: 7, taskId: 'agent-tool' }
+  ])('repairs cached Claude $taskId tracking at snapshot sequence $correctedSeq and rejects delayed resurrection', async ({ correctedSeq, taskId }) => {
+    const session: Session = { id: 'chat', title: 'Chat', backend: 'claude' }
+    const tool = { id: 'agent-tool', name: 'Agent', input: { description: 'Review the renderer', run_in_background: true } }
+    const durable: Event[] = [
+      { seq: 1, id: 'start', session_id: session.id, run_id: 'run-1', backend: 'claude',
+        type: 'tool_started', ts: '2026-09-01T12:00:00Z', tool },
+      { seq: 3, id: 'finish', session_id: session.id, run_id: 'run-1', backend: 'claude',
+        type: 'tool_finished', ts: '2026-09-01T12:00:02Z', tool, tool_id: tool.id, output: 'Background task started' }
+    ]
+    const running: Event = {
+      seq: 7, id: `subagent:chat:run-1:${taskId}`, session_id: session.id,
+      run_id: 'run-1', type: 'subagent_state', backend: 'claude',
+      ts: '2026-09-01T12:00:06Z', subagent_id: taskId,
+      subagent_tool_id: tool.id, subagent_name: 'Review the renderer',
+      subagent_status: 'running', subagent_started_at: durable[0].ts,
+      subagent_log: [{ ts: '2026-09-01T12:00:06Z', text: 'Reviewing source' }]
+    }
+    let agent = running
+    let onEvent: (event: Event) => void = () => { throw new Error('Timeline stream did not start.') }
+    const client = fakeClient({
+      sessionPage: async () => ({ session, events: durable, has_more: false, latest_seq: 7 }),
+      subagents: async () => ({ session_id: session.id, subagents: [agent], count: 1,
+        active_count: agent.subagent_status === 'running' ? 1 : 0, latest_seq: 7 }),
+      stream: (_sessionId, _after, receiveEvent) => { onEvent = receiveEvent; return vi.fn() }
+    })
+    const { service, cache } = createProfileService({ 'http://a.test:7850': [client] }, cache => {
+      cache.putSession('profile:a', session)
+      cache.putEvents('profile:a', session.id, [...durable, running])
+    })
+    Object.assign(service, { validatedGeneration: 1 })
+    await service.openTimeline(session.id, true)
+    await settleBackgroundWork()
+    expect(cache.snapshot('profile:a', session.id)?.events).toContainEqual(running)
+
+    const internals = service as unknown as {
+      scope: unknown
+      timelineSubscriptions: Map<string, { lease: number }>
+      refreshSubagentSnapshot(scope: unknown, sessionId: string, lease: number): Promise<void>
+      flushEventCache(): void
+      emit(name: string, payload: unknown): void
+    }
+    agent = { ...running, seq: correctedSeq, subagent_status: 'tracking_lost',
+      subagent_activity: 'Background task tracking lost; completion is not confirmed' }
+    await internals.refreshSubagentSnapshot(internals.scope, session.id, internals.timelineSubscriptions.get(session.id)!.lease)
+    const states = () => cache.snapshot('profile:a', session.id)!.events.filter(event => event.type === 'subagent_state')
+    expect(states()).toEqual([agent])
+
+    const emit = vi.spyOn(internals, 'emit')
+    onEvent({ ...running, seq: 10, id: 'subagent:chat:run-1:child-1', subagent_id: 'child-1' })
+    onEvent({ ...running, seq: 11, id: 'late-start', type: 'raw_event',
+      raw: JSON.stringify({ type: 'system', subtype: 'task_started', task_type: 'local_agent',
+        task_id: 'child-1', tool_use_id: tool.id }) })
+    onEvent({ ...running, seq: 12, id: 'late-progress', type: 'raw_event',
+      raw: JSON.stringify({ type: 'system', subtype: 'task_progress', task_id: 'child-1' }) })
+    internals.flushEventCache()
+    expect(states()).toEqual([agent])
+    expect(emit).not.toHaveBeenCalledWith('server:event', expect.anything())
+
+    const live = { ...running, seq: 13, id: `subagent:chat:run-2:${taskId}`, run_id: 'run-2' }
+    onEvent(live)
+    internals.flushEventCache()
+    expect(states()).toEqual([agent, live])
+    service.unsubscribeTimeline(session.id)
+    await service.openTimeline(session.id, true)
+    await settleBackgroundWork()
+    expect(states().filter(state => state.run_id === 'run-1')).toEqual([agent])
+    onEvent({ ...running, seq: 14, id: 'observed-completion', type: 'raw_event',
+      raw: JSON.stringify({ type: 'system', subtype: 'task_notification', task_id: 'child-1',
+        status: 'completed', summary: 'Provider confirmed completion' }) })
+    internals.flushEventCache()
+    expect(states().find(state => state.run_id === 'run-1')).toMatchObject({
+      subagent_status: 'completed', subagent_summary: 'Provider confirmed completion'
+    })
+  })
+
   it.each(['task_notification', 'task_updated'])('reopens a running Claude agent and persists progress and %s completion', async subtype => {
     const session: Session = { id: 'chat', title: 'Chat', backend: 'claude' }
     let agent: Event = {
@@ -4872,6 +5555,50 @@ describe('subagent lifecycle hydration', () => {
     await settleBackgroundWork()
 
     expect(refresh).toHaveBeenCalledWith(internals.scope, 'chat', 1)
+  })
+
+  it('refreshes only the stopped chat with an existing subscription, once', async () => {
+    const client = Object.assign(fakeClient(), {
+      stopTurn: vi.fn(async () => ({ stopped: true }))
+    })
+    const { service } = createProfileService({ 'http://a.test:7850': [client] })
+    Object.assign(service, {
+      validatedGeneration: 1,
+      timelineSubscriptions: new Map([['chat', { lease: 7, stop: null, connected: false }]])
+    })
+    const internals = service as unknown as {
+      scope: unknown
+      scheduleSubagentSnapshotRefresh(scope: unknown, sessionId: string, lease: number): void
+    }
+    const refresh = vi.spyOn(internals, 'scheduleSubagentSnapshotRefresh').mockImplementation(() => {})
+
+    await expect(service.stopTurn('chat')).resolves.toEqual({ stopped: true })
+    expect(refresh).toHaveBeenCalledExactlyOnceWith(internals.scope, 'chat', 7)
+    await service.stopTurn('unsubscribed-chat')
+    expect(refresh).toHaveBeenCalledTimes(1)
+  })
+
+  it('does not refresh child state after the stop response crosses a server switch', async () => {
+    const response = deferred<{ stopped: boolean }>()
+    const client = Object.assign(fakeClient(), { stopTurn: vi.fn(() => response.promise) })
+    const { service } = createProfileService({
+      'http://a.test:7850': [client], 'http://b.test:7850': [fakeClient()]
+    })
+    Object.assign(service, { validatedGeneration: 1 })
+    const pending = service.stopTurn('chat')
+    const rejected = expect(pending).rejects.toThrow()
+    await settleBackgroundWork()
+    await service.switchServer('b')
+    Object.assign(service, {
+      timelineSubscriptions: new Map([['chat', { lease: 9, stop: null, connected: false }]])
+    })
+    const internals = service as unknown as {
+      scheduleSubagentSnapshotRefresh(scope: unknown, sessionId: string, lease: number): void
+    }
+    const refresh = vi.spyOn(internals, 'scheduleSubagentSnapshotRefresh').mockImplementation(() => {})
+    response.resolve({ stopped: true })
+    await rejected
+    expect(refresh).not.toHaveBeenCalled()
   })
 })
 
@@ -9088,7 +9815,7 @@ describe('server profile lifecycle', () => {
     const internals = service as unknown as {
       timelineSubscriptions: Map<string, { lease: number; stop: () => void; connected: boolean; initializing: boolean }>
       emergencyStreamStop: (() => void) | null
-      terminalConnections: Map<string, { write(data: string): void; resize(columns: number, rows: number): void; scroll(delta: number): void; close(): void }>
+      terminalConnections: Map<string, { write(data: string): void; resize(columns: number, rows: number): void; scroll(delta: number): void; cancelScroll(): void; close(): void }>
       portTunnels: { disposeAll(): void }
       subagentProjector: { reset(): void }
     }
@@ -9097,7 +9824,7 @@ describe('server profile lifecycle', () => {
     })
     internals.emergencyStreamStop = emergencyStop
     internals.terminalConnections.set('chat-a', {
-      write: vi.fn(), resize: vi.fn(), scroll: vi.fn(), close: terminalClose
+      write: vi.fn(), resize: vi.fn(), scroll: vi.fn(), cancelScroll: vi.fn(), close: terminalClose
     })
     internals.portTunnels.disposeAll = tunnelDispose
     internals.subagentProjector.reset = projectionReset
@@ -9456,6 +10183,36 @@ describe('server profile lifecycle', () => {
     expect(bProbe.sessions).not.toHaveBeenCalled()
     expect(bProbe.jobs).not.toHaveBeenCalled()
     expect(bProbe.dispose).toHaveBeenCalledOnce()
+  })
+
+  it('keeps normal background queue recovery connected and clears a prior recovery warning', async () => {
+    let readiness: NonNullable<Health['chat_readiness']> = {
+      ready: false, state: 'failed', message: 'Queued message recovery failed.'
+    }
+    const a = fakeClient({ health: async () => ({ ok: true, server_identity: 'server-a', chat_readiness: readiness }) })
+    const { service, settings } = createProfileService({
+      'http://a.test:7850': [a], 'http://b.test:7850': [fakeClient()]
+    })
+    settings.setProfileServerIdentity('a', 'server-a')
+    const bootstrap = await service.bootstrap()
+    await service.refreshServer('a', bootstrap.profileGeneration)
+    expect((await service.bootstrap()).profiles.find(profile => profile.id === 'a')).toMatchObject({
+      connectionState: 'degraded', lastConnectionError: readiness.message
+    })
+
+    readiness = { ready: false, state: 'recovering', message: 'Queued messages are being restored after restart.' }
+    await service.refreshServer('a', bootstrap.profileGeneration)
+    const recovering = await service.bootstrap()
+    expect(recovering.health?.chat_readiness).toEqual(readiness)
+    expect(recovering.profiles.find(profile => profile.id === 'a')).toMatchObject({
+      connectionState: 'online', lastConnectionError: null
+    })
+
+    readiness = { ready: true, state: 'ready', message: null }
+    await service.refreshServer('a', bootstrap.profileGeneration)
+    expect((await service.bootstrap()).profiles.find(profile => profile.id === 'a')).toMatchObject({
+      connectionState: 'online', lastConnectionError: null
+    })
   })
 
   it('keeps recovery controls connected while reporting failed chat readiness', async () => {
@@ -10479,11 +11236,48 @@ describe('rapid profile resource teardown', () => {
     expect(() => service.listForwardedPorts('a', initial.profileGeneration)).toThrow('superseded')
   })
 
+  it('cancels a pending wheel batch before changing the terminal pane', async () => {
+    const order: string[] = []
+    const connection = { write: vi.fn(), resize: vi.fn(), scroll: vi.fn(), close: vi.fn(),
+      cancelScroll: vi.fn(() => order.push('cancel')) }
+    const client = Object.assign(fakeClient({ terminal: () => connection }), {
+      terminalAction: vi.fn(async () => { order.push('action'); return { windows: [] } })
+    })
+    const { service } = createProfileService({ 'http://a.test:7850': [client] })
+    const payload = await service.bootstrap()
+    await service.refreshServer('a', payload.profileGeneration)
+    await service.connectTerminal('a', payload.profileGeneration, 'chat', { columns: 80, rows: 24 })
+    await service.terminalAction('a', payload.profileGeneration, 'chat', 'select-window', '1')
+    expect(order).toEqual(['cancel', 'action'])
+    await expect(service.terminalAction('b', payload.profileGeneration, 'chat', 'select-window', '1')).rejects.toThrow()
+    expect(order).toEqual(['cancel', 'action'])
+    service.disconnectTerminal('chat')
+  })
+
+  it('fences terminal output acknowledgements by profile and generation', async () => {
+    const acknowledge = vi.fn()
+    const connection = {write:vi.fn(),resize:vi.fn(),scroll:vi.fn(),cancelScroll:vi.fn(),close:vi.fn(),acknowledge}
+    const client = fakeClient({terminal:()=>connection})
+    const {service} = createProfileService({'http://a.test:7850':[client]})
+    const payload = await service.bootstrap()
+    await service.refreshServer('a',payload.profileGeneration)
+    await service.connectTerminal('a',payload.profileGeneration,'chat',{columns:80,rows:24})
+    const receipt={streamId:'stream',offset:65536}
+    service.acknowledgeTerminal('b',payload.profileGeneration,'chat',receipt)
+    service.acknowledgeTerminal('a',payload.profileGeneration+1,'chat',receipt)
+    expect(acknowledge).not.toHaveBeenCalled()
+    service.acknowledgeTerminal('a',payload.profileGeneration,'chat',receipt)
+    expect(acknowledge).toHaveBeenCalledExactlyOnceWith(receipt)
+    service.disconnectTerminal('chat')
+    service.acknowledgeTerminal('a',payload.profileGeneration,'chat',receipt)
+    expect(acknowledge).toHaveBeenCalledOnce()
+  })
+
   it('closes each old client and terminal exactly once across ten switches', async () => {
     const terminalConnections: Array<{ write: ReturnType<typeof vi.fn>; resize: ReturnType<typeof vi.fn>; scroll: ReturnType<typeof vi.fn>; close: ReturnType<typeof vi.fn> }> = []
     const makeClient = () => fakeClient({
       terminal: () => {
-        const connection = { write: vi.fn(), resize: vi.fn(), scroll: vi.fn(), close: vi.fn() }
+        const connection = { write: vi.fn(), resize: vi.fn(), scroll: vi.fn(), cancelScroll: vi.fn(), close: vi.fn() }
         terminalConnections.push(connection)
         return connection
       }
@@ -10526,7 +11320,7 @@ describe('rapid profile resource teardown', () => {
         close: ReturnType<typeof vi.fn>
       }> = []
       const terminalFor = (owner: string) => () => {
-        const connection = { owner, write: vi.fn(), resize: vi.fn(), scroll: vi.fn(), close: vi.fn() }
+        const connection = { owner, write: vi.fn(), resize: vi.fn(), scroll: vi.fn(), cancelScroll: vi.fn(), close: vi.fn() }
         terminalConnections.push(connection)
         return connection
       }

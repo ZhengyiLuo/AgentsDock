@@ -138,8 +138,19 @@ export interface ClaudeRuntimeSnapshot {
   context_usage_refreshed?: boolean
   /** Native Claude current/latest goal; absent on older servers. */
   goal?: ClaudeGoal | null
-  /** Native command accepted; awaiting an authoritative goal status record. */
+  /** Native goal request accepted; command confirmation can lag the goal record. */
   goal_starting?: boolean
+  /** A native goal command was accepted but later rejected by Claude. */
+  goal_error?: string | null
+  /** Next durable goal command waiting in the existing message queue. */
+  queued_goal?: {
+    queued_id: string
+    condition: string
+    position: number
+    paused: boolean
+    pause_reason: 'stopped' | 'delivery_uncertain' | null
+    queued_count: number
+  } | null
   /** The initial provider transcript goal projection is still loading. */
   goal_loading?: boolean
 }
@@ -396,6 +407,11 @@ export interface TurnStopResult {
   native_interrupt?: boolean
   goal_paused?: boolean
   message?: string | null
+  subagents?: {
+    pending?: string[]
+    errors?: string[]
+    interrupted?: string[]
+  }
 }
 
 export interface CodexRollbackInput {
@@ -496,6 +512,8 @@ export interface Session {
   latest_agent_event_seq?: number | null
   latest_agent_event_at?: string | null
   latest_agent_event_type?: string | null
+  /** Latest visible output outside scheduled jobs; omitted by older servers. */
+  latest_non_job_agent_event_seq?: number | null
   last_read_agent_event_seq?: number | null
   last_read_agent_event_at?: string | null
   manual_unread?: boolean | null
@@ -980,6 +998,7 @@ export interface QueuedRunNowResponse {
   retryable?: boolean
   delivery_uncertain?: boolean
   native_steer?: boolean
+  chat_access_applied?: boolean
   replays_interrupted_message?: boolean
   message?: string | null
   remaining?: number | null
@@ -1037,6 +1056,19 @@ export interface Event extends SharedChatAttribution {
   mailbox_wake_id?: string | null
   mailbox_wake_through_seq?: number | null
   provider_generated?: boolean | null
+  /** Native background-task wake provenance; an empty input is a run boundary, not user text. */
+  parent_run_id?: string | null
+  parent_run_ids?: string[] | null
+  provider_task_id?: string | null
+  provider_task_ids?: string[] | null
+  provider_task_type?: string | null
+  provider_tool_use_id?: string | null
+  provider_wake_kind?: 'task' | 'schedule' | null
+  provider_schedule_id?: string | null
+  provider_schedule_ids?: string[] | null
+  provider_native_wake_id?: string | null
+  provider_concurrent_task_ids?: string[] | null
+  provider_admission_after_run_id?: string | null
   provider_input_sha256?: string | null
   phase?: string | null
   /** Durable summary placement at its first streamed section, without changing its ledger sequence. */
@@ -1164,6 +1196,10 @@ export interface Event extends SharedChatAttribution {
   subagent_summary?: string | null
   subagent_started_at?: string | null
   subagent_provider_ref?: string | null
+  subagent_parent_thread_id?: string | null
+  subagent_root_thread_id?: string | null
+  /** Copied history is not ownership of the source thread's native children. */
+  forked?: boolean
   subagent_log?: Array<{ ts: string; text: string }> | null
   file?: AgentFile | null
   artifact?: AgentFile | null
@@ -1224,6 +1260,8 @@ export interface Event extends SharedChatAttribution {
   native_steer?: boolean | null
   /** Accepted user input on the existing native goal owner; not a new turn or Stop. */
   native_goal_steer?: boolean | null
+  /** Accepted human follow-up on the existing Claude SDK run, without interruption. */
+  native_followup?: boolean | null
   superseded_by_run_id?: string | null
   steer_interrupted_run_id?: string | null
   codex_thread_status?: CodexThreadStatus | null
@@ -1916,7 +1954,8 @@ export interface ProfileTimelineEvent extends ProfileEventContext {
   /** Main-process latest-page read; accept a disjoint window without refetching. */
   authoritativeTail?: boolean
 }
-export interface ProfileTerminalDataEvent extends ProfileEventContext { sessionId: string; data: string }
+export interface TerminalOutputReceipt { streamId: string; offset: number }
+export interface ProfileTerminalDataEvent extends ProfileEventContext { sessionId: string; data: string; receipt?: TerminalOutputReceipt }
 export interface ProfileTerminalStateEvent extends ProfileEventContext {
   sessionId: string
   state: TerminalConnectionState
@@ -2335,6 +2374,8 @@ export interface TimelinePinsChanged {
   updated_at: string
 }
 
+export type SidebarSortMode = 'default' | 'latest' | 'name'
+
 export interface BootstrapPayload {
   /** A local write failed due to storage exhaustion during this app session. */
   storageFull?: boolean
@@ -2348,6 +2389,11 @@ export interface BootstrapPayload {
   folderOrder: string[]
   collapsedFolders: string[]
   pinnedCollapsed?: boolean
+  /** Local server-scoped sidebar display preferences. */
+  groupUnreadChats?: boolean
+  includeCronInUnread?: boolean
+  groupRunningChats?: boolean
+  sidebarSortMode?: SidebarSortMode
   archivedCollapsed: boolean
   inspectorVisible: boolean
   /** Present for profile-aware bootstraps; omitted by the legacy single-server path. */

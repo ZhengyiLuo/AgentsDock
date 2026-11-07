@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it } from 'vitest'
 import { setLocale } from '@shared/i18n'
 import type { Event } from '@shared/types'
-import { isSubagentActive, subagentDetailText, subagentDisplayName, subagentLogText, subagentStatusLabel, subagentsFromEvents } from './subagents'
+import { liveCodexSubagentCount, isSubagentActive, subagentDetailText, subagentDisplayName, subagentLogText, subagentStatusLabel, subagentsFromEvents } from './subagents'
 afterEach(() => setLocale('en'))
 
 const event = (seq: number, type: string, patch: Partial<Event> = {}): Event => ({
@@ -15,6 +15,43 @@ const event = (seq: number, type: string, patch: Partial<Event> = {}): Event => 
 })
 
 describe('subagentsFromEvents', () => {
+  it.each(['codex', 'claude'] as const)('localizes only the %s display fallback, preserving native identity and output', backend => {
+    const [agent] = subagentsFromEvents([event(1, 'subagent_state', {
+      backend, subagent_id: 'child', subagent_status: 'stopped', subagent_activity: 'Original subagent output'
+    })], backend)
+    const provider = backend === 'codex' ? 'Codex' : 'Claude'
+    expect(subagentDisplayName(agent)).toBe(`${provider} subagent`)
+    setLocale('zh-CN')
+    expect(subagentDisplayName(agent)).toBe(`${provider} 子 Agent`)
+    expect(subagentLogText(agent)).toContain('Original subagent output')
+    expect(subagentDisplayName({ ...agent, title: 'My subagent' })).toBe('My subagent')
+  })
+
+  it('counts only native live children owned by the current root, including nested children', () => {
+    const states = [
+      event(1, 'subagent_state', { backend: 'codex', subagent_id: 'a', subagent_parent_thread_id: 'root', subagent_status: 'completed' }),
+      event(2, 'subagent_state', { backend: 'codex', subagent_id: 'b', subagent_parent_thread_id: 'a', subagent_status: 'running' }),
+      event(3, 'subagent_state', { backend: 'codex', subagent_id: 'foreign', subagent_root_thread_id: 'elsewhere', subagent_status: 'running' }),
+      event(4, 'subagent_state', { backend: 'codex', subagent_id: 'forked', subagent_parent_thread_id: 'root', subagent_status: 'running', forked: true }),
+      event(5, 'subagent_state', { backend: 'claude', subagent_id: 'claude', subagent_parent_thread_id: 'root', subagent_status: 'running' }),
+    ]
+    expect(liveCodexSubagentCount(states, 'root')).toBe(1)
+    expect(liveCodexSubagentCount(states, 'root')).toBe(1)
+    expect(liveCodexSubagentCount(states, 'unknown')).toBe(0)
+    expect(liveCodexSubagentCount(states, null)).toBe(0)
+    expect(liveCodexSubagentCount([event(6, 'subagent_state', {
+      subagent_id: 'b', subagent_parent_thread_id: 'a', subagent_status: 'stopped'
+    }), ...states], 'root')).toBe(0)
+  })
+
+  it('uses explicit root ownership when bounded history omits the parent, but not unknown or root records', () => {
+    const states = [
+      event(1, 'subagent_state', { subagent_id: 'a', subagent_root_thread_id: 'root', subagent_status: 'running' }),
+      event(2, 'subagent_state', { subagent_id: 'root', subagent_root_thread_id: 'root', subagent_status: 'running' }),
+      event(3, 'subagent_state', { subagent_id: 'unknown', subagent_status: 'running' }),
+    ]
+    expect(liveCodexSubagentCount(states, 'root')).toBe(1)
+  })
   it('does not mislabel OpenCode tasks or their backend-less continuations as Codex agents', () => {
     expect(subagentsFromEvents([
       event(1, 'turn_started', { backend: 'opencode' }),
@@ -153,6 +190,26 @@ describe('subagentsFromEvents', () => {
     expect(subagentLogText(lost)).toContain('Tracking lost')
   })
 
+  it.each(['raw', 'structured'])('keeps one retired tool alias when a delayed %s task identity arrives', source => {
+    const lost = event(7, 'subagent_state', { backend: 'claude', subagent_id: 'tool-1',
+      subagent_tool_id: 'tool-1', subagent_status: 'tracking_lost', subagent_activity: 'Completion is not confirmed' })
+    const delayed = source === 'raw'
+      ? event(8, 'raw_event', { backend: 'claude', raw: JSON.stringify({ type: 'system', subtype: 'task_started',
+        task_id: 'real-task', tool_use_id: 'tool-1', task_type: 'local_agent' }) })
+      : event(8, 'subagent_state', { backend: 'claude', subagent_id: 'real-task',
+        subagent_tool_id: 'tool-1', subagent_status: 'running' })
+    const agents = subagentsFromEvents([lost, delayed])
+    expect(agents).toHaveLength(1)
+    expect(agents[0]).toMatchObject({ status: 'tracking_lost', latestActivity: 'Completion is not confirmed' })
+    expect(isSubagentActive(agents[0])).toBe(false)
+    const completed = subagentsFromEvents([lost, delayed, event(9, 'raw_event', {
+      backend: 'claude', raw: JSON.stringify({ type: 'system', subtype: 'task_notification',
+        task_id: 'real-task', status: 'completed', summary: 'Observed final result' })
+    })])
+    expect(completed).toHaveLength(1)
+    expect(completed[0]).toMatchObject({ status: 'completed', summary: 'Observed final result' })
+  })
+
   it('recognizes an explicitly observed killed task as inactive', () => {
     const [agent] = subagentsFromEvents([event(1, 'subagent_state', { backend: 'claude', subagent_id: 'task', subagent_status: 'killed' })])
     expect(agent.status).toBe('killed')
@@ -214,6 +271,22 @@ describe('subagentsFromEvents', () => {
     ])
     expect(agents).toHaveLength(1)
     expect(agents[0]).toMatchObject({ id: 'task-1', status: 'running', latestActivity: 'Running timeline tests' })
+  })
+
+  it.each(['running', 'tracking_lost'])('merges a background launch receipt with its authoritative %s task', status => {
+    const tool = { id: 'tool-agent', name: 'Agent', input: { description: 'Background review', run_in_background: true } }
+    const agents = subagentsFromEvents([
+      event(1, 'tool_started', { backend: 'claude', tool }),
+      event(2, 'tool_finished', { backend: 'claude', tool, tool_id: tool.id, output: 'Background task started' }),
+      event(3, 'subagent_state', { backend: 'claude', subagent_id: 'task-1',
+        subagent_tool_id: tool.id, subagent_name: 'Background review', subagent_status: status,
+        subagent_activity: status === 'tracking_lost' ? 'Completion is not confirmed' : 'Reviewing source' }),
+      event(4, 'tool_finished', { backend: 'claude', tool, tool_id: tool.id, output: 'Delayed launch receipt' })
+    ])
+    expect(agents).toHaveLength(1)
+    expect(agents[0]).toMatchObject({ id: 'task-1', key: 'claude:run-1:subagent:task-1', status })
+    expect(isSubagentActive(agents[0])).toBe(status === 'running')
+    if (status === 'tracking_lost') expect(agents[0].latestActivity).toBe('Completion is not confirmed')
   })
 
   it.each([

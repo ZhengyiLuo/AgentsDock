@@ -213,6 +213,42 @@ try {
     assert.equal(useAppStore.getState().agentRoutesBySession.source.routes[0].route_id, route.route_id)
   })
 
+  await test('an unlimited route snapshot does not reject an otherwise valid send', async () => {
+    reset()
+    const reference = { session_id: 'target', display_title_snapshot: 'Target', source_text_start: 0, source_text_end: 7, action: 'route' as const, grant_intent: true as const }
+    useAppStore.setState({
+      drafts: { source: '@Target hello' },
+      chatReferencesBySession: { source: [reference] },
+      agentRoutesBySession: { source: { routes: [route], max_routes: null } },
+    })
+    assert.equal(await send(), true)
+    assert.equal(sends, 1)
+  })
+
+  await test('removing an over-capacity chat reference clears only its stale send error', async () => {
+    reset()
+    const reference = { session_id: 'target', display_title_snapshot: 'Target', source_text_start: 0, source_text_end: 7, action: 'route' as const, grant_intent: true as const }
+    useAppStore.setState({
+      drafts: { source: '@Target hello' },
+      chatReferencesBySession: { source: [reference] },
+      agentRoutesBySession: { source: { routes: [], max_routes: 0 } },
+    })
+    assert.equal(await send(), false)
+    assert.match(useAppStore.getState().error ?? '', /route access limit/u)
+    useAppStore.getState().setChatReferencesForSession('source', [reference], 0)
+    assert.match(useAppStore.getState().error ?? '', /route access limit/u)
+
+    useAppStore.getState().setSessionDraft('Plain message', 0)
+    useAppStore.getState().setChatReferencesForSession('source', [], 0)
+    assert.equal(useAppStore.getState().error, null)
+    assert.equal(await send(), true)
+    assert.equal(sends, 1)
+
+    useAppStore.setState({ error: 'Connection unavailable' })
+    useAppStore.getState().setChatReferencesForSession('source', [], 0)
+    assert.equal(useAppStore.getState().error, 'Connection unavailable')
+  })
+
   await test('API route reads and revision deletes encode opaque identifiers; async skip sends its envelope', async () => {
     const requests: Array<{ url: string; method: string; body: unknown }> = []
     globalThis.fetch = async (input, init) => { requests.push({ url: String(input), method: init?.method ?? 'GET', body: init?.body ? JSON.parse(String(init.body)) : null }); return new Response(JSON.stringify({ ok: true, routes: [], max_routes: 16, deleted: true, route_id: 'r /?' }), { status: 200 }) }
@@ -220,7 +256,7 @@ try {
     await api.agentHandoffRoutes('s /?')
     await api.deleteAgentHandoffRoute('s /?', 'r /?', 'revision /?&')
     await api.skipQueuedCrossChatDelivery('s /?', 'q /?', { cross_chat_envelope_id: 'envelope' })
-    assert.match(requests[0].url, /\/s%20%2F%3F\/agent-handoff-routes$/u)
+    assert.match(requests[0].url, /\/s%20%2F%3F\/agent-handoff-routes\?unlimited_routes=true$/u)
     assert.equal(requests[1].method, 'DELETE')
     assert.equal(new URL(requests[1].url).searchParams.get('expected_revision'), 'revision /?&')
     assert.deepEqual(requests[2].body, { cross_chat_envelope_id: 'envelope' })

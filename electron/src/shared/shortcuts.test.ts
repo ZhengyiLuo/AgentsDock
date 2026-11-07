@@ -15,6 +15,9 @@ describe('app shortcut catalog', () => {
     expect(shortcutAccelerator('nextWorkspaceTab')).toBe('Control+Tab')
     expect(shortcutDisplay('previousWorkspaceTab', 'mac')).toBe('⌃⇧⇥')
     expect(shortcutDisplay('focusLeftChatPane', 'mac')).toBe('⌥⌘←')
+    expect(shortcutDisplay('nextChatWorkspace', 'mac')).toBe('⌃⌘→')
+    expect(shortcutDisplay('previousChatWorkspace', 'mac')).toBe('⌃⌘←')
+    expect(shortcutIsAvailable('nextChatWorkspace', 'other')).toBe(false)
     expect(shortcutDisplay('focusRightChatPane', 'other')).toBe('Ctrl+Alt+→')
     expect(shortcutAccelerator('nextServer')).toBe('CmdOrCtrl+Shift+]')
     expect(shortcutDisplay('previousServer', 'mac')).toBe('⇧⌘[')
@@ -42,6 +45,8 @@ describe('app shortcut catalog', () => {
     expect(shortcutKeycaps('attachFiles', 'mac')).toEqual(['⇧', '⌘', 'O'])
     expect(shortcutKeycaps('attachFiles', 'other')).toEqual(['Ctrl', 'Shift', 'O'])
     expect(shortcutKeycaps('sendMessage', 'mac')).toEqual(['↩'])
+    expect(shortcutKeycaps('stopAgent', 'mac')).toEqual(['⎋'])
+    expect(shortcutKeycaps('stopAgent', 'other')).toEqual(['Esc'])
     expect(shortcutKeycaps('settings', 'other')).toEqual(['Ctrl', ','])
   })
 

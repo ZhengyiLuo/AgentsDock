@@ -107,6 +107,25 @@ not reopen the old setup dialog. Before the first message, use the composer's
 Agent picker to switch agents or open My Agents. Credentials, native session
 identity, goals and delegated/job authorization are not copied.
 
+Clicking the sorting button beside the sidebar chat count cycles through
+**Folders → Latest → Name → Folders**. Enter/Space also cycle; hovering or
+pressing ArrowDown opens the checked selection menu for a direct choice.
+A small, regular-weight label in the shared status green beside the button
+confirms the selected mode for two seconds.
+Further selections replace the label and restart its timer; hovering alone does
+not show a confirmation or change the sort order.
+Pointer selections leave no focus halo; keyboard navigation retains its focus indicator.
+**Folders** preserves existing folders and manual ordering;
+**Latest** and **Name** show a flat list without folder headers.
+Latest uses the server's last agent-visible output time, falling back to
+creation time when unavailable, never last-opened/read or generic update time.
+The button sits immediately after the count; a quiet, theme-aware solid divider
+with breathing room separates pinned chats from the ordinary list.
+Unread/running, pinned and archived sections retain their existing priority and
+visibility rules. Sorting is remembered separately for each server, and
+next/previous-chat shortcuts follow the visible order. Drag reordering is only
+available in Folders mode; changing the display order never moves a chat's folder.
+
 Settings → Server starts with collapsed cards showing each saved server's name,
 URL and connection status. Add server is above the cards. Expand a card for
 separate version and identity rows. A token field shows its first four characters
@@ -121,6 +140,20 @@ offline servers fall back to the saved single address. Sharing does not switch
 the active server. The active card also contains restart controls.
 Persistent goals have no server-wide Settings toggle. Updated servers keep the
 capability available by default; each chat retains its own goal controls.
+With a matching server, Claude goals can be set or replaced during current
+work. The app shows the pending request until Claude applies it at its next
+native boundary; setting a goal does not interrupt the current tool or agents.
+Native refusals remain visible and leave the completion condition available
+for retry.
+The Claude goal banner distinguishes a saved goal from actual execution: it
+shows whether Claude is working, idle, waiting for input, or not loaded.
+Elapsed time is shown only when Claude reports it. An idle or unloaded goal
+offers **Continue goal**, which submits the native goal command in the same
+thread; it does not create an automatic restart loop. Native failed evaluations
+remain visible with their reported reason.
+Recovered provider messages use their original timestamps to appear between
+the appropriate live turns. History catch-up does not take ownership of an
+active turn or merge distinct native replies into one import batch.
 The camera-enabled mobile app can scan it from **Servers > Add Server > Scan QR
 code** and authenticates before saving. Older mobile builds need an app update.
 The image does not make a loopback-only server reachable from a phone. See
@@ -128,6 +161,14 @@ The image does not make a loopback-only server reachable from a phone. See
 format and remaining acceptance checks.
 
 <a id="opencode-optional-beta-backend"></a>
+
+## Chat inbox instructions
+
+Expand a sender's inbox group and choose **Edit and send** on a read or unread
+message to place its complete text in that chat's composer. Existing draft text
+and attachments stay in place. Review or change the text, then use the normal
+Send button to issue it as your own instruction. The received message and its
+original sender metadata remain preserved.
 
 ## OpenCode
 
@@ -180,11 +221,21 @@ older history loads on upward navigation. Failed refreshes retain the cache.
 Incoming events are coalesced to one renderer publish per animation frame.
 Timeline rows are virtualized with stable semantic keys.
 
-The chat sidebar temporarily groups unread and running chats above ordinary
-folders, with a blue dot for Unread and green for Running. Running takes
-precedence while a turn is active. Chats appear only once; their saved folder
-and pinned state are unchanged. Reading a completed chat returns it to its
-ordinary section, and empty status groups disappear. Groups and folders use
+Settings → General contains language, appearance and version information.
+Settings → Preferences contains Show reasoning traces and three sidebar switches,
+with sidebar choices remembered locally per server:
+**Unread chats at the top** (on), **Include cron jobs in Unread** (off), and
+**Show Running section** (on). Turning a section off leaves its chats in their
+saved folders or pins, with unread and activity indicators intact. Active chats
+never move into Unread while Running is hidden. Cron-only unread output stays
+in its folder by default; an unread ordinary reply still promotes the chat even
+if a later cron result arrives. Explicit **Mark unread** also promotes it.
+Cron attribution requires the matching server change; older servers or pending
+history recovery retain ordinary unread grouping until provenance is known.
+
+Chats appear only once; their saved folder and pinned state are unchanged.
+Reading a completed chat returns it to its ordinary section, and empty status
+groups disappear. Groups and folders use
 right-aligned collapse arrows. Status collapse state lasts within the current
 workspace, and next/previous-chat shortcuts follow the visible group order.
 Pinned also collapses, remembers its state per server across reopening, and
@@ -212,7 +263,33 @@ TIFF attachments and workspace images use a PNG preview of the first page in
 the desktop media viewer; downloading or opening the original keeps the TIFF
 file unchanged. Preview decoding runs outside the app's main thread.
 
-Chat remains the pinned default tab. Use `Cmd+O` to search
+Workspace layouts are opt-in: ordinary chats show their title and folder on
+the first line, with a copyable provider session ID beneath. **Show workspaces**
+is an icon button beside Scheduled jobs and Terminal. Turning it off leaves
+workspace mode entirely: only the focused chat remains, with its ordinary
+header, and empty pane selectors disappear. Turning it on restores the saved
+workspace and its pane assignments. Neither action creates or deletes layouts
+or discards drafts. Ordinary sidebar navigation while workspace mode is off
+does not reopen or overwrite the saved layout. Its tooltip changes between
+Show workspaces and Hide workspaces.
+Use the bar's **+ / New workspace** button to create the first default workspace
+around the current chat, or add subsequent workspaces. Layout controls appear
+after a workspace exists. View visibility is remembered per server, independently
+of existing workspaces.
+Existing named and multi-pane workspaces are retained;
+the old automatically created single-chat default is not treated as opt-in.
+Closing the last workspace returns to ordinary chat without deleting its chat
+or draft. These layouts are local, server-scoped preferences, not new folders
+on disk and not changes to a chat's working directory.
+
+Workspace chat headers stay compact: title, copyable session ID and actions on
+one line, without a folder chip. Use the chat menu's **Change folder** submenu
+to pick a saved folder; the current folder is checked. Folder changes affect
+that chat's sidebar grouping, not its working directory or other panes.
+
+The redundant pinned Chat/file strip is hidden while viewing a conversation.
+When a file is open, its tabs and the Chat return button remain available.
+Use the header's Open file button or `Cmd+O` to search
 and open a UTF-8 source file, switch explicitly from read-only to edit mode,
 and save with `Cmd+S`; `Shift+Cmd+O` remains the attachment picker. Syntax
 support is loaded only after a file opens, clean inactive files are evicted
@@ -220,19 +297,54 @@ from memory, and revision-checked saves prevent overwriting agent changes.
 Files above 512 KiB use a lightweight read-only text viewer instead of the
 syntax parser so opening source never competes with the chat renderer.
 
-The **Changes** tab reviews the selected workspace's entire Git worktree, not
-only changes attributed to an agent turn. Open it to inspect staged, unstaged,
-untracked and conflicted files; stage/unstage whole files; review and commit the
-staged set; or resolve text conflicts before continuing an existing merge or
-rebase. Abort requires confirmation. Git reads happen only on opening the tab,
-explicit refresh, file selection and action reconciliation—there is no polling.
-Repository revisions fence mutations against changes made by other agents or
-editors. This requires matching standalone AgentsServer Git endpoints and the
-native operator connection; shared-chat web guests have no Git controls.
+File tabs retain **Show chat / Full screen**, **Editor left / Editor right**,
+and **Split right** inside each chat pane, including workspace layouts. The
+Files tree's **Open to the Side** targets that pane's second editor group.
+Split layout and unsaved files are restored per chat; shortcuts still belong
+only to the focused chat and editor. Narrow editor toolbars wrap their controls.
 
-This first cut does not create branches/merges, push, or manage PRs/MRs. Binary
-conflicts and repositories requiring executable Git hooks/custom filters may
-need the terminal; the app reports that rather than bypassing repository policy.
+The **Changes** entry has been removed from this surface, including workspace
+mode. The underlying Git APIs and component are retained but are not exposed
+by the chat/file tab strip. `Cmd+1` returns to Chat and `Cmd+2` selects the first
+open file; there is no hidden Changes tab in keyboard navigation.
 
 See [FEATURE_PARITY.md](FEATURE_PARITY.md) for the implementation contract and
 verification status.
+
+## Code references and IntelliSense
+
+The composer's **Files and symbols** button opens **Files** and **Symbols** search
+within the selected chat's working directory on its connected server. Select a
+file or symbol, optionally adjust its line range, and attach it to the draft.
+References remain ordinary editable draft text; they are sent with your next
+message and can be edited or removed before sending. Symbol discovery starts
+when requested and uses the language server's project index.
+
+The Files explorer's **New file** action opens an Untitled editor and an inline
+filename field in the selected directory. Enter a name such as `demo.py` and
+press Enter to save it; the extension selects the editor language. Existing
+files are never overwritten by inline creation. Escape leaves the buffer
+unsaved, and Command/Control-S still offers Save As. Empty unnamed buffers are
+discarded when leaving and reopening a chat; nonempty drafts and named empty
+files are retained. **New folder** keeps its inline naming flow, and saved
+files can be renamed through their explorer context menu.
+
+Python and TypeScript/JavaScript source files in the workspace editor support
+project completion (**Ctrl+Space**), hover information, diagnostic underlines,
+**F12** to go to a definition, and **Shift+F12** to find references. The toolbar
+also exposes both navigation actions. Definition and reference selections open
+in the originating editor pane. Unsaved edits reach that editor's language
+server with debounced synchronization; they are saved only through the existing
+save workflow.
+
+This requires matching AgentsServer support and the appropriate tools on the
+server machine: Pyright for Python, or typescript-language-server with a
+compatible TypeScript installation for TypeScript/JavaScript. See
+[workspace intelligence setup](../server/docs/SERVER_REFERENCE.md#workspace-intelligence).
+The servers use native project configuration, including `pyrightconfig.json`
+and `tsconfig.json`. Each connection is rooted in the chat's workspace and is
+closed when its editor or context changes.
+
+If a tool is missing or a connection fails, **Setup** explains the requirement
+and **Retry** explicitly reconnects after it is resolved. File editing and chat
+remain available; the app does not install language servers automatically.

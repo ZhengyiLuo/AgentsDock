@@ -42,6 +42,11 @@ export function Inspector({ sessionId, onDigest, onJob, onTerminal, onProcesses,
       folder: value.folder,
       cwd: value.cwd,
       backend: value.backend,
+      backend_locked: value.backend_locked,
+      codex_provider: value.codex_provider,
+      provider_connection: value.provider_connection,
+      codex_provider_catalog: value.codex_provider_catalog,
+      provider_connection_catalog: value.provider_connection_catalog,
       model: value.model,
       effort: value.effort,
       system_prompt: value.system_prompt,
@@ -52,6 +57,8 @@ export function Inspector({ sessionId, onDigest, onJob, onTerminal, onProcesses,
       codex_thread_id: value.codex_thread_id,
       claude_session_id: value.claude_session_id,
       cursor_session_id: value.cursor_session_id,
+      opencode_session_id: value.opencode_session_id,
+      gemini_session_id: value.gemini_session_id,
     } : undefined
   }))
   const snapshotFiles = useAppStore(state => state.snapshots[sessionId]?.files)
@@ -93,8 +100,9 @@ export function Inspector({ sessionId, onDigest, onJob, onTerminal, onProcesses,
       && state.selectedSessionId === sessionId
       && !state.workspaceAdopting
   }
-  const providerSessionId = session?.session_id?.trim() || session?.codex_thread_id?.trim() || session?.claude_session_id?.trim() || session?.cursor_session_id?.trim() || ''
-  const forkDisabled = !connected || running || stopping || admitting
+  const providerSessionId = session?.session_id?.trim() || session?.codex_thread_id?.trim() || session?.claude_session_id?.trim() || session?.cursor_session_id?.trim() || session?.opencode_session_id?.trim() || session?.gemini_session_id?.trim() || ''
+  const forkSupported = session?.backend !== 'gemini' || health?.capabilities?.gemini_backend?.features?.fork === true
+  const forkDisabled = !forkSupported || !connected || running || stopping || admitting
   const copySessionId = async () => {
     if (!providerSessionId || !scopeIsCurrent()) return
     try {
@@ -199,7 +207,7 @@ export function Inspector({ sessionId, onDigest, onJob, onTerminal, onProcesses,
       <Field label="Name"><TextInput value={title} onChangeText={setTitle} onBlur={() => { const clean = title.trim(); if (scopeIsCurrent() && clean && clean !== session.title) void update(sessionId, { title: clean }, profileGeneration) }} style={[styles.input, { color: colors.text, borderColor: colors.border, backgroundColor: colors.surface }]} /></Field>
       <Field label="Model"><ChoiceField title="Model" value={session.model ?? ''} options={modelOptions} onChange={model => { if (scopeIsCurrent()) void update(sessionId, { model, effort: runtimeEffortAfterModelChange(catalog, session.backend, model, session.effort) }, profileGeneration) }} /></Field>
       {isCustomProvider(session) ? <Field label="Model ID"><TextInput key={`${session.id}:${session.model}`} testID="chat-api-model-id" defaultValue={session.model ?? ''} autoCapitalize="none" autoCorrect={false} placeholder="default" placeholderTextColor={colors.muted} onEndEditing={event => { const model = event.nativeEvent.text.trim(); if (scopeIsCurrent() && model !== (session.model ?? '')) void update(sessionId, { model: model || null, effort: null }, profileGeneration) }} style={[styles.input, { color: colors.text, borderColor: colors.border, backgroundColor: colors.surface }]} /></Field> : null}
-      {session.backend !== 'cursor' ? <Field label="Effort"><ChoiceField title="Effort" value={session.effort ?? ''} options={effortOptions} onChange={effort => { if (scopeIsCurrent()) void update(sessionId, { effort }, profileGeneration) }} /></Field> : null}
+      {session.backend !== 'cursor' && (session.backend !== 'gemini' && session.backend !== 'opencode' || effortOptions.some(option => option.value)) ? <Field label="Effort"><ChoiceField title="Effort" value={session.effort ?? ''} options={effortOptions} onChange={effort => { if (scopeIsCurrent()) void update(sessionId, { effort }, profileGeneration) }} /></Field> : null}
       {selectionError ? <Text accessibilityRole="alert" style={[styles.hint, { color: colors.orange }]}>{selectionError}</Text> : null}
       <Field label="Agent jobs"><ChoiceField title="Agent jobs" disabled={!jobsAccess.available} value={jobsAccess.effective} options={jobsAccessOptions} onChange={value => { if (scopeIsCurrent() && jobsAccess.available) void update(sessionId, { provider_jobs_access: value as ProviderJobsAccess }, profileGeneration) }} /></Field>
       <Text style={[styles.hint, { color: colors.muted }]}>{jobsAccess.available ? `${providerJobsAccessLabel(jobsAccess.effective)}${jobsAccess.inheritedDefault ? ' (server default)' : ''}. ${providerJobsAccessDescription(jobsAccess.effective)}` : 'Update AgentsServer to set Read-only or Blocked. Human job controls remain available.'}</Text>

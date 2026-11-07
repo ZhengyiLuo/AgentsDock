@@ -212,7 +212,7 @@ export function createDefaultProfileSettings(
 
 export const DEFAULT_CHAT_DEFAULTS: ChatDefaults = { backend: 'codex', model: '', effort: '', folder: 'General', cwd: '' }
 
-const CHAT_BACKENDS: Backend[] = ['claude', 'codex', 'cursor']
+const CHAT_BACKENDS: Backend[] = ['claude', 'codex', 'cursor', 'opencode', 'gemini']
 
 function normalizeChatDefaults(value: unknown): ChatDefaults {
   const parsed = isRecord(value) ? value : {}
@@ -220,7 +220,7 @@ function normalizeChatDefaults(value: unknown): ChatDefaults {
   return {
     backend,
     ...(parsed.codex_provider === 'custom' && backend === 'codex' ? { codex_provider: 'custom' as const } : {}),
-    ...(parsed.provider_connection === 'custom' && (backend === 'claude' || backend === 'cursor') ? { provider_connection: 'custom' as const } : {}),
+    ...(parsed.provider_connection === 'custom' && backend !== 'codex' ? { provider_connection: 'custom' as const } : {}),
     model: typeof parsed.model === 'string' ? parsed.model : DEFAULT_CHAT_DEFAULTS.model,
     effort: typeof parsed.effort === 'string' ? parsed.effort : DEFAULT_CHAT_DEFAULTS.effort,
     folder: typeof parsed.folder === 'string' && parsed.folder.trim() ? parsed.folder : DEFAULT_CHAT_DEFAULTS.folder,

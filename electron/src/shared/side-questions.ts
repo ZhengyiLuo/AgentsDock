@@ -1,6 +1,7 @@
 import type { Backend, Health } from './types'
 
-export const SIDE_QUESTION_MAX_CHARS = 8000
+// Match the server's request-body bound; don't impose a smaller text ceiling.
+export const SIDE_QUESTION_MAX_CHARS = 512 * 1024
 export const SIDE_QUESTION_MAX_HISTORY_ITEMS = 32
 export const SIDE_QUESTION_MAX_HISTORY_CHARS = 60000
 

@@ -1,0 +1,106 @@
+.workspace-editor-codemirror {
+  display: flex;
+  flex-direction: column;
+}
+
+.workspace-editor-code-content {
+  min-height: 0;
+  min-width: 0;
+  flex: 1;
+  overflow: hidden;
+}
+
+.code-intelligence-toolbar,
+.code-intelligence-locations-heading {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+  padding: var(--space-1) var(--space-3);
+  color: var(--muted);
+  background: var(--surface);
+  font-size: var(--text-size-meta);
+  border-bottom: 1px solid var(--border);
+}
+
+.code-intelligence-toolbar .quiet-button,
+.code-intelligence-locations-heading .quiet-button {
+  font-size: var(--text-size-meta);
+  min-height: var(--control-height-sm);
+  padding: var(--space-1) var(--space-2);
+}
+
+.code-intelligence-status,
+.code-intelligence-locations-heading > span {
+  flex: 1;
+  min-width: 0;
+}
+
+.code-intelligence-setup {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-3);
+  font-size: var(--text-size-meta);
+  color: var(--muted);
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+  overflow-wrap: anywhere;
+  max-height: 120px;
+  overflow-y: auto;
+}
+
+.code-intelligence-setup code {
+  font-family: var(--font-mono);
+  user-select: text;
+  white-space: pre-wrap;
+}
+
+.code-intelligence-locations {
+  max-height: 180px;
+  flex-shrink: 0;
+  overflow-y: auto;
+  background: var(--surface);
+}
+
+.code-intelligence-location {
+  display: flex;
+  gap: var(--space-3);
+  justify-content: space-between;
+  width: 100%;
+  padding: var(--space-2) var(--space-3);
+  border: 0;
+  background: transparent;
+  color: var(--text);
+  text-align: left;
+  font-family: var(--font-mono);
+  font-size: var(--text-size-meta);
+  font-weight: var(--text-weight-body);
+  cursor: pointer;
+}
+
+.code-intelligence-location:hover {
+  background: var(--interaction-hover);
+}
+
+.code-intelligence-location:focus-visible {
+  outline: 1px solid var(--accent);
+  outline-offset: -1px;
+}
+
+.code-intelligence-location > span:first-child {
+  overflow-wrap: anywhere;
+  min-width: 0;
+}
+
+.code-intelligence-location > span:last-child {
+  flex-shrink: 0;
+  color: var(--muted);
+}
+
+.code-intelligence-result-limit {
+  display: block;
+  padding: var(--space-2) var(--space-3);
+  color: var(--muted);
+  font-size: var(--text-size-meta);
+}

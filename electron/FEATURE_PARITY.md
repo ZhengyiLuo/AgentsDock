@@ -39,7 +39,7 @@ packaged-app smoke pass.
 - [x] Paged newest-first inspector media grid with lazy video thumbnail loading
 - [x] Authorized relative server-file links
 - [x] Codex-style per-file unified diff review and full-diff copy
-- [x] Per-chat cwd explorer, quick open, pinned Chat/file tabs, lazy syntax
+- [x] Per-chat cwd explorer, quick open, file tabs with Chat return, lazy syntax
   highlighting, draft recovery, and revision-checked text editing
 - [ ] Details-panel Files tab: folder browsing, editor file actions, remembered
   Details/Files selection and split-chat ownership implemented; native desktop interaction remains pending because computer

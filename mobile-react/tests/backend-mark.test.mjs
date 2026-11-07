@@ -12,8 +12,9 @@ globalThis.IS_REACT_ACT_ENVIRONMENT = true
 const outfile = resolve('build/tmp', `backend-mark-${process.pid}.mjs`)
 const mocks = {
   'react-native': `export const Image='Image',View='View'; export const StyleSheet={create:x=>x};`,
-  'lucide-react-native': `export const MousePointer2='MousePointer2';`,
-  '../theme': `export const radius={sm:6};`,
+  'lucide-react-native': `export const MousePointer2='MousePointer2',Code2='Code2';`,
+  'expo-image': `export const Image='VectorImage';`,
+  '../theme': `export const radius={sm:6}; export const usePalette=()=>({text:'#111'});`,
 }
 await build({
   entryPoints: ['src/components/BackendMark.tsx'], outfile, bundle: true, platform: 'node', format: 'esm',
@@ -54,5 +55,18 @@ test('Cursor continues to render locally without an image request', async () => 
   try {
     assert.equal(tree.root.findAllByType('Image').length, 0)
     assert.equal(tree.root.findAllByType('MousePointer2').length, 1)
+  } finally { await act(async () => tree.unmount()) }
+})
+
+test('Gemini embeds the desktop multicolor artwork without a remote request or tint', async () => {
+  const original = await readFile('assets/backend-gemini.svg')
+  let tree
+  await act(async () => { tree = TestRenderer.create(React.createElement(BackendMark, { backend: 'gemini', size: 24 })) })
+  try {
+    const image = tree.root.findByType('VectorImage')
+    assert.match(image.props.source.uri, /^data:image\/svg\+xml;base64,/)
+    assert.deepEqual(Buffer.from(image.props.source.uri.split(',')[1], 'base64'), original)
+    assert.deepEqual(image.props.style, { width: 24, height: 24 })
+    assert.equal(image.props.tintColor, undefined)
   } finally { await act(async () => tree.unmount()) }
 })

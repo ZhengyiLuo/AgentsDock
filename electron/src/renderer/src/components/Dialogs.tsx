@@ -4,6 +4,7 @@ import { localeOptions } from '@shared/locales'
 import { useLocale } from '../lib/i18n'
 import { forwardRef, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type FormEvent, type KeyboardEvent, type ReactNode } from 'react'
 import * as Dialog from '@radix-ui/react-dialog'
+import * as Switch from '@radix-ui/react-switch'
 import { ArrowRight, Check, ChevronDown, ChevronRight, CircleAlert, Clock3, Command, Copy, Download, ExternalLink, FileText, FolderOpen, GitFork, Import, KeyRound, Laptop, LoaderCircle, Network, RefreshCw, RotateCcw, Search, Server, Sparkles, X } from 'lucide-react'
 import type { AppUpdateStatus, AppUpdateTrack, Backend, BulkImportSessionItem, BulkImportSessionResult, ChatReference, ChatReferenceAction, CoordinatedServerUpdate, CreateJobInput, Health, Job, JobContextMode, JobScheduleKind, LocalSessionCandidate, ServerRestartBlockerSnapshot, ServerSetupCapabilities, ServerSetupProgress, ServerUpdateStatus, ServerUpdateTrack, Session, TeamReference, UpdateJobInput, WorkspaceProfileScope } from '@shared/types'
 import { cursorLocalSessionImportSupported, geminiLocalSessionImportSupported, localSessionImportKey, localSessionImportSupported } from '@shared/local-session-import'
@@ -456,7 +457,7 @@ export function Dialogs() {
   </>
 }
 
-type AppSettingsSection = 'general' | 'shortcuts' | 'server' | 'providers' | 'updates'
+type AppSettingsSection = 'general' | 'preferences' | 'shortcuts' | 'server' | 'providers' | 'updates'
 
 export function AppSettingsDialog({ serverSettings, onServerUpdatesVisible, onServerReleaseChecksVisible, onCoordinatedServerUpdate }: {
   serverSettings?: ReactNode; serverUpdates?: ReactNode; onServerUpdatesVisible?: (visible: boolean) => void
@@ -471,6 +472,9 @@ export function AppSettingsDialog({ serverSettings, onServerUpdatesVisible, onSe
   const health = useAppStore(state => state.health)
   const profiles = useAppStore(state => state.profiles)
   const activeProfileId = useAppStore(state => state.activeProfileId)
+  const groupUnreadChats = useAppStore(state => state.groupUnreadChats)
+  const includeCronInUnread = useAppStore(state => state.includeCronInUnread)
+  const groupRunningChats = useAppStore(state => state.groupRunningChats)
   const open = appSettingsOpen || legacyServerSettingsOpen
   const [section, setSection] = useState<AppSettingsSection>('general')
   const [providerRequest, setProviderRequest] = useState<{ backend?: Backend }>()
@@ -498,7 +502,7 @@ export function AppSettingsDialog({ serverSettings, onServerUpdatesVisible, onSe
         return
       }
       if (next === 'appearance') setSection('general')
-      else if (next === 'general' || next === 'shortcuts' || next === 'server' || next === 'providers' || next === 'updates') setSection(next)
+      else if (next === 'general' || next === 'preferences' || next === 'shortcuts' || next === 'server' || next === 'providers' || next === 'updates') setSection(next)
     }
     window.addEventListener('agentsdock:app-settings-section', selectSection)
     return () => window.removeEventListener('agentsdock:app-settings-section', selectSection)
@@ -611,6 +615,7 @@ export function AppSettingsDialog({ serverSettings, onServerUpdatesVisible, onSe
           <Dialog.Title>{t('settings.title')}</Dialog.Title>
           <nav aria-label={t('settings.sections')}>
             <button ref={section === 'general' ? activeSectionRef : undefined} type="button" className={section === 'general' ? 'active' : ''} aria-current={section === 'general' ? 'page' : undefined} onClick={() => setSection('general')}><span>{t('settings.general')}</span></button>
+            <button ref={section === 'preferences' ? activeSectionRef : undefined} type="button" className={section === 'preferences' ? 'active' : ''} aria-current={section === 'preferences' ? 'page' : undefined} onClick={() => setSection('preferences')}><span>{t('settings.preferences')}</span></button>
             <button ref={section === 'shortcuts' ? activeSectionRef : undefined} type="button" className={section === 'shortcuts' ? 'active' : ''} aria-current={section === 'shortcuts' ? 'page' : undefined} onClick={() => setSection('shortcuts')}><span>{t('settings.keyboardShortcuts')}</span></button>
             <button ref={section === 'server' ? activeSectionRef : undefined} type="button" className={section === 'server' ? 'active' : ''} aria-current={section === 'server' ? 'page' : undefined} onClick={() => setSection('server')}><span>{t('settings.server')}</span></button>
             <button ref={section === 'providers' ? activeSectionRef : undefined} type="button" className={section === 'providers' ? 'active' : ''} aria-current={section === 'providers' ? 'page' : undefined} onClick={() => setSection('providers')}><span>{t('settings.aiProviders')}</span></button>
@@ -642,7 +647,6 @@ export function AppSettingsDialog({ serverSettings, onServerUpdatesVisible, onSe
                   <option value="dark">{t('settings.darkTheme')}</option>
                 </select>
               </label>
-              <ReasoningDisplaySettings />
               <div className="app-settings-row">
                 <strong className="app-settings-row-title">AgentsDock</strong>
                 <span className="app-settings-value">{update?.currentVersion ? t('settings.version', { version: update.currentVersion }) : t('settings.versionUnavailable')}</span>
@@ -651,6 +655,24 @@ export function AppSettingsDialog({ serverSettings, onServerUpdatesVisible, onSe
                 <strong className="app-settings-row-title">AgentsServer</strong>
                 <span className="app-settings-value">{serverVersion ? t('settings.version', { version: serverVersion }) : t('settings.versionUnavailable')}</span>
               </div>
+            </div>
+          </section>}
+          {section === 'preferences' && <section className="app-settings-section" aria-labelledby="app-settings-preferences-title">
+            <header><h2 id="app-settings-preferences-title">{t('settings.preferences')}</h2></header>
+            <div className="app-settings-list">
+              <ReasoningDisplaySettings />
+              <label className="app-settings-row">
+                <div className="app-settings-row-copy"><strong>{t('settings.groupUnreadChats')}</strong><span id="group-unread-chats-help">{t('settings.groupUnreadChatsHelp')}</span></div>
+                <Switch.Root className="settings-switch" aria-label={t('settings.groupUnreadChats')} aria-describedby="group-unread-chats-help" checked={groupUnreadChats} onCheckedChange={value => useAppStore.getState().setGroupUnreadChats(value)}><Switch.Thumb className="settings-switch-thumb" /></Switch.Root>
+              </label>
+              <label className="app-settings-row">
+                <div className="app-settings-row-copy"><strong>{t('settings.includeCronInUnread')}</strong><span id="include-cron-in-unread-help">{t('settings.includeCronInUnreadHelp')}</span></div>
+                <Switch.Root className="settings-switch" aria-label={t('settings.includeCronInUnread')} aria-describedby="include-cron-in-unread-help" checked={includeCronInUnread} onCheckedChange={value => useAppStore.getState().setIncludeCronInUnread(value)}><Switch.Thumb className="settings-switch-thumb" /></Switch.Root>
+              </label>
+              <label className="app-settings-row">
+                <div className="app-settings-row-copy"><strong>{t('settings.groupRunningChats')}</strong><span id="group-running-chats-help">{t('settings.groupRunningChatsHelp')}</span></div>
+                <Switch.Root className="settings-switch" aria-label={t('settings.groupRunningChats')} aria-describedby="group-running-chats-help" checked={groupRunningChats} onCheckedChange={value => useAppStore.getState().setGroupRunningChats(value)}><Switch.Thumb className="settings-switch-thumb" /></Switch.Root>
+              </label>
             </div>
           </section>}
           {section === 'shortcuts' && <KeyboardShortcutsSettings />}

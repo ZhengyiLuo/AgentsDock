@@ -1,4 +1,4 @@
-import { cleanup, render, screen, waitFor } from '@testing-library/react'
+import { act, cleanup, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { AgentsDockAPI } from '@shared/ipc'
@@ -7,6 +7,108 @@ import { useAppStore } from '../store/app-store'
 import { RuntimeHealthNotice, RuntimeHealthPanel } from './RuntimeHealth'
 
 afterEach(cleanup)
+
+describe('server transport failures are separate from provider authentication', () => {
+  const setupConnection = () => {
+    useAppStore.setState({ activeProfileId: 'test', profileGeneration: 1, connected: true,
+      health: { ok: true, server_version: '0.1.25' }, runtimeCatalog: readyCatalog,
+      sessions: [], snapshots: {}, profiles: [], error: 'fetch failed' })
+    Object.assign(window.agentsDock, { servers: { refresh: vi.fn().mockResolvedValue({
+      health: { ok: true }, profiles: []
+    }) } })
+  }
+  it.each(['codex', 'claude', 'cursor', 'gemini'] as const)('labels %s transport failure as a server warning without login instructions', backend => {
+    setupConnection()
+    const { container } = render(<RuntimeHealthNotice backend={backend} sessionId="chat" admissionError="TypeError: fetch failed" />)
+    expect(screen.getByText('AgentsServer')).toBeInTheDocument()
+    expect(screen.getByText('Reported server version: 0.1.25')).toBeInTheDocument()
+    expect(container.querySelector('.runtime-health-row')).toHaveClass('warning')
+    expect(container.querySelector('.runtime-health-row')).not.toHaveClass('ready')
+    expect(screen.getByRole('button', { name: 'Reconnect server' })).toBeEnabled()
+    expect(screen.queryByText('Configure API')).not.toBeInTheDocument()
+    expect(screen.queryByText('Recheck')).not.toBeInTheDocument()
+  })
+  it('does not offer desktop server reconnection in the restricted shared browser', () => {
+    setupConnection()
+    Object.assign(window.agentsDock, { sharedChat: true })
+    render(<RuntimeHealthNotice backend="codex" sessionId="chat" admissionError="Failed to fetch" />)
+    expect(screen.queryByRole('button', { name: 'Reconnect server' })).not.toBeInTheDocument()
+    expect(window.agentsDock.servers.refresh).not.toHaveBeenCalled()
+  })
+  it('reconnects only the captured server and clears its failure after verification, without rechecking login or sending', async () => {
+    setupConnection()
+    const recovered = vi.fn()
+    render(<RuntimeHealthNotice backend="codex" sessionId="chat" admissionError="fetch failed" onConnectionRecovered={recovered} />)
+    await userEvent.click(screen.getByRole('button', { name: 'Reconnect server' }))
+    expect(window.agentsDock.servers.refresh).toHaveBeenCalledExactlyOnceWith('test', 1)
+    expect(window.agentsDock.runtime.catalog).not.toHaveBeenCalled()
+    expect(recovered).toHaveBeenCalledOnce()
+    expect(useAppStore.getState().error).toBeNull()
+  })
+  it('keeps the failure when verification fails and allows another explicit reconnect', async () => {
+    setupConnection()
+    vi.mocked(window.agentsDock.servers.refresh).mockResolvedValue({ health: null,
+      profiles: [{ id: 'test', lastConnectionError: 'Invalid server token' }] } as never)
+    const recovered = vi.fn()
+    render(<RuntimeHealthNotice backend="codex" sessionId="chat" admissionError="fetch failed" onConnectionRecovered={recovered} />)
+    await userEvent.click(screen.getByRole('button', { name: 'Reconnect server' }))
+    expect(recovered).not.toHaveBeenCalled()
+    expect(useAppStore.getState().error).toBe('Invalid server token')
+    expect(screen.getByRole('button', { name: 'Reconnect server' })).toBeEnabled()
+  })
+  it('ignores a late reconnect after switching server', async () => {
+    setupConnection()
+    let resolve!: (value: never) => void
+    vi.mocked(window.agentsDock.servers.refresh).mockImplementation(() => new Promise(r => { resolve = r }))
+    const recovered = vi.fn()
+    render(<RuntimeHealthNotice backend="codex" sessionId="chat" admissionError="fetch failed" onConnectionRecovered={recovered} />)
+    await userEvent.click(screen.getByRole('button', { name: 'Reconnect server' }))
+    act(() => useAppStore.setState({ activeProfileId: 'another', profileGeneration: 2, error: 'Keep other error' }))
+    await act(async () => resolve({ health: { ok: true } } as never))
+    expect(recovered).not.toHaveBeenCalled()
+    expect(useAppStore.getState().error).toBe('Keep other error')
+  })
+  it.each(['chat', 'error', 'unmount'] as const)('ignores a late reconnect after the notice changes: %s', async change => {
+    setupConnection()
+    let resolve!: (value: never) => void
+    vi.mocked(window.agentsDock.servers.refresh).mockImplementation(() => new Promise(r => { resolve = r }))
+    const recovered = vi.fn()
+    const { rerender, unmount } = render(<RuntimeHealthNotice backend="codex" sessionId="chat" admissionError="fetch failed" onConnectionRecovered={recovered} />)
+    await userEvent.click(screen.getByRole('button', { name: 'Reconnect server' }))
+    if (change === 'unmount') unmount()
+    else rerender(<RuntimeHealthNotice backend="codex" sessionId={change === 'chat' ? 'another-chat' : 'chat'} admissionError={change === 'error' ? 'Failed to fetch' : 'fetch failed'} onConnectionRecovered={recovered} />)
+    await act(async () => resolve({ health: { ok: true } } as never))
+    expect(recovered).not.toHaveBeenCalled()
+    expect(useAppStore.getState().error).toBe('fetch failed')
+  })
+  it.each(['success', 'failure'] as const)('does not apply another server’s late CLI recheck %s', async outcome => {
+    setupConnection()
+    let resolve!: (value: RuntimeCatalog) => void
+    let reject!: (error: Error) => void
+    vi.mocked(window.agentsDock.runtime.catalog).mockImplementation(() => new Promise((r, j) => { resolve = r; reject = j }))
+    render(<RuntimeHealthPanel />)
+    await userEvent.click(screen.getByRole('button', { name: 'Recheck CLIs' }))
+    const nextCatalog: RuntimeCatalog = { backends: {} }
+    act(() => useAppStore.setState({ activeProfileId: 'another', profileGeneration: 2, runtimeCatalog: nextCatalog, error: 'Keep other error' }))
+    await act(async () => {
+      if (outcome === 'success') resolve(readyCatalog)
+      else reject(new Error('Old server failed'))
+    })
+    expect(useAppStore.getState().runtimeCatalog).toBe(nextCatalog)
+    expect(useAppStore.getState().error).toBe('Keep other error')
+  })
+  it.each(['codex', 'claude'] as const)('keeps a running %s chat quiet despite cached signed-out diagnostics', backend => {
+    setupConnection()
+    useAppStore.setState({ runtimeCatalog: { backends: { [backend]: { models: [], efforts: [], diagnostic: {
+      backend, status: 'unauthenticated', available: false, authenticated: false, message: 'Old login error', action: 'Please log in'
+    } } } }, snapshots: { chat: { session: { id: 'chat', backend, title: 'Chat' }, events: [
+      { id: '1', seq: 1, session_id: 'chat', backend, ts: '', type: 'error', run_id: 'old', message: 'Old login error' },
+      { id: '2', seq: 2, session_id: 'chat', backend, ts: '', type: 'turn_started', run_id: 'new' }
+    ], queuedTurns: [], files: [], hasMoreEvents: false, filesTotal: 0, cachedAt: 0 } } })
+    const { container } = render(<RuntimeHealthNotice backend={backend} sessionId="chat" />)
+    expect(container).toBeEmptyDOMElement()
+  })
+})
 
 it('labels a Gemini API error as Gemini, not Codex', () => {
   useAppStore.setState({ health: null, runtimeCatalog: null, snapshots: {}, sessions: [] })
@@ -184,6 +286,148 @@ describe('passive Claude authentication in the composer', () => {
     } } }, runtimeCatalog: null, snapshots: {} })
     render(<RuntimeHealthNotice backend="claude" sessionId="claude-chat" />)
     expect(screen.queryByText('Claude Code is not installed.')).not.toBeInTheDocument()
+  })
+})
+
+describe('latest chat error ownership', () => {
+  const oldError = 'stream disconnected: An error occurred while processing the request.'
+  const latestError = 'The latest provider request failed.'
+  const event = (type: string, run: string | null, seq: number, extra: Partial<Event> = {}): Event => ({
+    id: `event-${seq}`, seq, session_id: 'chat', backend: 'codex',
+    type, run_id: run, ts: '2026-10-01T03:44:38Z', ...extra,
+  })
+  const setup = (events: Event[]) => {
+    useAppStore.setState({ health: null, runtimeCatalog: readyCatalog, sessions: [], snapshots: {
+      chat: { session: { id: 'chat', title: 'Chat', backend: 'codex' }, events,
+        queuedTurns: [], files: [], hasMoreEvents: true, filesTotal: 0, cachedAt: 0 },
+    } })
+  }
+  const failedRun = [
+    event('turn_started', 'old-run', 1),
+    event('error', 'old-run', 2, { message: oldError }),
+    event('turn_finished', 'old-run', 3, { exit_code: 1, is_error: true }),
+  ]
+
+  it('does not revive an old failure when subagent snapshots arrive after a successful reply', () => {
+    setup([
+      ...failedRun,
+      event('turn_started', 'latest-run', 4),
+      event('assistant_text', 'latest-run', 5, { text: 'The requested work is complete.' }),
+      event('turn_finished', 'latest-run', 6, { exit_code: 0 }),
+      event('subagent_state', 'old-run', 7, { subagent_id: 'child', subagent_status: 'completed' }),
+      event('subagent_state', 'old-run', 8, { subagent_id: 'child', subagent_status: 'completed' }),
+    ])
+    const { container } = render(<RuntimeHealthNotice backend="codex" sessionId="chat" />)
+    expect(container).toBeEmptyDOMElement()
+  })
+
+  it.each(['subagent_state', 'codex_goal_updated', 'codex_token_usage', 'raw_event'])(
+    'ignores late %s attribution when selecting a run from a bounded history window', type => {
+      setup([...failedRun, event('turn_finished', 'latest-run', 4, { exit_code: 0 }),
+        event(type, 'old-run', 5, { error: 'Background diagnostic' })])
+      const { container } = render(<RuntimeHealthNotice backend="codex" sessionId="chat" />)
+      expect(container).toBeEmptyDOMElement()
+    },
+  )
+
+  it('keeps the latest failure visible despite late snapshots from a different successful run', () => {
+    setup([event('turn_finished', 'old-run', 1, { exit_code: 0 }),
+      event('error', 'latest-run', 2, { message: latestError }),
+      event('turn_finished', 'latest-run', 3, { exit_code: 1, is_error: true }),
+      event('subagent_state', 'old-run', 4, { subagent_id: 'child' })])
+    render(<RuntimeHealthNotice backend="codex" sessionId="chat" />)
+    expect(screen.getByText(latestError)).toBeInTheDocument()
+  })
+
+  it('does not let imported lifecycle records clear a current failure', () => {
+    setup([event('error', 'latest-run', 1, { message: latestError }),
+      event('turn_started', 'import_history', 2, { imported: true }),
+      event('turn_finished', 'import_history', 3, { imported: true, exit_code: 0 })])
+    render(<RuntimeHealthNotice backend="codex" sessionId="chat" />)
+    expect(screen.getByText(latestError)).toBeInTheDocument()
+  })
+
+  it('does not revive imported errors after a successful current run', () => {
+    setup([event('turn_finished', 'latest-run', 1, { exit_code: 0 }),
+      event('error', 'import_history', 2, { imported: true, message: oldError })])
+    const { container } = render(<RuntimeHealthNotice backend="codex" sessionId="chat" />)
+    expect(container).toBeEmptyDOMElement()
+  })
+
+  it('filters child errors from both owner selection and the current run detail', () => {
+    setup([event('turn_finished', 'latest-run', 1, { exit_code: 0 }),
+      event('error', 'latest-run', 2, { subagent_id: 'child', message: 'Child failed' })])
+    const { container } = render(<RuntimeHealthNotice backend="codex" sessionId="chat" />)
+    expect(container).toBeEmptyDOMElement()
+  })
+
+  it.each(['subagent_state', 'codex_goal_updated', 'codex_token_usage'])(
+    'does not treat a current-run %s diagnostic as a primary turn error', type => {
+      setup([event('turn_finished', 'latest-run', 1, { exit_code: 0 }),
+        event(type, 'latest-run', 2, { error: 'Background diagnostic' })])
+      const { container } = render(<RuntimeHealthNotice backend="codex" sessionId="chat" />)
+      expect(container).toBeEmptyDOMElement()
+    },
+  )
+
+  it('preserves artifact failures belonging to the latest foreground run', () => {
+    setup([event('turn_started', 'latest-run', 1),
+      event('artifact_error', 'latest-run', 2, { error: 'Artifact manifest is invalid.' }),
+      event('turn_finished', 'latest-run', 3, { exit_code: 0 })])
+    render(<RuntimeHealthNotice backend="codex" sessionId="chat" />)
+    expect(screen.getByText('Artifact manifest is invalid.')).toBeInTheDocument()
+  })
+
+  it('does not let an old-run artifact error replace the latest foreground failure', () => {
+    setup([event('error', 'latest-run', 1, { message: latestError }),
+      event('turn_finished', 'latest-run', 2, { exit_code: 1, is_error: true }),
+      event('artifact_error', 'old-run', 3, { error: 'Old artifact failed.' })])
+    render(<RuntimeHealthNotice backend="codex" sessionId="chat" />)
+    expect(screen.getByText(latestError)).toBeInTheDocument()
+  })
+
+  it.each(['codex_review_started', 'codex_review_finished', 'codex_shell_started', 'codex_shell_finished'])(
+    'recognizes %s as a newer foreground lifecycle boundary', type => {
+      setup([...failedRun, event(type, 'latest-run', 4)])
+      const { container } = render(<RuntimeHealthNotice backend="codex" sessionId="chat" />)
+      expect(container).toBeEmptyDOMElement()
+    },
+  )
+
+  it('keeps a current failure when the goal becomes paused', () => {
+    setup([event('error', 'latest-run', 1, { message: latestError }),
+      event('turn_finished', 'latest-run', 2, { exit_code: 1, is_error: true }),
+      event('codex_goal_updated', null, 3, { message: 'Goal paused' })])
+    render(<RuntimeHealthNotice backend="codex" sessionId="chat" />)
+    expect(screen.getByText(latestError)).toBeInTheDocument()
+  })
+
+  it('clears the previous failure when a new turn starts', () => {
+    setup([...failedRun, event('turn_started', 'latest-run', 4)])
+    const { container } = render(<RuntimeHealthNotice backend="codex" sessionId="chat" />)
+    expect(container).toBeEmptyDOMElement()
+  })
+
+  it('preserves error-only startup failures and ignores another backend', () => {
+    setup([event('error', 'latest-run', 1, { backend: undefined, message: latestError }),
+      event('turn_finished', 'claude-run', 2, { backend: 'claude', exit_code: 0 }),
+      event('error', 'latest-run', 3, { backend: 'claude', message: 'Other backend failed' })])
+    render(<RuntimeHealthNotice backend="codex" sessionId="chat" />)
+    expect(screen.getByText(latestError)).toBeInTheDocument()
+  })
+
+  it('keeps newer runless failures but ignores empty error markers', () => {
+    setup([event('turn_finished', 'latest-run', 1, { exit_code: 0 }),
+      event('error', null, 2, { message: latestError }), event('error', null, 3)])
+    render(<RuntimeHealthNotice backend="codex" sessionId="chat" />)
+    expect(screen.getByText(latestError)).toBeInTheDocument()
+  })
+
+  it('does not resurrect a runless error across a successful lifecycle boundary', () => {
+    setup([event('error', null, 1, { message: oldError }),
+      event('turn_finished', 'latest-run', 2, { exit_code: 0 })])
+    const { container } = render(<RuntimeHealthNotice backend="codex" sessionId="chat" />)
+    expect(container).toBeEmptyDOMElement()
   })
 })
 

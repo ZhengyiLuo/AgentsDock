@@ -23,6 +23,11 @@ test('closing search cancels debounce, invalidates old results, clears input and
   const calls = []
   const searchTimer = { current: 123 }
   const handleSearchChange = callback('handleSearchChange', {
+    openingSearchResult: { current: null },
+    setOpeningSearchResultId: () => {},
+    profileScope: {},
+    profileScopeIsCurrent: () => true,
+    cancelTimelineSeek: () => calls.push('cancel-seek'),
     clearSearch: () => calls.push('invalidate-results'),
     setQuery: value => calls.push(['query', value]),
   })
@@ -44,22 +49,33 @@ function navigation({ welcome = false } = {}) {
   const session = { id: 'fixture' }
   let current = true
   let resolveSeek
+  let busyResult = null
+  const openingSearchResult = { current: null }
   let state = { sessions: [session], snapshots: {}, selectedSessionId: null }
   const open = callback('openSessionRow', {
     profileScope: { profileGeneration: 1 },
     sessionScopeIsCurrent: () => current,
     profileScopeIsCurrent: () => current,
-    openingSearchResult: { current: false },
+    openingSearchResult,
     dismissSearchKeyboard: () => {},
     closeSearch: () => calls.push('close-search'),
     onOpenChat: () => calls.push('open-chat'),
     isWelcomeSession: () => welcome,
     useAppStore: { getState: () => state, setState: update => { state = { ...state, ...update(state) } } },
     select: id => { state.selectedSessionId = id; return new Promise(() => {}) },
-    setOpeningSearchResultId: () => {},
+    setOpeningSearchResultId: value => { busyResult = value },
     seekTimelineResult: () => new Promise(resolve => { resolveSeek = resolve }),
   })
-  return { open, calls, session, settle: opened => resolveSeek(opened), invalidate: () => { current = false } }
+  const editQuery = callback('handleSearchChange', {
+    openingSearchResult,
+    profileScope: {},
+    profileScopeIsCurrent: () => current,
+    cancelTimelineSeek: () => calls.push('cancel-seek'),
+    setOpeningSearchResultId: () => {},
+    clearSearch: () => {},
+    setQuery: () => {},
+  })
+  return { open, editQuery, calls, session, get busyResult() { return busyResult }, settle: opened => resolveSeek(opened), invalidate: () => { current = false } }
 }
 
 for (const welcome of [false, true]) {
@@ -79,5 +95,17 @@ for (const outcome of ['success', 'failed', 'stale']) {
     fixture.settle(outcome !== 'failed')
     await new Promise(resolve => setImmediate(resolve))
     assert.deepEqual(fixture.calls, outcome === 'success' ? ['close-search', 'open-chat'] : [])
+    if (outcome !== 'stale') assert.equal(fixture.busyResult, null)
   })
 }
+
+test('editing a query cancels its pending history navigation and permits a new name selection', async () => {
+  const fixture = navigation()
+  fixture.open(fixture.session, { event_id: 'old-result' })
+  fixture.editQuery('new name')
+  fixture.open(fixture.session)
+  assert.deepEqual(fixture.calls, ['cancel-seek', 'close-search', 'open-chat'])
+  fixture.settle(true)
+  await new Promise(resolve => setImmediate(resolve))
+  assert.deepEqual(fixture.calls, ['cancel-seek', 'close-search', 'open-chat'], 'old completion must not reopen the previous result')
+})

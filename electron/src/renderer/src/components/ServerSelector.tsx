@@ -16,6 +16,8 @@ export function ServerSelector() {
   const profiles = useAppStore(state => state.profiles)
   const activeProfileId = useAppStore(state => state.activeProfileId)
   const switchingProfileId = useAppStore(state => state.switchingProfileId)
+  const restoringChats = useAppStore(state => state.health?.chat_readiness?.ready === false
+    && state.health.chat_readiness.state === 'recovering')
   const switchServer = useAppStore(state => state.switchServer)
   const active = profiles.find(profile => profile.id === activeProfileId) ?? profiles[0] ?? null
   const switchingProfile = profiles.find(profile => profile.id === switchingProfileId) ?? null
@@ -49,9 +51,9 @@ export function ServerSelector() {
       <ShortcutTooltip label={t("ui.ServerSelector.ServerSelector.switch_server_6fb2a18")} shortcut={['previousServer', 'nextServer']} side="right"><DropdownMenu.Trigger className="server-selector-trigger" disabled={Boolean(switchingProfileId)} aria-label={switchingProfile
         ? t("ui.ServerSelector.ServerSelector.switching_to_please_wait_4563ec6", { "server": String(switchingProfile.name) })
         : active
-          ? t("ui.ServerSelector.ServerSelector.choose_agentsserver_35d4c4a", { "server": String(active.name), "state": String(profileConnectionLabel(active)), "unread": active.cachedUnreadCount ? t('ui.server.unreadSuffix', { count: active.cachedUnreadCount }) : '' })
+          ? t("ui.ServerSelector.ServerSelector.choose_agentsserver_35d4c4a", { "server": String(active.name), "state": String(profileConnectionLabel(active, restoringChats)), "unread": active.cachedUnreadCount ? t('ui.server.unreadSuffix', { count: active.cachedUnreadCount }) : '' })
           : t("ui.ServerSelector.ServerSelector.choose_agentsserver_6c6e836")}>
-        <ConnectionDot state={active?.connectionState ?? 'cached'} label={active ? profileConnectionLabel(active) : undefined} />
+        <ConnectionDot state={active?.connectionState ?? 'cached'} label={active ? profileConnectionLabel(active, restoringChats) : undefined} />
         <span className="server-selector-copy">
           <strong>{active?.name || t("ui.ServerSelector.ServerSelector.choose_server_389e87e")}</strong>
           {activeHost && <small>{activeHost}</small>}
@@ -72,7 +74,7 @@ export function ServerSelector() {
               onSelect={() => chooseProfile(profile.id)}
               aria-current={current ? 'true' : undefined}
             >
-              <ConnectionDot state={switching ? 'connecting' : profile.connectionState} label={switching ? t("ui.ServerSelector.connecting_d403c68") : profileConnectionLabel(profile)} />
+              <ConnectionDot state={switching ? 'connecting' : profile.connectionState} label={switching ? t("ui.ServerSelector.connecting_d403c68") : profileConnectionLabel(profile, current && restoringChats)} />
               <span className="server-profile-copy">
                 <strong>{profile.name}</strong>
                 {host && <small>{host}</small>}
@@ -125,10 +127,11 @@ export function connectionStateLabel(state: ServerConnectionState): string {
   return t("ui.ServerSelector.connectionStateLabel.cached_a251c18")
 }
 
-function profileConnectionLabel(profile: PublicServerProfile): string {
+function profileConnectionLabel(profile: PublicServerProfile, restoringChats = false): string {
   if (profile.lastConnectionError && /\b(?:401|403|unauthori[sz]ed|forbidden|authentication|access token|bad token|invalid token)\b/i.test(profile.lastConnectionError)) {
     return t("ui.ServerSelector.profileConnectionLabel.authentication_required_732c522")
   }
   if (profile.connectionState === 'degraded' && profile.lastConnectionError) return t("ui.ServerSelector.profileConnectionLabel.degraded_b6e4a5f", { "detail": String(profile.lastConnectionError) })
+  if (profile.connectionState === 'online' && restoringChats) return t('serverProfile.connection.restoringChats')
   return connectionStateLabel(profile.connectionState)
 }

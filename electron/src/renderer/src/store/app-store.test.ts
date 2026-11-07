@@ -347,6 +347,20 @@ describe('live run state', () => {
     expect(useAppStore.getState().activeSessionIds).not.toContain('chat-1')
     expect(useAppStore.getState().stoppingSessionIds).not.toContain('chat-1')
   })
+
+  it.each([{ pending: ['child'], errors: [] }, { pending: [], errors: ['native error'] }])(
+    'does not trust an older server success with unresolved child results: %j', async subagents => {
+      const stop = vi.fn().mockResolvedValue({ stopped: true, pending: false, subagents })
+      Object.defineProperty(window, 'agentsDock', { configurable: true, value: { turns: { stop } } })
+      useAppStore.setState({ sessions: [sessionFor('chat-1')], selectedSessionId: 'chat-1',
+        activeSessionIds: new Set(['chat-1']), stoppingSessionIds: new Set(),
+        activeProfileId: 'local', profileGeneration: 1, switchingProfileId: null, error: null })
+      await useAppStore.getState().stopTurn()
+      expect(useAppStore.getState().activeSessionIds).toContain('chat-1')
+      expect(useAppStore.getState().error).toContain('subagents')
+      expect(useAppStore.getState().stoppingSessionIds).not.toContain('chat-1')
+    }
+  )
 })
 
 describe('chat forking', () => {
@@ -3703,7 +3717,7 @@ describe('chat selection', () => {
     expect(analytics.trackEvent.mock.calls.filter(([name]) => name === 'split_view_opened')).toHaveLength(1)
 
     await useAppStore.getState().openSessionInSplit('chat-c')
-    expect(useAppStore.getState().chatPanes).toEqual({ primary: 'chat-a', secondary: 'chat-c' })
+    expect(useAppStore.getState().chatPanes).toEqual({ primary: 'chat-a', secondary: 'chat-b', tertiary: 'chat-c' })
     expect(analytics.trackEvent.mock.calls.filter(([name]) => name === 'split_view_opened')).toHaveLength(1)
   })
 

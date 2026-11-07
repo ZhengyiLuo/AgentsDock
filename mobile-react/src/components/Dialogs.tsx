@@ -32,6 +32,7 @@ import { IconButton, SheetCloseButton } from './ui'
 import { MyAgentsSettings } from './MyAgentsSettings'
 import appConfig from '../../app.json'
 import { AndroidUpdateSettings } from './AndroidUpdater'
+import { AppleUpdateSettings } from './AppleUpdateSettings'
 import { AnalyticsSettings } from './AnalyticsSettings'
 
 const PRIVACY_POLICY_URL = 'https://agentsdock.net/privacy.html'
@@ -128,6 +129,7 @@ export function SettingsDialog({ visible, onClose, onOpenServers, onDidDismiss }
         <SettingsHeading title="App" />
         <SettingsRow testID="settings-open-appearance" icon={SunMoon} title="Appearance" value={t(themeLabels[themePreference])} onPress={() => setPage('appearance')} />
         <SettingsRow testID="settings-open-language" icon={Languages} title="Language" value={languagePreference === 'system' ? t('System') : languagePreference === 'en' ? 'English' : '简体中文'} onPress={() => setPage('language')} />
+        <SettingsRow testID="settings-open-updates" icon={Download} title="App updates" onPress={() => setPage('updates')} />
         <SettingsRow testID="settings-open-chats" icon={MessageSquare} title="New chat defaults" onPress={() => setPage('chats')} />
       </View>
       <View>
@@ -146,7 +148,6 @@ export function SettingsDialog({ visible, onClose, onOpenServers, onDidDismiss }
         <SettingsHeading title="About" />
         <SettingsRow testID="settings-open-privacy" icon={ShieldCheck} title="Privacy" external onPress={openPrivacyPolicy} />
         {Platform.OS === 'android' ? <SettingsRow testID="settings-open-analytics" icon={ShieldCheck} title="Usage analytics" onPress={() => setPage('analytics')} /> : null}
-        {Platform.OS === 'android' ? <SettingsRow testID="settings-open-updates" icon={Download} title="App updates" onPress={() => setPage('updates')} /> : null}
       </View>
       <Text testID="settings-build" style={[styles.build, { color: colors.muted }]} localize>AgentsDock {appConfig.expo.version} · build {Platform.OS === 'android' ? appConfig.expo.android.versionCode : appConfig.expo.ios.buildNumber}</Text>
     </View> : null}
@@ -200,10 +201,10 @@ export function SettingsDialog({ visible, onClose, onOpenServers, onDidDismiss }
       placeholderTextColor={colors.muted}
       style={[styles.input, { color: colors.text, borderColor: colors.border, backgroundColor: colors.raised }]}
     />
-    <Text style={[styles.help, { color: colors.muted }]} localize>The + button uses this backend and model with the last-opened chat’s folder and working directory. These location defaults apply when no chat is open.</Text>
     </> : null}
     {page === 'agents' ? <MyAgentsSettings /> : null}
     {page === 'updates' && Platform.OS === 'android' ? <AndroidUpdateSettings /> : null}
+    {page === 'updates' && Platform.OS === 'ios' ? <AppleUpdateSettings /> : null}
     {page === 'analytics' && Platform.OS === 'android' ? <AnalyticsSettings visible={visible} /> : null}
   </Sheet>
 }

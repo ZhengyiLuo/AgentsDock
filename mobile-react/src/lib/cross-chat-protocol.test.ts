@@ -75,6 +75,7 @@ await test('capacity counts unique explicit new targets while revision conflicts
   const granted = { target_session_id: 'granted' } as AgentCrossChatRoute
   const reference = { session_id: 'new', action: 'route', grant_intent: true } as ChatReference
   assert.match(agentRouteCapacityError({ routes: [granted], max_routes: 1 }, [reference]) ?? '', /limit/u)
+  assert.equal(agentRouteCapacityError({ routes: [granted], max_routes: null }, [reference]), null)
   assert.equal(agentRouteCapacityError({ routes: [granted], max_routes: 2 }, [reference, reference]), null)
   assert.equal(agentRouteCapacityError({ routes: [granted], max_routes: 1 }, [{ ...reference, session_id: 'granted' }]), null)
   assert.equal(agentRouteCapacityError({ routes: [granted], max_routes: 1 }, [{ ...reference, grant_intent: undefined }]), null)

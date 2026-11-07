@@ -47,7 +47,7 @@ export function notificationForEvent(event: Event, session: Session, translate: 
     key: `emergency:${event.emergency_alert_id || event.emergency_alert?.id || event.id}`,
   }
   if (session.unread_notification_level && event.seq > (session.unread_notification_seq ?? 0)) return null
-  if (event.type === 'codex_interaction_requested' || event.type === 'claude_interaction_requested') return {
+  if (event.type === 'codex_interaction_requested' || event.type === 'claude_interaction_requested' || event.type === 'gemini_interaction_requested') return {
     level: 'normal', title: `${translate('Action needed')} · ${title}`, body: translate('The agent needs your input.'),
     key: `interaction:${event.interaction_id || event.interaction?.id || event.id}`,
   }

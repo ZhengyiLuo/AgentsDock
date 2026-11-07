@@ -10,7 +10,7 @@ import TestRenderer, { act } from 'react-test-renderer'
 
 globalThis.IS_REACT_ACT_ENVIRONMENT = true
 globalThis.requestAnimationFrame = callback => { callback(); return 1 }
-const fixture = globalThis.__settingsFixture = { platform: 'ios', changes: [], links: [] }
+const fixture = globalThis.__settingsFixture = { platform: 'ios', changes: [], links: [], rejectedLinks: new Set() }
 fixture.app = create(set => ({
   fontScale: 1, health: null, runtime: null,
   profiles: [{ id: 'test', name: 'Test server' }], activeProfileId: 'test', serverURL: 'http://localhost:7850', connected: true,
@@ -22,7 +22,7 @@ fixture.appearance = create(set => ({ preference: 'system', error: null, setPref
 fixture.language = create(set => ({ preference: 'system', locale: 'en', error: null, setPreference: preference => set({ preference, locale: preference === 'zh-CN' ? 'zh-CN' : 'en' }) }))
 const icons = ['ArrowLeft', 'Calendar', 'Check', 'ChevronDown', 'ChevronRight', 'Clock', 'Copy', 'Download', 'ExternalLink', 'KeyRound', 'Languages', 'MessageSquare', 'Minus', 'Monitor', 'Moon', 'Network', 'Plus', 'RefreshCw', 'Search', 'Server', 'ShieldCheck', 'SquareTerminal', 'Sun', 'SunMoon']
 const mocks = {
-  'react-native': `export const ActivityIndicator='Spinner',Modal='Modal',Pressable='Button',ScrollView='Scroll',Switch='Switch',View='View'; export const Linking={openURL:async url=>{globalThis.__settingsFixture.links.push(url)}}; export const Platform={get OS(){return globalThis.__settingsFixture.platform}}; export const StyleSheet={create:x=>x,hairlineWidth:1}; export const useWindowDimensions=()=>({width:402,height:874}); export const useColorScheme=()=> 'light';`,
+  'react-native': `export const ActivityIndicator='Spinner',Modal='Modal',Pressable='Button',ScrollView='Scroll',Switch='Switch',View='View'; export const Linking={openURL:async url=>{const f=globalThis.__settingsFixture;f.links.push(url);if(f.rejectedLinks.has(url))throw new Error('Unavailable')}}; export const Platform={get OS(){return globalThis.__settingsFixture.platform}}; export const StyleSheet={create:x=>x,hairlineWidth:1}; export const useWindowDimensions=()=>({width:402,height:874}); export const useColorScheme=()=> 'light';`,
   'react-native-safe-area-context': `export const SafeAreaView='SafeArea';`,
   '@expo/ui/community/datetime-picker': `export const DateTimePicker='DateTimePicker';`,
   'expo-clipboard': `export const setStringAsync=async()=>{};`,
@@ -59,7 +59,7 @@ const press = (tree, id) => act(async () => tree.root.findAll(node => node.props
 
 for (const platform of ['ios', 'android']) test(`${platform} agent picker keeps logos, concise labels and selection through repeated opens`, async () => {
   fixture.platform = platform
-  const choices = ['claude', 'claude-custom', 'codex', 'codex-custom', 'cursor', 'cursor-custom']
+  const choices = ['claude', 'claude-custom', 'codex', 'codex-custom', 'cursor', 'cursor-custom', 'opencode', 'opencode-custom', 'gemini-custom']
   const changes = []
   let tree, reloads = 0
   const props = { value: 'claude', choices, label: 'Choose agent', testID: 'agent-picker', onChange: value => changes.push(value), onReload: () => { reloads++ }, children: 'Agent' }
@@ -81,11 +81,11 @@ for (const platform of ['ios', 'android']) test(`${platform} agent picker keeps 
         assert.equal(tree.root.findAll(node => node.type === 'Button' && node.props.testID === `agent-choice-${choice}`)[0].props.accessibilityState.selected, true)
       }
     }
-    assert.equal(changes.length, 60)
+    assert.equal(changes.length, choices.length * 10)
     await press(tree, 'agent-picker')
     await act(async () => tree.root.findByType('Modal').props.onRequestClose())
     await act(async () => tree.root.findByType('Modal').props.onDismiss())
-    assert.equal(changes.length, 60, 'dismissal must not choose an agent')
+    assert.equal(changes.length, choices.length * 10, 'dismissal must not choose an agent')
     await press(tree, 'agent-picker')
     await press(tree, 'agent-reload')
     if (platform === 'ios') {
@@ -106,7 +106,13 @@ test('settings starts with categories, preserves every section and omits duplica
     assert.ok(byId(tree, 'settings-build'))
     assert.equal(tree.root.findAllByType('Input').length, 0)
     assert.equal(tree.root.findAllByType('RuntimeHealthPanel').length, 0)
-    assert.equal(tree.root.findAllByProps({ testID: 'settings-open-updates' }).length, 0)
+    await press(tree, 'settings-open-updates')
+    assert.ok(byId(tree, 'ios-update-settings'))
+    await press(tree, 'ios-update-app-store')
+    assert.equal(fixture.links.at(-1), 'https://apps.apple.com/app/id6769275751')
+    await press(tree, 'ios-update-testflight')
+    assert.equal(fixture.links.at(-1), 'itms-beta://')
+    await press(tree, 'settings-back')
     await press(tree, 'settings-open-appearance')
     await press(tree, 'settings-theme-dark')
     assert.equal(fixture.appearance.getState().preference, 'dark')
@@ -141,6 +147,24 @@ test('settings starts with categories, preserves every section and omits duplica
     assert.equal(tree.root.findAllByProps({ testID: 'settings-open-analytics' }).length, 0)
     assert.doesNotMatch(JSON.stringify(tree.toJSON()), /settings-server-url|settings-access-token|settings-apply/)
   } finally { await act(async () => tree.unmount()) }
+})
+
+test('iOS update links fall back when TestFlight is absent and remain retryable on failure', async () => {
+  let tree
+  fixture.platform = 'ios'
+  fixture.rejectedLinks.add('itms-beta://')
+  await act(async () => { tree = TestRenderer.create(React.createElement(SettingsDialog, { visible: true, onClose() {} })) })
+  try {
+    await press(tree, 'settings-open-updates')
+    await press(tree, 'ios-update-testflight')
+    assert.equal(fixture.links.at(-1), 'https://apps.apple.com/app/id899247664')
+    fixture.rejectedLinks.add('https://apps.apple.com/app/id6769275751')
+    await press(tree, 'ios-update-app-store')
+    assert.match(JSON.stringify(tree.toJSON()), /Could not open the store. Try again./)
+    fixture.rejectedLinks.clear()
+    await press(tree, 'ios-update-app-store')
+    assert.doesNotMatch(JSON.stringify(tree.toJSON()), /Could not open the store. Try again./)
+  } finally { fixture.rejectedLinks.clear(); await act(async () => tree.unmount()) }
 })
 
 test('back stays in the sheet, close dismisses it, and reopening returns to categories', async () => {

@@ -51,15 +51,27 @@ if (!application.includes('android:usesCleartextTraffic="true"')) fail('release 
 if (!application.includes('android:allowBackup="false"')) fail('release application permits OS backup')
 if (!manifest.includes('android:windowSoftInputMode="adjustResize"')) fail('keyboard resize mode is missing')
 
+const permissionDeclaration = permission => {
+  const escaped = permission.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+  return manifest.match(new RegExp(`<uses-permission[^>]+android:name="${escaped}"[^>]*>`))?.[0] ?? ''
+}
 for (const permission of [
   'android.permission.SYSTEM_ALERT_WINDOW',
   'android.permission.READ_EXTERNAL_STORAGE',
-  'android.permission.WRITE_EXTERNAL_STORAGE',
+  'android.permission.READ_MEDIA_IMAGES',
+  'android.permission.READ_MEDIA_VIDEO',
+  'android.permission.READ_MEDIA_AUDIO',
+  'android.permission.READ_MEDIA_VISUAL_USER_SELECTED',
+  'android.permission.RECORD_AUDIO',
 ]) {
-  const escaped = permission.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
-  const declaration = manifest.match(new RegExp(`<uses-permission[^>]+android:name="${escaped}"[^>]*>`))?.[0] ?? ''
+  const declaration = permissionDeclaration(permission)
   if (!declaration.includes('tools:node="remove"')) fail(`${permission} is not explicitly removed`)
 }
+const storageWrite = permissionDeclaration('android.permission.WRITE_EXTERNAL_STORAGE')
+if (!storageWrite.includes('android:maxSdkVersion="28"') || storageWrite.includes('tools:node="remove"')) fail('media-save storage writes must remain limited to Android 9 and earlier')
+if (application.includes('android:requestLegacyExternalStorage')) fail('legacy external storage mode must remain disabled')
+const camera = permissionDeclaration('android.permission.CAMERA')
+if (!camera || camera.includes('tools:node="remove"')) fail('QR scanning requires Android camera permission')
 
 const mainApplication = path.join('android', 'app', 'src', 'main', 'java', ...android.package.split('.'), 'MainApplication.kt')
 if (!fs.existsSync(path.join(root, mainApplication))) fail(`missing package-scoped ${mainApplication}`)

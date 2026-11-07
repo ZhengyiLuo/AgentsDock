@@ -1,12 +1,41 @@
 import { describe, expect, it } from 'vitest'
 import type { Session } from '@shared/types'
-import { digestTargetSections, isUntouchedNewChat, rankSessionsForSearch, sessionNameMatchRank } from './sessions'
+import { digestTargetSections, isUntouchedNewChat, rankSessionsForSearch, sessionNameMatchRank, sidebarSessionGroups } from './sessions'
 
 const session = (id: string, title: string, patch: Partial<Session> = {}): Session => ({
   id,
   title,
   backend: 'codex',
   ...patch
+})
+
+describe('unread grouping without server provenance', () => {
+  it.each([undefined, null])('uses registered jobs only when the non-job cursor is %s', latestNonJob => {
+    const cron = session('cron', 'Forwarding', {
+      backend: 'claude', latest_agent_event_seq: 12, last_read_agent_event_seq: 2,
+      latest_non_job_agent_event_seq: latestNonJob
+    })
+    const ordinary = session('ordinary', 'Cron in title only', { latest_agent_event_seq: 8, last_read_agent_event_seq: 1 })
+    const jobSessionIds = new Set(['cron'])
+    const options = { includeCronInUnread: false, jobSessionIds }
+    expect(sidebarSessionGroups([cron, ordinary], new Set(), options)).toEqual({ unread: [ordinary], running: [], ordinary: [cron] })
+    expect(sidebarSessionGroups([cron, ordinary], new Set(), { ...options, includeCronInUnread: true }).unread).toEqual([cron, ordinary])
+    expect(sidebarSessionGroups([cron], new Set(), { ...options, jobSessionIds: new Set() }).unread).toEqual([cron])
+    expect(cron.latest_agent_event_seq).toBe(12)
+    expect(cron.last_read_agent_event_seq).toBe(2)
+  })
+
+  it('preserves manual unread and authoritative human replies in registered cron chats', () => {
+    const base = { latest_agent_event_seq: 30, last_read_agent_event_seq: 4 }
+    const manual = session('manual', 'Manual', { ...base, manual_unread: true })
+    const mixed = session('mixed', 'Mixed', { ...base, latest_non_job_agent_event_seq: 10 })
+    const cronOnly = session('cron', 'Cron', { ...base, latest_non_job_agent_event_seq: 4 })
+    const read = session('read', 'Read', { ...base, last_read_agent_event_seq: 30 })
+    const all = [manual, mixed, cronOnly, read]
+    const result = sidebarSessionGroups(all, new Set(), { jobSessionIds: new Set(all.map(item => item.id)) })
+    expect(result.unread).toEqual([manual, mixed])
+    expect(result.ordinary).toEqual([cronOnly, read])
+  })
 })
 
 describe('untouched new chat detection', () => {

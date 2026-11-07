@@ -46,7 +46,9 @@ test('queued edits refresh capability authority, preserve valid spans, and fence
   assert.match(queued, /validChatReferences\(normalizedPrompt, requestedReferences, sessionId\)/)
   assert.match(queued, /interactiveClientCapabilities\(source, state\.health\)/)
   assert.match(queued, /scope\.client\.updateQueued\([\s\S]*?validReferences/)
-  assert.match(store, /await action\(\)[\s\S]*?if \(!connectionIsCurrent\(scope\)\) return false[\s\S]*?scope\.client\.queue\(sessionId\)/)
+  const action = section(store, 'async function queueAction(', '\nfunction setSnapshotQueue(')
+  assert.match(action, /captureAgentRouteGuard\(scope, get\)[\s\S]*?await action\(\)[\s\S]*?if \(!current\(\)\) return false[\s\S]*?refreshSnapshotQueue\(scope, sessionId, set, get, current\)/)
+  assert.match(action, /const revision = queueState\.revision[\s\S]*?await scope\.client\.queue\(sessionId\)[\s\S]*?if \(!current\(\)\) return null[\s\S]*?queueState\.revision !== revision[\s\S]*?setSnapshotQueue\(/)
 })
 
 test('limits and migration ownership fail closed instead of creating partial authority', () => {

@@ -19,6 +19,7 @@ import {
   runtimeSelectionError,
   runtimeSendAdmissionError,
   selectableChatBackends,
+  nativeProviderSignInStatus,
 } from './runtime-catalog'
 
 it('offers only Gemini API even when the server advertises cached Google login', () => {
@@ -53,6 +54,40 @@ const validCatalog: RuntimeCatalog = {
 }
 
 describe('passive Claude authentication status from the server', () => {
+  const withDiagnostic = (diagnostic?: Partial<RuntimeDiagnostic>, present = true): RuntimeCatalog => ({ backends: {
+    claude: { models: [], efforts: [], native_credentials_present: present,
+      ...(diagnostic ? { diagnostic: { backend: 'claude', available: false, status: 'unknown', message: '', ...diagnostic } } : {}) }
+  } })
+
+  it.each([
+    { status: 'unauthenticated', authenticated: false },
+    { status: 'unauthenticated', authenticated: null },
+    { status: 'error', authenticated: false },
+    { status: 'missing', installed: false },
+  ] as Partial<RuntimeDiagnostic>[])('does not turn retained credentials into verified login: %j', diagnostic => {
+    const catalog = withDiagnostic(diagnostic)
+    expect(nativeProviderSignInStatus(null, catalog, 'claude')).toBe('signed-out')
+    // Keep the existing send-time verification policy; a cached failure must
+    // not trap someone who just renewed their credentials outside the app.
+    expect(selectableChatBackendChoices({ ok: true }, catalog)).toContain('claude')
+    expect(runtimeSendAdmissionError({ ok: true }, 'claude')).toBeNull()
+  })
+
+  it('distinguishes credential detection from verified authentication, including old servers', () => {
+    expect(nativeProviderSignInStatus(null, withDiagnostic(), 'claude')).toBe('unverified')
+    expect(nativeProviderSignInStatus(null, withDiagnostic({ authenticated: null }), 'claude')).toBe('unverified')
+    expect(nativeProviderSignInStatus(null, withDiagnostic(undefined, false), 'claude')).toBe('signed-out')
+    expect(nativeProviderSignInStatus(null, withDiagnostic({ authenticated: true, status: 'ready' }), 'claude')).toBe('signed-in')
+  })
+
+  it('uses the latest diagnostic for failure and recovery, independently of credential presence', () => {
+    const failed = { backend: 'claude', available: false, status: 'unauthenticated', authenticated: false, message: '', checked_at: '2026-10-01T12:00:00Z' } as const
+    const ready = { ...failed, status: 'ready', authenticated: true, available: true, checked_at: '2026-10-01T12:01:00Z' } as const
+    expect(nativeProviderSignInStatus({ ok: true, runtimes: { claude: failed } }, withDiagnostic(ready), 'claude')).toBe('signed-in')
+    expect(nativeProviderSignInStatus({ ok: true, runtimes: { claude: ready } }, withDiagnostic(failed), 'claude')).toBe('signed-in')
+    expect(nativeProviderSignInStatus({ ok: true, runtimes: { claude: { ...failed, checked_at: '2026-10-01T12:02:00Z' } } }, withDiagnostic(ready), 'claude')).toBe('signed-out')
+  })
+
   it.each(['unknown', 'unauthenticated'] as const)('allows a native retry while reporting %s honestly', status => {
     const diagnostic: RuntimeDiagnostic = {
       backend: 'claude', status, available: false, installed: true,

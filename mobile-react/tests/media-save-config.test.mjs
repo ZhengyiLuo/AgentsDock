@@ -34,7 +34,7 @@ test('Android storage writes are restricted to pre-MediaStore devices, without l
   assert.ok(manifest.manifest['uses-permission'].some(item => item.$['android:name'].endsWith('INTERNET')))
 })
 
-test('composed Expo plugins retain add-only media permissions in the generated manifest', () => {
+test('composed Expo plugins retain QR camera and add-only media permissions without microphone access', () => {
   const root = fileURLToPath(new URL('..', import.meta.url))
   const generated = JSON.parse(execFileSync(process.execPath, ['node_modules/expo/bin/cli', 'config', '--type', 'introspect', '--json'], {
     cwd: root, encoding: 'utf8', maxBuffer: 8 * 1024 * 1024, timeout: 60_000,
@@ -43,9 +43,14 @@ test('composed Expo plugins retain add-only media permissions in the generated m
   const application = manifest.application.find(item => item.$['android:name'].endsWith('MainApplication'))
   assert.equal(application.$['android:requestLegacyExternalStorage'], undefined)
   const permissions = manifest['uses-permission']
+  const camera = permissions.find(item => item.$['android:name'] === 'android.permission.CAMERA')
+  assert.ok(camera, 'QR scanning requires an Android camera permission declaration')
+  assert.notEqual(camera.$['tools:node'], 'remove')
+  assert.equal(permissions.find(item => item.$['android:name'] === 'android.permission.RECORD_AUDIO').$['tools:node'], 'remove')
   assert.equal(permissions.find(item => item.$['android:name'].endsWith('WRITE_EXTERNAL_STORAGE')).$['android:maxSdkVersion'], '28')
   for (const name of ['READ_EXTERNAL_STORAGE', 'READ_MEDIA_IMAGES', 'READ_MEDIA_VIDEO', 'READ_MEDIA_AUDIO', 'READ_MEDIA_VISUAL_USER_SELECTED']) {
     assert.equal(permissions.find(item => item.$['android:name'] === `android.permission.${name}`).$['tools:node'], 'remove')
   }
   assert.match(generated._internal.modResults.ios.infoPlist.NSPhotoLibraryAddUsageDescription, /save images and videos/)
+  assert.equal(generated._internal.modResults.ios.infoPlist.NSCameraUsageDescription, 'Allow AgentsDock to scan a server connection QR code.')
 })

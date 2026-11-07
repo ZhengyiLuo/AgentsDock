@@ -28,6 +28,19 @@ async function stageNativeFiles(files: File[]): Promise<Array<import('../shared/
 }
 
 const api: AgentsDockAPI = {
+  intelligence: {
+    read: (scope, sessionId, path) => ipcRenderer.invoke('intelligence:read', scope, sessionId, path),
+    files: (scope, sessionId, query, limit) => ipcRenderer.invoke('intelligence:files', scope, sessionId, query, limit),
+    status: (scope, sessionId) => ipcRenderer.invoke('intelligence:status', scope, sessionId),
+    connect: (scope, sessionId, connectionId, language) => ipcRenderer.invoke('intelligence:connect', scope, sessionId, connectionId, language),
+    send: (scope, sessionId, connectionId, message) => ipcRenderer.send('intelligence:send', scope, sessionId, connectionId, message),
+    disconnect: (scope, sessionId, connectionId) => ipcRenderer.invoke('intelligence:disconnect', scope, sessionId, connectionId),
+    onEvent: listener => {
+      const receive = (_event: Electron.IpcRendererEvent, event: import('../shared/code-intelligence').CodeIntelligenceEvent): void => listener(event)
+      ipcRenderer.on('intelligence:event', receive)
+      return () => ipcRenderer.removeListener('intelligence:event', receive)
+    }
+  },
   workspaceGit: {
     status: (scope, sessionId) => ipcRenderer.invoke('workspace-git:status', scope, sessionId),
     diff: (scope, sessionId, path, view) => ipcRenderer.invoke('workspace-git:diff', scope, sessionId, path, view),
@@ -403,6 +416,7 @@ const api: AgentsDockAPI = {
     write: (profileId, profileGeneration, sessionId, data) => ipcRenderer.send('terminal:write', profileId, profileGeneration, sessionId, data),
     resize: (profileId, profileGeneration, sessionId, columns, rows) => ipcRenderer.send('terminal:resize', profileId, profileGeneration, sessionId, columns, rows),
     scroll: (profileId, profileGeneration, sessionId, delta) => ipcRenderer.send('terminal:scroll', profileId, profileGeneration, sessionId, delta),
+    acknowledge: (profileId, profileGeneration, sessionId, receipt) => ipcRenderer.send('terminal:acknowledge', profileId, profileGeneration, sessionId, receipt),
     disconnect: (profileId, profileGeneration, sessionId) => ipcRenderer.invoke('terminal:disconnect', profileId, profileGeneration, sessionId),
     kill: (profileId, profileGeneration, sessionId) => ipcRenderer.invoke('terminal:kill', profileId, profileGeneration, sessionId),
     windows: (profileId, profileGeneration, sessionId) => ipcRenderer.invoke('terminal:windows', profileId, profileGeneration, sessionId),

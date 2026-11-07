@@ -8,25 +8,15 @@ import {
   useLayoutEffect,
   useMemo,
   useRef,
-  useState,
-  type DragEvent as ReactDragEvent,
-  type KeyboardEvent as ReactKeyboardEvent
+  useState
 } from 'react'
 import { LoaderCircle, RotateCcw, Siren, X } from 'lucide-react'
 import type { AppUpdateStatus } from '@shared/types'
 import { normalizeSecurePeerJoinTarget } from '@shared/secure-peer'
+import { ChatWorkspaceGrid } from './components/ChatWorkspaceGrid'
 import { ChatHeader } from './components/ChatHeader'
-import { ChatPane } from './components/ChatPane'
-import { ChatSplitView } from './components/ChatSplitView'
 import { CodeReview } from './components/CodeReview'
-import { ClaudeInteractionShelf } from './components/ClaudeInteractionShelf'
-import { GeminiInteractionShelf } from './components/GeminiInteractionShelf'
-import { ClaudeRuntimeProvider } from './components/ClaudeRuntimeContext'
-import { CodexInteractionShelf } from './components/CodexInteractionShelf'
-import { CodexRuntimeProvider } from './components/CodexRuntimeContext'
-import { Composer } from './components/Composer'
 import { Dialogs } from './components/Dialogs'
-import { EmergencyTimelineDock } from './components/EmergencyTimelineDock'
 import { InspectorDock } from './components/InspectorDock'
 import { InspectorWorkspace, type InspectorWorkspaceTab } from './components/InspectorWorkspace'
 import { SideChatPopover } from './components/SideChatPopover'
@@ -34,9 +24,7 @@ import { SideChatController } from './lib/side-chat'
 import { Sidebar } from './components/Sidebar'
 import { TerminalDock } from './components/TerminalDock'
 import { TeamNetwork, type PendingSecurePeerInvite, type TeamNetworkMailboxTarget, type TeamNetworkMessageTarget, type TeamNetworkSection } from './components/TeamNetwork'
-import { Timeline } from './components/Timeline'
 import { WelcomeChat } from './components/WelcomeChat'
-import { WorkspaceEditor } from './components/WorkspaceEditor'
 import { WorkspaceFilesProvider } from './components/WorkspaceFilesContext'
 import { readInspectorTab, saveInspectorTab } from './lib/inspector-preference'
 import { trackEvent } from './lib/analytics'
@@ -51,7 +39,6 @@ import {
 import { reviewTargetBelongsToSession, sameCodeReviewTarget, type CodeReviewTarget } from './lib/timeline'
 import { closeTopTransient } from './lib/transient-close'
 import { installRendererStallMonitor } from './lib/renderer-stall-monitor'
-import { nativeFileRefsFromFiles } from './lib/native-files'
 import { profileSessionKey, rendererWorkspaceKey } from './lib/profile-scope'
 import { ChatFontApplier } from './lib/chat-font'
 import { flushActiveWorkspace, useAppStore } from './store/app-store'
@@ -61,34 +48,6 @@ interface ScopedReviewTarget {
   profileGeneration: number
   target: CodeReviewTarget
 }
-
-interface PendingWorkspaceOpenEvent {
-  event: Event
-  targetKey: string
-}
-
-interface SplitWorkspaceTarget {
-  key: string
-  sessionId: string
-  profileId: string | null
-  profileGeneration: number
-  serverIdentity: string | null
-  cwd: string
-}
-
-const splitWorkspaceKey = (target: Omit<SplitWorkspaceTarget, 'key'>): string => JSON.stringify([
-  target.profileId,
-  target.profileGeneration,
-  target.serverIdentity,
-  target.sessionId,
-  target.cwd
-])
-
-const AVAILABLE_CODEX_CONTROLS = Object.freeze({ available: true })
-const AVAILABLE_CLAUDE_CONTROLS = Object.freeze({
-  available: true,
-  interactive_client_capability: 'claude_sdk_interactive_v1'
-})
 
 export function App() {
   return <WorkspaceFilesProvider><AppWorkspace /></WorkspaceFilesProvider>
@@ -104,43 +63,15 @@ function AppWorkspace() {
   const switchingProfileId = useAppStore(state => state.switchingProfileId)
   const inspectorVisible = useAppStore(state => state.inspectorVisible)
   const selectedSessionId = useAppStore(state => state.selectedSessionId)
-  const chatPanes = useAppStore(state => state.chatPanes)
   const focusedChatPane = useAppStore(state => state.focusedChatPane)
   const selectedSession = useAppStore(state => state.sessions.find(session => session.id === state.selectedSessionId) ?? null)
   const noServerConfigured = useAppStore(state => state.profiles.length === 0)
-  const primarySession = useAppStore(state => state.sessions.find(session => session.id === state.chatPanes.primary) ?? null)
-  const secondarySession = useAppStore(state => state.sessions.find(session => session.id === state.chatPanes.secondary) ?? null)
-  // Health also includes high-frequency activity and queue telemetry. Keep the
-  // app shell subscribed only to the primitive contract fields it renders so
-  // a heartbeat cannot repaint every workspace, timeline and input surface.
-  const workspaceFilesAvailable = useAppStore(state => state.health === null
-    ? null
-    : state.health.capabilities?.workspace_files?.available === true)
-  const workspaceFilesVersion = useAppStore(state => state.health?.capabilities?.workspace_files?.version)
-  const workspaceFilesMaxTextFileBytes = useAppStore(state => state.health?.capabilities?.workspace_files?.max_text_file_bytes)
-  const workspaceFilesUnavailableMessage = useAppStore(state => {
-    const capability = state.health?.capabilities?.workspace_files
-    return [capability?.message, capability?.action].filter(Boolean).join(' ')
-  })
-  const codexControlsAvailable = useAppStore(state => state.health?.capabilities?.codex_controls?.available === true)
-  const claudeControlsAvailable = useAppStore(state => {
-    const capability = state.health?.capabilities?.claude_controls
-    return capability?.available === true
-      && (capability.interactive_client_capability ?? capability.interactive_capability) === 'claude_sdk_interactive_v1'
-  })
-  const codexControlsCapability = codexControlsAvailable ? AVAILABLE_CODEX_CONTROLS : null
-  const claudeControlsCapability = claudeControlsAvailable ? AVAILABLE_CLAUDE_CONTROLS : null
   const error = useAppStore(state => state.error)
   const storageFull = useAppStore(state => state.storageFull)
   const activeProfileKey = rendererWorkspaceKey(activeProfileId, activeServerIdentity)
   const activeRenderKey = `${activeProfileKey}:generation:${profileGeneration}`
   const selectedWorkspaceKey = selectedSessionId ? profileSessionKey(activeProfileId, selectedSessionId, activeServerIdentity) : `${activeProfileKey}:empty`
   const selectedRenderKey = `${activeRenderKey}:${selectedSessionId ?? 'empty'}`
-  const workspaceProfileScope = useMemo(() => activeProfileId ? {
-    profileId: activeProfileId,
-    profileGeneration,
-    serverIdentity: activeServerIdentity
-  } : null, [activeProfileId, activeServerIdentity, profileGeneration])
   const [scopedReviewTarget, setScopedReviewTarget] = useState<ScopedReviewTarget | null>(null)
   const [sideChatController] = useState(() => new SideChatController())
   const [inspectorTab, setInspectorTab] = useState<InspectorWorkspaceTab>(readInspectorTab)
@@ -156,18 +87,6 @@ function AppWorkspace() {
     }
     setInspectorTab(tab)
   }, [])
-  const showFilesForOpenedFile = useCallback(() => {
-    const state = useAppStore.getState()
-    const ownerSession = state.sessions.find(session => session.id === selectedSessionId)
-    // A delayed file load must not reopen the panel for a different chat/server.
-    if (!ownerSession || !selectedSessionId || state.switchingProfileId
-      || state.activeProfileId !== activeProfileId || state.profileGeneration !== profileGeneration
-      || state.selectedSessionId !== selectedSessionId
-      || (state.profiles.find(profile => profile.id === state.activeProfileId)?.serverIdentity ?? null) !== activeServerIdentity
-      || ownerSession.cwd !== selectedSession?.cwd) return
-    chooseInspectorTab('files')
-    if (!state.inspectorVisible) state.setInspectorVisible(true)
-  }, [activeProfileId, activeServerIdentity, profileGeneration, selectedSessionId, selectedSession?.cwd, chooseInspectorTab])
   const [sideChatFocusVersion, setSideChatFocusVersion] = useState(0)
   const [sideChatOpenTarget, setSideChatOpenTarget] = useState<string | null>(null)
   const previousSideChatTarget = useRef<string | null>(null)
@@ -188,8 +107,8 @@ function AppWorkspace() {
       if (!detail || state.switchingProfileId || detail.profileId !== state.activeProfileId || detail.profileGeneration !== state.profileGeneration || window.agentsDock.sharedChat) return
       const session = state.sessions.find(candidate => candidate.id === detail.sessionId)
       if (!session || !['codex', 'claude'].includes(session.backend)) return
-      if (state.chatPanes.primary === session.id) state.focusChatPane('primary')
-      else if (state.chatPanes.secondary === session.id) state.focusChatPane('secondary')
+      const pane = Object.entries(state.chatPanes).find(([, id]) => id === session.id)?.[0]
+      if (pane) state.focusChatPane(pane as typeof state.focusedChatPane)
       else if (state.selectedSessionId !== session.id) return
       setSideChatOpenTarget(JSON.stringify([detail.profileId, detail.profileGeneration, session.id]))
       setSideChatFocusVersion(value => value + 1)
@@ -199,14 +118,7 @@ function AppWorkspace() {
   }, [])
   const columnStyle = useMemo(() => savedWorkspaceColumnStyle(activeProfileKey), [activeProfileKey])
   const shellRef = useRef<HTMLElement | null>(null)
-  const fileDragTimeout = useRef<number | null>(null)
   const closingWindowRef = useRef(false)
-  const pendingWorkspaceOpenEvent = useRef<PendingWorkspaceOpenEvent | null>(null)
-  const replayingWorkspaceOpenEvent = useRef<Event | null>(null)
-  const splitWorkspaceTargetRef = useRef<SplitWorkspaceTarget | null>(null)
-  const readySplitWorkspaceKeyRef = useRef<string | null>(null)
-  const splitWorkspaceOverlayRef = useRef<HTMLDivElement | null>(null)
-  const [splitWorkspaceTarget, setSplitWorkspaceTarget] = useState<SplitWorkspaceTarget | null>(null)
   const [slowBoot, setSlowBoot] = useState(false)
   const [retryingStorage, setRetryingStorage] = useState(false)
   useEffect(() => {
@@ -228,7 +140,6 @@ function AppWorkspace() {
       useAppStore.setState({ storageFull: true, error: error instanceof Error ? error.message : t('storage.closeFailed') })
     } finally { setRetryingStorage(false) }
   }
-  const [fileDropActive, setFileDropActive] = useState(false)
   const [teamspaceScopeKey, setTeamspaceScopeKey] = useState<string | null>(null)
   const [teamspaceInitialSection, setTeamspaceInitialSection] = useState<TeamNetworkSection>('mail')
   const [teamspaceMailboxTarget, setTeamspaceMailboxTarget] = useState<TeamNetworkMailboxTarget | null>(null)
@@ -275,85 +186,7 @@ function AppWorkspace() {
   const reviewVisible = Boolean(reviewTarget) && inspectorTab === 'review'
   const dockOpen = inspectorVisible || reviewVisible
   const visibleDockOpen = !teamspaceOpen && dockOpen
-  const splitOpen = Boolean(primarySession && secondarySession)
-  const clearFileDragTimeout = useCallback(() => {
-    if (fileDragTimeout.current !== null) {
-      window.clearTimeout(fileDragTimeout.current)
-      fileDragTimeout.current = null
-    }
-  }, [])
-  const resetFileDrag = useCallback(() => {
-    clearFileDragTimeout()
-    setFileDropActive(false)
-  }, [clearFileDragTimeout])
-  const markFileDragActive = useCallback(() => {
-    setFileDropActive(true)
-    clearFileDragTimeout()
-    fileDragTimeout.current = window.setTimeout(resetFileDrag, 1_500)
-  }, [clearFileDragTimeout, resetFileDrag])
-  const dismissSplitWorkspace = useCallback(() => {
-    const target = splitWorkspaceTargetRef.current
-    splitWorkspaceTargetRef.current = null
-    readySplitWorkspaceKeyRef.current = null
-    pendingWorkspaceOpenEvent.current = null
-    setSplitWorkspaceTarget(null)
-    if (!target) return
-    window.requestAnimationFrame(() => {
-      if (splitWorkspaceTargetRef.current) return
-      const state = useAppStore.getState()
-      const serverIdentity = state.profiles.find(profile => profile.id === state.activeProfileId)?.serverIdentity ?? null
-      if (
-        state.activeProfileId !== target.profileId
-        || state.profileGeneration !== target.profileGeneration
-        || serverIdentity !== target.serverIdentity
-        || !state.chatPanes.primary
-        || !state.chatPanes.secondary
-      ) return
-      document.querySelector<HTMLElement>(`[data-chat-pane="${state.focusedChatPane}"]`)?.focus({ preventScroll: true })
-    })
-  }, [])
-  const workspaceEditorReady = useCallback((expectedTargetKey: string) => {
-    const target = splitWorkspaceTargetRef.current
-    if (!target || target.key !== expectedTargetKey) return
-    const state = useAppStore.getState()
-    const targetSession = state.sessions.find(session => session.id === target.sessionId)
-    const serverIdentity = state.profiles.find(profile => profile.id === state.activeProfileId)?.serverIdentity ?? null
-    if (
-      state.activeProfileId !== target.profileId
-      || state.profileGeneration !== target.profileGeneration
-      || serverIdentity !== target.serverIdentity
-      || state.selectedSessionId !== target.sessionId
-      || (state.chatPanes.primary !== target.sessionId && state.chatPanes.secondary !== target.sessionId)
-      || !state.chatPanes.primary
-      || !state.chatPanes.secondary
-      || !targetSession
-      || (targetSession.cwd ?? '') !== target.cwd
-    ) return
-    readySplitWorkspaceKeyRef.current = expectedTargetKey
-    const pending = pendingWorkspaceOpenEvent.current
-    if (!pending || pending.targetKey !== expectedTargetKey) return
-    pendingWorkspaceOpenEvent.current = null
-    // Chromium retains the propagation stop on a dispatched event. Recreate
-    // the request so the newly mounted editor can receive it exactly once.
-    const eventOptions = {
-      bubbles: pending.event.bubbles,
-      cancelable: pending.event.cancelable,
-      composed: pending.event.composed
-    }
-    const replay = pending.event instanceof CustomEvent
-      ? new CustomEvent(pending.event.type, { ...eventOptions, detail: pending.event.detail })
-      : new Event(pending.event.type, eventOptions)
-    replayingWorkspaceOpenEvent.current = replay
-    try {
-      window.dispatchEvent(replay)
-    } finally {
-      replayingWorkspaceOpenEvent.current = null
-    }
-  }, [])
-  const renderedSplitWorkspaceKey = splitWorkspaceTarget?.key ?? null
-  const renderedSplitWorkspaceReady = useCallback(() => {
-    if (renderedSplitWorkspaceKey) workspaceEditorReady(renderedSplitWorkspaceKey)
-  }, [renderedSplitWorkspaceKey, workspaceEditorReady])
+  const splitOpen = useAppStore(state => (state.chatPaneCount ?? (state.chatPanes.secondary ? 2 : 1)) > 1)
   const presentQueuedSecurePeerInvite = useCallback((): boolean => {
     const invite = queuedSecurePeerInvite.current
     if (!invite) return false
@@ -389,10 +222,6 @@ function AppWorkspace() {
       if (value) shell.style.setProperty(property, value)
     }
   }, [activeProfileKey, columnStyle])
-  useLayoutEffect(() => {
-    if (splitWorkspaceTarget) splitWorkspaceOverlayRef.current?.focus({ preventScroll: true })
-  }, [splitWorkspaceTarget])
-
   useEffect(() => { trackEvent('app_launched') }, [])
   useEffect(() => { void initialize() }, [initialize])
   useEffect(() => installRendererStallMonitor(
@@ -414,32 +243,6 @@ function AppWorkspace() {
     return () => window.clearTimeout(timer)
   }, [initialized])
   useEffect(() => {
-    resetFileDrag()
-  }, [resetFileDrag, selectedRenderKey, switchingProfileId])
-  useEffect(() => {
-    const resetOnEscape = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') resetFileDrag()
-    }
-    const resetWhenHidden = () => {
-      if (document.visibilityState !== 'visible') resetFileDrag()
-    }
-    window.addEventListener('dragend', resetFileDrag, true)
-    window.addEventListener('drop', resetFileDrag, true)
-    window.addEventListener('blur', resetFileDrag)
-    window.addEventListener('pointerdown', resetFileDrag, true)
-    window.addEventListener('keydown', resetOnEscape, true)
-    document.addEventListener('visibilitychange', resetWhenHidden)
-    return () => {
-      window.removeEventListener('dragend', resetFileDrag, true)
-      window.removeEventListener('drop', resetFileDrag, true)
-      window.removeEventListener('blur', resetFileDrag)
-      window.removeEventListener('pointerdown', resetFileDrag, true)
-      window.removeEventListener('keydown', resetOnEscape, true)
-      document.removeEventListener('visibilitychange', resetWhenHidden)
-      clearFileDragTimeout()
-    }
-  }, [clearFileDragTimeout, resetFileDrag])
-  useEffect(() => {
     const open = (event: Event) => {
       const target = (event as CustomEvent<CodeReviewTarget>).detail
       const state = useAppStore.getState()
@@ -458,76 +261,6 @@ function AppWorkspace() {
   useEffect(() => {
     if (!reviewTarget && inspectorTab === 'review') setInspectorTab(preferredInspectorTab.current)
   }, [reviewTarget, inspectorTab])
-  useEffect(() => {
-    if (!splitOpen) return
-    const openEditorForChat = (event: Event) => {
-      if (replayingWorkspaceOpenEvent.current === event) return
-      const detail = (event as CustomEvent<{ sessionId?: string }>).detail
-      const targetSessionId = detail?.sessionId ?? useAppStore.getState().selectedSessionId
-      if (!targetSessionId || (targetSessionId !== chatPanes.primary && targetSessionId !== chatPanes.secondary)) return
-      const state = useAppStore.getState()
-      const session = state.sessions.find(candidate => candidate.id === targetSessionId)
-      if (!session) return
-      const pane = state.chatPanes.primary === targetSessionId
-        ? 'primary'
-        : state.chatPanes.secondary === targetSessionId
-          ? 'secondary'
-          : null
-      if (!pane) return
-      const serverIdentity = state.profiles.find(profile => profile.id === state.activeProfileId)?.serverIdentity ?? null
-      const targetWithoutKey = {
-        sessionId: targetSessionId,
-        profileId: state.activeProfileId,
-        profileGeneration: state.profileGeneration,
-        serverIdentity,
-        cwd: session.cwd ?? ''
-      }
-      const target: SplitWorkspaceTarget = {
-        ...targetWithoutKey,
-        key: splitWorkspaceKey(targetWithoutKey)
-      }
-      if (
-        splitWorkspaceTargetRef.current?.key === target.key
-        && readySplitWorkspaceKeyRef.current === target.key
-      ) {
-        state.focusChatPane(pane)
-        return
-      }
-      event.stopImmediatePropagation()
-      pendingWorkspaceOpenEvent.current = {
-        event,
-        targetKey: target.key
-      }
-      readySplitWorkspaceKeyRef.current = null
-      splitWorkspaceTargetRef.current = target
-      setSplitWorkspaceTarget(target)
-      state.focusChatPane(pane)
-    }
-    window.addEventListener('agentsdock:open-workspace-file', openEditorForChat, true)
-    window.addEventListener('agentsdock:open-workspace-path', openEditorForChat, true)
-    window.addEventListener('agentsdock:open-agent-file', openEditorForChat, true)
-    return () => {
-      window.removeEventListener('agentsdock:open-workspace-file', openEditorForChat, true)
-      window.removeEventListener('agentsdock:open-workspace-path', openEditorForChat, true)
-      window.removeEventListener('agentsdock:open-agent-file', openEditorForChat, true)
-    }
-  }, [chatPanes.primary, chatPanes.secondary, splitOpen])
-  useEffect(() => {
-    const target = splitWorkspaceTargetRef.current
-    if (!target) return
-    const state = useAppStore.getState()
-    const targetSession = state.sessions.find(session => session.id === target.sessionId)
-    if (
-      !splitOpen
-      || activeProfileId !== target.profileId
-      || profileGeneration !== target.profileGeneration
-      || activeServerIdentity !== target.serverIdentity
-      || selectedSessionId !== target.sessionId
-      || (chatPanes.primary !== target.sessionId && chatPanes.secondary !== target.sessionId)
-      || !targetSession
-      || (targetSession.cwd ?? '') !== target.cwd
-    ) dismissSplitWorkspace()
-  }, [activeProfileId, activeServerIdentity, chatPanes.primary, chatPanes.secondary, dismissSplitWorkspace, primarySession?.cwd, profileGeneration, secondarySession?.cwd, selectedSessionId, splitOpen])
   useEffect(() => {
     if (!activeProfileId || !selectedSessionId) return
     const scopedKey = profileSessionKey(activeProfileId, selectedSessionId, activeServerIdentity)
@@ -551,6 +284,25 @@ function AppWorkspace() {
     })
   }, [activeProfileId, activeServerIdentity, selectedSession?.id, selectedSession?.archived, terminalOpenBySession])
   useEffect(() => {
+    const switchWorkspace = (event: KeyboardEvent) => {
+      if (event.defaultPrevented || event.repeat || event.isComposing
+        || !event.metaKey || !event.ctrlKey || event.altKey || event.shiftKey
+        || !['ArrowLeft', 'ArrowRight'].includes(event.key)
+        || document.querySelector('[aria-modal="true"]')) return
+      const state = useAppStore.getState()
+      if (state.switchingProfileId || state.chatWorkspaces.length < 2) return
+      const index = state.chatWorkspaces.findIndex(workspace => workspace.id === state.activeChatWorkspaceId)
+      if (index < 0) return
+      event.preventDefault()
+      event.stopImmediatePropagation()
+      const direction = event.key === 'ArrowRight' ? 1 : -1
+      const next = (index + direction + state.chatWorkspaces.length) % state.chatWorkspaces.length
+      void state.selectChatWorkspace(state.chatWorkspaces[next].id)
+    }
+    window.addEventListener('keydown', switchWorkspace, true)
+    return () => window.removeEventListener('keydown', switchWorkspace, true)
+  }, [])
+  useEffect(() => {
     const focusSplitPane = (event: KeyboardEvent) => {
       if (event.defaultPrevented || event.repeat || event.shiftKey) return
       if (document.querySelector('[aria-modal="true"]')) return
@@ -559,33 +311,40 @@ function AppWorkspace() {
         ? event.metaKey && event.altKey && !event.ctrlKey
         : event.ctrlKey && event.altKey && !event.metaKey
       if (!exactModifiers) return
-      const pane = event.key === 'ArrowLeft' || event.code === 'ArrowLeft'
-        ? 'primary'
-        : event.key === 'ArrowRight' || event.code === 'ArrowRight'
-          ? 'secondary'
-          : null
-      if (!pane) return
+      const direction = event.key.replace('Arrow', '')
+      if (!['Left', 'Right', 'Up', 'Down'].includes(direction)) return
       const state = useAppStore.getState()
-      const { primary, secondary } = state.chatPanes
-      if (
-        !primary
-        || !secondary
-        || primary === secondary
-        || !state.sessions.some(session => session.id === primary)
-        || !state.sessions.some(session => session.id === secondary)
-      ) return
+      const slots = ['primary', 'secondary', 'tertiary', 'quaternary'] as const
+      const count = state.chatPaneCount
+      if (count < 2) return
+      const index = slots.indexOf(state.focusedChatPane)
+      let next = index
+      if (count === 2) {
+        if (direction === 'Left') next = 0
+        if (direction === 'Right') next = 1
+      } else if (count === 3 && state.chatWorkspaces.find(workspace => workspace.id === state.activeChatWorkspaceId)?.threePaneLayout === 'columns') {
+        if (direction === 'Left') next = Math.max(0, index - 1)
+        if (direction === 'Right') next = Math.min(2, index + 1)
+      } else if (count === 3) {
+        if (direction === 'Left') next = 0
+        if (direction === 'Right') next = index === 0 ? 1 : index
+        if (direction === 'Up' && index === 2) next = 1
+        if (direction === 'Down' && index === 1) next = 2
+      } else {
+        if (direction === 'Left' && index % 2 === 1) next = index - 1
+        if (direction === 'Right' && index % 2 === 0) next = index + 1
+        if (direction === 'Up' && index >= 2) next = index - 2
+        if (direction === 'Down' && index < 2) next = index + 2
+      }
+      const pane = slots[next]
       event.preventDefault()
       event.stopImmediatePropagation()
-      const workspaceCovered = Boolean(splitWorkspaceTargetRef.current)
-      if (workspaceCovered) dismissSplitWorkspace()
       state.focusChatPane(pane)
-      if (!workspaceCovered) {
-        document.querySelector<HTMLElement>(`[data-chat-pane="${pane}"]`)?.focus({ preventScroll: true })
-      }
+      document.querySelector<HTMLElement>(`[data-chat-pane="${pane}"]`)?.focus({ preventScroll: true })
     }
     window.addEventListener('keydown', focusSplitPane, true)
     return () => window.removeEventListener('keydown', focusSplitPane, true)
-  }, [dismissSplitWorkspace])
+  }, [])
   useEffect(() => {
     const handleWorkspaceShortcut = (event: KeyboardEvent) => {
       if (
@@ -723,8 +482,9 @@ function AppWorkspace() {
       if (closeWorkspaceFile.defaultPrevented) return
       if (reviewVisible) { setScopedReviewTarget(null); setInspectorTab(preferredInspectorTab.current); return }
       if (terminalOpen && selectedSessionId) { setTerminalOpen(selectedSessionId, false); return }
-      if (splitWorkspaceTargetRef.current) { dismissSplitWorkspace(); return }
       if (splitOpen) { useAppStore.getState().closeChatPane(focusedChatPane); return }
+      const current = useAppStore.getState()
+      if (current.chatWorkspaces.length > 1) { void current.closeChatWorkspace(current.activeChatWorkspaceId); return }
       if (closingWindowRef.current) return
       closingWindowRef.current = true
       void flushActiveWorkspace()
@@ -734,7 +494,7 @@ function AppWorkspace() {
     }
     window.addEventListener('agentsdock:close-surface', closeSurface)
     return () => window.removeEventListener('agentsdock:close-surface', closeSurface)
-  }, [dismissSplitWorkspace, focusedChatPane, reviewVisible, selectedSessionId, setTerminalOpen, splitOpen, teamspaceOpen, terminalOpen])
+  }, [focusedChatPane, reviewVisible, selectedSessionId, setTerminalOpen, splitOpen, teamspaceOpen, terminalOpen])
   useEffect(() => window.agentsDock.events.on('native:close-request', ({ requestId }) => {
     void (async () => {
       let saved = false
@@ -763,65 +523,6 @@ function AppWorkspace() {
   const closeTerminal = useCallback(() => {
     if (selectedSessionId) setTerminalOpen(selectedSessionId, false)
   }, [selectedSessionId, setTerminalOpen])
-  const canDropFiles = Boolean(selectedSession && !selectedSession.archived && !switchingProfileId)
-  const dragContainsFiles = (event: ReactDragEvent<HTMLDivElement>) => Array.from(event.dataTransfer.types).includes('Files')
-  const handleFileDragEnter = (event: ReactDragEvent<HTMLDivElement>) => {
-    if (!canDropFiles || !dragContainsFiles(event)) return
-    event.preventDefault()
-    markFileDragActive()
-  }
-  const handleFileDragOver = (event: ReactDragEvent<HTMLDivElement>) => {
-    if (!canDropFiles || !dragContainsFiles(event)) return
-    event.preventDefault()
-    event.dataTransfer.dropEffect = 'copy'
-    markFileDragActive()
-  }
-  const handleFileDragLeave = (event: ReactDragEvent<HTMLDivElement>) => {
-    if (!fileDropActive) return
-    event.preventDefault()
-    if (event.target !== event.currentTarget) return
-    const destination = event.relatedTarget
-    if (destination instanceof Node && event.currentTarget.contains(destination)) return
-    resetFileDrag()
-  }
-  const handleFileDrop = async (event: ReactDragEvent<HTMLDivElement>) => {
-    if (!canDropFiles || !dragContainsFiles(event)) return
-    event.preventDefault()
-    resetFileDrag()
-    try {
-      const refs = await nativeFileRefsFromFiles(event.dataTransfer.files)
-      const current = useAppStore.getState()
-      if (
-        refs.length
-        && current.activeProfileId === activeProfileId
-        && current.profileGeneration === profileGeneration
-        && current.selectedSessionId === selectedSessionId
-        && !current.switchingProfileId
-      ) await current.attachPaths(refs)
-    } catch (cause) {
-      const current = useAppStore.getState()
-      if (
-        current.activeProfileId === activeProfileId
-        && current.profileGeneration === profileGeneration
-        && current.selectedSessionId === selectedSessionId
-        && !current.switchingProfileId
-      ) current.setError(cause instanceof Error ? cause.message : String(cause))
-    }
-  }
-  const handleChatShortcut = (event: ReactKeyboardEvent<HTMLDivElement>) => {
-    if (
-      event.defaultPrevented
-      || !(event.metaKey || event.ctrlKey)
-      || event.altKey
-      || event.shiftKey
-      || event.key.toLowerCase() !== 'd'
-      || !selectedSessionId
-    ) return
-    event.preventDefault()
-    event.stopPropagation()
-    useAppStore.getState().setModal('digest', true)
-  }
-
   const sideChat = (session: NonNullable<typeof selectedSession>) => <SideChatPopover
     key={`side-chat:${activeRenderKey}:${session.id}`} session={session}
     scope={{ profileId: activeProfileId ?? '', profileGeneration, serverIdentity: activeServerIdentity }}
@@ -834,85 +535,6 @@ function AppWorkspace() {
     }}
   />
 
-  const chatWorkspace = <div
-    className="chat-workspace"
-    onKeyDown={handleChatShortcut}
-    onDragEnter={handleFileDragEnter}
-    onDragOver={handleFileDragOver}
-    onDragLeave={handleFileDragLeave}
-    onDrop={handleFileDrop}
-  >
-    {noServerConfigured ? <WelcomeChat /> : <>
-      <div className="chat-workspace-history">
-        <Timeline key={`timeline:${selectedRenderKey}`} />
-      </div>
-      <div className="chat-workspace-shelves">
-        <CodexInteractionShelf key={`codex-interactions:${selectedRenderKey}`} />
-        <ClaudeInteractionShelf key={`claude-interactions:${selectedRenderKey}`} />
-        <GeminiInteractionShelf key={`gemini-interactions:${selectedRenderKey}`} session={selectedSession} />
-      </div>
-      {selectedSession && <EmergencyTimelineDock
-        key={`emergency:${selectedRenderKey}`}
-        sessionId={selectedSession.id}
-        focused
-      />}
-      <div className="chat-workspace-composer">
-        {selectedSession && sideChat(selectedSession)}
-        {selectedSession?.archived
-          ? <div className="composer disabled"><span>{t("ui.App.App.archived_chat_unarchive_it_to_send_a_messa_1b14da3")}</span></div>
-          : <Composer key={`composer:${selectedRenderKey}`} dropActive={fileDropActive} />}
-      </div>
-    </>}
-  </div>
-
-  const singleConversation = <>
-    <ChatHeader
-      key={`header:${selectedRenderKey}`}
-      session={noServerConfigured ? null : undefined}
-      sidebarVisible={sidebarVisible}
-      terminalOpen={terminalOpen}
-      onSidebarToggle={toggleSidebar}
-      onTerminalToggle={selectedSession?.archived ? undefined : toggleTerminal}
-      onOpenSplit={sessionId => void useAppStore.getState().openSessionInSplit(sessionId)}
-    />
-    {selectedSession
-      ? <WorkspaceEditor
-        key={`workspace-editor:${selectedRenderKey}:${selectedSession.cwd ?? ''}`}
-        workspaceKey={`${selectedWorkspaceKey}:cwd:${selectedSession.cwd ?? ''}`}
-        session={selectedSession}
-        profileScope={workspaceProfileScope}
-        available={workspaceFilesAvailable}
-        capabilityVersion={workspaceFilesVersion}
-        maxTextFileBytes={workspaceFilesMaxTextFileBytes}
-        unavailableMessage={workspaceFilesUnavailableMessage}
-        onFileOpen={showFilesForOpenedFile}
-        chatContent={chatWorkspace}
-      />
-      : chatWorkspace}
-  </>
-
-  // Files can browse the focused split chat without covering either conversation.
-  // Opening/editing a file activates this same editor, preserving its buffers.
-  const filesBrowseTarget = splitOpen && visibleDockOpen && inspectorTab === 'files' && selectedSession
-    ? { profileId: activeProfileId, profileGeneration, serverIdentity: activeServerIdentity,
-      sessionId: selectedSession.id, cwd: selectedSession.cwd ?? '' }
-    : null
-  const renderedWorkspaceTarget = splitWorkspaceTarget ?? (filesBrowseTarget
-    ? { ...filesBrowseTarget, key: splitWorkspaceKey(filesBrowseTarget) } : null)
-  const splitWorkspaceSession = renderedWorkspaceTarget?.sessionId === primarySession?.id
-    ? primarySession
-    : renderedWorkspaceTarget?.sessionId === secondarySession?.id ? secondarySession : null
-  const splitWorkspaceProfileScope = renderedWorkspaceTarget?.profileId ? {
-    profileId: renderedWorkspaceTarget.profileId,
-    profileGeneration: renderedWorkspaceTarget.profileGeneration,
-    serverIdentity: renderedWorkspaceTarget.serverIdentity
-  } : null
-  const activateSplitFiles = () => {
-    if (!renderedWorkspaceTarget || splitWorkspaceTarget) return
-    splitWorkspaceTargetRef.current = renderedWorkspaceTarget
-    setSplitWorkspaceTarget(renderedWorkspaceTarget)
-  }
-
   if (!initialized) {
     return <main className="app-boot"><LoaderCircle className="spin" size={20} /><span>{t("ui.App.App.opening_agentsdock_24f75ec")}</span>{slowBoot && <><small>{t("ui.App.App.startup_is_taking_longer_than_expected_che_4274a9c")}</small><button className="quiet-button" onClick={() => window.location.reload()}>{t("ui.App.App.retry_942087c")}</button></>}</main>
   }
@@ -921,7 +543,7 @@ function AppWorkspace() {
     <main ref={shellRef} className={`app-shell ${sidebarVisible ? '' : 'sidebar-hidden '}${visibleDockOpen ? 'inspector-open' : ''}${reviewVisible && !teamspaceOpen ? ' review-open' : ''}${teamspaceOpen ? ' teamspace-open' : ''}${switchingProfileId ? ' profile-switching' : ''}`} style={columnStyle}>
       <ChatFontApplier />
       <Sidebar key={`sidebar:${activeRenderKey}`} hidden={!sidebarVisible} />
-      <section className={`conversation-pane${teamspaceOpen ? ' teamspace-pane' : splitOpen ? ' split-open' : selectedSession ? ' workspace-editor-open' : ''}`} aria-busy={Boolean(switchingProfileId)} inert={switchingProfileId ? true : undefined}>
+      <section className={`conversation-pane${teamspaceOpen ? ' teamspace-pane' : noServerConfigured ? '' : ' grid-workspace-open'}`} aria-busy={Boolean(switchingProfileId)} inert={switchingProfileId ? true : undefined}>
         {teamspaceOpen
           ? <TeamNetwork
             key={`teamspace:${activeRenderKey}`}
@@ -937,72 +559,16 @@ function AppWorkspace() {
               return null
             })}
           />
-          : splitOpen && primarySession && secondarySession
-          ? <>
-            <ChatSplitView
-              preferenceScope={workspaceProfileScope}
-              inactive={Boolean(splitWorkspaceTarget)}
-              primary={<ChatPane
-                key={`${activeRenderKey}:${primarySession.id}`}
-                pane="primary"
-                session={primarySession}
-                sideChat={sideChat(primarySession)}
-                focused={focusedChatPane === 'primary'}
-                split
-                sidebarVisible={sidebarVisible}
-                terminalOpen={focusedChatPane === 'primary' && terminalOpen}
-                onSidebarToggle={toggleSidebar}
-                onTerminalToggle={toggleTerminal}
-              />}
-              secondary={<ChatPane
-                key={`${activeRenderKey}:${secondarySession.id}`}
-                pane="secondary"
-                session={secondarySession}
-                sideChat={sideChat(secondarySession)}
-                focused={focusedChatPane === 'secondary'}
-                split
-                sidebarVisible={sidebarVisible}
-                terminalOpen={focusedChatPane === 'secondary' && terminalOpen}
-                onTerminalToggle={toggleTerminal}
-              />}
-            />
-            {renderedWorkspaceTarget && splitWorkspaceSession && <div
-              ref={splitWorkspaceOverlayRef}
-              className={splitWorkspaceTarget ? 'split-workspace-overlay' : 'split-workspace-files-browser'}
-              role="region"
-              aria-label={t("ui.App.App.file_workspace_7499ea9", { "name": String(splitWorkspaceSession.title) })}
-              data-session-id={splitWorkspaceSession.id}
-              tabIndex={-1}
-            >
-              <WorkspaceEditor
-                key={`split-workspace-editor:${renderedWorkspaceTarget.key}`}
-                workspaceKey={`${profileSessionKey(renderedWorkspaceTarget.profileId, splitWorkspaceSession.id, renderedWorkspaceTarget.serverIdentity)}:cwd:${renderedWorkspaceTarget.cwd}`}
-                session={splitWorkspaceSession}
-                profileScope={splitWorkspaceProfileScope}
-                available={workspaceFilesAvailable}
-                capabilityVersion={workspaceFilesVersion}
-                maxTextFileBytes={workspaceFilesMaxTextFileBytes}
-                unavailableMessage={workspaceFilesUnavailableMessage}
-                onReady={renderedSplitWorkspaceReady}
-                onReturnToChat={dismissSplitWorkspace}
-                filesOnly={!splitWorkspaceTarget}
-                onActivate={activateSplitFiles}
-                onFileOpen={showFilesForOpenedFile}
-                chatContent={<div className="split-workspace-return">
-                  <strong>{t("ui.App.App.your_split_chats_are_still_open_4a8601f")}</strong>
-                  <span>{t("ui.App.App.choose_chat_to_return_to_both_panes_3c6aab3")}</span>
-                  <button type="button" className="quiet-button" onClick={dismissSplitWorkspace}>{t("ui.App.App.return_to_split_chats_f0b8029")}</button>
-                </div>}
-              />
-            </div>}
-          </>
-          : selectedSession?.archived
-            ? singleConversation
-            : <ClaudeRuntimeProvider key={`claude-runtime:${selectedRenderKey}`} session={selectedSession} capability={claudeControlsCapability}>
-              <CodexRuntimeProvider key={`codex-runtime:${selectedRenderKey}`} session={selectedSession} capability={codexControlsCapability}>
-                {singleConversation}
-              </CodexRuntimeProvider>
-            </ClaudeRuntimeProvider>}
+          : noServerConfigured
+            ? <><ChatHeader sidebarVisible={sidebarVisible} onSidebarToggle={toggleSidebar} /><WelcomeChat /></>
+            : <ChatWorkspaceGrid
+              key={activeRenderKey}
+              sidebarVisible={sidebarVisible}
+              terminalOpen={Boolean(terminalOpen)}
+              onSidebarToggle={toggleSidebar}
+              onTerminalToggle={toggleTerminal}
+              sideChat={sideChat}
+            />}
       </section>
       <InspectorDock
         open={visibleDockOpen}

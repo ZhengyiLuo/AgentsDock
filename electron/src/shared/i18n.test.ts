@@ -5,6 +5,19 @@ import { catalogs, defaultLocale, localeOptions } from './locales'
 afterEach(() => setLocale('en'))
 
 describe('language resolution and translation', () => {
+  it('uses the approved Chinese subagent term without changing English', () => {
+    expect(t('subagents.title')).toBe('Subagents')
+    setLocale('zh-CN')
+    expect(t('subagents.title')).toBe('子 Agent')
+    expect(t('subagents.stop')).toBe('停止子 Agent')
+    expect(t('subagents.providerName', { provider: 'Codex' })).toBe('Codex 子 Agent')
+    for (const [key, value] of Object.entries(catalogs.en)) {
+      if (/\bsubagents?\b/i.test(value)) {
+        expect(catalogs['zh-CN'][key], key).not.toMatch(/子代理|\bsubagents?\b/i)
+      }
+    }
+  })
+
   it('uses only supported Simplified Chinese system locales', () => {
     for (const system of ['zh', 'zh-CN', 'zh_SG', 'zh-Hans', 'zh-Hans-HK']) {
       expect(resolveLocale('system', system)).toBe('zh-CN')

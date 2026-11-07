@@ -96,6 +96,7 @@ export function liveTimelineAdvanced(previousSeq: number, nextSeq: number): bool
 }
 
 function timelineRowIds(row: TimelineRow): string[] {
+  if (row.kind === 'message' && row.representedEventIds) return [...row.representedEventIds, ...row.events.map(event => event.id)]
   if (row.kind === 'message' || row.kind === 'trace' || row.kind === 'progress' || row.kind === 'job') {
     return row.events.map(event => event.id)
   }

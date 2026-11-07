@@ -327,6 +327,10 @@ globalThis.fetch = ((input: RequestInfo | URL, init?: RequestInit) => {
           created_at: '2026-07-28T00:00:00Z',
         },
       }
+    } else if (path.endsWith('/gemini/runtime')) {
+      value = { available: true, pending_interactions: [], permission_modes: ['default', 'autoEdit', 'yolo'] }
+    } else if (path.includes('/gemini/interactions/')) {
+      value = { interaction: { id: 'gemini interaction /?', session_id: 'session /?', method: 'item/tool/requestApproval', params: {}, created_at: '2026-10-25T00:00:00Z' } }
     } else if (path.endsWith('/claude/runtime')) {
       value = {
         available: true,
@@ -717,7 +721,7 @@ try {
   assert(createBody.codex_approvals_reviewer === null, 'The server should own an omitted Codex reviewer default')
   assert(createBody.provider_jobs_access === null, 'The server should own an omitted provider jobs access default')
   assert(!Object.hasOwn(createBody, 'codex_provider') && !Object.hasOwn(createBody, 'provider_connection'), 'Legacy native creation must not add a custom route')
-  for (const backend of ['codex', 'claude'] as const) {
+  for (const backend of ['codex', 'claude', 'opencode', 'gemini'] as const) {
     const field = backend === 'codex' ? 'codex_provider' : 'provider_connection'
     await codex.createSession({ title: 'API test', folder: '', cwd: '', backend, [field]: 'custom', model: 'exact-api-model' })
     const body = JSON.parse(fetchRecords.at(-1)?.body ?? '{}')
@@ -754,6 +758,11 @@ try {
   })
   const claudeCreateBody = JSON.parse(fetchRecords.at(-1)?.body ?? '{}') as Record<string, unknown>
   assert(claudeCreateBody.claude_permission_mode === 'plan', 'Claude session creation must send the requested SDK permission mode')
+  for (const backend of ['opencode', 'gemini'] as const) {
+    const field = backend === 'opencode' ? 'opencode_permission_mode' : 'gemini_permission_mode'
+    await codex.createSession({ title: 'Optional agent', folder: '', cwd: '/workspace', backend, [field]: 'plan' })
+    assert(JSON.parse(fetchRecords.at(-1)?.body ?? '{}')[field] === 'plan', `${backend} creation must preserve permission mode`)
+  }
   await codex.updateSession('session /?', { claude_permission_mode: null })
   const claudeResetBody = JSON.parse(fetchRecords.at(-1)?.body ?? '{}') as Record<string, unknown>
   assert(Object.hasOwn(claudeResetBody, 'claude_permission_mode'), 'Claude permission reset must preserve an explicit null')
@@ -851,6 +860,15 @@ try {
   assert(reloadRequest.method === 'POST' && reloadRequest.body === '{}', 'Provider reload should POST an explicit empty object')
 
   await codex.codexRuntime('session /?')
+  const geminiRuntime = await codex.geminiRuntime('session /?')
+  assert(geminiRuntime.available && geminiRuntime.permission_modes?.includes('autoEdit'), 'Gemini runtime must preserve advertised modes')
+  assert(fetchRecords.at(-1)?.url.endsWith('/session%20%2F%3F/gemini/runtime'), 'Gemini runtime must encode the session ID')
+  const geminiInteraction = await codex.resolveGeminiInteraction('session /?', 'gemini interaction /?', { decision: 'decline' })
+  assert(geminiInteraction.id === 'gemini interaction /?', 'Gemini approval must unwrap the exact interaction')
+  const geminiRequest = fetchRecords.at(-1)
+  assert(geminiRequest?.url.endsWith('/gemini/interactions/gemini%20interaction%20%2F%3F/resolve'), 'Gemini approval must encode both IDs')
+  assert(geminiRequest.method === 'POST' && geminiRequest.teamNetworkToken === 'codex-token' && geminiRequest.token === null, 'Gemini approval must use only the modern native-control header')
+  assert(geminiRequest.body === '{"response":{"decision":"decline"}}', 'Gemini approval must preserve the offered decision')
   await codex.resolveCodexInteraction('session /?', 'interaction /?', { decision: 'accept' })
   const claudeRuntime = await codex.claudeRuntime('session /?')
   assert(claudeRuntime.transport === 'agent-sdk', 'Claude runtime should return the server transport snapshot')
