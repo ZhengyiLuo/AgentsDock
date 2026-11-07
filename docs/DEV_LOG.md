@@ -1,5 +1,15 @@
 # Public development log
 
+## Unreleased — Wait for Cursor's first durable native session before updating
+
+- A Cursor thread identifier is persisted only after a successful native reply.
+  Its first running turn now waits for that safe boundary instead of being
+  interrupted into a new thread with no original task context. Later turns
+  with a durable native session remain eligible for update continuation.
+- Verification: 96 restart/recovery tests pass, including a live-but-not-yet-
+  persisted Cursor identifier and the subsequent durable-session case.
+  Managed-package and native desktop acceptance remains in progress below.
+
 ## Unreleased — Avoid double-counting a resumable native goal during update
 
 - The live managed-install replay exposed a native goal's consumer being counted

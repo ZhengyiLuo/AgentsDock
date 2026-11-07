@@ -34,6 +34,9 @@ Codex app-server or Claude Agent SDK transport, so restarting does not silently
 remove interactive approvals. Non-chat work, a turn
 still starting, and backends without this continuation contract are not
 force-stopped by the one-click path; they must reach a safe boundary first.
+Cursor's first turn also waits until its native session has been committed by
+a successful reply. A live initial session identifier alone is not a durable
+resume target; force-stopping it could lose the original task's context.
 
 Continuation capability version 2 also supports active native Codex goals.
 Shutdown pauses the exact owned goal; startup resumes that same native thread
