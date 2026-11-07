@@ -1039,6 +1039,8 @@ export interface ProviderHistoryOrigin {
 }
 
 export interface Event extends SharedChatAttribution {
+  /** Server-authored update recovery boundary, not a newly submitted user message. */
+  server_update_restart_request_id?: string | null
   seq: number
   id: string
   session_id: string

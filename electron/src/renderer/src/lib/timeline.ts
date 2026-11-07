@@ -1702,6 +1702,12 @@ function isNativeMailboxWakeInput(event: Event): boolean {
 }
 
 function isServerUpdateContinuationInput(event: Event): boolean {
+  if (event.type === 'turn_started' && event.imported !== true && event.backend === 'codex'
+    && event.purpose === 'codex_goal_resume' && !hasProviderUserProvenance(event)
+    && typeof event.run_id === 'string' && /^run_codexgoal_[a-f0-9]{16}$/.test(event.run_id)
+    && typeof event.queued_id === 'string' && /^queued_[a-f0-9]{16}$/.test(event.queued_id)
+    && typeof event.server_update_restart_request_id === 'string'
+    && /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/.test(event.server_update_restart_request_id)) return true
   return event.type === 'turn_started' && event.imported !== true
     && event.purpose === 'server_update_continuation' && event.prompt === ''
     && event.provider_generated === true && event.provider_user_authored !== true

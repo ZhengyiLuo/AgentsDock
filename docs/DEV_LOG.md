@@ -14,8 +14,15 @@
   did not restart the already-updated service. A real Claude task recovered and
   completed before its retained queued follow-up, each once. These packages use
   a private QA signing key and loopback feed, not production release signing.
-- The subsequent native-goal managed-install replay and native desktop automatic
-  exit/install/relaunch are still pending; this is not release acceptance.
+- The subsequent native Codex goal replay passed a real managed-package update:
+  one pause and one recovery, unchanged native goal identity, retained usage,
+  and completion of the existing file checkpoint. It exposed an internal goal
+  resume notice rendered as a user message; the desktop now hides only the
+  server-marked update recovery boundary, retaining user text and the reply.
+  Verified that correction in the isolated native app against the real events.
+- Follow-up checks pass 269 server tests and 310 desktop tests, TypeScript and
+  production compilation. Native desktop automatic exit/install/relaunch is
+  still pending; private QA signing is not production release acceptance.
 
 ## Unreleased — Preserve native goals through coordinated server restarts
 
