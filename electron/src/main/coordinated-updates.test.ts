@@ -84,6 +84,54 @@ describe('signed coordinated release contract', () => {
 })
 
 describe('coordinated app/server reconciliation (mocked server boundary)', () => {
+  it.each([2, 12])('waits for all %i saved servers and resumes each exact reservation once', async count => {
+    const ids = Array.from({ length: count }, (_, index) => `multi-${index}`)
+    const f = fixture(ids)
+    const capabilities = {
+      server_updates: { available: true, version: 12 },
+      server_update_ensure_v1: { available: true, version: 1 },
+      server_update_continuation_v1: { available: true, version: 1 },
+      server_restart: { available: true, required: false, version: 2, message: 'Ready', action: null,
+        force_restart: true, force_confirmation_required: true }
+    }
+    let releaseLast: (() => void) | undefined
+    const lastRestart = new Promise<void>(resolve => { releaseLast = resolve })
+    for (const [index, id] of ids.entries()) {
+      const scheduleId = (index + 1).toString(16).padStart(32, '0')
+      const client = f.clients[id]
+      client.health.mockResolvedValue(health(id, { capabilities }))
+      client.ensureServerUpdate.mockResolvedValue({ phase: 'pending', current_version: '1.1.0-beta.1',
+        target_version: '1.2.0-beta.2', server_identity: `server-${id}`, server_instance_id: `boot-${id}`,
+        schedule_id: scheduleId, preparation_phase: 'ready' })
+      client.restartServer.mockImplementation(async request => {
+        if (index === count - 1) await lastRestart
+        client.health.mockResolvedValue(health(id, { server_version: '1.2.0-beta.2', capabilities }))
+        return { phase: 'accepted', request_id: request.request_id,
+          update_schedule_id: scheduleId, message: 'Restart accepted.' }
+      })
+    }
+    let installerAllowed = false
+    const installation = f.manager.prepareForInstall(signed(), '1.2.0-beta.2')
+      .then(() => { installerAllowed = true })
+    try {
+      await vi.waitFor(() => expect(f.clients[ids[count - 1]].restartServer).toHaveBeenCalledOnce())
+      expect(installerAllowed).toBe(false)
+    } finally {
+      releaseLast!()
+    }
+    await installation
+    expect(f.manager.status()).toHaveLength(count)
+    expect(f.manager.status().every(record => record.phase === 'current')).toBe(true)
+    for (const [index, id] of ids.entries()) {
+      expect(f.clients[id].restartServer).toHaveBeenCalledOnce()
+      expect(f.clients[id].restartServer.mock.calls[0][0]).toMatchObject({
+        expected_server_identity: `server-${id}`, expected_server_instance_id: `boot-${id}`,
+        expected_update_schedule_id: (index + 1).toString(16).padStart(32, '0'),
+        resume_interrupted_turns: true
+      })
+    }
+  })
+
   it('prepares and verifies the server before allowing the app installer to run', async () => {
     const f = fixture()
     const scheduleId = 'a'.repeat(32)

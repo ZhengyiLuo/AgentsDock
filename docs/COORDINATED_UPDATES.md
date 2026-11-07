@@ -47,6 +47,33 @@ failure after one of several servers has already updated, and failure of the
 native app installer after all servers have updated; neither case may be
 reported as a completed product update.
 
+### Final review gates
+
+This is not a global pause barrier across every server process on a machine.
+The coordinator targets saved, identity-verified profiles. Servers prepare and
+activate independently, and a completed server may resume its chats while
+another server is still updating. Only the desktop replacement waits for all
+target servers. The current continuation receipt accepts up to 256 ordinary
+active chats per server; unsupported work must finish safely instead of being
+interrupted without a recovery contract.
+
+After integration with current main, the following native acceptance remains
+required before merging the server-first flow:
+
+- Two managed servers with live work: exact signed candidate activation,
+  preserved identity/history, one continuation per interrupted ordinary turn,
+  no duplicated side effects in the controlled test, and retained queued work.
+- Offline preflight and partial failure after one server has updated: no app
+  replacement, a persistent actionable error, and retry of incomplete targets.
+- Goals, scheduled work and unsupported providers: truthful waiting behavior
+  without losing or silently converting their work into ordinary chat turns.
+- Actual native app replacement: flush drafts, exit without manual termination,
+  install the candidate, reopen with saved profiles and verify completion.
+
+Multi-profile coordinator fixtures and an isolated development Electron app
+connected to real servers are useful regression checks, but neither establishes
+signed-package replacement or provider recovery through that replacement.
+
 The sections below describe the earlier app-first bridge and historical
 acceptance; they do not establish acceptance for this new server-first flow.
 

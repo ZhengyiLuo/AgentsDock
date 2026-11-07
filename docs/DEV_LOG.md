@@ -1,5 +1,27 @@
 # Public development log
 
+## 2026-11-06 — Refresh the coordinated-update review against current main
+
+- Integrate main through `eac24fca`, preserving both native background-wake and
+  server-update continuation filtering in the desktop timeline.
+- Add two- and twelve-profile coordinator regressions: every exact server
+  reservation receives one continuation-enabled restart request, and desktop
+  installation remains gated until the last server is verified current.
+- Verification: 443 focused desktop tests, 207 update/restart/recovery server
+  tests and 74 provider-history repair tests pass. Desktop type checking,
+  production compilation and compiled-entry
+  verification pass. The server suites run with isolated configuration and
+  state, without inherited managed-installation settings. Two real disposable
+  servers were reached through a native development app; its Settings listed
+  both, and separate Claude and Codex conversations each received their reply.
+  Local installation discovery is isolated in this private harness; native IPC,
+  authenticated HTTP, providers and chat persistence are real.
+- Remaining gates: current-source signed multi-server replacement, busy-turn
+  recovery, offline/partial-failure retry, and automatic native app quit and
+  relaunch. This review does not establish universal task checkpointing or a
+  global pause across servers. Source/local development only; no release or
+  production app/server replacement.
+
 ## Unreleased — Use one product update control in desktop Settings
 
 - Remove the separate manual AgentsServer update controls from Settings. The
