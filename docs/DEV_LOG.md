@@ -1,5 +1,231 @@
 # Public development log
 
+## 2026-11-07 — Complete isolated coordinated-update source acceptance
+
+- Source `75da4096` passed actual signed managed-service replacement with two
+  isolated services, real Claude/Cursor work and native Codex goals. The review
+  fixed a first-turn Cursor recovery hole: updates now wait for its native
+  session to be durable rather than restarting into an empty conversation.
+- Rechecked invalid signatures, corrupt archives before takeover, partial
+  success and retry, and failure after takeover. The latter restored the old
+  healthy service and cleared the failed stage/fence; the same package then
+  installed successfully on retry. Existing identities/history were retained,
+  including installations with legacy 0755/0750 root permissions.
+- Through actual native app input, two private packaged update cycles exited,
+  installed and reopened automatically. The last cycle updated both saved
+  services before replacing the app, resumed Cursor once, and waited safely
+  for Claude's independent background command. Draft, connection, language and
+  channel settings survived. Rechecking did not reinstall current targets.
+  Offline preflight kept the old app and a persistent actionable error.
+  Detached terminal work survived rollback/retry and reconnected afterward.
+- Verification: all 11 hosted checks passed on the code head; 96 focused
+  restart/recovery and 254 update/installer/handoff tests passed. Desktop
+  verification also passed 310 focused tests, type checking and production
+  compilation. Final native history showed one interrupted Cursor turn and
+  one successful continuation, with no internal continuation user bubble.
+- Test surface: isolated, focus-emulated native Electron with real IPC,
+  authenticated HTTP, providers, service manager and native updater. Private
+  QA feeds/packages used ephemeral server signing and an Apple Development-
+  signed shell containing the branch's compiled desktop code. Production
+  signing/notarization, platform-specific release installation and supported
+  old-client feed migration remain release gates; they are not established by
+  this local acceptance. No production server was changed and nothing was
+  released. See `docs/COORDINATED_UPDATES.md` for the exact boundaries.
+
+## Unreleased — Wait for Cursor's first durable native session before updating
+
+- A Cursor thread identifier is persisted only after a successful native reply.
+  Its first running turn now waits for that safe boundary instead of being
+  interrupted into a new thread with no original task context. Later turns
+  with a durable native session remain eligible for update continuation.
+- Verification: 96 restart/recovery tests pass, including a live-but-not-yet-
+  persisted Cursor identifier and the subsequent durable-session case.
+  Managed-package and native desktop acceptance remains in progress below.
+
+## Unreleased — Avoid double-counting a resumable native goal during update
+
+- The live managed-install replay exposed a native goal's consumer being counted
+  both as an active chat and as independent background work. Deduplicate only
+  the exact, still-owned active goal consumer. Unrelated operations, changed
+  ownership, prompts and child agents remain restart blockers.
+- Verification: 77 restart/admission tests pass, including the actual native
+  operation registry in the goal-checkpoint test and stale-owner regressions.
+- An isolated two-service managed-package replay exercised legacy installation
+  roots with modes 0755 and 0750, invalid signatures, a corrupt archive before
+  takeover, partial success and retry. The failed service stayed healthy; retry
+  did not restart the already-updated service. A real Claude task recovered and
+  completed before its retained queued follow-up, each once. These packages use
+  a private QA signing key and loopback feed, not production release signing.
+- The subsequent native Codex goal replay passed a real managed-package update:
+  one pause and one recovery, unchanged native goal identity, retained usage,
+  and completion of the existing file checkpoint. It exposed an internal goal
+  resume notice rendered as a user message; the desktop now hides only the
+  server-marked update recovery boundary, retaining user text and the reply.
+  Verified that correction in the isolated native app against the real events.
+- Follow-up checks pass 269 server tests and 310 desktop tests, TypeScript and
+  production compilation. Native desktop automatic exit/install/relaunch is
+  still pending; private QA signing is not production release acceptance.
+
+## Unreleased — Preserve native goals through coordinated server restarts
+
+- Extend update-continuation capability to native Codex goals. Save the exact
+  thread/goal identity, pause before provider teardown, and resume the same goal
+  without resetting its token or time usage. Completion, replacement, exhausted
+  budgets and a later manual pause/clear take precedence over recovery.
+- Preserve the original interactive transport for ordinary continuations.
+  Claude SDK runs must confirm native Stop before recovery; closing the transport
+  alone is not a safe stop. Bind Claude recovery to its current native goal,
+  excluding earlier replaced goals, and show a recoverable error if stopping
+  cannot be confirmed. Internal continuation prompts stay out of user bubbles.
+- Pause independent chat owners concurrently within the bounded shutdown phase.
+  A prepared update with a durable continuation receipt receives the cooperative
+  shutdown budget, not the emergency three-second kill deadline. Keep emergency
+  restart behavior and the installer's bounded wait aligned with shutdown.
+- Verification on review base `2604af6a`: 380 focused server regression tests
+  pass, including lifecycle/queue, native goal identity and cancellation,
+  concurrent stop, transport retention and both restart signal paths. A separate
+  110-test goal-admission/history-repair run passes. Desktop type checking,
+  production compilation and 306 focused updater/timeline tests pass.
+- Real acceptance used an isolated native Electron app (offscreen/focus-emulated)
+  with authenticated local servers and real Codex and Claude providers. Goals
+  were created through the UI, interrupted, resumed after server restart,
+  and completed their file checkpoints. Codex retained native usage; a manual
+  pause prevented recovery. Claude resumed only the current goal, leaving old
+  goal checkpoints untouched; another restart produced no second continuation.
+  Interactive approvals were still required and usable after recovery.
+  A further Claude run exercised the production restart signal/watchdog code
+  using a private fixture trigger and completed the current goal after relaunch.
+- Test boundary: installation receipts were fixture-generated; source servers
+  were restarted, not upgraded through a signed package/service-manager install.
+  Current-source signed multi-server replacement, offline/partial-install
+  failure and native desktop quit/install/relaunch remain pre-merge gates.
+  Unsupported active jobs, standalone tasks and terminals still wait for a safe
+  boundary. No production server was restarted and nothing was released.
+
+## 2026-11-06 — Refresh the coordinated-update review against current main
+
+- Integrate main through `eac24fca`, preserving both native background-wake and
+  server-update continuation filtering in the desktop timeline.
+- Add two- and twelve-profile coordinator regressions: every exact server
+  reservation receives one continuation-enabled restart request, and desktop
+  installation remains gated until the last server is verified current.
+- Verification: 443 focused desktop tests, 207 update/restart/recovery server
+  tests and 74 provider-history repair tests pass. Desktop type checking,
+  production compilation and compiled-entry
+  verification pass. The server suites run with isolated configuration and
+  state, without inherited managed-installation settings. Two real disposable
+  servers were reached through a native development app; its Settings listed
+  both, and separate Claude and Codex conversations each received their reply.
+  Local installation discovery is isolated in this private harness; native IPC,
+  authenticated HTTP, providers and chat persistence are real.
+- Remaining gates: current-source signed multi-server replacement, busy-turn
+  recovery, offline/partial-failure retry, and automatic native app quit and
+  relaunch. This review does not establish universal task checkpointing or a
+  global pause across servers. Source/local development only; no release or
+  production app/server replacement.
+
+## Unreleased — Use one product update control in desktop Settings
+
+- Remove the separate manual AgentsServer update controls from Settings. The
+  Updates page keeps one Stable/Beta choice and one AgentsDock installation
+  action while listing each server's version and paired-update progress. A
+  failed paired update is retried from one product-level action; server restart
+  remains available on the Server page.
+- Verification: 236 focused desktop UI/updater tests, TypeScript checking, production
+  compilation and the compiled-entry audit pass. An isolated native Electron
+  development app used its actual Settings controls and authenticated client
+  connection to a disposable local server: the server version appeared, the
+  product channel was shown once and no separate server update panel appeared.
+  A separately identified local QA app containing this compiled UI was also
+  opened and operated through Settings: Updates showed one product channel and
+  action, the Server page had no manual update panel, and saved server versions
+  remained visible. This QA bundle reuses a test shell and is not a release-grade
+  package. The final UI has not been exercised through a packaged update
+  installation. Availability: source and local QA only; no public release or
+  production app/server replacement.
+
+## 2026-10-20 — Sync the coordinated updater with current main
+
+- Merge main `b21ef7ea` into the unreleased coordinated-update branch, retaining
+  both the server-first update work and intervening desktop/server fixes.
+- After integration, 311 focused desktop tests and 206 focused server tests pass
+  with isolated test state. Desktop TypeScript, production compilation, Python
+  compilation and diff checks pass. No native update package or public release
+  was produced by this source integration.
+
+## Unreleased — Prepare paired servers before replacing the desktop app
+
+- A downloaded app update now verifies its matching signed server descriptor,
+  checks saved server identities, and waits for every paired server to reach
+  the target before invoking the native installer. The app blocks chat controls
+  while updating and reports an incomplete update on failure.
+- A capable server can activate its exact queued update immediately. Ordinary
+  Codex, Claude and Cursor chats interrupted by that update receive one durable
+  internal continuation after restart. This does not checkpoint the exact
+  in-flight provider operation; already-completed side effects can be repeated.
+  Goals, other internal work and unsupported runtimes still wait for a safe
+  boundary.
+- A live forced-update check found that graceful shutdown can write a stopped
+  terminal event before the replacement process scans abandoned turns. Save
+  the active ordinary run identities in the restart receipt and restore their
+  internal continuation after a matching signed update, including when the
+  update has already completed before startup recovery. Completed turns stay
+  complete; a second startup does not queue another continuation. Real-provider
+  testing confirmed one continuation was queued and launched, but the first
+  continuation only reported an interrupted command instead of finishing its
+  remaining work. The internal instruction now explicitly asks the agent to
+  complete unfinished steps, including a necessary retry after checking effects.
+  A later disposable, signed beta.10-to-beta.11 update interrupted a real Codex
+  command. The replacement server retained identity, queued and completed
+  exactly one internal continuation, and the file contained one start and one
+  finish marker. The local app displayed the resumed answer after reload, and
+  a follow-up sent through that app completed on the same chat.
+- Validation: 151 focused server tests, 71 focused desktop tests, TypeScript and
+  the desktop production build pass. A disposable named server was upgraded
+  with a signed unpublished candidate and completed an ordinary Codex turn.
+  No public release was changed.
+- A compiled local Electron app from this branch connected to an existing
+  test server through the real client/server transport. A disposable Codex
+  chat and follow-up both completed, and the Updates page resolved the
+  published Stable and Beta feeds. Equal-version and local-suffix preflight
+  behavior has focused regression coverage. The development app cannot
+  install unpublished updates through its public feed; the separate signed
+  package test exercised active-chat continuation through the real server.
+- An isolated native update replay exposed an early forced-restart request
+  while the server package was still staging. The coordinator now waits for
+  an explicit ready state before requesting activation; a regression test
+  covers staging followed by readiness.
+- A later isolated replay activated the matching server but did not complete
+  native app replacement. The coordinator now keeps the same user update
+  action alive across the expected server restart connection gap, including
+  an ambiguous restart response. A later isolated macOS native replay with
+  signed, notarized, unpublished beta.6 and beta.7 packages passed the actual
+  one-click journey: the server reached beta.7 before app replacement, the app
+  relaunched at beta.7, and server identity and a saved chat survived. See
+  [native replay](https://github.com/ZhengyiLuo/AgentsDock/actions/runs/39105335755).
+  The replay used a private exact-package test feed and a disposable server;
+  it did not exercise a real provider turn during the update, busy goals,
+  multiple saved servers, or a production release.
+
+## 2026-10-21 — Replay a private busy-chat update
+
+- An explicit retry after server preparation failed could reattach to the old
+  failed schedule and fail again without attempting a new preparation. The main
+  Update action now clears that operation ownership on retry while retaining
+  the exact signed target. A regression failed before the fix; 135 focused
+  desktop tests, TypeScript checking and the production compile pass.
+- An unpublished, isolated macOS QA app and signed server package replayed a
+  beta.10-to-beta.11 update through the real Update button. The server
+  completed first; the app then replaced itself, relaunched and reopened the
+  same chat. A live Claude turn interrupted during the server restart received
+  one durable continuation, produced a final answer on the new server and
+  remained visible in the app. The continuation was marked system-generated
+  and not user-authored. A separate failed-preparation replay verified that
+  the same main button could retry successfully.
+- These QA app packages use a separate bundle identity, private app data and
+  loopback-only feeds; they were signed for local development, not notarized or
+  published. Busy Codex/Cursor turns, non-chat blockers, multiple clients and
+  rollback still need native acceptance before a product release.
 ## 2026-11-06 - Improve terminal feedback and bound bulk output
 
 - Feed received output directly into xterm's existing input-aware parser instead
@@ -9748,3 +9974,35 @@ and the original remained unchanged. This is a source fix, not a published beta.
   encountered Codex's retained native writer after unsubscribe; that probe is
   failed, and genuine cross-process credential handoff remains unaccepted.
   No public release, installed-app replacement, or live-service deployment.
+
+## 2026-10-22 — Draft coordinated busy-server update verification
+
+- One product Update action now prepares and verifies saved servers before the
+  native app installer. Disposable managed-service upgrades confirmed one
+  internal continuation and a final reply for each of Codex, Claude, and
+  Cursor. A non-chat job and a persistent goal deferred forced interruption;
+  a persistent terminal survived, and simultaneous client requests caused one
+  server replacement.
+- An isolated packaged-app replay confirmed that an unreachable server leaves
+  the old app installed, but found its error message could be overwritten by a
+  background release check. The source fix retains an explicit incomplete
+  update message across checks and identifies the failed connection. Focused
+  desktop tests, type checking, and the production compile passed; this revised
+  UI message has not yet passed packaged-app acceptance.
+- Native replacement remains unaccepted: a repacked QA app downloaded the
+  matching update, but did not exit automatically. Its installer completed and
+  relaunched only after the disposable old app was explicitly terminated. The
+  QA shell was modified for isolated feeds and is not an exact-source signed
+  release candidate. A clean packaged replay, multi-server partial failure,
+  rollback, and busy-chat UI journey are still required. No public release or
+  production installation changed.
+
+Follow-up verification covered a partial multi-server update in the desktop
+coordinator: after one server reaches the target and another rejects the
+update, the plan retains both results; repeating the main Update action retries
+only the failed server. The affected desktop suites passed 130 tests and type
+checking passed. Server activation, handoff and rollback fixtures passed 112
+tests. A fresh locally signed QA package was built with the isolated feed, but
+it did not reach the application UI on this machine, so the revised offline
+message and automatic app exit are still unverified in a packaged App. This QA
+package is not a release candidate. The disposable server was restored.

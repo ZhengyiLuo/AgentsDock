@@ -1,5 +1,157 @@
 # Coordinated app and server updates
 
+## Unreleased server-first update work
+
+The next coordinated updater prepares the exact signed server descriptor for
+the downloaded app release before invoking the native app installer. It checks
+all saved server identities, then asks each server to install that version and
+waits for verified gateway, execution and API health. The desktop remains on
+its prior installed version if a server is offline, blocked or fails. During
+this operation the desktop displays a blocking progress view; the native app
+installer runs only after all saved servers have reached the target. A server
+already newer and compatible is never downgraded.
+
+Settings exposes one product update action and one Stable/Beta choice. The
+separate manual AgentsServer update controls are no longer shown. Each saved
+server still reports its version and paired-update progress; if a paired
+update fails after the app is current, the main action becomes **Retry
+AgentsDock update** and retries the incomplete server targets. Server restart
+remains a separate maintenance control on the Server page.
+If a saved server is unreachable before installation, the old app remains
+installed and the same Update action stays available. The incomplete-update
+message identifies the unreachable server and remains visible when a background
+release check rediscovers the same app package.
+
+Servers advertising `server_update_continuation_v1` can activate a prepared
+idle-scheduled update immediately. The request is bound to the exact schedule
+and server boot. It durably queues an internal continuation for each ordinary
+Codex, Claude or Cursor chat turn still active at forced restart. After the
+new server starts, that continuation asks the provider to inspect the prior
+work and finish the task. This resumes the conversation, **not the exact
+in-flight provider instruction**. File writes, commands and outside effects
+may already have happened and may be repeated. The receipt retains the original
+Codex app-server or Claude Agent SDK transport, so restarting does not silently
+remove interactive approvals. Non-chat work, a turn
+still starting, and backends without this continuation contract are not
+force-stopped by the one-click path; they must reach a safe boundary first.
+Cursor's first turn also waits until its native session has been committed by
+a successful reply. A live initial session identifier alone is not a durable
+resume target; force-stopping it could lose the original task's context.
+
+Continuation capability version 2 also supports active native Codex goals.
+Shutdown pauses the exact owned goal; startup resumes that same native thread
+and goal without sending a second objective or resetting token/time usage.
+Completed, replaced, exhausted, cleared or manually paused goals are not
+reactivated. This requires the supporting server code to be installed already;
+it cannot retrofit native-goal recovery into an older server during its first
+upgrade. Claude SDK recovery requires the old native run to confirm Stop before
+disconnecting. It captures the current native goal's condition and set identity,
+checks them again at admission, and continues only that goal through its original
+SDK transport. Earlier replaced goals in the conversation are not recovery work.
+A clear, replacement, completion or explicit Stop invalidates the saved recovery.
+If the native stop cannot be confirmed, the server leaves a visible explanation
+instead of starting a potentially concurrent second run. Prepared updates with
+a durable resume receipt use the cooperative shutdown budget; an emergency
+restart without that receipt retains its short hard-kill deadline.
+This is not automatic approval: a resumed tool may still require the user's
+permission. Active scheduled jobs and standalone provider tasks still wait for
+their safe boundary; they are not converted into chat continuations. Persistent
+terminal work is not a chat continuation either: a detached tmux server proven
+independent of the replaced service can survive and reconnect, while unsafe or
+unverified service-owned processes block activation.
+
+Cross-machine app/server replacement is not atomic. An interrupted install
+can leave a newer server with the older app; the UI must report an incomplete
+update and offer the same target for retry. Release acceptance must test the
+real packaged app and signed update feed with busy chats, old servers, offline
+profiles, multiple clients and failure recovery before this behavior ships.
+In particular, a busy Codex, Claude and Cursor chat must each show one
+interrupted turn and one resumed provider reply after a real managed-service
+replacement. Reimporting native history must never display the internal
+continuation as a user-authored message. Native goals must retain their identity,
+budget and manual-stop state. A non-chat provider task or unsafe persistent
+terminal must defer the force path without losing work. Verify
+failure after one of several servers has already updated, and failure of the
+native app installer after all servers have updated; neither case may be
+reported as a completed product update.
+
+### Final review gates
+
+This is not a global pause barrier across every server process on a machine.
+The coordinator targets saved, identity-verified profiles. Servers prepare and
+activate independently, and a completed server may resume its chats while
+another server is still updating. Only the desktop replacement waits for all
+target servers. The current continuation receipt accepts up to 256 supported
+active chats/goals per server; unsupported work must finish safely instead of being
+interrupted without a recovery contract.
+
+After integration with current main, the source review covers these acceptance
+categories:
+
+- Two managed servers with live work: exact signed candidate activation,
+  preserved identity/history, one continuation per interrupted ordinary turn,
+  no duplicated side effects in the controlled test, and retained queued work.
+- Offline preflight and partial failure after one server has updated: no app
+  replacement, a persistent actionable error, and retry of incomplete targets.
+- Native Codex goals: preserve identity/usage, pause and reactivate only the
+  update-owned goal once; manual pause/clear, completion and exhausted budgets
+  win. Claude goals: confirm native Stop, retain only the current completion
+  condition and interactive transport, and refuse stale/replaced goal recovery.
+- Scheduled work and unsupported providers: truthful waiting behavior without
+  losing or silently converting their work into ordinary chat turns.
+- Actual native app replacement: flush drafts, exit without manual termination,
+  install the candidate, reopen with saved profiles and verify completion.
+
+Multi-profile coordinator fixtures and an isolated development Electron app
+connected to real servers are useful regression checks, but neither establishes
+signed-package replacement or provider recovery through that replacement.
+
+### Current source acceptance (2026-11-07)
+
+Source `75da4096` passed the following isolated macOS checks. Private QA versions,
+an ephemeral server-signing key and a loopback update feed were used; nothing
+was published and no production installation was replaced.
+
+- Two actual managed services retained their identities and history through
+  signed package updates, including installation roots initially using 0755
+  and 0750 permissions. A corrupt archive left its incumbent healthy; partial
+  success and retry skipped the already-current service. A deliberately broken
+  candidate failed after takeover, restored the healthy old release, cleared
+  its activation fence, and succeeded on a same-byte retry after stage cleanup.
+- Real Claude, Cursor and native Codex-goal work exercised recovery through
+  managed replacement. Claude retained its interactive SDK permission path and
+  queued follow-up; Codex retained native goal identity and usage. Cursor's
+  first turn waited for a durable native session; a later turn resumed that
+  same session once. Recovered internal instructions stayed out of user bubbles.
+- A packaged native app rejected an offline saved server without replacing
+  itself, kept the actionable failure visible, and succeeded after reconnection.
+  Two native update cycles exited, installed and relaunched automatically,
+  without manually terminating the old app. The final one-click cycle updated
+  both saved services before the app: Cursor resumed its interrupted task,
+  while Claude's independent background command finished safely before its
+  service restarted. The unsent draft, profiles, language and Beta choice survived;
+  a subsequent check reported all targets current without reinstalling them.
+- Detached terminal commands and scrollback survived both rollback and retry,
+  and the app reconnected. This is macOS detached-tmux evidence, not a claim
+  about processes owned by a Linux systemd service cgroup.
+- The final code head passed all 11 hosted source checks, 96 focused restart/
+  recovery tests and 254 update/installer/handoff tests. The desktop changes
+  also passed 310 focused tests, type checking and production compilation.
+
+The native packages used a separately identified Apple Development-signed QA
+shell containing the compiled branch application. They were not Developer ID
+release candidates and were not notarized. Publication still requires the
+exact production-signed/notarized candidate and feed, supported old-client
+migration, and platform-specific native installation checks. Windows and Linux
+native desktop replacement were not exercised in this macOS acceptance; hosted
+source tests do not substitute for them. Native installer failure after all
+services succeed is covered by source regression tests, not a fresh production
+installer-failure replay. Retain those release gates; source merge is not
+authorization to publish.
+
+The sections below describe the earlier app-first bridge and historical
+acceptance; they do not establish acceptance for this new server-first flow.
+
 **1.0.4 and 1.0.5 are withdrawn.** Public stable app and server feeds currently
 offer 1.0.3. Their earlier acceptance below covered particular fixtures and
 missed retained rollback records and channel transitions; it does not establish

@@ -1039,6 +1039,8 @@ export interface ProviderHistoryOrigin {
 }
 
 export interface Event extends SharedChatAttribution {
+  /** Server-authored update recovery boundary, not a newly submitted user message. */
+  server_update_restart_request_id?: string | null
   seq: number
   id: string
   session_id: string
@@ -1739,6 +1741,7 @@ export interface ServerRestartRequest {
   force_confirmed?: true
   expected_blocker_revision?: string
   expected_update_schedule_id?: string
+  resume_interrupted_turns?: true
 }
 
 export interface ServerRestartStatus {
@@ -2075,6 +2078,10 @@ export interface CoordinatedServerUpdate {
   scheduleId?: string
   operationTargetVersion?: string
   operationOwned?: boolean
+  /** Exact pending reservation already sent to the restart endpoint. */
+  forceRequestedScheduleId?: string
+  forceRequestId?: string
+  forceRetryAt?: number
   paused?: boolean
 }
 export interface AppUpdateStatus {
