@@ -147,7 +147,7 @@ export function ClaudeRuntimeProvider({ session, capability, children }: ClaudeR
       if (errorTarget === 'contextUsage' || usageGenerationAdvanced) {
         setContextUsageError(null)
       }
-      if (errorTarget === 'runtime') setRuntimeError(null)
+      setRuntimeError(null)
       return next
     } catch (cause) {
       if (epoch !== requestEpoch.current || sessionIdRef.current !== sessionId || profileIdentityRef.current !== requestProfileIdentity) return null
@@ -209,6 +209,7 @@ export function ClaudeRuntimeProvider({ session, capability, children }: ClaudeR
       runtimeIdentityRef.current = `${requestProfileIdentity}\u0000${sessionId}`
       setRuntime(next)
       setContextUsageError(null)
+      setRuntimeError(null)
       return next
     } catch (cause) {
       if (

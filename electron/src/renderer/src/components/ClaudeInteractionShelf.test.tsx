@@ -352,6 +352,104 @@ describe('Claude interaction shelf', () => {
     expect(progress).toHaveAttribute('aria-valuetext', expect.stringContaining('48% context used'))
   })
 
+  it('explains missing usage in Chinese during a turn and updates after terminal sampling', async () => {
+    const listeners = captureServerEventListeners()
+    setLocale('zh-CN')
+    runtimeRequest.mockResolvedValue({
+      ...runtime, pending_interactions: [], features: { context_usage_refresh: true },
+      context_usage_snapshot: null
+    })
+    render(
+      <ClaudeRuntimeProvider session={session} capability={{ available: true, interactive_client_capability: 'claude_sdk_interactive_v1' }}>
+        <ClaudeContextIndicator />
+      </ClaudeRuntimeProvider>
+    )
+    const button = await screen.findByRole('button', { name: '刷新 Claude 上下文用量' })
+    const user = userEvent.setup()
+    await user.hover(button)
+    expect((await screen.findAllByText('暂未获取上下文用量'))[0]).toBeVisible()
+    expect((await screen.findAllByText('本轮 Claude 回复结束后刷新'))[0]).toBeVisible()
+    expect(screen.queryByText('不可用')).not.toBeInTheDocument()
+    expect(screen.getByRole('progressbar')).not.toHaveAttribute('aria-valuenow')
+    await user.click(button)
+    expect(refreshContextUsage).not.toHaveBeenCalled()
+
+    runtimeRequest.mockResolvedValue(interactiveRuntimeWithContextGeneration(2))
+    act(() => emitClaudeContextRuntimeChange(listeners, 2))
+    await waitFor(() => expect(screen.getByRole('progressbar')).toHaveAttribute('aria-valuenow', '30'))
+    expect(button).toHaveAttribute('aria-disabled', 'false')
+    expect(screen.getByRole('progressbar').getAttribute('aria-valuetext')).toContain('可用 token')
+    act(() => setLocale('en'))
+    expect(screen.getByRole('progressbar').getAttribute('aria-valuetext')).toContain('30% context used')
+  })
+
+  it('shows initial loading and a failed runtime read with an observational retry', async () => {
+    const pending = deferred<ClaudeRuntimeSnapshot>()
+    runtimeRequest.mockReturnValueOnce(pending.promise).mockResolvedValue(interactiveRuntimeWithContext())
+    render(
+      <ClaudeRuntimeProvider session={session} capability={{ available: true, interactive_client_capability: 'claude_sdk_interactive_v1' }}>
+        <ClaudeContextIndicator />
+      </ClaudeRuntimeProvider>
+    )
+    const button = screen.getByRole('button', { name: 'Refresh Claude context usage' })
+    const user = userEvent.setup()
+    await user.hover(button)
+    expect((await screen.findAllByText('Loading context usage…'))[0]).toBeVisible()
+    expect(button).toHaveAttribute('aria-busy', 'true')
+    await user.click(button)
+    expect(runtimeRequest).toHaveBeenCalledTimes(1)
+    await act(async () => { pending.reject(new Error('Runtime endpoint offline')) })
+    await user.unhover(button)
+    await user.hover(button)
+    expect((await screen.findAllByText('Refresh failed: Runtime endpoint offline'))[0]).toBeVisible()
+    expect((await screen.findAllByText('Click to retry'))[0]).toBeVisible()
+    await user.click(button)
+    await waitFor(() => expect(screen.getByRole('progressbar')).toHaveAttribute('aria-valuenow', '30'))
+    expect(runtimeRequest).toHaveBeenCalledTimes(2)
+    expect(refreshContextUsage).not.toHaveBeenCalled()
+    await user.unhover(button)
+    await user.hover(button)
+    expect((await screen.findAllByText('Click to refresh now'))[0]).toBeVisible()
+    expect(screen.queryByText('Refresh failed: Runtime endpoint offline')).not.toBeInTheDocument()
+  })
+
+  it('retries a failed runtime read even when the cached turn was active without sampling the SDK', async () => {
+    runtimeRequest.mockResolvedValue({ ...interactiveRuntimeWithContext(), status: { type: 'active' } })
+    render(
+      <ClaudeRuntimeProvider session={session} capability={{ available: true, interactive_client_capability: 'claude_sdk_interactive_v1' }}>
+        <ClaudeContextIndicator /><RuntimeRefreshProbe />
+      </ClaudeRuntimeProvider>
+    )
+    await waitFor(() => expect(screen.getByRole('progressbar')).toHaveAttribute('aria-valuenow', '30'))
+    runtimeRequest.mockRejectedValueOnce(new Error('Temporary disconnect'))
+    const user = userEvent.setup()
+    await user.click(screen.getByRole('button', { name: 'Refresh Claude runtime' }))
+    await waitFor(() => expect(screen.getByTestId('claude-runtime-error')).toHaveTextContent('Temporary disconnect'))
+    const button = screen.getByRole('button', { name: 'Refresh Claude context usage' })
+    expect(button).toHaveAttribute('aria-disabled', 'false')
+    await user.click(button)
+    await waitFor(() => expect(screen.getByTestId('claude-runtime-error')).toBeEmptyDOMElement())
+    expect(runtimeRequest).toHaveBeenCalledTimes(3)
+    expect(refreshContextUsage).not.toHaveBeenCalled()
+    expect(button).toHaveAttribute('aria-disabled', 'true')
+  })
+
+  it('does not claim a new unloaded chat is broken or start its provider just to read usage', async () => {
+    runtimeRequest.mockResolvedValue({ ...runtime, status: { type: 'notLoaded' }, pending_interactions: [], features: { context_usage_refresh: true } })
+    render(
+      <ClaudeRuntimeProvider session={{ ...session, claude_session_id: undefined }} capability={{ available: true, interactive_client_capability: 'claude_sdk_interactive_v1' }}>
+        <ClaudeContextIndicator />
+      </ClaudeRuntimeProvider>
+    )
+    const button = await screen.findByRole('button', { name: 'Refresh Claude context usage' })
+    const user = userEvent.setup()
+    await user.hover(button)
+    expect((await screen.findAllByText('Available after Claude finishes a response'))[0]).toBeVisible()
+    await user.click(button)
+    expect(refreshContextUsage).not.toHaveBeenCalled()
+    expect(runtimeRequest).toHaveBeenCalledTimes(1)
+  })
+
   it('stops a context refresh spinner when the bridge never settles', async () => {
     const snapshot = interactiveRuntimeWithContext()
     const pending = deferred<ClaudeRuntimeSnapshot>()
