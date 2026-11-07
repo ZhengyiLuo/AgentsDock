@@ -8,6 +8,7 @@ import { FitAddon } from '@xterm/addon-fit'
 import { SearchAddon } from '@xterm/addon-search'
 import { WebLinksAddon } from '@xterm/addon-web-links'
 import { Terminal, type ITheme } from '@xterm/xterm'
+import { attachTerminalEcho } from '../lib/terminal-echo'
 import {
   ChevronDown,
   ChevronLeft,
@@ -62,6 +63,7 @@ export const TerminalWorkspace = memo(function TerminalWorkspace({ session, layo
   const fitRef = useRef<FitAddon | null>(null)
   const searchRef = useRef<SearchAddon | null>(null)
   const actionBusyRef = useRef(false)
+  const resetEchoRef = useRef<() => void>(() => undefined)
   const onCloseRef = useRef(onClose)
   const mouseEnabledRef = useRef(false)
   const wheelRemainderRef = useRef(0)
@@ -240,6 +242,7 @@ export const TerminalWorkspace = memo(function TerminalWorkspace({ session, layo
 
   const runAction = useCallback(async (action: TerminalAction, target?: string) => {
     if (!profileId || actionBusyRef.current || !terminalProfileIsActive(profileId, profileGeneration)) return
+    resetEchoRef.current()
     actionBusyRef.current = true
     setActionBusy(true)
     try {
@@ -310,10 +313,14 @@ export const TerminalWorkspace = memo(function TerminalWorkspace({ session, layo
     terminal.loadAddon(search)
     terminal.loadAddon(new WebLinksAddon((_event, uri) => void window.agentsDock.native.openExternal(uri)))
     terminal.open(host)
+    const echo = attachTerminalEcho(terminal, host)
+    resetEchoRef.current = echo.reset
+    let connected = false
     terminalRef.current = terminal
     fitRef.current = fit
     searchRef.current = search
     terminal.attachCustomWheelEventHandler(event => {
+      echo.reset()
       if (mouseEnabledRef.current) return containTerminalWheel(event)
       event.stopPropagation()
       event.preventDefault()
@@ -324,9 +331,14 @@ export const TerminalWorkspace = memo(function TerminalWorkspace({ session, layo
     })
 
     const data = terminal.onData(value => {
-      if (profileId && terminalProfileIsActive(profileId, profileGeneration)) window.agentsDock.terminal.write(profileId, profileGeneration, session.id, value)
+      if (profileId && terminalProfileIsActive(profileId, profileGeneration)) {
+        if (connected) echo.input(value)
+        else echo.reset()
+        window.agentsDock.terminal.write(profileId, profileGeneration, session.id, value)
+      }
     })
     terminal.attachCustomKeyEventHandler(event => {
+      if (event.metaKey || event.ctrlKey || event.altKey || event.key.length !== 1) echo.reset()
       if (event.type !== 'keydown' || !event.metaKey) return true
       const key = event.key.toLowerCase()
       const clipboardShortcut = terminalClipboardShortcut(event)
@@ -414,23 +426,27 @@ export const TerminalWorkspace = memo(function TerminalWorkspace({ session, layo
     requestFitRef.current = scheduleFit
 
     let terminalDataFrame: number | null = null
-    let terminalDataChunks: string[] = []
+    let terminalScanTail = ''
     const flushTerminalData = () => {
       terminalDataFrame = null
-      if (!terminalDataChunks.length) return
-      const batch = terminalDataChunks.join('')
-      terminalDataChunks = []
-      terminal.write(batch)
-      recordTerminalOutput(batch)
+      recordTerminalOutput(terminalScanTail)
+      terminalScanTail = ''
     }
     const removeDataListener = window.agentsDock.events.on('terminal:data', payload => {
       if (payload.profileId === profileId && payload.profileGeneration === profileGeneration && payload.sessionId === session.id) {
-        terminalDataChunks.push(payload.data)
+        // xterm batches parsing/rendering itself and fast-tracks input echoes.
+        // Do not add another animation frame before that low-latency path.
+        terminal.write(payload.data, payload.receipt && profileId ? () => {
+          window.agentsDock.terminal.acknowledge(profileId, profileGeneration, session.id, payload.receipt!)
+        } : undefined)
+        terminalScanTail = (terminalScanTail + payload.data).slice(-TERMINAL_PORT_SCAN_CHARACTERS)
         terminalDataFrame ??= window.requestAnimationFrame(flushTerminalData)
       }
     })
     const removeStateListener = window.agentsDock.events.on('terminal:state', payload => {
       if (payload.profileId !== profileId || payload.profileGeneration !== profileGeneration || payload.sessionId !== session.id) return
+      echo.reset()
+      connected = payload.state === 'connected'
       setConnectionState(payload.state)
       setConnectionError(payload.error ?? null)
       if (payload.name) setConnectionName(payload.name)
@@ -467,10 +483,9 @@ export const TerminalWorkspace = memo(function TerminalWorkspace({ session, layo
         window.cancelAnimationFrame(terminalDataFrame)
         terminalDataFrame = null
       }
-      // Preserve bytes already received if the panel closes between ingress
-      // and its animation frame. Port suggestions can wait for the next open.
-      if (terminalDataChunks.length) terminal.write(terminalDataChunks.join(''))
-      terminalDataChunks = []
+      terminalScanTail = ''
+      echo.dispose()
+      resetEchoRef.current = () => undefined
       if (resizeFrame) window.cancelAnimationFrame(resizeFrame)
       if (settleTimer) window.clearTimeout(settleTimer)
       requestFitRef.current = () => undefined

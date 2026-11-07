@@ -4973,9 +4973,9 @@ export class AppService {
     const connection = scope.client.terminal(
       sessionId,
       options,
-      data => {
+      (data, receipt) => {
         if (this.isCurrentScope(scope) && this.terminalLeases.get(sessionId) === lease) {
-          this.emit('terminal:data', { sessionId, data, profileId: scope.profileId, profileGeneration: scope.generation })
+          this.emit('terminal:data', { sessionId, data, ...(receipt ? { receipt } : {}), profileId: scope.profileId, profileGeneration: scope.generation })
         }
       },
       state => {
@@ -4989,6 +4989,9 @@ export class AppService {
   }
   writeTerminal(profileId: string, profileGeneration: number, sessionId: string, data: string): void {
     if (this.profileScopeMatches(profileId, profileGeneration)) this.terminalConnections.get(sessionId)?.write(data)
+  }
+  acknowledgeTerminal(profileId: string, profileGeneration: number, sessionId: string, receipt: { streamId: string; offset: number }): void {
+    if (this.profileScopeMatches(profileId, profileGeneration)) this.terminalConnections.get(sessionId)?.acknowledge(receipt)
   }
   resizeTerminal(profileId: string, profileGeneration: number, sessionId: string, columns: number, rows: number): void {
     if (this.profileScopeMatches(profileId, profileGeneration)) this.terminalConnections.get(sessionId)?.resize(columns, rows)

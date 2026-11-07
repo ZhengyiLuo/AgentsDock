@@ -602,6 +602,7 @@ export interface AgentsDockAPI {
     write(profileId: string, profileGeneration: number, sessionId: string, data: string): void
     resize(profileId: string, profileGeneration: number, sessionId: string, columns: number, rows: number): void
     scroll(profileId: string, profileGeneration: number, sessionId: string, delta: number): void
+    acknowledge(profileId: string, profileGeneration: number, sessionId: string, receipt: { streamId: string; offset: number }): void
     disconnect(profileId: string, profileGeneration: number, sessionId: string): Promise<void>
     kill(profileId: string, profileGeneration: number, sessionId: string): Promise<boolean>
     windows(profileId: string, profileGeneration: number, sessionId: string): Promise<TerminalWindowsSnapshot>

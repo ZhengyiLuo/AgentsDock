@@ -11254,6 +11254,25 @@ describe('rapid profile resource teardown', () => {
     service.disconnectTerminal('chat')
   })
 
+  it('fences terminal output acknowledgements by profile and generation', async () => {
+    const acknowledge = vi.fn()
+    const connection = {write:vi.fn(),resize:vi.fn(),scroll:vi.fn(),cancelScroll:vi.fn(),close:vi.fn(),acknowledge}
+    const client = fakeClient({terminal:()=>connection})
+    const {service} = createProfileService({'http://a.test:7850':[client]})
+    const payload = await service.bootstrap()
+    await service.refreshServer('a',payload.profileGeneration)
+    await service.connectTerminal('a',payload.profileGeneration,'chat',{columns:80,rows:24})
+    const receipt={streamId:'stream',offset:65536}
+    service.acknowledgeTerminal('b',payload.profileGeneration,'chat',receipt)
+    service.acknowledgeTerminal('a',payload.profileGeneration+1,'chat',receipt)
+    expect(acknowledge).not.toHaveBeenCalled()
+    service.acknowledgeTerminal('a',payload.profileGeneration,'chat',receipt)
+    expect(acknowledge).toHaveBeenCalledExactlyOnceWith(receipt)
+    service.disconnectTerminal('chat')
+    service.acknowledgeTerminal('a',payload.profileGeneration,'chat',receipt)
+    expect(acknowledge).toHaveBeenCalledOnce()
+  })
+
   it('closes each old client and terminal exactly once across ten switches', async () => {
     const terminalConnections: Array<{ write: ReturnType<typeof vi.fn>; resize: ReturnType<typeof vi.fn>; scroll: ReturnType<typeof vi.fn>; close: ReturnType<typeof vi.fn> }> = []
     const makeClient = () => fakeClient({

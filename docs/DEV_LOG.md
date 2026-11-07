@@ -1,5 +1,45 @@
 # Public development log
 
+## 2026-11-06 - Improve terminal feedback and bound bulk output
+
+- Feed received output directly into xterm's existing input-aware parser instead
+  of imposing another animation-frame delay. Keep port discovery frame-batched
+  with a bounded tail. Remove the redundant tmux existence check before exiting
+  application-owned history scrolling on the next keystroke.
+- Add conservative visual-only typing prediction after distinct ordinary
+  characters have echoed correctly in the current burst. Predictions occupy
+  blank cells only and retire on mismatches, idle expiry, command/edit keys,
+  paste, composition, scrolling, selection, resizing, navigation and reconnect.
+  They never change terminal history, clipboard contents or transmitted input.
+  First/unconfirmed input, Unicode, line wrapping and unsupported input modes
+  continue to use authoritative output; this is not a universal shell-mode or
+  password detector.
+- Negotiate optional ack-v1 output credit with matching desktop/server builds.
+  ACK original PTY byte offsets only after xterm parses them, fence callbacks by
+  server generation and socket identity, and bound unconsumed output to a
+  64 KiB window plus at most one read. Input remains independent of output
+  credit. Older clients/servers retain the existing streaming path.
+- Source base `69eb0f8a`; development desktop 0.2.0/build 86, Electron 43.1.1,
+  server metadata 1.0.7-beta.11. All 280 selected desktop checks and 54 server
+  regressions, desktop typecheck and production compilation pass. Native hidden-window Electron
+  acceptance uses real mouse/keyboard, IPC, authenticated WebSocket, PTY and
+  tmux: ordinary typing, exact echo reconciliation, a non-echoing test password,
+  Unicode paste, backspace/arrows, Vim entry/exit, 10,000-line scrollback, bulk
+  output/Ctrl-C, reopen/reconnect and light/narrow presentation. An additional
+  80 ms renderer-ingress delay exercises predictions without changing transport
+  authentication or provider behavior; it is not a WAN or paint benchmark.
+- A further visible native-app pass repeats five fast-typing bursts and three
+  scroll-then-input cycles, edits pending input, and interrupts bulk output.
+  Confirmed output remains exact, with no duplicate characters or stale
+  prediction overlay after settling. No synthetic ingress delay is used in
+  this pass. Repeated bulk-output interruption checks also guide the smaller
+  credit window, reducing queued parsing before the next command is visible.
+- Real transport acceptance verifies output stops at its credit limit, ignores
+  invalid ACKs and resumes; Ctrl-C remains accepted while credit is exhausted.
+  No provider request is needed. No Windows/Linux native, real WAN, or exhaustive
+  shell/password-program acceptance is claimed. Source and local test runtime
+  only; no release, mobile change or production-server deployment.
+
 ## 2026-11-06 - Clarify Claude context usage and recover failed reads
 
 - Replace the ambiguous context-meter “Unavailable” label with an explicit
