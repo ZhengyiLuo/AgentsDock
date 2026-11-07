@@ -1,5 +1,36 @@
 # Public development log
 
+## 2026-11-06 - Clarify Claude context usage and recover failed reads
+
+- Replace the ambiguous context-meter “Unavailable” label with an explicit
+  missing-measurement state. Localize the usage details, loading, next-response
+  guidance and retry hints in English and Simplified Chinese. No token counts
+  or context limits are estimated when Claude supplies no valid measurement.
+- Surface runtime-read errors in the meter instead of silently displaying an
+  empty state. Retry failed reads through the observational runtime endpoint,
+  including when the cached state says active; never sample the SDK alongside
+  a running turn. Successful runtime responses clear obsolete read errors.
+  Keep last-known usage on manual sampling failures and prevent duplicate
+  clicks during initial loading or refresh.
+- Source: desktop-only correction on main `81e6e75c`; development package
+  version 0.2.0, Electron 43.1.1, unchanged test-server version 1.0.7-beta.11.
+  Five new focused regressions fail against the previous implementation. All
+  96 selected Claude-control, context-usage, localization and design tests pass;
+  TypeScript and production Electron compilation/output verification pass.
+- Exercise an isolated native offscreen Electron app with mouse and keyboard:
+  unloaded-chat guidance, real Claude messages and follow-ups, automatic usage
+  after completion, active-turn refresh blocking, manual refresh, navigation,
+  Chinese copy, light/dark themes and a narrow viewport. Keyboard refresh
+  advances the server's usage generation through real IPC, authenticated
+  transport and the native Claude SDK. Inject a runtime-read failure only in
+  the test harness, then remove it and recover with the real retry action.
+  Credential storage and the failure injection are fixtures; normal provider
+  responses and context measurements are not mocked. Analytics is disabled.
+- The reporter's custom endpoint and app/server versions remain unknown, so
+  persistent missing telemetry specific to that endpoint is not reproduced.
+  No server/mobile code changes, production restart, release or deployment.
+  Available as local source/build only.
+
 ## 2026-11-04 - Keep delegated worker tasks separate from creator orchestration
 
 - Follow up PR #145 integration on `e435f079`: clarify the provider policy,

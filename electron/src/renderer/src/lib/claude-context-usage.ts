@@ -1,4 +1,5 @@
 import type { ClaudeTokenUsage, JsonValue } from '@shared/types'
+import { t } from '@shared/i18n'
 
 export interface ClaudeContextUsage {
   contextTokens: number
@@ -35,12 +36,15 @@ export function parseClaudeContextUsage(value: ClaudeTokenUsage | null | undefin
 }
 
 export function formatClaudeContextUsageDetail(usage: ClaudeContextUsage | null): string {
-  if (!usage) return 'Claude context usage is not available yet.'
+  if (!usage) return t('claudeContext.noMeasurement')
   const raw = usage.rawContextWindow != null && usage.rawContextWindow !== usage.effectiveContextWindow
-    ? ` · ${formatCompactTokens(usage.rawContextWindow)} raw window`
+    ? ` · ${t('claudeContext.rawWindow', { tokens: formatCompactTokens(usage.rawContextWindow) })}`
     : ''
   const model = usage.model ? ` · ${usage.model}` : ''
-  return `${formatCompactTokens(usage.contextTokens)} / ${formatCompactTokens(usage.effectiveContextWindow)} usable tokens${raw}${model}`
+  return `${t('claudeContext.usableTokens', {
+    used: formatCompactTokens(usage.contextTokens),
+    total: formatCompactTokens(usage.effectiveContextWindow)
+  })}${raw}${model}`
 }
 
 export function formatContextPercent(value: number | null): string {
