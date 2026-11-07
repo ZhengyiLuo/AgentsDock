@@ -1953,7 +1953,8 @@ export interface ProfileTimelineEvent extends ProfileEventContext {
   /** Main-process latest-page read; accept a disjoint window without refetching. */
   authoritativeTail?: boolean
 }
-export interface ProfileTerminalDataEvent extends ProfileEventContext { sessionId: string; data: string }
+export interface TerminalOutputReceipt { streamId: string; offset: number }
+export interface ProfileTerminalDataEvent extends ProfileEventContext { sessionId: string; data: string; receipt?: TerminalOutputReceipt }
 export interface ProfileTerminalStateEvent extends ProfileEventContext {
   sessionId: string
   state: TerminalConnectionState

@@ -491,6 +491,10 @@ export function registerIpc(
     if (acceptTrustedSender(event, 'terminal:resize')) service.resizeTerminal(profileId, profileGeneration, sessionId, columns, rows)
   })
   ipcMain.removeAllListeners('terminal:scroll')
+  ipcMain.removeAllListeners('terminal:acknowledge')
+  ipcMain.on('terminal:acknowledge', (event, profileId, profileGeneration, sessionId, receipt) => {
+    if (acceptTrustedSender(event, 'terminal:acknowledge')) service.acknowledgeTerminal(profileId, profileGeneration, sessionId, receipt)
+  })
   ipcMain.on('terminal:scroll', (event, profileId, profileGeneration, sessionId, delta) => {
     if (acceptTrustedSender(event, 'terminal:scroll')) service.scrollTerminal(profileId, profileGeneration, sessionId, delta)
   })

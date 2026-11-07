@@ -22,6 +22,8 @@ vi.mock('@xterm/xterm', () => ({
     hasSelection = vi.fn(() => false)
     loadAddon = vi.fn()
     onData = vi.fn(() => ({ dispose: vi.fn() }))
+    onWriteParsed = vi.fn(() => ({ dispose: vi.fn() }))
+    onSelectionChange = vi.fn(() => ({ dispose: vi.fn() }))
     open = vi.fn()
     refresh = vi.fn()
     resize = vi.fn((columns: number, rows: number) => {
@@ -72,6 +74,7 @@ const terminal = {
   write: vi.fn(),
   resize: vi.fn(),
   scroll: vi.fn(),
+  acknowledge: vi.fn(),
   windows: vi.fn(async (): Promise<{ windows: TerminalWindow[]; mouse_enabled: boolean; name: string | null }> => ({ windows: [], mouse_enabled: false, name: null })),
   action: vi.fn(async (): Promise<{ windows: TerminalWindow[]; mouse_enabled: boolean; name: string | null }> => ({ windows: [], mouse_enabled: false, name: null })),
   kill: vi.fn(async () => undefined)
@@ -82,6 +85,7 @@ type TerminalDataPayload = {
   profileGeneration: number
   sessionId: string
   data: string
+  receipt?: {streamId: string; offset: number}
 }
 
 let terminalDataListener: ((payload: TerminalDataPayload) => void) | null = null
@@ -210,7 +214,7 @@ describe('TerminalWorkspace ports surface', () => {
     expect(onRender).not.toHaveBeenCalled()
   })
 
-  it('coalesces terminal output packets into one xterm write per frame', async () => {
+  it('delivers echoes to xterm immediately without an extra frame', async () => {
     render(<TerminalWorkspace session={session} layoutHeight={360} />)
     await waitFor(() => expect(terminalDataListener).not.toBeNull())
     const write = xtermHarness.instances[0].write as ReturnType<typeof vi.fn>
@@ -227,8 +231,19 @@ describe('TerminalWorkspace ports surface', () => {
       }
     })
 
-    await waitFor(() => expect(write).toHaveBeenCalledOnce())
-    expect(write).toHaveBeenCalledWith('first second third')
+    expect(write.mock.calls.map(call => call[0])).toEqual(['first ', 'second ', 'third'])
+  })
+
+  it('acknowledges bytes only after xterm consumes the output', async () => {
+    render(<TerminalWorkspace session={session} layoutHeight={360} />)
+    await waitFor(() => expect(terminalDataListener).not.toBeNull())
+    const write = xtermHarness.instances[0].write as ReturnType<typeof vi.fn>
+    write.mockClear()
+    const receipt = {streamId:'socket-1',offset:65536}
+    act(() => terminalDataListener?.({profileId:'profile-a',profileGeneration:4,sessionId:session.id,data:'output',receipt}))
+    expect(terminal.acknowledge).not.toHaveBeenCalled()
+    act(() => write.mock.calls[0][1]())
+    expect(terminal.acknowledge).toHaveBeenCalledWith('profile-a',4,session.id,receipt)
   })
 
   it('keeps the existing terminal connection and port scope when language changes', async () => {

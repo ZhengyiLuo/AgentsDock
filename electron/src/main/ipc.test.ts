@@ -5,7 +5,8 @@ import type { LazyTeamHubService } from './team-hub-lazy-service'
 import type { SendTurnInput } from '../shared/types'
 
 const harness = vi.hoisted(() => ({
-  handlers: new Map<string, (event: unknown, ...args: unknown[]) => unknown>()
+  handlers: new Map<string, (event: unknown, ...args: unknown[]) => unknown>(),
+  listeners: new Map<string, (event: unknown, ...args: unknown[]) => unknown>()
 }))
 
 vi.mock('electron', () => ({
@@ -17,8 +18,8 @@ vi.mock('electron', () => ({
   ipcMain: {
     removeHandler: vi.fn((channel: string) => harness.handlers.delete(channel)),
     handle: vi.fn((channel: string, handler: (event: unknown, ...args: unknown[]) => unknown) => harness.handlers.set(channel, handler)),
-    removeAllListeners: vi.fn(),
-    on: vi.fn()
+    removeAllListeners: vi.fn((channel: string) => harness.listeners.delete(channel)),
+    on: vi.fn((channel: string, handler: (event: unknown, ...args: unknown[]) => unknown) => harness.listeners.set(channel, handler))
   },
   shell: { openExternal: vi.fn(), showItemInFolder: vi.fn() }
 }))
@@ -40,6 +41,17 @@ const trustedEvent = {
 
 describe('Team Hub IPC registration', () => {
   beforeEach(() => harness.handlers.clear())
+
+  it('accepts terminal output acknowledgements only from a trusted native renderer', () => {
+    const acknowledgeTerminal=vi.fn()
+    registerIpc({acknowledgeTerminal} as unknown as AppService,{} as AppUpdateManager)
+    const handler=harness.listeners.get('terminal:acknowledge')!
+    const receipt={streamId:'stream-1',offset:65536}
+    handler(trustedEvent,'profile',4,'chat',receipt)
+    expect(acknowledgeTerminal).toHaveBeenCalledExactlyOnceWith('profile',4,'chat',receipt)
+    handler({sender:{id:2,getURL:()=> 'https://untrusted.invalid'},senderFrame:{url:'https://untrusted.invalid',parent:null}},'profile',4,'chat',receipt)
+    expect(acknowledgeTerminal).toHaveBeenCalledOnce()
+  })
 
   it.each([
     ['servers:copy-token', 'copyServerToken'],
