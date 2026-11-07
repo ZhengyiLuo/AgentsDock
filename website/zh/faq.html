@@ -112,7 +112,7 @@ claude --version</code></pre></li>
           <details class="faq-item" id="tailscale">
             <summary><span class="faq-q">我需要 Tailscale 吗？</span><svg class="faq-chev" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg></summary>
             <div class="faq-a">
-<p>只有在局域网之外访问服务器时才需要。在同一 Wi-Fi 下可以直接用机器的局域网 IP。Tailscale 会给服务器分配一个私有的 <code>100.x.x.x</code> 地址，无需开放端口就能从任何地方访问。见<a href="./setup.html#remote-tailscale">搭建指南</a>。</p>
+<p><strong>强烈推荐使用 Tailscale。</strong>设备和服务器不在同一 Wi-Fi 或局域网时，需要使用它，除非你已有能让设备访问服务器的 VPN 或私有网络。同一局域网内可以直接使用服务器的局域网 IP。两端都连接 Tailscale 后，使用服务器的私有 <code>100.x.x.x</code> 地址即可访问，无需把端口暴露到公网。见<a href="./setup.html#remote-tailscale">搭建指南</a>。</p>
             </div>
           </details>
           <details class="faq-item" id="multi-server">

@@ -124,7 +124,7 @@
         <ul>
           <li>一台由你掌控的远程机器（Linux，或 Apple silicon Mac）来运行服务器，已安装 Node.js 22.14 或更高版本及 npm。<code>tmux</code> 是可选的，只有应用内终端需要它。</li>
           <li>服务器机器上已安装 <strong><code>uv</code></strong>。它管理服务器的 Python 环境和依赖，AgentsDock 不会自动安装它。具体步骤见下方的<a href="#install-uv">先安装 uv</a>。</li>
-          <li>一个 <a href="https://tailscale.com/download" target="_blank" rel="noopener">Tailscale</a> 账号（可选）——仅在需要从局域网之外访问远程机器时才用得到。在同一 Wi‑Fi 下可以直接用机器的局域网 IP；Tailscale 让你能从其他任何地方安全连接。</li>
+          <li>一个 <a href="https://tailscale.com/download" target="_blank" rel="noopener">Tailscale</a> 账号<strong>（强烈推荐）</strong>。设备和服务器不在同一 Wi-Fi 或局域网时，需要使用 Tailscale，除非你已有能让设备访问服务器的 VPN 或私有网络。同一局域网内可以直接使用服务器的局域网 IP。</li>
           <li>在远程机器上安装你计划使用的 provider 对应的 CLI 命令行工具：<strong>Claude Code</strong>、<strong>Codex</strong>、<strong>OpenCode</strong>、<strong>Cursor</strong> 或 <strong>Gemini</strong>。各 provider 的配置方式见<a href="./agents.html">连接 agents</a>。</li>
           <li>一台能运行 <strong>AgentsDock 客户端</strong>的设备：macOS、Windows、Linux、iPhone、iPad 或 Android。</li>
         </ul>
@@ -173,8 +173,8 @@ agentsdock: <span class="term-success">Server 1.0.10 is ready</span> at <span cl
 
         <p><strong>Gemini</strong> 使用 API 连接，而不是 Google 账号或 CLI 登录。服务器上仍需安装兼容版本的 Gemini CLI 命令行工具。按照<a href="./agents.html#gemini-api">连接 Gemini API</a>中的说明安装，并在桌面客户端配置 API key。</p>
 
-        <h3 class="docs-step" id="remote-tailscale"><span class="step-n">3</span>在远程机器上安装 Tailscale <span class="docs-step-opt">可选</span></h3>
-        <p>仅在需要从局域网之外访问远程机器时才需要。如果你的设备和远程机器在同一 Wi‑Fi 下，可以跳过这一步，在第二步直接使用机器的局域网 IP。</p>
+        <h3 class="docs-step" id="remote-tailscale"><span class="step-n">3</span>在远程机器上安装 Tailscale</h3>
+        <p><strong>强烈推荐。</strong>设备和服务器不在同一 Wi-Fi 或局域网时，需要使用 Tailscale，除非你已有能连通两端的 VPN 或私有网络。使用已有的网络时可以跳过这一步；如果两端在同一局域网内，也可以直接使用服务器的局域网 IP。</p>
         <p>在远程机器上安装 <a href="https://tailscale.com/download" target="_blank" rel="noopener">Tailscale</a> 并登录。这会给机器分配一个私有的 <code>100.x.x.x</code> 地址，你的其他设备可以从任何地方访问它——无需向公网开放任何端口。记下这个地址（或机器的 Tailscale 主机名），第二步会用到。</p>
 
         <p><strong>有不止一台机器？</strong>在每台机器上重复第一步。AgentsDock 可以同时保存多个服务器——它们都会出现在侧边栏顶部的服务器菜单里，一键即可切换。</p>
@@ -189,8 +189,8 @@ agentsdock: <span class="term-success">Server 1.0.10 is ready</span> at <span cl
         <h3 class="docs-step" id="device-app"><span class="step-n">1</span>下载 AgentsDock 客户端</h3>
         <p>到<a href="../index.html#downloads">下载区</a>选择你的平台（macOS、Windows、Linux、iPhone、iPad 或 Android），下载并打开客户端。</p>
 
-        <h3 class="docs-step" id="device-tailscale"><span class="step-n">2</span>在设备上安装 Tailscale <span class="docs-step-opt">可选</span></h3>
-        <p>仅当你在远程机器上安装了 Tailscale 时才需要。在这台设备上也安装它并用同一账号登录，这样两端就在同一个私有网络里，应用才能连到服务器。若在同一局域网内，跳过这一步，直接用远程机器的局域网 IP。</p>
+        <h3 class="docs-step" id="device-tailscale"><span class="step-n">2</span>在设备上安装 Tailscale</h3>
+        <p><strong>跨 Wi-Fi 或局域网连接时，强烈推荐使用 Tailscale。</strong>选择 Tailscale 后，在这台设备上也安装它，并用与服务器<strong>相同的账号</strong>登录，两端都保持连接。只有当两端在同一局域网内，或你已有能让这台设备访问服务器的 VPN 或私有网络时，才可以跳过这一步。</p>
 
         <h3 class="docs-step" id="device-connect"><span class="step-n">3</span>连接到你的服务器</h3>
         <p>在 AgentsDock 中添加服务器，填入远程机器的地址——它的 Tailscale <code>100.x.x.x</code> 地址加端口 <code>7850</code>——然后把第一步得到的 token 粘贴到<strong>token</strong>字段。它长这样：</p>

@@ -22,6 +22,37 @@ painful to rediscover later.
   active server and push the latest server repository/code to GitHub so app and
   server contract versions do not drift.
 
+## 2026-11-06 - Clarify Tailscale requirements for remote access
+
+- Replaced Tailscale's optional labels with highly recommended guidance on the
+  English and Simplified Chinese homepages, setup guides, FAQs and advanced
+  installation pages. Clarified that access from outside the server's Wi-Fi or
+  LAN needs Tailscale unless an existing VPN or private network reaches the
+  server. Retained the same-LAN local-IP alternative and instructions to keep
+  Tailscale connected on both devices.
+- Thirty website tests passed, including ten focused network-guidance checks.
+  Real-browser checks covered all eight pages at 1440, 390 and 320 pixels with
+  no horizontal overflow or script errors. Opened each localized FAQ answer and
+  followed its link to the Tailscale setup section successfully.
+- Website copy only; no client, network or server configuration was changed.
+  Reviewed and approved for website publication and mirror sync on November 6.
+
+## 2026-11-06 - Add a compact WeChat contact option
+
+- Added "Connect on WeChat" below Discord on the support page, with a 200px-wide
+  QR image and an accessible link to the full-size image. Preserved the supplied
+  image content, converted it to PNG, and removed embedded EXIF/text metadata.
+- Presented Discord and WeChat as peer bullet-list items with matching label
+  styling, and updated the introduction to name both contact options.
+- Twenty website content and release-link tests passed. Real-browser checks at
+  1440, 768, 390 and 320 pixels confirmed the image loads at the intended size,
+  retains its aspect ratio, and causes no horizontal overflow or script errors.
+  Keyboard activation opened the full-size image successfully.
+- The full-size QR image passed local barcode decoding. Adding the contact
+  inside WeChat was not exercised. The contact layout was reviewed and approved
+  for website publication and mirror sync on November 6. No application release
+  or server change is included.
+
 ## 2026-11-05 - Add Gemini and provider logos to the website
 
 - Added Gemini to the English and Simplified Chinese homepage provider lists,

@@ -127,7 +127,7 @@
           <li><strong><code>uv</code></strong> installed on the server's <code>PATH</code> and verified with <code>uv --version</code> before running npm install. It manages the isolated Python environment and dependencies; clients do not need it. On macOS with Homebrew, use <code>brew install uv</code>. For Linux or other methods, see the <a href="https://docs.astral.sh/uv/getting-started/installation/" target="_blank" rel="noopener">official uv installation guide</a>. AgentsDock does not install uv automatically; see <a href="./setup.html#uv-missing">troubleshooting</a> if the check fails.</li>
           <li>Any provider CLIs you plan to use — <strong>Claude Code</strong>, <strong>Codex</strong>, <strong>OpenCode</strong>, or <strong>Cursor</strong> — installed and signed in on the host, in the same user account that runs the server.</li>
           <li><strong>tmux</strong> (optional) — enables the in-app terminal, live pane inspection, and in-app managed updates. On macOS with Homebrew, the installer offers to install it; otherwise it prints the command and continues.</li>
-          <li><strong>Tailscale</strong> (optional) — for reaching the server from other devices without exposing the port.</li>
+          <li><strong>Tailscale (highly recommended)</strong>. Required outside the server's Wi-Fi or local network unless you already have a VPN or private network that lets your devices reach it.</li>
           <li>A working user service session: <code>launchctl</code> (macOS) or <code>systemctl --user</code> (Linux). No <code>sudo</code> is ever used.</li>
         </ul>
 
@@ -155,7 +155,7 @@ agentsdock setup [--port PORT] [--bind IP] [--non-interactive] [--dry-run]</pre>
         <p>Bind to <code>0.0.0.0</code> (default) to accept connections from other devices; bind to <code>127.0.0.1</code> only if the app runs on the same machine. A server bound to loopback is not reachable over Tailscale.</p>
 
         <h2 id="remote">Remote access (Tailscale)</h2>
-        <p>Remote access is expected to go through Tailscale, which keeps the server reachable from phones, tablets, and laptops without publishing the port on the internet. It is optional; the installer only prints a reminder if Tailscale isn't on the host.</p>
+        <p><strong>Tailscale is highly recommended for remote access.</strong> Outside the server's Wi-Fi or local network, you need it unless you already have a VPN or private network that lets your devices reach the server. On the same local network, you can use the server's local IP address. The installer does not require Tailscale to finish, but that does not make the server reachable from other networks.</p>
         <p>On the server:</p>
 <pre>tailscale status
 tailscale ip -4</pre>

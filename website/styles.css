@@ -662,6 +662,10 @@ a.quote-author--link:hover .quote-handle { text-decoration: none; }
 .legal .legal-lead { font-size: 18px; color: var(--muted-2); line-height: 1.65; margin-bottom: 32px; }
 .legal .docs-intro-list { margin: 0 0 32px; padding-left: 22px; }
 .legal .docs-intro-list li { color: var(--muted-2); font-size: 18px; line-height: 1.65; margin-bottom: 10px; }
+.support-wechat { width: 200px; max-width: 100%; margin: 12px 0 0; }
+.support-wechat a { display: block; border-radius: 6px; }
+.support-wechat a:focus-visible { outline: 2px solid var(--blue); outline-offset: 4px; }
+.support-wechat img { display: block; width: 100%; height: auto; border-radius: 6px; }
 /* Setup-guide extras */
 .legal pre { margin: 0 0 20px; padding: 16px 18px; border: 1px solid var(--line); border-radius: 10px; background: #090b0f; overflow-x: auto; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 13.5px; line-height: 1.75; color: #d3dbe6; }
 .legal pre code { background: none; color: inherit; padding: 0; font-size: inherit; }

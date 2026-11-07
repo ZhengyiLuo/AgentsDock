@@ -112,7 +112,7 @@ claude --version</code></pre></li>
           <details class="faq-item" id="tailscale">
             <summary><span class="faq-q">Do I need Tailscale?</span><svg class="faq-chev" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg></summary>
             <div class="faq-a">
-<p>Only to reach your server from outside its local network. On the same Wi-Fi you can use the machine's local IP address. Tailscale gives the server a private <code>100.x.x.x</code> address you can reach from anywhere without opening ports. See <a href="./setup.html#remote-tailscale">the setup guide</a>.</p>
+<p><strong>Tailscale is highly recommended.</strong> Outside your server's Wi-Fi or local network, you need it unless you already have a VPN or private network that lets your devices reach the server. On the same local network, you can use the server's local IP address. With Tailscale connected on both devices, use the server's private <code>100.x.x.x</code> address without exposing its port to the internet. See <a href="./setup.html#remote-tailscale">the setup guide</a>.</p>
             </div>
           </details>
           <details class="faq-item" id="multi-server">

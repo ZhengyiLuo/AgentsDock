@@ -127,7 +127,7 @@
           <li>服务器的 <code>PATH</code> 中已安装 <strong><code>uv</code></strong>，并在 npm 安装前用 <code>uv --version</code> 验证。它管理隔离的 Python 环境和依赖，客户端不需要它。macOS 已安装 Homebrew 时，用 <code>brew install uv</code>；Linux 或其他方式见 <a href="https://docs.astral.sh/uv/getting-started/installation/" target="_blank" rel="noopener">uv 官方安装指南</a>。AgentsDock 不会自动安装 uv，检查失败时请看<a href="./setup.html#uv-missing">问题排查</a>。</li>
           <li>你计划使用的提供方 CLI（<strong>Claude Code</strong>、<strong>Codex</strong>、<strong>OpenCode</strong> 或 <strong>Cursor</strong>）已在主机上安装并登录，且与运行服务器的是同一个用户账号。</li>
           <li><strong>tmux</strong>（可选）——启用应用内终端、实时窗格查看和应用内托管更新。装有 Homebrew 的 macOS 上，安装脚本会询问是否代为安装；否则打印安装命令并继续。</li>
-          <li><strong>Tailscale</strong>（可选）——让其他设备无需暴露端口即可访问服务器。</li>
+          <li><strong>Tailscale（强烈推荐）</strong>。设备和服务器不在同一 Wi-Fi 或局域网时需要使用，除非你已有能让设备访问服务器的 VPN 或私有网络。</li>
           <li>可用的用户服务会话：<code>launchctl</code>（macOS）或 <code>systemctl --user</code>（Linux）。全程不使用 <code>sudo</code>。</li>
         </ul>
 
@@ -155,7 +155,7 @@ agentsdock setup [--port PORT] [--bind IP] [--non-interactive] [--dry-run]</pre>
         <p>绑定到 <code>0.0.0.0</code>（默认）以接受其他设备的连接；只有应用与服务器在同一台机器上时才绑定 <code>127.0.0.1</code>。绑定到回环地址的服务器无法通过 Tailscale 访问。</p>
 
         <h2 id="remote">远程访问（Tailscale）</h2>
-        <p>远程访问推荐走 Tailscale，这样手机、平板和笔记本都能访问服务器，而无需把端口发布到互联网。它是可选的；主机上没有 Tailscale 时，安装脚本只会打印一条提醒。</p>
+        <p><strong>远程访问强烈推荐使用 Tailscale。</strong>设备和服务器不在同一 Wi-Fi 或局域网时，需要使用它，除非你已有能让设备访问服务器的 VPN 或私有网络。同一局域网内可以直接使用服务器的局域网 IP。安装器不会强制要求 Tailscale，但安装成功并不代表其他网络上的设备就能访问服务器。</p>
         <p>在服务器上：</p>
 <pre>tailscale status
 tailscale ip -4</pre>
