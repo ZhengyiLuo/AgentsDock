@@ -54,9 +54,11 @@ instead of starting a potentially concurrent second run. Prepared updates with
 a durable resume receipt use the cooperative shutdown budget; an emergency
 restart without that receipt retains its short hard-kill deadline.
 This is not automatic approval: a resumed tool may still require the user's
-permission. Active scheduled jobs, standalone provider tasks and persistent
-terminals still wait for their safe boundary; they are not converted into chat
-continuations.
+permission. Active scheduled jobs and standalone provider tasks still wait for
+their safe boundary; they are not converted into chat continuations. Persistent
+terminal work is not a chat continuation either: a detached tmux server proven
+independent of the replaced service can survive and reconnect, while unsafe or
+unverified service-owned processes block activation.
 
 Cross-machine app/server replacement is not atomic. An interrupted install
 can leave a newer server with the older app; the UI must report an incomplete
@@ -67,8 +69,8 @@ In particular, a busy Codex, Claude and Cursor chat must each show one
 interrupted turn and one resumed provider reply after a real managed-service
 replacement. Reimporting native history must never display the internal
 continuation as a user-authored message. Native goals must retain their identity,
-budget and manual-stop state. A non-chat provider task or persistent terminal
-must defer the force path without losing work. Verify
+budget and manual-stop state. A non-chat provider task or unsafe persistent
+terminal must defer the force path without losing work. Verify
 failure after one of several servers has already updated, and failure of the
 native app installer after all servers have updated; neither case may be
 reported as a completed product update.
@@ -83,8 +85,8 @@ target servers. The current continuation receipt accepts up to 256 supported
 active chats/goals per server; unsupported work must finish safely instead of being
 interrupted without a recovery contract.
 
-After integration with current main, the following native acceptance remains
-required before merging the server-first flow:
+After integration with current main, the source review covers these acceptance
+categories:
 
 - Two managed servers with live work: exact signed candidate activation,
   preserved identity/history, one continuation per interrupted ordinary turn,
@@ -103,6 +105,49 @@ required before merging the server-first flow:
 Multi-profile coordinator fixtures and an isolated development Electron app
 connected to real servers are useful regression checks, but neither establishes
 signed-package replacement or provider recovery through that replacement.
+
+### Current source acceptance (2026-11-07)
+
+Source `75da4096` passed the following isolated macOS checks. Private QA versions,
+an ephemeral server-signing key and a loopback update feed were used; nothing
+was published and no production installation was replaced.
+
+- Two actual managed services retained their identities and history through
+  signed package updates, including installation roots initially using 0755
+  and 0750 permissions. A corrupt archive left its incumbent healthy; partial
+  success and retry skipped the already-current service. A deliberately broken
+  candidate failed after takeover, restored the healthy old release, cleared
+  its activation fence, and succeeded on a same-byte retry after stage cleanup.
+- Real Claude, Cursor and native Codex-goal work exercised recovery through
+  managed replacement. Claude retained its interactive SDK permission path and
+  queued follow-up; Codex retained native goal identity and usage. Cursor's
+  first turn waited for a durable native session; a later turn resumed that
+  same session once. Recovered internal instructions stayed out of user bubbles.
+- A packaged native app rejected an offline saved server without replacing
+  itself, kept the actionable failure visible, and succeeded after reconnection.
+  Two native update cycles exited, installed and relaunched automatically,
+  without manually terminating the old app. The final one-click cycle updated
+  both saved services before the app: Cursor resumed its interrupted task,
+  while Claude's independent background command finished safely before its
+  service restarted. The unsent draft, profiles, language and Beta choice survived;
+  a subsequent check reported all targets current without reinstalling them.
+- Detached terminal commands and scrollback survived both rollback and retry,
+  and the app reconnected. This is macOS detached-tmux evidence, not a claim
+  about processes owned by a Linux systemd service cgroup.
+- The final code head passed all 11 hosted source checks, 96 focused restart/
+  recovery tests and 254 update/installer/handoff tests. The desktop changes
+  also passed 310 focused tests, type checking and production compilation.
+
+The native packages used a separately identified Apple Development-signed QA
+shell containing the compiled branch application. They were not Developer ID
+release candidates and were not notarized. Publication still requires the
+exact production-signed/notarized candidate and feed, supported old-client
+migration, and platform-specific native installation checks. Windows and Linux
+native desktop replacement were not exercised in this macOS acceptance; hosted
+source tests do not substitute for them. Native installer failure after all
+services succeed is covered by source regression tests, not a fresh production
+installer-failure replay. Retain those release gates; source merge is not
+authorization to publish.
 
 The sections below describe the earlier app-first bridge and historical
 acceptance; they do not establish acceptance for this new server-first flow.

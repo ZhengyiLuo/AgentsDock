@@ -1,5 +1,37 @@
 # Public development log
 
+## 2026-11-07 — Complete isolated coordinated-update source acceptance
+
+- Source `75da4096` passed actual signed managed-service replacement with two
+  isolated services, real Claude/Cursor work and native Codex goals. The review
+  fixed a first-turn Cursor recovery hole: updates now wait for its native
+  session to be durable rather than restarting into an empty conversation.
+- Rechecked invalid signatures, corrupt archives before takeover, partial
+  success and retry, and failure after takeover. The latter restored the old
+  healthy service and cleared the failed stage/fence; the same package then
+  installed successfully on retry. Existing identities/history were retained,
+  including installations with legacy 0755/0750 root permissions.
+- Through actual native app input, two private packaged update cycles exited,
+  installed and reopened automatically. The last cycle updated both saved
+  services before replacing the app, resumed Cursor once, and waited safely
+  for Claude's independent background command. Draft, connection, language and
+  channel settings survived. Rechecking did not reinstall current targets.
+  Offline preflight kept the old app and a persistent actionable error.
+  Detached terminal work survived rollback/retry and reconnected afterward.
+- Verification: all 11 hosted checks passed on the code head; 96 focused
+  restart/recovery and 254 update/installer/handoff tests passed. Desktop
+  verification also passed 310 focused tests, type checking and production
+  compilation. Final native history showed one interrupted Cursor turn and
+  one successful continuation, with no internal continuation user bubble.
+- Test surface: isolated, focus-emulated native Electron with real IPC,
+  authenticated HTTP, providers, service manager and native updater. Private
+  QA feeds/packages used ephemeral server signing and an Apple Development-
+  signed shell containing the branch's compiled desktop code. Production
+  signing/notarization, platform-specific release installation and supported
+  old-client feed migration remain release gates; they are not established by
+  this local acceptance. No production server was changed and nothing was
+  released. See `docs/COORDINATED_UPDATES.md` for the exact boundaries.
+
 ## Unreleased — Wait for Cursor's first durable native session before updating
 
 - A Cursor thread identifier is persisted only after a successful native reply.
