@@ -1,5 +1,22 @@
 # Public development log
 
+## Unreleased — Avoid double-counting a resumable native goal during update
+
+- The live managed-install replay exposed a native goal's consumer being counted
+  both as an active chat and as independent background work. Deduplicate only
+  the exact, still-owned active goal consumer. Unrelated operations, changed
+  ownership, prompts and child agents remain restart blockers.
+- Verification: 77 restart/admission tests pass, including the actual native
+  operation registry in the goal-checkpoint test and stale-owner regressions.
+- An isolated two-service managed-package replay exercised legacy installation
+  roots with modes 0755 and 0750, invalid signatures, a corrupt archive before
+  takeover, partial success and retry. The failed service stayed healthy; retry
+  did not restart the already-updated service. A real Claude task recovered and
+  completed before its retained queued follow-up, each once. These packages use
+  a private QA signing key and loopback feed, not production release signing.
+- The subsequent native-goal managed-install replay and native desktop automatic
+  exit/install/relaunch are still pending; this is not release acceptance.
+
 ## Unreleased — Preserve native goals through coordinated server restarts
 
 - Extend update-continuation capability to native Codex goals. Save the exact
