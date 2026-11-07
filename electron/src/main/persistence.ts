@@ -1265,6 +1265,13 @@ export class LocalCache {
     `).run(serverId, sessionId, sessionId)
   }
 
+  file(serverId: string, sessionId: string, fileId: string): AgentFile | null {
+    const row = this.statement('SELECT json FROM files WHERE server_id = ? AND session_id = ? AND file_id = ?')
+      .get(serverId, sessionId, fileId) as { json: string } | undefined
+    const file = row ? parseJSON(row.json, {} as AgentFile) : null
+    return file?.id === fileId && agentFileBelongsToSession(file, sessionId) ? file : null
+  }
+
   files(serverId: string, sessionId: string, limit = 120): AgentFile[] {
     this.purgeForeignFiles(serverId, sessionId)
     return this.statement('SELECT json FROM files WHERE server_id = ? AND session_id = ?')

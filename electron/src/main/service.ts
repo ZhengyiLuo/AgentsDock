@@ -13,7 +13,7 @@ import { open, rename, rm, stat, writeFile } from 'node:fs/promises'
 import { createHash, randomUUID } from 'node:crypto'
 import { Readable } from 'node:stream'
 import { pipeline } from 'node:stream/promises'
-import { basename, dirname, join } from 'node:path'
+import { basename, dirname, isAbsolute, join } from 'node:path'
 import { isImportedProviderControlMetadata, mergeProviderInterruptionEvent } from '../shared/provider-origin'
 import type { ChatShareMode, CreateChatShareInput } from '../shared/chat-shares'
 import type { WorkspaceGitAction, WorkspaceGitView } from '../shared/workspace-git'
@@ -397,6 +397,7 @@ export interface AppServiceOptions {
 export class AppService {
   private readonly localServerDiscovery: () => Promise<DiscoveredLocalServer[]>
   private localDiscoveryStarted = false
+  private readonly localServerIdentities = new Set<string>()
   readonly settings: SettingsStore
   readonly cache: LocalCache
   client: AgentServerClient
@@ -1581,6 +1582,7 @@ export class AppService {
     try {
       const found = await this.localServerDiscovery()
       if (!this.running || this.shutdownEpoch !== epoch) return
+      for (const server of found) this.localServerIdentities.add(server.serverIdentity)
       for (const server of found) {
         if (!this.running || this.shutdownEpoch !== epoch) return
         const profiles = this.settings.listProfiles()
@@ -4893,6 +4895,24 @@ export class AppService {
     if (error) throw new Error(error)
   }
   async revealFile(sessionId: string, file: AgentFile): Promise<void> {
+    requireSessionFile(sessionId, file)
+    const scope = this.captureScope()
+    // A local server's file is already on this machine. Use metadata received
+    // from that server, not paths supplied by the renderer or a loopback URL
+    // (which may be a tunnel to a remote server).
+    const localFile = this.localServerIdentities.has(scope.namespace)
+      ? this.cache.file(scope.namespace, sessionId, file.id)
+      : null
+    for (const path of new Set([localFile?.source_path, localFile?.path])) {
+      if (!path || !isAbsolute(path)) continue
+      const info = await stat(path).catch(() => null)
+      this.assertCurrentScope(scope)
+      if (info?.isFile()) {
+        shell.showItemInFolder(path)
+        return
+      }
+    }
+    this.assertCurrentScope(scope)
     shell.showItemInFolder(await this.ensureLocalFile(sessionId, file))
   }
 

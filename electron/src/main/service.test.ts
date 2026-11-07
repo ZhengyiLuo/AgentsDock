@@ -43,6 +43,7 @@ const electronHarness = vi.hoisted(() => ({
   showSaveDialog: vi.fn(),
   shellOpenExternal: vi.fn(),
   shellOpenPath: vi.fn(),
+  shellShowItemInFolder: vi.fn(),
   notifications: [] as Array<{
     options: { title: string; body: string; silent: boolean }
     shown: boolean
@@ -75,7 +76,8 @@ vi.mock('electron', () => ({
   safeStorage: {},
   shell: {
     openExternal: (...args: unknown[]) => electronHarness.shellOpenExternal(...args),
-    openPath: (...args: unknown[]) => electronHarness.shellOpenPath(...args)
+    openPath: (...args: unknown[]) => electronHarness.shellOpenPath(...args),
+    showItemInFolder: (...args: unknown[]) => electronHarness.shellShowItemInFolder(...args)
   }
 }))
 
@@ -351,6 +353,49 @@ afterEach(() => {
   electronHarness.showSaveDialog.mockReset()
   electronHarness.shellOpenExternal.mockReset()
   electronHarness.shellOpenPath.mockReset()
+  electronHarness.shellShowItemInFolder.mockReset()
+})
+
+describe('revealing files from a local server', () => {
+  it.each(['source', 'stored', 'remote', 'missing'] as const)('%s file uses the correct native location', async mode => {
+    const directory = mkdtempSync(join(tmpdir(), 'agentsdock-reveal-'))
+    cleanup.push(() => rmSync(directory, { recursive: true, force: true }))
+    const source = join(directory, 'original.txt')
+    const stored = join(directory, 'attachment.txt')
+    if (mode === 'source' || mode === 'remote') writeFileSync(source, 'original')
+    if (mode !== 'missing') writeFileSync(stored, 'attachment')
+    const { service, cache } = createProfileService({ 'http://a.test:7850': [fakeClient()] })
+    const internals = service as unknown as { localServerIdentities: Set<string>; ensureLocalFile: () => Promise<string> }
+    if (mode !== 'remote') internals.localServerIdentities.add('profile:a')
+    cache.putFiles('profile:a', 'chat', [{ id: 'file', session_id: 'chat', filename: 'attachment.txt', source_path: source, path: stored }])
+    const download = vi.spyOn(internals, 'ensureLocalFile').mockResolvedValue('/downloaded/attachment.txt')
+    // Neither the same ID in another chat nor a renderer-provided path may win.
+    cache.putFiles('profile:a', 'other-chat', [{ id: 'file', filename: 'other.txt', path: '/other-chat/file.txt' }])
+    const input = { id: 'file', filename: 'attachment.txt', path: '/renderer/file.txt', source_path: '/renderer/source.txt' }
+    await service.revealFile('chat', input)
+    await service.revealFile('chat', input)
+    const local = mode === 'source' || mode === 'stored'
+    expect(electronHarness.shellShowItemInFolder.mock.calls).toEqual([
+      [local ? (mode === 'source' ? source : stored) : '/downloaded/attachment.txt'],
+      [local ? (mode === 'source' ? source : stored) : '/downloaded/attachment.txt']
+    ])
+    expect(download).toHaveBeenCalledTimes(local ? 0 : 2)
+  })
+
+  it('does not reveal a file after switching server during the local file check', async () => {
+    const directory = mkdtempSync(join(tmpdir(), 'agentsdock-reveal-scope-'))
+    cleanup.push(() => rmSync(directory, { recursive: true, force: true }))
+    const path = join(directory, 'attachment.txt')
+    writeFileSync(path, 'attachment')
+    const { service, cache } = createProfileService({ 'http://a.test:7850': [fakeClient()] })
+    const internals = service as unknown as { localServerIdentities: Set<string>; profileGeneration: number }
+    internals.localServerIdentities.add('profile:a')
+    cache.putFiles('profile:a', 'chat', [{ id: 'file', filename: 'attachment.txt', path }])
+    const revealed = service.revealFile('chat', { id: 'file', filename: 'attachment.txt' })
+    internals.profileGeneration += 1
+    await expect(revealed).rejects.toThrow()
+    expect(electronHarness.shellShowItemInFolder).not.toHaveBeenCalled()
+  })
 })
 
 describe('concurrent artifact downloads', () => {

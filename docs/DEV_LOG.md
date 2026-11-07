@@ -1,5 +1,29 @@
 # Public development log
 
+## 2026-11-06 - Reveal same-machine files without downloading them
+
+- Show in folder now reveals an existing original file, or its stored attachment,
+  when the connected server is found by the existing local-server discovery.
+  Previously it downloaded the entire attachment before revealing a temporary
+  copy, even on the server's own machine. Remote servers and missing local
+  files retain the download fallback. Paths come from chat-scoped server
+  metadata; changing servers during lookup cancels the obsolete action.
+- Source `8398a5cb`, local desktop package 0.2.0/build 86, Electron 43.1.1.
+  Focused file regressions, TypeScript, production compilation, existing build
+  checks and Developer ID signature verification passed.
+- Exercised actual offscreen Electron pointer clicks through production IPC,
+  authenticated disposable AgentsServer instances and Finder. The previous
+  package waited for an 8 MiB download with a deliberate two-second transport
+  delay. The corrected compiled and packaged app revealed local originals and
+  stored fallbacks with zero file-body requests; repeated clicks and a separate
+  server identity retained correct behavior. A personal packaged-app repeat
+  reached the native reveal call in 29 ms. Finder selections were verified.
+- Packaged ASAR main, preload and renderer ran under stock Electron with an
+  isolated profile. Discovery home, artifact data and download delay were test
+  fixtures; file transport and Finder were real. No provider invocation or
+  Gatekeeper launch test. Local package only; no installed-app replacement,
+  release, server update or production restart. No server change is required.
+
 ## 2026-11-06 - Clarify Claude context usage and recover failed reads
 
 - Replace the ambiguous context-meter “Unavailable” label with an explicit
