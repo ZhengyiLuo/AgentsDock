@@ -1,5 +1,41 @@
 # Public development log
 
+## Unreleased — Preserve native goals through coordinated server restarts
+
+- Extend update-continuation capability to native Codex goals. Save the exact
+  thread/goal identity, pause before provider teardown, and resume the same goal
+  without resetting its token or time usage. Completion, replacement, exhausted
+  budgets and a later manual pause/clear take precedence over recovery.
+- Preserve the original interactive transport for ordinary continuations.
+  Claude SDK runs must confirm native Stop before recovery; closing the transport
+  alone is not a safe stop. Bind Claude recovery to its current native goal,
+  excluding earlier replaced goals, and show a recoverable error if stopping
+  cannot be confirmed. Internal continuation prompts stay out of user bubbles.
+- Pause independent chat owners concurrently within the bounded shutdown phase.
+  A prepared update with a durable continuation receipt receives the cooperative
+  shutdown budget, not the emergency three-second kill deadline. Keep emergency
+  restart behavior and the installer's bounded wait aligned with shutdown.
+- Verification on review base `2604af6a`: 380 focused server regression tests
+  pass, including lifecycle/queue, native goal identity and cancellation,
+  concurrent stop, transport retention and both restart signal paths. A separate
+  110-test goal-admission/history-repair run passes. Desktop type checking,
+  production compilation and 306 focused updater/timeline tests pass.
+- Real acceptance used an isolated native Electron app (offscreen/focus-emulated)
+  with authenticated local servers and real Codex and Claude providers. Goals
+  were created through the UI, interrupted, resumed after server restart,
+  and completed their file checkpoints. Codex retained native usage; a manual
+  pause prevented recovery. Claude resumed only the current goal, leaving old
+  goal checkpoints untouched; another restart produced no second continuation.
+  Interactive approvals were still required and usable after recovery.
+  A further Claude run exercised the production restart signal/watchdog code
+  using a private fixture trigger and completed the current goal after relaunch.
+- Test boundary: installation receipts were fixture-generated; source servers
+  were restarted, not upgraded through a signed package/service-manager install.
+  Current-source signed multi-server replacement, offline/partial-install
+  failure and native desktop quit/install/relaunch remain pre-merge gates.
+  Unsupported active jobs, standalone tasks and terminals still wait for a safe
+  boundary. No production server was restarted and nothing was released.
+
 ## 2026-11-06 — Refresh the coordinated-update review against current main
 
 - Integrate main through `eac24fca`, preserving both native background-wake and

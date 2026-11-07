@@ -29,9 +29,31 @@ Codex, Claude or Cursor chat turn still active at forced restart. After the
 new server starts, that continuation asks the provider to inspect the prior
 work and finish the task. This resumes the conversation, **not the exact
 in-flight provider instruction**. File writes, commands and outside effects
-may already have happened and may be repeated. Non-chat work, goals, a turn
+may already have happened and may be repeated. The receipt retains the original
+Codex app-server or Claude Agent SDK transport, so restarting does not silently
+remove interactive approvals. Non-chat work, a turn
 still starting, and backends without this continuation contract are not
 force-stopped by the one-click path; they must reach a safe boundary first.
+
+Continuation capability version 2 also supports active native Codex goals.
+Shutdown pauses the exact owned goal; startup resumes that same native thread
+and goal without sending a second objective or resetting token/time usage.
+Completed, replaced, exhausted, cleared or manually paused goals are not
+reactivated. This requires the supporting server code to be installed already;
+it cannot retrofit native-goal recovery into an older server during its first
+upgrade. Claude SDK recovery requires the old native run to confirm Stop before
+disconnecting. It captures the current native goal's condition and set identity,
+checks them again at admission, and continues only that goal through its original
+SDK transport. Earlier replaced goals in the conversation are not recovery work.
+A clear, replacement, completion or explicit Stop invalidates the saved recovery.
+If the native stop cannot be confirmed, the server leaves a visible explanation
+instead of starting a potentially concurrent second run. Prepared updates with
+a durable resume receipt use the cooperative shutdown budget; an emergency
+restart without that receipt retains its short hard-kill deadline.
+This is not automatic approval: a resumed tool may still require the user's
+permission. Active scheduled jobs, standalone provider tasks and persistent
+terminals still wait for their safe boundary; they are not converted into chat
+continuations.
 
 Cross-machine app/server replacement is not atomic. An interrupted install
 can leave a newer server with the older app; the UI must report an incomplete
@@ -41,8 +63,9 @@ profiles, multiple clients and failure recovery before this behavior ships.
 In particular, a busy Codex, Claude and Cursor chat must each show one
 interrupted turn and one resumed provider reply after a real managed-service
 replacement. Reimporting native history must never display the internal
-continuation as a user-authored message. A goal, non-chat provider task, or
-persistent terminal must defer the force path without losing work. Verify
+continuation as a user-authored message. Native goals must retain their identity,
+budget and manual-stop state. A non-chat provider task or persistent terminal
+must defer the force path without losing work. Verify
 failure after one of several servers has already updated, and failure of the
 native app installer after all servers have updated; neither case may be
 reported as a completed product update.
@@ -53,8 +76,8 @@ This is not a global pause barrier across every server process on a machine.
 The coordinator targets saved, identity-verified profiles. Servers prepare and
 activate independently, and a completed server may resume its chats while
 another server is still updating. Only the desktop replacement waits for all
-target servers. The current continuation receipt accepts up to 256 ordinary
-active chats per server; unsupported work must finish safely instead of being
+target servers. The current continuation receipt accepts up to 256 supported
+active chats/goals per server; unsupported work must finish safely instead of being
 interrupted without a recovery contract.
 
 After integration with current main, the following native acceptance remains
@@ -65,8 +88,12 @@ required before merging the server-first flow:
   no duplicated side effects in the controlled test, and retained queued work.
 - Offline preflight and partial failure after one server has updated: no app
   replacement, a persistent actionable error, and retry of incomplete targets.
-- Goals, scheduled work and unsupported providers: truthful waiting behavior
-  without losing or silently converting their work into ordinary chat turns.
+- Native Codex goals: preserve identity/usage, pause and reactivate only the
+  update-owned goal once; manual pause/clear, completion and exhausted budgets
+  win. Claude goals: confirm native Stop, retain only the current completion
+  condition and interactive transport, and refuse stale/replaced goal recovery.
+- Scheduled work and unsupported providers: truthful waiting behavior without
+  losing or silently converting their work into ordinary chat turns.
 - Actual native app replacement: flush drafts, exit without manual termination,
   install the candidate, reopen with saved profiles and verify completion.
 
