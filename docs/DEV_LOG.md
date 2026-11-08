@@ -22,6 +22,12 @@
   working directory. Repeated real desktop update checks report the HTTP failure
   without freezing and keep manual retry available. These source changes are
   not part of a published release.
+- Source CI can recover an upstream Electron download 5xx/transport failure
+  through the official GitHub asset API, keeping the exact npm-pinned SHA-256,
+  original installer and complete validation. It does not change product feeds,
+  publish artifacts, or accept unknown versions, invalid hashes or API failures.
+  Real macOS and Linux archives passed pinned-hash verification; the Linux probe
+  exercised the API fallback. All 419 release-tooling/CLI checks passed.
 - Acceptance limits: public release download URLs returned HTTP 504 independently
   of Electron, so signed desktop download/install/relaunch remains unaccepted.
   The ad-hoc package still encountered a separate browser-store Keychain wait
