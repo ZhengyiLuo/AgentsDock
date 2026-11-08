@@ -1159,3 +1159,47 @@ jobs:
 
 # The optional rehearsal contains no signing credentials or publishing commands.
 # Only product-release-acceptance.yml can supply production acceptance evidence.
+
+  audit-beta6-server-export:
+    if: github.event_name == 'workflow_dispatch' && github.repository == 'ZhengyiLuo/AgentsDock' && github.ref == 'refs/heads/release/audit-beta6-export'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
+        with:
+          ref: 0e46b3f81e98596da3d91c73137f89efeee05686
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Export the exact frozen server with the unchanged history validator
+        shell: bash
+        env:
+          SOURCE_SHA: 0e46b3f81e98596da3d91c73137f89efeee05686
+          PREVIOUS_EXPORT: f71107187de176e77bf1b2fee7eb927770f015f9
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$SOURCE_SHA"
+          test "$(git rev-parse --is-shallow-repository)" = false
+          test -z "$(git status --porcelain)"
+          git fetch --no-tags https://github.com/ZhengyiLuo/AgentsServer.git "$PREVIOUS_EXPORT"
+          test "$(git rev-parse FETCH_HEAD)" = "$PREVIOUS_EXPORT"
+          test "$(git rev-parse "$PREVIOUS_EXPORT^{tree}")" = "$(git rev-parse '1651b11a4e6f16c3f312d0f11bf8a5f34a096236:server')"
+          mkdir -m 700 "$RUNNER_TEMP/beta6-export"
+          python3 scripts/prepare_server_export.py --commit "$SOURCE_SHA" --previous "$PREVIOUS_EXPORT" > "$RUNNER_TEMP/beta6-export/export.json"
+          export_sha="$(jq -er '.exported_commit | select(test("^[0-9a-f]{40}$"))' "$RUNNER_TEMP/beta6-export/export.json")"
+          test "$(git rev-parse "$export_sha^{tree}")" = "$(git rev-parse "$SOURCE_SHA:server")"
+          git merge-base --is-ancestor "$PREVIOUS_EXPORT" "$export_sha"
+          git update-ref refs/heads/export-audit-1.0.12-beta.6 "$export_sha"
+          git bundle create "$RUNNER_TEMP/beta6-export/server-export.bundle" refs/heads/export-audit-1.0.12-beta.6
+          git bundle verify "$RUNNER_TEMP/beta6-export/server-export.bundle"
+          sha256sum "$RUNNER_TEMP/beta6-export/server-export.bundle"
+          cat "$RUNNER_TEMP/beta6-export/export.json"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: beta6-server-export-0e46b3f81e98596da3d91c73137f89efeee05686-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            ${{ runner.temp }}/beta6-export/export.json
+            ${{ runner.temp }}/beta6-export/server-export.bundle
+          if-no-files-found: error
+          retention-days: 14
