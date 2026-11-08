@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict'
 import { spawnSync } from 'node:child_process'
+import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { test } from 'node:test'
 import { assertCurrentPairedServer, assertDesktopRunner, assertOlderVersion, assertSharedOperation, boundedNativeLog,
@@ -39,7 +40,7 @@ test('native replacement diagnostics retain only finite state and comparisons', 
     serverUpdates: [{ name: privateValue }], extra: privateValue }, true, baseline, baseline, candidate)
   assert.deepEqual(snapshot, { rendererAvailable: true, incumbentRunning: true, incumbentStillInstalled: true,
     candidateInstalled: false, candidateStillSelected: true, cancelable: false, updaterState: 'installing',
-    messageCategory: 'restarting', candidateChangedBeforeRestart: false, plainGatewayUnavailable: false })
+    messageCategory: 'restarting', candidateChangedBeforeRestart: false, generic503MessageObserved: false })
   assert.doesNotMatch(JSON.stringify(snapshot), /private|https:|token|1\.0\./)
   const failed = nativeInstallObservation({ state: privateValue, cancelable: privateValue,
     message: 'AgentsDock update is incomplete: The downloaded app changed before restart.' }, false, candidate, baseline, candidate)
@@ -52,14 +53,32 @@ test('native replacement diagnostics retain only finite state and comparisons', 
   assert.equal(nativeInstallObservation({message: {}}, false, baseline, baseline, candidate).messageCategory, 'other')
 })
 
-test('legacy post-completion retry admits only exact transient503 and the same current unpaused server', () => {
+function sourceDerivedGatewayFailure() {
+  // Exercise the real three-layer message composition; a duplicated hand-written
+  // fixture previously added punctuation that the shipped updater never adds.
+  const read = name => readFileSync(new URL(`../../electron/src/main/${name}`, import.meta.url), 'utf8')
+  const render = (template, values) => template.replace(/\$\{([^}]+)\}/g, (_match, key) => {
+    assert(Object.hasOwn(values, key), `Unknown message interpolation: ${key}`)
+    return values[key]
+  })
+  const detail = render(read('server-client.ts').match(/let detail = `([^`]+)`/)[1],
+    {'response.status': 503, 'response.statusText': 'Service Unavailable'})
+  const message = render(read('coordinated-updates.ts').match(/if \(failed\) throw new Error\(`([^`]+)`\)/)[1],
+    {'failed.name': 'Acceptance legacy server', 'failed.message': detail})
+  return render(read('updater.ts').match(/const failureMessage = `([^`]+)`/)[1], {message})
+}
+
+test('legacy post-completion retry admits only the source-derived displayed503 and the same current unpaused server', () => {
   const baseline = '1.0.6'
   const value = { ...status(), currentVersion: baseline, availableVersion: identity.version, cancelable: true, state: 'downloaded',
-    message: 'AgentsDock update is incomplete: Acceptance legacy server: 503 Service Unavailable. Retry Update AgentsDock after resolving this.' }
+    message: sourceDerivedGatewayFailure() }
   const result = assertLegacyPostcompletionRetry(value, health(), fixture(), identity.version, baseline, baseline)
   assert.equal(result.seamlessUpgradePassed, false)
   assert.equal(result.manualRetries, 2)
   assert.equal(result.totalInstallClicks, 3)
+  assert.equal(result.failureCategory, 'displayed-http-503')
+  assert.throws(() => assertLegacyPostcompletionRetry({...value, message: value.message.replace('Unavailable Retry', 'Unavailable. Retry')},
+    health(), fixture(), identity.version, '1.0.6', '1.0.6'))
   for (const patch of [{message: 'Unknown failure'}, {message: value.message.replace('503 Service Unavailable', 'Cannot write update files')},
     {state: 'installing'}, {cancelable: false}, {availableVersion: baseline}, {currentVersion: identity.version},
     {serverUpdates: [{...record(), phase: 'blocked'}]}, {serverUpdates: [{...record(), paused: true}]},

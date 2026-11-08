@@ -17,6 +17,10 @@
 - Keep a transient-503 legacy recovery experiment separate from seamless-upgrade
   acceptance: require the exact current server and unchanged candidate before
   one additional explicit UI retry, and prove no second server restart occurs.
+- Derive the exact displayed-failure fixture from the native client's message
+  composition, without inventing punctuation. Count the additional recovery
+  click in both the detailed checks and console summary; display classification
+  does not establish the unobserved HTTP response body or content type.
 
 ## Unreleased — Retry transient notarization-ticket validation failures
 

@@ -144,7 +144,8 @@ export function nativeInstallObservation(status, incumbentRunning, installedVers
       : /^Restarting into AgentsDock /.test(message) ? 'restarting'
       : /^AgentsDock update is incomplete:/.test(message) ? 'install-failed' : 'other',
     candidateChangedBeforeRestart: message.includes('The downloaded app changed before restart.'),
-    plainGatewayUnavailable: message === `AgentsDock update is incomplete: ${PROFILE_NAME}: 503 Service Unavailable. Retry Update AgentsDock after resolving this.` }
+    // This classifies displayed text only, not the HTTP content type or body.
+    generic503MessageObserved: message === `AgentsDock update is incomplete: ${PROFILE_NAME}: 503 Service Unavailable Retry Update AgentsDock after resolving this.` }
 }
 
 export function assertLegacyPostcompletionRetry(status, health, fixture, version, installedVersion, baseline) {
@@ -152,8 +153,8 @@ export function assertLegacyPostcompletionRetry(status, health, fixture, version
   assert.equal(status?.availableVersion, version)
   assert.equal(status?.state, 'downloaded')
   assert.equal(status?.cancelable, true)
-  assert(nativeInstallObservation(status, true, installedVersion, baseline, version).plainGatewayUnavailable,
-    'Only the exact plain gateway 503 permits the separate legacy recovery experiment')
+  assert(nativeInstallObservation(status, true, installedVersion, baseline, version).generic503MessageObserved,
+    'Only the exact displayed HTTP 503 permits the separate legacy recovery experiment')
   assertPreparedServerBeforeApp(health, fixture, version, installedVersion, baseline)
   const records = status.serverUpdates?.filter(row => row.profileId === PROFILE_ID)
   assert.equal(records?.length, 1)
@@ -161,7 +162,7 @@ export function assertLegacyPostcompletionRetry(status, health, fixture, version
   assert(record.phase === 'current' && record.paused !== true && record.targetVersion === version
     && record.serverIdentity === fixture.serverIdentity && record.serverInstanceId === health.server_instance_id)
   assert(typeof record.operationId === 'string' && record.operationId.length > 0)
-  return { originalPreparationFailed: true, failureCategory: 'plain-gateway-503', seamlessUpgradePassed: false,
+  return { originalPreparationFailed: true, failureCategory: 'displayed-http-503', seamlessUpgradePassed: false,
     manualRetries: 2, totalInstallClicks: 3, retryOnlyAfterVerifiedCurrentServer: true }
 }
 
@@ -776,7 +777,7 @@ export async function main(argv = process.argv.slice(2)) {
       }
       lastReconciliation = (await collectReconciliationSnapshot(() => status,
         () => reconciliationHealth(fixture), fixture, replay.identity.version)).snapshot
-      if (serverBeforeApp && !legacyRecovery && snapshot.plainGatewayUnavailable && lastReconciliation.recordPhase === 'current') {
+      if (serverBeforeApp && !legacyRecovery && snapshot.generic503MessageObserved && lastReconciliation.recordPhase === 'current') {
         const health = await serverHealth(fixture)
         legacyRecovery = assertLegacyPostcompletionRetry(status, health, fixture, replay.identity.version,
           installedVersion, options['baseline-version'])
@@ -895,6 +896,7 @@ export async function main(argv = process.argv.slice(2)) {
           toVersion: replay.identity.version, trustedNativeInput: true, nativeReplacementObserved: true,
           nativeRelaunchObserved: Boolean(relaunched), installedAsarSha256: expected.asarSha256,
           targetZipSha256: expected.zipSha256, appInstalledBeforeServerReconnection: !serverBeforeApp,
+          ...(legacyRecovery ? { recoveryMode: 'explicit-post-completion-retry', ...legacyRecovery } : {}),
           ...(serverBeforeApp ? preparedBeforeApp : {}) } },
         { name: 'legacy-server-upgrade', status: coverage.populatedNativeHistoryObserved ? 'passed' : 'blocked', observations: { ...current.verification,
           fromVersion: fixture.baselineVersion, toVersion: replay.identity.version,
@@ -902,7 +904,10 @@ export async function main(argv = process.argv.slice(2)) {
           updateRequestedByProductionCoordinator: true, manualServerUpdateClicks: 0, ...coverage,
           ...(!coverage.populatedNativeHistoryObserved ? { remaining: ['Populated provider history and native session IDs were not exercised by the empty-chat fixture.'] } : {}) } },
         { name: serverBeforeApp ? 'offline-install-refusal-and-user-retry' : 'offline-server-reconnect', status: 'passed',
-          observations: serverBeforeApp ? { ...offlineRefusal, ...preparedBeforeApp, manualRetryClicks: 1,
+          observations: serverBeforeApp ? { ...offlineRefusal, ...preparedBeforeApp,
+            manualRetryClicks: legacyRecovery?.manualRetries ?? 1,
+            totalInstallClicks: legacyRecovery?.totalInstallClicks ?? 2,
+            ...(legacyRecovery ? { recoveryMode: 'explicit-post-completion-retry', seamlessUpgradePassed: false } : {}),
             appInstalledWhileServerOffline: false, reconnectedVisiblePhase: currentRow.phaseLabel }
             : { appInstalledWhileServerOffline: true, offlineVisiblePhase: initialRow.phaseLabel,
               reconnectedVisiblePhase: currentRow.phaseLabel, reconciledAutomatically: true,
@@ -915,11 +920,12 @@ export async function main(argv = process.argv.slice(2)) {
         { name: serverBeforeApp ? 'multiple-clients-after-prepared-update' : 'multiple-clients', status: 'passed', observations: shared }
       ],
       events, legacyRecovery, limitations: ['No live-provider reply or natural OAuth renewal is claimed.',
-        ...(legacyRecovery ? ['The beta.4 preparation failed with a transient gateway 503; success is explicit post-completion retry recovery, not seamless upgrade.'] : []),
+        ...(legacyRecovery ? ['The beta.4 preparation displayed HTTP 503; the wire response was not captured. Success is explicit post-completion retry recovery, not seamless upgrade.'] : []),
         'This case does not establish reboot, busy-work, rollback or native Windows acceptance.'],
       completedAt: new Date().toISOString() }
     await writeFile(join(options.output, 'desktop-evidence.json'), `${JSON.stringify(evidence, null, 2)}\n`, { flag: 'wx', mode: 0o600 })
-    console.log(JSON.stringify({ observed: true, checks: evidence.checks, evidenceSha256: digest(await readFile(join(options.output, 'desktop-evidence.json'))) }))
+    console.log(JSON.stringify({ observed: true, checks: evidence.checks, legacyRecovery,
+      evidenceSha256: digest(await readFile(join(options.output, 'desktop-evidence.json'))) }))
     return evidence
   } catch (error) {
     if (secondClient) await observeShared('failure').catch(() => {})
