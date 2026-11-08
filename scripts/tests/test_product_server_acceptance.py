@@ -1969,6 +1969,39 @@ class NativeServerAcceptanceUnitTests(unittest.TestCase):
         for private in ("private-token", "private.invalid", "private-path", "private/path", "private-module"):
             self.assertNotIn(private, output)
 
+    def test_retained_update_failure_reports_fixed_recovery_reason_without_private_text(self):
+        fixture = {"baselineVersion": "1.0.7-beta.21", "targetVersion": "1.0.12-beta.3"}
+        cases = [
+            ("server_update_handoff_release_failed",
+             "The detached updater exited before reporting completion. See server-update.log.",
+             "runner-exited-without-completion"),
+            ("server_update_handoff_release_failed",
+             "The update failed and its execution hold could not be released safely.", "handoff-release-failed"),
+            ("server_update_recovery_failed",
+             "The interrupted server update could not finish recovery. See server-update.log.", "activation-recovery-failed"),
+            ("server_update_recovery_launch_failed",
+             "The server could not start activation recovery.", "activation-recovery-launch-failed"),
+            ("server_update_recovery_pending",
+             "The installer was interrupted. Its retained activation will be recovered.", "activation-recovery-pending"),
+        ]
+        for code, message, reason in cases:
+            with self.subTest(reason=reason):
+                value = MOD.diagnostic_status({"phase": "failed", "message": message, "error_code": code,
+                    "error": "private-token", "error_action": "https://private.invalid/private-path",
+                    "target_version": fixture["targetVersion"], "retryable": True}, fixture)
+                self.assertEqual(value["errorCode"], code)
+                self.assertEqual(value["failure"]["knownError"], reason)
+                self.assertEqual(value["failure"]["categories"], ["service-activation"])
+                self.assertEqual(value["phase"], "failed")
+                self.assertTrue(value["retryable"])
+                for private in (message, "private-token", "private.invalid", "private-path"):
+                    self.assertNotIn(private, json.dumps(value))
+                # A known sentence with additional unknown data is not the same
+                # fixed error; neither the suffix nor a guessed cause is public.
+                unknown = MOD.diagnostic_legacy_failure(message + " private-token")
+                self.assertIsNone(unknown["knownError"])
+                self.assertNotIn("private-token", json.dumps(unknown))
+
     def test_legacy_failure_classification_is_bounded_and_does_not_invent_signature_or_stage(self):
         for message, state in ((None, "missing"), ({"message": "private-token"}, "invalid-type"),
                                ("x" * 8193, "oversized"), ("", "empty"), ("  ", "empty")):
