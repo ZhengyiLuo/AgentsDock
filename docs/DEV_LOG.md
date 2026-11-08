@@ -10,6 +10,8 @@
   resumed goal's run-bound tools and durable update recovery boundary.
 - Isolate update endpoint tests from a developer's managed-install environment;
   package preparation retains its separate tests and real native acceptance.
+- Preserve keyword-only defaults when rebinding the isolated route-authentication
+  test functions, so mailbox authorization exercises the production defaults.
 - Add exact beta.2/stable 1.0.11 upgrade profiles and the reviewed beta.3 installer
   pin without changing historical artifact identities or relaxing runner,
   signature, ownership or rollback guards.
