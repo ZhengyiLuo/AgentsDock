@@ -7,7 +7,8 @@ import { CustomModelSettings } from './CustomModelSettings'
 
 const listed = { backend: 'claude', revision: 1, default_model: null, discovery_status: 'ready', models: [{ value: 'fixture/one', label: 'Friendly model' }] }
 function bridge() {
-  const api = { read: vi.fn().mockResolvedValue(listed), save: vi.fn().mockResolvedValue({ ...listed, revision: 2, default_model: 'fixture/one' }) }
+  const api = { read: vi.fn().mockResolvedValue(listed), save: vi.fn().mockResolvedValue({ ...listed, revision: 2, default_model: 'fixture/one' }),
+    check: vi.fn().mockResolvedValue({ backend: 'claude', revision: 1, model: 'fixture/one', status: 'verified', scope: 'text_request' }) }
   Object.defineProperty(window, 'agentsDock', { configurable: true, value: {
     customModels: api, native: { openExternal: vi.fn().mockResolvedValue(undefined) },
     providerConnections: { request: vi.fn().mockResolvedValue({ ok: true, status: 'verified' }) },
@@ -101,4 +102,36 @@ it('discards old-server catalogs after switching profiles', async () => {
   await act(async () => finish({ ...listed, models: [{ value: 'private/old', label: 'Old server model' }] }))
   expect(screen.queryByText(/Old server model/)).not.toBeInTheDocument()
   expect(api.read).toHaveBeenLastCalledWith({ profileId: 'other', profileGeneration: 2 }, 'claude')
+})
+
+it('checks only after explicit input, never saves a default or changes connection readiness', async () => {
+  const api = bridge(), saved = vi.fn()
+  api.read.mockResolvedValue({ ...listed, default_model: 'fixture/one', check_available: true })
+  render(<CustomModelSettings backend="claude" active onSaved={saved} />)
+  const button = await screen.findByRole('button', { name: 'Test this model' })
+  expect(api.check).not.toHaveBeenCalled()
+  fireEvent.click(button)
+  await waitFor(() => expect(api.check).toHaveBeenCalledExactlyOnceWith(
+    { profileId: 'test', profileGeneration: 1 }, 'claude', { model: 'fixture/one', expected_revision: 1 }))
+  expect(await screen.findByText(/Text request succeeded/)).toBeVisible()
+  expect(api.save).not.toHaveBeenCalled()
+  expect(saved).not.toHaveBeenCalled()
+  expect(window.agentsDock.providerConnections!.request).not.toHaveBeenCalled()
+})
+
+it('does not disable a model for quota errors and discards a late check after switching servers', async () => {
+  const api = bridge()
+  api.read.mockResolvedValue({ ...listed, default_model: 'fixture/one', check_available: true })
+  api.check.mockResolvedValue({ status: 'rate_limited' })
+  render(<CustomModelSettings backend="claude" active onSaved={vi.fn()} />)
+  fireEvent.click(await screen.findByRole('button', { name: 'Test this model' }))
+  await screen.findByText(/quota/i)
+  expect(screen.getByRole('option', { name: 'Friendly model (fixture/one)' })).not.toBeDisabled()
+  let finish!: (result: unknown) => void
+  api.check.mockImplementationOnce(() => new Promise(resolve => { finish = resolve }))
+  fireEvent.click(screen.getByRole('button', { name: 'Test this model' }))
+  act(() => useAppStore.setState({ activeProfileId: 'other', profileGeneration: 2 }))
+  await screen.findByRole('button', { name: 'Test this model' })
+  await act(async () => finish({ status: 'model_unavailable' }))
+  expect(screen.getByRole('option', { name: 'Friendly model (fixture/one)' })).not.toBeDisabled()
 })

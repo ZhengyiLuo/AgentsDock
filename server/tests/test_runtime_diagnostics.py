@@ -849,7 +849,7 @@ class RuntimeDiagnosticTests(unittest.TestCase):
             ["fable", "opus", "sonnet", "claude-fable-5-1"],
         )
 
-    def test_claude_catalog_fallback_includes_current_official_models(self) -> None:
+    def test_claude_catalog_cache_miss_never_invents_account_access_from_version_pins(self) -> None:
         help_text = """\
   --model <model>                       Provide an alias for the latest model
                                         (e.g. 'fable', 'opus', or 'sonnet')
@@ -867,11 +867,9 @@ class RuntimeDiagnosticTests(unittest.TestCase):
         self.assertIn("fable", by_value)
         self.assertIn("opus", by_value)
         self.assertIn("sonnet", by_value)
-        self.assertEqual(by_value["claude-fable-5-1"]["label"], "Fable 5.1")
-        self.assertEqual(by_value["claude-mythos-5-1"]["availability"], "limited")
-        self.assertIn("claude-opus-5", by_value)
-        self.assertIn("claude-sonnet-5", by_value)
-        self.assertIn("current fallback", catalog["model_source"])
+        self.assertFalse(any(value.startswith("claude-") for value in by_value))
+        self.assertEqual(catalog["discovery_status"], "unavailable")
+        self.assertIn("availability unverified", catalog["model_source"])
 
     def test_claude_catalog_uses_account_scoped_models_without_extra_pins(self) -> None:
         provider_options = [

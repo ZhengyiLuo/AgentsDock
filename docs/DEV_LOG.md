@@ -1,5 +1,34 @@
 # Public development log
 
+## Unreleased — Account-scoped model inventories and explicit checks
+
+- Stop presenting historical Claude/Codex version fallbacks and saved chat IDs
+  as current account inventory. Keep Claude discovery passive and let real SDK
+  metadata share its cache with the picker despite chat-only scheduling limits.
+- Reconcile desktop catalog caches on reconnect; refresh custom Codex inventories
+  with credential-scoped expiry and explicitly refresh OpenCode's CLI registry.
+  Retain same-connection rows on transient failure with an unconfirmed warning,
+  accept authoritative empty lists, and preserve native/default model semantics.
+- Raise Cursor API inventory capacity from 256 to 512 with partial-list reporting.
+  Exclude known Gemini audio-only products from the text-agent catalog.
+- Add a native-only, revision-fenced optional text check for Claude/OpenCode/Gemini
+  API models, with English/Chinese UI and usage disclosure. It does not change
+  defaults, credentials or chats. Quota/auth/network errors do not prove retirement;
+  short-lived rejection observations are not a permanent model blacklist.
+- Verification: 233 focused server tests; desktop typecheck, production compile
+  and 573 focused tests. Isolated native offscreen Electron exercised real settings
+  reads, default selection, reload/reopen and explicit Gemini/OpenCode requests
+  through production IPC/native HTTP/server authorization. A Gemini inventory
+  entry rejected the request while another succeeded; connection readiness stayed
+  unchanged. English/Chinese, dark/light and narrow layout were inspected.
+  Two 24-read concurrency batches returned complete backend catalogs. Live Cursor
+  inventory exceeded the previous cap. Account-switch/failure races used fixtures.
+- Limits: not every model was invoked; text success does not establish full agent
+  compatibility. Native Claude cache/identity behavior has regression coverage but
+  fresh live capture was blocked by a CLI startup error and remains unverified.
+  No mobile changes, packaging
+  acceptance, public release or production-server deployment is included.
+
 ## Unreleased — Preserve both legacy update-recovery receipt fields
 
 - The separate legacy-recovery rehearsal accepts a completed schedule receipt

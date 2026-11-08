@@ -323,6 +323,7 @@ export function registerIpc(
   handle('provider-connections:request', (scope, backend, action, input) => service.providerConnectionRequest(scope, backend, action, input))
   handle('provider-accounts:read', (scope, backend) => service.providerAccount(scope, backend))
   handle('custom-models:read', (scope, backend, sessionId) => service.customModels(scope, backend, undefined, sessionId))
+  handle('custom-models:check', (scope, backend, input) => service.checkCustomModel(scope, backend, input))
   handle('custom-models:save', (scope, backend, input) => service.customModels(scope, backend, input))
   handle('codex:auth:get', scope => service.codexAuth(scope))
   handle('codex:auth:reload', scope => service.codexAuth(scope, true))

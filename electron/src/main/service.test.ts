@@ -9792,7 +9792,7 @@ describe('server profile lifecycle', () => {
     expect(client.runtimeCatalog).toHaveBeenCalledOnce()
   })
 
-  it('keeps a cached runtime catalog fresh across profile activation', async () => {
+  it('reconciles cached model choices passively on profile activation', async () => {
     const client = fakeClient()
     const { service } = createProfileService({
       'http://a.test:7850': [client]
@@ -9804,7 +9804,7 @@ describe('server profile lifecycle', () => {
     await service.refreshServer('a', payload.profileGeneration)
     await settleBackgroundWork()
 
-    expect(client.runtimeCatalog).not.toHaveBeenCalled()
+    expect(client.runtimeCatalog).toHaveBeenCalledExactlyOnceWith(false)
   })
 
   it('refetches the model list when the server comes back as a new instance', async () => {
@@ -9838,7 +9838,7 @@ describe('server profile lifecycle', () => {
     expect(client.runtimeCatalog).toHaveBeenLastCalledWith(true)
   })
 
-  it('keeps trusting the cached catalog while the server instance is unchanged', async () => {
+  it('does not repeat the initial passive refresh while the server instance is unchanged', async () => {
     // The refresh must key on the server actually being replaced, not fire on
     // every reconnect, or an ordinary network blip re-probes every CLI.
     const client = fakeClient({
@@ -9855,7 +9855,7 @@ describe('server profile lifecycle', () => {
     await service.refreshServer('a', payload.profileGeneration)
     await settleBackgroundWork()
 
-    expect(client.runtimeCatalog).not.toHaveBeenCalled()
+    expect(client.runtimeCatalog).toHaveBeenCalledExactlyOnceWith(false)
   })
 
   it('forces an authoritative runtime probe when the user explicitly rechecks CLI status', async () => {
