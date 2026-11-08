@@ -1,5 +1,15 @@
 # Public development log
 
+## 2026-11-08 - Clarify failed update rehearsal diagnostics
+
+- Preserve fixed failure reasons for an exited updater, execution-hold cleanup
+  and activation recovery in bounded release-test reports. Keep raw messages
+  and private logs out of uploaded evidence.
+- This changes test diagnostics only. Signed app/server packages, updater
+  behavior and pending release acceptance remain unchanged.
+- Validation: 97 harness tests and 68 candidate/replay guard tests pass. A fresh
+  exact-package hosted replay is still required; no native pass is claimed here.
+
 ## 2026-11-08 - Prepare coordinated 1.0.12-beta.3
 
 - Integrate main through `5de30b23` into the published beta.2 release line,

@@ -25,6 +25,12 @@ unchanged. Pin its entire reviewed file to
 Historical pins and journeys remain intact. This is harness preparation, not
 native acceptance; scoped reports keep their original non-acceptance flags.
 
+Retained updater failures distinguish an exited runner from an unreleased
+execution hold and activation-recovery failures using fixed, allowlisted labels.
+Raw status messages, credentials, paths and log text remain private. These
+read-only diagnostics do not retry, repair or clear a failed update and do not
+change signed artifacts or acceptance requirements.
+
 ## 1.0.12-beta.1 rehearsal preparation
 
 Retain the previously reviewed stable 1.0.11 harness and historical pins.

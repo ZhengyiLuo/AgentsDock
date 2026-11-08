@@ -617,7 +617,9 @@ DIAGNOSTIC_PHASES = frozenset({"idle", "available", "current", "pending", "start
     "candidate-healthy", "committing", "committed", "rolling-back", "rolled-back", "rollback-healthy"})
 PREPARATION_PHASES = frozenset({"checking", "downloading", "staging", "ready"})
 UPDATE_ERROR_CODES = frozenset({"server_update_preparation_failed", "server_update_preparation_invalid",
-                              "server_update_rolled_back", "server_update_pending", "server_update_pending_http"})
+                              "server_update_rolled_back", "server_update_pending", "server_update_pending_http",
+                              "server_update_handoff_release_failed", "server_update_recovery_failed",
+                              "server_update_recovery_launch_failed", "server_update_recovery_pending"})
 STATUS_FLAGS = ("retryable", "errorPresent", "scheduleIdPresent", "updateIdPresent", "preparationIdPresent")
 
 
@@ -675,6 +677,16 @@ def diagnostic_legacy_failure(message: object) -> dict:
         "updated AgentsServer changed its legacy Team Hub transport": ("post-install-health", "candidate-legacy-hub-transport-mismatch"),
         "updated AgentsServer changed its Team Hub routes": ("post-install-health", "candidate-hub-routes-mismatch"),
         "updated AgentsServer did not repair its Team Hub host": ("post-install-health", "candidate-hub-repair-failed"),
+        "The detached updater exited before reporting completion. See server-update.log.":
+            ("service-activation", "runner-exited-without-completion"),
+        "The update failed and its execution hold could not be released safely.":
+            ("service-activation", "handoff-release-failed"),
+        "The interrupted server update could not finish recovery. See server-update.log.":
+            ("service-activation", "activation-recovery-failed"),
+        "The server could not start activation recovery.":
+            ("service-activation", "activation-recovery-launch-failed"),
+        "The installer was interrupted. Its retained activation will be recovered.":
+            ("service-activation", "activation-recovery-pending"),
     }
     categories: set[str] = set()
     known = None

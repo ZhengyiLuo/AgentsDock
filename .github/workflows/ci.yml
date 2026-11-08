@@ -555,7 +555,9 @@ jobs:
             'candidate-hub-identity-mismatch', 'candidate-hub-transport-mismatch', 'candidate-legacy-hub-transport-mismatch',
             'candidate-hub-routes-mismatch', 'candidate-hub-repair-failed', 'signed-descriptor-not-found', 'release-track-empty',
             'manifest-wrong-track', 'requested-track-mismatch', 'requested-not-latest', 'resolved-version-mismatch',
-            'forward-update-required', 'download-size-limit', 'startup-readiness-timeout', 'installer-exit-failure', 'installer-timeout']
+            'forward-update-required', 'download-size-limit', 'startup-readiness-timeout', 'installer-exit-failure', 'installer-timeout',
+            'runner-exited-without-completion', 'handoff-release-failed', 'activation-recovery-failed',
+            'activation-recovery-launch-failed', 'activation-recovery-pending']
           const labels = (values, allowed) => Array.isArray(values) && values.length <= allowed.length
             && new Set(values).size === values.length && values.every(value => allowed.includes(value))
           const validFailure = value => shape(value, ['messageState', 'categories', 'knownError'], ['httpStatus', 'installerExitCode'])
@@ -568,7 +570,9 @@ jobs:
           const validStatusFields = value => phases.includes(value.phase) && versions.includes(value.target)
             && ['checking', 'downloading', 'staging', 'ready', 'absent', 'other-or-unknown'].includes(value.preparationPhase)
             && ['server_update_preparation_failed', 'server_update_preparation_invalid', 'server_update_rolled_back',
-                'server_update_pending', 'server_update_pending_http', 'absent', 'other-or-unknown'].includes(value.errorCode)
+                'server_update_pending', 'server_update_pending_http', 'server_update_handoff_release_failed',
+                'server_update_recovery_failed', 'server_update_recovery_launch_failed', 'server_update_recovery_pending',
+                'absent', 'other-or-unknown'].includes(value.errorCode)
             && (value.errorHttpStatus === null || int(value.errorHttpStatus, 400, 599))
             && statusFlags.every(key => bool(value[key]))
           const validStatus = value => value?.readable === false ? shape(value, ['readable'])
