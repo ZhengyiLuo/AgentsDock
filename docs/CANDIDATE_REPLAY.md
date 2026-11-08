@@ -536,6 +536,23 @@ installation over an existing managed server.
 
 ## Exact journey
 
+The exact `beta1124` incumbent uses a different, server-first contract from
+the older app-first baselines below. Its shipped `prepareInstall` refuses an
+offline saved server. For `1.0.12-beta.4` → `1.0.12-beta.5`, first observe that
+specific retryable refusal and verify the incumbent version and application
+bytes remain installed. Reconnect the owned server, explicitly retry through
+the real update button, and observe both server components current and unpaused
+before native app replacement. Require the unchanged candidate's replacement,
+relaunch, saved settings, Beta preference and server-data preservation afterward.
+Two native clients then prove current-state convergence, not co-observation of a
+live update operation. The older baseline cases retain their stricter shared
+operation-ID observation during post-app service reconnection.
+
+This harness-only distinction does not change candidate payloads, source pins,
+signatures or publication guards. A prior timeout after clicking with an offline
+server is not evidence of a quit hang: the actual offline refusal must be observed
+in the corrected native run. Harness contract tests alone are not acceptance.
+
 - Desktop baseline: published, update-enabled, signed/notarized AgentsDock
   `1.0.6` from the legacy desktop feed. The real settings UI first checks Stable,
   then selects Beta and retains Beta through installation and relaunch.

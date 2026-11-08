@@ -5,7 +5,8 @@ import { test } from 'node:test'
 import { assertCurrentPairedServer, assertDesktopRunner, assertOlderVersion, assertSharedOperation, boundedNativeLog,
   assertStableDiscovery, assertVisibleCoordinatedRow, checksumForMacArchive, collectReconciliationSnapshot, collectSharedOperationSnapshot, emitNativeProgress,
   migrationCoverage, parseDesktopAcceptanceArguments, parseReconciliationSnapshot, parseSharedOperationSnapshot, reconciliationSnapshot,
-  retainSharedOperationObservation, desktopJourney,
+  retainSharedOperationObservation, desktopJourney, requiresServerBeforeApp, assertOfflineInstallRefusal,
+  assertPreparedServerBeforeApp, assertTwoPreparedClients,
   terminalReconciliationFailure, validateDesktopFixture } from '../product_desktop_acceptance.mjs'
 
 // These are harness contract tests only: no app/service installation, native
@@ -29,6 +30,56 @@ const status = () => ({ currentVersion: identity.version, serverUpdates: [record
 const health = () => ({ ok: true, server_identity: fixture().serverIdentity,
   server_instance_id: 'new-service-instance', server_version: identity.version,
   gateway: { version: identity.version }, execution_service: { version: identity.version, maintenance_held: false } })
+
+test('only the pinned beta4 incumbent uses server-before-app acceptance', () => {
+  assert.equal(requiresServerBeforeApp('1.0.12-beta.5', '1.0.12-beta.4', 'beta1124'), true)
+  assert.equal(requiresServerBeforeApp('1.0.12-beta.5', '1.0.11', 'stable111'), false)
+  assert.equal(requiresServerBeforeApp('1.0.12-beta.5', '1.0.6', 'legacy'), false)
+  assert.throws(() => requiresServerBeforeApp('1.0.12-beta.5', '1.0.12-beta.3', 'beta1124'))
+  assert.throws(() => requiresServerBeforeApp('1.0.12-beta.6', '1.0.12-beta.4', 'beta1124'))
+})
+
+test('offline refusal requires the exact retryable incumbent, real offline state and native failure reason', () => {
+  const baseline = '1.0.12-beta.4', candidate = '1.0.12-beta.5'
+  const value = { currentVersion: baseline, availableVersion: candidate, state: 'downloaded',
+    message: 'AgentsDock update is incomplete: Private server: server is offline or unreachable; reconnect before updating AgentsDock. Retry Update AgentsDock after resolving this.' }
+  const accepted = assertOfflineInstallRefusal(value, baseline, candidate, baseline, true)
+  assert.deepEqual(accepted, {offlineRefusalObserved: true, incumbentAppPreserved: true, sameCandidateRetryable: true})
+  assert.doesNotMatch(JSON.stringify(accepted), /Private|message|http/)
+  for (const patch of [{state: 'installing'}, {state: 'error'}, {currentVersion: candidate},
+    {availableVersion: baseline}, {message: 'Update is ready'}, {message: 'AgentsDock update is incomplete: invalid signature'}]) {
+    assert.throws(() => assertOfflineInstallRefusal({...value, ...patch}, baseline, candidate, baseline, true))
+  }
+  assert.throws(() => assertOfflineInstallRefusal(value, baseline, candidate, candidate, true))
+  assert.throws(() => assertOfflineInstallRefusal(value, baseline, candidate, baseline, false))
+})
+
+test('server-before-app evidence requires both exact healthy unpaused components before replacement', () => {
+  const baseline = '1.0.6'
+  assert.equal(assertPreparedServerBeforeApp(health(), fixture(), identity.version, baseline, baseline)
+    .serverPreparedBeforeAppReplacement, true)
+  for (const patch of [{ok: false}, {server_identity: 'other'}, {server_version: baseline},
+    {server_instance_id: fixture().serverInstanceId}, {server_instance_id: undefined},
+    {gateway: {version: baseline}}, {execution_service: {version: identity.version, maintenance_held: true}},
+    {execution_service: {version: identity.version}}]) {
+    assert.throws(() => assertPreparedServerBeforeApp({...health(), ...patch}, fixture(), identity.version, baseline, baseline))
+  }
+  assert.throws(() => assertPreparedServerBeforeApp(health(), fixture(), identity.version, identity.version, baseline))
+})
+
+test('post-preparation native clients prove current state but never invent a shared live operation', () => {
+  const a = status(), b = status()
+  delete a.serverUpdates[0].operationId; delete b.serverUpdates[0].operationId
+  const result = assertTwoPreparedClients(a, b, health(), fixture(), identity.version)
+  assert.equal(result.sharedOperationObserved, false)
+  assert.equal(result.finalServiceInstanceShared, true)
+  assert.throws(() => assertSharedOperation(a, b, fixture(), identity.version), /shared same-type/)
+  for (const patch of [{phase: 'offline'}, {paused: true}, {serverInstanceId: 'other'}, {serverIdentity: 'other'},
+    {targetVersion: '1.0.6'}]) {
+    assert.throws(() => assertTwoPreparedClients(a, {...b, serverUpdates: [{...record(), ...patch}]}, health(), fixture(), identity.version))
+  }
+  assert.throws(() => assertTwoPreparedClients(a, {...b, serverUpdates: [record(), record()]}, health(), fixture(), identity.version))
+})
 
 test('stable baseline subscriptions are preserved instead of forced through Beta', () => {
   assert.deepEqual(desktopJourney('1.0.9', '1.0.6', 'stable108'),
