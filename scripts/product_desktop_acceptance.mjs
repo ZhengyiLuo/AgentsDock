@@ -54,7 +54,8 @@ const NATIVE_PROGRESS_PHASES = new Set(['baseline-artifact-verification-starting
   'offline-pending-visible', 'second-native-client-waiting', 'owned-legacy-service-start-requested',
   'two-native-clients-share-one-completed-update', 'paired-service-current',
   'offline-install-refusal-observed', 'owned-service-reconnected-before-app-retry',
-  'paired-server-prepared-before-app-replacement', 'two-native-clients-current-after-prepared-update'])
+  'paired-server-prepared-before-app-replacement', 'two-native-clients-current-after-prepared-update',
+  'native-replacement-state-observed'])
 
 export function emitNativeProgress(stage, at, write = line => process.stdout.write(line)) {
   assert(NATIVE_PROGRESS_PHASES.has(stage), 'Unknown native progress stage')
@@ -128,6 +129,35 @@ export function assertTwoPreparedClients(first, second, health, fixture, version
     'Both native clients must observe the current authenticated service instance')
   return { nativeClientCount: 2, bothClientsCurrent: true, finalServiceInstanceShared: true,
     sharedOperationObserved: false, targetVersion: version }
+}
+
+export function nativeInstallObservation(status, incumbentRunning, installedVersion, baseline, candidate) {
+  const message = typeof status?.message === 'string' ? status.message : ''
+  return { rendererAvailable: Boolean(status && typeof status === 'object'),
+    incumbentRunning: incumbentRunning === true, incumbentStillInstalled: installedVersion === baseline,
+    candidateInstalled: installedVersion === candidate,
+    candidateStillSelected: status?.availableVersion === candidate,
+    cancelable: typeof status?.cancelable === 'boolean' ? status.cancelable : null,
+    updaterState: ['idle', 'checking', 'available', 'downloading', 'downloaded', 'installing', 'not-available', 'error']
+      .includes(status?.state) ? status.state : 'unknown',
+    messageCategory: /^Updating servers before installing AgentsDock:/.test(message) ? 'preparing-servers'
+      : /^Restarting into AgentsDock /.test(message) ? 'restarting'
+      : /^AgentsDock update is incomplete:/.test(message) ? 'install-failed' : 'other',
+    candidateChangedBeforeRestart: message.includes('The downloaded app changed before restart.') }
+}
+
+export function nativeUpdaterLogObservation(bytes) {
+  assert(typeof bytes === 'string' && Buffer.byteLength(bytes) <= 16 * 1024 * 1024, 'Unbounded native log')
+  return { proxyCreated: bytes.includes('Proxy server for native Squirrel.Mac is created ('),
+    proxyListening: bytes.includes('Proxy server for native Squirrel.Mac is listening ('),
+    feedRequested: /(?:^|\n)\/ requested(?:\r?\n|$)/.test(bytes),
+    archiveRequested: bytes.includes(' requested by Squirrel.Mac, pipe '),
+    authenticationRejected: bytes.includes('No authenthication info') || bytes.includes('Invalid authenthication credentials'),
+    nativeDownloaded: bytes.includes('nativeUpdater.update-downloaded'),
+    proxyClosed: bytes.includes('Proxy server for native Squirrel.Mac is closed ('),
+    archiveReadFailed: bytes.includes('Cannot pipe "'),
+    updaterShipItError: bytes.includes('SQRLShipItRequestErrorDomain'),
+    updaterSquirrelError: bytes.includes('SQRLUpdaterErrorDomain') }
 }
 
 export function parseDesktopAcceptanceArguments(argv) {
@@ -580,6 +610,7 @@ export async function main(argv = process.argv.slice(2)) {
   let ownedApp, secondApp, client, secondClient, lastReconciliation = null, keychainCreated = false
   let offlineRefusal = null, preparedBeforeApp = null
   const sharedOperationObservations = []
+  const nativeInstallObservations = []
   const observeShared = async stage => {
     const result = await collectSharedOperationSnapshot(
       () => client?.evaluate('window.agentsDock.updates.status()'),
@@ -709,8 +740,26 @@ export async function main(argv = process.argv.slice(2)) {
       }, 15 * 60_000)
       observed('paired-server-prepared-before-app-replacement', preparedBeforeApp)
     }
+    // Retain only finite read-only status diagnostics while waiting for native
+    // replacement. Closing CDP early concealed whether preparation or ordinary
+    // window persistence blocked the incumbent. Never retry or force its quit.
+    await until('Squirrel replaced installed app', async () => {
+      const installedVersion = appVersion(ownedApp)
+      if (installedVersion === replay.identity.version) return true
+      let status = null
+      try { status = await client.evaluate('window.agentsDock.updates.status()') } catch { /* Native exit disconnects CDP. */ }
+      const snapshot = nativeInstallObservation(status, processesFor(ownedApp).includes(original.pid),
+        installedVersion, options['baseline-version'], replay.identity.version)
+      if (nativeInstallObservations.length < 24
+        && JSON.stringify(nativeInstallObservations.at(-1)?.snapshot) !== JSON.stringify(snapshot)) {
+        nativeInstallObservations.push({ at: new Date().toISOString(), snapshot })
+        observed('native-replacement-state-observed', snapshot)
+      }
+      lastReconciliation = (await collectReconciliationSnapshot(() => status,
+        () => reconciliationHealth(fixture), fixture, replay.identity.version)).snapshot
+      return false
+    }, 4 * 60_000)
     client.close(); client = null
-    await until('Squirrel replaced installed app', () => appVersion(ownedApp) === replay.identity.version, 4 * 60_000)
     verifyApp(ownedApp, replay.identity.version)
     assert.equal(await hashFile(join(ownedApp, 'Contents/Resources/app.asar')), expected.asarSha256)
     const relaunched = await until('Squirrel relaunched app', () => processesFor(ownedApp).find(pid => pid !== original.pid))
@@ -835,6 +884,16 @@ export async function main(argv = process.argv.slice(2)) {
     return evidence
   } catch (error) {
     if (secondClient) await observeShared('failure').catch(() => {})
+    let nativeUpdaterDiagnostics = null
+    try {
+      const path = join(options.output, 'native-private.log')
+      const file = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW)
+      try {
+        const stat = await file.stat()
+        assert(stat.isFile() && stat.uid === process.getuid() && stat.size <= 16 * 1024 * 1024)
+        nativeUpdaterDiagnostics = nativeUpdaterLogObservation(await file.readFile('utf8'))
+      } finally { await file.close() }
+    } catch { /* Never expose raw log errors or substitute diagnostics for acceptance. */ }
     let serviceDiagnostics = { status: 'unavailable' }
     try {
       const diagnostic = serviceCommand(options, fixture, 'diagnose', [], 'server-diagnostics.json')
@@ -845,7 +904,8 @@ export async function main(argv = process.argv.slice(2)) {
       ...(harness ? { kind: 'scoped-macos-candidate-observations', publicationEligible: false, releaseAcceptance: false,
         harnessSourceSha: harness.harnessSourceSha } : {}),
       releaseReceiptSha256: replay.identity.releaseReceiptSha256, events, lastReconciliation,
-      sharedOperationObservations, offlineRefusal, preparedBeforeApp, serviceDiagnostics }), { flag: 'wx', mode: 0o600 }).catch(() => {})
+      sharedOperationObservations, nativeInstallObservations, nativeUpdaterDiagnostics,
+      offlineRefusal, preparedBeforeApp, serviceDiagnostics }), { flag: 'wx', mode: 0o600 }).catch(() => {})
     throw error
   } finally {
     client?.close()

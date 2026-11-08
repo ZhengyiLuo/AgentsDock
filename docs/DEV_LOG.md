@@ -11,6 +11,9 @@
 - Add focused refusal, version/order, component-health and client-convergence
   regressions. Hosted native execution is still required; this entry does not
   establish successful acceptance or publication.
+- Retain bounded, read-only native updater-state comparisons during replacement
+  failures so server preparation and desktop quit failures are distinguishable.
+  Raw messages, process details and private logs are not included in evidence.
 
 ## Unreleased — Retry transient notarization-ticket validation failures
 
