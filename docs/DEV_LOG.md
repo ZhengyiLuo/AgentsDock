@@ -14,6 +14,9 @@
 - Retain bounded, read-only native updater-state comparisons during replacement
   failures so server preparation and desktop quit failures are distinguishable.
   Raw messages, process details and private logs are not included in evidence.
+- Keep a transient-503 legacy recovery experiment separate from seamless-upgrade
+  acceptance: require the exact current server and unchanged candidate before
+  one additional explicit UI retry, and prove no second server restart occurs.
 
 ## Unreleased — Retry transient notarization-ticket validation failures
 

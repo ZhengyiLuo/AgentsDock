@@ -55,7 +55,7 @@ const NATIVE_PROGRESS_PHASES = new Set(['baseline-artifact-verification-starting
   'two-native-clients-share-one-completed-update', 'paired-service-current',
   'offline-install-refusal-observed', 'owned-service-reconnected-before-app-retry',
   'paired-server-prepared-before-app-replacement', 'two-native-clients-current-after-prepared-update',
-  'native-replacement-state-observed'])
+  'native-replacement-state-observed', 'legacy-postcompletion-retry-requested'])
 
 export function emitNativeProgress(stage, at, write = line => process.stdout.write(line)) {
   assert(NATIVE_PROGRESS_PHASES.has(stage), 'Unknown native progress stage')
@@ -143,7 +143,26 @@ export function nativeInstallObservation(status, incumbentRunning, installedVers
     messageCategory: /^Updating servers before installing AgentsDock:/.test(message) ? 'preparing-servers'
       : /^Restarting into AgentsDock /.test(message) ? 'restarting'
       : /^AgentsDock update is incomplete:/.test(message) ? 'install-failed' : 'other',
-    candidateChangedBeforeRestart: message.includes('The downloaded app changed before restart.') }
+    candidateChangedBeforeRestart: message.includes('The downloaded app changed before restart.'),
+    plainGatewayUnavailable: message === `AgentsDock update is incomplete: ${PROFILE_NAME}: 503 Service Unavailable. Retry Update AgentsDock after resolving this.` }
+}
+
+export function assertLegacyPostcompletionRetry(status, health, fixture, version, installedVersion, baseline) {
+  assert.equal(status?.currentVersion, baseline)
+  assert.equal(status?.availableVersion, version)
+  assert.equal(status?.state, 'downloaded')
+  assert.equal(status?.cancelable, true)
+  assert(nativeInstallObservation(status, true, installedVersion, baseline, version).plainGatewayUnavailable,
+    'Only the exact plain gateway 503 permits the separate legacy recovery experiment')
+  assertPreparedServerBeforeApp(health, fixture, version, installedVersion, baseline)
+  const records = status.serverUpdates?.filter(row => row.profileId === PROFILE_ID)
+  assert.equal(records?.length, 1)
+  const record = records[0]
+  assert(record.phase === 'current' && record.paused !== true && record.targetVersion === version
+    && record.serverIdentity === fixture.serverIdentity && record.serverInstanceId === health.server_instance_id)
+  assert(typeof record.operationId === 'string' && record.operationId.length > 0)
+  return { originalPreparationFailed: true, failureCategory: 'plain-gateway-503', seamlessUpgradePassed: false,
+    manualRetries: 2, totalInstallClicks: 3, retryOnlyAfterVerifiedCurrentServer: true }
 }
 
 export function nativeUpdaterLogObservation(bytes) {
@@ -608,7 +627,7 @@ export async function main(argv = process.argv.slice(2)) {
   }
   const logs = boundedNativeLog(createWriteStream(join(options.output, 'native-private.log'), { flags: 'wx', mode: 0o600 }))
   let ownedApp, secondApp, client, secondClient, lastReconciliation = null, keychainCreated = false
-  let offlineRefusal = null, preparedBeforeApp = null
+  let offlineRefusal = null, preparedBeforeApp = null, legacyRecovery = null, recoveryInstance, recoveryOperation
   const sharedOperationObservations = []
   const nativeInstallObservations = []
   const observeShared = async stage => {
@@ -757,6 +776,17 @@ export async function main(argv = process.argv.slice(2)) {
       }
       lastReconciliation = (await collectReconciliationSnapshot(() => status,
         () => reconciliationHealth(fixture), fixture, replay.identity.version)).snapshot
+      if (serverBeforeApp && !legacyRecovery && snapshot.plainGatewayUnavailable && lastReconciliation.recordPhase === 'current') {
+        const health = await serverHealth(fixture)
+        legacyRecovery = assertLegacyPostcompletionRetry(status, health, fixture, replay.identity.version,
+          installedVersion, options['baseline-version'])
+        assert.equal(await hashFile(join(ownedApp, 'Contents/Resources/app.asar')), previous.asarSha256)
+        recoveryInstance = health.server_instance_id
+        recoveryOperation = status.serverUpdates.find(row => row.profileId === PROFILE_ID).operationId
+        await client.screenshot(join(options.output, '02-legacy-preparation-failed-server-current.png'))
+        await client.clickButton(MIGRATION_INSTALL_BUTTON_NAMES)
+        observed('legacy-postcompletion-retry-requested', legacyRecovery)
+      }
       return false
     }, 4 * 60_000)
     client.close(); client = null
@@ -780,6 +810,14 @@ export async function main(argv = process.argv.slice(2)) {
         && status.serverUpdates?.some(item => item.profileId === PROFILE_ID && item.phase === initialPhase) ? status : null
     })
     assertMigrationTrack(journey.installedTrack, initial, await readFile(join(profileDirectory, 'update-track'), 'utf8'))
+    if (legacyRecovery) {
+      const health = await serverHealth(fixture)
+      assert.equal(health.server_instance_id, recoveryInstance, 'Legacy retry must not restart the already updated server again')
+      assert.equal(initial.serverUpdates.find(row => row.profileId === PROFILE_ID).operationId, recoveryOperation,
+        'Legacy retry must retain the same completed server update receipt')
+      legacyRecovery.noAdditionalServerRestart = true
+      legacyRecovery.sameServerOperationPreserved = true
+    }
     await openMigrationUpdateSettings(client)
     const initialRow = await visibleServerRow(client, initialPhase)
     await client.screenshot(join(options.output, `02-native-app-updated-server-${initialPhase}.png`))
@@ -876,7 +914,8 @@ export async function main(argv = process.argv.slice(2)) {
           discovery: 'synthetic-replay-not-publication' } },
         { name: serverBeforeApp ? 'multiple-clients-after-prepared-update' : 'multiple-clients', status: 'passed', observations: shared }
       ],
-      events, limitations: ['No live-provider reply or natural OAuth renewal is claimed.',
+      events, legacyRecovery, limitations: ['No live-provider reply or natural OAuth renewal is claimed.',
+        ...(legacyRecovery ? ['The beta.4 preparation failed with a transient gateway 503; success is explicit post-completion retry recovery, not seamless upgrade.'] : []),
         'This case does not establish reboot, busy-work, rollback or native Windows acceptance.'],
       completedAt: new Date().toISOString() }
     await writeFile(join(options.output, 'desktop-evidence.json'), `${JSON.stringify(evidence, null, 2)}\n`, { flag: 'wx', mode: 0o600 })
@@ -905,7 +944,7 @@ export async function main(argv = process.argv.slice(2)) {
         harnessSourceSha: harness.harnessSourceSha } : {}),
       releaseReceiptSha256: replay.identity.releaseReceiptSha256, events, lastReconciliation,
       sharedOperationObservations, nativeInstallObservations, nativeUpdaterDiagnostics,
-      offlineRefusal, preparedBeforeApp, serviceDiagnostics }), { flag: 'wx', mode: 0o600 }).catch(() => {})
+      offlineRefusal, preparedBeforeApp, legacyRecovery, serviceDiagnostics }), { flag: 'wx', mode: 0o600 }).catch(() => {})
     throw error
   } finally {
     client?.close()
