@@ -1,5 +1,20 @@
 # Public development log
 
+## 2026-11-08 - Prepare coordinated 1.0.12-beta.5
+
+- Prepare a matching desktop, signed server, legacy bridge and short CLI Beta
+  candidate from main through `0f2e8181`, after the updater fixes and exact
+  upgrade-test configuration merged. Stable remains `1.0.11`.
+- Include credential-free update discovery and legacy-server file-descriptor
+  headroom while retaining beta.4's update recovery and receipt protections.
+  See [the candidate release notes](RELEASE_1.0.12-beta.5.md).
+- Source CI passed on both merged pull-request heads. Local version/staging
+  checks (27 tests) and runtime/CLI packaging regressions (16 tests) pass.
+  Candidate packaging and
+  exact signed installation/relaunch, rollback, active-work recovery and native
+  history acceptance remain pending. This entry records local source
+  preparation; it does not establish publication or deployment.
+
 ## Unreleased — Prepare exact beta.5 upgrade rehearsals
 
 - Add independently verified public beta.4/build 1272 and retained stable
