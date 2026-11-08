@@ -23,8 +23,10 @@ ownership, native-runner and immutable-receipt checks remain enforced.
 Beta.4 prepares servers before replacing its app. Its original preparation
 failure remains recorded even if a later explicit retry completes installation.
 The narrowly admitted recovery experiment requires the same retryable candidate,
-verified current unpaused server and unchanged server operation/instance before
-and after the additional click. Report three total install clicks, including
+verified current unpaused server and unchanged server instance and receipt pair
+before and after the additional click. Preserve operation and schedule IDs
+separately, including absent fields, and require at least one valid receipt.
+Report three total install clicks, including
 the offline refusal and two manual retries, with `seamlessUpgradePassed: false`.
 Displayed HTTP 503 text does not establish its wire content type or body.
 This legacy path does not exercise the correction in the future app's updater.

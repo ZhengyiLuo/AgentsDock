@@ -19,9 +19,12 @@ The unpublished beta.5 packages and their original test records remain frozen.
 - Retain beta.4's update recovery and protection against stale update receipts.
 
 The restart-gap correction runs in the updated app. A beta.4 app upgrading to
-this release still runs its old updater until desktop replacement. A separately
-verified explicit retry after its server becomes current must be reported as
-legacy recovery, not a seamless first-attempt upgrade.
+this release still runs its old updater until desktop replacement. If beta.4
+shows an incomplete-update HTTP 503 after the server finishes updating, wait
+until the saved server shows Up to date, then click Update AgentsDock again.
+The isolated beta.4-to-beta.5 rehearsal verified this explicit recovery in both
+installation-root modes. This does not establish a seamless first-attempt
+upgrade or replace the required checks of the new beta.6 packages.
 
 ## Validation before publication
 
