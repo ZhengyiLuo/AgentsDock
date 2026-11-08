@@ -80,10 +80,12 @@ BETA1123_ROOT_NORMALIZING_INSTALLER_SHA256 = "5776115d6a61620189128578ca9facf0bb
 # Beta.5 retains beta.3's exact installer bytes; only the reviewed version
 # association is new, not its lock, permission or recovery contract.
 BETA1125_ROOT_NORMALIZING_INSTALLER_SHA256 = BETA1123_ROOT_NORMALIZING_INSTALLER_SHA256
+# Beta.6 keeps these complete installer bytes; new release receipts remain separate.
+BETA1126_ROOT_NORMALIZING_INSTALLER_SHA256 = BETA1123_ROOT_NORMALIZING_INSTALLER_SHA256
 NPM_BASELINE_VERSIONS = {"stable108": "1.0.8", "beta1085": "1.0.8-beta.5", "beta1101": "1.0.10-beta.1", "stable109": "1.0.9", "stable110": "1.0.10", "beta11112": "1.0.11-beta.12", "stable111": "1.0.11", "beta1121": "1.0.12-beta.1", "beta1122": "1.0.12-beta.2", "beta1124": "1.0.12-beta.4"}
 NPM_BASELINE_TARGETS = {"stable108": ("1.0.9",), "beta1085": ("1.0.9",),
                         "beta1101": ("1.0.10-beta.2", "1.0.10-beta.3", "1.0.10-beta.4", "1.0.10-beta.5", "1.0.10-beta.6", "1.0.10"),
-                        "stable109": ("1.0.10",), "stable110": ("1.0.11",), "beta11112": ("1.0.11", "1.0.12-beta.1"), "stable111": ("1.0.12-beta.1", "1.0.12-beta.2", "1.0.12-beta.3", "1.0.12-beta.5"), "beta1121": ("1.0.12-beta.2",), "beta1122": ("1.0.12-beta.3",), "beta1124": ("1.0.12-beta.5",)}
+                        "stable109": ("1.0.10",), "stable110": ("1.0.11",), "beta11112": ("1.0.11", "1.0.12-beta.1"), "stable111": ("1.0.12-beta.1", "1.0.12-beta.2", "1.0.12-beta.3", "1.0.12-beta.5", "1.0.12-beta.6"), "beta1121": ("1.0.12-beta.2",), "beta1122": ("1.0.12-beta.3",), "beta1124": ("1.0.12-beta.5", "1.0.12-beta.6")}
 ROLLBACK_STAGES = {"preflight", "start-request", "observe-rollback", "rollback-proof", "preservation",
                    "retry-request", "retry-health", "retry-completion", "retry-verification"}
 
@@ -1471,7 +1473,8 @@ def root_normalization_contract(bundle: Path, receipt: dict) -> str:
             with package.extractfile(members[0]) as stream:
                 installers.append(stream.read(2 * 1024 * 1024 + 1))
     # These reviewed candidates, including stable 1.0.10, retain the complete beta.1 installer.
-    expected_hash = (BETA1125_ROOT_NORMALIZING_INSTALLER_SHA256 if version == "1.0.12-beta.5"
+    expected_hash = (BETA1126_ROOT_NORMALIZING_INSTALLER_SHA256 if version == "1.0.12-beta.6"
+                     else BETA1125_ROOT_NORMALIZING_INSTALLER_SHA256 if version == "1.0.12-beta.5"
                      else BETA1123_ROOT_NORMALIZING_INSTALLER_SHA256 if version == "1.0.12-beta.3"
                      else BETA1122_ROOT_NORMALIZING_INSTALLER_SHA256 if version == "1.0.12-beta.2"
                      else BETA1121_ROOT_NORMALIZING_INSTALLER_SHA256 if version == "1.0.12-beta.1"

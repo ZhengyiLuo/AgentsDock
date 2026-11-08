@@ -79,7 +79,7 @@ export function desktopJourney(candidate, baseline, profile = 'legacy') {
   if (profile !== 'legacy') {
     const expected = candidateBaselineProfile(profile, candidate)
     assert.equal(baseline, expected.desktop.version, 'Desktop baseline differs from its exact profile')
-    const switchToBeta = ['1.0.12-beta.1', '1.0.12-beta.2', '1.0.12-beta.3', '1.0.12-beta.5'].includes(candidate) && profile === 'stable111'
+    const switchToBeta = ['1.0.12-beta.1', '1.0.12-beta.2', '1.0.12-beta.3', '1.0.12-beta.5', '1.0.12-beta.6'].includes(candidate) && profile === 'stable111'
     return { initialTrack: expected.subscription, installedTrack: switchToBeta ? 'beta' : expected.subscription, switchToBeta }
   }
   assert(!baseline.includes('-'), 'Legacy desktop journey requires its stable baseline')

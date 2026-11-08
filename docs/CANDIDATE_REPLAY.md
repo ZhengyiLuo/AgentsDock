@@ -7,6 +7,35 @@ All candidate receipts and observations remain `publicationEligible: false`;
 observations also remain `releaseAcceptance: false`. A successful job does not
 turn blocked or unobserved scenarios into full release acceptance.
 
+## 1.0.12-beta.6 rehearsal preparation
+
+Beta.6 admits the same independently pinned public `stable111` and `beta1124`
+incumbents listed below for beta.5. It does not use the unpublished beta.5 as a
+baseline or change any historical association. Both `0755` and `0750` roots
+remain required, alongside the retained legacy, fresh and recovery cases.
+Stable users explicitly select Beta; beta.4 users retain Beta.
+
+The complete installer is unchanged at SHA-256
+`5776115d6a61620189128578ca9facf0bbcdd5ebf496c8e1f1f55127dc10d301`.
+Only the exact beta.6 association is added. Installer, signature, source,
+ownership, native-runner and immutable-receipt checks remain enforced.
+
+Beta.4 prepares servers before replacing its app. Its original preparation
+failure remains recorded even if a later explicit retry completes installation.
+The narrowly admitted recovery experiment requires the same retryable candidate,
+verified current unpaused server and unchanged server operation/instance before
+and after the additional click. Report three total install clicks, including
+the offline refusal and two manual retries, with `seamlessUpgradePassed: false`.
+Displayed HTTP 503 text does not establish its wire content type or body.
+This legacy path does not exercise the correction in the future app's updater.
+
+Use `candidate-replay-v1.0.12-beta.6` only with its own newly sealed source,
+packages, receipt and bundle hashes. Preserve every beta.5 artifact and original
+failure record. No beta.6 artifacts, native acceptance or publication are
+established by this source preparation. Reports remain
+`publicationEligible: false` and `releaseAcceptance: false`; provider history,
+active-work, reboot and native Windows boundaries retain their separate gates.
+
 ## 1.0.12-beta.5 rehearsal preparation
 
 The exact beta.5 candidate adds `stable111` and `beta1124`, each with both

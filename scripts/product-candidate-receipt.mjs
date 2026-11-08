@@ -69,6 +69,10 @@ export const BETA1101_BASELINE = Object.freeze({
 })
 
 export function candidateBaselineProfile(name, candidateVersion) {
+  if (candidateVersion === '1.0.12-beta.6') {
+    assert(Object.hasOwn(BETA1126_BASELINES, name), 'Unknown beta 1.0.12-beta.6 baseline profile')
+    return BETA1126_BASELINES[name]
+  }
   if (candidateVersion === '1.0.12-beta.5') {
     assert(Object.hasOwn(BETA1125_BASELINES, name), 'Unknown beta 1.0.12-beta.5 baseline profile')
     return BETA1125_BASELINES[name]
@@ -197,6 +201,13 @@ export const BETA1125_BASELINES = Object.freeze({
       manifestSha256: '9a21a1d21b1ec58b6fcbeb0e956c5512bae715c64e2224292412bbc49d04b7d3',
       signatureSha256: '276450540ed19d78690edd1fe4b7f25ded3a77f1761ab3f5a43a7fd972259b7a',
       archiveSha256: '2f9fa9b5d0dc37199b4b899d0ae913a7ad30f94ab3956060c689eaf4e8947756', archiveBytes: 3939922 }) }),
+})
+
+// Beta.6 uses the same independently pinned public incumbents. The beta.5
+// candidate and all historical associations remain immutable.
+export const BETA1126_BASELINES = Object.freeze({
+  stable111: BETA1125_BASELINES.stable111,
+  beta1124: BETA1125_BASELINES.beta1124,
 })
 
 export async function verifyBaselineServer(name, directory, candidateVersion) {

@@ -40,7 +40,7 @@ export function replayBaselineMetadata(baselineVersion, candidateVersion, candid
     || ['1.0.11', '1.0.12-beta.1'].includes(candidateVersion) && baselineVersion === '1.0.11-beta.12'
     || candidateVersion === '1.0.12-beta.2' && baselineVersion === '1.0.12-beta.1'
     || candidateVersion === '1.0.12-beta.3' && baselineVersion === '1.0.12-beta.2'
-    || candidateVersion === '1.0.12-beta.5' && baselineVersion === '1.0.12-beta.4')),
+    || ['1.0.12-beta.5', '1.0.12-beta.6'].includes(candidateVersion) && baselineVersion === '1.0.12-beta.4')),
     'Beta desktop baseline requires an exact reviewed candidate journey.')
   if (candidate && candidateVersion === '1.0.9') need(['1.0.6', '1.0.8-beta.5'].includes(baselineVersion),
     'Stable candidate requires an independently pinned desktop baseline.')
@@ -54,8 +54,8 @@ export function replayBaselineMetadata(baselineVersion, candidateVersion, candid
     'Beta 1.0.12-beta.2 requires an independently pinned desktop baseline.')
   if (candidate && candidateVersion === '1.0.12-beta.3') need(['1.0.6', '1.0.11', '1.0.12-beta.2'].includes(baselineVersion),
     'Beta 1.0.12-beta.3 requires an independently pinned desktop baseline.')
-  if (candidate && candidateVersion === '1.0.12-beta.5') need(['1.0.6', '1.0.11', '1.0.12-beta.4'].includes(baselineVersion),
-    'Beta 1.0.12-beta.5 requires an independently pinned desktop baseline.')
+  if (candidate && ['1.0.12-beta.5', '1.0.12-beta.6'].includes(candidateVersion)) need(['1.0.6', '1.0.11', '1.0.12-beta.4'].includes(baselineVersion),
+    `Beta ${candidateVersion} requires an independently pinned desktop baseline.`)
   return { track: beta ? 'beta' : 'stable', metadata: `${beta ? 'beta' : 'latest'}-mac.yml`, prerelease: beta }
 }
 const STARTUP_STAGES = Object.freeze(['arguments', 'runner-guard', 'input-containment', 'artifact-verification',
@@ -461,7 +461,7 @@ async function createReplay({ receiptPath, acceptedReceiptSha256, preparationRun
       if (baselineVersion === '1.0.6') await verifyBaselineDesktop('stable108', baselineDesktopDirectory, '1.0.9')
       else await verifyBaselineDesktop(baselineVersion === '1.0.11' ? 'stable111' : 'beta1122', baselineDesktopDirectory, receipt.version)
     }
-    if (candidate && receipt.version === '1.0.12-beta.5') {
+    if (candidate && ['1.0.12-beta.5', '1.0.12-beta.6'].includes(receipt.version)) {
       if (baselineVersion === '1.0.6') await verifyBaselineDesktop('stable108', baselineDesktopDirectory, '1.0.9')
       else await verifyBaselineDesktop(baselineVersion === '1.0.11' ? 'stable111' : 'beta1124', baselineDesktopDirectory, receipt.version)
     }

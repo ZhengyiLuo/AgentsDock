@@ -401,7 +401,7 @@ test('exact stable and beta.2 through beta.6 matrices select independent npm bas
   const workflow = readFileSync(new URL('../../.github/workflows/ci.yml', import.meta.url), 'utf8')
   const inputs = readFileSync(new URL('../../.github/actions/product-candidate-inputs/action.yml', import.meta.url), 'utf8')
   const job = workflow.slice(workflow.indexOf('  candidate-native:'), workflow.indexOf('  candidate-no-downgrade:'))
-  assert.match(job, /baseline_profile: \$\{\{ fromJSON\(inputs\.candidate_tag == 'candidate-replay-v1\.0\.12-beta\.5' && '\["legacy","stable111","beta1124"\]' \|\| inputs\.candidate_tag == 'candidate-replay-v1\.0\.12-beta\.3' && '\["legacy","stable111","beta1122"\]' \|\| inputs\.candidate_tag == 'candidate-replay-v1\.0\.12-beta\.2' && '\["legacy","stable111","beta1121"\]' \|\| inputs\.candidate_tag == 'candidate-replay-v1\.0\.12-beta\.1' && '\[\"legacy\",\"stable111\",\"beta11112\"\]' \|\| inputs\.candidate_tag == 'candidate-replay-v1\.0\.11' && '\["legacy","stable110","beta11112"\]' \|\| inputs\.candidate_tag == 'candidate-replay-v1\.0\.10' && '\["legacy","stable109","beta1101"\]' \|\| inputs\.candidate_tag == 'candidate-replay-v1\.0\.9' && '\["legacy","stable108","beta1085"\]' \|\| \(inputs\.candidate_tag == 'candidate-replay-v1\.0\.10-beta\.2' \|\| inputs\.candidate_tag == 'candidate-replay-v1\.0\.10-beta\.3' \|\| inputs\.candidate_tag == 'candidate-replay-v1\.0\.10-beta\.4' \|\| inputs\.candidate_tag == 'candidate-replay-v1\.0\.10-beta\.5' \|\| inputs\.candidate_tag == 'candidate-replay-v1\.0\.10-beta\.6'\) && '\["legacy","beta1101"\]' \|\| '\["legacy"\]'\) \}\}/)
+  assert.match(job, /baseline_profile: \$\{\{ fromJSON\(inputs\.candidate_tag == 'candidate-replay-v1\.0\.12-beta\.6' && '\["legacy","stable111","beta1124"\]' \|\| inputs\.candidate_tag == 'candidate-replay-v1\.0\.12-beta\.5' && '\["legacy","stable111","beta1124"\]' \|\| inputs\.candidate_tag == 'candidate-replay-v1\.0\.12-beta\.3' && '\["legacy","stable111","beta1122"\]' \|\| inputs\.candidate_tag == 'candidate-replay-v1\.0\.12-beta\.2' && '\["legacy","stable111","beta1121"\]' \|\| inputs\.candidate_tag == 'candidate-replay-v1\.0\.12-beta\.1' && '\[\"legacy\",\"stable111\",\"beta11112\"\]' \|\| inputs\.candidate_tag == 'candidate-replay-v1\.0\.11' && '\["legacy","stable110","beta11112"\]' \|\| inputs\.candidate_tag == 'candidate-replay-v1\.0\.10' && '\["legacy","stable109","beta1101"\]' \|\| inputs\.candidate_tag == 'candidate-replay-v1\.0\.9' && '\["legacy","stable108","beta1085"\]' \|\| \(inputs\.candidate_tag == 'candidate-replay-v1\.0\.10-beta\.2' \|\| inputs\.candidate_tag == 'candidate-replay-v1\.0\.10-beta\.3' \|\| inputs\.candidate_tag == 'candidate-replay-v1\.0\.10-beta\.4' \|\| inputs\.candidate_tag == 'candidate-replay-v1\.0\.10-beta\.5' \|\| inputs\.candidate_tag == 'candidate-replay-v1\.0\.10-beta\.6'\) && '\["legacy","beta1101"\]' \|\| '\["legacy"\]'\) \}\}/)
   const negative = workflow.slice(workflow.indexOf('  candidate-no-downgrade:'))
   assert.match(negative, /startsWith\(inputs\.candidate_tag, 'candidate-replay-v1\.0\.8-beta\.'\)/)
   assert.match(job, /INSTALL_KIND=npm-baseline/)
@@ -435,6 +435,8 @@ test('candidate composite shell parses and profile gates reject out-of-scope sel
     {BASELINE_PROFILE: 'beta1121', CANDIDATE_TAG: 'candidate-replay-v1.0.12-beta.2'},
     {BASELINE_PROFILE: 'stable111', CANDIDATE_TAG: 'candidate-replay-v1.0.12-beta.3'},
     {BASELINE_PROFILE: 'beta1122', CANDIDATE_TAG: 'candidate-replay-v1.0.12-beta.3'},
+    {BASELINE_PROFILE: 'stable111', CANDIDATE_TAG: 'candidate-replay-v1.0.12-beta.6'},
+    {BASELINE_PROFILE: 'beta1124', CANDIDATE_TAG: 'candidate-replay-v1.0.12-beta.6'},
     {BASELINE_PROFILE: 'stable111', CANDIDATE_TAG: 'candidate-replay-v1.0.12-beta.5'},
     {BASELINE_PROFILE: 'beta1124', CANDIDATE_TAG: 'candidate-replay-v1.0.12-beta.5'},
     {BASELINE_PROFILE: 'beta11112', CANDIDATE_TAG: 'candidate-replay-v1.0.11'},
@@ -451,7 +453,12 @@ test('candidate composite shell parses and profile gates reject out-of-scope sel
     {BASELINE_PROFILE: 'stable111', CANDIDATE_TAG: 'candidate-replay-v1.0.12-beta.4'},
     {BASELINE_PROFILE: 'beta1122', CANDIDATE_TAG: 'candidate-replay-v1.0.12-beta.2'},
     {BASELINE_PROFILE: 'beta1124', CANDIDATE_TAG: 'candidate-replay-v1.0.12-beta.4'},
-    {BASELINE_PROFILE: 'beta1124', CANDIDATE_TAG: 'candidate-replay-v1.0.12-beta.6'},
+    {BASELINE_PROFILE: 'beta1124', CANDIDATE_TAG: 'candidate-replay-v1.0.12-beta.7'},
+    {BASELINE_PROFILE: 'beta1124', CANDIDATE_TAG: 'candidate-replay-v1.0.12-beta.6+local'},
+    {BASELINE_PROFILE: 'beta1125', CANDIDATE_TAG: 'candidate-replay-v1.0.12-beta.6'},
+    {BASELINE_PROFILE: 'beta1122', CANDIDATE_TAG: 'candidate-replay-v1.0.12-beta.6'},
+    {BASELINE_PROFILE: 'beta1124', CANDIDATE_TAG: 'candidate-replay-v1.0.12-beta.6', EXECUTION_SCOPE: 'candidate-server-linux'},
+    {BASELINE_PROFILE: 'stable111', CANDIDATE_TAG: 'candidate-replay-v1.0.12-beta.6', EXECUTION_SCOPE: 'candidate-server-linux'},
     {BASELINE_PROFILE: 'beta1124', CANDIDATE_TAG: 'candidate-replay-v1.0.12-beta.5+local'},
     {BASELINE_PROFILE: 'beta1122', CANDIDATE_TAG: 'candidate-replay-v1.0.12-beta.5'},
     {BASELINE_PROFILE: 'beta1124', CANDIDATE_TAG: 'candidate-replay-v1.0.12-beta.5', EXECUTION_SCOPE: 'candidate-server-linux'},
@@ -744,7 +751,7 @@ test('beta.5 pins published beta.4 and stable 1.0.11 without expanding older jou
   assert.equal(beta.subscription, 'beta')
   assert(Object.isFrozen(beta) && Object.isFrozen(beta.desktop) && Object.isFrozen(beta.server))
   assert.equal(candidateBaselineProfile('stable111', '1.0.12-beta.5'), candidateBaselineProfile('stable111', '1.0.12-beta.1'))
-  for (const version of ['1.0.12-beta.3', '1.0.12-beta.4', '1.0.12-beta.6', '1.0.12-beta.5+local', '1.0.12']) {
+  for (const version of ['1.0.12-beta.3', '1.0.12-beta.4', '1.0.12-beta.7', '1.0.12-beta.5+local', '1.0.12']) {
     assert.throws(() => candidateBaselineProfile('beta1124', version))
   }
   for (const name of ['beta1122', 'beta1121', 'beta11112', 'stable110', 'unknown']) {
@@ -757,6 +764,26 @@ test('beta.5 pins published beta.4 and stable 1.0.11 without expanding older jou
   writeFileSync(join(root, 'agents-server-npm-manifest.sig'), Buffer.alloc(64))
   await assert.rejects(() => verifyBaselineDesktop('beta1124', root, '1.0.12-beta.5'), /independently pinned bytes/)
   await assert.rejects(() => verifyBaselineServer('beta1124', root, '1.0.12-beta.5'), /independently pinned bytes/)
+})
+
+test('beta.6 reuses public incumbent pins without admitting unpublished beta.5 or future candidates', async t => {
+  for (const name of ['stable111', 'beta1124']) {
+    assert.equal(candidateBaselineProfile(name, '1.0.12-beta.6'), candidateBaselineProfile(name, '1.0.12-beta.5'))
+    assert.throws(() => candidateBaselineProfile(name, '1.0.12-beta.7'))
+    assert.throws(() => candidateBaselineProfile(name, '1.0.12-beta.6+local'))
+  }
+  for (const name of ['beta1125', 'beta1122', 'beta1121', 'beta11112', 'unknown']) {
+    assert.throws(() => candidateBaselineProfile(name, '1.0.12-beta.6'))
+  }
+  const root = mkdtempSync(join(tmpdir(), 'beta1126-baseline-'))
+  t.after(() => rmSync(root, {recursive: true, force: true}))
+  writeFileSync(join(root, 'SHA256SUMS'), 'substituted')
+  writeFileSync(join(root, 'agents-server-npm-manifest.json'), '{}')
+  writeFileSync(join(root, 'agents-server-npm-manifest.sig'), Buffer.alloc(64))
+  for (const name of ['stable111', 'beta1124']) {
+    await assert.rejects(() => verifyBaselineDesktop(name, root, '1.0.12-beta.6'), /independently pinned bytes/)
+    await assert.rejects(() => verifyBaselineServer(name, root, '1.0.12-beta.6'), /independently pinned bytes/)
+  }
 })
 
 test('beta.3 binds beta.2 and stable 1.0.11 to independently verified release bytes', async t => {

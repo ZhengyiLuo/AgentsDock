@@ -1,5 +1,18 @@
 # Public development log
 
+## 2026-11-08 - Prepare coordinated 1.0.12-beta.6
+
+- Prepare a new matching desktop, signed server, legacy bridge and short CLI
+  Beta version with the admitted-update restart-gap correction. Preserve the
+  frozen beta.5 source, packages and original test results; stable remains
+  `1.0.11`. See [the preparation notes](RELEASE_1.0.12-beta.6.md).
+- Admit exact public beta.4 and stable 1.0.11 upgrade baselines with both legacy
+  root-permission modes. Retain old candidate gates and the full installer hash.
+  Keep legacy manual-retry recovery separate from seamless update acceptance.
+- This is source preparation only. New source-bound npm/CLI packages, signatures,
+  bridge, native build and exact-package validation remain required before
+  publication. No installed services, update feeds or mobile builds change.
+
 ## Unreleased — Retry transient notarization-ticket validation failures
 
 - Extend release orchestration's bounded Apple ticket-download recovery to
