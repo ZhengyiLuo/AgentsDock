@@ -1,5 +1,33 @@
 # Public development log
 
+## 2026-11-08 - Publish coordinated 1.0.12-beta.4
+
+- Publish desktop build **1272** on the Beta channel from source
+  [`91123f03`](https://github.com/ZhengyiLuo/AgentsDock/commit/91123f031bf6bd012203728d1c43ee146b533686),
+  with identical assets in the [canonical release](https://github.com/ZhengyiLuo/AgentsDock/releases/tag/v1.0.12-beta.4)
+  and [compatibility mirror](https://github.com/ZhengyiLuo/AgentsDock-Releases/releases/tag/v1.0.12-beta.4).
+  The matching [npm runtime](https://www.npmjs.com/package/@agentsdock/server/v/1.0.12-beta.4),
+  [short CLI](https://www.npmjs.com/package/agentsdock/v/1.0.12-beta.4)
+  and [signed legacy server bridge](https://github.com/ZhengyiLuo/AgentsServer/releases/tag/v1.0.12-beta.4)
+  are also public.
+- All four native package verifiers and the normal
+  [desktop publication workflow](https://github.com/ZhengyiLuo/AgentsDock/actions/runs/42460116414)
+  passed. macOS passed Developer ID, notarization, Gatekeeper and packaged
+  launch/termination checks; Windows retains the unsigned distribution policy.
+  The [matched npm publication](https://github.com/ZhengyiLuo/AgentsDock/actions/runs/42459490517)
+  passed, with signed runtime/bridge content and executable-mode parity verified.
+- Public readback verified the four platform feeds and Beta discovery in both
+  desktop repositories. Both copies retain checksum-manifest SHA-256
+  `d373ca92a41b983e74f424e865f693cf11a10062f1bf28cf65abd19ed1d4a8f8`.
+  Both npm `beta` tags resolve to `1.0.12-beta.4`; npm `latest` and the stable
+  desktop, compatibility and server releases remain **1.0.11**.
+- Full signed outgoing update/relaunch, active-task recovery and populated
+  native provider-history acceptance remain deferred and unverified. Native
+  Windows replacement and logout/reboot behavior are also unverified; package
+  checks do not establish these journeys. No installed-service deployment or
+  mobile/store release is included. See the [release notes](RELEASE_1.0.12-beta.4.md)
+  for changes and testing limits.
+
 ## 2026-11-08 - Prepare coordinated 1.0.12-beta.4
 
 - Carry the reviewed beta.3 changes and the stale updater-status reconciliation
