@@ -1,5 +1,27 @@
 # Public development log
 
+## Unreleased — Reconcile beta updater fixes with main
+
+- Bring the already-shipped beta.4 stale-update reconciliation fix and bounded
+  recovery diagnostics into main, retaining the later isolated update-check
+  session, pinned CI download fallback and legacy-service resource-limit fixes.
+  This does not change release versions, feeds or published artifacts.
+- Verification on integrated source `218b7151`: 243 focused server tests,
+  97 acceptance-harness tests and 91 replay/candidate/download tests pass;
+  TypeScript checking, Electron production compilation and output validation
+  pass. The added regression methods fail against the pre-backport server.
+- Two isolated servers preserved newer durable updater progress through real
+  authenticated status requests and rejected each other's credentials. Only
+  the failed updater-liveness probe was synthetic; no installer was started.
+  Actual mouse input in an isolated offscreen Electron app exercised Settings,
+  both release channels and repeated public update checks. Stable and Beta
+  returned their published versions without freezing, and both test server
+  versions remained visible. The development app correctly did not self-update.
+- Acceptance limits: this verifies source integration and status reconciliation,
+  not native update installation, restart or active-work recovery. Those flows
+  still require an exact signed candidate and managed-service rehearsal before
+  release acceptance. No deployment or publication is part of this backport.
+
 ## Unreleased — Isolate update checks and legacy-service resource limits
 
 - Public release checks and paired-server metadata fetches use a non-persistent,
