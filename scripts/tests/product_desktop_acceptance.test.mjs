@@ -8,6 +8,7 @@ import { assertCurrentPairedServer, assertDesktopRunner, assertOlderVersion, ass
   migrationCoverage, parseDesktopAcceptanceArguments, parseReconciliationSnapshot, parseSharedOperationSnapshot, reconciliationSnapshot,
   retainSharedOperationObservation, desktopJourney, requiresServerBeforeApp, assertOfflineInstallRefusal,
   assertPreparedServerBeforeApp, assertTwoPreparedClients, nativeInstallObservation, nativeUpdaterLogObservation, assertLegacyPostcompletionRetry,
+  legacyRecoveryReceipts, assertLegacyRecoveryReceiptsUnchanged,
   terminalReconciliationFailure, validateDesktopFixture } from '../product_desktop_acceptance.mjs'
 
 // These are harness contract tests only: no app/service installation, native
@@ -87,6 +88,38 @@ test('legacy post-completion retry admits only the source-derived displayed503 a
   }
   assert.throws(() => assertLegacyPostcompletionRetry(value, {...health(), execution_service: {version: identity.version, maintenance_held: true}}, fixture(), identity.version, baseline, baseline))
   assert.throws(() => assertLegacyPostcompletionRetry(value, health(), fixture(), identity.version, identity.version, baseline))
+})
+
+test('legacy recovery accepts an exact completed schedule receipt when the force response was lost', () => {
+  const baseline = '1.0.12-beta.4'
+  for (const receipt of [{operationId: undefined, scheduleId: 'saved-schedule'},
+    {operationId: 'saved-operation', scheduleId: 'saved-schedule'}]) {
+    const value = { ...status(), currentVersion: baseline, availableVersion: identity.version, cancelable: true,
+      state: 'downloaded', message: sourceDerivedGatewayFailure(), serverUpdates: [{...record(), ...receipt}] }
+    assert.equal(assertLegacyPostcompletionRetry(value, health(), fixture(), identity.version, baseline, baseline)
+      .seamlessUpgradePassed, false)
+    for (const key of ['operationId', 'scheduleId']) for (const invalid of ['', false, 123, {}, []]) {
+      assert.throws(() => assertLegacyPostcompletionRetry({...value,
+        serverUpdates: [{...value.serverUpdates[0], [key]: invalid}]}, health(), fixture(), identity.version, baseline, baseline))
+    }
+  }
+})
+
+test('legacy recovery keeps receipt namespaces and absent fields exact without exposing their values', () => {
+  for (const receipt of [{operationId: 'private-operation'}, {scheduleId: 'private-schedule'},
+    {operationId: 'private-operation', scheduleId: 'private-schedule'}]) {
+    const before = legacyRecoveryReceipts(receipt)
+    assert.equal(assertLegacyRecoveryReceiptsUnchanged(before, {...receipt}), true)
+    for (const key of ['operationId', 'scheduleId']) {
+      assert.throws(() => assertLegacyRecoveryReceiptsUnchanged(before, {...receipt, [key]: 'different-private'}),
+        error => !/private-operation|private-schedule|different-private/.test(error.message))
+      if (receipt[key]) assert.throws(() => assertLegacyRecoveryReceiptsUnchanged(before, {...receipt, [key]: null}))
+    }
+  }
+  assert.throws(() => assertLegacyRecoveryReceiptsUnchanged(legacyRecoveryReceipts({scheduleId: 'same-text'}),
+    {operationId: 'same-text'}))
+  assert.throws(() => legacyRecoveryReceipts({operationId: null, scheduleId: undefined}))
+  assert.throws(() => legacyRecoveryReceipts(undefined))
 })
 
 test('native Squirrel diagnostics disclose fixed booleans, never archive URLs or authentication values', () => {

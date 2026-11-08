@@ -18,6 +18,16 @@
   bridge, native build and exact-package validation remain required before
   publication. No installed services, update feeds or mobile builds change.
 
+## Unreleased — Preserve both legacy update-recovery receipt fields
+
+- The separate legacy-recovery rehearsal accepts a completed schedule receipt
+  when a lost restart response left no operation receipt. Require at least one
+  valid receipt, and preserve both identifiers and their namespaces exactly
+  across native replacement. No identifiers are included in public diagnostics.
+- Keep the exact failure, identity, current/unpaused server, candidate bytes and
+  no-additional-restart gates. This corrects a harness false refusal; it is not
+  a new product retry or a claim of seamless upgrade or release acceptance.
+
 ## Unreleased — Match beta.4's native coordinated-update acceptance contract
 
 - Keep the signed beta.5 candidate unchanged while testing beta.4's shipped
