@@ -69,6 +69,10 @@ export const BETA1101_BASELINE = Object.freeze({
 })
 
 export function candidateBaselineProfile(name, candidateVersion) {
+  if (candidateVersion === '1.0.12-beta.5') {
+    assert(Object.hasOwn(BETA1125_BASELINES, name), 'Unknown beta 1.0.12-beta.5 baseline profile')
+    return BETA1125_BASELINES[name]
+  }
   if (candidateVersion === '1.0.12-beta.3') {
     assert(Object.hasOwn(BETA1123_BASELINES, name), 'Unknown beta 1.0.12-beta.3 baseline profile')
     return BETA1123_BASELINES[name]
@@ -178,6 +182,21 @@ export const BETA1123_BASELINES = Object.freeze({
       manifestSha256: 'd505fdf9ae3608f58e66519afe6f3a9a46df54cacc6a1ed58173584ee69bc327',
       signatureSha256: '6882ae6e11d314d37acc63a936263433c974287da98b6595cef44f5ecccfbd10',
       archiveSha256: '23def0f21d4e764c479cabcb994ac40159955a536367131c980f96b5998f12c9', archiveBytes: 3926164 }) }),
+})
+
+// Independently verified published beta.4 desktop and registry bytes. Admit
+// only this beta.5 journey; older candidates and their receipts remain frozen.
+export const BETA1125_BASELINES = Object.freeze({
+  stable111: BETA1121_BASELINES.stable111,
+  beta1124: Object.freeze({ desktop: Object.freeze({ version: '1.0.12-beta.4', buildNumber: '1272', track: 'beta', repository: 'AgentsDock',
+    sourceSha: '91123f031bf6bd012203728d1c43ee146b533686',
+    checksumSha256: 'd373ca92a41b983e74f424e865f693cf11a10062f1bf28cf65abd19ed1d4a8f8',
+    zipSha256: '17e9af86e7947df7207d907bcdae396bffabd41cb4cac0912c8b6d1be0bbde50',
+    metadataSha256: 'ff6e62db6f27bdb14683f1eddea6ca00a01e135c5875e500546f6b3c7fd3c8e6' }), subscription: 'beta',
+    server: Object.freeze({ version: '1.0.12-beta.4', track: 'beta', sourceSha: '91123f031bf6bd012203728d1c43ee146b533686',
+      manifestSha256: '9a21a1d21b1ec58b6fcbeb0e956c5512bae715c64e2224292412bbc49d04b7d3',
+      signatureSha256: '276450540ed19d78690edd1fe4b7f25ded3a77f1761ab3f5a43a7fd972259b7a',
+      archiveSha256: '2f9fa9b5d0dc37199b4b899d0ae913a7ad30f94ab3956060c689eaf4e8947756', archiveBytes: 3939922 }) }),
 })
 
 export async function verifyBaselineServer(name, directory, candidateVersion) {
