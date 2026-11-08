@@ -153,7 +153,7 @@ export class CoordinatedUpdateManager {
           // asking the server to retry the exact signed release.
           Object.assign(record, { operationId: undefined, scheduleId: undefined,
             operationTargetVersion: undefined, operationOwned: false,
-            forceRequestedScheduleId: undefined, forceRequestId: undefined })
+            forceRequestedScheduleId: undefined, forceRequestId: undefined, awaitingActivation: false })
         }
         record.paused = false
         record.forceRetryAt = undefined
@@ -222,7 +222,8 @@ export class CoordinatedUpdateManager {
     const record = this.plan?.records.find(candidate => candidate.profileId === profileId && candidate.serverIdentity === profile?.serverIdentity)
     if (!profile || !record) throw new Error('The saved server update no longer belongs to this profile.')
     Object.assign(record, { paused: false, operationId: undefined, scheduleId: undefined,
-      operationTargetVersion: undefined, operationOwned: false, phase: 'checking', message: 'Retrying the paired server update…' })
+      operationTargetVersion: undefined, operationOwned: false, awaitingActivation: false,
+      phase: 'checking', message: 'Retrying the paired server update…' })
     this.save()
     await this.reconcile(profileId)
   }
@@ -244,6 +245,8 @@ export class CoordinatedUpdateManager {
           forceRequestedScheduleId: undefined, forceRequestId: undefined, forceRetryAt: undefined,
           operationTargetVersion: undefined, operationOwned: false } : {}),
         targetVersion: manifest.version, paused, phase: paused ? old!.phase : 'checking',
+        awaitingActivation: Boolean(sameTarget && !paused && old?.awaitingActivation
+          && ['checking', 'pending', 'updating', 'offline'].includes(old.phase)),
         message: paused ? old!.message : 'Checking the paired server update…' }
     }) }
     this.save()
@@ -286,6 +289,7 @@ export class CoordinatedUpdateManager {
         plan.records.push(record)
       }
       Object.assign(record, update)
+      if (record.paused || ['current', 'failed', 'blocked'].includes(record.phase)) record.awaitingActivation = false
       this.save()
     }
     let timeout: NodeJS.Timeout | undefined
@@ -413,6 +417,12 @@ export class CoordinatedUpdateManager {
         patch({ phase: 'blocked', message: 'Update response belongs to another server instance. Reconnect to reconcile it.' })
         return
       }
+      // Only a live, identity-fenced receipt may authorize observing a worker
+      // restart gap. Retain historical IDs, but never infer active admission
+      // from them after an operation has completed or failed.
+      const admittedActivation = Boolean(replyIsFenced && target && status.target_version === manifest.version
+        && ACTIVE_PHASES.has(status.phase) && (status.update_id || status.schedule_id)
+        && !['server_update_recovery_failed', 'server_update_recovery_launch_failed'].includes(status.error_code ?? ''))
       if (this.preparingInstall && status.phase === 'pending' && status.preparation_phase === 'ready'
         && status.schedule_id && target
         && Date.now() >= (previousReceipt?.forceRetryAt ?? 0)
@@ -426,6 +436,9 @@ export class CoordinatedUpdateManager {
         // a different destructive restart against the same reservation.
         patch({ forceRequestedScheduleId: status.schedule_id, forceRequestId: requestId,
           forceRetryAt: Date.now() + 30_000,
+          awaitingActivation: admittedActivation,
+          operationId: status.update_id ?? undefined, scheduleId: status.schedule_id,
+          operationTargetVersion: status.target_version,
           message: 'Saving active chats and restarting the server for this update…' })
         try {
           const accepted = await connection.client.restartServer({
@@ -457,6 +470,7 @@ export class CoordinatedUpdateManager {
       const recoveryFailed = ['server_update_recovery_failed', 'server_update_recovery_launch_failed'].includes(status.error_code ?? '')
       patch({ phase: recoveryFailed ? 'failed' : status.phase === 'pending' ? 'pending' : status.phase === 'failed' ? 'failed'
         : ACTIVE_PHASES.has(status.phase) ? 'updating' : 'pending',
+        awaitingActivation: admittedActivation,
         ...(recoveryFailed ? { paused: true } : {}),
         operationId: status.update_id ?? undefined, scheduleId: status.schedule_id ?? undefined,
         operationTargetVersion: status.target_version ?? manifest.version,
@@ -466,6 +480,14 @@ export class CoordinatedUpdateManager {
     } catch (error) {
       if (previousReceipt?.paused && !(error instanceof ComponentHealthError)) return
       const message = error instanceof Error ? error.message : String(error)
+      // The gateway remains reachable while its worker restarts and returns a
+      // plain-text 503. The native client represents that response without a
+      // structured detail. Observe only our already admitted, exact update;
+      // do not treat arbitrary 503s or rejected admission as a restart gap.
+      if (isAdmittedUpdateRestartGap(error, previousReceipt, manifest.version)) {
+        patch({ phase: 'offline', message: 'Server is restarting for the admitted update; waiting for verified reconnection.' })
+        return
+      }
       patch({ phase: error instanceof ServerError || error instanceof ComponentHealthError || /channel|identity|legacy|managed|signed/i.test(message) ? 'blocked' : 'offline',
         ...(error instanceof ServerError && error.status === 503 && needsLegacyUpdateRecovery(message) ? { paused: true } : {}),
         message })
@@ -498,6 +520,16 @@ export class CoordinatedUpdateManager {
     this.options.store.write(this.plan)
     this.options.publish(this.status())
   }
+}
+
+function isAdmittedUpdateRestartGap(error: unknown, record: CoordinatedServerUpdate | undefined, version: string): boolean {
+  if (!(error instanceof ServerError) || error.status !== 503 || error.detail !== undefined
+    || error.message !== '503 Service Unavailable' || !record || record.paused
+    || record.awaitingActivation !== true
+    || record.targetVersion !== version || !['checking', 'pending', 'updating', 'offline'].includes(record.phase)) return false
+  const reservedRestart = Boolean(record.forceRequestId && record.forceRequestedScheduleId)
+  const admittedOperation = record.operationTargetVersion === version && Boolean(record.operationId || record.scheduleId)
+  return reservedRestart || admittedOperation
 }
 
 function updateTarget(health: Health): ServerUpdateTarget | undefined {
