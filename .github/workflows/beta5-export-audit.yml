@@ -1,0 +1,39 @@
+name: Audit frozen beta.5 server export
+
+on:
+  push:
+    branches: [release/audit-beta5-export]
+
+permissions:
+  contents: read
+
+jobs:
+  exact-export:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
+        with:
+          ref: 1651b11a4e6f16c3f312d0f11bf8a5f34a096236
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Verify frozen canonical source and standard subtree export
+        shell: bash
+        run: |
+          test "$(git rev-parse HEAD)" = 1651b11a4e6f16c3f312d0f11bf8a5f34a096236
+          test -z "$(git status --porcelain)"
+          git fetch --no-tags https://github.com/ZhengyiLuo/AgentsServer.git 23c183979ecdcada6f5351c7b3a2e631014c04f9
+          python3 scripts/prepare_server_export.py \
+            --commit 1651b11a4e6f16c3f312d0f11bf8a5f34a096236 \
+            --previous 23c183979ecdcada6f5351c7b3a2e631014c04f9 > "$RUNNER_TEMP/export.json"
+          jq -e '.canonical_commit == "1651b11a4e6f16c3f312d0f11bf8a5f34a096236" and
+            .exported_commit == "f71107187de176e77bf1b2fee7eb927770f015f9" and
+            .server_tree == "3d95181a2e7921f26ee653e6c52abf275a5d622f" and
+            .previous_standalone_commit == "23c183979ecdcada6f5351c7b3a2e631014c04f9"' "$RUNNER_TEMP/export.json"
+          test -z "$(git status --porcelain)"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: beta5-standard-export-verification
+          path: ${{ runner.temp }}/export.json
+          if-no-files-found: error
+          retention-days: 14
