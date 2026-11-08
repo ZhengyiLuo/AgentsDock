@@ -38,6 +38,20 @@ active-work, reboot and native Windows boundaries retain their separate gates.
 
 ## 1.0.12-beta.5 rehearsal preparation
 
+Native replacement waits retain bounded state/category comparisons and the
+last real coordinator/health observation. These are read-only diagnostics, not
+an extra retry, forced quit or manual replacement. Raw status messages, profile
+values and native logs remain private. A timeout still fails acceptance.
+
+A separately labeled legacy recovery experiment may issue one additional real
+UI click only after the exact plain gateway 503 message, unchanged incumbent
+bytes/candidate, and the same authenticated server's current, unpaused components
+and completed receipt are verified. It records three total install clicks and
+two manual retries, requires exact native replacement/relaunch, and rejects an
+additional server restart or changed operation. This does not pass the original
+seamless-upgrade requirement or remove its failure. Unknown, identity, signature,
+authentication, disk or structured failures are never admitted to this retry.
+
 The exact beta.5 candidate adds `stable111` and `beta1124`, each with both
 `0755` and `0750` installation-root modes, beside the retained legacy, fresh
 and recovery cases. Stable 1.0.11 users explicitly select Beta; existing beta.4
@@ -564,6 +578,23 @@ Compatible stable `1.0.8` servers must remain unchanged. Do not run a fresh npm
 installation over an existing managed server.
 
 ## Exact journey
+
+The exact `beta1124` incumbent uses a different, server-first contract from
+the older app-first baselines below. Its shipped `prepareInstall` refuses an
+offline saved server. For `1.0.12-beta.4` → `1.0.12-beta.5`, first observe that
+specific retryable refusal and verify the incumbent version and application
+bytes remain installed. Reconnect the owned server, explicitly retry through
+the real update button, and observe both server components current and unpaused
+before native app replacement. Require the unchanged candidate's replacement,
+relaunch, saved settings, Beta preference and server-data preservation afterward.
+Two native clients then prove current-state convergence, not co-observation of a
+live update operation. The older baseline cases retain their stricter shared
+operation-ID observation during post-app service reconnection.
+
+This harness-only distinction does not change candidate payloads, source pins,
+signatures or publication guards. A prior timeout after clicking with an offline
+server is not evidence of a quit hang: the actual offline refusal must be observed
+in the corrected native run. Harness contract tests alone are not acceptance.
 
 - Desktop baseline: published, update-enabled, signed/notarized AgentsDock
   `1.0.6` from the legacy desktop feed. The real settings UI first checks Stable,

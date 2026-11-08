@@ -9,9 +9,36 @@
 - Admit exact public beta.4 and stable 1.0.11 upgrade baselines with both legacy
   root-permission modes. Retain old candidate gates and the full installer hash.
   Keep legacy manual-retry recovery separate from seamless update acceptance.
+- Local validation passes for the exact-baseline/installer guards, release
+  version/staging rules, runtime/CLI packaging, coordinator and updater tests,
+  TypeScript and Electron production compilation. Public baseline metadata and
+  signed registry bytes match the independent pins. These are source checks,
+  not acceptance of newly signed beta.6 desktop packages.
 - This is source preparation only. New source-bound npm/CLI packages, signatures,
   bridge, native build and exact-package validation remain required before
   publication. No installed services, update feeds or mobile builds change.
+
+## Unreleased — Match beta.4's native coordinated-update acceptance contract
+
+- Keep the signed beta.5 candidate unchanged while testing beta.4's shipped
+  server-first update behavior: observe offline refusal, reconnect, explicitly
+  retry, and require the paired server ready before native app replacement.
+- Preserve the older baselines' app-first offline recovery and shared-operation
+  checks. The beta.4 case labels its later two-client state as convergence rather
+  than claiming both clients observed a live update operation.
+- Add focused refusal, version/order, component-health and client-convergence
+  regressions. Hosted native execution is still required; this entry does not
+  establish successful acceptance or publication.
+- Retain bounded, read-only native updater-state comparisons during replacement
+  failures so server preparation and desktop quit failures are distinguishable.
+  Raw messages, process details and private logs are not included in evidence.
+- Keep a transient-503 legacy recovery experiment separate from seamless-upgrade
+  acceptance: require the exact current server and unchanged candidate before
+  one additional explicit UI retry, and prove no second server restart occurs.
+- Derive the exact displayed-failure fixture from the native client's message
+  composition, without inventing punctuation. Count the additional recovery
+  click in both the detailed checks and console summary; display classification
+  does not establish the unobserved HTTP response body or content type.
 
 ## Unreleased — Keep admitted server updates alive across gateway restart gaps
 
@@ -24,7 +51,8 @@
 - Regression: 168 focused coordinator/updater tests, type checks and Electron
   production build pass. An isolated offscreen native UI exercised the actual
   Update button, production IPC/coordinator, authenticated managed server
-  admission, signed package verification, real replacement and reconnection.
+  admission, signed package verification, real server runtime replacement and
+  reconnection.
   The app remained installing across a gateway-shaped 503 and continued only
   after the original server identity returned at the target version.
 - The first local attempt correctly reported a test download-environment
