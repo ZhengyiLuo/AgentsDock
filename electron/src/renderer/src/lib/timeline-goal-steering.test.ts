@@ -31,6 +31,39 @@ const history = (): Event[] => [
 describe('native goal steering presentation', () => {
   beforeEach(clearTimelineProjectionCache)
 
+  it('keeps goal-resume bookkeeping out of user bubbles while preserving actual follow-ups', () => {
+    const events = [
+      event(1, 'turn_started', { purpose: 'codex_goal_resume', message: 'Resuming the persistent Codex goal.' }),
+      event(2, 'reasoning_summary', { text: 'Native goal progress.', phase: 'commentary' }),
+      steer(3),
+      event(4, 'assistant_text', { text: 'Corrected goal result.', phase: 'final_answer' }),
+      event(5, 'turn_finished', { purpose: 'codex_goal_resume' })
+    ]
+    for (let length = 1; length <= events.length; length++) {
+      const slice = events.slice(0, length)
+      const live = cachedTimelineProjection('goal-resume-live', slice, []).rendered
+      expect(live).toEqual(renderTimelineItems(projectTimeline(slice, [])))
+      expect(live.filter(row => row.kind === 'message' && row.role === 'user').map(row => row.seq))
+        .toEqual(length >= 3 ? [3] : [])
+    }
+    const rows = renderTimelineItems(projectTimeline(events, []))
+    expect(rows.map(row => [row.kind, row.seq])).toEqual([
+      ['progress', 2], ['message', 3], ['message', 4]
+    ])
+  })
+
+  it('preserves identical goal-resume wording when genuinely supplied by the user', () => {
+    const text = 'Resuming the persistent Codex goal.'
+    const rows = renderTimelineItems(projectTimeline([
+      event(1, 'turn_started', { prompt: text }),
+      event(2, 'turn_finished'),
+      event(3, 'turn_started', { run_id: 'resumed-goal', purpose: 'codex_goal_resume', message: text }),
+      steer(4, { run_id: 'resumed-goal', prompt: text })
+    ], []))
+    expect(rows.filter(row => row.kind === 'message' && row.role === 'user').map(row => row.seq))
+      .toEqual([1, 4])
+  })
+
   it('adds chronological user segments without rebinding, stopping, or replacing the goal owner', () => {
     const items = projectTimeline(history(), [])
     expect(items.filter(item => item.kind === 'turn').map(item => [item.key, item.runId])).toEqual([

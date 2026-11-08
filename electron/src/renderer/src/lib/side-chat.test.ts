@@ -11,6 +11,43 @@ beforeEach(() => useAppStore.setState({ activeProfileId: 'a', profileGeneration:
   health: { ok: true, capabilities: { side_questions: capability } } }))
 
 describe('SideChatController', () => {
+  it('changes the legacy side effort in place and keeps a newer selection while its reply arrives', async () => {
+    useAppStore.setState({ health: { ok: true, capabilities: { side_questions: { ...capability, runtime_settings: true } } } })
+    const response = deferred()
+    const ask = vi.fn().mockReturnValueOnce(response.promise).mockImplementation((_scope, sessionId, input) => Promise.resolve({
+      request_id: input.request_id, session_id: sessionId, backend: 'codex', answer: 'Followup', model: input.model, effort: input.effort
+    }))
+    const close = vi.fn()
+    Object.defineProperty(window, 'agentsDock', { configurable: true, value: { sideQuestions: { ask, close } } })
+    const controller = new SideChatController()
+    controller.setRuntimeSettings(scope, session, { model: 'side-model', effort: 'high' })
+    controller.setDraft(scope, session.id, 'First')
+    const sending = controller.send(scope, { ...session, model: 'parent-model', effort: 'max' })
+    const first = ask.mock.calls[0][2]
+    controller.setRuntimeSettings(scope, session, { model: 'side-model', effort: 'low' })
+    response.resolve({ request_id: first.request_id, session_id: session.id, backend: 'codex', answer: 'First answer', model: 'side-model', effort: 'high' })
+    await sending
+    expect(controller.snapshot(scope, session.id).runtimeSettings).toEqual({ model: 'side-model', effort: 'low' })
+    controller.setDraft(scope, session.id, 'Followup')
+    await controller.send(scope, { ...session, model: 'changed-parent', effort: 'max' })
+    expect(ask.mock.calls[1][2]).toMatchObject({ model: 'side-model', effort: 'low', side_chat_id: first.side_chat_id, after_request_id: first.request_id })
+    expect(controller.snapshot(scope, session.id).exchanges.map(item => item.answer)).toEqual(['First answer', 'Followup'])
+    expect(controller.snapshot(scope, session.id)).toMatchObject({ model: 'side-model', effort: 'low', runtimeSettings: undefined })
+    expect(close).not.toHaveBeenCalled()
+  })
+
+  it('does not attach unknown runtime fields to an older server request', async () => {
+    const ask = vi.fn().mockImplementation((_scope, sessionId, input) => Promise.resolve({ request_id: input.request_id,
+      session_id: sessionId, backend: 'codex', answer: 'Works' }))
+    Object.defineProperty(window, 'agentsDock', { configurable: true, value: { sideQuestions: { ask } } })
+    const controller = new SideChatController()
+    controller.setRuntimeSettings(scope, session, { model: 'different-model', effort: 'high' })
+    controller.setDraft(scope, session.id, 'Still works')
+    await controller.send(scope, session)
+    expect(ask).toHaveBeenCalledOnce()
+    expect(ask.mock.calls[0][2]).not.toHaveProperty('model')
+    expect(ask.mock.calls[0][2]).not.toHaveProperty('effort')
+  })
   it('restores each chat and server position across visits, but rejects saves from a cleared view', () => {
     Object.defineProperty(window, 'agentsDock', { configurable: true, value: { sideQuestions: {} } })
     const controller = new SideChatController()

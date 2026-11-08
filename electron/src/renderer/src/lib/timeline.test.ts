@@ -881,8 +881,13 @@ describe('projectTimeline', () => {
     expect(users[0]?.kind === 'message' && messageItemText(users[0])).toBe('Finish my goal')
     expect(rows.some(row => row.kind === 'message' && row.role === 'assistant'
       && messageItemText(row).includes('Goal finished after updating.'))).toBe(true)
-    for (const change of [{ server_update_restart_request_id: undefined }, { imported: true },
-      { provider_user_authored: true }, { queued_id: 'unrelated' }, { backend: 'claude' as const }]) {
+    // Ordinary native goal resumes are also lifecycle boundaries, even without
+    // an update receipt. Imported or explicitly user-authored input stays visible.
+    for (const change of [{ server_update_restart_request_id: undefined }, { queued_id: 'unrelated' }]) {
+      const hidden = renderTimelineItems(projectTimeline([event(1, 'turn_started', { ...recovery, ...change })], []))
+      expect(hidden.some(row => row.kind === 'message' && row.role === 'user')).toBe(false)
+    }
+    for (const change of [{ imported: true }, { provider_user_authored: true }, { backend: 'claude' as const }]) {
       const visible = renderTimelineItems(projectTimeline([event(1, 'turn_started', { ...recovery, ...change })], []))
       expect(visible.some(row => row.kind === 'message' && row.role === 'user')).toBe(true)
     }

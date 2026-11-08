@@ -82,6 +82,10 @@ and its legacy mirror. Coordinated releases also require the exact npm archive
 and matching signed legacy server bridge to be available, with identical runtime
 contents and executable permissions.
 
+Before publication, final canonical release notes (including documented testing
+limits) are copied to a still-draft legacy mirror and read back. This does not
+replace artifacts, move source tags, or rewrite already-published mirror notes.
+
 New releases containing the short `agentsdock` command also prepare and verify
 both npm packages before desktop publication. Follow the
 [matched npm CLI release procedure](NPM_CLI_RELEASES.md), including first-package
@@ -96,32 +100,53 @@ exist on the default branch for manual dispatch, while a dispatch can select the
 reviewed release branch. Registering the workflows does not replace application
 source on a diverged default branch.
 
-The public workflow has a separate run counter from the former private workflow.
-Reserve its native build number explicitly using the audited epochs in
-`scripts/validate_desktop_build_number.mjs`:
+The macOS preparation orchestrator is pinned to the dispatched workflow commit,
+separately from the frozen product source. It runs that source's original build
+script. Only an already-accepted outer DMG notarization followed by a recognized
+CloudKit network failure (stapler exit 68, URL error -1005/-1001) is recoverable:
+retry the same DMG ticket download at most four times with bounded delays, validate
+the ticket, and run every original signature, updater and package check. Other
+build failures remain failures. Recovery never re-signs/resubmits the DMG,
+repacks the app, bypasses verification, or publishes. A new preparation run still
+requires its own native build reservation; failed runs consume their reservation.
 
-| Preparation workflow run | Exact reserved native build |
+The public preparation workflow has a separate run counter from the former
+private workflow. Reserve its native build number explicitly using
+`scripts/validate_desktop_build_number.mjs`. Its audited allocation epochs are:
+
+| Public preparation run | Exact native build reservation |
 | --- | --- |
-| 1–20 | `1185 + run` |
-| 21–22 | `1232 + (run - 20)` |
-| 23 onward | `1239 + (run - 22)` |
+| 1–20 | `1185 + run_number` (1186–1205; retained for historical reruns) |
+| 21–22 | `1232 + (run_number - 20)` (1233–1234; retained for reruns) |
+| 23 onward | `1239 + (run_number - 22)` (1240, 1241, …) |
 
-These epochs retain historical allocations while advancing past intervening
-local builds. Failed runs consume their reservation; reruns retain it. For
-example, run 33 reserved 1250 and run 34 reserves 1251. Check the current run
-counter before dispatch; this example does not reserve the next available run.
-Never restore the old flat formula, reuse a build, or remap an existing epoch.
+The September 29 cutover found the public counter at run 20 and local native
+package metadata through `1.0.7-beta.24`, build 1232. Those local build numbers
+are consumed even though they are not public desktop releases. The old next-run
+formula would incorrectly allocate 1206. Do not reuse any accepted, packaged,
+or reserved build; never flatten several runs to one build with `max()`.
 
-For a sealed coordinated desktop draft, `direct-desktop-release-publish.yml`
-also supports `verification_only=true`. Supply the exact `version`, `track`,
-`expected_source_sha` and `expected_manifest_sha256` (the SHA-256 of its
-`SHA256SUMS` file), and the appropriate `allow_unsigned_windows` policy. Dispatch
-on the draft's reviewed source branch. The helper allows only canonical draft
-GET/download operations and reuses the same four native verification jobs.
-It records a receipt only when all platform seals match; publication and public
-migration jobs are skipped. This mode uploads replay/verification artifacts,
-so it still requires explicit authorization to run. It does not create a draft,
-prove hosted signing credentials, or establish product/update acceptance.
+A subsequent audit found public preparation still at run 22 while local
+diagnostic `1.0.7-beta.30` had consumed build 1239. The appended run-23 epoch
+starts at 1240, retaining all previously allocated public run/build pairs.
+Local diagnostics are not public release receipts and do not authorize reusing
+their native build numbers for a different package.
+
+Before dispatch, recheck current public runs, published/draft release identities
+and the release owner's local reservations. The recorded high-water mark cannot
+detect another machine's unpublished reservation. Serialize native release work;
+if a later local allocation exists, append a reviewed epoch above that high-water
+mark before a new preparation run. Preserve all previously allocated run/build
+pairs, including failed runs. A rerun retains its original reservation. Do not
+dispatch dummy runs to advance the counter or use the old private counter.
+
+All four platform jobs consume the same validated reservation and verify their
+packaged build against it. The stamping sanity floor remains 1186 to permit
+historical replay; only the epoch validator allocates a new build. Publication
+rechecks the sealed checksum manifest and native assets, without allocating
+another build or applying the publisher's independent run counter. A local
+macOS build paired with artifact-only preparation must use that preparation
+run's exact reservation, not a separately chosen local build number.
 
 When macOS signing is performed locally, dispatch the same preparation workflow
 with `artifacts_only=true`. It retains the source ancestry, release version,
@@ -181,8 +206,73 @@ Preserve the former private repository's history and artifacts. At the first
 public native build, stop dispatching its preparation workflow: concurrency and
 build counters are separate between repositories, so the old pipeline could
 reuse a build number. Disable the old native workflows as part of cutover and
-use only the public publisher thereafter. Do not publish the same candidate
-through both pipelines.
+use only the canonical release process thereafter. Do not publish the same
+candidate through both pipelines.
+
+### Verification-only replay with existing local publication access
+
+When the release owner has an authenticated local GitHub CLI but the dedicated
+CI publication secret is unavailable, the registered publication workflow can
+run with `verification_only=true`. Supply the independently reviewed
+`expected_source_sha` and `expected_manifest_sha256`; this mode never creates,
+publishes or edits a release. Stage the unchanged complete asset set privately
+first with the existing release helper.
+
+The inspection job uses the canonical repository's job token only to read its
+private draft. GitHub requires Contents write for that draft read; no helper
+write operation is used. The existing environment and branch restrictions remain
+in force. macOS, Linux x64, Linux ARM64 and Windows run the same native verifiers
+on the same downloaded asset set and pinned application source as normal
+publication. A separate receipt is produced only when inspection and all four
+platforms agree on the exact checksum-manifest hash. The publication and
+post-publication migration jobs are disabled in this mode.
+
+Before an explicitly authorized local publication, verify the receipt's GitHub
+run/attempt, reviewed workflow commit, source commit, version, track and manifest
+against the original downloaded artifact and successful job records. A supplied
+hash alone, a local assembly receipt or successful preparation is not this gate.
+Publish npm through the registered trusted-publishing workflow first; then use
+the existing manual helpers and normal local GitHub authentication for the
+signed legacy bridge, desktop and mirror. The desktop helper rechecks both
+repositories and public signed server paths; never replace assets or skip a
+failed verification. Do not extract or copy the local login into CI secrets.
+Keep untested acceptance boundaries separate from native package verification
+and verify public feeds after publication.
+
+## Separate short npm command
+
+The unscoped `agentsdock` CLI is a separate package from the signed
+`@agentsdock/server` runtime. Prepare it from the same clean committed source
+and `server/VERSION` with `server/scripts/package_agentsdock_cli.py
+--require-clean-source --output DIRECTORY`. Preserve its exact tarball and
+`agentsdock-cli-receipt.json`; do not add them to the runtime's three-asset
+`npm-candidate-vVERSION` draft or weaken that draft's verifier.
+
+`scripts/verify_agentsdock_cli_publication.mjs` has read-only `inspect`,
+`preflight` and `verify` operations. Supply the CLI directory, exact version,
+source SHA, accepted receipt hash, signed runtime directory, accepted runtime
+manifest hash and the independently observed prior CLI `latest` value (or
+`absent` for its first publication). It compares all six CLI files to the exact
+committed source, checks the reviewed lifecycle hook and same-version runtime
+dependency, and verifies signed runtime/public registry bytes. The beta path
+requires the prior CLI stable/default tag to remain unchanged.
+
+Publish and verify the signed scoped runtime first, then the accepted CLI
+tarball on the matching `beta` or `latest` tag, before exposing the desktop
+release. First publication requires an authenticated authorized npm account
+and any npm browser/2FA approval. A registry 404 does not establish package
+name ownership. Package-specific trusted publishing must be configured before
+claiming later CLI publication is automated; the scoped runtime's existing
+trusted publisher does not authorize this new package.
+
+The CLI intentionally has a reviewed global-install setup hook; its runtime
+dependency still has no lifecycle hooks. Use `npm publish EXACT_TARBALL
+--ignore-scripts --access public --tag CHANNEL --registry=https://registry.npmjs.org/`
+only after preflight and required native acceptance. This neither installs a
+local server nor authorizes a service restart. Recheck the published metadata,
+actual archive and both package tags with `verify`; never repack accepted bytes
+or retry publication over an existing differing version. Known CLI native
+acceptance boundaries are in `server/npm/agentsdock/README.md`.
 
 ## Local verification
 

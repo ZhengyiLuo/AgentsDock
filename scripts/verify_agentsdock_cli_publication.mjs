@@ -95,8 +95,8 @@ export function validateCandidate({ directory, version, sourceSHA, acceptedRecei
   if (!VERSION.test(version) || !/^[a-f0-9]{40}$/.test(sourceSHA) || !/^[a-f0-9]{64}$/.test(acceptedReceiptSHA256) || !/^[a-f0-9]{64}$/.test(acceptedManifestSHA256)) {
     throw new Error('Explicit version, reviewed source, accepted receipt and accepted runtime manifest hashes are required.')
   }
-  if (expectedLatest !== 'absent' && (!VERSION.test(expectedLatest) || expectedLatest.includes('-'))) {
-    throw new Error('Provide the pre-publication latest baseline: a stable version or absent.')
+  if (expectedLatest !== 'absent' && (!VERSION.test(expectedLatest) || (version.includes('-') && expectedLatest.includes('-')))) {
+    throw new Error('Provide the pre-publication latest baseline: a stable version or absent (a stable candidate may replace an explicitly pinned beta).')
   }
   if (expectedRuntimeLatest !== undefined && (!VERSION.test(expectedRuntimeLatest) || expectedRuntimeLatest.includes('-'))) {
     throw new Error('Runtime latest baseline must be an explicit stable version.')
@@ -180,9 +180,13 @@ function publishedMetadata(candidate, metadata) {
     'optionalDependencies', 'acceptDependencies', 'peerDependencies', 'peerDependenciesMeta', 'devDependencies',
     'bundledDependencies', 'bundleDependencies', 'overrides', 'resolutions', 'dependenciesMeta',
     'workspaces', 'pnpm', 'packageManager', 'engineStrict', 'devEngines', 'gypfile', 'installConfig',
-    'exports', 'imports', 'main', 'type', 'directories', 'config']
+    'exports', 'imports', 'main', 'type', 'config']
   if (!version || version.name !== 'agentsdock' || version.version !== candidate.version ||
       resolverFields.some(key => Object.hasOwn(version, key) !== Object.hasOwn(candidate.metadata, key) || !same(version[key], candidate.metadata[key])) ||
+      // npm may normalize an absent directories field to an empty object.
+      // Allow only this inert addition; any actual directory mapping must match.
+      (Object.hasOwn(version, 'directories') &&
+        !same(version.directories, candidate.metadata.directories ?? {})) ||
       // npm can add these derived fields. The exact allowlist has no shrinkwrap
       // and the reviewed package does have a postinstall hook.
       (Object.hasOwn(version, '_hasShrinkwrap') && version._hasShrinkwrap !== false) ||

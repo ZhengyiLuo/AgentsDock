@@ -17,6 +17,12 @@ from fastapi.testclient import TestClient
 
 
 class ServerUpdateEndpointTests(unittest.IsolatedAsyncioTestCase):
+    def setUp(self):
+        # Endpoint admission fixtures do not own the developer's managed install.
+        # Managed package preparation has separate isolated coverage and any
+        # fixture that needs it must explicitly supply its own installation root.
+        self.enterContext(patch.dict(os.environ, {"AGENTS_SERVER_INSTALL_DIR": ""}))
+
     async def test_update_endpoint_direct_invocation_repeats_native_auth(self):
         request = Request({
             "type": "http",

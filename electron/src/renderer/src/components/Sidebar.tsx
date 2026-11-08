@@ -19,6 +19,7 @@ import { trackEvent } from '../lib/analytics'
 import { activeEmergencyAlert } from '../lib/emergency-alert'
 import { backendLabel, runtimeLabel } from '../lib/format'
 import { openSessionHistoryResult } from '../lib/session-history-search'
+import { liveCodexSubagentCount, liveCodexSubagentLabel } from '../lib/subagents'
 import { rankSessionsForSearch, sidebarSessionGroups, sortSidebarSessions, type SidebarGroupingOptions } from '../lib/sessions'
 import { getWorkspacePreference, setWorkspacePreference } from '../lib/workspace-preferences'
 import { handleMenuCommand, selectMailHintPending, selectBulletinHintPending, sessionUnread, useAppStore } from '../store/app-store'
@@ -379,6 +380,13 @@ const SessionRow = memo(function SessionRow({ session, selected, visiblePane, se
   const unread = sessionUnread(session)
   const emergency = activeEmergencyAlert(session)
   const running = useAppStore(state => state.activeSessionIds.has(session.id))
+  const liveChildren = useAppStore(state => session.backend === 'codex'
+    ? liveCodexSubagentCount(state.snapshots[session.id]?.events,
+      state.snapshots[session.id]?.session.codex_thread_id || session.codex_thread_id
+        || state.snapshots[session.id]?.session.session_id || session.session_id)
+    : 0)
+  const childActivity = liveChildren > 0 ? liveCodexSubagentLabel(liveChildren) : ''
+
   const needsUserAction = Boolean(session.codex_needs_user_action || session.claude_needs_user_action)
   const prefetchTimer = useRef<number | null>(null)
   useEffect(() => () => { if (prefetchTimer.current) window.clearTimeout(prefetchTimer.current) }, [])
@@ -418,11 +426,11 @@ const SessionRow = memo(function SessionRow({ session, selected, visiblePane, se
           {...(!reorderDisabled ? draggable.attributes : {})}
         >
           {session.archived ? <Archive size={18} aria-label={t('chat.archived')} /> : <BackendMark backend={session.backend} size={18} />}
-          <span className="session-copy"><strong>{session.title}</strong><small title={emergency?.message || (needsUserAction ? t("ui.Sidebar.SessionRow.this_agent_is_paused_until_you_respond_82dc6e8") : undefined)}>{emergency ? t("ui.Sidebar.SessionRow.emergency_89e4490", { "message": String(emergency.message) }) : needsUserAction ? t("ui.Sidebar.SessionRow.action_needed_c2d066a", { "chat": String(backendLabel(session.backend)) }) : `${backendLabel(session.backend)} · ${runtime}${running ? ' · running' : unread ? ' · new' : ''}`}</small></span>
+          <span className="session-copy"><strong>{session.title}</strong><small title={emergency?.message || (needsUserAction ? t("ui.Sidebar.SessionRow.this_agent_is_paused_until_you_respond_82dc6e8") : childActivity || undefined)}>{emergency ? t("ui.Sidebar.SessionRow.emergency_89e4490", { "message": String(emergency.message) }) : needsUserAction ? t("ui.Sidebar.SessionRow.action_needed_c2d066a", { "chat": String(backendLabel(session.backend)) }) : childActivity ? `${childActivity} · ${backendLabel(session.backend)} · ${runtime}${running ? ' · running' : ''}` : `${backendLabel(session.backend)} · ${runtime}${running ? ' · running' : unread ? ' · new' : ''}`}</small></span>
           {session.archived && <span className="session-archive-badge">{t('chat.archived')}</span>}
           {emergency && <span key={emergency.id} className="sr-only" role="alert">{t('ui.sidebar.emergency', { title: session.title, message: emergency.message })}</span>}
           {visiblePane && <span className="sr-only">{visiblePane === 'primary' ? t('ui.sidebar.firstPane') : visiblePane === 'secondary' ? t('ui.sidebar.secondPane') : t('chatWorkspace.paneNumber', { number: CHAT_PANE_IDS.indexOf(visiblePane) + 1 })}</span>}
-          {(emergency || needsUserAction || running || unread) && <span className={`status-dot ${emergency ? 'emergency' : needsUserAction ? 'attention' : running ? 'running' : 'unread'}`} aria-hidden="true" />}
+          {(emergency || needsUserAction || running || liveChildren > 0 || unread) && <span className={`status-dot ${emergency ? 'emergency' : needsUserAction ? 'attention' : running || liveChildren > 0 ? 'running' : 'unread'}`} aria-hidden="true" />}
         </div>
       </ContextMenu.Trigger>
       <SessionContextMenu session={session} unread={unread} folders={folders} />

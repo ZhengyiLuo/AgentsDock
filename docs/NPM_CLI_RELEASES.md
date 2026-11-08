@@ -6,25 +6,141 @@ committed source snapshot and one public version; the CLI dependency must be
 `"@agentsdock/server": "VERSION"`, never a range or floating tag. The desktop
 continues to pin the signed runtime descriptor, not a floating npm channel.
 
-This document describes release tooling, not full product acceptance. As of
-2026-10-11, runtime `latest` is `1.0.9`, runtime `beta` is `1.0.10-beta.6`, and
-`agentsdock` is not public. Runtime publication run `38062694130`, attempt 1,
-verified the exact beta.6 registry package, then stopped at the explicit
-first-CLI bootstrap gate. It did not complete a matched desktop/CLI release.
-Recheck these public states before acting; leave published bytes and stable
-defaults unchanged. Main's development `server/VERSION` is not a reservation.
-Do not rebuild the frozen beta.6 candidate or silently drop release-line fixes.
+## 1.0.11-beta.2 public completion
 
-At the earlier preparation pins, main `3964cf80` was an ancestor of beta.4 source
-`941bc4cd`. Later release-line changes include pending-update HTTP handling,
-signed-update lock waiting, executable packaging permissions, native build
-reservation corrections, persistent service PATH handling and instance lifecycle
-work. This tooling change does not import those product changes into main.
-Before cutting a new candidate, reconcile the current main and reviewed release
-line explicitly, choose an unused version/build, and run full source and native
-acceptance. Neither blindly bumping main nor reusing a prior accepted artifact
-establishes that the new candidate contains the required runtime fixes.
+Product source `853dcd285ef442176370632149deba21ef732eda` is frozen. The reviewed
+orchestrator `197f07b9ca949c1a81441d18b46a048764d6dd2d` changes only release
+orchestration/docs, not the packaged application or runtime. Native CLI
+[acceptance 39099183063](https://github.com/ZhengyiLuo/AgentsDock/actions/runs/39099183063)
+passes on macOS and Linux; the signed macOS app also passes real Gemini
+API/CLI conversation, automatic-title and reload acceptance against the exact
+packaged server. See the [development log](DEV_LOG.md) for scope and limits.
 
+Attempt 1 of [paired publication 39103091104](https://github.com/ZhengyiLuo/AgentsDock/actions/runs/39103091104)
+accepted the runtime upload through OIDC, then exhausted 61 read-only registry
+checks before it became public. On 2026-10-18 UTC, attempt 2 verified and skipped
+that unchanged runtime, published the accepted short CLI through its own
+Trusted Publisher, and verified both exact public archives. Both `beta` tags
+now resolve to `1.0.11-beta.2`; both stable `latest` tags remain `1.0.10`.
+A fresh isolated scripts-disabled registry installation verifies the matched
+versions, exact runtime dependency and CLI help without operating any service.
+
+The signed legacy server bridge, canonical desktop and compatibility mirror
+are public. [Desktop publication 39177990728](https://github.com/ZhengyiLuo/AgentsDock/actions/runs/39177990728)
+reverified all four native platforms before publishing the unchanged build 1261.
+The original product source, accepted archives and checksum manifest remain
+frozen; later documentation commits are not new artifact sources. Keep the
+documented native UI, clean-quit and upgrade acceptance limits distinct from
+successful publication. See the [development log](DEV_LOG.md).
+
+## 1.0.11-beta.1 public completion
+
+On 2026-10-13 UTC, [paired publication 38370285507](https://github.com/ZhengyiLuo/AgentsDock/actions/runs/38370285507)
+published and verified both exact packages from source
+`e93391294af2cb0c35f5f04fe8e94cce77810458`, with separate package-specific OIDC
+trust. Both `beta` tags resolve to `1.0.11-beta.1`; both stable `latest` tags
+remain `1.0.10`. An isolated scripts-disabled registry installation confirms
+the exact versions, matched runtime dependency and CLI help without operating
+existing services.
+
+The signed legacy server bridge, canonical desktop and compatibility mirror
+are public. [Desktop publication 38431444310](https://github.com/ZhengyiLuo/AgentsDock/actions/runs/38431444310)
+reverified all four platforms and published the unchanged build 1252. Native
+macOS/Linux CLI lifecycle checks and import-focused signed macOS app acceptance
+passed, including actual Claude/Codex continuation. Full populated-history and
+busy-work upgrades, reboot, Windows updater and clean-quit acceptance remain
+unverified; the release notes retain these limits. See the
+[public development log](DEV_LOG.md#2026-10-13--accept-imports-and-publish-1011-beta1).
+
+The release integrates main through `2b666a9f` into the frozen 1.0.10 line.
+Its streaming transcript reader is included in the runtime inventory and its
+installer has an exact-version acceptance pin. Historical installer pins and
+accepted archives remain unchanged. A later documentation commit is not a new
+artifact source; never rebuild this published version.
+
+## 1.0.10 public completion
+
+The earlier stable publication completed on 2026-10-13 UTC. Attempt 2 of
+[paired publication 38346314422](https://github.com/ZhengyiLuo/AgentsDock/actions/runs/38346314422)
+verified the existing runtime and published the short CLI through its own
+Trusted Publisher. [Desktop publication 38362425715](https://github.com/ZhengyiLuo/AgentsDock/actions/runs/38362425715)
+published the unchanged build 1251 to both download repositories after native
+verification; the signed legacy server bridge is public as well. The previous
+pending-publication notes below are historical, not the current release state.
+
+## Stable 1.0.10 preparation
+
+The separately frozen stable candidate is `1.0.10` on `release/1.0.10`, based on the reviewed
+beta.6 source plus release-blocking fixes. Build new versioned artifacts from
+its final committed source; never relabel or replace beta.6 archives. The older
+beta preparation details below are retained as historical context, not the
+source/version selection for this stable cut.
+
+Recheck registry state before publishing. On 2026-10-12 the observed runtime
+`latest` is `1.0.9`; the short CLI's first publication caused npm to assign
+`latest` to `1.0.10-beta.6` as well as `beta`, despite explicit beta publication.
+For stable preparation, pin those two distinct observed baselines. The stable
+publish intentionally advances both `latest` tags to the new stable version.
+Do not pretend the prior CLI baseline was absent or silently change its tag.
+
+The stable candidate's native CLI check includes immediate named stop/start,
+with no observer or sleep between the two commands, and requires a fresh,
+stable authenticated server epoch. The earlier beta-only exception does not
+waive stable native acceptance. The registry verifier permits npm's empty
+`directories: {}` normalization but no nonempty mapping or other resolver drift.
+Full app/update acceptance and the separate short-package Trusted Publisher
+remain required; source tests and an existing-version registry check do not
+prove either. No stable publication is recorded by this preparation section.
+
+### 1.0.10 publication attempt
+
+[Paired publication 38346314422](https://github.com/ZhengyiLuo/AgentsDock/actions/runs/38346314422)
+accepted the exact runtime upload through OIDC, but exhausted its bounded
+read-only registry verification window. At the subsequent 2026-10-13 UTC
+check, npm's authenticated lifecycle API reported `validating` and the public
+registry did not contain `@agentsdock/server@1.0.10`. The CLI upload had not run;
+neither `latest` tag had advanced. This is not a completed matched publication.
+
+The short package's separate GitHub Trusted Publisher is configured for this
+repository, `server-npm-publish.yml` and `npm-release`; its first OIDC publication
+still needs verification. Do not re-upload while validation is pending. Once
+the exact runtime becomes public, rerun the failed job with its unchanged
+accepted pins so it verifies and skips the existing runtime before publishing
+the CLI. Only proceed to desktop publication after both packages and the signed
+legacy server bridge have been verified publicly.
+
+## Historical beta preparation
+
+This document describes release preparation, not a publication receipt. As of
+2026-10-07, runtime `latest` is `1.0.9`, runtime `beta` is `1.0.10-beta.4`, and
+`agentsdock` is not public. Leave those existing bytes and stable defaults alone.
+The selected new matched candidate is `1.0.10-beta.6`; it must preserve stable
+`1.0.9` and npm `latest`. Recheck registry/release state before any publication.
+Main's development `server/VERSION` is not a release reservation. Do not overwrite
+published beta.4 or the frozen private beta.5 candidate, or silently drop fixes
+maintained on the release branch.
+
+At the reviewed preparation pins, main `3964cf80` is an ancestor of beta.4 source
+`941bc4cd`. Start the next release branch from that frozen release source, then
+apply the reviewed pipeline changes without rewriting the old tag. A version
+bump on main alone would omit already-shipped pending-update HTTP error handling,
+signed-update lock waiting, executable packaging permissions and native build
+reservation fixes, among other release-line changes. Review the resulting merge
+and run its full source checks before accepting any new package.
+
+The frozen beta.5 source integrated main's reviewed custom-API/OpenCode fixes
+and the paired CLI pipeline on that beta.4 release line. Beta.6 starts from the
+same reviewed source plus the CLI PATH-persistence fix: temporary npm lifecycle,
+npx-cache and node-gyp paths must not become service dependencies. Stable absolute
+provider/user/Node path spellings remain intact; existing saved service PATHs are
+not rewritten. The installer bytes and signing trust roots are unchanged.
+
+Use `release/1.0.10-beta.6` and its final committed source for every new artifact.
+The earlier beta.5 native build reservation is consumed. Recheck the public
+preparation counter and all other reservations before assigning beta.6's build;
+never reuse another run's allocation or restore main's older build formula.
+Do not reuse beta.5 tarballs, signatures, checksums or acceptance receipts for
+beta.6. These instructions are not an artifact or acceptance receipt.
 ## Operating releases from another computer
 
 The operator computer can be a controller, not the signing host. Use a canonical
@@ -161,40 +277,45 @@ After these workflows are registered on the default branch, dispatch
 on disposable GitHub-hosted Apple silicon macOS and Linux. It has no npm publish
 or signing operation. Never spoof its runner guards on a developer account.
 
-Registration is not implementation: the selected workflow commit must contain
-the CLI verifier, staging helper, native harness and their tests. An older main
-with only the registered YAML is not a runnable paired-release source. Supply
-the exact reviewed branch and commit rather than relying on the UI default.
+When main and the release line differ, register only the exact reviewed full
+`.github/workflows/agentsdock-cli-native-acceptance.yml` on main through normal
+review and CI. Do not merge unrelated runtime changes or substitute a no-op
+acceptance workflow. Registration is not execution or acceptance. Dispatch the
+full workflow from the frozen `release/1.0.10-beta.6` source, with `source_sha`
+equal to that branch's actual workflow SHA and `source_ref` equal to its name.
+Its tools must exist in that source, and both immutable candidate drafts must
+already pass inspection. An incomplete main checkout or missing inputs must
+fail, not produce an acceptance receipt.
 
 The native job exercises actual npm global postinstall, authenticated default
 health, installed runtime bytes/modes, repeated-install process/identity/token
 retention, list/status/info/token, named creation and lifecycle, removal
 confirmation and synthetic state retention, default lifecycle and independence
-from the original npm prefix/cache after restart. It also stops both default
-components, verifies canceled removal preserves their exact runtime/configuration
-and token, and verifies confirmed removal unregisters both while preserving
-synthetic state and the unrelated named instance's retained state. Failure
-receipts retain partial observations and never assert full product acceptance.
-Bounded `failedCheck` identifiers must not contain private exception output.
-Record the actual run,
+from the original npm prefix/cache after restart. Finally it stops both default
+components, cancels removal while preserving their exact runtime/configuration
+and token, then confirms removal. Confirmed uninstall must unregister both
+services and remove runtime/configuration/token while preserving the synthetic
+state marker and the named instance's retained state. It does not purge history.
+Only a report observing this whole boundary removes `default-removal` from its
+untested list. Failure receipts retain partial observations and never assert
+full product acceptance. Record the actual run,
 attempt, source and both hashes; validate the original artifact's API digest and
 contents rather than substituting another attempt.
 
-The beta.6 diagnostic run `38027600173`, attempt 1, passed Linux but failed
-macOS immediate named stop/start fresh-process and stable-health validation
-after both commands returned success. Normal named restart passed. This remains
-a known failed product boundary; importing stronger harness checks does not fix
-the runtime or turn that result into acceptance. Preserve every original run,
-attempt and failed/full-acceptance flag. Any product correction requires a new
-candidate; do not rebuild beta.6 or weaken the lifecycle checks.
+Beta.6 requires this exact-pair native workflow on both hosts, not only the
+scoped runtime's direct-install checks. The real offline npm regression uses
+inert native/installer doubles; it proves PATH propagation but not live service
+health, restart or cache independence. Bounded `failedCheck` identifiers now
+distinguish token-file/output, authenticated health, service-path independence
+and installed-byte/mode failures without exposing private output.
 
 Remaining release checks:
 
 - Fresh real global setup on both supported native hosts; missing `uv`/service
   prerequisites, occupied port, interrupted setup and explicit retry.
 - Correct start/stop/restart/removal of both components of a split default
-  installation. The current instance manager has a known old-layout binding
-  limitation. The harness deliberately fails on refusal; do not bypass the
+  installation, including removal after an owned stop. Earlier source had an
+  old-layout binding limitation. The harness fails on refusal; do not bypass the
   binding check, stop only one component, or describe it as complete management.
 - Interactive setup/pairing and optional dependency decline; native token-menu
   cancellation, bulk controls/exclusions, name reuse and removal/purge behavior.
@@ -204,6 +325,29 @@ Remaining release checks:
   `agentsdock@beta` resolution, before exposing a paired desktop release.
 - If a desktop is also released, its normal signed-app, legacy bridge, managed
   update and platform gates still apply. This npm workflow does not waive them.
+
+### Beta.6 scoped desktop/server replay
+
+The existing `ci.yml` now admits exact `candidate-replay-v1.0.10-beta.6` for
+the independently pinned `beta1101` baseline, alongside the retained legacy
+journeys and both `0755`/`0750` installation-root modes. Historical beta.2 through
+beta.5 pins and evidence remain unchanged. This is the beta.1-to-beta.6 journey,
+not evidence for a beta.4 or beta.5 baseline. The complete reviewed installer
+remains pinned to SHA-256
+`51a6ae6f242476ae4f19712b95ecbaba212b2256e3928d389d8f617a6c367ed7`;
+if the new source changes that installer, review its behavior and whole-file pin
+before creating an accepted candidate rather than weakening the verifier.
+
+Dispatch with that candidate tag, its own accepted `candidate.json` and bundle
+hashes, `candidate_replay=true`, `npm_native_validation=false`, and
+`candidate_server_rollback=false`; leave npm-only inputs empty. The separate
+Linux rollback dispatch uses the same receipt/bundle pins with
+`candidate_server_rollback=true` and both other modes false. Never reuse earlier
+candidate hashes or relabel their observations. Replays remain
+`publicationEligible: false` and `releaseAcceptance: false`; genuine populated
+history, active/queued work, reboot, native Windows update and public-feed
+acceptance are not supplied by these fixtures. First-global-install and instance
+management are covered separately by the paired CLI native workflow.
 
 ## First publication and authentication
 

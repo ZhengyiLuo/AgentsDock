@@ -298,15 +298,32 @@ test('registry-only dependency modifiers cannot shadow the exact pin despite an 
     devEngines: { runtime: { name: 'other' } }, gypfile: true, installConfig: { hoistingLimits: 'workspaces' },
     _hasShrinkwrap: true, hasInstallScript: false,
     exports: './other.cjs', imports: { '#core': './other.cjs' }, config: { extra: true },
+    directories: { bin: './other-bin' },
   }
   for (const [key, value] of Object.entries(additions)) {
     const remote = registry(candidate, f, { mutate: m => { m.versions[candidate.version][key] = value } })
     await assert.rejects(publicationPreflight(candidate, remote), /Published CLI metadata/)
     await assert.rejects(verifyRegistry(candidate, remote), /Published CLI metadata/)
   }
-  const derived = registry(candidate, f, { mutate: m => Object.assign(m.versions[candidate.version], { _hasShrinkwrap: false, hasInstallScript: true }) })
+  const derived = registry(candidate, f, { mutate: m => Object.assign(m.versions[candidate.version], { _hasShrinkwrap: false, hasInstallScript: true, directories: {} }) })
   assert.equal((await publicationPreflight(candidate, derived)).publish, false)
   assert.equal((await verifyRegistry(candidate, derived)).verified, true)
+})
+
+test('registry directories normalization allows only an empty object, not other empty values', async t => {
+  const f = fixture(t), candidate = validateCandidate(f.options)
+  for (const value of [null, [], '', false, { bin: '' }]) {
+    const remote = registry(candidate, f, { mutate: m => { m.versions[candidate.version].directories = value } })
+    await assert.rejects(verifyRegistry(candidate, remote), /Published CLI metadata/)
+  }
+})
+
+test('stable may intentionally advance an exact observed beta latest without accepting drift', async t => {
+  const f = fixture(t, { version: '1.0.10', expectedLatest: '1.0.10-beta.6' }), candidate = validateCandidate(f.options)
+  const previous = registry(candidate, f, { published: false, latest: '1.0.10-beta.6', tag: '1.0.10-beta.6' })
+  assert.equal((await publicationPreflight(candidate, previous)).publish, true)
+  await assert.rejects(publicationPreflight(candidate, registry(candidate, f, { published: false, tag: '1.0.10-beta.5' })), /latest tag/)
+  assert.equal((await verifyRegistry(candidate, registry(candidate, f, { latest: '1.0.10' }))).verified, true)
 })
 
 test('stable uses latest intentionally and never rewrites a different public candidate', async t => {

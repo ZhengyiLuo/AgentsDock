@@ -76,6 +76,7 @@ describe('Claude header controls', () => {
     expect(within(goal).queryByRole('spinbutton')).not.toBeInTheDocument()
     await userEvent.setup().click(within(goal).getByRole('button', { name: 'Start goal' }))
     expect(setGoal).toHaveBeenCalledExactlyOnceWith(session.id, 'All changes pass validation.')
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Claude goal' })).not.toBeInTheDocument())
   })
 
   it.each(['idle', 'active'] as const)('offers native goal admission from the running header with native %s status', async type => {

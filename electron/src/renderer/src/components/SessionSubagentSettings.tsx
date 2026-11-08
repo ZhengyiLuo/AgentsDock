@@ -18,6 +18,7 @@ export function SessionSubagentSettings({ session, profileScope }: {
   const [draft, setDraft] = useState(baseline)
   const [saving, setSaving] = useState(false)
   const [saved, setSaved] = useState(false)
+  const [acknowledged, setAcknowledged] = useState<{ session: Session, previousLimit: number | null } | null>(null)
   const [error, setError] = useState<string | null>(null)
   const mounted = useRef(true)
   useEffect(() => { mounted.current = true; return () => { mounted.current = false } }, [])
@@ -25,6 +26,7 @@ export function SessionSubagentSettings({ session, profileScope }: {
     const old = previous.current
     previous.current = baseline
     setDraft(value => value === old ? baseline : value)
+    setAcknowledged(null)
   }, [baseline])
 
   const limit = draft.trim() === '' ? null : Number(draft)
@@ -33,7 +35,27 @@ export function SessionSubagentSettings({ session, profileScope }: {
   const supportedProvider = session.subagent_limit_control?.supported === true
   // Clearing an obsolete override is allowed even after a provider downgrade.
   const editable = connected && supportedServer && (supportedProvider || (session.subagent_limit != null && limit === null)) && !saving
-  const changed = limit !== (session.subagent_limit ?? null)
+  // The save reply can arrive before the normal session update. Once that
+  // update catches up, use its live application state rather than the reply.
+  const confirmed = acknowledged && acknowledged.previousLimit === (session.subagent_limit ?? null)
+    && (acknowledged.session.subagent_limit ?? null) !== (session.subagent_limit ?? null)
+    ? acknowledged.session : session
+  const changed = limit !== (confirmed.subagent_limit ?? null)
+  const control = confirmed.subagent_limit_control
+  const automatic = control?.applies_to === 'automatically_when_idle'
+  const effectiveKnown = typeof control?.effective_limit === 'number'
+    && Number.isSafeInteger(control.effective_limit) && control.effective_limit > 0
+  const requested = typeof control?.requested_limit === 'number'
+    && Number.isSafeInteger(control.requested_limit) && control.requested_limit > 0
+    ? String(control.requested_limit) : t('ui.sessionSubagents.defaultLimit')
+  const applicationMessage = control?.application_state === 'applied'
+    ? t(effectiveKnown ? 'ui.sessionSubagents.activeLimit' : 'ui.sessionSubagents.activeDefault', { limit: String(control?.effective_limit) })
+    : control?.application_state === 'pending'
+      ? t(effectiveKnown ? 'ui.sessionSubagents.pendingLimit' : 'ui.sessionSubagents.pendingUnknown', {
+        requested, effective: String(control?.effective_limit)
+      })
+      : control?.application_state === 'next_start'
+        ? t('ui.sessionSubagents.nextStart', { requested }) : t('ui.sessionSubagents.automaticApplies')
   const current = () => {
     const state = useAppStore.getState()
     return mounted.current && !state.switchingProfileId
@@ -54,6 +76,7 @@ export function SessionSubagentSettings({ session, profileScope }: {
         throw new Error(t('ui.sessionSubagents.notAcknowledged'))
       }
       setDraft(updated.subagent_limit?.toString() ?? '')
+      setAcknowledged({ session: updated, previousLimit: session.subagent_limit ?? null })
       setSaved(true)
     } catch (reason) {
       if (current()) setError(reason instanceof Error ? reason.message : String(reason))
@@ -77,11 +100,12 @@ export function SessionSubagentSettings({ session, profileScope }: {
       <p>{t('ui.sessionSubagents.empty')}</p>
       {!supportedServer ? <p>{t('ui.sessionSubagents.updateServer')}</p>
         : !supportedProvider ? <p>{session.subagent_limit_control?.message || t('ui.sessionSubagents.unsupported')}</p>
+        : automatic ? <p role="status">{applicationMessage}</p>
         : <p>{t(session.subagent_limit_control?.applies_to === 'next_provider_process_start' ? 'ui.sessionSubagents.codexResetApplies'
           : session.subagent_limit_control?.applies_to === 'next_idle_provider_start' ? 'ui.sessionSubagents.claudeApplies' : 'ui.sessionSubagents.codexApplies')}</p>}
       {!valid && <p role="alert">{t('ui.sessionSubagents.invalid')}</p>}
       {error && <p role="alert">{error}</p>}
-      {saved && <p role="status">{t('ui.sessionSubagents.saved')}</p>}
+      {saved && !automatic && <p role="status">{t('ui.sessionSubagents.saved')}</p>}
     </form>
   </section>
 }

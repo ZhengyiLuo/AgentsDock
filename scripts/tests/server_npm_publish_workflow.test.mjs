@@ -109,6 +109,20 @@ test('manual guard accepts equal pins and an explicitly reviewed workflow descen
   }
 })
 
+test('manual guard admits an exact observed beta CLI baseline for downstream stable promotion checks', () => {
+  const result = bash(identityGuard, pins('a'.repeat(40), 'b'.repeat(40), {
+    EXPECTED_CLI_LATEST: '1.0.10-beta.6',
+  }))
+  assert.equal(result.status, 0, result.stderr)
+  // This syntax guard cannot infer the candidate track. The pinned candidate
+  // verifier must still reject a beta baseline for a beta candidate, and check
+  // the exact observed registry tag before either publication.
+  const inspect = publish.indexOf('name: Inspect the paired CLI before publishing either package')
+  const upload = publish.indexOf('name: Publish the verified tarball with npm trusted publishing')
+  assert(inspect > 0 && inspect < upload)
+  assert.match(publish.slice(inspect, upload), /verify_agentsdock_cli_publication\.mjs inspect[^\n]*"\$EXPECTED_CLI_LATEST"/)
+})
+
 test('manual guard rejects missing or mismatched pins, manifest hashes and untrusted refs', () => {
   const base = pins('a'.repeat(40), 'b'.repeat(40))
   for (const change of [
@@ -121,7 +135,9 @@ test('manual guard rejects missing or mismatched pins, manifest hashes and untru
     { ACCEPTED_MANIFEST_SHA256: '' }, { ACCEPTED_MANIFEST_SHA256: 'c'.repeat(63) },
     { ACCEPTED_CLI_RECEIPT_SHA256: '' }, { ACCEPTED_CLI_RECEIPT_SHA256: 'd'.repeat(63) },
     { EXPECTED_NPM_LATEST: '' }, { EXPECTED_NPM_LATEST: '1.0.10-beta.4' },
-    { EXPECTED_CLI_LATEST: '' }, { EXPECTED_CLI_LATEST: '1.0.10-beta.4' },
+    { EXPECTED_CLI_LATEST: '' }, { EXPECTED_CLI_LATEST: 'beta' },
+    { EXPECTED_CLI_LATEST: '1.0.10-beta.0' }, { EXPECTED_CLI_LATEST: '1.0.10-beta.06' },
+    { EXPECTED_CLI_LATEST: '1.0.10-rc.1' }, { EXPECTED_CLI_LATEST: '^1.0.10' },
   ]) denied(bash(identityGuard, { ...base, ...change }), JSON.stringify(change))
 })
 
