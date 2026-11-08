@@ -1,5 +1,18 @@
 # Public development log
 
+## Unreleased — Retry transient notarization-ticket validation failures
+
+- Extend release orchestration's bounded Apple ticket-download recovery to
+  ticket validation and final package verification. Retry only explicit CloudKit
+  connection-loss or timeout errors after accepted outer-DMG notarization.
+- Keep the frozen product builder, signed payloads and complete native verifier
+  unchanged. Invalid signatures, tickets, metadata and smoke checks still fail;
+  early app-stapling failures are not treated as completed-package validation.
+- All 432 release-tooling/CLI checks pass, including 13 focused regressions for
+  recovery boundaries, bounded retries, immutable assets and non-transport
+  failure rejection. Hosted native acceptance remains required; this
+  entry does not establish a successful package or publication.
+
 ## 2026-11-08 - Prepare coordinated 1.0.12-beta.5
 
 - Prepare a matching desktop, signed server, legacy bridge and short CLI Beta
