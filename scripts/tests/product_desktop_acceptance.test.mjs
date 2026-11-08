@@ -1,11 +1,13 @@
 import assert from 'node:assert/strict'
 import { spawnSync } from 'node:child_process'
+import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { test } from 'node:test'
 import { assertCurrentPairedServer, assertDesktopRunner, assertOlderVersion, assertSharedOperation, boundedNativeLog,
   assertStableDiscovery, assertVisibleCoordinatedRow, checksumForMacArchive, collectReconciliationSnapshot, collectSharedOperationSnapshot, emitNativeProgress,
   migrationCoverage, parseDesktopAcceptanceArguments, parseReconciliationSnapshot, parseSharedOperationSnapshot, reconciliationSnapshot,
-  retainSharedOperationObservation, desktopJourney,
+  retainSharedOperationObservation, desktopJourney, requiresServerBeforeApp, assertOfflineInstallRefusal,
+  assertPreparedServerBeforeApp, assertTwoPreparedClients, nativeInstallObservation, nativeUpdaterLogObservation, assertLegacyPostcompletionRetry,
   terminalReconciliationFailure, validateDesktopFixture } from '../product_desktop_acceptance.mjs'
 
 // These are harness contract tests only: no app/service installation, native
@@ -29,6 +31,128 @@ const status = () => ({ currentVersion: identity.version, serverUpdates: [record
 const health = () => ({ ok: true, server_identity: fixture().serverIdentity,
   server_instance_id: 'new-service-instance', server_version: identity.version,
   gateway: { version: identity.version }, execution_service: { version: identity.version, maintenance_held: false } })
+
+test('native replacement diagnostics retain only finite state and comparisons', () => {
+  const privateValue = 'private-token https://private.example/Profile'
+  const baseline = '1.0.12-beta.4', candidate = '1.0.12-beta.5'
+  const snapshot = nativeInstallObservation({ state: 'installing', cancelable: false,
+    availableVersion: candidate, message: `Restarting into AgentsDock ${privateValue}`,
+    serverUpdates: [{ name: privateValue }], extra: privateValue }, true, baseline, baseline, candidate)
+  assert.deepEqual(snapshot, { rendererAvailable: true, incumbentRunning: true, incumbentStillInstalled: true,
+    candidateInstalled: false, candidateStillSelected: true, cancelable: false, updaterState: 'installing',
+    messageCategory: 'restarting', candidateChangedBeforeRestart: false, generic503MessageObserved: false })
+  assert.doesNotMatch(JSON.stringify(snapshot), /private|https:|token|1\.0\./)
+  const failed = nativeInstallObservation({ state: privateValue, cancelable: privateValue,
+    message: 'AgentsDock update is incomplete: The downloaded app changed before restart.' }, false, candidate, baseline, candidate)
+  assert.equal(failed.updaterState, 'unknown')
+  assert.equal(failed.cancelable, null)
+  assert.equal(failed.messageCategory, 'install-failed')
+  assert.equal(failed.candidateChangedBeforeRestart, true)
+  assert.equal(failed.candidateInstalled, true)
+  assert.equal(nativeInstallObservation(null, false, baseline, baseline, candidate).rendererAvailable, false)
+  assert.equal(nativeInstallObservation({message: {}}, false, baseline, baseline, candidate).messageCategory, 'other')
+})
+
+function sourceDerivedGatewayFailure() {
+  // Exercise the real three-layer message composition; a duplicated hand-written
+  // fixture previously added punctuation that the shipped updater never adds.
+  const read = name => readFileSync(new URL(`../../electron/src/main/${name}`, import.meta.url), 'utf8')
+  const render = (template, values) => template.replace(/\$\{([^}]+)\}/g, (_match, key) => {
+    assert(Object.hasOwn(values, key), `Unknown message interpolation: ${key}`)
+    return values[key]
+  })
+  const detail = render(read('server-client.ts').match(/let detail = `([^`]+)`/)[1],
+    {'response.status': 503, 'response.statusText': 'Service Unavailable'})
+  const message = render(read('coordinated-updates.ts').match(/if \(failed\) throw new Error\(`([^`]+)`\)/)[1],
+    {'failed.name': 'Acceptance legacy server', 'failed.message': detail})
+  return render(read('updater.ts').match(/const failureMessage = `([^`]+)`/)[1], {message})
+}
+
+test('legacy post-completion retry admits only the source-derived displayed503 and the same current unpaused server', () => {
+  const baseline = '1.0.6'
+  const value = { ...status(), currentVersion: baseline, availableVersion: identity.version, cancelable: true, state: 'downloaded',
+    message: sourceDerivedGatewayFailure() }
+  const result = assertLegacyPostcompletionRetry(value, health(), fixture(), identity.version, baseline, baseline)
+  assert.equal(result.seamlessUpgradePassed, false)
+  assert.equal(result.manualRetries, 2)
+  assert.equal(result.totalInstallClicks, 3)
+  assert.equal(result.failureCategory, 'displayed-http-503')
+  assert.throws(() => assertLegacyPostcompletionRetry({...value, message: value.message.replace('Unavailable Retry', 'Unavailable. Retry')},
+    health(), fixture(), identity.version, '1.0.6', '1.0.6'))
+  for (const patch of [{message: 'Unknown failure'}, {message: value.message.replace('503 Service Unavailable', 'Cannot write update files')},
+    {state: 'installing'}, {cancelable: false}, {availableVersion: baseline}, {currentVersion: identity.version},
+    {serverUpdates: [{...record(), phase: 'blocked'}]}, {serverUpdates: [{...record(), paused: true}]},
+    {serverUpdates: [{...record(), operationId: undefined}]}, {serverUpdates: [{...record(), serverIdentity: 'other'}]}]) {
+    assert.throws(() => assertLegacyPostcompletionRetry({...value, ...patch}, health(), fixture(), identity.version, baseline, baseline))
+  }
+  assert.throws(() => assertLegacyPostcompletionRetry(value, {...health(), execution_service: {version: identity.version, maintenance_held: true}}, fixture(), identity.version, baseline, baseline))
+  assert.throws(() => assertLegacyPostcompletionRetry(value, health(), fixture(), identity.version, identity.version, baseline))
+})
+
+test('native Squirrel diagnostics disclose fixed booleans, never archive URLs or authentication values', () => {
+  const privateText = 'https://private.example/token?auth=secret /private/user/update.zip'
+  const result = nativeUpdaterLogObservation(`Proxy server for native Squirrel.Mac is created (${privateText})\n`
+    + `Proxy server for native Squirrel.Mac is listening (${privateText})\n/ requested\n`
+    + `${privateText} requested by Squirrel.Mac, pipe ${privateText}\nnativeUpdater.update-downloaded\n`)
+  assert(result.proxyCreated && result.proxyListening && result.feedRequested && result.archiveRequested && result.nativeDownloaded)
+  assert(!result.proxyClosed && !result.authenticationRejected && !result.archiveReadFailed)
+  assert(Object.values(result).every(value => typeof value === 'boolean'))
+  assert.doesNotMatch(JSON.stringify(result), /private|secret|https|update.zip/)
+  assert.equal(nativeUpdaterLogObservation('Invalid authenthication credentials').authenticationRejected, true)
+  assert.equal(nativeUpdaterLogObservation('SQRLUpdaterErrorDomain').updaterSquirrelError, true)
+  assert.throws(() => nativeUpdaterLogObservation({}))
+  assert.throws(() => nativeUpdaterLogObservation('a'.repeat(16 * 1024 * 1024 + 1)))
+})
+
+test('only the pinned beta4 incumbent uses server-before-app acceptance', () => {
+  assert.equal(requiresServerBeforeApp('1.0.12-beta.5', '1.0.12-beta.4', 'beta1124'), true)
+  assert.equal(requiresServerBeforeApp('1.0.12-beta.5', '1.0.11', 'stable111'), false)
+  assert.equal(requiresServerBeforeApp('1.0.12-beta.5', '1.0.6', 'legacy'), false)
+  assert.throws(() => requiresServerBeforeApp('1.0.12-beta.5', '1.0.12-beta.3', 'beta1124'))
+  assert.throws(() => requiresServerBeforeApp('1.0.12-beta.6', '1.0.12-beta.4', 'beta1124'))
+})
+
+test('offline refusal requires the exact retryable incumbent, real offline state and native failure reason', () => {
+  const baseline = '1.0.12-beta.4', candidate = '1.0.12-beta.5'
+  const value = { currentVersion: baseline, availableVersion: candidate, state: 'downloaded',
+    message: 'AgentsDock update is incomplete: Private server: server is offline or unreachable; reconnect before updating AgentsDock. Retry Update AgentsDock after resolving this.' }
+  const accepted = assertOfflineInstallRefusal(value, baseline, candidate, baseline, true)
+  assert.deepEqual(accepted, {offlineRefusalObserved: true, incumbentAppPreserved: true, sameCandidateRetryable: true})
+  assert.doesNotMatch(JSON.stringify(accepted), /Private|message|http/)
+  for (const patch of [{state: 'installing'}, {state: 'error'}, {currentVersion: candidate},
+    {availableVersion: baseline}, {message: 'Update is ready'}, {message: 'AgentsDock update is incomplete: invalid signature'}]) {
+    assert.throws(() => assertOfflineInstallRefusal({...value, ...patch}, baseline, candidate, baseline, true))
+  }
+  assert.throws(() => assertOfflineInstallRefusal(value, baseline, candidate, candidate, true))
+  assert.throws(() => assertOfflineInstallRefusal(value, baseline, candidate, baseline, false))
+})
+
+test('server-before-app evidence requires both exact healthy unpaused components before replacement', () => {
+  const baseline = '1.0.6'
+  assert.equal(assertPreparedServerBeforeApp(health(), fixture(), identity.version, baseline, baseline)
+    .serverPreparedBeforeAppReplacement, true)
+  for (const patch of [{ok: false}, {server_identity: 'other'}, {server_version: baseline},
+    {server_instance_id: fixture().serverInstanceId}, {server_instance_id: undefined},
+    {gateway: {version: baseline}}, {execution_service: {version: identity.version, maintenance_held: true}},
+    {execution_service: {version: identity.version}}]) {
+    assert.throws(() => assertPreparedServerBeforeApp({...health(), ...patch}, fixture(), identity.version, baseline, baseline))
+  }
+  assert.throws(() => assertPreparedServerBeforeApp(health(), fixture(), identity.version, identity.version, baseline))
+})
+
+test('post-preparation native clients prove current state but never invent a shared live operation', () => {
+  const a = status(), b = status()
+  delete a.serverUpdates[0].operationId; delete b.serverUpdates[0].operationId
+  const result = assertTwoPreparedClients(a, b, health(), fixture(), identity.version)
+  assert.equal(result.sharedOperationObserved, false)
+  assert.equal(result.finalServiceInstanceShared, true)
+  assert.throws(() => assertSharedOperation(a, b, fixture(), identity.version), /shared same-type/)
+  for (const patch of [{phase: 'offline'}, {paused: true}, {serverInstanceId: 'other'}, {serverIdentity: 'other'},
+    {targetVersion: '1.0.6'}]) {
+    assert.throws(() => assertTwoPreparedClients(a, {...b, serverUpdates: [{...record(), ...patch}]}, health(), fixture(), identity.version))
+  }
+  assert.throws(() => assertTwoPreparedClients(a, {...b, serverUpdates: [record(), record()]}, health(), fixture(), identity.version))
+})
 
 test('stable baseline subscriptions are preserved instead of forced through Beta', () => {
   assert.deepEqual(desktopJourney('1.0.9', '1.0.6', 'stable108'),

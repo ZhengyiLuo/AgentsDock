@@ -52,7 +52,10 @@ const NATIVE_PROGRESS_PHASES = new Set(['baseline-artifact-verification-starting
   'updated-renderer-connecting', 'second-renderer-connecting', 'baseline-native-connected', 'stable-subscription-observed', 'beta-subscription-observed',
   'server-offline-before-app-install', 'trusted-native-input-restart-to-update', 'native-replacement-and-relaunch',
   'offline-pending-visible', 'second-native-client-waiting', 'owned-legacy-service-start-requested',
-  'two-native-clients-share-one-completed-update', 'paired-service-current'])
+  'two-native-clients-share-one-completed-update', 'paired-service-current',
+  'offline-install-refusal-observed', 'owned-service-reconnected-before-app-retry',
+  'paired-server-prepared-before-app-replacement', 'two-native-clients-current-after-prepared-update',
+  'native-replacement-state-observed', 'legacy-postcompletion-retry-requested'])
 
 export function emitNativeProgress(stage, at, write = line => process.stdout.write(line)) {
   assert(NATIVE_PROGRESS_PHASES.has(stage), 'Unknown native progress stage')
@@ -85,6 +88,96 @@ export function desktopJourney(candidate, baseline, profile = 'legacy') {
   assert(!baseline.includes('-'), 'Legacy desktop journey requires its stable baseline')
   return { initialTrack: 'stable', installedTrack: candidate.includes('-beta.') ? 'beta' : 'stable',
     switchToBeta: candidate.includes('-beta.') }
+}
+
+export function requiresServerBeforeApp(candidate, baseline, profile) {
+  desktopJourney(candidate, baseline, profile)
+  // This exact pinned incumbent introduced prepareInstall. Older baselines
+  // deliberately retain their app-first/offline-reconciliation acceptance.
+  return profile === 'beta1124'
+}
+
+export function assertOfflineInstallRefusal(status, baseline, candidate, installedVersion, offline) {
+  assert.equal(status?.currentVersion, baseline)
+  assert.equal(installedVersion, baseline, 'Offline refusal must retain the incumbent app')
+  assert.equal(offline, true, 'Offline refusal requires a genuinely offline service')
+  assert.equal(status.state, 'downloaded', 'The same update must remain retryable')
+  assert.equal(status.availableVersion, candidate)
+  assert(/^AgentsDock update is incomplete:/.test(status.message ?? '')
+    && /server is offline(?: or unreachable)?; reconnect before updating (?:AgentsDock|the app)\./.test(status.message),
+  'Require the actual offline pre-install refusal, not an arbitrary failure')
+  return { offlineRefusalObserved: true, incumbentAppPreserved: true, sameCandidateRetryable: true }
+}
+
+export function assertPreparedServerBeforeApp(health, fixture, version, installedVersion, baseline) {
+  assert.equal(installedVersion, baseline, 'The server must be prepared before native app replacement')
+  assert(health?.ok && health.server_identity === fixture.serverIdentity && health.server_version === version,
+    'Pre-install server preparation requires exact healthy version and original identity')
+  assert(health.gateway?.version === version && health.execution_service?.version === version
+    && health.execution_service?.maintenance_held === false, 'Both server components must be current and unpaused')
+  assert(health.server_instance_id && health.server_instance_id !== fixture.serverInstanceId)
+  return { serverPreparedBeforeAppReplacement: true, bothComponentsCurrent: true, executionUnpaused: true,
+    originalServerIdentityPreserved: true }
+}
+
+export function assertTwoPreparedClients(first, second, health, fixture, version) {
+  assertCurrentPairedServer(first, health, fixture, version)
+  assertCurrentPairedServer(second, health, fixture, version)
+  const receipts = [first, second].map(status => status.serverUpdates.filter(row => row.profileId === PROFILE_ID))
+  assert(receipts.every(rows => rows.length === 1), 'Each client must have one exact server receipt')
+  assert(receipts.every(([row]) => row.serverInstanceId === health.server_instance_id),
+    'Both native clients must observe the current authenticated service instance')
+  return { nativeClientCount: 2, bothClientsCurrent: true, finalServiceInstanceShared: true,
+    sharedOperationObserved: false, targetVersion: version }
+}
+
+export function nativeInstallObservation(status, incumbentRunning, installedVersion, baseline, candidate) {
+  const message = typeof status?.message === 'string' ? status.message : ''
+  return { rendererAvailable: Boolean(status && typeof status === 'object'),
+    incumbentRunning: incumbentRunning === true, incumbentStillInstalled: installedVersion === baseline,
+    candidateInstalled: installedVersion === candidate,
+    candidateStillSelected: status?.availableVersion === candidate,
+    cancelable: typeof status?.cancelable === 'boolean' ? status.cancelable : null,
+    updaterState: ['idle', 'checking', 'available', 'downloading', 'downloaded', 'installing', 'not-available', 'error']
+      .includes(status?.state) ? status.state : 'unknown',
+    messageCategory: /^Updating servers before installing AgentsDock:/.test(message) ? 'preparing-servers'
+      : /^Restarting into AgentsDock /.test(message) ? 'restarting'
+      : /^AgentsDock update is incomplete:/.test(message) ? 'install-failed' : 'other',
+    candidateChangedBeforeRestart: message.includes('The downloaded app changed before restart.'),
+    // This classifies displayed text only, not the HTTP content type or body.
+    generic503MessageObserved: message === `AgentsDock update is incomplete: ${PROFILE_NAME}: 503 Service Unavailable Retry Update AgentsDock after resolving this.` }
+}
+
+export function assertLegacyPostcompletionRetry(status, health, fixture, version, installedVersion, baseline) {
+  assert.equal(status?.currentVersion, baseline)
+  assert.equal(status?.availableVersion, version)
+  assert.equal(status?.state, 'downloaded')
+  assert.equal(status?.cancelable, true)
+  assert(nativeInstallObservation(status, true, installedVersion, baseline, version).generic503MessageObserved,
+    'Only the exact displayed HTTP 503 permits the separate legacy recovery experiment')
+  assertPreparedServerBeforeApp(health, fixture, version, installedVersion, baseline)
+  const records = status.serverUpdates?.filter(row => row.profileId === PROFILE_ID)
+  assert.equal(records?.length, 1)
+  const record = records[0]
+  assert(record.phase === 'current' && record.paused !== true && record.targetVersion === version
+    && record.serverIdentity === fixture.serverIdentity && record.serverInstanceId === health.server_instance_id)
+  assert(typeof record.operationId === 'string' && record.operationId.length > 0)
+  return { originalPreparationFailed: true, failureCategory: 'displayed-http-503', seamlessUpgradePassed: false,
+    manualRetries: 2, totalInstallClicks: 3, retryOnlyAfterVerifiedCurrentServer: true }
+}
+
+export function nativeUpdaterLogObservation(bytes) {
+  assert(typeof bytes === 'string' && Buffer.byteLength(bytes) <= 16 * 1024 * 1024, 'Unbounded native log')
+  return { proxyCreated: bytes.includes('Proxy server for native Squirrel.Mac is created ('),
+    proxyListening: bytes.includes('Proxy server for native Squirrel.Mac is listening ('),
+    feedRequested: /(?:^|\n)\/ requested(?:\r?\n|$)/.test(bytes),
+    archiveRequested: bytes.includes(' requested by Squirrel.Mac, pipe '),
+    authenticationRejected: bytes.includes('No authenthication info') || bytes.includes('Invalid authenthication credentials'),
+    nativeDownloaded: bytes.includes('nativeUpdater.update-downloaded'),
+    proxyClosed: bytes.includes('Proxy server for native Squirrel.Mac is closed ('),
+    archiveReadFailed: bytes.includes('Cannot pipe "'),
+    updaterShipItError: bytes.includes('SQRLShipItRequestErrorDomain'),
+    updaterSquirrelError: bytes.includes('SQRLUpdaterErrorDomain') }
 }
 
 export function parseDesktopAcceptanceArguments(argv) {
@@ -506,6 +599,7 @@ export async function main(argv = process.argv.slice(2)) {
   const fixture = validateDesktopFixture(await regularJSON(options['server-fixture']), replay.identity)
   const baselineProfile = options['baseline-profile'] ?? 'legacy'
   const journey = desktopJourney(replay.identity.version, options['baseline-version'], baselineProfile)
+  const serverBeforeApp = requiresServerBeforeApp(replay.identity.version, options['baseline-version'], baselineProfile)
   if (baselineProfile !== 'legacy') {
     assert(options.scope === 'candidate', 'Pinned baseline profiles are scoped candidate observations only')
     assert.equal(fixture.baselineProfile, baselineProfile, 'Server and desktop baseline profiles differ')
@@ -534,7 +628,9 @@ export async function main(argv = process.argv.slice(2)) {
   }
   const logs = boundedNativeLog(createWriteStream(join(options.output, 'native-private.log'), { flags: 'wx', mode: 0o600 }))
   let ownedApp, secondApp, client, secondClient, lastReconciliation = null, keychainCreated = false
+  let offlineRefusal = null, preparedBeforeApp = null, legacyRecovery = null, recoveryInstance, recoveryOperation
   const sharedOperationObservations = []
+  const nativeInstallObservations = []
   const observeShared = async stage => {
     const result = await collectSharedOperationSnapshot(
       () => client?.evaluate('window.agentsDock.updates.status()'),
@@ -640,14 +736,67 @@ export async function main(argv = process.argv.slice(2)) {
     await client.screenshot(join(options.output, '01-ready-with-server-offline.png'))
     await client.clickButton(MIGRATION_INSTALL_BUTTON_NAMES)
     observed('trusted-native-input-restart-to-update')
+    if (serverBeforeApp) {
+      offlineRefusal = await until('Incumbent refuses offline paired installation without replacing the app', async () => {
+        const status = await client.evaluate('window.agentsDock.updates.status()')
+        try { return assertOfflineInstallRefusal(status, options['baseline-version'], replay.identity.version,
+          appVersion(ownedApp), await assertOffline(fixture)) } catch { return null }
+      })
+      assert.equal(await hashFile(join(ownedApp, 'Contents/Resources/app.asar')), previous.asarSha256,
+        'The offline refusal must retain the exact incumbent application bytes')
+      offlineRefusal.incumbentAsarPreserved = true
+      await client.screenshot(join(options.output, '01-offline-install-refused.png'))
+      observed('offline-install-refusal-observed', offlineRefusal)
+      serviceCommand(options, fixture, 'service', ['--action', 'start'], 'server-preinstall-reconnected.json')
+      await until('Original service is healthy before the real user retry', async () => {
+        try { const health = await serverHealth(fixture); return health.server_version === fixture.baselineVersion } catch { return false }
+      })
+      observed('owned-service-reconnected-before-app-retry')
+      await client.clickButton(MIGRATION_INSTALL_BUTTON_NAMES)
+      observed('trusted-native-input-restart-to-update')
+      preparedBeforeApp = await until('Incumbent prepares the exact server before native app replacement', async () => {
+        try { return assertPreparedServerBeforeApp(await serverHealth(fixture), fixture, replay.identity.version,
+          appVersion(ownedApp), options['baseline-version']) } catch { return null }
+      }, 15 * 60_000)
+      observed('paired-server-prepared-before-app-replacement', preparedBeforeApp)
+    }
+    // Retain only finite read-only status diagnostics while waiting for native
+    // replacement. Closing CDP early concealed whether preparation or ordinary
+    // window persistence blocked the incumbent. Never retry or force its quit.
+    await until('Squirrel replaced installed app', async () => {
+      const installedVersion = appVersion(ownedApp)
+      if (installedVersion === replay.identity.version) return true
+      let status = null
+      try { status = await client.evaluate('window.agentsDock.updates.status()') } catch { /* Native exit disconnects CDP. */ }
+      const snapshot = nativeInstallObservation(status, processesFor(ownedApp).includes(original.pid),
+        installedVersion, options['baseline-version'], replay.identity.version)
+      if (nativeInstallObservations.length < 24
+        && JSON.stringify(nativeInstallObservations.at(-1)?.snapshot) !== JSON.stringify(snapshot)) {
+        nativeInstallObservations.push({ at: new Date().toISOString(), snapshot })
+        observed('native-replacement-state-observed', snapshot)
+      }
+      lastReconciliation = (await collectReconciliationSnapshot(() => status,
+        () => reconciliationHealth(fixture), fixture, replay.identity.version)).snapshot
+      if (serverBeforeApp && !legacyRecovery && snapshot.generic503MessageObserved && lastReconciliation.recordPhase === 'current') {
+        const health = await serverHealth(fixture)
+        legacyRecovery = assertLegacyPostcompletionRetry(status, health, fixture, replay.identity.version,
+          installedVersion, options['baseline-version'])
+        assert.equal(await hashFile(join(ownedApp, 'Contents/Resources/app.asar')), previous.asarSha256)
+        recoveryInstance = health.server_instance_id
+        recoveryOperation = status.serverUpdates.find(row => row.profileId === PROFILE_ID).operationId
+        await client.screenshot(join(options.output, '02-legacy-preparation-failed-server-current.png'))
+        await client.clickButton(MIGRATION_INSTALL_BUTTON_NAMES)
+        observed('legacy-postcompletion-retry-requested', legacyRecovery)
+      }
+      return false
+    }, 4 * 60_000)
     client.close(); client = null
-    await until('Squirrel replaced installed app', () => appVersion(ownedApp) === replay.identity.version, 4 * 60_000)
     verifyApp(ownedApp, replay.identity.version)
     assert.equal(await hashFile(join(ownedApp, 'Contents/Resources/app.asar')), expected.asarSha256)
     const relaunched = await until('Squirrel relaunched app', () => processesFor(ownedApp).find(pid => pid !== original.pid))
-    assert(await assertOffline(fixture), 'Server unexpectedly restarted before the app completed its own update')
+    if (!serverBeforeApp) assert(await assertOffline(fixture), 'Server unexpectedly restarted before the app completed its own update')
     observed('native-replacement-and-relaunch', { installedVersion: appVersion(ownedApp), installedAsarSha256: expected.asarSha256,
-      nativeRelaunchObserved: Boolean(relaunched), serverStillOffline: true })
+      nativeRelaunchObserved: Boolean(relaunched), serverStillOffline: !serverBeforeApp, serverPreparedBeforeApp: serverBeforeApp })
     // Squirrel may discard diagnostic CLI arguments. First prove its relaunch,
     // then reopen the same unmodified installation solely for CDP observation.
     await stopOwned(ownedApp)
@@ -655,16 +804,25 @@ export async function main(argv = process.argv.slice(2)) {
     observed('updated-renderer-connecting')
     client = await until('Updated native renderer', () => connect(port))
     await client.call('Page.bringToFront')
-    const offline = await until('Real coordinator reports offline server', async () => {
+    const initialPhase = serverBeforeApp ? 'current' : 'offline'
+    const initial = await until(`Real coordinator reports ${initialPhase} server`, async () => {
       const status = await client.evaluate('window.agentsDock?.updates.status()')
       return status?.currentVersion === replay.identity.version
-        && status.serverUpdates?.some(item => item.profileId === PROFILE_ID && item.phase === 'offline') ? status : null
+        && status.serverUpdates?.some(item => item.profileId === PROFILE_ID && item.phase === initialPhase) ? status : null
     })
-    assertMigrationTrack(journey.installedTrack, offline, await readFile(join(profileDirectory, 'update-track'), 'utf8'))
+    assertMigrationTrack(journey.installedTrack, initial, await readFile(join(profileDirectory, 'update-track'), 'utf8'))
+    if (legacyRecovery) {
+      const health = await serverHealth(fixture)
+      assert.equal(health.server_instance_id, recoveryInstance, 'Legacy retry must not restart the already updated server again')
+      assert.equal(initial.serverUpdates.find(row => row.profileId === PROFILE_ID).operationId, recoveryOperation,
+        'Legacy retry must retain the same completed server update receipt')
+      legacyRecovery.noAdditionalServerRestart = true
+      legacyRecovery.sameServerOperationPreserved = true
+    }
     await openMigrationUpdateSettings(client)
-    const offlineRow = await visibleServerRow(client, 'offline')
-    await client.screenshot(join(options.output, '02-native-app-updated-server-offline.png'))
-    observed('offline-pending-visible', { phase: 'offline', phaseLabel: offlineRow.phaseLabel })
+    const initialRow = await visibleServerRow(client, initialPhase)
+    await client.screenshot(join(options.output, `02-native-app-updated-server-${initialPhase}.png`))
+    if (!serverBeforeApp) observed('offline-pending-visible', { phase: 'offline', phaseLabel: initialRow.phaseLabel })
     const secondProfile = join(options.output, 'second-profile')
     await mkdir(secondProfile, { mode: 0o700 })
     for (const [name, data] of [['settings.json', JSON.stringify(settings)], ['update-track', `${journey.installedTrack}\n`],
@@ -676,19 +834,21 @@ export async function main(argv = process.argv.slice(2)) {
     const secondProcess = launch(secondApp, secondProfile, secondPort)
     observed('second-renderer-connecting')
     secondClient = await until('Second exact native candidate renderer', () => connect(secondPort))
-    await until('Both real app instances observe the same offline server', async () => {
+    await until(`Both real app instances observe the same ${initialPhase} server`, async () => {
       const status = await secondClient.evaluate('window.agentsDock?.updates.status()')
       return status?.currentVersion === replay.identity.version && status.serverUpdates?.some(item =>
-        item.profileId === PROFILE_ID && item.serverIdentity === fixture.serverIdentity && item.phase === 'offline')
+        item.profileId === PROFILE_ID && item.serverIdentity === fixture.serverIdentity && item.phase === initialPhase)
     })
     assert(processesFor(ownedApp).length > 0 && processesFor(secondApp).includes(secondProcess.pid),
-      'Two independent native app processes must coexist before service reconnection')
+      'Two independent native app processes must coexist for paired-state observation')
     observed('second-native-client-waiting', { independentProfile: true, nativeClientCount: 2 })
-    await observeShared('offline')
+    await observeShared(serverBeforeApp ? 'completed-wait' : 'offline')
     // No server-update IPC is invoked by this harness: reconnect is the only
     // action, and the installed production coordinator owns admission/retry.
-    serviceCommand(options, fixture, 'service', ['--action', 'start'], 'server-reconnected.json')
-    observed('owned-legacy-service-start-requested')
+    if (!serverBeforeApp) {
+      serviceCommand(options, fixture, 'service', ['--action', 'start'], 'server-reconnected.json')
+      observed('owned-legacy-service-start-requested')
+    }
     const current = await until('Automatic paired server reconciliation', async () => {
       const { first: status, probe, snapshot: pairedSnapshot } = await observeShared('reconciling')
       const snapshot = pairedSnapshot.first
@@ -702,11 +862,13 @@ export async function main(argv = process.argv.slice(2)) {
     assert(!current.terminalFailure, 'Production coordinator paused after a failed update of the exact paired server')
     const currentRow = await visibleServerRow(client, 'current')
     await client.screenshot(join(options.output, '03-matched-app-and-server.png'))
-    const shared = await until('Both real clients joined one server update operation', async () => {
-      const { first: a, second: b } = await observeShared('completed-wait')
-      try { return assertSharedOperation(a, b, fixture, replay.identity.version) } catch { return null }
+    const shared = await until(serverBeforeApp ? 'Both real clients observe the prepared current server'
+      : 'Both real clients joined one server update operation', async () => {
+      const { first: a, second: b, probe } = await observeShared('completed-wait')
+      try { return serverBeforeApp ? assertTwoPreparedClients(a, b, probe?.health, fixture, replay.identity.version)
+        : assertSharedOperation(a, b, fixture, replay.identity.version) } catch { return null }
     })
-    observed('two-native-clients-share-one-completed-update', shared)
+    observed(serverBeforeApp ? 'two-native-clients-current-after-prepared-update' : 'two-native-clients-share-one-completed-update', shared)
     const preservation = serviceCommand(options, fixture, 'verify', ['--expect-version', replay.identity.version], 'server-preservation.json')
     const persisted = await regularJSON(join(profileDirectory, 'settings.json'))
     const saved = persisted.profiles.find(profile => profile.id === PROFILE_ID)
@@ -733,30 +895,50 @@ export async function main(argv = process.argv.slice(2)) {
         { name: 'native-app-update', status: 'passed', observations: { fromVersion: options['baseline-version'],
           toVersion: replay.identity.version, trustedNativeInput: true, nativeReplacementObserved: true,
           nativeRelaunchObserved: Boolean(relaunched), installedAsarSha256: expected.asarSha256,
-          targetZipSha256: expected.zipSha256, appInstalledBeforeServerReconnection: true } },
+          targetZipSha256: expected.zipSha256, appInstalledBeforeServerReconnection: !serverBeforeApp,
+          ...(legacyRecovery ? { recoveryMode: 'explicit-post-completion-retry', ...legacyRecovery } : {}),
+          ...(serverBeforeApp ? preparedBeforeApp : {}) } },
         { name: 'legacy-server-upgrade', status: coverage.populatedNativeHistoryObserved ? 'passed' : 'blocked', observations: { ...current.verification,
           fromVersion: fixture.baselineVersion, toVersion: replay.identity.version,
           preservedStateSha256: fixture.baselineStateSha256, preservationEvidenceSha256: preservation.evidenceSha256,
           updateRequestedByProductionCoordinator: true, manualServerUpdateClicks: 0, ...coverage,
           ...(!coverage.populatedNativeHistoryObserved ? { remaining: ['Populated provider history and native session IDs were not exercised by the empty-chat fixture.'] } : {}) } },
-        { name: 'offline-server-reconnect', status: 'passed', observations: { appInstalledWhileServerOffline: true,
-          offlineVisiblePhase: offlineRow.phaseLabel, reconnectedVisiblePhase: currentRow.phaseLabel,
-          reconciledAutomatically: true, manualRetryClicks: 0, originalServerIdentityPreserved: true } },
+        { name: serverBeforeApp ? 'offline-install-refusal-and-user-retry' : 'offline-server-reconnect', status: 'passed',
+          observations: serverBeforeApp ? { ...offlineRefusal, ...preparedBeforeApp,
+            manualRetryClicks: legacyRecovery?.manualRetries ?? 1,
+            totalInstallClicks: legacyRecovery?.totalInstallClicks ?? 2,
+            ...(legacyRecovery ? { recoveryMode: 'explicit-post-completion-retry', seamlessUpgradePassed: false } : {}),
+            appInstalledWhileServerOffline: false, reconnectedVisiblePhase: currentRow.phaseLabel }
+            : { appInstalledWhileServerOffline: true, offlineVisiblePhase: initialRow.phaseLabel,
+              reconnectedVisiblePhase: currentRow.phaseLabel, reconciledAutomatically: true,
+              manualRetryClicks: 0, originalServerIdentityPreserved: true } },
         { name: 'stable-beta-channels', status: 'passed', observations: { stable: stableDiscovery,
           selected: { track: downloaded.track, state: downloaded.state, availableVersion: downloaded.availableVersion },
           initialSubscription: journey.initialTrack, installedSubscription: journey.installedTrack,
           subscriptionChanges: journey.switchToBeta ? 1 : 0, selectedPreferencePreservedAfterRelaunch: true,
           discovery: 'synthetic-replay-not-publication' } },
-        { name: 'multiple-clients', status: 'passed', observations: shared }
+        { name: serverBeforeApp ? 'multiple-clients-after-prepared-update' : 'multiple-clients', status: 'passed', observations: shared }
       ],
-      events, limitations: ['No live-provider reply or natural OAuth renewal is claimed.',
+      events, legacyRecovery, limitations: ['No live-provider reply or natural OAuth renewal is claimed.',
+        ...(legacyRecovery ? ['The beta.4 preparation displayed HTTP 503; the wire response was not captured. Success is explicit post-completion retry recovery, not seamless upgrade.'] : []),
         'This case does not establish reboot, busy-work, rollback or native Windows acceptance.'],
       completedAt: new Date().toISOString() }
     await writeFile(join(options.output, 'desktop-evidence.json'), `${JSON.stringify(evidence, null, 2)}\n`, { flag: 'wx', mode: 0o600 })
-    console.log(JSON.stringify({ observed: true, checks: evidence.checks, evidenceSha256: digest(await readFile(join(options.output, 'desktop-evidence.json'))) }))
+    console.log(JSON.stringify({ observed: true, checks: evidence.checks, legacyRecovery,
+      evidenceSha256: digest(await readFile(join(options.output, 'desktop-evidence.json'))) }))
     return evidence
   } catch (error) {
     if (secondClient) await observeShared('failure').catch(() => {})
+    let nativeUpdaterDiagnostics = null
+    try {
+      const path = join(options.output, 'native-private.log')
+      const file = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW)
+      try {
+        const stat = await file.stat()
+        assert(stat.isFile() && stat.uid === process.getuid() && stat.size <= 16 * 1024 * 1024)
+        nativeUpdaterDiagnostics = nativeUpdaterLogObservation(await file.readFile('utf8'))
+      } finally { await file.close() }
+    } catch { /* Never expose raw log errors or substitute diagnostics for acceptance. */ }
     let serviceDiagnostics = { status: 'unavailable' }
     try {
       const diagnostic = serviceCommand(options, fixture, 'diagnose', [], 'server-diagnostics.json')
@@ -767,7 +949,8 @@ export async function main(argv = process.argv.slice(2)) {
       ...(harness ? { kind: 'scoped-macos-candidate-observations', publicationEligible: false, releaseAcceptance: false,
         harnessSourceSha: harness.harnessSourceSha } : {}),
       releaseReceiptSha256: replay.identity.releaseReceiptSha256, events, lastReconciliation,
-      sharedOperationObservations, serviceDiagnostics }), { flag: 'wx', mode: 0o600 }).catch(() => {})
+      sharedOperationObservations, nativeInstallObservations, nativeUpdaterDiagnostics,
+      offlineRefusal, preparedBeforeApp, legacyRecovery, serviceDiagnostics }), { flag: 'wx', mode: 0o600 }).catch(() => {})
     throw error
   } finally {
     client?.close()
