@@ -13,6 +13,21 @@
   failure rejection. Hosted native acceptance remains required; this
   entry does not establish a successful package or publication.
 
+## 2026-11-08 - Prepare coordinated 1.0.12-beta.5
+
+- Prepare a matching desktop, signed server, legacy bridge and short CLI Beta
+  candidate from main through `0f2e8181`, after the updater fixes and exact
+  upgrade-test configuration merged. Stable remains `1.0.11`.
+- Include credential-free update discovery and legacy-server file-descriptor
+  headroom while retaining beta.4's update recovery and receipt protections.
+  See [the candidate release notes](RELEASE_1.0.12-beta.5.md).
+- Source CI passed on both merged pull-request heads. Local version/staging
+  checks (27 tests) and runtime/CLI packaging regressions (16 tests) pass.
+  Candidate packaging and
+  exact signed installation/relaunch, rollback, active-work recovery and native
+  history acceptance remain pending. This entry records local source
+  preparation; it does not establish publication or deployment.
+
 ## Unreleased — Prepare exact beta.5 upgrade rehearsals
 
 - Add independently verified public beta.4/build 1272 and retained stable
@@ -87,6 +102,18 @@
   An existing external-volume working directory also failed in the managed
   service context; the successful provider check does not resolve that boundary.
   Active-turn continuation across an update was not exercised in this run.
+
+## 2026-11-08 - Prepare coordinated 1.0.12-beta.4
+
+- Carry the reviewed beta.3 changes and the stale updater-status reconciliation
+  fix into one desktop/server/CLI beta version. Preserve stable `1.0.11` and all
+  existing immutable artifacts; see [candidate notes](RELEASE_1.0.12-beta.4.md).
+- The reconciliation fix passed 227 focused tests. Isolated development-app
+  checks exercised authenticated HTTP, retained refreshed update receipts, and
+  real disposable Codex and Claude replies retained after navigation.
+- Production package validation and final signed outgoing update/relaunch,
+  active-work recovery and populated-history acceptance remain pending. This
+  entry records preparation only; no publication or deployment is claimed.
 
 ## Unreleased — Preserve updater progress during stale status checks
 
