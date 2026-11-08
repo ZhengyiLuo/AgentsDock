@@ -6,7 +6,7 @@ import { assertCurrentPairedServer, assertDesktopRunner, assertOlderVersion, ass
   assertStableDiscovery, assertVisibleCoordinatedRow, checksumForMacArchive, collectReconciliationSnapshot, collectSharedOperationSnapshot, emitNativeProgress,
   migrationCoverage, parseDesktopAcceptanceArguments, parseReconciliationSnapshot, parseSharedOperationSnapshot, reconciliationSnapshot,
   retainSharedOperationObservation, desktopJourney, requiresServerBeforeApp, assertOfflineInstallRefusal,
-  assertPreparedServerBeforeApp, assertTwoPreparedClients, nativeInstallObservation, nativeUpdaterLogObservation,
+  assertPreparedServerBeforeApp, assertTwoPreparedClients, nativeInstallObservation, nativeUpdaterLogObservation, assertLegacyPostcompletionRetry,
   terminalReconciliationFailure, validateDesktopFixture } from '../product_desktop_acceptance.mjs'
 
 // These are harness contract tests only: no app/service installation, native
@@ -39,7 +39,7 @@ test('native replacement diagnostics retain only finite state and comparisons', 
     serverUpdates: [{ name: privateValue }], extra: privateValue }, true, baseline, baseline, candidate)
   assert.deepEqual(snapshot, { rendererAvailable: true, incumbentRunning: true, incumbentStillInstalled: true,
     candidateInstalled: false, candidateStillSelected: true, cancelable: false, updaterState: 'installing',
-    messageCategory: 'restarting', candidateChangedBeforeRestart: false })
+    messageCategory: 'restarting', candidateChangedBeforeRestart: false, plainGatewayUnavailable: false })
   assert.doesNotMatch(JSON.stringify(snapshot), /private|https:|token|1\.0\./)
   const failed = nativeInstallObservation({ state: privateValue, cancelable: privateValue,
     message: 'AgentsDock update is incomplete: The downloaded app changed before restart.' }, false, candidate, baseline, candidate)
@@ -50,6 +50,24 @@ test('native replacement diagnostics retain only finite state and comparisons', 
   assert.equal(failed.candidateInstalled, true)
   assert.equal(nativeInstallObservation(null, false, baseline, baseline, candidate).rendererAvailable, false)
   assert.equal(nativeInstallObservation({message: {}}, false, baseline, baseline, candidate).messageCategory, 'other')
+})
+
+test('legacy post-completion retry admits only exact transient503 and the same current unpaused server', () => {
+  const baseline = '1.0.6'
+  const value = { ...status(), currentVersion: baseline, availableVersion: identity.version, cancelable: true, state: 'downloaded',
+    message: 'AgentsDock update is incomplete: Acceptance legacy server: 503 Service Unavailable. Retry Update AgentsDock after resolving this.' }
+  const result = assertLegacyPostcompletionRetry(value, health(), fixture(), identity.version, baseline, baseline)
+  assert.equal(result.seamlessUpgradePassed, false)
+  assert.equal(result.manualRetries, 2)
+  assert.equal(result.totalInstallClicks, 3)
+  for (const patch of [{message: 'Unknown failure'}, {message: value.message.replace('503 Service Unavailable', 'Cannot write update files')},
+    {state: 'installing'}, {cancelable: false}, {availableVersion: baseline}, {currentVersion: identity.version},
+    {serverUpdates: [{...record(), phase: 'blocked'}]}, {serverUpdates: [{...record(), paused: true}]},
+    {serverUpdates: [{...record(), operationId: undefined}]}, {serverUpdates: [{...record(), serverIdentity: 'other'}]}]) {
+    assert.throws(() => assertLegacyPostcompletionRetry({...value, ...patch}, health(), fixture(), identity.version, baseline, baseline))
+  }
+  assert.throws(() => assertLegacyPostcompletionRetry(value, {...health(), execution_service: {version: identity.version, maintenance_held: true}}, fixture(), identity.version, baseline, baseline))
+  assert.throws(() => assertLegacyPostcompletionRetry(value, health(), fixture(), identity.version, identity.version, baseline))
 })
 
 test('native Squirrel diagnostics disclose fixed booleans, never archive URLs or authentication values', () => {

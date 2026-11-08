@@ -14,6 +14,15 @@ last real coordinator/health observation. These are read-only diagnostics, not
 an extra retry, forced quit or manual replacement. Raw status messages, profile
 values and native logs remain private. A timeout still fails acceptance.
 
+A separately labeled legacy recovery experiment may issue one additional real
+UI click only after the exact plain gateway 503 message, unchanged incumbent
+bytes/candidate, and the same authenticated server's current, unpaused components
+and completed receipt are verified. It records three total install clicks and
+two manual retries, requires exact native replacement/relaunch, and rejects an
+additional server restart or changed operation. This does not pass the original
+seamless-upgrade requirement or remove its failure. Unknown, identity, signature,
+authentication, disk or structured failures are never admitted to this retry.
+
 The exact beta.5 candidate adds `stable111` and `beta1124`, each with both
 `0755` and `0750` installation-root modes, beside the retained legacy, fresh
 and recovery cases. Stable 1.0.11 users explicitly select Beta; existing beta.4
