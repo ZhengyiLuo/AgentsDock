@@ -7,6 +7,24 @@ All candidate receipts and observations remain `publicationEligible: false`;
 observations also remain `releaseAcceptance: false`. A successful job does not
 turn blocked or unobserved scenarios into full release acceptance.
 
+## 1.0.12-beta.3 rehearsal preparation
+
+The new exact candidate admits `stable111` and `beta1122`, with both legacy
+installation-root modes, alongside the existing legacy and recovery journeys.
+The beta.2 incumbent is public build 1270 from `9e816c6b`. Its independently
+downloaded checksum manifest is
+`d936c89bba528d97e5345202cbe41d3149272a2fd625c4a9dfcc15092850e15c`;
+the signed npm descriptor is
+`d505fdf9ae3608f58e66519afe6f3a9a46df54cacc6a1ed58173584ee69bc327`.
+The archive also matches anonymous official-registry delivery.
+
+The new installer allows the additional bounded cooperative shutdown phase
+(190 rather than 185 seconds); its ownership, locking and rollback rules remain
+unchanged. Pin its entire reviewed file to
+`5776115d6a61620189128578ca9facf0bbcdd5ebf496c8e1f1f55127dc10d301`.
+Historical pins and journeys remain intact. This is harness preparation, not
+native acceptance; scoped reports keep their original non-acceptance flags.
+
 ## 1.0.12-beta.1 rehearsal preparation
 
 Retain the previously reviewed stable 1.0.11 harness and historical pins.

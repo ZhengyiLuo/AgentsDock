@@ -293,7 +293,7 @@ export interface WorkspaceEditorProps {
   filesOnly?: boolean
   onActivate?: () => void
   onFileOpen?: () => void
-  /** Keep Chat and files inside one chat pane without nested editor splits. */
+  /** Scope files and commands to this chat pane, independently of its editor layout. */
   tabbedPane?: boolean
   paneActive?: boolean
   paneFocused?: boolean
@@ -342,8 +342,8 @@ export function WorkspaceEditor({
   const memoryPaths = new Set(memoryFiles.map(file => file.path))
   const [openFiles, setOpenFiles] = useState<OpenWorkspaceFile[]>(memoryFiles)
   const [activePath, setActivePath] = useState<string | null>(() => memory?.activePath && memoryPaths.has(memory.activePath) ? memory.activePath : null)
-  const [secondaryPath, setSecondaryPath] = useState<string | null>(() => !tabbedPane && memory?.secondaryPath && memoryPaths.has(memory.secondaryPath) ? memory.secondaryPath : null)
-  const [activeGroup, setActiveGroup] = useState<EditorGroupId>(() => !tabbedPane && memoryMatches ? memory.activeGroup ?? 'primary' : 'primary')
+  const [secondaryPath, setSecondaryPath] = useState<string | null>(() => memory?.secondaryPath && memoryPaths.has(memory.secondaryPath) ? memory.secondaryPath : null)
+  const [activeGroup, setActiveGroup] = useState<EditorGroupId>(() => memoryMatches ? memory.activeGroup ?? 'primary' : 'primary')
   const [restored, setRestored] = useState(memoryMatches)
   const pendingPaneOpenRef = useRef<(() => void) | null>(null)
   const paneOwnershipRef = useRef({ tabbedPane, paneActive, paneFocused, profileScope, sessionId: session.id, cwd, restored })
@@ -492,9 +492,9 @@ export function WorkspaceEditor({
     archived: Boolean(session.archived)
   }
 
-  const focusedPath = !tabbedPane && activeGroup === 'secondary' && secondaryPath ? secondaryPath : activePath
+  const focusedPath = activeGroup === 'secondary' && secondaryPath ? secondaryPath : activePath
   const primaryFile = openFiles.find(file => file.path === activePath) ?? null
-  const secondaryFile = !tabbedPane ? openFiles.find(file => file.path === secondaryPath) ?? null : null
+  const secondaryFile = openFiles.find(file => file.path === secondaryPath) ?? null
   const activeFile = openFiles.find(file => file.path === focusedPath) ?? null
   const paletteRenderGroup: EditorGroupId | null = paletteGroup === 'secondary'
     ? secondaryPath ? 'secondary' : activePath ? 'primary' : null
@@ -706,12 +706,12 @@ export function WorkspaceEditor({
             ? persisted.activePath
             : null
         ))
-        if (!tabbedPane) setSecondaryPath(current => current ?? (
+        setSecondaryPath(current => current ?? (
           persisted.secondaryPath && restoredFiles.some(file => file.path === persisted.secondaryPath)
             ? persisted.secondaryPath
             : null
         ))
-        if (!tabbedPane) setActiveGroup(current => current === 'secondary' || persisted.activeGroup !== 'secondary'
+        setActiveGroup(current => current === 'secondary' || persisted.activeGroup !== 'secondary'
           ? current
           : persisted.secondaryPath ? 'secondary' : 'primary')
         if (!filePresentationTouchedRef.current) {
@@ -722,7 +722,7 @@ export function WorkspaceEditor({
       .catch(() => undefined)
       .finally(() => { if (!cancelled) setRestored(true) })
     return () => { cancelled = true }
-  }, [cwd, memoryMatches, preferenceKey, profileScope, session.id, tabbedPane])
+  }, [cwd, memoryMatches, preferenceKey, profileScope, session.id])
 
   const persistWorkspace = useCallback(() => {
     // Empty, unnamed buffers are temporary UI, not files. Keep them visible
@@ -817,7 +817,7 @@ export function WorkspaceEditor({
   }, [persistWorkspace, restored])
 
   const currentEditorGroup = (): EditorGroupId | null => (
-    !paneOwnershipRef.current.tabbedPane && activeGroupRef.current === 'secondary' && secondaryPathRef.current
+    activeGroupRef.current === 'secondary' && secondaryPathRef.current
       ? 'secondary'
       : activePathRef.current ? 'primary' : null
   )
@@ -892,8 +892,7 @@ export function WorkspaceEditor({
   }
 
   const activateFilePath = (path: string, group: EditorGroupId = activeGroupRef.current): void => {
-    if (paneOwnershipRef.current.tabbedPane) group = 'primary'
-    else {
+    if (!paneOwnershipRef.current.tabbedPane) {
       onActivate?.()
       onFileOpenRef.current?.()
     }
@@ -2209,7 +2208,7 @@ export function WorkspaceEditor({
       }
       setWorkspaceError(message)
     }
-    const targetGroup = tabbedPane ? 'primary' : paletteLease?.targetGroup ?? options.targetGroup ?? (
+    const targetGroup = paletteLease?.targetGroup ?? options.targetGroup ?? (
       activePathRef.current && activeGroupRef.current === 'secondary' ? 'secondary' : 'primary'
     )
     if (!paletteLeaseIsCurrent(paletteLease)) return false
@@ -3413,8 +3412,8 @@ export function WorkspaceEditor({
   const chatPanelId = `${instanceId}-chat-panel`
   const editorPanelId = `${instanceId}-editor-panel`
   const fileActive = activePath !== null
-  const editorOnly = fileActive && (tabbedPane || filePresentation === 'full' || Boolean(onReturnToChat))
-  const splitActive = !tabbedPane && fileActive && filePresentation === 'split' && !onReturnToChat
+  const editorOnly = fileActive && (filePresentation === 'full' || Boolean(onReturnToChat))
+  const splitActive = fileActive && filePresentation === 'split' && !onReturnToChat
   const splitStyle = splitActive
     ? { '--workspace-editor-width': `${editorSplit.editorPercent}%` } as CSSProperties
     : undefined
@@ -3668,7 +3667,7 @@ export function WorkspaceEditor({
                   })
                 }}
               >{t('editor.openCompleteFile')}</button>}
-              {!tabbedPane && group === 'primary' && !secondaryPath && <button
+              {group === 'primary' && !secondaryPath && <button
                 type="button"
                 className="workspace-editor-expand-button"
                 aria-label={t('editor.splitEditorRight')}
@@ -3717,7 +3716,7 @@ export function WorkspaceEditor({
                 <Minimize2 size={13} aria-hidden="true" />
                 <span className="workspace-editor-expand-label">{t('editor.showChats')}</span>
               </button>}
-              {focused && !tabbedPane && !onReturnToChat && <button
+              {focused && !onReturnToChat && <button
                 type="button"
                 className="workspace-editor-expand-button"
                 aria-label={editorOnly ? t('editor.restoreChatSplitView') : t('editor.showFileWorkspaceFullScreen')}
@@ -3944,7 +3943,7 @@ export function WorkspaceEditor({
             placeholder: openFiles.find(file => file.path === pendingUntitledSave.path)?.name
           } : pendingCreate}
           onOpen={path => void openFile(path)}
-          onOpenToSide={tabbedPane ? undefined : openFileToSide}
+          onOpenToSide={openFileToSide}
           onToggle={toggleDirectory}
           onLoadMore={path => void loadDirectory(path, true)}
           onRefresh={refreshExplorer}

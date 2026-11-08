@@ -20,6 +20,7 @@ import { requirePinnedItemsScope } from '../lib/pinned-items'
 import { exactQueuedDeliverySkipAvailable } from '../lib/chat-references'
 import { useAppStore } from '../store/app-store'
 import { MarkdownContent } from './MarkdownContent'
+import { claudeCompactOutput } from '../lib/claude-compact-output'
 import { MediaGrid } from './MediaGrid'
 import { ChatInboxGroup } from './ChatInboxGroup'
 import { CrossChatPeerLink } from './CrossChatPeerLink'
@@ -99,7 +100,15 @@ function Message({ item, sessionId, profileScope, pinned }: { item: MessageItem;
           <button type="button" title={t('timeline.ui.copyFullMessage')} onClick={() => runTimelineAction(copy())}>{copied ? <Check size={12} /> : <Copy size={12} />}</button>
         </header>
         <div className="message-parts">
-          {events.map(part => <MarkdownContent
+          {events.map(part => {
+            const commandOutput = role === 'assistant' ? claudeCompactOutput(part, item.claudeCompactInput) : null
+            return commandOutput ? <div key={part.id} className="claude-compact-output">
+              <p>{t('timeline.compact.completed')}</p>
+              <details open={!commandOutput.collapsed}>
+                <summary>{t('timeline.compact.output')}</summary>
+                <pre>{commandOutput.text}</pre>
+              </details>
+            </div> : <MarkdownContent
             key={part.id}
             text={messageText(part)}
             files={files}
@@ -107,7 +116,7 @@ function Message({ item, sessionId, profileScope, pinned }: { item: MessageItem;
             inlineChatReferences={role === 'user' ? inlineTimelineChatReferences(part) : []}
             inlineTeamReferences={role === 'user' ? part.team_references ?? [] : []}
             onChatReferenceClick={selectTimelineChatReference}
-          />)}
+          />})}
         </div>
         {chatReferences.length > 0 && <div className="sent-chat-references" aria-label={t('timeline.ui.referencedChats')}>
           {chatReferences.map(reference => {

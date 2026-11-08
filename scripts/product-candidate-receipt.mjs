@@ -69,6 +69,10 @@ export const BETA1101_BASELINE = Object.freeze({
 })
 
 export function candidateBaselineProfile(name, candidateVersion) {
+  if (candidateVersion === '1.0.12-beta.3') {
+    assert(Object.hasOwn(BETA1123_BASELINES, name), 'Unknown beta 1.0.12-beta.3 baseline profile')
+    return BETA1123_BASELINES[name]
+  }
   if (candidateVersion === '1.0.12-beta.2') {
     assert(Object.hasOwn(BETA1122_BASELINES, name), 'Unknown beta 1.0.12-beta.2 baseline profile')
     return BETA1122_BASELINES[name]
@@ -159,6 +163,21 @@ export const BETA1122_BASELINES = Object.freeze({
       manifestSha256: 'acd800f9a7b3356d27293b6a98328b66a9e693eee695fedb2a8b54e642f9654d',
       signatureSha256: '4a262de3a11a59acf15d40d077c5a6c842e6bdaa9d9bd4b6d0d09efb2400216d',
       archiveSha256: '19da85e7a0f8a19af52fa3e5b5cf627c6c466a017e7b8d54561bb5751df28cad', archiveBytes: 3897427 }) }),
+})
+
+// Independently downloaded beta.2 release and official-registry archive. The
+// new journey preserves all historical pins and admits only beta.3.
+export const BETA1123_BASELINES = Object.freeze({
+  stable111: BETA1121_BASELINES.stable111,
+  beta1122: Object.freeze({ desktop: Object.freeze({ version: '1.0.12-beta.2', buildNumber: '1270', track: 'beta', repository: 'AgentsDock',
+    sourceSha: '9e816c6b3b73508a47764b4d4ea546e41bcd3857',
+    checksumSha256: 'd936c89bba528d97e5345202cbe41d3149272a2fd625c4a9dfcc15092850e15c',
+    zipSha256: '34705c4cd52d46bb1c82ace3129814410085238cd6e2c9af0b4e09fb755af124',
+    metadataSha256: 'c2e1f393c7e7a5eac994abaa41ec362ece257ca9464e439e3b64d1272d7de473' }), subscription: 'beta',
+    server: Object.freeze({ version: '1.0.12-beta.2', track: 'beta', sourceSha: '9e816c6b3b73508a47764b4d4ea546e41bcd3857',
+      manifestSha256: 'd505fdf9ae3608f58e66519afe6f3a9a46df54cacc6a1ed58173584ee69bc327',
+      signatureSha256: '6882ae6e11d314d37acc63a936263433c974287da98b6595cef44f5ecccfbd10',
+      archiveSha256: '23def0f21d4e764c479cabcb994ac40159955a536367131c980f96b5998f12c9', archiveBytes: 3926164 }) }),
 })
 
 export async function verifyBaselineServer(name, directory, candidateVersion) {

@@ -213,6 +213,10 @@ import {
 } from './secure-peer-contract'
 
 const INITIAL_SEMANTIC_ITEM_LIMIT = 48
+// Background latest-page reads per poll for chats that finished out of view.
+const FINISHED_CHAT_PREFETCH_LIMIT = 3
+// A failed background read waits this long before it is retried for the same reply.
+const FINISHED_CHAT_PREFETCH_RETRY_MS = 60_000
 const HISTORY_PAGE_SEMANTIC_ITEM_LIMIT = 120
 const LEGACY_TIMELINE_EVENT_LIMIT = 480
 const LEGACY_BOUNDARY_BACKFILL_EVENT_LIMIT = 1_000
@@ -313,6 +317,22 @@ interface ConnectionScope {
   readonly serverUrl: string
   namespace: string
   readonly client: AgentServerClient
+}
+
+interface FinishedChatPrefetchAttempt {
+  /** Agent output sequence the read was made for. */
+  readonly agentSeq: number
+  /** When a failed read may be retried for that same output. */
+  readonly retryAt: number
+}
+
+/** Background prefetch bookkeeping for one server connection. */
+interface FinishedChatPrefetch {
+  readonly generation: number
+  running: boolean
+  readonly attempts: Map<string, FinishedChatPrefetchAttempt>
+  /** Reads in flight, so opening the chat can wait for them. */
+  readonly reads: Map<string, Promise<TimelinePage>>
 }
 
 interface InactiveEmergencyStream {
@@ -425,6 +445,7 @@ export class AppService {
   private pendingNotificationRoutes: ProfileNotificationRoute[] = []
   private timelineLeaseSequence = 0
   private timelineReconcileInFlight = new Set<string>()
+  private finishedChatPrefetch: FinishedChatPrefetch | null = null
   private subagentSnapshotInFlight = new Map<string, Promise<SubagentSnapshot | null>>()
   private healthFailureCount = 0
   private readonly activityHealth = new ActivityHealthProjection()
@@ -5020,9 +5041,9 @@ export class AppService {
     const connection = scope.client.terminal(
       sessionId,
       options,
-      data => {
+      (data, receipt) => {
         if (this.isCurrentScope(scope) && this.terminalLeases.get(sessionId) === lease) {
-          this.emit('terminal:data', { sessionId, data, profileId: scope.profileId, profileGeneration: scope.generation })
+          this.emit('terminal:data', { sessionId, data, ...(receipt ? { receipt } : {}), profileId: scope.profileId, profileGeneration: scope.generation })
         }
       },
       state => {
@@ -5036,6 +5057,9 @@ export class AppService {
   }
   writeTerminal(profileId: string, profileGeneration: number, sessionId: string, data: string): void {
     if (this.profileScopeMatches(profileId, profileGeneration)) this.terminalConnections.get(sessionId)?.write(data)
+  }
+  acknowledgeTerminal(profileId: string, profileGeneration: number, sessionId: string, receipt: { streamId: string; offset: number }): void {
+    if (this.profileScopeMatches(profileId, profileGeneration)) this.terminalConnections.get(sessionId)?.acknowledge(receipt)
   }
   resizeTerminal(profileId: string, profileGeneration: number, sessionId: string, columns: number, rows: number): void {
     if (this.profileScopeMatches(profileId, profileGeneration)) this.terminalConnections.get(sessionId)?.resize(columns, rows)
@@ -5070,6 +5094,9 @@ export class AppService {
   async terminalAction(profileId: string, profileGeneration: number, sessionId: string, action: TerminalAction, target?: string): Promise<TerminalWindowsSnapshot> {
     const scope = this.requireProfileScope(profileId, profileGeneration)
     await this.ensureValidatedScope(scope)
+    this.assertCurrentScope(scope)
+    // A window/pane switch must not inherit a wheel batch for the old target.
+    this.terminalConnections.get(sessionId)?.cancelScroll()
     const windows = await scope.client.terminalAction(sessionId, action, target)
     this.assertCurrentScope(scope)
     return windows
@@ -5598,6 +5625,7 @@ export class AppService {
         this.emitSessions(activeScope, mergedSessions)
       }
       this.refreshProfileUnread(activeScope)
+      this.prefetchFinishedChats(activeScope)
     }
     if (jobs.status === 'fulfilled') {
       const changed = !jsonEqual(this.jobs, jobs.value)
@@ -5816,6 +5844,9 @@ export class AppService {
   private async reconcileTimelineAndStream(scope: ConnectionScope, sessionId: string, lease: number): Promise<void> {
     if (!this.isValidatedScope(scope)) {
       this.finishTimelineInitialization(sessionId, lease)
+      // Revalidate now rather than at the next poll. A successful health
+      // check reconciles every timeline still waiting for its latest page.
+      void this.runBackgroundRefresh(false, scope)
       return
     }
     const reconcileKey = `${scope.generation}:${sessionId}:${lease}`
@@ -5850,10 +5881,43 @@ export class AppService {
 
   private async fetchTimeline(scope: ConnectionScope, sessionId: string, lease: number, beforeStream?: (snapshot: SessionSnapshot) => void): Promise<SessionSnapshot> {
     await this.ensureValidatedScope(scope)
-    const page = await this.semanticTimelinePage(scope, sessionId, {
+    const page = await this.latestTimelinePageForOpen(scope, sessionId)
+    if (!this.isCurrentTimeline(scope, sessionId, lease)) throw new Error('Timeline selection superseded')
+    const snapshot = this.storeLatestTimelinePage(scope, sessionId, page)
+    if (!this.isCurrentTimeline(scope, sessionId, lease)) throw new Error('Timeline selection superseded')
+    // Publish the snapshot before any catch-up or live event from its boundary.
+    beforeStream?.(snapshot)
+    this.activateTimelineStream(scope, sessionId, timelinePageLatestSeq(page), lease)
+    this.scheduleSubagentSnapshotRefresh(scope, sessionId, lease)
+    queueMicrotask(() => void this.refreshTimelineFiles(scope, sessionId, true))
+    return snapshot
+  }
+
+  /** The window opening a chat starts from: its newest semantic items. */
+  private latestTimelinePage(scope: ConnectionScope, sessionId: string): Promise<TimelinePage> {
+    return this.semanticTimelinePage(scope, sessionId, {
       limit: INITIAL_SEMANTIC_ITEM_LIMIT, tail: true, visible: true
     })
-    if (!this.isCurrentTimeline(scope, sessionId, lease)) throw new Error('Timeline selection superseded')
+  }
+
+  /**
+   * Opening a chat whose latest page is already being prefetched waits for
+   * that read instead of starting another one. If it fails, read directly.
+   */
+  private async latestTimelinePageForOpen(scope: ConnectionScope, sessionId: string): Promise<TimelinePage> {
+    const prefetch = this.finishedChatPrefetch?.generation === scope.generation
+      ? this.finishedChatPrefetch.reads.get(sessionId)
+      : undefined
+    if (prefetch) {
+      try {
+        return await prefetch
+      } catch { /* The background run records its own failure. */ }
+    }
+    return this.latestTimelinePage(scope, sessionId)
+  }
+
+  /** Replace the cached window with an authoritative latest page. */
+  private storeLatestTimelinePage(scope: ConnectionScope, sessionId: string, page: TimelinePage): SessionSnapshot {
     // Flush accepted writes from the retired lease before replacing its window.
     this.flushEventCache()
     this.cache.putSession(scope.namespace, page.session)
@@ -5872,8 +5936,7 @@ export class AppService {
       semanticPaging
     )
     const cached = this.cache.snapshot(scope.namespace, sessionId)
-    if (!this.isCurrentTimeline(scope, sessionId, lease)) throw new Error('Timeline selection superseded')
-    const snapshot: SessionSnapshot = cached ? {
+    return cached ? {
       ...cached,
       session: page.session,
       queuedTurns: page.queued_turns ?? [],
@@ -5896,12 +5959,108 @@ export class AppService {
       filesTotal: 0,
       cachedAt: Date.now()
     }
-    // Publish the snapshot before any catch-up or live event from its boundary.
-    beforeStream?.(snapshot)
-    this.activateTimelineStream(scope, sessionId, page.latest_seq ?? page.events.at(-1)?.seq ?? 0, lease)
-    this.scheduleSubagentSnapshotRefresh(scope, sessionId, lease)
-    queueMicrotask(() => void this.refreshTimelineFiles(scope, sessionId, true))
-    return snapshot
+  }
+
+  /**
+   * A chat that finishes out of view has no live stream, so opening it would
+   * first paint the cached transcript without its reply. For unread chats
+   * this device has opened before, read the same latest page that opening
+   * the chat reads, a few chats per poll. Each reply is read once; a failed
+   * read is retried after a pause rather than on every poll.
+   */
+  private prefetchFinishedChats(scope: ConnectionScope): void {
+    if (!this.isValidatedScope(scope)) return
+    const prefetch = this.finishedChatPrefetchFor(scope)
+    // A slow earlier run keeps its chats; a later poll continues after it.
+    if (prefetch.running) return
+    forgetUnlistedChats(prefetch.attempts, this.sessions)
+    const sessions = this.finishedChatsToPrefetch(scope, prefetch.attempts, Date.now())
+    if (!sessions.length) return
+    prefetch.running = true
+    void this.runFinishedChatPrefetches(scope, prefetch, sessions).finally(() => { prefetch.running = false })
+  }
+
+  /** A new server connection starts with no attempts and no reads. */
+  private finishedChatPrefetchFor(scope: ConnectionScope): FinishedChatPrefetch {
+    if (this.finishedChatPrefetch?.generation !== scope.generation) {
+      this.finishedChatPrefetch = { generation: scope.generation, running: false, attempts: new Map(), reads: new Map() }
+    }
+    return this.finishedChatPrefetch
+  }
+
+  /** Unread chats, newest first, whose cached timeline misses their latest reply. */
+  private finishedChatsToPrefetch(
+    scope: ConnectionScope,
+    attempts: Map<string, FinishedChatPrefetchAttempt>,
+    now: number
+  ): Session[] {
+    const running = runningSessionIds(this.health)
+    return this.sessions
+      .filter(session => !session.archived
+        && !running.has(session.id)
+        && !this.timelineSubscriptions.has(session.id)
+        && hasUnreadAgentOutput(session)
+        && prefetchAttemptDue(attempts.get(session.id), session, now)
+        && this.cachedTimelineLagsBehind(scope, session))
+      .sort((left, right) => latestAgentOutputTime(right) - latestAgentOutputTime(left))
+      .slice(0, FINISHED_CHAT_PREFETCH_LIMIT)
+  }
+
+  private cachedTimelineLagsBehind(scope: ConnectionScope, session: Session): boolean {
+    const cachedSeq = this.cachedTimelineLatestSeq(scope, session.id)
+    // A chat never opened on this device keeps its ordinary cold open.
+    return cachedSeq !== null && cachedSeq < (session.latest_agent_event_seq ?? 0)
+  }
+
+  /** Newest event sequence cached for a chat, or null if it was never opened here. */
+  private cachedTimelineLatestSeq(scope: ConnectionScope, sessionId: string): number | null {
+    const state = this.cache.timelineState(scope.namespace, sessionId)
+    if (!state) return null
+    return Math.max(state.verifiedLatestSeq ?? 0, this.cache.latestEventSequence(scope.namespace, sessionId))
+  }
+
+  private async runFinishedChatPrefetches(
+    scope: ConnectionScope,
+    prefetch: FinishedChatPrefetch,
+    sessions: Session[]
+  ): Promise<void> {
+    // One read at a time keeps this background work from competing with the
+    // chat the user opens next.
+    for (const session of sessions) {
+      if (!this.isValidatedScope(scope)) return
+      const agentSeq = session.latest_agent_event_seq ?? 0
+      try {
+        await this.prefetchFinishedChat(scope, prefetch, session.id)
+        // Also final when the page was discarded: the open or newer cache
+        // already covers this reply.
+        prefetch.attempts.set(session.id, { agentSeq, retryAt: Number.POSITIVE_INFINITY })
+      } catch (error) {
+        prefetch.attempts.set(session.id, { agentSeq, retryAt: Date.now() + FINISHED_CHAT_PREFETCH_RETRY_MS })
+        if (!this.isCurrentScope(scope)) return
+        reportStorageError(error)
+        appLog('timeline', 'finished chat prefetch failed', { sessionId: session.id, error: errorText(error) })
+      }
+    }
+  }
+
+  private async prefetchFinishedChat(scope: ConnectionScope, prefetch: FinishedChatPrefetch, sessionId: string): Promise<void> {
+    const read = this.latestTimelinePage(scope, sessionId)
+    prefetch.reads.set(sessionId, read)
+    let page: TimelinePage
+    try {
+      page = await read
+    } finally {
+      prefetch.reads.delete(sessionId)
+    }
+    // An open that started meanwhile owns this chat's window and stream.
+    if (!this.isValidatedScope(scope) || this.timelineSubscriptions.has(sessionId)) return
+    // Never replace history the cache gained meanwhile with an older page.
+    if (timelinePageLatestSeq(page) < (this.cachedTimelineLatestSeq(scope, sessionId) ?? 0)) return
+    const snapshot = this.storeLatestTimelinePage(scope, sessionId, page)
+    this.emit('server:timeline', {
+      sessionId, snapshot, source: 'server', mode: 'replace', authoritativeTail: true,
+      profileId: scope.profileId, profileGeneration: scope.generation
+    })
   }
 
   private async fetchSubagentSnapshot(
@@ -7363,11 +7522,15 @@ function abortable<T>(promise: Promise<T>, signal: AbortSignal): Promise<T> {
 }
 
 function connectionStateForHealth(health: Health): ServerConnectionState {
-  return health.chat_readiness?.ready === false || health.capabilities?.tmux?.available === false ? 'degraded' : 'online'
+  // Restoring saved queues is normal startup work, not a failed connection.
+  // The server admits each chat as its queue is restored; keep actual failures
+  // and missing prerequisites visible without treating the whole scan as one.
+  return (health.chat_readiness?.ready === false && health.chat_readiness.state !== 'recovering')
+    || health.capabilities?.tmux?.available === false ? 'degraded' : 'online'
 }
 
 function connectionWarningForHealth(health: Health): string | null {
-  if (health.chat_readiness?.ready === false) {
+  if (health.chat_readiness?.ready === false && health.chat_readiness.state !== 'recovering') {
     return health.chat_readiness.message || 'Chat recovery is incomplete. Check the server before sending more messages.'
   }
   const tmux = health.capabilities?.tmux
@@ -8065,6 +8228,35 @@ function timelinePageNextBefore(page: TimelinePage): number | null {
 
 function semanticAttemptSucceeded(page: TimelinePage): boolean {
   return page.semantic_paging ?? (page.semantic_item_count != null)
+}
+
+function runningSessionIds(health: Health | null): Set<string> {
+  return new Set(health?.active ?? health?.active_sessions ?? [])
+}
+
+function hasUnreadAgentOutput(session: Session): boolean {
+  return (session.latest_agent_event_seq ?? 0) > (session.last_read_agent_event_seq ?? 0)
+}
+
+function forgetUnlistedChats(attempts: Map<string, FinishedChatPrefetchAttempt>, sessions: Session[]): void {
+  const listed = new Set(sessions.map(session => session.id))
+  for (const sessionId of attempts.keys()) {
+    if (!listed.has(sessionId)) attempts.delete(sessionId)
+  }
+}
+
+function prefetchAttemptDue(attempt: FinishedChatPrefetchAttempt | undefined, session: Session, now: number): boolean {
+  // A newer reply is always due; the same reply waits for its retry time.
+  return !attempt || (session.latest_agent_event_seq ?? 0) !== attempt.agentSeq || now >= attempt.retryAt
+}
+
+function timelinePageLatestSeq(page: TimelinePage): number {
+  return page.latest_seq ?? page.events.at(-1)?.seq ?? 0
+}
+
+function latestAgentOutputTime(session: Session): number {
+  const time = Date.parse(session.latest_agent_event_at ?? '')
+  return Number.isFinite(time) ? time : 0
 }
 
 function linkedFilename(response: Response, target: string): string {

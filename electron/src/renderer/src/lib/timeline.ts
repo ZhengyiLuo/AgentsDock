@@ -19,6 +19,8 @@ export interface MessageItem {
   events: Event[]
   role: 'user' | 'assistant'
   files: AgentFile[]
+  /** Exact owning input for presentation of native Claude compact diagnostics. */
+  claudeCompactInput?: Event
   /** Renderer-only outbound message that has not been accepted by AgentsServer yet. */
   pending?: boolean
   pendingPhase?: 'preflight' | 'submitting' | 'submitted'
@@ -746,7 +748,9 @@ export class TimelineProjector {
       // Resuming a persistent native goal starts an execution, not a human
       // message. Genuine later corrections enter through the steer branch.
       const nativeGoalResume = event.backend === 'codex' && event.purpose === 'codex_goal_resume'
-      if (!nativeGoalResume && !isDigestDeliveryTurn(event) && !isNativeMailboxWakeInput(event) && !isNativeBackgroundWakeInput(event)) this.activeTurn.user = event
+        && event.imported !== true && !hasProviderUserProvenance(event)
+      if (!nativeGoalResume && !isDigestDeliveryTurn(event) && !isNativeMailboxWakeInput(event)
+        && !isNativeBackgroundWakeInput(event) && !isServerUpdateContinuationInput(event)) this.activeTurn.user = event
       this.activeTurn.seq = Math.min(this.activeTurn.seq, event.seq)
       this.activeTurn.startedAt = event.ts
       this.activeTurn.purpose = event.purpose
@@ -1701,6 +1705,19 @@ function isNativeMailboxWakeInput(event: Event): boolean {
     && typeof event.provider_input_sha256 === 'string' && /^[a-f0-9]{64}$/.test(event.provider_input_sha256)
 }
 
+function isServerUpdateContinuationInput(event: Event): boolean {
+  if (event.type === 'turn_started' && event.imported !== true && event.backend === 'codex'
+    && event.purpose === 'codex_goal_resume' && !hasProviderUserProvenance(event)
+    && typeof event.run_id === 'string' && /^run_codexgoal_[a-f0-9]{16}$/.test(event.run_id)
+    && typeof event.queued_id === 'string' && /^queued_[a-f0-9]{16}$/.test(event.queued_id)
+    && typeof event.server_update_restart_request_id === 'string'
+    && /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/.test(event.server_update_restart_request_id)) return true
+  return event.type === 'turn_started' && event.imported !== true
+    && event.purpose === 'server_update_continuation' && event.prompt === ''
+    && event.provider_generated === true && event.provider_user_authored !== true
+    && typeof event.run_id === 'string' && Boolean(event.run_id.trim())
+}
+
 function isNativeBackgroundWakeInput(event: Event): boolean {
   const nativeBoundary = event.type === 'turn_started' && event.backend === 'claude' && event.imported !== true
     && typeof event.run_id === 'string' && Boolean(event.run_id.trim()) && !event.run_id.startsWith('import_')
@@ -2143,6 +2160,8 @@ function renderTimelineItem(item: TimelineItem): RenderTimelineItem[] {
       rows.push({
         kind: 'message', id: `${item.id}:assistant${suffix}`, key: `${item.key}:assistant${suffix}`,
         seq: segment.finals[0].seq, event, events: segment.finals, role: 'assistant', files: item.files,
+        ...(item.user?.backend === 'claude' && /^\/compact(?:\s|$)/u.test(item.user.prompt ?? '')
+          ? { claudeCompactInput: item.user } : {}),
       })
     }
   }
@@ -2256,6 +2275,7 @@ export function reconcileRenderTimelineItems(previous: RenderTimelineItem[], nex
     if (!before || before.kind !== item.kind) return item
     if (before === item) return before
     if (before.kind === 'message' && item.kind === 'message' && before.event === item.event &&
+      before.claudeCompactInput === item.claudeCompactInput &&
       before.role === item.role && sameReferences(before.events, item.events) &&
       sameReferences(before.files, item.files)) return before
     if (before.kind === 'trace' && item.kind === 'trace' && before.active === item.active &&

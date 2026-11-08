@@ -15,10 +15,13 @@ export function ClaudeContextIndicator() {
   useLocale()
   const {
     supported,
+    loading,
     runtime,
     session,
     refreshing,
     contextUsageError,
+    runtimeError,
+    refresh,
     refreshContextUsage
   } = useClaudeRuntime()
   const meterId = useId()
@@ -32,34 +35,40 @@ export function ClaudeContextIndicator() {
   const percent = usage?.contextPercent ?? null
   const formattedPercent = formatContextPercent(percent)
   const detail = formatClaudeContextUsageDetail(usage)
-  const tooltip = percent == null ? detail : `${formattedPercent} context used · ${detail}`
+  const title = percent == null
+    ? t('claudeContext.pending')
+    : t('ui.ClaudeContextIndicator.ClaudeContextIndicator.context_used_5d5dd91', { percent: formattedPercent })
+  const tooltip = percent == null ? detail : `${title} · ${detail}`
   const supportsOnDemandRefresh = runtime?.features?.context_usage_refresh === true
   const runtimeStatus = runtime?.status?.type
   const canSampleNow = supportsOnDemandRefresh && runtimeStatus === 'idle'
-  const canRefresh = !supportsOnDemandRefresh || canSampleNow
-  const refreshStatus = refreshing
-    ? 'Refreshing from Claude…'
-    : contextUsageError
-      ? `Refresh failed: ${contextUsageError}`
+  // A failed runtime read can always be retried observationally. Never send
+  // the SDK sampling command alongside an active provider turn.
+  const canRefresh = !loading && !refreshing && (Boolean(runtimeError) || !supportsOnDemandRefresh || canSampleNow)
+  const error = contextUsageError ?? runtimeError
+  const refreshStatus = loading || refreshing
+    ? t('claudeContext.refreshing')
+    : runtimeError
+      ? t('claudeContext.retry')
       : canSampleNow
-        ? 'Click to refresh now'
+        ? t('claudeContext.refreshNow')
         : supportsOnDemandRefresh && runtimeStatus === 'active'
-          ? 'Refreshes when the current Claude response finishes'
+          ? t('claudeContext.afterCurrentReply')
           : supportsOnDemandRefresh
-            ? 'Starts refreshing after the next Claude response'
-        : 'Updates after each Claude response'
+            ? t('claudeContext.afterNextReply')
+            : t('claudeContext.afterEachReply')
   return <Tooltip.Provider delayDuration={100}>
     <Tooltip.Root>
       <Tooltip.Trigger asChild>
         <button
           type="button"
-          className={`codex-context-indicator${percent == null ? ' unknown' : ''}${refreshing ? ' refreshing' : ''}`}
+          className={`codex-context-indicator${percent == null ? ' unknown' : ''}${loading || refreshing ? ' refreshing' : ''}`}
           aria-label={t("ui.ClaudeContextIndicator.ClaudeContextIndicator.refresh_claude_context_usage_ff7e7c5")}
           aria-describedby={meterId}
-          aria-busy={refreshing}
+          aria-busy={loading || refreshing}
           aria-disabled={!canRefresh}
           onClick={() => {
-            if (!refreshing && canRefresh) void refreshContextUsage()
+            if (canRefresh) void (runtimeError ? refresh() : refreshContextUsage())
           }}
         >
           <svg viewBox="0 0 18 18" aria-hidden="true">
@@ -78,9 +87,10 @@ export function ClaudeContextIndicator() {
       </Tooltip.Trigger>
       <Tooltip.Portal>
         <Tooltip.Content className="shortcut-tooltip codex-context-tooltip claude-context-tooltip" side="top" sideOffset={7} collisionPadding={8}>
-          <strong>{percent == null ? t("ui.ClaudeContextIndicator.ClaudeContextIndicator.unavailable_ca18449") : t("ui.ClaudeContextIndicator.ClaudeContextIndicator.context_used_5d5dd91", { "percent": String(formattedPercent) })}</strong>
+          <strong>{title}</strong>
           <span>{detail}</span>
-          <small className={contextUsageError ? 'error' : undefined}>{refreshStatus}</small>
+          {error && <small className="error">{t('claudeContext.refreshFailed', { error })}</small>}
+          <small>{refreshStatus}</small>
           <Tooltip.Arrow className="shortcut-tooltip-arrow" />
         </Tooltip.Content>
       </Tooltip.Portal>

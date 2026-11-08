@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState, type CSSProperties, type PointerEvent, type ReactNode } from 'react'
-import { Columns2, Columns3, Grid2X2, PanelLeft, Square } from 'lucide-react'
+import { Columns2, Columns3, Grid2X2, PanelLeft, Plus, Square } from 'lucide-react'
 import type { Session } from '@shared/types'
 import { t, useLocale } from '../lib/i18n'
 import { CHAT_PANE_IDS, type ChatPane as ChatPaneId } from '../lib/chat-panes'
@@ -184,12 +184,19 @@ export function ChatWorkspaceGrid({ sidebarVisible, terminalOpen, onSidebarToggl
 function EmptyChatPane({ pane, focused }: { pane: ChatPaneId; focused: boolean }) {
   const sessions = useAppStore(state => state.sessions)
   const panes = useAppStore(state => state.chatPanes)
+  const workspaceId = useAppStore(state => state.activeChatWorkspaceId)
+  const creatingChat = useAppStore(state => state.creatingChat)
+  const switchingProfileId = useAppStore(state => state.switchingProfileId)
   const [query, setQuery] = useState('')
   const candidates = sessions.filter(session => !session.archived && !Object.values(panes).includes(session.id)
     && `${session.title} ${session.cwd}`.toLowerCase().includes(query.toLowerCase()))
   return <section className={`empty-chat-pane${focused ? ' focused' : ''}`} data-chat-pane={pane} tabIndex={-1}
     onPointerDownCapture={() => useAppStore.getState().focusChatPane(pane)} onFocusCapture={() => useAppStore.getState().focusChatPane(pane)}>
     <strong>{t('chatWorkspace.chooseChat')}</strong>
+    <button type="button" className="primary-button empty-pane-new-chat" disabled={creatingChat || Boolean(switchingProfileId)}
+      onClick={() => void useAppStore.getState().requestNewChat(workspaceId ? { workspaceId, pane } : undefined)}>
+      <Plus size={16} aria-hidden="true" />{t('chatWorkspace.newChat')}
+    </button>
     <input type="search" aria-label={t('chatWorkspace.search')} placeholder={t('chatWorkspace.search')}
       value={query} onChange={event => setQuery(event.target.value)} />
     <div className="empty-pane-chat-list">

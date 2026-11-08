@@ -1,4 +1,5 @@
-import { describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it } from 'vitest'
+import { setLocale } from '@shared/i18n'
 import {
   formatClaudeContextUsageDetail,
   formatContextPercent,
@@ -6,6 +7,14 @@ import {
 } from './claude-context-usage'
 
 describe('Claude context usage', () => {
+  afterEach(() => setLocale('en'))
+
+  it('localizes missing usage and token details without changing the provider model name', () => {
+    setLocale('zh-CN')
+    expect(formatClaudeContextUsageDetail(null)).toBe('尚未收到 Claude 返回的上下文用量。')
+    const usage = parseClaudeContextUsage({ totalTokens: 50_000, maxTokens: 100_000, rawMaxTokens: 200_000, model: 'custom-model' })
+    expect(formatClaudeContextUsageDetail(usage)).toBe('50k / 100k 可用 token · 原始窗口 200k · custom-model')
+  })
   it('reads the authoritative Claude SDK context response', () => {
     const usage = parseClaudeContextUsage({
       context_usage: {

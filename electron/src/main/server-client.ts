@@ -308,9 +308,11 @@ export interface OpenedUploadSource {
 }
 
 export interface TerminalConnection {
+  acknowledge(receipt: { streamId: string; offset: number }): void
   write(data: string): void
   resize(columns: number, rows: number): void
   scroll(delta: number): void
+  cancelScroll(): void
   close(): void
 }
 
@@ -1968,7 +1970,7 @@ export class AgentServerClient {
   terminal(
     sessionId: string,
     options: TerminalConnectOptions,
-    onData: (data: string) => void,
+    onData: (data: string, receipt?: { streamId: string; offset: number }) => void,
     onState: (state: TerminalStateEvent) => void
   ): TerminalConnection {
     const configuration = this.configuration
@@ -1983,9 +1985,28 @@ export class AgentServerClient {
     let fatalError: string | null = null
     let columns = options.columns
     let rows = options.rows
+    let scrollTimer: NodeJS.Timeout | null = null
+    let pendingScroll = 0
+    let streamId = ''
+    let flowEnabled = false
+    let receivedOffset = 0
+    let acknowledgedOffset = 0
+    const cancelScroll = (): void => {
+      if (scrollTimer) clearTimeout(scrollTimer)
+      scrollTimer = null
+      pendingScroll = 0
+    }
+    const flushScroll = (): void => {
+      const delta = pendingScroll
+      cancelScroll()
+      if (delta && !stopped && socket?.readyState === 1) {
+        socket.send(JSON.stringify({ type: 'scroll', delta }))
+      }
+    }
     const stop = (): void => {
       if (stopped) return
       stopped = true
+      cancelScroll()
       if (retry) clearTimeout(retry)
       if (activeConnectWatchdog) clearTimeout(activeConnectWatchdog)
       if (resizeSync) clearTimeout(resizeSync)
@@ -2011,6 +2032,7 @@ export class AgentServerClient {
       const url = new URL(endpoint)
       url.searchParams.set('columns', String(columns))
       url.searchParams.set('rows', String(rows))
+      url.searchParams.set('flow_control', 'ack-v1')
       if (options.cwd) url.searchParams.set('cwd', options.cwd)
       const protocols = authenticatedWebSocketProtocols(
         configuration,
@@ -2018,6 +2040,15 @@ export class AgentServerClient {
         TERMINAL_STREAM_PROTOCOL
       )
       const currentDecoder = new TextDecoder()
+      const currentStreamId = randomUUID()
+      streamId = currentStreamId
+      flowEnabled = false
+      receivedOffset = acknowledgedOffset = 0
+      const deliver = (bytes: Uint8Array): void => {
+        if (stopped || disconnected || socket !== current) return
+        receivedOffset += bytes.byteLength
+        onData(currentDecoder.decode(bytes, { stream: true }), flowEnabled ? { streamId: currentStreamId, offset: receivedOffset } : undefined)
+      }
       const current = new WebSocket(url, protocols)
       socket = current
       current.binaryType = 'arraybuffer'
@@ -2033,6 +2064,8 @@ export class AgentServerClient {
       const reconnect = (error?: string | null): void => {
         if (stopped || disconnected || socket !== current) return
         disconnected = true
+        cancelScroll()
+        socket = null
         clearConnectWatchdog()
         onState({ sessionId, state: 'reconnecting', error: error || null })
         const jitter = Math.floor(Math.random() * Math.min(250, retryDelay / 3))
@@ -2053,8 +2086,9 @@ export class AgentServerClient {
         if (stopped || disconnected || socket !== current) return
         if (typeof message.data === 'string') {
           try {
-            const control = JSON.parse(message.data) as { type?: string; name?: string; message?: string }
+            const control = JSON.parse(message.data) as { type?: string; name?: string; message?: string; flow_control?: string }
             if (control.type === 'ready') {
+              flowEnabled = control.flow_control === 'ack-v1'
               retryDelay = 500
               onState({ sessionId, state: 'connected', name: control.name ?? null })
             } else if (control.type === 'error') {
@@ -2077,11 +2111,11 @@ export class AgentServerClient {
           void message.data.arrayBuffer().then(buffer => {
             if (stopped || disconnected || socket !== current) return
             const blobBytes = new Uint8Array(buffer)
-            if (blobBytes.byteLength) onData(currentDecoder.decode(blobBytes, { stream: true }))
+            if (blobBytes.byteLength) deliver(blobBytes)
           })
           return
         }
-        if (bytes?.byteLength) onData(currentDecoder.decode(bytes, { stream: true }))
+        if (bytes?.byteLength) deliver(bytes)
       })
       current.addEventListener('close', event => {
         clearConnectWatchdog()
@@ -2117,22 +2151,41 @@ export class AgentServerClient {
     if (configuration.abortController.signal.aborted) stop()
     else connect()
     return {
+      acknowledge(receipt): void {
+        if (stopped || !flowEnabled || socket?.readyState !== 1 || !receipt || receipt.streamId !== streamId ||
+            !Number.isSafeInteger(receipt.offset) || receipt.offset > receivedOffset || receipt.offset <= acknowledgedOffset) return
+        // ACK at 16 KiB boundaries, below the server's 64 KiB window. Ordinary
+        // typing creates no extra frames. Old render callbacks cannot ACK a new socket.
+        if (receipt.offset - acknowledgedOffset < 16 * 1024) return
+        acknowledgedOffset = receipt.offset
+        socket.send(JSON.stringify({ type: 'output_ack', offset: acknowledgedOffset }))
+      },
       write(data: string): void {
         if (stopped) return
+        flushScroll()
         if (socket?.readyState === 1) socket.send(new TextEncoder().encode(data))
       },
       resize(nextColumns: number, nextRows: number): void {
         if (stopped) return
+        flushScroll()
         columns = nextColumns
         rows = nextRows
         if (socket?.readyState === 1) socket.send(JSON.stringify({ type: 'resize', columns, rows }))
         syncTerminalSize()
       },
       scroll(delta: number): void {
-        if (stopped) return
+        if (stopped || socket?.readyState !== 1 || !Number.isFinite(delta)) return
         const bounded = Math.max(-80, Math.min(80, Math.trunc(delta)))
-        if (bounded && socket?.readyState === 1) socket.send(JSON.stringify({ type: 'scroll', delta: bounded }))
+        if (!bounded) return
+        // Keep direction changes ordered, and stay within the existing server's
+        // 80-line packet limit. A fixed (not sliding) deadline keeps scrolling
+        // responsive without one tmux subprocess chain per trackpad event.
+        if (pendingScroll && (Math.sign(pendingScroll) !== Math.sign(bounded) || Math.abs(pendingScroll + bounded) > 80)) flushScroll()
+        pendingScroll += bounded
+        if (Math.abs(pendingScroll) === 80) flushScroll()
+        else if (!scrollTimer) scrollTimer = setTimeout(flushScroll, 16)
       },
+      cancelScroll,
       close: stop
     }
   }

@@ -765,6 +765,22 @@ test('origin result parser refuses unbounded/raw/private fields and forged parti
   assert.throws(() => parseReplayOriginProbe(Buffer.alloc(2049)))
 })
 
+test('1.0.12-beta.3 replay rejects substituted and cross-version baseline bytes', async t => {
+  const f = scopedFixture(t, '1.0.12-beta.3')
+  const replay = await createCandidateReplay(f.options)
+  assert.equal(replay.identity.track, 'beta')
+  assert.equal(replay.identity.publicationEligible, false)
+  const baselineDesktopDirectory = join(f.root, 'substituted-baseline')
+  mkdirSync(baselineDesktopDirectory)
+  writeFileSync(join(baselineDesktopDirectory, 'SHA256SUMS'), 'substituted baseline manifest')
+  for (const baselineVersion of ['1.0.6', '1.0.11', '1.0.12-beta.2']) {
+    await assert.rejects(() => createCandidateReplay({...f.options, baselineDesktopDirectory, baselineVersion}), /independently pinned bytes/)
+  }
+  for (const baselineVersion of ['1.0.10', '1.0.11-beta.12', '1.0.12-beta.1', '1.0.12-beta.3', '1.0.12-beta.4']) {
+    assert.throws(() => replayBaselineMetadata(baselineVersion, '1.0.12-beta.3', true))
+  }
+})
+
 test('1.0.12-beta.2 replay rejects substituted contemporary baseline bytes', async t => {
   const f = scopedFixture(t, '1.0.12-beta.2')
   const replay = await createCandidateReplay(f.options)

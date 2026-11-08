@@ -966,5 +966,22 @@ describe('AppUpdateManager', () => {
     expect(installFailed).toHaveBeenCalledOnce()
     expect(manager.status()).toMatchObject({ state: 'downloaded', availableVersion: '1.2.4' })
     expect(manager.status().message).toContain('restart denied')
+
+    mocks.autoUpdater.checkForUpdates.mockImplementation(async () => {
+      mocks.emit('update-available', { version: '1.2.4' })
+      mocks.emit('update-downloaded', { version: '1.2.4' })
+      return null
+    })
+    await manager.check(false)
+    expect(manager.status()).toMatchObject({ state: 'downloaded', availableVersion: '1.2.4' })
+    expect(manager.status().message).toContain('restart denied')
+
+    mocks.autoUpdater.checkForUpdates.mockImplementation(async () => {
+      mocks.emit('update-available', { version: '1.2.5' })
+      mocks.emit('update-downloaded', { version: '1.2.5' })
+      return null
+    })
+    await manager.check(true)
+    expect(manager.status().message).toBe('AgentsDock 1.2.5 is ready to install.')
   })
 })

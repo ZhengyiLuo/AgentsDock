@@ -74,10 +74,13 @@ BETA1121_ROOT_NORMALIZING_INSTALLER_SHA256 = "958d54c6a862a5449f7ee3db13f2fd9083
 # each unchanged activation-quiesce failure boundary. Lock, recovery and root
 # permissions remain enforced by the reviewed installer and native tests.
 BETA1122_ROOT_NORMALIZING_INSTALLER_SHA256 = "3ad26a902209ffb2bf0916b6127b4d42ee2a23f003e85d1524f2ea64c3e843ef"
-NPM_BASELINE_VERSIONS = {"stable108": "1.0.8", "beta1085": "1.0.8-beta.5", "beta1101": "1.0.10-beta.1", "stable109": "1.0.9", "stable110": "1.0.10", "beta11112": "1.0.11-beta.12", "stable111": "1.0.11", "beta1121": "1.0.12-beta.1"}
+# Beta.3 permits the additional bounded teardown phase introduced by update
+# recovery (190 rather than 185 seconds); ownership, locks and rollback stay exact.
+BETA1123_ROOT_NORMALIZING_INSTALLER_SHA256 = "5776115d6a61620189128578ca9facf0bbcdd5ebf496c8e1f1f55127dc10d301"
+NPM_BASELINE_VERSIONS = {"stable108": "1.0.8", "beta1085": "1.0.8-beta.5", "beta1101": "1.0.10-beta.1", "stable109": "1.0.9", "stable110": "1.0.10", "beta11112": "1.0.11-beta.12", "stable111": "1.0.11", "beta1121": "1.0.12-beta.1", "beta1122": "1.0.12-beta.2"}
 NPM_BASELINE_TARGETS = {"stable108": ("1.0.9",), "beta1085": ("1.0.9",),
                         "beta1101": ("1.0.10-beta.2", "1.0.10-beta.3", "1.0.10-beta.4", "1.0.10-beta.5", "1.0.10-beta.6", "1.0.10"),
-                        "stable109": ("1.0.10",), "stable110": ("1.0.11",), "beta11112": ("1.0.11", "1.0.12-beta.1"), "stable111": ("1.0.12-beta.1", "1.0.12-beta.2"), "beta1121": ("1.0.12-beta.2",)}
+                        "stable109": ("1.0.10",), "stable110": ("1.0.11",), "beta11112": ("1.0.11", "1.0.12-beta.1"), "stable111": ("1.0.12-beta.1", "1.0.12-beta.2", "1.0.12-beta.3"), "beta1121": ("1.0.12-beta.2",), "beta1122": ("1.0.12-beta.3",)}
 ROLLBACK_STAGES = {"preflight", "start-request", "observe-rollback", "rollback-proof", "preservation",
                    "retry-request", "retry-health", "retry-completion", "retry-verification"}
 
@@ -1453,7 +1456,8 @@ def root_normalization_contract(bundle: Path, receipt: dict) -> str:
             with package.extractfile(members[0]) as stream:
                 installers.append(stream.read(2 * 1024 * 1024 + 1))
     # These reviewed candidates, including stable 1.0.10, retain the complete beta.1 installer.
-    expected_hash = (BETA1122_ROOT_NORMALIZING_INSTALLER_SHA256 if version == "1.0.12-beta.2"
+    expected_hash = (BETA1123_ROOT_NORMALIZING_INSTALLER_SHA256 if version == "1.0.12-beta.3"
+                     else BETA1122_ROOT_NORMALIZING_INSTALLER_SHA256 if version == "1.0.12-beta.2"
                      else BETA1121_ROOT_NORMALIZING_INSTALLER_SHA256 if version == "1.0.12-beta.1"
                      else BETA11112_ROOT_NORMALIZING_INSTALLER_SHA256 if version in {"1.0.11-beta.12", "1.0.11"}
                      else BETA1112_ROOT_NORMALIZING_INSTALLER_SHA256 if version == "1.0.11-beta.2"
@@ -1475,7 +1479,7 @@ def native_root_state(fixture: dict) -> dict:
 
 
 def verify_root_normalization(before: dict, after: dict, installer_hash: str) -> dict:
-    need(installer_hash in {ROOT_NORMALIZING_INSTALLER_SHA256, STABLE109_ROOT_NORMALIZING_INSTALLER_SHA256, BETA1101_ROOT_NORMALIZING_INSTALLER_SHA256, BETA1111_ROOT_NORMALIZING_INSTALLER_SHA256, BETA1112_ROOT_NORMALIZING_INSTALLER_SHA256, BETA11112_ROOT_NORMALIZING_INSTALLER_SHA256, BETA1121_ROOT_NORMALIZING_INSTALLER_SHA256, BETA1122_ROOT_NORMALIZING_INSTALLER_SHA256},
+    need(installer_hash in {ROOT_NORMALIZING_INSTALLER_SHA256, STABLE109_ROOT_NORMALIZING_INSTALLER_SHA256, BETA1101_ROOT_NORMALIZING_INSTALLER_SHA256, BETA1111_ROOT_NORMALIZING_INSTALLER_SHA256, BETA1112_ROOT_NORMALIZING_INSTALLER_SHA256, BETA11112_ROOT_NORMALIZING_INSTALLER_SHA256, BETA1121_ROOT_NORMALIZING_INSTALLER_SHA256, BETA1122_ROOT_NORMALIZING_INSTALLER_SHA256, BETA1123_ROOT_NORMALIZING_INSTALLER_SHA256},
          "Root normalization requires the reviewed signed installer contract.")
     identity = before.get("rootIdentity")
     need(isinstance(identity, list) and len(identity) == 3

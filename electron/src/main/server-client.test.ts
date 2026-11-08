@@ -3084,6 +3084,7 @@ describe('AgentServerClient live stream', () => {
     connection.write('pwd\r')
     connection.resize(160, 52)
     connection.scroll(-6)
+    vi.advanceTimersByTime(16)
     expect(new TextDecoder().decode(socket.sent[0] as Uint8Array)).toBe('pwd\r')
     expect(JSON.parse(String(socket.sent[1]))).toEqual({ type: 'resize', columns: 160, rows: 52 })
     expect(JSON.parse(String(socket.sent[2]))).toEqual({ type: 'scroll', delta: -6 })
@@ -3099,6 +3100,139 @@ describe('AgentServerClient live stream', () => {
     expect(socket.closed).toBe(true)
     expect(FakeWebSocket.instances).toHaveLength(1)
     expect(states.at(-1)).toBe('disconnected')
+  })
+
+  it('batches terminal wheel input on a fixed deadline without losing lines or direction', () => {
+    vi.useFakeTimers()
+    vi.stubGlobal('WebSocket', FakeWebSocket)
+    const client = new AgentServerClient('http://example.test:7850', 'secret')
+    const connection = client.terminal('chat', { columns: 80, rows: 24 }, () => {}, () => {})
+    const socket = FakeWebSocket.instances[0]
+    connection.scroll(-5)
+    vi.advanceTimersByTime(8)
+    connection.scroll(-5)
+    expect(socket.sent).toEqual([])
+    vi.advanceTimersByTime(8)
+    expect(socket.sent.map(String)).toEqual([JSON.stringify({ type: 'scroll', delta: -10 })])
+
+    connection.scroll(-70)
+    connection.scroll(-20)
+    connection.scroll(7)
+    vi.advanceTimersByTime(16)
+    const deltas = socket.sent.map(data => JSON.parse(String(data)).delta)
+    expect(deltas.reduce((sum, delta) => sum + delta, 0)).toBe(-93)
+    expect(deltas.slice(0, -1).every(delta => delta < 0 && delta >= -80)).toBe(true)
+    expect(deltas.at(-1)).toBe(7)
+    connection.scroll(NaN)
+    connection.scroll(Infinity)
+    connection.scroll(0)
+    vi.advanceTimersByTime(16)
+    expect(socket.sent).toHaveLength(deltas.length)
+    connection.close()
+  })
+
+  it('negotiates byte-accurate output credit and rejects old-socket acknowledgements', () => {
+    vi.useFakeTimers()
+    vi.stubGlobal('WebSocket', FakeWebSocket)
+    const client = new AgentServerClient('http://example.test:7850', 'secret')
+    const output = vi.fn()
+    const connection = client.terminal('chat', {columns:80,rows:24}, output, vi.fn())
+    const socket = FakeWebSocket.instances.at(-1)!
+    expect(socket.url.searchParams.get('flow_control')).toBe('ack-v1')
+    socket.emit('message', JSON.stringify({type:'ready',flow_control:'ack-v1'}))
+    // UTF-8 can be split across frames; count bytes even when decode emits ''.
+    const bytes = new TextEncoder().encode('中'.repeat(22000))
+    socket.emit('message', bytes.slice(0,1).buffer)
+    expect(output.mock.calls.at(-1)![0]).toBe('')
+    connection.acknowledge(output.mock.calls.at(-1)![1])
+    expect(socket.sent).toHaveLength(0)
+    socket.emit('message', bytes.slice(1).buffer)
+    const receipt = output.mock.calls.at(-1)![1]
+    expect(receipt.offset).toBe(66000)
+    connection.acknowledge({...receipt, offset:999999});expect(socket.sent).toHaveLength(0)
+    connection.acknowledge(receipt)
+    connection.acknowledge(receipt)
+    expect(socket.sent.map(String)).toEqual([JSON.stringify({type:'output_ack',offset:66000})])
+    socket.emit('close', undefined, {code:1006})
+    vi.advanceTimersByTime(1000)
+    const replacement = FakeWebSocket.instances.at(-1)!
+    replacement.emit('message', JSON.stringify({type:'ready',flow_control:'ack-v1'}))
+    replacement.emit('message',bytes.buffer)
+    connection.acknowledge(receipt)
+    expect(replacement.sent).toHaveLength(0)
+    connection.acknowledge(output.mock.calls.at(-1)![1])
+    expect(replacement.sent).toHaveLength(1)
+    connection.close();client.dispose()
+  })
+
+  it('does not require output credit from an older server', () => {
+    vi.stubGlobal('WebSocket', FakeWebSocket)
+    const client = new AgentServerClient('http://example.test:7850', 'secret')
+    const output=vi.fn()
+    const connection=client.terminal('chat',{columns:80,rows:24},output,vi.fn())
+    const socket=FakeWebSocket.instances.at(-1)!
+    socket.emit('message',JSON.stringify({type:'ready'}))
+    socket.emit('message',new TextEncoder().encode('legacy').buffer)
+    expect(output).toHaveBeenCalledWith('legacy',undefined)
+    connection.close();client.dispose()
+  })
+
+  it('flushes terminal scrolling before typing and resizing, without delaying ordinary input', () => {
+    vi.useFakeTimers()
+    vi.stubGlobal('WebSocket', FakeWebSocket)
+    const client = new AgentServerClient('http://example.test:7850', 'secret')
+    const connection = client.terminal('chat', { columns: 80, rows: 24 }, () => {}, () => {})
+    const socket = FakeWebSocket.instances[0]
+    connection.scroll(-4)
+    connection.scroll(-6)
+    connection.write('\u0003')
+    expect(JSON.parse(String(socket.sent[0]))).toEqual({ type: 'scroll', delta: -10 })
+    expect(new TextDecoder().decode(socket.sent[1] as Uint8Array)).toBe('\u0003')
+    connection.scroll(3)
+    connection.resize(100, 40)
+    expect(socket.sent.slice(2).map(data => JSON.parse(String(data)))).toEqual([
+      { type: 'scroll', delta: 3 }, { type: 'resize', columns: 100, rows: 40 }
+    ])
+    connection.write('x')
+    expect(new TextDecoder().decode(socket.sent.at(-1) as Uint8Array)).toBe('x')
+    connection.close()
+  })
+
+  it('drops pending scrolling on intentional close or a terminal action', () => {
+    vi.useFakeTimers()
+    vi.stubGlobal('WebSocket', FakeWebSocket)
+    const client = new AgentServerClient('http://example.test:7850', 'secret')
+    const connection = client.terminal('chat', { columns: 80, rows: 24 }, () => {}, () => {})
+    const socket = FakeWebSocket.instances[0]
+    connection.scroll(-5)
+    connection.cancelScroll()
+    vi.advanceTimersByTime(16)
+    expect(socket.sent).toEqual([])
+    connection.scroll(-5)
+    connection.close()
+    vi.advanceTimersByTime(16)
+    expect(socket.sent).toEqual([])
+  })
+
+  it('never replays pending terminal scrolling after reconnect or scope retirement', () => {
+    vi.useFakeTimers()
+    vi.spyOn(Math, 'random').mockReturnValue(0)
+    vi.stubGlobal('WebSocket', FakeWebSocket)
+    const client = new AgentServerClient('http://example.test:7850', 'secret')
+    const connection = client.terminal('chat', { columns: 80, rows: 24 }, () => {}, () => {})
+    const first = FakeWebSocket.instances[0]
+    connection.scroll(-5)
+    first.emit('close', undefined, { code: 1006 })
+    connection.scroll(-5)
+    vi.advanceTimersByTime(500)
+    const second = FakeWebSocket.instances[1]
+    expect(first.sent).toEqual([])
+    expect(second.sent).toEqual([])
+    connection.scroll(-5)
+    client.configure('http://other.test:7850', 'different-secret')
+    vi.advanceTimersByTime(1_000)
+    expect(second.sent).toEqual([])
+    expect(second.closed).toBe(true)
   })
 
   it('times out and retries a terminal websocket stuck during connection', () => {

@@ -1,5 +1,838 @@
 # Public development log
 
+## 2026-11-08 - Prepare coordinated 1.0.12-beta.3
+
+- Integrate main through `5de30b23` into the published beta.2 release line,
+  retaining previously shipped runtime, update, mailbox and history fixes.
+  Prepare one desktop/server/CLI beta version; stable remains `1.0.11`.
+- Combine native goal lifecycle filtering with update-continuation provenance,
+  retaining imported and explicitly user-authored messages. Preserve the
+  resumed goal's run-bound tools and durable update recovery boundary.
+- Isolate update endpoint tests from a developer's managed-install environment;
+  package preparation retains its separate tests and real native acceptance.
+- Add exact beta.2/stable 1.0.11 upgrade profiles and the reviewed beta.3 installer
+  pin without changing historical artifact identities or relaxing runner,
+  signature, ownership or rollback guards.
+- Desktop type checking/build and 5,948 tests pass (six skipped), plus eight
+  packaging/license checks. The 117 update endpoint tests and 277 focused
+  timeline/coordinator tests pass. Native release acceptance remains pending;
+  see [candidate notes](RELEASE_1.0.12-beta.3.md). No publication or deployment
+  is established by this preparation entry.
+
+## 2026-11-07 — Complete isolated coordinated-update source acceptance
+
+- Source `75da4096` passed actual signed managed-service replacement with two
+  isolated services, real Claude/Cursor work and native Codex goals. The review
+  fixed a first-turn Cursor recovery hole: updates now wait for its native
+  session to be durable rather than restarting into an empty conversation.
+- Rechecked invalid signatures, corrupt archives before takeover, partial
+  success and retry, and failure after takeover. The latter restored the old
+  healthy service and cleared the failed stage/fence; the same package then
+  installed successfully on retry. Existing identities/history were retained,
+  including installations with legacy 0755/0750 root permissions.
+- Through actual native app input, two private packaged update cycles exited,
+  installed and reopened automatically. The last cycle updated both saved
+  services before replacing the app, resumed Cursor once, and waited safely
+  for Claude's independent background command. Draft, connection, language and
+  channel settings survived. Rechecking did not reinstall current targets.
+  Offline preflight kept the old app and a persistent actionable error.
+  Detached terminal work survived rollback/retry and reconnected afterward.
+- Verification: all 11 hosted checks passed on the code head; 96 focused
+  restart/recovery and 254 update/installer/handoff tests passed. Desktop
+  verification also passed 310 focused tests, type checking and production
+  compilation. Final native history showed one interrupted Cursor turn and
+  one successful continuation, with no internal continuation user bubble.
+- Test surface: isolated, focus-emulated native Electron with real IPC,
+  authenticated HTTP, providers, service manager and native updater. Private
+  QA feeds/packages used ephemeral server signing and an Apple Development-
+  signed shell containing the branch's compiled desktop code. Production
+  signing/notarization, platform-specific release installation and supported
+  old-client feed migration remain release gates; they are not established by
+  this local acceptance. No production server was changed and nothing was
+  released. See `docs/COORDINATED_UPDATES.md` for the exact boundaries.
+
+## Unreleased — Wait for Cursor's first durable native session before updating
+
+- A Cursor thread identifier is persisted only after a successful native reply.
+  Its first running turn now waits for that safe boundary instead of being
+  interrupted into a new thread with no original task context. Later turns
+  with a durable native session remain eligible for update continuation.
+- Verification: 96 restart/recovery tests pass, including a live-but-not-yet-
+  persisted Cursor identifier and the subsequent durable-session case.
+  Managed-package and native desktop acceptance remains in progress below.
+
+## Unreleased — Avoid double-counting a resumable native goal during update
+
+- The live managed-install replay exposed a native goal's consumer being counted
+  both as an active chat and as independent background work. Deduplicate only
+  the exact, still-owned active goal consumer. Unrelated operations, changed
+  ownership, prompts and child agents remain restart blockers.
+- Verification: 77 restart/admission tests pass, including the actual native
+  operation registry in the goal-checkpoint test and stale-owner regressions.
+- An isolated two-service managed-package replay exercised legacy installation
+  roots with modes 0755 and 0750, invalid signatures, a corrupt archive before
+  takeover, partial success and retry. The failed service stayed healthy; retry
+  did not restart the already-updated service. A real Claude task recovered and
+  completed before its retained queued follow-up, each once. These packages use
+  a private QA signing key and loopback feed, not production release signing.
+- The subsequent native Codex goal replay passed a real managed-package update:
+  one pause and one recovery, unchanged native goal identity, retained usage,
+  and completion of the existing file checkpoint. It exposed an internal goal
+  resume notice rendered as a user message; the desktop now hides only the
+  server-marked update recovery boundary, retaining user text and the reply.
+  Verified that correction in the isolated native app against the real events.
+- Follow-up checks pass 269 server tests and 310 desktop tests, TypeScript and
+  production compilation. Native desktop automatic exit/install/relaunch is
+  still pending; private QA signing is not production release acceptance.
+
+## Unreleased — Preserve native goals through coordinated server restarts
+
+- Extend update-continuation capability to native Codex goals. Save the exact
+  thread/goal identity, pause before provider teardown, and resume the same goal
+  without resetting its token or time usage. Completion, replacement, exhausted
+  budgets and a later manual pause/clear take precedence over recovery.
+- Preserve the original interactive transport for ordinary continuations.
+  Claude SDK runs must confirm native Stop before recovery; closing the transport
+  alone is not a safe stop. Bind Claude recovery to its current native goal,
+  excluding earlier replaced goals, and show a recoverable error if stopping
+  cannot be confirmed. Internal continuation prompts stay out of user bubbles.
+- Pause independent chat owners concurrently within the bounded shutdown phase.
+  A prepared update with a durable continuation receipt receives the cooperative
+  shutdown budget, not the emergency three-second kill deadline. Keep emergency
+  restart behavior and the installer's bounded wait aligned with shutdown.
+- Verification on review base `2604af6a`: 380 focused server regression tests
+  pass, including lifecycle/queue, native goal identity and cancellation,
+  concurrent stop, transport retention and both restart signal paths. A separate
+  110-test goal-admission/history-repair run passes. Desktop type checking,
+  production compilation and 306 focused updater/timeline tests pass.
+- Real acceptance used an isolated native Electron app (offscreen/focus-emulated)
+  with authenticated local servers and real Codex and Claude providers. Goals
+  were created through the UI, interrupted, resumed after server restart,
+  and completed their file checkpoints. Codex retained native usage; a manual
+  pause prevented recovery. Claude resumed only the current goal, leaving old
+  goal checkpoints untouched; another restart produced no second continuation.
+  Interactive approvals were still required and usable after recovery.
+  A further Claude run exercised the production restart signal/watchdog code
+  using a private fixture trigger and completed the current goal after relaunch.
+- Test boundary: installation receipts were fixture-generated; source servers
+  were restarted, not upgraded through a signed package/service-manager install.
+  Current-source signed multi-server replacement, offline/partial-install
+  failure and native desktop quit/install/relaunch remain pre-merge gates.
+  Unsupported active jobs, standalone tasks and terminals still wait for a safe
+  boundary. No production server was restarted and nothing was released.
+
+## 2026-11-06 — Refresh the coordinated-update review against current main
+
+- Integrate main through `eac24fca`, preserving both native background-wake and
+  server-update continuation filtering in the desktop timeline.
+- Add two- and twelve-profile coordinator regressions: every exact server
+  reservation receives one continuation-enabled restart request, and desktop
+  installation remains gated until the last server is verified current.
+- Verification: 443 focused desktop tests, 207 update/restart/recovery server
+  tests and 74 provider-history repair tests pass. Desktop type checking,
+  production compilation and compiled-entry
+  verification pass. The server suites run with isolated configuration and
+  state, without inherited managed-installation settings. Two real disposable
+  servers were reached through a native development app; its Settings listed
+  both, and separate Claude and Codex conversations each received their reply.
+  Local installation discovery is isolated in this private harness; native IPC,
+  authenticated HTTP, providers and chat persistence are real.
+- Remaining gates: current-source signed multi-server replacement, busy-turn
+  recovery, offline/partial-failure retry, and automatic native app quit and
+  relaunch. This review does not establish universal task checkpointing or a
+  global pause across servers. Source/local development only; no release or
+  production app/server replacement.
+
+## Unreleased — Use one product update control in desktop Settings
+
+- Remove the separate manual AgentsServer update controls from Settings. The
+  Updates page keeps one Stable/Beta choice and one AgentsDock installation
+  action while listing each server's version and paired-update progress. A
+  failed paired update is retried from one product-level action; server restart
+  remains available on the Server page.
+- Verification: 236 focused desktop UI/updater tests, TypeScript checking, production
+  compilation and the compiled-entry audit pass. An isolated native Electron
+  development app used its actual Settings controls and authenticated client
+  connection to a disposable local server: the server version appeared, the
+  product channel was shown once and no separate server update panel appeared.
+  A separately identified local QA app containing this compiled UI was also
+  opened and operated through Settings: Updates showed one product channel and
+  action, the Server page had no manual update panel, and saved server versions
+  remained visible. This QA bundle reuses a test shell and is not a release-grade
+  package. The final UI has not been exercised through a packaged update
+  installation. Availability: source and local QA only; no public release or
+  production app/server replacement.
+
+## 2026-10-20 — Sync the coordinated updater with current main
+
+- Merge main `b21ef7ea` into the unreleased coordinated-update branch, retaining
+  both the server-first update work and intervening desktop/server fixes.
+- After integration, 311 focused desktop tests and 206 focused server tests pass
+  with isolated test state. Desktop TypeScript, production compilation, Python
+  compilation and diff checks pass. No native update package or public release
+  was produced by this source integration.
+
+## Unreleased — Prepare paired servers before replacing the desktop app
+
+- A downloaded app update now verifies its matching signed server descriptor,
+  checks saved server identities, and waits for every paired server to reach
+  the target before invoking the native installer. The app blocks chat controls
+  while updating and reports an incomplete update on failure.
+- A capable server can activate its exact queued update immediately. Ordinary
+  Codex, Claude and Cursor chats interrupted by that update receive one durable
+  internal continuation after restart. This does not checkpoint the exact
+  in-flight provider operation; already-completed side effects can be repeated.
+  Goals, other internal work and unsupported runtimes still wait for a safe
+  boundary.
+- A live forced-update check found that graceful shutdown can write a stopped
+  terminal event before the replacement process scans abandoned turns. Save
+  the active ordinary run identities in the restart receipt and restore their
+  internal continuation after a matching signed update, including when the
+  update has already completed before startup recovery. Completed turns stay
+  complete; a second startup does not queue another continuation. Real-provider
+  testing confirmed one continuation was queued and launched, but the first
+  continuation only reported an interrupted command instead of finishing its
+  remaining work. The internal instruction now explicitly asks the agent to
+  complete unfinished steps, including a necessary retry after checking effects.
+  A later disposable, signed beta.10-to-beta.11 update interrupted a real Codex
+  command. The replacement server retained identity, queued and completed
+  exactly one internal continuation, and the file contained one start and one
+  finish marker. The local app displayed the resumed answer after reload, and
+  a follow-up sent through that app completed on the same chat.
+- Validation: 151 focused server tests, 71 focused desktop tests, TypeScript and
+  the desktop production build pass. A disposable named server was upgraded
+  with a signed unpublished candidate and completed an ordinary Codex turn.
+  No public release was changed.
+- A compiled local Electron app from this branch connected to an existing
+  test server through the real client/server transport. A disposable Codex
+  chat and follow-up both completed, and the Updates page resolved the
+  published Stable and Beta feeds. Equal-version and local-suffix preflight
+  behavior has focused regression coverage. The development app cannot
+  install unpublished updates through its public feed; the separate signed
+  package test exercised active-chat continuation through the real server.
+- An isolated native update replay exposed an early forced-restart request
+  while the server package was still staging. The coordinator now waits for
+  an explicit ready state before requesting activation; a regression test
+  covers staging followed by readiness.
+- A later isolated replay activated the matching server but did not complete
+  native app replacement. The coordinator now keeps the same user update
+  action alive across the expected server restart connection gap, including
+  an ambiguous restart response. A later isolated macOS native replay with
+  signed, notarized, unpublished beta.6 and beta.7 packages passed the actual
+  one-click journey: the server reached beta.7 before app replacement, the app
+  relaunched at beta.7, and server identity and a saved chat survived. See
+  [native replay](https://github.com/ZhengyiLuo/AgentsDock/actions/runs/39105335755).
+  The replay used a private exact-package test feed and a disposable server;
+  it did not exercise a real provider turn during the update, busy goals,
+  multiple saved servers, or a production release.
+
+## 2026-10-21 — Replay a private busy-chat update
+
+- An explicit retry after server preparation failed could reattach to the old
+  failed schedule and fail again without attempting a new preparation. The main
+  Update action now clears that operation ownership on retry while retaining
+  the exact signed target. A regression failed before the fix; 135 focused
+  desktop tests, TypeScript checking and the production compile pass.
+- An unpublished, isolated macOS QA app and signed server package replayed a
+  beta.10-to-beta.11 update through the real Update button. The server
+  completed first; the app then replaced itself, relaunched and reopened the
+  same chat. A live Claude turn interrupted during the server restart received
+  one durable continuation, produced a final answer on the new server and
+  remained visible in the app. The continuation was marked system-generated
+  and not user-authored. A separate failed-preparation replay verified that
+  the same main button could retry successfully.
+- These QA app packages use a separate bundle identity, private app data and
+  loopback-only feeds; they were signed for local development, not notarized or
+  published. Busy Codex/Cursor turns, non-chat blockers, multiple clients and
+  rollback still need native acceptance before a product release.
+## 2026-11-06 - Improve terminal feedback and bound bulk output
+
+- Feed received output directly into xterm's existing input-aware parser instead
+  of imposing another animation-frame delay. Keep port discovery frame-batched
+  with a bounded tail. Remove the redundant tmux existence check before exiting
+  application-owned history scrolling on the next keystroke.
+- Add conservative visual-only typing prediction after distinct ordinary
+  characters have echoed correctly in the current burst. Predictions occupy
+  blank cells only and retire on mismatches, idle expiry, command/edit keys,
+  paste, composition, scrolling, selection, resizing, navigation and reconnect.
+  They never change terminal history, clipboard contents or transmitted input.
+  First/unconfirmed input, Unicode, line wrapping and unsupported input modes
+  continue to use authoritative output; this is not a universal shell-mode or
+  password detector.
+- Negotiate optional ack-v1 output credit with matching desktop/server builds.
+  ACK original PTY byte offsets only after xterm parses them, fence callbacks by
+  server generation and socket identity, and bound unconsumed output to a
+  64 KiB window plus at most one read. Input remains independent of output
+  credit. Older clients/servers retain the existing streaming path.
+- Source base `69eb0f8a`; development desktop 0.2.0/build 86, Electron 43.1.1,
+  server metadata 1.0.7-beta.11. All 280 selected desktop checks and 54 server
+  regressions, desktop typecheck and production compilation pass. Native hidden-window Electron
+  acceptance uses real mouse/keyboard, IPC, authenticated WebSocket, PTY and
+  tmux: ordinary typing, exact echo reconciliation, a non-echoing test password,
+  Unicode paste, backspace/arrows, Vim entry/exit, 10,000-line scrollback, bulk
+  output/Ctrl-C, reopen/reconnect and light/narrow presentation. An additional
+  80 ms renderer-ingress delay exercises predictions without changing transport
+  authentication or provider behavior; it is not a WAN or paint benchmark.
+- A further visible native-app pass repeats five fast-typing bursts and three
+  scroll-then-input cycles, edits pending input, and interrupts bulk output.
+  Confirmed output remains exact, with no duplicate characters or stale
+  prediction overlay after settling. No synthetic ingress delay is used in
+  this pass. Repeated bulk-output interruption checks also guide the smaller
+  credit window, reducing queued parsing before the next command is visible.
+- Real transport acceptance verifies output stops at its credit limit, ignores
+  invalid ACKs and resumes; Ctrl-C remains accepted while credit is exhausted.
+  No provider request is needed. No Windows/Linux native, real WAN, or exhaustive
+  shell/password-program acceptance is claimed. Source and local test runtime
+  only; no release, mobile change or production-server deployment.
+
+## 2026-11-06 - Clarify Claude context usage and recover failed reads
+
+- Replace the ambiguous context-meter “Unavailable” label with an explicit
+  missing-measurement state. Localize the usage details, loading, next-response
+  guidance and retry hints in English and Simplified Chinese. No token counts
+  or context limits are estimated when Claude supplies no valid measurement.
+- Surface runtime-read errors in the meter instead of silently displaying an
+  empty state. Retry failed reads through the observational runtime endpoint,
+  including when the cached state says active; never sample the SDK alongside
+  a running turn. Successful runtime responses clear obsolete read errors.
+  Keep last-known usage on manual sampling failures and prevent duplicate
+  clicks during initial loading or refresh.
+- Source: desktop-only correction on main `81e6e75c`; development package
+  version 0.2.0, Electron 43.1.1, unchanged test-server version 1.0.7-beta.11.
+  Five new focused regressions fail against the previous implementation. All
+  96 selected Claude-control, context-usage, localization and design tests pass;
+  TypeScript and production Electron compilation/output verification pass.
+- Exercise an isolated native offscreen Electron app with mouse and keyboard:
+  unloaded-chat guidance, real Claude messages and follow-ups, automatic usage
+  after completion, active-turn refresh blocking, manual refresh, navigation,
+  Chinese copy, light/dark themes and a narrow viewport. Keyboard refresh
+  advances the server's usage generation through real IPC, authenticated
+  transport and the native Claude SDK. Inject a runtime-read failure only in
+  the test harness, then remove it and recover with the real retry action.
+  Credential storage and the failure injection are fixtures; normal provider
+  responses and context measurements are not mocked. Analytics is disabled.
+- The reporter's custom endpoint and app/server versions remain unknown, so
+  persistent missing telemetry specific to that endpoint is not reproduced.
+  No server/mobile code changes, production restart, release or deployment.
+  Available as local source/build only.
+
+## 2026-11-04 - Keep delegated worker tasks separate from creator orchestration
+
+- Follow up PR #145 integration on `e435f079`: clarify the provider policy,
+  idle mailbox wake and busy-run notice. The original user instruction bounds
+  authorization; the prepared message identifies the recipient's subtask.
+  A worker asked to calculate and reply must not repeat its creator's setup or
+  create another worker. Requested replies use Chats, not a local final answer.
+- Clarify that accepted-send fields are snapshots, not live execution status.
+  An empty inbox is not evidence that the peer has not started or read its task.
+  No delegation is promoted from body text, copied to outgoing peer messages,
+  or expanded into new permissions. Receipt formats and authorization checks
+  are unchanged.
+- Add policy regressions that fail before the clarification, plus a real-ledger
+  check preserving the recipient task separately from its exact user scope.
+  All 598 focused server tests and 493 desktop service tests pass; TypeScript,
+  production Electron compilation and compiled-output verification pass.
+- Exercise the native offscreen Electron app through actual mouse/keyboard,
+  production IPC and authenticated test-server transport with real Codex and
+  Claude. Each provider completes initial and repeat creation/calculation/reply
+  workflows: four children total, one task and reply per child, no descendant
+  creations, correct settings inheritance and parent result/read receipts.
+  Verify both rendered mailbox cards and replies, including return navigation
+  and Jump to latest. Only isolated credential storage is a fixture; provider
+  generation and mailbox transport are real.
+- Development preview metadata remains desktop 0.2.0 / server 1.0.7-beta.11.
+  The local test server runs the correction; no production restart, deployment,
+  release or mobile change. Provider instructions guide task interpretation;
+  they are not a new enforcement or transitive-delegation mechanism. Other
+  providers and packaged Windows/Linux acceptance are not retested here.
+
+## 2026-11-04 - Integrate agent-created chats for local acceptance
+
+- Integrate PR #145 on main `413e6fa7`, retaining the original contributor
+  commit `b8bf3b0` and both development-log histories. Independent chats inherit
+  applicable settings and receive an exact creator/child mailbox pair without
+  copying native conversation identity or history. Creation alone stays idle.
+- Correct a permission-ceiling regression found by the existing Claude native
+  continuation tests: capability issuance no longer adds chat creation to
+  explicitly restricted actions. Normal admission and steering opt in; a server
+  without authentication cannot grant creation. Keep the original strict
+  continuation assertions and add explicit empty/restricted-ceiling regressions.
+- Verify failed acceptance recovery, cancellation settlement, same-key retries,
+  different-setting rejection, denied creation without mutations, and revoked
+  pairs not being silently restored. All 472 focused server tests pass; 493
+  desktop service tests, TypeScript, production compilation and compiled-output
+  verification pass. The two original continuation failures reproduce before
+  the correction and pass afterward without weakening their assertions.
+- Exercise actual native offscreen Electron, production preload/IPC and the
+  authenticated test server with real Codex and Claude. Create independent
+  children, confirm inherited folder/runtime settings and no initial turn,
+  send one task through each new route, observe each idle child wake and return
+  exactly one reply, then observe each creator wake and read its reply.
+  Mouse navigation confirms the new chats and mailbox cards in the existing UI.
+- After an idle test-server restart, both providers' fresh same-key creation
+  calls return the original chat and route with `created: false` and
+  `duplicate: true`. An unsent draft survives the server restart and renderer
+  reload. Identical same-run Claude mutations replay their original receipt
+  through the existing tool replay guard, rather than creating another chat.
+- Restart the visible local preview on the integrated source and preserve its
+  existing draft. Development desktop metadata remains 0.2.0; server metadata
+  remains 1.0.7-beta.11. These identify local source previews, not new releases.
+  Only credential storage is a fixture in the isolated client. Custom endpoint
+  inheritance, denied requests, cancellation and revoke failure cases have
+  automated coverage, not all forced live-provider scenarios. Other providers
+  and packaged Windows/Linux acceptance remain untested. Local only; no remote
+  push, PR merge, production deployment, mobile change or release publication.
+
+## 2026-11-04 - Keep catalog concurrency checks independent of runner pauses
+
+- The first fixture synchronization fix did not resolve full CI by itself.
+  Subsequent logs show the first HTTP test task stalling its event loop for
+  6.389 seconds, beyond the old five-second test watchdog. Injecting a matching
+  6.5-second stall locally reproduces that failure.
+- Use the existing neighboring concurrency test's 30-second bounded watchdog
+  for entry, join and synthetic-worker release. This test checks shared-work
+  ownership, not request latency: retain all 24 overlapping requests, one probe
+  per provider, identical responses, cleanup and single-worker regression guards.
+  Production discovery budgets and transport timeouts are unchanged.
+- The injected-stall case now passes; another 20 repetitions plus the complete
+  module pass (34 tests). Re-run the full shard and CI before merge. No running
+  app, provider behavior or release artifact changes are involved.
+
+## 2026-11-04 - Avoid worker starvation in the runtime-catalog concurrency test
+
+- The connection/sync integration's full CI repeatedly timed out in an unchanged
+  catalog test. Its blocking entry observer used the same default executor that
+  scope reads and catalog discovery needed. A one-worker executor reproduces the
+  fixture deadlock deterministically, even though ordinary local runs pass.
+- Signal an asyncio event from the synthetic provider workers instead of using
+  another worker to observe them. Deliberately constrain the test's default pool
+  to one worker. Preserve the five-second entry watchdog, all 24 overlapping
+  requests, exact per-provider call counts, response equality and cleanup checks.
+- The constrained case fails before the change and passes afterward. Twenty
+  repetitions plus the entire catalog-concurrency module pass (34 tests). This
+  changes test synchronization only, not provider discovery, authentication,
+  release artifacts or the running local app.
+
+## 2026-11-03 - Extend connection and background-sync acceptance
+
+- Revalidate integration `d73e5748`: 772 focused desktop tests across service,
+  transport, persistence, settings, server selection and locale contracts pass;
+  47 focused server tests and TypeScript pass again. No functional source change
+  is needed after these checks; the previous production compilation still applies.
+- Use an isolated native offscreen Electron profile, production IPC and real
+  authenticated Claude and Codex turns. Confirm hidden completed replies reach
+  the semantic cache before opening their chats, repeated navigation retains
+  chat-owned drafts, and replies remain distinct without cross-chat leakage.
+  Scroll the longer Claude history to verify earlier replies remain available.
+- Interrupt only the isolated client's real TCP connection through a transparent
+  test proxy. Cached replies remain readable and the draft survives offline
+  navigation. Restore connectivity and open a cached chat: the online indicator
+  returns in about 0.3 seconds in this local run, without waiting for the regular
+  poll. This timing is an observation, not a remote-network latency guarantee.
+- Disconnect again after a real Claude turn is accepted. The server completes
+  that original turn while the client is offline; reconnecting prefetches the
+  complete result without a second execution or duplicate completion. A later
+  real Codex request succeeds. Fully quit and relaunch the isolated app: the
+  selected chat, unsent draft and cached replies persist. Only credential storage
+  is a fixture; the proxy forwards unmodified traffic and injects socket loss.
+- The user's visible preview and the server stay running throughout these fault
+  tests. Slow startup recovery and failed-readiness presentation remain automated
+  regression coverage; packaged Windows/Linux acceptance is not claimed. Local
+  verification only, without a remote push, merge or release.
+
+## 2026-11-03 - Integrate connection recovery and background reply synchronization
+
+- Combine PRs #143 and #151 on main base `897a40e2`, preserving both original
+  contributor histories, including JiaCheng310's background-prefetch change.
+  Code merges cleanly; retain both development-log entries. Correct the Chinese
+  recovery label to use the established term “会话”, fixing the original
+  terminology-contract failure without changing behavior.
+- On integration commit `6e91eef6` plus that terminology correction, 699
+  targeted desktop tests, 47 focused server tests, TypeScript, production
+  compilation and compile-output verification pass. Development app metadata
+  remains 0.2.0; this is not a published version or an updater candidate.
+- An isolated native offscreen Electron app exercises production preload/IPC,
+  authenticated test-server transport and two real Claude turns. Leave the
+  responding chat, observe each completed reply in the local semantic cache
+  before reopening it, then return and reload. Both replies appear exactly once,
+  the contextual follow-up succeeds, and normal server refresh remains online.
+  Only credential storage is a fixture; the provider and server are real.
+- Restart the visible local preview on the integrated source, retaining the
+  existing profile and checking draft preservation. The updated test server is
+  required for the normal-disconnect handling. Long recovery and failed-recovery
+  presentation, late responses and retry ownership are covered by focused
+  regressions, not claimed as deliberately forced live scenarios in this run.
+  Packaged Windows/Linux and real network-loss acceptance remain untested here.
+- Local compiled preview only. No remote push, PR merge or release publication.
+
+## 2026-11-03 - Present Claude compact hook output as command diagnostics
+
+- Follow up on the Claude reliability integration below: native `/compact`
+  output from PostCompact hooks is command text, not Markdown. Show a concise
+  completion label and a disclosure containing the unchanged native output.
+  Only a recognized successful single-hook envelope with empty output starts
+  collapsed; failures, warnings, non-empty output and unknown envelopes remain
+  expanded. Copying and stored history retain the complete original text.
+- Apply this presentation only to source-identified Claude output paired with
+  its exact same-session, same-run `/compact` input. Ordinary messages, user
+  quotes and other providers keep their existing rendering. Reconciliation
+  updates the row if the owning input arrives later.
+- On integration base `503ae3aa`, 378 targeted desktop tests, 483 focused server
+  tests, TypeScript, production compilation and compile-output verification
+  pass. The new rendering regression fails against the previous renderer.
+  The follow-up changes desktop presentation only; it adds no server mutation.
+- An isolated native offscreen Electron app exercises production IPC and real
+  authenticated server/Claude Code 2.1.304 requests: compact, contextual follow-up,
+  mouse and keyboard disclosure controls, English/dark and Chinese/light narrow
+  layouts, and reload. Native diagnostic bytes remain intact, shell text no
+  longer becomes mathematical notation, and the remembered phrase survives
+  compaction. Only credential storage is a fixture. Hook failures are covered
+  by automated tests rather than changes to the user's hook configuration.
+- Local compiled preview only. No release, remote push or PR merge. Real print
+  transport, forced connection-race timing, credential rotation and a full
+  24-hour cache interval are not claimed as live tests in this follow-up.
+
+## 2026-11-03 - Integrate the Claude reliability review batch for local acceptance
+
+- Combine PRs #150, #147, #148 and #149 on main base `f1af8090`, retaining
+  their original contributor commits. Code merges cleanly; development-log
+  conflicts retain both entries. No desktop or mobile source change is needed.
+- On integration commit `5433f8d0`, 483 focused server tests, desktop TypeScript,
+  production compilation and compile-output verification pass. These changes
+  require the updated server; rebuilding the desktop alone is insufficient.
+- An isolated native offscreen Electron app uses production preload/IPC and
+  authenticated test-server transport with real Claude Code 2.1.304. Exercise
+  message, native-palette `/compact`, contextual follow-up, a second `/compact`,
+  renderer reload and explicit provider-history refresh. Both commands complete
+  without the false empty-response error, the follow-up retains the test phrase,
+  and history refresh adds no duplicate user or assistant content.
+- Native model names remain present after more than five minutes and a real
+  Settings reload. A structured mention of a disposable target authorizes a
+  real provider-tool inbox request successfully; the same request without a
+  scoped mention is denied. Temporary test authorization is removed afterward.
+  Deliberate connection-race timing and credential rotation are covered by
+  automated regressions, not claimed as forced real-app scenarios in this run.
+- Existing local PostCompact hooks append lengthy command diagnostics to the
+  native completion output. The output remains verbose in the desktop; this
+  integration does not claim to improve that presentation. Print-transport and
+  a full 24-hour cache interval were not repeated in this local acceptance run.
+- Local preview only: the visible app is restarted against the integrated code,
+  preserving its profile and unsent draft. No PR merge, remote push or release.
+
+## 2026-11-03 - Revalidate empty-pane chat creation against current workspace behavior
+
+- Integrate the empty-pane New chat action with current workspace exit and
+  file-split behavior. Keep unique workspace identities and explicit layout
+  activation. A creation that finishes after exiting workspace mode updates
+  the saved workspace without reopening its panes or replacing the ordinary chat.
+- The new delayed-create regression fails without the visibility guard and
+  passes with it. On main base `7e590033`, 511 focused desktop tests, TypeScript
+  and production compilation pass; development metadata remains 0.2.0/build 86.
+- Actual native offscreen Electron input exercises production preload/IPC and
+  authenticated test-server requests: create four distinct persisted chats in
+  their destination panes, create with an empty search result and keyboard,
+  preserve four unsent drafts, exit/reenter workspace mode, and reload. Inspect
+  dark/light and narrow layouts. Only credential storage is a fixture; server
+  creation and responses are real. No provider turn is needed for this layout
+  change; packaged Windows/Linux acceptance is not claimed.
+- Local compiled preview and test-service validation only; no release publication.
+
+## 2026-11-01 - Create a new chat directly in an empty workspace pane
+
+- Add New chat above the existing-chat search in every empty pane. Create a
+  fresh server conversation in the clicked pane while retaining the other
+  chats, drafts and current workspace controls. Keep the action available when
+  the search has no matches, with English and Chinese labels.
+- Preserve empty workspace focus when background session lists arrive. Keep
+  ordinary chat-mode startup selection, and respect navigation or replacement
+  of the destination while creation is pending.
+- Validation uses an isolated offscreen native Electron app with production
+  preload/IPC and authenticated requests to a disposable full server. Click New
+  chat in three- and four-pane layouts, type into the new composers, and verify
+  distinct persisted conversations, empty histories and unchanged existing
+  drafts. Exercise dark and light themes and a narrow empty-search layout.
+  Existing histories and provider availability are fixtures; no provider turn,
+  packaged distribution, or native Windows/Linux acceptance is claimed.
+- Source based on `9f6f1f13`; development app metadata remains 0.2.0 (build 86).
+  Sixty focused workspace/component tests, TypeScript and Electron production
+  compilation pass. Source/build validation only; no server contract change
+  or deployment.
+
+## 2026-11-03 - Reduce terminal input delay after scrolling
+
+- Coalesce same-direction desktop wheel input on a fixed 16 ms deadline while
+  preserving the existing 80-line packet limit and total scroll distance.
+  Flush before typing, resizing or reversing direction; discard pending wheel
+  input when detaching, reconnecting, changing profile or switching tmux targets.
+  Ordinary keyboard input is not delayed or retried.
+- Reduce repeated server history scrolling from four tmux processes to two by
+  using the mode query as the existence check and combining the scroll with its
+  final mode query. Preserve manually owned copy mode, bottom-of-history exit,
+  and the older-tmux hidden-indicator fallback. No terminal protocol change.
+- Same-machine authenticated WebSocket/PTY/tmux benchmark: 10,000 history lines,
+  60 five-line wheel steps at requested 8 ms intervals, then an input echo.
+  The final repeated comparison (eight trials per version) reduced median
+  post-scroll echo delay from 390 ms to 18.6 ms; observed maxima were 504 ms and
+  20.8 ms. Idle echo medians remained 0.84 ms and 0.86 ms. Earlier runs varied
+  with host load but also improved; these are local measurements, not remote
+  network or foreground paint guarantees. Both mixed client/server combinations
+  were additionally exercised against the unchanged wire protocol.
+- Verification on main base `6dbb6673`, development metadata 0.2.0/build 86:
+  676 focused desktop tests, 65 server tests, TypeScript and production build
+  pass. New client regressions fail without the fix. Native offscreen Electron
+  exercises real IPC, authenticated transport, PTY and tmux: ordinary typing,
+  repeated scroll/input, direction reversal, Ctrl-C, window creation, split,
+  resize, reconnect, close/reopen with retained contents, manual copy-mode
+  ownership and mouse-capture toggling. Post-scroll input-to-renderer-data
+  median was 31 ms across four native-app trials (not a paint measurement).
+  Only credential storage and the synthetic terminal workload are fixtures;
+  no provider request is required for this terminal change.
+- Source/local test build only; existing user services and App are unchanged.
+  Client batching works with the previous server; the server process reduction
+  requires the corresponding server update. No release, deployment, mobile
+  change or native Windows/Linux acceptance is included.
+
+## 2026-11-02 - Preserve Claude tool ownership during connection startup
+
+- Keep the callback settings used to construct a Claude connection attached to
+  that connection while concurrent command/MCP discovery supplies newer options.
+  Those newer settings apply on the next reconnect.
+- This prevents a connecting client from retaining unbound AgentsDock tool
+  callbacks while ownership is assigned to a different settings object.
+- Validation: the delayed-connect race fails before the fix and passes after it.
+  All 13 focused ownership, reconnect, fork, native continuation and Side chat
+  checks pass. An isolated real Claude SDK run performs a concurrent runtime
+  lookup during controlled connection startup, then reads the inbox through
+  the production provider tool and HTTP authorization successfully. Temporary
+  fixture processes are stopped afterward; no production service changes or
+  deployment.
+
+## 2026-11-02 - Treat Claude /compact as a completed command
+
+- A native Claude local command such as `/compact` produces no model reply;
+  Claude only marks its result with `local_command`. AgentsDock flagged that
+  as "Claude returned no response…" and failed the turn. Such results now
+  complete normally, and the replayed `<local-command-stdout>` (e.g.
+  "Compacted") is shown as the reply with its native message ID. The output
+  is promoted only after the structured `local_command` field proves it; a
+  human message quoting the markup is not.
+- Applies to the Agent SDK and `claude -p` transports. The print path no
+  longer crashes on string-valued replayed user content.
+- Regression cases for SDK and print `/compact` turns fail before the fix;
+  297 focused server tests pass. An isolated source server (temporary
+  state/config, loopback) took real authenticated HTTP turns on the Agent SDK
+  path, using the desktop's native command selection, against a real Claude
+  (Haiku): message, `/compact`, follow-up, `/compact` again, then reopening
+  the chat. Before the fix this reproduced the empty-turn error and imported
+  wrapper bubbles. With this and the preceding history fix, both compactions
+  show "Compacted" with exit 0 and sync imports nothing. The same sequence on
+  the real `claude -p` transport (no SDK capability) also completes both
+  compactions with "Compacted" and exit 0.
+- Desktop acceptance: an isolated unpacked Electron 43.1.1 build of main,
+  offscreen in a private headless Wayland compositor with a private session
+  bus and keyring, connected through the real setup dialog and production
+  IPC/authenticated transport to an isolated source server running real
+  Claude Code 2.1.316 (Opus, Agent SDK). `/compact` was chosen from the native
+  command palette twice, around a follow-up, then the renderer was reloaded
+  and the chat reopened. Before the fix: two "Claude returned no response…"
+  errors. After it: both turns end with an assistant "Compacted", no errors,
+  and identical results after reopening. Limits: `--no-sandbox` (the setuid
+  helper needs root), and Linux only.
+- Source only; no server deploy/restart, desktop release or mobile change.
+
+## 2026-11-02 - Stop importing Claude command rows as user messages
+
+- Claude Code records a local slash command such as `/compact` as user-role
+  transcript rows: a metadata caveat, a `<command-name>` wrapper and its
+  `<local-command-stdout>` output. Provider-history sync imported the wrapper
+  and output as human bubbles and, because they matched nothing on the
+  timeline, re-imported everything since that point.
+- Rows proven by the native caveat → command → output parent chain now project
+  as the typed command (`/compact`) and its output ("Compacted"), keyed by the
+  native message ID, so they match the live turn instead of duplicating it.
+  Quoted markup without that chain stays ordinary user text; `/goal` keeps its
+  dedicated normalizer. Full import and incremental cursor sync both apply it.
+  Output rows must share the command occurrence's `promptId` (one stdout and
+  one stderr each), so a later human prompt quoting the markup stays human.
+  Incremental seeding recovers complete preceding records within the
+  transcript reader's 32 MiB record bound, so long command arguments keep
+  their provenance across a cursor boundary.
+- Regression cases use transcript records captured from Claude Code 2.1.316
+  and fail before the fix; 191 focused server tests pass.
+- Desktop acceptance (with the follow-up live-turn fix): an isolated unpacked
+  Electron 43.1.1 build of main, offscreen in a private headless Wayland
+  compositor with a private session bus and keyring, connected through the
+  real setup dialog to an isolated source server over authenticated
+  transport. A real Claude Opus chat ran message → `/compact` (from the native
+  command palette) → follow-up → `/compact` → renderer reload and reopen.
+  Before the fix, each compaction added two imported "You" bubbles with raw
+  wrapper markup. After it, the timeline shows four user and four assistant
+  messages, both "Compacted", no markup, and no imported rows on the server.
+- Rows already imported into existing chats are unchanged. Source only; no
+  server deploy/restart, desktop release or mobile change.
+
+## 2026-11-02 - Keep versioned Claude model labels while chats stay open
+
+- The model picker and composer bar showed bare aliases such as `Opus`
+  instead of `Opus 5.5`. Versioned labels come passively from a real chat's
+  Claude initialization, which happens once when its process connects, but
+  were cached for only five minutes. Claude chat processes stay connected for
+  hours and the desktop re-reads the catalog every 15 minutes, so most reads
+  fell back to the alias list.
+- The passive label cache now lasts 24 hours. Its key still changes with the
+  Claude CLI binary, provider environment, user/managed settings and account
+  identity; each new connection replaces the entry and native authentication
+  failure clears it. The native credential file now counts only by presence
+  (login/logout), so same-account OAuth renewal no longer discards labels. No
+  disposable Claude process, version guessing or static pin was added. Before
+  any chat connects, aliases remain unversioned.
+- Regression: the long-lived-chat and credential-rotation cases fail before
+  the fix; 22 catalog tests pass. An isolated source server (temporary
+  state/config, loopback) with a real Claude Opus chat returned `Opus 5.5` immediately and, with the chat
+  still open, `Opus` after 320 seconds before the fix versus `Opus 5.5`
+  after it.
+- Desktop acceptance: an isolated unpacked Electron 43.1.1 build of main,
+  offscreen in a private headless Wayland compositor with a private session
+  bus and keyring, connected through the real setup dialog and production
+  IPC/authenticated transport to an isolated source server with a real
+  Claude Code 2.1.316 Opus chat. The composer read `Opus · high` until the
+  catalog refreshed, then `Opus 5.5 · high` after Settings → My Agents →
+  Reload settings. The picker listed Opus 5.5, Sonnet 5.5 and Haiku 5.5. After
+  341 seconds with the chat still open, a second reload kept `Opus 5.5 · high`
+  with the fix; on main it fell back to `Opus · high`. Real OAuth renewal was
+  not triggered; same-account rotation is covered by a regression only.
+  Limits: `--no-sandbox` (the setuid helper needs root), and Linux only.
+- Updated the Claude discovery docs, including marking the removed
+  disposable-probe design as historical. Source only; no server
+  deploy/restart, desktop release or mobile change.
+## 2026-11-02 - Prefetch replies of chats that finish out of view
+
+- A chat that finished while hidden opened with its cached messages and showed
+  the reply only after the latest page loaded. The background poll now reads
+  that page for unread chats this device has opened before, up to three per
+  poll, so opening the chat shows the reply at once. Each reply is read once;
+  a failed read is retried after a minute.
+- Opening a chat after a failed health check reconnects at once instead of
+  waiting for the next 30-second poll.
+- Verification: new service tests; typecheck, desktop tests and build pass.
+  Against a local test server with a stub Cursor CLI, the reply was cached
+  about 40 ms after the poll and still showed in the app with the server
+  stopped. Real Claude/Codex turns and packaged builds were not tested.
+
+## 2026-11-02 - Exit workspace mode into a single chat
+
+- Hide workspaces now exits the entire multi-pane view, including empty chat
+  selectors, and restores the ordinary header for the focused conversation.
+  Reopening restores saved pane assignments and layout instead of creating a
+  workspace. Sidebar navigation while closed cannot overwrite that layout.
+- Retain drafts and server-scoped preferences through toggles, reloads and
+  server switching; release hidden timeline subscriptions without stopping
+  provider runs. Ignore late hidden-pane loads and reconcile deleted chats
+  before reopening. Migrate previously hidden-but-still-split saved layouts.
+- Regression cases failed before the fix. The beta-based preview passed 5,956
+  desktop tests (six skipped). The main-based PR passed 5,827 tests (five
+  skipped), eight packaging/license checks, typecheck and production build.
+  Native offscreen Electron with real authenticated test-server transport
+  exercised three-pane selection, focused-chat exit, unsent draft retention,
+  reload, repeated reopening, keyboard activation, and dark/light/narrow views.
+  Credential storage was isolated; no provider message was submitted.
+- Local user window refreshed to the updated compiled renderer; no server
+  update/restart, mobile change or release. Native Windows/Linux acceptance
+  and packaged distribution remain outside this local preview.
+
+## 2026-11-02 - Restore file split controls inside chat workspaces
+
+- Restore Show chat / Full screen, Editor left / Editor right, Split right,
+  and the Files tree's Open to the Side in tabbed chat panes. Retain the
+  workspace model and its focused-pane/profile ownership guards; do not bring
+  back the removed Changes tab. Restore secondary editor selection and layout
+  preferences independently of pane ownership, including unsaved file drafts.
+- Bound editor grid tracks and wrap narrow toolbars so restored buttons are
+  not clipped in chat-plus-two-file layouts. Reuse existing controls, labels,
+  themes and resizing behavior without changing the provider/server contract.
+- Regression: the three focused cases fail before the fix; 5,949 desktop
+  tests and eight packaging/license checks pass, with six tests skipped.
+  TypeScript and production compilation pass; final grid sizing is additionally
+  covered by the 19 editor-style/design-system checks.
+- Actual native offscreen Electron verification uses real authenticated test
+  server file transport: open two fixture files, show chat beside them, switch
+  editor left/right, save only the focused secondary file, retain an unsaved
+  secondary draft and layout after reload, and inspect dark/light and narrow
+  layouts for clipped controls. Test credentials are supplied by an isolated
+  credential-store fixture; file reads/writes, IPC and renderer handlers are real.
+  No provider turn is required for this editor-layout change.
+- Initially reproduced and verified on beta.2 artifact source `9e816c6b`.
+  Ported only these two UI fixes onto main `9f6f1f13`, without release-line
+  changes. Repeated native workspace exit/restoration and chat/two-file split
+  workflows with the main-based renderer, preload and service transport.
+  Local source and compiled preview only; no server restart, mobile change or publication.
+  Restarted the local user App with its existing profile and confirmed the
+  selected chat, open file and server connection were retained. Exercised
+  Show chat in that window and confirmed the restored layout controls and
+  visible chat/file panes. Packaged distribution and native Windows/Linux
+  acceptance are not part of this change.
+## 2026-11-01 - Distinguish normal chat recovery from connection failures
+
+- Keep a healthy server connected while its startup queue-restoration task is
+  running. The server already admits each chat when its durable queue is ready;
+  do not label every chat or the connection degraded until the full scan ends.
+  Show “Connected — restoring queued chats” on the active server indicator and
+  menu, then “Online” when recovery completes. Include English and Chinese text.
+- Continue reporting failed recovery, unavailable tmux, authentication failures
+  and transport failures. Preserve per-chat queue admission, durable messages
+  and coordinated-update readiness requirements.
+- Treat a validated HTTP/WebSocket client disconnect as a normal gateway close,
+  without synthesizing an interrupted-execution error after closing its IPC
+  transport. Accepted worker cleanup continues; genuine worker interruptions
+  still report failures.
+- Validation: 490 affected desktop tests, 27 execution-transport tests,
+  TypeScript and production Electron compilation pass. New regressions fail
+  against the previous behavior. Independent review found no blocking issues.
+- Native app acceptance uses an offscreen Electron window, production renderer,
+  preload and IPC, and authenticated requests to the full isolated server.
+  Hold/fault its real startup recovery task to exercise restoring, ready,
+  failed and recovered status, using actual mouse input for the server menu
+  and refresh button. No provider turns are needed for connection presentation.
+  Actual TCP WebSocket → Uvicorn → Unix IPC acceptance also confirms a normal
+  code-1000 close produces no gateway error and preserves worker cleanup.
+- Source changes only; no live server restart, deployment or public release.
+  Windows/Linux native app acceptance and packaged distribution are untested.
+
+## 2026-11-01 - Let agents create chats with automatic mailbox connections
+
+- Add run-bound `chats create --title ... --folder ...` for independent
+  AgentsDock conversations. Create a permanent bidirectional mailbox route
+  between creator and child automatically and expose it to the creating run
+  immediately. Existing send, inbox, read and reply actions handle communication.
+  Creation itself does not start a provider turn.
+- Inherit applicable runtime settings, including a custom provider connection,
+  without copying native thread IDs, transcript, goals or other peer routes.
+  The new chat appears in its requested folder through the existing desktop
+  API. There is no new chat-count quota or route-approval dialog.
+- Persist explicit retry keys across logical runs and restarts. Repeated
+  creation returns the existing chat. A failed route grant preserves the
+  already-visible child and repairs it on retry; disconnects do not duplicate
+  creation. Exact-route sends discover the current mailbox mode even from a
+  shell opened before creation. Keep private creation-admission records out of
+  client timelines.
+- Validation: 59 helper tests, four creation regressions, 50 existing pair,
+  discovery and provider-input tests, and 13 session/custom-provider tests pass.
+  Server syntax checks and the unchanged Electron production build pass.
+- Isolated full-server acceptance exercises the production helper over HTTP,
+  actual capability authentication, immediate send, child read/reply, creator
+  read, and explicit-key recovery in a new logical run after restart. Native
+  offscreen Electron uses production IPC and authenticated transport to select
+  the created chat and display its folder and mailbox cards. These transport
+  checks use synthetic provider run bindings and are not generation acceptance.
+- Real Codex acceptance separately exercises normal turn admission and the
+  run-bound provider tool: the creator creates and messages a child, the child
+  automatically wakes to read and reply, and the creator automatically wakes
+  and reads that reply. Both chats use disposable state; temporary authentication
+  is removed and fixture processes are stopped afterward. Claude and other
+  providers have not received live generation acceptance for this change.
+- Server/helper change based on `9f6f1f13`; no desktop contract migration,
+  production server restart, installation, release or mobile change.
+
 ## 2026-11-02 - Publish coordinated 1.0.12-beta.2
 
 - Publish direct desktop build **1270**, npm runtime/short CLI and the matching
@@ -9456,3 +10289,35 @@ and the original remained unchanged. This is a source fix, not a published beta.
   encountered Codex's retained native writer after unsubscribe; that probe is
   failed, and genuine cross-process credential handoff remains unaccepted.
   No public release, installed-app replacement, or live-service deployment.
+
+## 2026-10-22 — Draft coordinated busy-server update verification
+
+- One product Update action now prepares and verifies saved servers before the
+  native app installer. Disposable managed-service upgrades confirmed one
+  internal continuation and a final reply for each of Codex, Claude, and
+  Cursor. A non-chat job and a persistent goal deferred forced interruption;
+  a persistent terminal survived, and simultaneous client requests caused one
+  server replacement.
+- An isolated packaged-app replay confirmed that an unreachable server leaves
+  the old app installed, but found its error message could be overwritten by a
+  background release check. The source fix retains an explicit incomplete
+  update message across checks and identifies the failed connection. Focused
+  desktop tests, type checking, and the production compile passed; this revised
+  UI message has not yet passed packaged-app acceptance.
+- Native replacement remains unaccepted: a repacked QA app downloaded the
+  matching update, but did not exit automatically. Its installer completed and
+  relaunched only after the disposable old app was explicitly terminated. The
+  QA shell was modified for isolated feeds and is not an exact-source signed
+  release candidate. A clean packaged replay, multi-server partial failure,
+  rollback, and busy-chat UI journey are still required. No public release or
+  production installation changed.
+
+Follow-up verification covered a partial multi-server update in the desktop
+coordinator: after one server reaches the target and another rejects the
+update, the plan retains both results; repeating the main Update action retries
+only the failed server. The affected desktop suites passed 130 tests and type
+checking passed. Server activation, handoff and rollback fixtures passed 112
+tests. A fresh locally signed QA package was built with the isolated feed, but
+it did not reach the application UI on this machine, so the revised offline
+message and automatic app exit are still unverified in a packaged App. This QA
+package is not a release candidate. The disposable server was restored.

@@ -491,7 +491,7 @@ test('1.0.12-beta.1 explicitly opts stable users into Beta and retains existing 
   assert.deepEqual(desktopJourney('1.0.12-beta.1', '1.0.11-beta.12', 'beta11112'),
     {initialTrack: 'beta', installedTrack: 'beta', switchToBeta: false})
   assert.throws(() => desktopJourney('1.0.12-beta.1', '1.0.10', 'stable111'))
-  assert.throws(() => desktopJourney('1.0.12-beta.3', '1.0.11', 'stable111'))
+  assert.throws(() => desktopJourney('1.0.12-beta.4', '1.0.11', 'stable111'))
 })
 
 test('stable 1.0.11 preserves both incumbent subscriptions without relabeling beta.12', () => {
@@ -505,6 +505,14 @@ test('stable 1.0.11 preserves both incumbent subscriptions without relabeling be
   }
 })
 
+
+test('beta.3 retains Beta on beta.2 and requires explicit stable opt-in', () => {
+  assert.deepEqual(desktopJourney('1.0.12-beta.3', '1.0.11', 'stable111'),
+    {initialTrack: 'stable', installedTrack: 'beta', switchToBeta: true})
+  assert.deepEqual(desktopJourney('1.0.12-beta.3', '1.0.12-beta.2', 'beta1122'),
+    {initialTrack: 'beta', installedTrack: 'beta', switchToBeta: false})
+  assert.throws(() => desktopJourney('1.0.12-beta.3', '1.0.12-beta.1', 'beta1122'))
+})
 
 test('beta.2 retains Beta on beta.1 and requires explicit stable opt-in', () => {
   assert.deepEqual(desktopJourney('1.0.12-beta.2', '1.0.11', 'stable111'),
