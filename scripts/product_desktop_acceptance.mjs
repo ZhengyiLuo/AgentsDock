@@ -148,6 +148,23 @@ export function nativeInstallObservation(status, incumbentRunning, installedVers
     generic503MessageObserved: message === `AgentsDock update is incomplete: ${PROFILE_NAME}: 503 Service Unavailable Retry Update AgentsDock after resolving this.` }
 }
 
+// Keep both receipt namespaces private and exact. A lost restart response may
+// leave only the admitted schedule receipt even after the server is current.
+export function legacyRecoveryReceipts(record) {
+  const receipts = {operationId: record?.operationId ?? null, scheduleId: record?.scheduleId ?? null}
+  assert(Object.values(receipts).every(value => value === null || (typeof value === 'string' && value.length > 0)),
+    'Legacy recovery requires valid saved receipt identifiers')
+  assert(Object.values(receipts).some(value => value !== null), 'Legacy recovery requires a saved receipt')
+  return receipts
+}
+
+export function assertLegacyRecoveryReceiptsUnchanged(before, record) {
+  const after = legacyRecoveryReceipts(record)
+  assert(before.operationId === after.operationId && before.scheduleId === after.scheduleId,
+    'Legacy retry must retain both completed server receipt fields without changing their namespaces')
+  return true
+}
+
 export function assertLegacyPostcompletionRetry(status, health, fixture, version, installedVersion, baseline) {
   assert.equal(status?.currentVersion, baseline)
   assert.equal(status?.availableVersion, version)
@@ -161,7 +178,7 @@ export function assertLegacyPostcompletionRetry(status, health, fixture, version
   const record = records[0]
   assert(record.phase === 'current' && record.paused !== true && record.targetVersion === version
     && record.serverIdentity === fixture.serverIdentity && record.serverInstanceId === health.server_instance_id)
-  assert(typeof record.operationId === 'string' && record.operationId.length > 0)
+  legacyRecoveryReceipts(record)
   return { originalPreparationFailed: true, failureCategory: 'displayed-http-503', seamlessUpgradePassed: false,
     manualRetries: 2, totalInstallClicks: 3, retryOnlyAfterVerifiedCurrentServer: true }
 }
@@ -628,7 +645,7 @@ export async function main(argv = process.argv.slice(2)) {
   }
   const logs = boundedNativeLog(createWriteStream(join(options.output, 'native-private.log'), { flags: 'wx', mode: 0o600 }))
   let ownedApp, secondApp, client, secondClient, lastReconciliation = null, keychainCreated = false
-  let offlineRefusal = null, preparedBeforeApp = null, legacyRecovery = null, recoveryInstance, recoveryOperation
+  let offlineRefusal = null, preparedBeforeApp = null, legacyRecovery = null, recoveryInstance, recoveryReceipts
   const sharedOperationObservations = []
   const nativeInstallObservations = []
   const observeShared = async stage => {
@@ -783,7 +800,7 @@ export async function main(argv = process.argv.slice(2)) {
           installedVersion, options['baseline-version'])
         assert.equal(await hashFile(join(ownedApp, 'Contents/Resources/app.asar')), previous.asarSha256)
         recoveryInstance = health.server_instance_id
-        recoveryOperation = status.serverUpdates.find(row => row.profileId === PROFILE_ID).operationId
+        recoveryReceipts = legacyRecoveryReceipts(status.serverUpdates.find(row => row.profileId === PROFILE_ID))
         await client.screenshot(join(options.output, '02-legacy-preparation-failed-server-current.png'))
         await client.clickButton(MIGRATION_INSTALL_BUTTON_NAMES)
         observed('legacy-postcompletion-retry-requested', legacyRecovery)
@@ -814,10 +831,10 @@ export async function main(argv = process.argv.slice(2)) {
     if (legacyRecovery) {
       const health = await serverHealth(fixture)
       assert.equal(health.server_instance_id, recoveryInstance, 'Legacy retry must not restart the already updated server again')
-      assert.equal(initial.serverUpdates.find(row => row.profileId === PROFILE_ID).operationId, recoveryOperation,
-        'Legacy retry must retain the same completed server update receipt')
+      assertLegacyRecoveryReceiptsUnchanged(recoveryReceipts,
+        initial.serverUpdates.find(row => row.profileId === PROFILE_ID))
       legacyRecovery.noAdditionalServerRestart = true
-      legacyRecovery.sameServerOperationPreserved = true
+      legacyRecovery.sameServerReceiptsPreserved = true
     }
     await openMigrationUpdateSettings(client)
     const initialRow = await visibleServerRow(client, initialPhase)
