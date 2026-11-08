@@ -1,10 +1,12 @@
 #!/usr/bin/env node
 // Release orchestration only: run the pinned source builder unchanged. Recover
-// only a recognized DMG ticket-download network failure, then run its complete
-// native verifier. Never sign, resubmit, repack the app, or publish here.
+// only recognized ticket transport failures after DMG notarization acceptance,
+// then run its complete native verifier. Never sign, resubmit, repack the app,
+// bypass a check, or publish here.
 import assert from 'node:assert/strict'
 import { spawn, spawnSync } from 'node:child_process'
-import { lstatSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs'
+import { createReadStream, existsSync, lstatSync, readdirSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs'
+import { createHash } from 'node:crypto'
 import { join, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
 
@@ -12,6 +14,13 @@ const need = (ok, message) => { if (!ok) throw new Error(message) }
 export function transientStapleFailure(code, output) {
   return code === 68 && /Error Domain=NSURLErrorDomain Code=-(?:1005|1001)\b/.test(output) &&
     /api\.apple-cloudkit\.com\//.test(output) && /staple and validate action failed! Error 68\./.test(output)
+}
+export function transientValidationFailure(code, output) {
+  const processing = output.lastIndexOf('Processing: ')
+  const failure = processing < 0 ? output : output.slice(processing)
+  return code === 68 && /Error Domain=NSURLErrorDomain Code=-(?:1005|1001)\b/.test(failure) &&
+    /https:\/\/api\.apple-cloudkit\.com\/database\/1\/com\.apple\.gk\.ticket-delivery\/production\/public\/records\/lookup(?:[\s"},]|$)/.test(failure) &&
+    /The validate action failed! Error 68\.\s*$/.test(failure)
 }
 export function recoverableBuildFailure(code, output, version) {
   const tail = output.slice(-65536)
@@ -32,6 +41,18 @@ export function removeDmgMetadata(text, name) {
   need(matches === 1, 'Expected exactly one pre-stapling DMG metadata entry.')
   return result.join('\n')
 }
+export function recoverableVerificationFailure(code, output, version) {
+  const tail = output.slice(-65536), processing = tail.lastIndexOf('Processing: ')
+  if (processing < 0) return false
+  const before = tail.slice(0, processing), last = tail.slice(processing)
+  const target = last.split('\n')[0].trim().slice('Processing: '.length)
+  // Both archives already exist and this versioned outer DMG was accepted.
+  // App-stapling failures before ZIP creation are not this boundary.
+  return before.includes(`/AgentsDock-${version}-mac-universal.dmg`) && /status: Accepted\b/.test(before) &&
+    (target.endsWith(`/AgentsDock-${version}-mac-universal.dmg`) ||
+      /\/agentsdock-release\.[A-Za-z0-9]+\/(?:zip|dmg)\/AgentsDock\.app$/.test(target)) &&
+    transientValidationFailure(code, last)
+}
 export async function retryStaple(run, wait, report = () => {}) {
   for (let attempt = 0; attempt < 4; attempt++) {
     const result = await run()
@@ -46,11 +67,54 @@ function regular(path) {
   const stat = lstatSync(path)
   need(stat.isFile() && !stat.isSymbolicLink() && stat.size > 0, 'Expected a regular nonempty release asset.')
 }
+export async function retryValidation(run, wait, report = () => {}) {
+  for (let attempt = 0; attempt < 4; attempt++) {
+    const result = await run()
+    if (result.status === 0 && !result.signal && !result.error) return
+    need(!result.signal && !result.error && attempt < 3 && transientValidationFailure(result.status, `${result.stdout ?? ''}${result.stderr ?? ''}`),
+      'Required macOS release validation failed; no verified release may be produced.')
+    report(`Transient Apple ticket-validation network failure; retry ${attempt + 1}/3.`)
+    await wait(15000 * (attempt + 1))
+  }
+}
 function command(program, args, timeout = 120000) {
-  const result = spawnSync(program, args, { encoding: 'utf8', timeout, maxBuffer: 4 * 1024 * 1024 })
+  // Preserve stdout/stderr ordering so an older network error cannot authorize
+  // recovery of a later failure. Arguments are passed positionally, not evaluated.
+  const result = spawnSync('/bin/sh', ['-c', 'exec "$@" 2>&1', 'release-check', program, ...args],
+    { encoding: 'utf8', timeout, maxBuffer: 4 * 1024 * 1024 })
   if (result.stdout) process.stdout.write(result.stdout)
   if (result.stderr) process.stderr.write(result.stderr)
   return result
+}
+export async function snapshotFinalizedAssets(assets, version, track) {
+  const zip = `AgentsDock-${version}-mac-universal.zip`, dmg = `AgentsDock-${version}-mac-universal.dmg`
+  const metadataName = `${track === 'beta' ? 'beta' : 'latest'}-mac.yml`
+  for (const name of [zip, `${zip}.blockmap`, dmg, metadataName]) regular(join(assets, name))
+  need(!existsSync(join(assets, `${dmg}.blockmap`)), 'Final verification requires finalized DMG metadata.')
+  const metadata = readFileSync(join(assets, metadataName), 'utf8').split('\n')
+  need(metadata.includes(`version: ${version}`) && metadata.includes(`path: ${zip}`) &&
+    metadata.includes(`  - url: ${zip}`) && !metadata.some(line => /^\s*- url:.*\.dmg["']?\s*$/.test(line)),
+  'Final verification requires exact ZIP-only update metadata.')
+  const snapshot = {}
+  for (const name of readdirSync(assets).sort()) {
+    const path = join(assets, name), stat = lstatSync(path)
+    need(!stat.isSymbolicLink(), 'Release assets must not be symlinks.')
+    if (stat.isDirectory()) continue
+    regular(path)
+    const hash = createHash('sha256')
+    for await (const chunk of createReadStream(path)) hash.update(chunk)
+    snapshot[name] = { size: stat.size, sha256: hash.digest('hex') }
+  }
+  return snapshot
+}
+export async function retryFinalVerification(run, capture, wait, report = () => {}) {
+  const accepted = await capture()
+  await retryValidation(async () => {
+    assert.deepEqual(await capture(), accepted, 'Release assets changed before verification.')
+    const result = await run()
+    assert.deepEqual(await capture(), accepted, 'Release assets changed during verification.')
+    return result
+  }, wait, report)
 }
 function checked(program, args, timeout) {
   const result = command(program, args, timeout)
@@ -74,22 +138,27 @@ export async function main(args = process.argv.slice(2)) {
     child.on('error', reject); child.on('close', (code, signal) => resolvePromise({ code, signal }))
   })
   if (result.code === 0) return
-  need(!result.signal && recoverableBuildFailure(result.code, tail, version),
-    'Pinned macOS build failed outside the recoverable DMG network boundary.')
+  const needsStaple = recoverableBuildFailure(result.code, tail, version)
+  need(!result.signal && (needsStaple || recoverableVerificationFailure(result.code, tail, version)),
+    'Pinned macOS build failed outside the recoverable ticket transport boundary.')
   const assets = join(root, 'electron/dist-release'), name = `AgentsDock-${version}-mac-universal.dmg`
   const dmg = join(assets, name), metadata = join(assets, `${track === 'beta' ? 'beta' : 'latest'}-mac.yml`)
   regular(dmg); regular(metadata)
-  const normalized = removeDmgMetadata(readFileSync(metadata, 'utf8'), name)
-  checked('/usr/bin/codesign', ['--verify', '--strict', '-R=anchor apple generic and certificate leaf[subject.OU] = "KRR35MWWHD"', dmg])
-  await retryStaple(() => command('/usr/bin/xcrun', ['stapler', 'staple', dmg]),
-    ms => new Promise(resolvePromise => setTimeout(resolvePromise, ms)), console.log)
-  checked('/usr/bin/xcrun', ['stapler', 'validate', dmg])
-  // Identical finalization to the pinned builder, reached only after success.
-  const blockmap = `${dmg}.blockmap`
-  regular(blockmap); unlinkSync(blockmap)
-  writeFileSync(metadata, normalized)
-  checked(join(root, 'scripts/verify_electron_release.sh'), [assets, version, track], 600000)
-  console.log('Recovered DMG ticket download; all original native release checks passed.')
+  const wait = ms => new Promise(resolvePromise => setTimeout(resolvePromise, ms))
+  if (needsStaple) {
+    const normalized = removeDmgMetadata(readFileSync(metadata, 'utf8'), name)
+    checked('/usr/bin/codesign', ['--verify', '--strict', '-R=anchor apple generic and certificate leaf[subject.OU] = "KRR35MWWHD"', dmg])
+    await retryStaple(() => command('/usr/bin/xcrun', ['stapler', 'staple', dmg]), wait, console.log)
+    await retryValidation(() => command('/usr/bin/xcrun', ['stapler', 'validate', dmg]), wait, console.log)
+    // Identical finalization to the pinned builder, reached only after success.
+    const blockmap = `${dmg}.blockmap`
+    regular(blockmap); unlinkSync(blockmap)
+    writeFileSync(metadata, normalized)
+  }
+  // Retry the complete original verifier on the same bytes, never skip a check.
+  await retryFinalVerification(() => command(join(root, 'scripts/verify_electron_release.sh'), [assets, version, track], 600000),
+    () => snapshotFinalizedAssets(assets, version, track), wait, console.log)
+  console.log('Recovered Apple ticket transport; all original native release checks passed.')
 }
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   main().catch(error => { console.error(error.message); process.exitCode = 1 })
