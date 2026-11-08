@@ -79,6 +79,13 @@ pnpm install --frozen-lockfile
 pnpm dev
 ```
 
+Source CI warms the exact pinned Electron runtime cache before invoking the
+original installer. If GitHub's public download route returns a server error or
+has a transport failure, it can fetch the same official asset through GitHub's
+API. Both routes verify the SHA-256 bundled in the pinned Electron npm package;
+the original installer, type checks, tests and build still run. This source-CI
+recovery does not change AgentsDock's product update feeds or release assets.
+
 On macOS, logs are written to:
 
 ```text

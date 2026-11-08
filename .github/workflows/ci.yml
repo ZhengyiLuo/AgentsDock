@@ -177,6 +177,9 @@ jobs:
           cache-dependency-path: electron/pnpm-lock.yaml
       - run: pnpm install --frozen-lockfile
         working-directory: electron
+      - name: Cache the checksum-pinned official Electron runtime
+        run: node ../scripts/cache_electron_runtime.mjs
+        working-directory: electron
       - name: Materialize Electron runtime before parallel test imports
         run: node node_modules/electron/install.js
         working-directory: electron
