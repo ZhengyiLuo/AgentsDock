@@ -1,5 +1,17 @@
 # Public development log
 
+## Unreleased — Match beta.4's native coordinated-update acceptance contract
+
+- Keep the signed beta.5 candidate unchanged while testing beta.4's shipped
+  server-first update behavior: observe offline refusal, reconnect, explicitly
+  retry, and require the paired server ready before native app replacement.
+- Preserve the older baselines' app-first offline recovery and shared-operation
+  checks. The beta.4 case labels its later two-client state as convergence rather
+  than claiming both clients observed a live update operation.
+- Add focused refusal, version/order, component-health and client-convergence
+  regressions. Hosted native execution is still required; this entry does not
+  establish successful acceptance or publication.
+
 ## 2026-11-08 - Prepare coordinated 1.0.12-beta.5
 
 - Prepare a matching desktop, signed server, legacy bridge and short CLI Beta
