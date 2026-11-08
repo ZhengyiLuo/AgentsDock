@@ -1,5 +1,17 @@
 # Public development log
 
+## 2026-11-08 - Prepare coordinated 1.0.12-beta.4
+
+- Carry the reviewed beta.3 changes and the stale updater-status reconciliation
+  fix into one desktop/server/CLI beta version. Preserve stable `1.0.11` and all
+  existing immutable artifacts; see [candidate notes](RELEASE_1.0.12-beta.4.md).
+- The reconciliation fix passed 227 focused tests. Isolated development-app
+  checks exercised authenticated HTTP, retained refreshed update receipts, and
+  real disposable Codex and Claude replies retained after navigation.
+- Production package validation and final signed outgoing update/relaunch,
+  active-work recovery and populated-history acceptance remain pending. This
+  entry records preparation only; no publication or deployment is claimed.
+
 ## Unreleased — Preserve updater progress during stale status checks
 
 - Recheck the full update receipt under its file lock before finalizing an
