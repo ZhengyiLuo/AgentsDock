@@ -6,7 +6,7 @@ import { assertCurrentPairedServer, assertDesktopRunner, assertOlderVersion, ass
   assertStableDiscovery, assertVisibleCoordinatedRow, checksumForMacArchive, collectReconciliationSnapshot, collectSharedOperationSnapshot, emitNativeProgress,
   migrationCoverage, parseDesktopAcceptanceArguments, parseReconciliationSnapshot, parseSharedOperationSnapshot, reconciliationSnapshot,
   retainSharedOperationObservation, desktopJourney, requiresServerBeforeApp, assertOfflineInstallRefusal,
-  assertPreparedServerBeforeApp, assertTwoPreparedClients,
+  assertPreparedServerBeforeApp, assertTwoPreparedClients, nativeInstallObservation, nativeUpdaterLogObservation,
   terminalReconciliationFailure, validateDesktopFixture } from '../product_desktop_acceptance.mjs'
 
 // These are harness contract tests only: no app/service installation, native
@@ -30,6 +30,42 @@ const status = () => ({ currentVersion: identity.version, serverUpdates: [record
 const health = () => ({ ok: true, server_identity: fixture().serverIdentity,
   server_instance_id: 'new-service-instance', server_version: identity.version,
   gateway: { version: identity.version }, execution_service: { version: identity.version, maintenance_held: false } })
+
+test('native replacement diagnostics retain only finite state and comparisons', () => {
+  const privateValue = 'private-token https://private.example/Profile'
+  const baseline = '1.0.12-beta.4', candidate = '1.0.12-beta.5'
+  const snapshot = nativeInstallObservation({ state: 'installing', cancelable: false,
+    availableVersion: candidate, message: `Restarting into AgentsDock ${privateValue}`,
+    serverUpdates: [{ name: privateValue }], extra: privateValue }, true, baseline, baseline, candidate)
+  assert.deepEqual(snapshot, { rendererAvailable: true, incumbentRunning: true, incumbentStillInstalled: true,
+    candidateInstalled: false, candidateStillSelected: true, cancelable: false, updaterState: 'installing',
+    messageCategory: 'restarting', candidateChangedBeforeRestart: false })
+  assert.doesNotMatch(JSON.stringify(snapshot), /private|https:|token|1\.0\./)
+  const failed = nativeInstallObservation({ state: privateValue, cancelable: privateValue,
+    message: 'AgentsDock update is incomplete: The downloaded app changed before restart.' }, false, candidate, baseline, candidate)
+  assert.equal(failed.updaterState, 'unknown')
+  assert.equal(failed.cancelable, null)
+  assert.equal(failed.messageCategory, 'install-failed')
+  assert.equal(failed.candidateChangedBeforeRestart, true)
+  assert.equal(failed.candidateInstalled, true)
+  assert.equal(nativeInstallObservation(null, false, baseline, baseline, candidate).rendererAvailable, false)
+  assert.equal(nativeInstallObservation({message: {}}, false, baseline, baseline, candidate).messageCategory, 'other')
+})
+
+test('native Squirrel diagnostics disclose fixed booleans, never archive URLs or authentication values', () => {
+  const privateText = 'https://private.example/token?auth=secret /private/user/update.zip'
+  const result = nativeUpdaterLogObservation(`Proxy server for native Squirrel.Mac is created (${privateText})\n`
+    + `Proxy server for native Squirrel.Mac is listening (${privateText})\n/ requested\n`
+    + `${privateText} requested by Squirrel.Mac, pipe ${privateText}\nnativeUpdater.update-downloaded\n`)
+  assert(result.proxyCreated && result.proxyListening && result.feedRequested && result.archiveRequested && result.nativeDownloaded)
+  assert(!result.proxyClosed && !result.authenticationRejected && !result.archiveReadFailed)
+  assert(Object.values(result).every(value => typeof value === 'boolean'))
+  assert.doesNotMatch(JSON.stringify(result), /private|secret|https|update.zip/)
+  assert.equal(nativeUpdaterLogObservation('Invalid authenthication credentials').authenticationRejected, true)
+  assert.equal(nativeUpdaterLogObservation('SQRLUpdaterErrorDomain').updaterSquirrelError, true)
+  assert.throws(() => nativeUpdaterLogObservation({}))
+  assert.throws(() => nativeUpdaterLogObservation('a'.repeat(16 * 1024 * 1024 + 1)))
+})
 
 test('only the pinned beta4 incumbent uses server-before-app acceptance', () => {
   assert.equal(requiresServerBeforeApp('1.0.12-beta.5', '1.0.12-beta.4', 'beta1124'), true)

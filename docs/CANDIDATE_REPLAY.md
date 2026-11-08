@@ -9,6 +9,11 @@ turn blocked or unobserved scenarios into full release acceptance.
 
 ## 1.0.12-beta.5 rehearsal preparation
 
+Native replacement waits retain bounded state/category comparisons and the
+last real coordinator/health observation. These are read-only diagnostics, not
+an extra retry, forced quit or manual replacement. Raw status messages, profile
+values and native logs remain private. A timeout still fails acceptance.
+
 The exact beta.5 candidate adds `stable111` and `beta1124`, each with both
 `0755` and `0750` installation-root modes, beside the retained legacy, fresh
 and recovery cases. Stable 1.0.11 users explicitly select Beta; existing beta.4
