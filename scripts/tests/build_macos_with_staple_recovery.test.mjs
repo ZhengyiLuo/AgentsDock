@@ -1,9 +1,9 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-import { mkdtempSync, rmSync, writeFileSync, unlinkSync } from 'node:fs'
+import { mkdtempSync, mkdirSync, rmSync, writeFileSync, unlinkSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { recoverableBuildFailure, recoverableVerificationFailure, removeDmgMetadata, retryStaple, retryValidation, retryFinalVerification, snapshotFinalizedAssets, transientStapleFailure, transientValidationFailure } from '../build_macos_with_staple_recovery.mjs'
+import { recoverableBuildFailure, recoverableVerificationFailure, removeDmgMetadata, retryStaple, retryValidation, retryFinalVerification, snapshotFinalizedAssets, streamPinnedBuild, transientStapleFailure, transientValidationFailure } from '../build_macos_with_staple_recovery.mjs'
 
 const network = 'Error Domain=NSURLErrorDomain Code=-1005 "The network connection was lost." https://api.apple-cloudkit.com/database/1/com.apple.gk.ticket-delivery/production/public/records/lookup\nThe staple and validate action failed! Error 68.\n'
 const build = 'status: Accepted\nProcessing: /tmp/release/AgentsDock-1.0.11-beta.2-mac-universal.dmg\n'+network
@@ -131,4 +131,19 @@ test('snapshot requires complete finalized exact-version native inputs', async t
   writeFileSync(join(directory,'beta-mac.yml'),metadata)
   unlinkSync(join(directory,zip))
   await assert.rejects(snapshotFinalizedAssets(directory,version,'beta'))
+})
+test('initial builder keeps mixed-stream diagnostic order, exit status and bounded tail', {skip:process.platform==='win32'}, async t => {
+  const root=mkdtempSync(join(tmpdir(),'ticket stream test-'))
+  t.after(()=>rmSync(root,{recursive:true,force:true}))
+  mkdirSync(join(root,'scripts'))
+  const ending=accepted+'Processing: /tmp/agentsdock-release.Abc123/zip/AgentsDock.app\n'+validation
+  writeFileSync(join(root,'scripts/build_electron_release.sh'),`#!/usr/bin/env node\nconst fs=require('node:fs');fs.writeSync(1,'x'.repeat(300000));\n`+
+    `for(const [index,line] of ${JSON.stringify(ending.split('\n'))}.entries())fs.writeSync(index%2?2:1,line+'\\n');process.exitCode=68;\n`,{mode:0o755})
+  let output=''
+  const result=await streamPinnedBuild(root,{write:bytes=>{output+=bytes.toString()}})
+  assert.equal(result.code,68);assert.equal(result.signal,null)
+  assert.equal(result.tail.length,262144)
+  assert.equal(result.tail,output.slice(-262144))
+  assert(output.endsWith(ending+'\n'))
+  assert(recoverableVerificationFailure(result.code,result.tail,'1.0.11-beta.2'))
 })

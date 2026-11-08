@@ -120,6 +120,20 @@ function checked(program, args, timeout) {
   const result = command(program, args, timeout)
   need(result.status === 0, `Required macOS release verification failed: ${program}`)
 }
+export function streamPinnedBuild(root, output = process.stdout) {
+  let tail = ''
+  return new Promise((resolvePromise, reject) => {
+    const child = spawn('/bin/sh', ['-c', 'exec "$@" 2>&1', 'release-builder', join(root, 'scripts/build_electron_release.sh')],
+      { cwd: root, stdio: ['ignore', 'pipe', 'pipe'] })
+    // The builder's streams are merged by the shell before Node observes them.
+    // stderr here can contain only the wrapper's own exec/launch diagnostics.
+    for (const stream of [child.stdout, child.stderr]) stream.on('data', bytes => {
+      output.write(bytes); tail = (tail + bytes.toString()).slice(-262144)
+    })
+    child.on('error', reject)
+    child.on('close', (code, signal) => resolvePromise({ code, signal, tail }))
+  })
+}
 export async function main(args = process.argv.slice(2)) {
   need(args.length === 3, 'Usage: build_macos_with_staple_recovery.mjs SOURCE_ROOT SOURCE_SHA VERSION')
   const [rootInput, source, version] = args, root = resolve(rootInput)
@@ -129,14 +143,7 @@ export async function main(args = process.argv.slice(2)) {
   const track = process.env.AGENTSDOCK_RELEASE_TRACK
   need(track === 'beta' || track === 'stable', 'Explicit release track required.')
   assert.equal(JSON.parse(readFileSync(join(root, 'electron/package.json'), 'utf8')).version, version)
-  let tail = ''
-  const result = await new Promise((resolvePromise, reject) => {
-    const child = spawn(join(root, 'scripts/build_electron_release.sh'), [], { cwd: root, stdio: ['ignore', 'pipe', 'pipe'] })
-    for (const [stream, output] of [[child.stdout, process.stdout], [child.stderr, process.stderr]]) stream.on('data', bytes => {
-      output.write(bytes); tail = (tail + bytes.toString()).slice(-262144)
-    })
-    child.on('error', reject); child.on('close', (code, signal) => resolvePromise({ code, signal }))
-  })
+  const result = await streamPinnedBuild(root), tail = result.tail
   if (result.code === 0) return
   const needsStaple = recoverableBuildFailure(result.code, tail, version)
   need(!result.signal && (needsStaple || recoverableVerificationFailure(result.code, tail, version)),
