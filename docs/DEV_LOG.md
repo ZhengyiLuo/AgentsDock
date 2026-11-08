@@ -1,5 +1,25 @@
 # Public development log
 
+## Unreleased — Keep admitted server updates alive across gateway restart gaps
+
+- Keep an app update waiting through a generic HTTP 503 only after a verified,
+  exact-target server update has been admitted. Require an explicit active
+  receipt; completed, canceled, failed and paused history does not authorize
+  this recovery. Identity, API, signature and structured-error checks remain.
+- Preserve the existing bounded wait and restart request identity. Do not
+  reinterpret an initial admission failure or repeat a destructive restart.
+- Regression: 168 focused coordinator/updater tests, type checks and Electron
+  production build pass. An isolated offscreen native UI exercised the actual
+  Update button, production IPC/coordinator, authenticated managed server
+  admission, signed package verification, real replacement and reconnection.
+  The app remained installing across a gateway-shaped 503 and continued only
+  after the original server identity returned at the target version.
+- The first local attempt correctly reported a test download-environment
+  failure; an explicit retry passed after correcting that isolated fixture.
+  Release discovery/download and the final native app-replacement handoff were
+  simulated. Signed desktop replacement and live-provider work are not claimed
+  by this test; release acceptance remains separate. Source change only.
+
 ## Unreleased — Retry transient notarization-ticket validation failures
 
 - Extend release orchestration's bounded Apple ticket-download recovery to

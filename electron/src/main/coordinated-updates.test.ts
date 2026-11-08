@@ -190,7 +190,10 @@ describe('coordinated app/server reconciliation (mocked server boundary)', () =>
     expect(f.manager.status()[0].phase).toBe('current')
   })
 
-  it('keeps one-click installation alive through an ambiguous force response and restart gap', async () => {
+  it.each([
+    ['connection loss', () => new Error('connection lost')],
+    ['plain gateway 503', () => new ServerError(503, '503 Service Unavailable')]
+  ] as const)('keeps one-click installation alive through an ambiguous force response and restart gap: %s', async (_name, restartError) => {
     const f = fixture()
     const capabilities = { server_updates: { available: true, version: 12 },
       server_update_ensure_v1: { available: true, version: 1 },
@@ -202,15 +205,173 @@ describe('coordinated app/server reconciliation (mocked server boundary)', () =>
       target_version: '1.2.0-beta.2', server_identity: 'server-a', server_instance_id: 'boot-a',
       schedule_id: 'a'.repeat(32), preparation_phase: 'ready' })
     f.clients.a.restartServer.mockImplementationOnce(async () => {
-      f.clients.a.health.mockRejectedValueOnce(new Error('service restarting'))
+      f.clients.a.health.mockRejectedValueOnce(restartError())
         .mockResolvedValue(health('a', { server_version: '1.2.0-beta.2', capabilities }))
-      throw new Error('connection lost')
+      throw restartError()
     })
     await f.manager.prepareForInstall(signed(), '1.2.0-beta.2')
     expect(f.clients.a.restartServer).toHaveBeenCalledOnce()
+    expect(f.clients.a.ensureServerUpdate).toHaveBeenCalledOnce()
     expect(f.manager.status()[0].phase).toBe('current')
     expect(f.saved()?.records[0].forceRequestId).toBe(f.clients.a.restartServer.mock.calls[0][0].request_id)
   }, 10_000)
+
+  it.each([
+    [503, 'Cannot write update files', undefined],
+    [503, '503 Service Unavailable', { code: 'server_update_recovery_failed' }],
+    [401, '503 Service Unavailable', undefined],
+    [403, '503 Service Unavailable', undefined],
+    [502, '502 Bad Gateway', undefined]
+  ])('does not reinterpret terminal or structured restart failure (%s %s)', async (code, message, detail) => {
+    const f = fixture()
+    const capabilities = { server_updates: { available: true, version: 12 },
+      server_update_ensure_v1: { available: true, version: 1 },
+      server_update_continuation_v1: { available: true, version: 1 },
+      server_restart: { available: true, required: false, version: 2, message: 'Ready', action: null,
+        force_restart: true, force_confirmation_required: true } }
+    f.clients.a.health.mockResolvedValue(health('a', { capabilities }))
+    f.clients.a.ensureServerUpdate.mockResolvedValue({ phase: 'pending', current_version: '1.1.0-beta.1',
+      target_version: '1.2.0-beta.2', server_identity: 'server-a', server_instance_id: 'boot-a',
+      schedule_id: 'a'.repeat(32), preparation_phase: 'ready' })
+    f.clients.a.restartServer.mockRejectedValueOnce(new ServerError(Number(code), String(message), detail))
+    await expect(f.manager.prepareForInstall(signed(), '1.2.0-beta.2')).rejects.toThrow(String(message))
+    expect(f.clients.a.restartServer).toHaveBeenCalledOnce()
+    expect(f.manager.status()[0].phase).toBe('blocked')
+  })
+
+  it('does not reinterpret a plain 503 before an update was admitted', async () => {
+    const f = fixture()
+    f.clients.a.ensureServerUpdate.mockRejectedValueOnce(new ServerError(503, '503 Service Unavailable'))
+    await expect(f.manager.prepareForInstall(signed(), '1.2.0-beta.2')).rejects.toThrow('503 Service Unavailable')
+    expect(f.clients.a.restartServer).not.toHaveBeenCalled()
+    expect(f.manager.status()[0].phase).toBe('blocked')
+  })
+
+  it.each([true, false])('only observes an admitted managed update for the same signed target (%s)', async sameTarget => {
+    const f = fixture()
+    f.clients.a.ensureServerUpdate.mockResolvedValue({phase: 'installing', current_version: '1.1.0-beta.1',
+      target_version: sameTarget ? '1.2.0-beta.2' : '1.1.0-beta.9', update_id: 'admitted-operation',
+      server_identity: 'server-a', server_instance_id: 'boot-a'})
+    await f.manager.resume(signed(), '1.2.0-beta.2')
+    expect(f.manager.status()[0].operationOwned).toBe(false)
+    f.clients.a.health.mockRejectedValueOnce(new ServerError(503, '503 Service Unavailable'))
+    await f.manager.reconcileAll()
+    expect(f.manager.status()[0].phase).toBe(sameTarget ? 'offline' : 'blocked')
+    expect(f.clients.a.ensureServerUpdate).toHaveBeenCalledOnce()
+    expect(f.clients.a.restartServer).not.toHaveBeenCalled()
+  })
+
+  it.each(['current', 'failed', 'blocked', 'paused', 'wrong-target', 'wrong-identity', 'unmarked'] as const)(
+    'does not revive a historical restart receipt across adoption: %s', async kind => {
+      const f = fixture()
+      f.store.write({ envelope: signed(), records: [{ profileId: 'a', name: 'Server a',
+        serverIdentity: kind === 'wrong-identity' ? 'other-server' : 'server-a',
+        targetVersion: kind === 'wrong-target' ? '1.1.0-beta.9' : '1.2.0-beta.2',
+        phase: ['current', 'failed', 'blocked'].includes(kind) ? kind as 'current' | 'failed' | 'blocked' : 'pending',
+        paused: kind === 'paused', message: 'Historical reservation.',
+        awaitingActivation: kind !== 'unmarked', operationOwned: true,
+        operationTargetVersion: '1.2.0-beta.2', operationId: 'old-operation', scheduleId: 'old-schedule',
+        forceRequestId: 'old-request', forceRequestedScheduleId: 'old-schedule' }] })
+      // Preflight succeeds, then the rolled-back server rejects new admission.
+      f.clients.a.ensureServerUpdate.mockRejectedValue(new ServerError(503, '503 Service Unavailable'))
+      await expect(f.manager.prepareForInstall(signed(), '1.2.0-beta.2')).rejects.toThrow('503 Service Unavailable')
+      expect(f.manager.status()[0]).toMatchObject({ phase: 'blocked', awaitingActivation: false })
+      expect(f.clients.a.ensureServerUpdate).toHaveBeenCalledOnce()
+      expect(f.clients.a.restartServer).not.toHaveBeenCalled()
+    })
+
+  it('retains only a genuinely active admission across app adoption', async () => {
+    const f = fixture()
+    await f.manager.resume(signed(), '1.2.0-beta.2')
+    expect(f.saved()?.records[0].awaitingActivation).toBe(true)
+    f.clients.a.health.mockRejectedValueOnce(new ServerError(503, '503 Service Unavailable'))
+    const resumed = new CoordinatedUpdateManager(f.options)
+    await resumed.resume(signed(), '1.2.0-beta.2')
+    expect(resumed.status()[0]).toMatchObject({ phase: 'offline', awaitingActivation: true })
+    expect(f.clients.a.ensureServerUpdate).toHaveBeenCalledOnce()
+    f.clients.a.health.mockResolvedValue(health('a', {server_version: '1.2.0-beta.2'}))
+    await resumed.reconcileAll()
+    expect(resumed.status()[0]).toMatchObject({phase: 'current', awaitingActivation: false})
+  })
+
+  it('bounds a persistent admitted gateway gap without replaying admission or restart', async () => {
+    vi.useFakeTimers()
+    const f = fixture()
+    f.clients.a.ensureServerUpdate.mockImplementationOnce(async () => {
+      f.clients.a.health.mockRejectedValue(new ServerError(503, '503 Service Unavailable'))
+      return {phase: 'installing', current_version: '1.1.0-beta.1', target_version: '1.2.0-beta.2',
+        server_identity: 'server-a', server_instance_id: 'boot-a', update_id: 'active-operation'}
+    })
+    try {
+      const installation = f.manager.prepareForInstall(signed(), '1.2.0-beta.2')
+      const rejection = expect(installation).rejects.toThrow('Server update is still running. The app was not replaced')
+      await vi.advanceTimersByTimeAsync(15 * 60_000)
+      await rejection
+      expect(f.clients.a.ensureServerUpdate).toHaveBeenCalledOnce()
+      expect(f.clients.a.restartServer).not.toHaveBeenCalled()
+      expect(f.manager.status()[0]).toMatchObject({phase: 'offline', operationId: 'active-operation'})
+    } finally { vi.useRealTimers() }
+  })
+
+  it.each(['current', 'identity-changed', 'api-incompatible'] as const)(
+    'observes the real plain-text gateway HTTP shape without replaying restart: %s', async outcome => {
+      // Actual native HTTP client and socket; the endpoint is a fixture, not
+      // acceptance of the real server installer or application UI.
+      const defaultFetchStub = globalThis.fetch
+      vi.unstubAllGlobals()
+      const calls: { path: string; method: string; body: unknown }[] = []
+      const schedule = 'a'.repeat(32)
+      const capabilities = { server_updates: { available: true, version: 12 },
+        server_update_ensure_v1: { available: true, version: 1 },
+        server_update_continuation_v1: { available: true, version: 1 },
+        server_restart: { available: true, required: false, version: 2, message: 'Ready', action: null,
+          force_restart: true, force_confirmation_required: true } }
+      let restarting = false, gapSeen = false
+      const server = createServer(async (request, response) => {
+        const chunks: Buffer[] = []
+        for await (const chunk of request) chunks.push(Buffer.from(chunk))
+        const path = new URL(request.url!, 'http://localhost').pathname
+        calls.push({ path, method: request.method!, body: chunks.length ? JSON.parse(Buffer.concat(chunks).toString()) : undefined })
+        response.setHeader('Content-Type', 'application/json')
+        if (path === '/api/admin/restart' || path === '/api/health' && restarting && !gapSeen) {
+          if (path === '/api/admin/restart') restarting = true
+          else gapSeen = true
+          response.statusCode = 503
+          response.setHeader('Content-Type', 'text/plain')
+          response.end('Execution service unavailable')
+        } else if (path === '/api/health') response.end(JSON.stringify(health('a', { capabilities,
+          ...(restarting ? { server_version: '1.2.0-beta.2', server_instance_id: 'new-boot',
+            ...(outcome === 'identity-changed' ? {server_identity: 'different-server'} : {}),
+            ...(outcome === 'api-incompatible' ? {api_contract_version: 99} : {}) } : {}) })))
+        else if (path === '/api/admin/update/ensure') response.end(JSON.stringify({
+          phase: 'pending', current_version: '1.1.0-beta.1', target_version: '1.2.0-beta.2',
+          server_identity: 'server-a', server_instance_id: 'boot-a', schedule_id: schedule, preparation_phase: 'ready' }))
+        else { response.statusCode = 404; response.end('{}') }
+      })
+      await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve))
+      const address = server.address() as {port: number}
+      const f = fixture()
+      const manager = new CoordinatedUpdateManager({ ...f.options, connect: async () => ({
+        client: new AgentServerClient(`http://127.0.0.1:${address.port}`, 'owned-test-token'),
+        assertCurrent: () => undefined, loopback: true
+      }) })
+      try {
+        const installation = manager.prepareForInstall(signed(), '1.2.0-beta.2')
+        if (outcome === 'current') await installation
+        else await expect(installation).rejects.toThrow(outcome === 'identity-changed' ? 'server identity' : 'newer API')
+        expect(manager.status()[0].phase).toBe(outcome === 'current' ? 'current' : 'blocked')
+        expect(gapSeen).toBe(true)
+        expect(calls.filter(call => call.path === '/api/admin/update/ensure')).toHaveLength(1)
+        const restarts = calls.filter(call => call.path === '/api/admin/restart')
+        expect(restarts).toHaveLength(1)
+        expect(restarts[0].body).toMatchObject({expected_update_schedule_id: schedule,
+          expected_server_identity: 'server-a', expected_server_instance_id: 'boot-a'})
+      } finally {
+        vi.stubGlobal('fetch', defaultFetchStub)
+        server.closeAllConnections()
+        await new Promise<void>(resolve => server.close(() => resolve()))
+      }
+    }, 10_000)
 
   it('does not mutate any server when another saved server fails preflight', async () => {
     const f = fixture(['a', 'b'])
