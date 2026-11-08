@@ -2115,6 +2115,8 @@ export interface CoordinatedServerUpdate {
   forceRequestedScheduleId?: string
   forceRequestId?: string
   forceRetryAt?: number
+  /** A fenced, exact-target update is active; historical receipts alone do not imply this. */
+  awaitingActivation?: boolean
   paused?: boolean
 }
 export interface AppUpdateStatus {
