@@ -9,13 +9,19 @@
 - The legacy managed-server entrypoint now applies the same file-descriptor
   headroom as the split worker/gateway. Provider children inherit the raised
   soft limit without changing the hard limit or lowering an existing limit.
-- Verification: the new regressions fail before their fixes. Desktop updater
-  and coordinator suites pass (157 tests, two skipped), as do all 13 execution
-  service tests, TypeScript checking and production compilation. An ad-hoc
+- Verification: the new regressions fail before their fixes. Eight additional
+  cases cover HTTP 504/rate limiting, offline retry, invalid UTF-8, and failed,
+  oversized or incorrectly signed paired metadata without starting installation.
+  Desktop updater, coordinator, destination and shutdown suites pass (180 tests,
+  two skipped). The full desktop suite passes (5,957 tests, six skipped), plus
+  eight build/license checks, all 13 execution-service tests, TypeScript checking
+  and production compilation. An ad-hoc
   packaged native app exercised update checking and cancellation. A managed
   test instance completed an authenticated published-package upgrade, retained
   its state, then ran the patched startup and a real Claude reply in an isolated
-  working directory. The source fix is local only, not published.
+  working directory. Repeated real desktop update checks report the HTTP failure
+  without freezing and keep manual retry available. These source changes are
+  not part of a published release.
 - Acceptance limits: public release download URLs returned HTTP 504 independently
   of Electron, so signed desktop download/install/relaunch remains unaccepted.
   The ad-hoc package still encountered a separate browser-store Keychain wait

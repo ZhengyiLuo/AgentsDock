@@ -112,6 +112,67 @@ describe('AppUpdateManager', () => {
     )
   })
 
+  it.each([504, 429, 'offline'] as const)('keeps a failed isolated release check retryable (%s)', async failure => {
+    if (failure === 'offline') mocks.netFetch.mockRejectedValueOnce(new TypeError('Network unavailable'))
+    else mocks.netFetch.mockResolvedValueOnce(new Response('Unavailable', { status: failure }))
+    const manager = createManager({}, 'beta')
+
+    expect(await manager.check(true)).toMatchObject({ state: 'error' })
+    expect(manager.status().message).toContain(failure === 'offline' ? 'Network unavailable' : `HTTP ${failure}`)
+    expect(mocks.autoUpdater.checkForUpdates).not.toHaveBeenCalled()
+    expect(mocks.autoUpdater.quitAndInstall).not.toHaveBeenCalled()
+
+    mocks.autoUpdater.checkForUpdates.mockImplementation(async () => {
+      mocks.emit('update-not-available', { version: '1.2.3' })
+      return null
+    })
+    expect(await manager.check(true)).toMatchObject({ state: 'not-available' })
+    expect(mocks.netFetch).toHaveBeenCalledTimes(2)
+    expect(mocks.persistentFetch).not.toHaveBeenCalled()
+    for (const [, options] of mocks.netFetch.mock.calls) {
+      expect(options).toMatchObject({ credentials: 'omit', cache: 'no-store' })
+    }
+  })
+
+  it('fails closed on invalid UTF-8 in the isolated release feed', async () => {
+    mocks.netFetch.mockResolvedValueOnce(new Response(new Uint8Array([0xc3, 0x28])))
+    const manager = createManager({}, 'beta')
+    expect(await manager.check(true)).toMatchObject({ state: 'error' })
+    expect(manager.status().message).toContain('invalid UTF-8')
+    expect(mocks.autoUpdater.checkForUpdates).not.toHaveBeenCalled()
+  })
+
+  it.each(['http', 'oversize', 'short-signature', 'invalid-signature'] as const)(
+    'isolates paired metadata requests and refuses unsafe installation (%s)', async failure => {
+      const prepareInstall = vi.fn()
+      const beforeInstall = vi.fn()
+      const manager = createManager({ prepareInstall, beforeInstall })
+      mocks.emit('update-downloaded', { version: '1.2.4' })
+      mocks.netFetch.mockImplementation(async input => {
+        if (String(input).endsWith('.sig')) return new Response(new Uint8Array(failure === 'short-signature' ? 63 : 64))
+        if (failure === 'http') return new Response('Gateway timeout', { status: 504 })
+        if (failure === 'oversize') return new Response('x'.repeat(8 * 1024 + 1))
+        return new Response('{}')
+      })
+
+      expect(await manager.install()).toBe(false)
+      expect(manager.status()).toMatchObject({ state: 'downloaded', availableVersion: '1.2.4' })
+      const expected = { http: 'HTTP 504', oversize: 'size limit', 'short-signature': 'invalid length', 'invalid-signature': 'signature' }
+      expect(manager.status().message).toContain(expected[failure])
+      expect(prepareInstall).not.toHaveBeenCalled()
+      expect(beforeInstall).not.toHaveBeenCalled()
+      expect(mocks.autoUpdater.quitAndInstall).not.toHaveBeenCalled()
+      expect(mocks.persistentFetch).not.toHaveBeenCalled()
+      expect(mocks.netFetch.mock.calls.map(([url]) => url)).toEqual([
+        'https://github.com/ZhengyiLuo/AgentsDock/releases/download/v1.2.4/agents-server-npm-manifest.json',
+        'https://github.com/ZhengyiLuo/AgentsDock/releases/download/v1.2.4/agents-server-npm-manifest.sig'
+      ])
+      for (const [, options] of mocks.netFetch.mock.calls) {
+        expect(options).toMatchObject({ credentials: 'omit', cache: 'no-store', headers: { Accept: 'application/octet-stream' } })
+      }
+    }
+  )
+
   it('defaults fresh prerelease installs to the beta channel', () => {
     expect(defaultAppUpdateTrack('0.2.7-beta.6')).toBe('beta')
     expect(defaultAppUpdateTrack('0.2.6')).toBe('stable')
