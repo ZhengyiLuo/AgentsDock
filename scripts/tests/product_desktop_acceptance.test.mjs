@@ -506,6 +506,17 @@ test('stable 1.0.11 preserves both incumbent subscriptions without relabeling be
 })
 
 
+test('beta.5 retains Beta on beta.4 and requires explicit stable opt-in', () => {
+  assert.deepEqual(desktopJourney('1.0.12-beta.5', '1.0.11', 'stable111'),
+    {initialTrack: 'stable', installedTrack: 'beta', switchToBeta: true})
+  assert.deepEqual(desktopJourney('1.0.12-beta.5', '1.0.12-beta.4', 'beta1124'),
+    {initialTrack: 'beta', installedTrack: 'beta', switchToBeta: false})
+  for (const args of [['1.0.12-beta.5', '1.0.12-beta.3', 'beta1124'],
+    ['1.0.12-beta.4', '1.0.11', 'stable111'], ['1.0.12-beta.6', '1.0.12-beta.4', 'beta1124']]) {
+    assert.throws(() => desktopJourney(...args))
+  }
+})
+
 test('beta.3 retains Beta on beta.2 and requires explicit stable opt-in', () => {
   assert.deepEqual(desktopJourney('1.0.12-beta.3', '1.0.11', 'stable111'),
     {initialTrack: 'stable', installedTrack: 'beta', switchToBeta: true})

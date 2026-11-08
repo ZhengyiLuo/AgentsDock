@@ -1,5 +1,22 @@
 # Public development log
 
+## Unreleased — Prepare exact beta.5 upgrade rehearsals
+
+- Add independently verified public beta.4/build 1272 and retained stable
+  1.0.11 baselines for the exact beta.5 candidate. Exercise both legacy root
+  permission modes; stable users must explicitly opt into Beta, and existing
+  Beta subscriptions are retained. Earlier candidate pins remain unchanged.
+- Keep the complete reviewed installer hash and all source, signature, native
+  runner and non-publication guards. This changes test configuration only,
+  not application/runtime behavior, release versions or published packages.
+- Three new admission regressions fail before the change. All 113 Node and
+  98 Python harness tests pass, including wrong-version, substituted-input and
+  cross-scope rejection. Independently downloaded beta.4 desktop and signed
+  official-registry runtime bytes pass the new baseline verifier.
+- This is preparation, not native beta.5 acceptance. Exact signed-package
+  install/relaunch, recovery and real active-work checks remain pending. No
+  service deployment or release publication is established by this entry.
+
 ## Unreleased — Reconcile beta updater fixes with main
 
 - Bring the already-shipped beta.4 stale-update reconciliation fix and bounded

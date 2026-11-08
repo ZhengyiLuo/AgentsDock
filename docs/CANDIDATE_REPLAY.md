@@ -7,6 +7,43 @@ All candidate receipts and observations remain `publicationEligible: false`;
 observations also remain `releaseAcceptance: false`. A successful job does not
 turn blocked or unobserved scenarios into full release acceptance.
 
+## 1.0.12-beta.5 rehearsal preparation
+
+The exact beta.5 candidate adds `stable111` and `beta1124`, each with both
+`0755` and `0750` installation-root modes, beside the retained legacy, fresh
+and recovery cases. Stable 1.0.11 users explicitly select Beta; existing beta.4
+users retain Beta. Historical candidate/profile associations remain unchanged.
+
+The public beta.4 incumbent is build 1272 from
+`91123f031bf6bd012203728d1c43ee146b533686`. Independently downloaded inputs are:
+
+| Input | SHA-256 |
+| --- | --- |
+| Desktop `SHA256SUMS` | `d373ca92a41b983e74f424e865f693cf11a10062f1bf28cf65abd19ed1d4a8f8` |
+| Universal Mac ZIP | `17e9af86e7947df7207d907bcdae396bffabd41cb4cac0912c8b6d1be0bbde50` |
+| `beta-mac.yml` | `ff6e62db6f27bdb14683f1eddea6ca00a01e135c5875e500546f6b3c7fd3c8e6` |
+| Signed npm descriptor | `9a21a1d21b1ec58b6fcbeb0e956c5512bae715c64e2224292412bbc49d04b7d3` |
+| Descriptor signature | `276450540ed19d78690edd1fe4b7f25ded3a77f1761ab3f5a43a7fd972259b7a` |
+| Npm archive, 3,939,922 bytes | `2f9fa9b5d0dc37199b4b899d0ae913a7ad30f94ab3956060c689eaf4e8947756` |
+
+The downloaded archive from the official registry passes the existing release
+key signature, source, size and hash checks. The desktop ZIP matches the public
+checksum inventory and contains native build 1272. These are incumbent pins,
+not evidence that the new candidate has been built, signed or accepted.
+
+Beta.5 retains the entire reviewed beta.3 installer, SHA-256
+`5776115d6a61620189128578ca9facf0bbcdd5ebf496c8e1f1f55127dc10d301`.
+Only the exact new version association is admitted. Source, signature, runner,
+scope, immutable-receipt and ownership guards are unchanged. Dispatch with
+`candidate-replay-v1.0.12-beta.5` and that candidate's independently verified
+receipt/bundle hashes after the packages exist. Never reuse prior receipts.
+
+Preparation checks: 113 Node harness/guard tests and 98 Python harness tests
+pass. Exact-package native runs are still pending. Scoped replay reports keep
+`publicationEligible: false` and `releaseAcceptance: false`; they do not prove
+populated provider-history migration, active/queued-work recovery, reboot or
+native Windows updater behavior. Those boundaries remain separately required.
+
 ## 1.0.12-beta.3 rehearsal preparation
 
 The new exact candidate admits `stable111` and `beta1122`, with both legacy
