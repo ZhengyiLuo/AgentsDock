@@ -1,5 +1,19 @@
 # Public development log
 
+## Unreleased — Preserve updater progress during stale status checks
+
+- Recheck the full update receipt under its file lock before finalizing an
+  apparently abandoned updater. New heartbeats, process/phase changes and
+  recovery ownership now preserve the live operation and its maintenance hold.
+- Update check/start requests keep a refreshed active operation instead of
+  replacing its status or launching another updater. Unchanged dead-runner
+  recovery and retained activation-journal safeguards remain intact.
+- Verification: 227 focused update, endpoint, runner and recovery tests pass,
+  including real receipt writes interleaved with simulated failed liveness
+  probes. Python compilation and diff checks pass. Native app/service update
+  acceptance and exact release-package validation are still pending; this is
+  source-only, not a published or deployed fix.
+
 ## 2026-11-08 - Clarify failed update rehearsal diagnostics
 
 - Preserve fixed failure reasons for an exited updater, execution-hold cleanup
