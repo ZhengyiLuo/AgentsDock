@@ -1,5 +1,29 @@
 # Public development log
 
+## Unreleased — Isolate update checks and legacy-service resource limits
+
+- Public release checks and paired-server metadata fetches use a non-persistent,
+  credential-free Electron session. They no longer open the browser cookie
+  encryption store, which can stall behind macOS Keychain access. Existing
+  deadlines, size bounds, channel rules and signed-descriptor checks remain.
+- The legacy managed-server entrypoint now applies the same file-descriptor
+  headroom as the split worker/gateway. Provider children inherit the raised
+  soft limit without changing the hard limit or lowering an existing limit.
+- Verification: the new regressions fail before their fixes. Desktop updater
+  and coordinator suites pass (157 tests, two skipped), as do all 13 execution
+  service tests, TypeScript checking and production compilation. An ad-hoc
+  packaged native app exercised update checking and cancellation. A managed
+  test instance completed an authenticated published-package upgrade, retained
+  its state, then ran the patched startup and a real Claude reply in an isolated
+  working directory. The source fix is local only, not published.
+- Acceptance limits: public release download URLs returned HTTP 504 independently
+  of Electron, so signed desktop download/install/relaunch remains unaccepted.
+  The ad-hoc package still encountered a separate browser-store Keychain wait
+  during quit; isolating release requests does not establish native restart safety.
+  An existing external-volume working directory also failed in the managed
+  service context; the successful provider check does not resolve that boundary.
+  Active-turn continuation across an update was not exercised in this run.
+
 ## 2026-11-08 - Prepare coordinated 1.0.12-beta.3
 
 - Integrate main through `5de30b23` into the published beta.2 release line,

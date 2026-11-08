@@ -1,4 +1,4 @@
-import { app, net } from 'electron'
+import { app, session } from 'electron'
 import { autoUpdater, type ProgressInfo, type UpdateDownloadedEvent, type UpdateInfo } from 'electron-updater'
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
@@ -639,8 +639,13 @@ async function fetchBoundedReleaseBytes(url: string, label: string, maxBytes: nu
   const controller = new AbortController()
   const timeout = setTimeout(() => controller.abort(), RELEASE_CHECK_TIMEOUT_MS)
   try {
-    const response = await net.fetch(url, {
+    // Release metadata is public. The default browser session may wait for
+    // persistent-cookie decryption (and a macOS Keychain prompt) before it
+    // sends anything. Keep checks independent of user login/cookie storage,
+    // as electron-updater already does for its own download transport.
+    const response = await session.fromPartition('agentsdock-public-updates', { cache: false }).fetch(url, {
       cache: 'no-store',
+      credentials: 'omit',
       headers: { Accept: accept },
       signal: controller.signal
     })

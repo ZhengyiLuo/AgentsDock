@@ -31,10 +31,12 @@ const mocks = vi.hoisted(() => {
     })
   }
   const netFetch = vi.fn<typeof fetch>()
+  const updateSession = vi.fn(() => ({ fetch: netFetch }))
+  const persistentFetch = vi.fn(() => { throw new Error('Persistent cookie store is blocked') })
   const emit = (event: string, ...args: unknown[]) => {
     for (const listener of listeners.get(event) ?? []) listener(...args)
   }
-  return { autoUpdater, emit, listeners, netFetch, appVersion: '1.2.3', appIsPackaged: true }
+  return { autoUpdater, emit, listeners, netFetch, updateSession, persistentFetch, appVersion: '1.2.3', appIsPackaged: true }
 })
 
 vi.mock('electron', () => ({
@@ -42,7 +44,8 @@ vi.mock('electron', () => ({
     get isPackaged() { return mocks.appIsPackaged },
     getVersion: () => mocks.appVersion
   },
-  net: { fetch: mocks.netFetch }
+  net: { fetch: mocks.persistentFetch },
+  session: { fromPartition: mocks.updateSession }
 }))
 vi.mock('electron-updater', () => ({ autoUpdater: mocks.autoUpdater }))
 vi.mock('./logger', () => ({ appLog: vi.fn() }))
@@ -64,6 +67,8 @@ describe('AppUpdateManager', () => {
     mocks.autoUpdater.channel = null
     mocks.autoUpdater.setFeedURL.mockReset()
     mocks.autoUpdater.checkForUpdates.mockReset().mockResolvedValue(null)
+    mocks.updateSession.mockClear()
+    mocks.persistentFetch.mockClear()
     mocks.netFetch.mockReset().mockResolvedValue(new Response(
       '<feed><entry><link href="https://github.com/ZhengyiLuo/AgentsDock/releases/tag/v1.2.6-beta.1" /></entry></feed>',
       { status: 200 }
@@ -94,6 +99,18 @@ describe('AppUpdateManager', () => {
     manager.start()
     return manager
   }
+
+  it('checks public release metadata without opening the persistent browser cookie store', async () => {
+    const manager = createManager({}, 'beta')
+    await manager.check(true)
+
+    expect(mocks.updateSession).toHaveBeenCalledWith('agentsdock-public-updates', { cache: false })
+    expect(mocks.persistentFetch).not.toHaveBeenCalled()
+    expect(mocks.netFetch).toHaveBeenCalledWith(
+      'https://github.com/ZhengyiLuo/AgentsDock/releases.atom',
+      expect.objectContaining({ credentials: 'omit', cache: 'no-store', signal: expect.any(AbortSignal) })
+    )
+  })
 
   it('defaults fresh prerelease installs to the beta channel', () => {
     expect(defaultAppUpdateTrack('0.2.7-beta.6')).toBe('beta')
@@ -217,6 +234,7 @@ describe('AppUpdateManager', () => {
       'https://github.com/ZhengyiLuo/AgentsDock/releases/latest/download/latest-mac.yml',
       {
         cache: 'no-store',
+        credentials: 'omit',
         headers: { Accept: 'text/yaml, text/plain' },
         signal: expect.any(AbortSignal)
       }
@@ -254,6 +272,7 @@ describe('AppUpdateManager', () => {
       'https://github.com/ZhengyiLuo/AgentsDock/releases/download/v1.2.6-beta.1/beta-mac.yml',
       {
         cache: 'no-store',
+        credentials: 'omit',
         headers: { Accept: 'text/yaml, text/plain' },
         signal: expect.any(AbortSignal)
       }
@@ -310,6 +329,7 @@ describe('AppUpdateManager', () => {
       'https://github.com/ZhengyiLuo/AgentsDock/releases.atom',
       {
         cache: 'no-store',
+        credentials: 'omit',
         headers: { Accept: 'application/atom+xml, application/xml, text/xml' },
         signal: expect.any(AbortSignal)
       }
