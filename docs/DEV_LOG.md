@@ -1,5 +1,32 @@
 # Public development log
 
+## 2026-11-09 - Validate coordinated 1.0.12-beta.6
+
+- Freeze desktop build `1275`, the signed server runtime, short CLI and legacy
+  bridge at product source `0e46b3f81e98596da3d91c73137f89efeee05686`. Beta.6
+  includes admitted-update restart-gap recovery, credential-free update checks
+  and legacy-server file-descriptor headroom. Stable remains `1.0.11`; the
+  unpublished beta.5 candidate is unchanged. See [release notes](RELEASE_1.0.12-beta.6.md).
+- Native preparation and independent verification passed on all four desktop
+  platforms. Matched CLI lifecycle acceptance passed on macOS and Linux.
+  [Mac upgrade/recovery checks](https://github.com/ZhengyiLuo/AgentsDock/actions/runs/42534945814)
+  passed all eleven cases across retained attempts, including public beta.4 and
+  stable `1.0.11` with both legacy root modes. Both beta.4 cases needed explicit
+  recovery after server completion, not a seamless first attempt.
+- [Linux rollback/retry](https://github.com/ZhengyiLuo/AgentsDock/actions/runs/42534947832)
+  passed in both root modes using the same signed packages. Original artifact
+  digests, source pins and scoped observation flags were verified and retained.
+- Separate isolated provider checks retained Codex/Claude context, queued work
+  and a persistent goal across the signed server update. Packaged desktop
+  replacement with active providers, complete history rendering, reboot,
+  natural OAuth renewal and the native Windows updater are not established.
+  [Claude history duplication #166](https://github.com/ZhengyiLuo/AgentsDock/issues/166)
+  remains a documented beta limitation. Windows previews remain unsigned.
+- [Matched npm publication](https://github.com/ZhengyiLuo/AgentsDock/actions/runs/42537649524)
+  is in progress. This entry records candidate validation, not completed public
+  publication. No mobile build or upload is included. Later documentation
+  commits are not new artifact sources.
+
 ## Unreleased — Preserve both legacy update-recovery receipt fields
 
 - The separate legacy-recovery rehearsal accepts a completed schedule receipt
