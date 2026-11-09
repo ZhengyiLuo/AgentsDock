@@ -124,7 +124,7 @@ Never add message or prompt text, chat/job/agent/folder names, skill or command 
 | `server_update_requested` | The user requests a supported managed server update, including deferred admission. Not installation success. | None |
 | `server_update_now_requested` | The user confirms Update now and the identity/reservation checks allow the restart request. | None |
 | `server_update_cancelled` | A user's explicit queued-update cancellation request settles. | `success` |
-| `server_update_retry_requested` | The user requests retry for a coordinated server update. | None |
+| `server_update_retry_requested` | The user requests retry or confirms finishing a coordinated server update. | None |
 
 iOS/iPadOS analytics remain disabled. Team Network instrumentation is unchanged. Chat-reference submission is not proof of agent-to-agent delivery/read/reply. No background history, streamed tokens, or typing are counted.
 

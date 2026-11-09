@@ -2098,6 +2098,16 @@ export interface ServerUpdateStatus {
 export type AppUpdateState = 'disabled' | 'idle' | 'checking' | 'available' | 'downloading' | 'downloaded' | 'installing' | 'not-available' | 'error'
 export type AppUpdateChannel = 'development' | 'direct' | 'app-store'
 export type AppUpdateTrack = 'stable' | 'beta'
+export interface FinishServerUpdateRequest {
+  profileId: string
+  serverIdentity: string
+  targetVersion: string
+  confirmed: true
+  /** The reservation shown in the confirmation, never an arbitrary cancel target. */
+  scheduleId?: string
+  operationTargetVersion?: string
+  serverInstanceId?: string
+}
 export interface CoordinatedServerUpdate {
   profileId: string
   name: string
@@ -2113,6 +2123,10 @@ export interface CoordinatedServerUpdate {
   scheduleId?: string
   operationTargetVersion?: string
   operationOwned?: boolean
+  /** Explicit user consent for this server identity and signed target only. */
+  updateRequested?: boolean
+  replaceReservation?: { scheduleId: string; version: string; instanceId: string }
+  continuationAvailable?: boolean
   /** Exact pending reservation already sent to the restart endpoint. */
   forceRequestedScheduleId?: string
   forceRequestId?: string

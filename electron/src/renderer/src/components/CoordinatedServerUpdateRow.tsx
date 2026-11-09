@@ -3,6 +3,9 @@ import type { CoordinatedServerUpdate } from '@shared/types'
 import { t } from '../lib/i18n'
 
 function updateDescription(server: CoordinatedServerUpdate): string {
+  if (server.phase === 'pending' && server.continuationAvailable === false && server.operationTargetVersion === server.targetVersion) {
+    return t('coordinatedUpdate.legacyIdleHelp')
+  }
   const raw = server.message.trim()
   if (/\b429\b|too many requests|temporarily limited update requests/i.test(raw)) {
     if (/temporarily limited update requests/i.test(raw) && /try again in \d+ seconds/i.test(raw)) return raw

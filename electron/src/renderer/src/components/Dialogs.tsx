@@ -483,10 +483,13 @@ export function AppSettingsDialog({ serverSettings, onServerUpdatesVisible, onSe
   const [updateTrackBusy, setUpdateTrackBusy] = useState(false)
   const [updateCancelBusy, setUpdateCancelBusy] = useState(false)
   const [updateRetryBusy, setUpdateRetryBusy] = useState(false)
+  const [serverUpdateConfirmation, setServerUpdateConfirmation] = useState<CoordinatedServerUpdate[] | null>(null)
+  const serverUpdateCancelRef = useRef<HTMLButtonElement>(null)
   const updateRetryInFlight = useRef(false)
   const activeSectionRef = useRef<HTMLButtonElement | null>(null)
 
   const closeSettings = () => {
+    setServerUpdateConfirmation(null)
     const store = useAppStore.getState()
     store.setModal('settings', false)
     store.setModal('appSettings', false)
@@ -569,6 +572,30 @@ export function AppSettingsDialog({ serverSettings, onServerUpdatesVisible, onSe
   }
   const retryableServerUpdates = update?.serverUpdates?.filter(server => server.paused
     || ['failed', 'blocked', 'offline'].includes(server.phase)) || []
+  const pendingServerUpdates = update?.serverUpdates?.filter(server => server.phase === 'pending' && !server.paused && !server.updateRequested) || []
+  const finishServerUpdates = async () => {
+    if (updateRetryInFlight.current || !serverUpdateConfirmation) return
+    updateRetryInFlight.current = true
+    setUpdateRetryBusy(true)
+    trackEvent('server_update_retry_requested')
+    try {
+      const errors = await Promise.all(serverUpdateConfirmation.map(async server => {
+        try {
+          if (!server.serverIdentity) throw new Error(t('coordinatedUpdate.identityChanged'))
+          await window.agentsDock.updates.finishServerUpdate({
+            profileId: server.profileId, serverIdentity: server.serverIdentity, targetVersion: server.targetVersion,
+            confirmed: true, scheduleId: server.scheduleId, operationTargetVersion: server.operationTargetVersion,
+            serverInstanceId: server.serverInstanceId
+          })
+          return null
+        } catch (error) { return `${server.name}: ${message(error)}` }
+      }))
+      setUpdate(await window.agentsDock.updates.status())
+      if (errors.some(Boolean)) useAppStore.getState().setError(errors.filter(Boolean).join('\n'))
+      setServerUpdateConfirmation(null)
+    } catch (error) { useAppStore.getState().setError(message(error)) }
+    finally { updateRetryInFlight.current = false; setUpdateRetryBusy(false) }
+  }
   const retryUpdate = async () => {
     if (updateRetryInFlight.current) return
     updateRetryInFlight.current = true
@@ -602,7 +629,7 @@ export function AppSettingsDialog({ serverSettings, onServerUpdatesVisible, onSe
     profile.serverSetupComplete || profile.hasAccessToken || Boolean(profile.serverIdentity)
   )
 
-  return <Dialog.Root open={open} onOpenChange={value => { if (!value) closeSettings() }}>
+  return <><Dialog.Root open={open} onOpenChange={value => { if (!value) closeSettings() }}>
     <Dialog.Portal>
       <Dialog.Overlay className="dialog-overlay app-settings-overlay" />
       <Dialog.Content className="app-settings-dialog" onOpenAutoFocus={event => {
@@ -698,7 +725,7 @@ export function AppSettingsDialog({ serverSettings, onServerUpdatesVisible, onSe
                   {update?.channel === 'development' && <button type="button" className="quiet-button" disabled={!developmentUpdateCheckEnabled || updateBusy || updateTrackBusy || updateRetryBusy} title={developmentUpdateCheckEnabled ? undefined : update.message || t("ui.Dialogs.AppSettingsDialog.app_update_checks_are_unavailable_for_this_86d2da7")} onClick={() => void checkForUpdates()}>{updateBusy || updateTrackBusy ? <LoaderCircle className="spin" size={13} /> : <RefreshCw size={13} />}{updateBusy || updateTrackBusy ? t("ui.Dialogs.AppSettingsDialog.checking_ec963ff") : t("ui.Dialogs.AppSettingsDialog.check_for_updates_f26f327")}</button>}
                   {update?.channel === 'direct' && update.state !== 'downloaded' && update.state !== 'installing' && <button type="button" className="quiet-button" disabled={updateBusy || updateTrackBusy || updateCancelBusy || updateRetryBusy} onClick={() => void checkForUpdates()}>{updateBusy || updateTrackBusy ? <LoaderCircle className="spin" size={13} /> : <RefreshCw size={13} />}{t("ui.Dialogs.AppSettingsDialog.check_for_updates_f26f327")}</button>}
                   {update?.channel === 'direct' && update.state === 'downloaded' && <button type="button" className="primary-button" disabled={updateCancelBusy || updateTrackBusy || updateRetryBusy} onClick={() => void installUpdate()}><Download size={13} />{t("ui.Dialogs.AppSettingsDialog.restart_to_update_451d3a7")}</button>}
-                  {update?.channel === 'direct' && update.state !== 'downloaded' && update.state !== 'installing' && retryableServerUpdates.length > 0 && <button type="button" className="primary-button" disabled={updateBusy || updateTrackBusy || updateCancelBusy || updateRetryBusy} onClick={() => void retryUpdate()}>{updateRetryBusy ? <LoaderCircle className="spin" size={13} /> : <RotateCcw size={13} />}{t('appUpdate.retryProduct')}</button>}
+                  {update?.channel === 'direct' && update.state !== 'downloaded' && update.state !== 'installing' && (pendingServerUpdates.length > 0 || retryableServerUpdates.length > 0) && <button type="button" className="primary-button" disabled={updateBusy || updateTrackBusy || updateCancelBusy || updateRetryBusy} onClick={() => pendingServerUpdates.length > 0 ? setServerUpdateConfirmation([...pendingServerUpdates, ...retryableServerUpdates]) : void retryUpdate()}>{updateRetryBusy ? <LoaderCircle className="spin" size={13} /> : <RotateCcw size={13} />}{t(pendingServerUpdates.length > 0 ? 'appUpdate.finishServers' : 'appUpdate.retryProduct')}</button>}
                   {update?.channel === 'direct' && update.state === 'installing' && <span className="app-settings-value"><LoaderCircle className="spin" size={13} />{t("ui.Dialogs.AppSettingsDialog.restarting_75d0f14")}</span>}
                   {update?.channel === 'direct' && (update.state === 'downloaded' || update.cancelable) && <button type="button" className="quiet-button" disabled={updateCancelBusy || updateRetryBusy} onClick={() => void cancelUpdate()}>{updateCancelBusy ? <LoaderCircle className="spin" size={13} /> : <X size={13} />}{updateCancelBusy ? t('appUpdate.cancelling') : update.state === 'downloaded' ? t('appUpdate.discard') : t('appUpdate.cancel')}</button>}
                 </div>
@@ -736,6 +763,22 @@ export function AppSettingsDialog({ serverSettings, onServerUpdatesVisible, onSe
       </Dialog.Content>
     </Dialog.Portal>
   </Dialog.Root>
+  <Shell open={open && serverUpdateConfirmation !== null} onOpenChange={value => { if (!value && !updateRetryBusy) setServerUpdateConfirmation(null) }}
+    title={t('appUpdate.finishServers')} description={t('appUpdate.finishServersHelp')} className="confirm-dialog"
+    closeDisabled={updateRetryBusy} initialFocusRef={serverUpdateCancelRef}>
+    <div className="server-restart-confirmation">
+      <ul>{serverUpdateConfirmation?.map(server => <li key={server.profileId}>
+        <strong>{server.name}</strong>{' · '}{server.targetVersion}
+        {server.operationTargetVersion && server.operationTargetVersion !== server.targetVersion
+          && <p>{t('appUpdate.replaceReservation', { version: server.operationTargetVersion })}</p>}
+      </li>)}</ul>
+      <p>{t('appUpdate.finishServersWarning')}</p>
+      <div className="confirm-actions">
+        <button ref={serverUpdateCancelRef} type="button" className="quiet-button" disabled={updateRetryBusy} onClick={() => setServerUpdateConfirmation(null)}>{t('ui.Dialogs.SettingsDialog.cancel_19766ed')}</button>
+        <button type="button" className="primary-button" disabled={updateRetryBusy} onClick={() => void finishServerUpdates()}>{updateRetryBusy && <LoaderCircle className="spin" size={13} />}{t('appUpdate.confirmServers')}</button>
+      </div>
+    </div>
+  </Shell></>
 }
 
 export function ServerOnboardingDialog() {

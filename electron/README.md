@@ -208,6 +208,25 @@ side chats, live steering, or native goals for OpenCode.
 Ordinary queued follow-ups and Stop remain available. A copied-memory fork
 is not presented as a native clone.
 
+## Finishing paired server updates
+
+Settings → Updates offers **Update servers** when the desktop app is current
+but a paired server update is still pending. Confirm the listed servers and
+signed target: continuation-capable servers can interrupt supported work,
+restart into that exact release, and resume the unfinished task. Interrupted
+operations can repeat; this is not an exactly-once tool-execution guarantee.
+Older servers continue waiting for idle without forced interruption. Each
+server proceeds independently, so an offline profile does not prevent another
+server's confirmed update.
+
+An older pending reservation is replaced only after confirmation of that exact
+server identity, boot, schedule and version, and only before installation has
+started. Background checks never cancel someone else's reservation or acquire
+permission to interrupt work. A changed reservation requires fresh review;
+newer reserved versions are not downgraded. Lost restart responses retain their
+request identity so retry observes the admitted update instead of restarting
+unrelated work. No server-side authentication or installer policy is weakened.
+
 ## Architecture
 
 - `src/main`: server client, SQLite cache, downloads, native integration, IPC

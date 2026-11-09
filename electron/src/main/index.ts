@@ -86,7 +86,11 @@ if (!app.requestSingleInstanceLock()) {
       if (!coordinatedUpdates) throw new Error('Server update coordination is not ready.')
       await coordinatedUpdates.prepareForInstall(release, version)
     },
-    retryServers: async profileId => { await coordinatedUpdates?.retry(profileId) }
+    retryServers: async profileId => { await coordinatedUpdates?.retry(profileId) },
+    finishServerUpdate: async request => {
+      if (!coordinatedUpdates) throw new Error('Server update coordination is not ready.')
+      await coordinatedUpdates.finish(request)
+    }
   })
 
   app.whenReady().then(() => {
