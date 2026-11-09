@@ -60732,12 +60732,24 @@ def discover_opencode_catalog(*, executable: str | None = None, refresh: bool = 
     from opencode_agent_client import parse_opencode_models_list
 
     model_source = "opencode models"
+    discovery_status = "ready"
     try:
         executable = executable or resolve_opencode_executable()
         if executable is None:
             raise RuntimeError("no compatible OpenCode executable is available")
         model_source = f"{Path(executable).name} models"
-        output = run_catalog_command([executable, "models", *(["--refresh"] if refresh else [])])
+        try:
+            output = run_catalog_command([executable, "models", *(["--refresh"] if refresh else [])])
+        except Exception:
+            if not refresh or runtime_catalog_budget_expired():
+                raise
+            # Registry refresh can need the network. Ask the same native CLI
+            # for its current inventory within the remaining shared budget;
+            # do not resurrect another account's server/client cached rows or
+            # claim that this fallback confirms a successful online refresh.
+            output = run_catalog_command([executable, "models"])
+            discovery_status = "unavailable"
+            model_source += " (registry refresh unavailable; native cached registry)"
         parsed = parse_opencode_models_list(output)
     except Exception as exc:
         logger.warning(
@@ -60745,6 +60757,7 @@ def discover_opencode_catalog(*, executable: str | None = None, refresh: bool = 
             type(exc).__name__,
         )
         parsed = []
+        discovery_status = "unavailable"
         model_source = f"{model_source} failed"
 
     if not parsed:
@@ -60762,6 +60775,7 @@ def discover_opencode_catalog(*, executable: str | None = None, refresh: bool = 
             "effort_source": "none",
             "default_model": "",
             "default_effort": None,
+            "discovery_status": "empty" if discovery_status == "ready" else discovery_status,
         }
     default_entry = next(
         (model for model in parsed if model.get("is_free")), parsed[0]
@@ -60776,6 +60790,7 @@ def discover_opencode_catalog(*, executable: str | None = None, refresh: bool = 
         "effort_source": "none",
         "default_model": str(default_entry.get("id") or ""),
         "default_effort": None,
+        "discovery_status": discovery_status,
     }
 
 

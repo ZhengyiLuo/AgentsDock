@@ -11,11 +11,14 @@
   accept authoritative empty lists, and preserve native/default model semantics.
 - Raise Cursor API inventory capacity from 256 to 512 with partial-list reporting.
   Exclude known Gemini audio-only products from the text-agent catalog.
+- If OpenCode's explicit registry refresh fails, read the same CLI's native
+  registry within the existing deadline and label freshness unconfirmed. Do not
+  substitute another account's cached rows or retry an authoritative empty list.
 - Add a native-only, revision-fenced optional text check for Claude/OpenCode/Gemini
   API models, with English/Chinese UI and usage disclosure. It does not change
   defaults, credentials or chats. Quota/auth/network errors do not prove retirement;
   short-lived rejection observations are not a permanent model blacklist.
-- Verification: 233 focused server tests; desktop typecheck, production compile
+- Verification: 244 focused server tests; desktop typecheck, production compile
   and 573 focused tests. Isolated native offscreen Electron exercised real settings
   reads, default selection, reload/reopen and explicit Gemini/OpenCode requests
   through production IPC/native HTTP/server authorization. A Gemini inventory
@@ -26,6 +29,9 @@
 - Limits: not every model was invoked; text success does not establish full agent
   compatibility. Native Claude cache/identity behavior has regression coverage but
   fresh live capture was blocked by a CLI startup error and remains unverified.
+  A follow-up native-app pass reconfirmed Gemini's explicit API check but full
+  chat requests encountered native startup/disconnect failures; one Codex request
+  was stopped without an answer. Full-provider acceptance remains pending.
   No mobile changes, packaging
   acceptance, public release or production-server deployment is included.
 
