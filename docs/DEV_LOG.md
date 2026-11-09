@@ -5,6 +5,8 @@
 - Stop presenting historical Claude/Codex version fallbacks and saved chat IDs
   as current account inventory. Keep Claude discovery passive and let real SDK
   metadata share its cache with the picker despite chat-only scheduling limits.
+  Follow the native account's default selector when reported, unless the server
+  has an explicit configured override; do not assume the default is Sonnet.
 - Reconcile desktop catalog caches on reconnect; refresh custom Codex inventories
   with credential-scoped expiry and explicitly refresh OpenCode's CLI registry.
   Retain same-connection rows on transient failure with an unconfirmed warning,
@@ -18,20 +20,21 @@
   API models, with English/Chinese UI and usage disclosure. It does not change
   defaults, credentials or chats. Quota/auth/network errors do not prove retirement;
   short-lived rejection observations are not a permanent model blacklist.
-- Verification: 244 focused server tests; desktop typecheck, production compile
+- Verification: 245 focused server tests; desktop typecheck, production compile
   and 573 focused tests. Isolated native offscreen Electron exercised real settings
   reads, default selection, reload/reopen and explicit Gemini/OpenCode requests
   through production IPC/native HTTP/server authorization. A Gemini inventory
   entry rejected the request while another succeeded; connection readiness stayed
   unchanged. English/Chinese, dark/light and narrow layout were inspected.
-  Two 24-read concurrency batches returned complete backend catalogs. Live Cursor
+  Repeated 24-read concurrency batches returned complete backend catalogs. Live Cursor
   inventory exceeded the previous cap. Account-switch/failure races used fixtures.
+- Full chat acceptance: isolated native offscreen Electron sent a disposable
+  prompt through each real Claude, Codex, Cursor, OpenCode and Gemini runtime;
+  all five returned the expected answer and completed successfully. Fresh Claude
+  SDK initialization populated the picker with native current and older models.
+  These checks used an accessible, clean workspace without project overrides.
 - Limits: not every model was invoked; text success does not establish full agent
-  compatibility. Native Claude cache/identity behavior has regression coverage but
-  fresh live capture was blocked by a CLI startup error and remains unverified.
-  A follow-up native-app pass reconfirmed Gemini's explicit API check but full
-  chat requests encountered native startup/disconnect failures; one Codex request
-  was stopped without an answer. Full-provider acceptance remains pending.
+  compatibility. No second live account was available for an account-switch test.
   No mobile changes, packaging
   acceptance, public release or production-server deployment is included.
 

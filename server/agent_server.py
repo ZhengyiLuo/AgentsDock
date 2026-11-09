@@ -60639,12 +60639,12 @@ def discover_claude_native_models() -> tuple[list[dict[str, Any]], str]:
 def parse_claude_help_catalog() -> dict[str, Any]:
     model_options: list[dict[str, Any]] = []
     effort_options: list[dict[str, Any]] = []
-    default_model = (
+    configured_default_model = (
         os.environ.get("CLAUDE_MODEL")
         or os.environ.get("ANTHROPIC_MODEL")
         or agentsdock_setting("CLAUDE_MODEL", "")
-        or "sonnet"
     )
+    default_model = configured_default_model or "sonnet"
     default_effort = os.environ.get("CLAUDE_EFFORT") or agentsdock_setting("CLAUDE_EFFORT", "")
     supports_ultracode = claude_supports_effort("ultracode")
     # Optional candidate discovery must leave time for the native picker,
@@ -60671,6 +60671,11 @@ def parse_claude_help_catalog() -> dict[str, Any]:
         # after the native picker applies account/organization restrictions.
         # Never append unfiltered static pins to a successful native result.
         model_options.extend(native_options)
+        if not configured_default_model and any(option["value"] == "default" for option in native_options):
+            # The account's native default can change independently of the
+            # Sonnet alias. Preserve the native selector instead of labeling
+            # or pinning the server default to our historical assumption.
+            default_model = "default"
     else:
         model_options.extend(discovered_help_aliases)
         model_options.extend(runtime_option(value, label) for value, label in CLAUDE_CLI_MODEL_ALIASES)

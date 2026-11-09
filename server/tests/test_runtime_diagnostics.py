@@ -771,6 +771,23 @@ class RuntimeDiagnosticTests(unittest.TestCase):
         self.assertEqual(result["model_source"], "Cached Claude SDK initialize")
         api.assert_called_once_with(timeout_seconds=2.0)
 
+    def test_claude_default_follows_native_account_unless_explicitly_configured(self):
+        self.native_models.return_value = ([
+            {"value": "default", "label": "Default — Opus 5.5"},
+            {"value": "sonnet", "label": "Sonnet 5.5"},
+        ], "success")
+        for configured, expected, label in [("", "default", "Default — Opus 5.5"), ("sonnet", "sonnet", "Sonnet 5.5")]:
+            with self.subTest(configured=configured), patch.dict(agent_server.os.environ, {
+                "CLAUDE_MODEL": configured, "ANTHROPIC_MODEL": "",
+            }), patch.object(agent_server, "agentsdock_setting", return_value=""), patch.object(
+                agent_server, "run_catalog_command", return_value="",
+            ), patch.object(agent_server, "claude_supports_effort", return_value=False), patch.object(
+                agent_server, "discover_claude_provider_models", return_value=([], "unavailable"),
+            ):
+                result = agent_server.parse_claude_help_catalog()
+            self.assertEqual(result["default_model"], expected)
+            self.assertEqual(result["models"][0], {"value": "", "label": label})
+
     def test_claude_api_models_do_not_expand_cached_native_permissions(self) -> None:
         self.native_models.return_value = ([
             {"value": "opus", "label": "Opus 5.5"},
