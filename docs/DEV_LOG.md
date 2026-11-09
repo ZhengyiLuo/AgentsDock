@@ -20,8 +20,8 @@
   API models, with English/Chinese UI and usage disclosure. It does not change
   defaults, credentials or chats. Quota/auth/network errors do not prove retirement;
   short-lived rejection observations are not a permanent model blacklist.
-- Verification: 245 focused server tests; desktop typecheck, production compile
-  and 573 focused tests. Isolated native offscreen Electron exercised real settings
+- Verification: 307 focused server tests; desktop typecheck, production compile
+  and 580 focused tests including locale terminology checks. Isolated native offscreen Electron exercised real settings
   reads, default selection, reload/reopen and explicit Gemini/OpenCode requests
   through production IPC/native HTTP/server authorization. A Gemini inventory
   entry rejected the request while another succeeded; connection readiness stayed

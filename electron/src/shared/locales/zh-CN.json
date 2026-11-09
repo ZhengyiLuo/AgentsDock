@@ -874,7 +874,7 @@
   "connections.nativeAccountLabel": "{provider} CLI 登录",
   "customModels.default": "默认模型",
   "customModels.notListed": "未列入当前列表",
-  "customModels.notListedHelp": "此已保存模型不在当前连接的列表中。可刷新，或手动输入准确 ID 尝试；聊天设置未被更改。",
+  "customModels.notListedHelp": "此已保存模型不在当前连接的列表中。可刷新，或手动输入准确 ID 尝试；会话设置未被更改。",
   "customModels.stale": "未能刷新此连接的模型目录。缓存选项尚未确认，请重试。",
   "customModels.check": "测试此模型",
   "customModels.checkHelp": "可选：使用此连接发送简短文本请求，可能产生费用；不代表所有 Agent 工具都已验证。",
