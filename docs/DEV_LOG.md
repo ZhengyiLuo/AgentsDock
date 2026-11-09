@@ -17,7 +17,9 @@
   when the signed target changes or the operation fails or completes.
 - Verification: coordinator, updater, transport, UI and localization regressions
   cover explicit confirmation, cancellation, repeated clicks, legacy idle
-  behavior, stale reservations and restart recovery. Native end-to-end acceptance
+  behavior, stale reservations and restart recovery. After integrating current
+  main, 6,004 Electron tests passed (6 skipped), plus 8 compile/license checks;
+  TypeScript checks and production compilation passed. Native end-to-end acceptance
   of the new button remains pending because OS credential access blocked the
   isolated packaged app's connection. Earlier API-triggered update checks do
   not count as acceptance of this UI workflow.
