@@ -21,11 +21,12 @@ export function CustomModelSettings({ backend, active, onSaved, verifyOnSelect =
   const [reload, setReload] = useState(0)
   const [manual, setManual] = useState(false)
   const [manualModel, setManualModel] = useState('')
+  const [checkResult, setCheckResult] = useState<string | null>(null)
   const serial = useRef(0)
   const id = useId()
   useEffect(() => {
     const request = ++serial.current
-    setCatalog(null); setSelected(''); setFailed(false); setLoading(false); setSaving(false); setManual(false); setManualModel('')
+    setCatalog(null); setSelected(''); setFailed(false); setLoading(false); setSaving(false); setManual(false); setManualModel(''); setCheckResult(null)
     if (!active || !connected || !profileId) return
     const api = window.agentsDock.customModels
     if (!api) { setFailed(true); return }
@@ -42,7 +43,7 @@ export function CustomModelSettings({ backend, active, onSaved, verifyOnSelect =
     const verifier = window.agentsDock.providerConnections
     if (verifyOnSelect && !verifier) { setFailed(true); return }
     const request = ++serial.current
-    setSelected(model); setSaving(true); setFailed(false)
+    setSelected(model); setSaving(true); setFailed(false); setCheckResult(null)
     try {
       const result = await trackOperation('provider_default_model_saved', () => window.agentsDock.customModels!.save({ profileId, profileGeneration }, backend,
         { model: model || null, expected_revision: catalog.revision }), () => true, { backend })
@@ -56,6 +57,20 @@ export function CustomModelSettings({ backend, active, onSaved, verifyOnSelect =
     } catch { if (serial.current === request) { setSelected(catalog.default_model ?? ''); setFailed(true) } }
     finally { if (serial.current === request) setSaving(false) }
   }
+  async function check() {
+    if (!catalog || !profileId || !selected || saving || loading || !window.agentsDock.customModels?.check) return
+    const request = ++serial.current
+    setSaving(true); setFailed(false); setCheckResult(null)
+    try {
+      const result = await window.agentsDock.customModels.check({ profileId, profileGeneration }, backend,
+        { model: selected, expected_revision: catalog.revision })
+      if (serial.current !== request) return
+      setCheckResult(result.status)
+      setCatalog({ ...catalog, models: catalog.models?.map(row => row.value === selected
+        ? { ...row, locked: ['unsupported', 'model_unavailable'].includes(result.status) } : row) })
+    } catch { if (serial.current === request) setFailed(true) }
+    finally { if (serial.current === request) setSaving(false) }
+  }
   if (!active) return null
   const options = catalog?.models ?? []
   const missing = selected && !options.some(option => option.value === selected)
@@ -67,9 +82,12 @@ export function CustomModelSettings({ backend, active, onSaved, verifyOnSelect =
     {loading ? <small role="status">{t('customModels.loading')}</small> : catalog && <>
       <select id={id} value={selected} disabled={saving || !options.length} onChange={event => void save(event.target.value)}>
           <option value="" disabled={verifyOnSelect}>{t('customModels.choose')}</option>
-          {missing && <option value={selected}>{selected}</option>}
-          {options.map(option => <option key={option.value} value={option.value}>{option.label === option.value ? option.label : `${option.label} (${option.value})`}</option>)}
+          {missing && <option value={selected} disabled>{selected} · {t('customModels.notListed')}</option>}
+          {options.map(option => <option key={option.value} value={option.value} disabled={option.locked}>{option.label === option.value ? option.label : `${option.label} (${option.value})`}{option.locked ? ` · ${t('customModels.check.unavailable')}` : ''}</option>)}
         </select>
+      {missing && <small>{t('customModels.notListedHelp')}</small>}
+      {catalog.discovery_status === 'partial' && <small>{t('customModels.partial')}</small>}
+      {['unavailable', 'authentication_failed'].includes(catalog.discovery_status ?? '') && <small role="status">{t('customModels.stale')}</small>}
       {!options.length && <small>{t('customModels.empty')}</small>}
       {verifyOnSelect && selected && <button type="button" className="quiet-button" disabled={saving} onClick={() => void save(selected)}>{t('customModels.verify')}</button>}
       {baseURL && <>
@@ -82,6 +100,14 @@ export function CustomModelSettings({ backend, active, onSaved, verifyOnSelect =
           </form>}
       </>}
     </>}
+    {catalog?.check_available && selected && selected !== 'auto' && !verifyOnSelect && <>
+      <small>{t('customModels.checkHelp')}</small>
+      <button type="button" className="quiet-button" disabled={saving || loading} onClick={() => void check()}>{t('customModels.check')}</button>
+    </>}
+    {checkResult && <small role="status">{t(checkResult === 'verified' ? 'customModels.check.verified'
+      : ['unsupported', 'model_unavailable'].includes(checkResult) ? 'customModels.check.unavailable'
+      : checkResult === 'rate_limited' ? 'customModels.check.rateLimited'
+      : checkResult === 'authentication_failed' ? 'customModels.check.authFailed' : 'customModels.check.inconclusive')}</small>}
     {failed && <small role="alert" className="codex-auth-settings-error">{t('customModels.failed')}</small>}
     <button type="button" className="quiet-button" disabled={loading || saving} onClick={() => setReload(value => value + 1)}>{t('customModels.refresh')}</button>
   </div>

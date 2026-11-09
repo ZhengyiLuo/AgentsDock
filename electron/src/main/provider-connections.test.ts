@@ -14,6 +14,27 @@ const empty = { ...config, configured: false, has_api_key: false, base_url: null
   auth_header: null, checked_at: null, last_result: null }
 
 describe('settings-only provider connection native transport', () => {
+  it('checks one saved model through the exact native route and drops extra response fields', async () => {
+    const reply = { backend: 'gemini', model: 'example-model', revision: 4, status: 'verified', scope: 'text_request' }
+    const server = createServer(async (req, res) => {
+      const chunks: Buffer[] = []; for await (const chunk of req) chunks.push(Buffer.from(chunk))
+      expect(req.method).toBe('POST')
+      expect(req.url).toBe('/api/admin/provider-models/gemini/check')
+      expect(req.headers['x-agentsdock-token']).toBe('synthetic-admin')
+      expect(req.headers.origin).toBeUndefined()
+      expect(req.headers['sec-fetch-mode']).toBeUndefined()
+      expect(JSON.parse(Buffer.concat(chunks).toString())).toEqual({ model: 'example-model', expected_revision: 4 })
+      res.setHeader('Content-Type', 'application/json')
+      res.end(JSON.stringify({ ...reply, api_key: 'must-not-escape' }))
+    })
+    await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve))
+    const client = new AgentServerClient(`http://127.0.0.1:${(server.address() as AddressInfo).port}`, 'synthetic-admin')
+    try {
+      expect(await client.checkCustomModel('gemini', { model: 'example-model', expected_revision: 4 })).toEqual(reply)
+      reply.model = 'different-model'
+      await expect(client.checkCustomModel('gemini', { model: 'example-model', expected_revision: 4 })).rejects.toThrow('CUSTOM_MODELS_INVALID')
+    } finally { client.dispose(); server.closeAllConnections(); await new Promise<void>(resolve => server.close(() => resolve())) }
+  })
   it('keeps Gemini protocol/header separate and uses native authenticated approval routes', async () => {
     const gemini = { ...input, base_url: 'https://generativelanguage.googleapis.com', model: null, protocol: 'gemini' as const, auth_header: 'x-goog-api-key' as const }
     expect(connectionRequest('gemini', 'save', gemini)).toEqual(gemini)

@@ -433,6 +433,7 @@ export interface AgentsDockAPI {
     read(scope: CodexServerSettingsScope, backend: import('./provider-connections').CLIAccountBackend): Promise<import('./provider-connections').CLIAccountMetadata>
   }
   customModels?: {
+    check?(scope: CodexServerSettingsScope, backend: import('./custom-models').CustomModelBackend, input: import('./custom-models').CustomModelInput): Promise<import('./custom-models').CustomModelCheck>
     read(scope: CodexServerSettingsScope, backend: import('./custom-models').CustomModelBackend, sessionId?: string): Promise<import('./custom-models').CustomModels>
     save(scope: CodexServerSettingsScope, backend: import('./custom-models').CustomModelBackend, input: import('./custom-models').CustomModelInput): Promise<import('./custom-models').CustomModels>
   }
