@@ -1,8 +1,8 @@
 # Public development log
 
-## 2026-11-09 - Validate coordinated 1.0.12-beta.6
+## 2026-11-09 - Publish coordinated 1.0.12-beta.6
 
-- Freeze desktop build `1275`, the signed server runtime, short CLI and legacy
+- Publish desktop build `1275`, the signed server runtime, short CLI and legacy
   bridge at product source `0e46b3f81e98596da3d91c73137f89efeee05686`. Beta.6
   includes admitted-update restart-gap recovery, credential-free update checks
   and legacy-server file-descriptor headroom. Stable remains `1.0.11`; the
@@ -23,9 +23,17 @@
   [Claude history duplication #166](https://github.com/ZhengyiLuo/AgentsDock/issues/166)
   remains a documented beta limitation. Windows previews remain unsigned.
 - [Matched npm publication](https://github.com/ZhengyiLuo/AgentsDock/actions/runs/42537649524)
-  is in progress. This entry records candidate validation, not completed public
-  publication. No mobile build or upload is included. Later documentation
-  commits are not new artifact sources.
+  verified both exact archives. A fresh scripts-disabled registry installation
+  verified `agentsdock@beta`, its exact runtime dependency and CLI help without
+  operating services. Both npm `beta` tags select `1.0.12-beta.6`; both `latest`
+  tags remain `1.0.11`. The matching signed legacy bridge is public and verified.
+- [Desktop publication](https://github.com/ZhengyiLuo/AgentsDock/actions/runs/42538264142)
+  reverified all four platforms and published both download repositories. Each
+  public copy has the same 16 asset digests, signed metadata, update feeds and
+  known-limit notes. All stable defaults remain `1.0.11`. Public feed verification
+  is separate from the exact-artifact native rehearsals; no additional installed
+  public-feed upgrade is claimed. No mobile build or upload is included. Later
+  documentation commits are not new artifact sources.
 
 ## Unreleased — Preserve both legacy update-recovery receipt fields
 

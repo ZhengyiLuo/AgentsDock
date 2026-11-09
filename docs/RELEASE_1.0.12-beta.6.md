@@ -1,9 +1,24 @@
 # AgentsDock 1.0.12-beta.6
 
-Publication is in progress after native verification. The coordinated candidate
-contains desktop build **1275**, the signed `@agentsdock/server` runtime, the
-short `agentsdock` CLI and the signed legacy server bridge. Stable remains
-`1.0.11`. The unpublished beta.5 candidate remains unchanged.
+Published on **2026-11-09 UTC**: desktop build **1275**, the signed
+`@agentsdock/server` runtime, the short `agentsdock` CLI and the signed legacy
+server bridge share version `1.0.12-beta.6`. Both npm `beta` tags select this
+version. Stable remains `1.0.11`. The unpublished beta.5 candidate is unchanged.
+
+Download the [desktop release](https://github.com/ZhengyiLuo/AgentsDock/releases/tag/v1.0.12-beta.6),
+its [legacy mirror](https://github.com/ZhengyiLuo/AgentsDock-Releases/releases/tag/v1.0.12-beta.6),
+or the [signed server bridge](https://github.com/ZhengyiLuo/AgentsServer/releases/tag/v1.0.12-beta.6).
+
+[Matched npm publication](https://github.com/ZhengyiLuo/AgentsDock/actions/runs/42537649524)
+verified both exact archives and preserved both stable `latest` tags. A fresh,
+isolated registry install with setup scripts disabled verified `agentsdock@beta`,
+its exact runtime dependency and CLI help without operating installed services.
+[Desktop publication](https://github.com/ZhengyiLuo/AgentsDock/actions/runs/42538264142)
+reverified all four native platforms before publishing the unchanged packages.
+Both public desktop copies have the same 16 asset digests, signed server metadata,
+update feeds and documented limitations. Public metadata was verified separately
+from the native upgrade rehearsals below; a new installed upgrade through the
+public feed is not claimed.
 
 ## Changes since beta.4
 
@@ -75,7 +90,7 @@ Logout/reboot survival, natural OAuth renewal, complete populated-history
 migration, and the native Windows updater remain outside this acceptance.
 Windows preview installers are unsigned. No mobile build or upload is included.
 
-## Immutable candidate identity
+## Immutable release identity
 
 - Product source: `0e46b3f81e98596da3d91c73137f89efeee05686`.
 - Source branch: `release/prepare-1.0.12-beta.6`.
