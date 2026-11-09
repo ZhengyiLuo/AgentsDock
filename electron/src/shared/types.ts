@@ -587,11 +587,13 @@ export interface RuntimeDiagnostic {
   last_error_at?: string | null
 }
 export interface RuntimeBackendCatalog {
+  discovery_status?: string
   /** Authentication-scoped retirement policy; never applies to custom catalogs. */
   model_replacements?: Record<string, string>
   native_credentials_present?: boolean
   /** Safe metadata only; credentials stay on the server. */
   custom_provider?: {
+    discovery_status?: string
     configured: boolean
     available: boolean
     /** Opaque configuration revision; this is not an API key. */

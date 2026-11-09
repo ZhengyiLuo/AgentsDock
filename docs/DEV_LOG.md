@@ -24,6 +24,44 @@
 - Availability: source and an isolated ad-hoc QA package only. No server/mobile
   source changes, production deployment or release publication are included.
 
+## Unreleased — Account-scoped model inventories and explicit checks
+
+- Stop presenting historical Claude/Codex version fallbacks and saved chat IDs
+  as current account inventory. Keep Claude discovery passive and let real SDK
+  metadata share its cache with the picker despite chat-only scheduling limits.
+  Follow the native account's default selector when reported, unless the server
+  has an explicit configured override; do not assume the default is Sonnet.
+- Reconcile desktop catalog caches on reconnect; refresh custom Codex inventories
+  with credential-scoped expiry and explicitly refresh OpenCode's CLI registry.
+  Retain same-connection rows on transient failure with an unconfirmed warning,
+  accept authoritative empty lists, and preserve native/default model semantics.
+- Raise Cursor API inventory capacity from 256 to 512 with partial-list reporting.
+  Exclude known Gemini audio-only products from the text-agent catalog.
+- If OpenCode's explicit registry refresh fails, read the same CLI's native
+  registry within the existing deadline and label freshness unconfirmed. Do not
+  substitute another account's cached rows or retry an authoritative empty list.
+- Add a native-only, revision-fenced optional text check for Claude/OpenCode/Gemini
+  API models, with English/Chinese UI and usage disclosure. It does not change
+  defaults, credentials or chats. Quota/auth/network errors do not prove retirement;
+  short-lived rejection observations are not a permanent model blacklist.
+- Verification: 307 focused server tests; desktop typecheck, production compile
+  and 580 focused tests including locale terminology checks. Isolated native offscreen Electron exercised real settings
+  reads, default selection, reload/reopen and explicit Gemini/OpenCode requests
+  through production IPC/native HTTP/server authorization. A Gemini inventory
+  entry rejected the request while another succeeded; connection readiness stayed
+  unchanged. English/Chinese, dark/light and narrow layout were inspected.
+  Repeated 24-read concurrency batches returned complete backend catalogs. Live Cursor
+  inventory exceeded the previous cap. Account-switch/failure races used fixtures.
+- Full chat acceptance: isolated native offscreen Electron sent a disposable
+  prompt through each real Claude, Codex, Cursor, OpenCode and Gemini runtime;
+  all five returned the expected answer and completed successfully. Fresh Claude
+  SDK initialization populated the picker with native current and older models.
+  These checks used an accessible, clean workspace without project overrides.
+- Limits: not every model was invoked; text success does not establish full agent
+  compatibility. No second live account was available for an account-switch test.
+  No mobile changes, packaging
+  acceptance, public release or production-server deployment is included.
+
 ## 2026-11-09 - Publish coordinated 1.0.12-beta.6
 
 - Publish desktop build `1275`, the signed server runtime, short CLI and legacy

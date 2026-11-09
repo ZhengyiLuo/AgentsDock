@@ -256,6 +256,7 @@ const api: AgentsDockAPI = {
     read: (scope, backend) => ipcRenderer.invoke('provider-accounts:read', scope, backend)
   },
   customModels: {
+    check: (scope, backend, input) => ipcRenderer.invoke('custom-models:check', scope, backend, input),
     read: (scope, backend, sessionId) => ipcRenderer.invoke('custom-models:read', scope, backend, sessionId),
     save: (scope, backend, input) => ipcRenderer.invoke('custom-models:save', scope, backend, input)
   },

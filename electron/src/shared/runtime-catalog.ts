@@ -78,7 +78,7 @@ export function runtimeBackendCatalogFor(catalog: RuntimeCatalog | null | undefi
   if (!custom) return undefined
   return {
     ...custom,
-    models: custom.models ?? (custom.model ? [{ value: custom.model, label: custom.model }] : []),
+    models: custom.models ?? [],
     efforts: custom.efforts ?? [],
     default_model: custom.default_model ?? custom.model
   }
@@ -103,9 +103,9 @@ const EFFORT_ORDER = ['none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'
 
 export function runtimeCatalogHasSelectableModels(catalog: RuntimeCatalog | null | undefined): catalog is RuntimeCatalog {
   if (!catalog?.backends) return false
-  return REQUIRED_BACKENDS.every(backend =>
-    catalog.backends[backend]?.models?.some(option => Boolean(option.value.trim()))
-  )
+  // An authoritative empty account/policy list must replace the previous
+  // account's choices, not cause the entire refresh to keep stale data.
+  return REQUIRED_BACKENDS.every(backend => Array.isArray(catalog.backends[backend]?.models))
 }
 
 /** True when this server understands the Cursor backend contract.
@@ -202,18 +202,27 @@ export function runtimeCatalogOptions(
   const available = (backendCatalog?.[type] ?? []).filter(option => !replacements?.[option.value])
   const configuredDefault = type === 'models' ? backendCatalog?.default_model : backendCatalog?.default_effort
   const advertisedDefault = available.find(option => option.value === '')
+  const defaultModel = type === 'models' && configuredDefault
+    ? available.find(option => option.value === configuredDefault) : undefined
+  const defaultUnavailable = type === 'models' && codexProvider === 'custom'
+    && (!configuredDefault?.trim() || defaultModel?.locked === true
+      || (['ready', 'empty'].includes(backendCatalog?.discovery_status ?? '') && !defaultModel))
   const defaultLabel = (codexProvider === 'custom' && type === 'models' && !configuredDefault?.trim() ? t('customModels.choose') : '') || (backend === 'opencode' && type === 'models'
     ? configuredDefault?.trim() ? `${t('opencode.defaultModel')} (${configuredDefault.trim()})` : t('opencode.defaultModel') : '')
     || advertisedDefault?.label?.trim()
     || (configuredDefault?.trim() ? `Server default (${configuredDefault.trim()})` : '')
     || (catalog ? 'Server default' : type === 'models' ? 'Loading model choices…' : 'Loading reasoning choices…')
   const options: RuntimeOption[] = [
-    { value: '', label: defaultLabel, ...(codexProvider === 'custom' && type === 'models' && !configuredDefault?.trim() ? { locked: true } : {}) },
+    { value: '', label: defaultLabel, ...(defaultUnavailable ? { locked: true,
+      locked_reason: defaultModel?.locked_reason || t('customModels.notListedHelp') } : {}) },
     ...available.filter(option => option.value !== '')
   ]
   const selected = current?.trim()
   if (selected && !replacements?.[selected] && !options.some(option => option.value === selected)) {
-    options.push({ value: selected, label: selected })
+    options.push(type === 'models'
+      ? { value: selected, label: `${selected} · ${t('customModels.notListed')}`, locked: true,
+        locked_reason: t('customModels.notListedHelp') }
+      : { value: selected, label: selected })
   }
   if (backend === 'codex' && codexProvider === 'custom' && type === 'models') {
     return options.map(option => {

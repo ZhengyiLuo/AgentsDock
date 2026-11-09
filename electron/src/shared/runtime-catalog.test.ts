@@ -211,6 +211,19 @@ describe('native and custom API choices', () => {
 })
 
 describe('runtimeCatalogHasSelectableModels', () => {
+  it('does not bypass an unavailable custom model through its default alias', () => {
+    const custom = { configured: true, available: true, model: 'old', discovery_status: 'ready',
+      base_url: 'https://example.invalid', models: [{ value: 'new', label: 'New' }] }
+    const missing = runtimeCatalogOptions(validCatalog, 'claude', 'models', 'old', 'custom', custom)
+    expect(missing.find(row => row.value === '')?.locked).toBe(true)
+    expect(missing.find(row => row.value === 'old')?.locked).toBe(true)
+    const rejected = runtimeCatalogOptions(validCatalog, 'claude', 'models', null, 'custom', {
+      ...custom, models: [{ value: 'old', label: 'Old', locked: true }] })
+    expect(rejected.find(row => row.value === '')?.locked).toBe(true)
+    const unconfirmed = runtimeCatalogOptions(validCatalog, 'claude', 'models', null, 'custom', {
+      ...custom, discovery_status: 'unavailable' })
+    expect(unconfirmed.find(row => row.value === '')?.locked).not.toBe(true)
+  })
   it('offers a verified Cursor key separately from native login and removes it after Forget', () => {
     const health = { ok: true, capabilities: { cursor_backend: { available: true, version: 2 }, provider_connections_v1: { per_chat: true, available: true } } } as Health
     const custom = { configured: true, available: true, base_url: 'https://api2.cursor.sh', model: 'auto', default_model: 'auto', models: [{ value: 'auto', label: 'Auto' }] }
@@ -248,13 +261,13 @@ describe('runtimeCatalogHasSelectableModels', () => {
     ])
   })
 
-  it('rejects the synthetic server-default-only response', () => {
+  it('accepts an empty account catalog instead of retaining another accounts choices', () => {
     expect(runtimeCatalogHasSelectableModels({
       backends: {
         claude: { models: [{ value: '', label: 'Server default' }], efforts: [] },
         codex: { models: [{ value: '', label: 'Server default' }], efforts: [] }
       }
-    })).toBe(false)
+    })).toBe(true)
   })
 
   it('rejects missing and partial catalogs', () => {
@@ -432,7 +445,7 @@ describe('runtimeCatalogOptions', () => {
   it('preserves a saved custom choice while the catalog reloads', () => {
     expect(runtimeCatalogOptions(null, 'claude', 'models', 'claude-fable-5')).toEqual([
       { value: '', label: 'Loading model choices…' },
-      { value: 'claude-fable-5', label: 'claude-fable-5' }
+      expect.objectContaining({ value: 'claude-fable-5', label: 'claude-fable-5 · Not in current list', locked: true })
     ])
   })
 })

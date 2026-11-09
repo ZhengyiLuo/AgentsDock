@@ -2483,6 +2483,18 @@ export class AppService {
     return result
   }
 
+  async checkCustomModel(expected: CodexServerSettingsScope, backend: CustomModelBackend, input: CustomModelInput) {
+    const checked = customModelBackend(backend), body = customModelInput(checked, input)
+    const scope = this.requireProfileScope(expected?.profileId, expected?.profileGeneration)
+    await this.ensureValidatedScope(scope)
+    this.assertCurrentScope(scope)
+    const result = await scope.client.checkCustomModel(checked, body)
+    this.assertCurrentScope(scope)
+    try { await this.refreshRuntime(true, false, scope, true) } catch { /* preserve the completed check result */ }
+    this.assertCurrentScope(scope)
+    return result
+  }
+
   async codexProvider(expected: CodexServerSettingsScope): Promise<CodexProviderConfiguration> {
     const scope = this.requireProfileScope(expected?.profileId, expected?.profileGeneration)
     await this.ensureValidatedScope(scope)
@@ -5717,7 +5729,7 @@ export class AppService {
       if (!this.isCurrentScope(scope)) return
       if (providerRevision !== (this.providerCatalogRevision ?? 0)) return
       if (!runtimeCatalogHasSelectableModels(catalog)) {
-        throw new Error('Server returned no selectable Claude/Codex models')
+        throw new Error('Server returned an invalid runtime catalog')
       }
       this.runtimeCatalog = catalog
       this.cache.putPreference(scope.namespace, RUNTIME_CATALOG_CACHE_KEY, catalog)
@@ -6755,7 +6767,9 @@ export class AppService {
     this.jobs = this.cache.jobs(scope.namespace)
     const cachedRuntime = this.cache.preference(scope.namespace, RUNTIME_CATALOG_CACHE_KEY, null as RuntimeCatalog | null)
     this.runtimeCatalog = runtimeCatalogHasSelectableModels(cachedRuntime) ? cachedRuntime : null
-    this.runtimeRefreshNextAt = this.runtimeCatalog ? Date.now() + RUNTIME_CATALOG_REFRESH_MS : 0
+    // Render cached choices immediately, but reconcile account/endpoint state
+    // on reconnect rather than treating an arbitrarily old disk cache as new.
+    this.runtimeRefreshNextAt = 0
     this.health = null
     this.focusedSessionId = this.cache.preference(scope.namespace, 'selectedSessionId', null as string | null)
   }
