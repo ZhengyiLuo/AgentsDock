@@ -20,20 +20,66 @@ function show(update: CoordinatedServerUpdate, retryResult?: Promise<AppUpdateSt
       serverUpdates: [{ ...update, phase: 'current' as const, paused: false, message: 'Up to date' }] }))
     return current
   })
+  const finishServerUpdate = vi.fn(async () => {
+    current = await (retryResult ?? Promise.resolve({ ...status,
+      serverUpdates: [{ ...update, phase: 'current' as const, updateRequested: false, message: 'Up to date' }] }))
+    return current
+  })
   Object.defineProperty(window, 'agentsDock', { configurable: true, value: {
-    updates: { status: vi.fn(() => Promise.resolve(current)), check: vi.fn().mockResolvedValue(status), retryServers },
+    updates: { status: vi.fn(() => Promise.resolve(current)), check: vi.fn().mockResolvedValue(status), retryServers, finishServerUpdate },
     events: { on: vi.fn().mockReturnValue(() => undefined) }
   } })
   useAppStore.setState(state => ({ profiles: [], activeProfileId: 'another-server', health: null, error: null,
     modals: { ...state.modals, appSettings: true, settings: false } }))
   render(<AppSettingsDialog />)
   fireEvent.click(screen.getByRole('button', { name: t('settings.updates') }))
-  return { retryServers }
+  return { retryServers, finishServerUpdate }
 }
 
 afterEach(() => { cleanup(); setLocale('en'); window.localStorage.clear(); Reflect.deleteProperty(window, 'agentsDock') })
 
 describe('paired server recovery in Settings', () => {
+  it('offers Update servers even when the app is current, and cancel never interrupts work', async () => {
+    const { finishServerUpdate, retryServers } = show({ ...failed, phase: 'pending', paused: false })
+    fireEvent.click(await screen.findByRole('button', { name: 'Update servers' }))
+    expect(screen.getByText(/Older servers wait until work finishes/)).toBeVisible()
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }))
+    expect(finishServerUpdate).not.toHaveBeenCalled()
+    expect(retryServers).not.toHaveBeenCalled()
+  })
+  it('confirms the displayed server, signed target and old reservation without switching the active server', async () => {
+    const update = { ...failed, phase: 'pending' as const, paused: false,
+      scheduleId: 'old-schedule', operationTargetVersion: '1.0.4', serverInstanceId: 'boot-studio' }
+    const { finishServerUpdate, retryServers } = show(update)
+    fireEvent.click(await screen.findByRole('button', { name: 'Update servers' }))
+    expect(screen.getByText(/Replace the pending 1.0.4 update/)).toBeVisible()
+    fireEvent.click(screen.getByRole('button', { name: 'Update and continue tasks' }))
+    await waitFor(() => expect(finishServerUpdate).toHaveBeenCalledExactlyOnceWith({
+      profileId: update.profileId, serverIdentity: update.serverIdentity, targetVersion: update.targetVersion,
+      confirmed: true, scheduleId: update.scheduleId, operationTargetVersion: update.operationTargetVersion, serverInstanceId: update.serverInstanceId
+    }))
+    expect(retryServers).not.toHaveBeenCalled()
+    expect(useAppStore.getState().activeProfileId).toBe('another-server')
+  })
+  it('prevents duplicate confirmation while the real operation is pending', async () => {
+    let resolve!: (status: AppUpdateStatus) => void
+    const result = new Promise<AppUpdateStatus>(done => { resolve = done })
+    const { finishServerUpdate } = show({ ...failed, phase: 'pending', paused: false }, result)
+    fireEvent.click(await screen.findByRole('button', { name: 'Update servers' }))
+    const confirm = screen.getByRole('button', { name: 'Update and continue tasks' })
+    fireEvent.click(confirm); fireEvent.click(confirm)
+    expect(finishServerUpdate).toHaveBeenCalledOnce()
+    expect(confirm).toBeDisabled()
+    await act(async () => resolve({ state: 'not-available', channel: 'direct', track: 'stable', currentVersion: '1.0.5', serverUpdates: [] }))
+    expect(screen.queryByRole('button', { name: 'Update and continue tasks' })).not.toBeInTheDocument()
+  })
+  it('localizes the legacy idle explanation and update confirmation', async () => {
+    setLocale('zh-CN')
+    show({ ...failed, phase: 'pending', paused: false, continuationAvailable: false, operationTargetVersion: failed.targetVersion })
+    expect(await screen.findByText('更新已预约。此旧版服务端将在当前任务结束后更新，无法自动恢复被中断的任务。')).toBeVisible()
+    fireEvent.click(screen.getByRole('button', { name: '更新服务端' }))
+    expect(screen.getByRole('button', { name: '更新并继续任务' })).toBeEnabled()
+  })
   it.each(['failed', 'blocked', 'offline'] as const)('retries an unpaused %s row from the product update action', async phase => {
     const { retryServers } = show({ ...failed, phase, paused: false })
     const retry = await screen.findByRole('button', { name: 'Retry AgentsDock update' })

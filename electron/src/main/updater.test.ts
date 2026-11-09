@@ -100,6 +100,15 @@ describe('AppUpdateManager', () => {
     return manager
   }
 
+  it('passes reviewed server-update consent through the updater without reinstalling the app', async () => {
+    const finishServerUpdate = vi.fn().mockResolvedValue(undefined)
+    const manager = createManager({ finishServerUpdate })
+    const request = { profileId: 'fixture', serverIdentity: 'identity', targetVersion: '1.2.3', confirmed: true as const }
+    await manager.finishServerUpdate(request)
+    expect(finishServerUpdate).toHaveBeenCalledExactlyOnceWith(request)
+    expect(mocks.autoUpdater.quitAndInstall).not.toHaveBeenCalled()
+  })
+
   it('checks public release metadata without opening the persistent browser cookie store', async () => {
     const manager = createManager({}, 'beta')
     await manager.check(true)

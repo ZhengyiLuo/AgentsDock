@@ -44,6 +44,8 @@ function fixture(ids = ['a']) {
       phase: 'accepted' as const, request_id: request.request_id,
       update_schedule_id: request.expected_update_schedule_id, message: 'Restart accepted.'
     })),
+    cancelServerUpdate: vi.fn(async (): Promise<ServerUpdateStatus> => ({ phase: 'idle', current_version: '1.1.0-beta.1',
+      server_identity: `server-${id}`, server_instance_id: `boot-${id}` })),
     dispose: vi.fn()
   }]))
   let saved: CoordinatedUpdatePlan | null = null
@@ -53,6 +55,140 @@ function fixture(ids = ['a']) {
     store, publish: vi.fn(), publicKey }
   return { manager: new CoordinatedUpdateManager(options), options, clients, profiles, store, assertCurrent, saved: () => saved }
 }
+
+describe('explicit installed-app server update (mocked server boundary)', () => {
+  const capabilities = {
+    server_updates: { available: true, version: 12 },
+    server_update_ensure_v1: { available: true, version: 1 },
+    server_update_continuation_v1: { available: true, version: 2 },
+    server_restart: { available: true, required: false, version: 2, message: 'Ready', action: null }
+  }
+  const pending = { phase: 'pending' as const, current_version: '1.1.0-beta.1', target_version: '1.2.0-beta.2',
+    server_identity: 'server-a', server_instance_id: 'boot-a', schedule_id: 'a'.repeat(32),
+    preparation_phase: 'ready' as const, cancelable: true }
+  const request = { profileId: 'a', serverIdentity: 'server-a', targetVersion: '1.2.0-beta.2', confirmed: true as const }
+  async function ready(ids = ['a']) {
+    const f = fixture(ids)
+    f.clients.a.health.mockResolvedValue(health('a', { capabilities }))
+    f.clients.a.ensureServerUpdate.mockResolvedValue(pending)
+    f.clients.a.serverUpdateStatus.mockResolvedValue(pending)
+    await f.manager.resume(signed(), request.targetVersion)
+    return f
+  }
+  it('never force-restarts from startup or a release check, then finishes the confirmed server only', async () => {
+    const f = await ready(['a', 'b'])
+    expect(f.clients.a.restartServer).not.toHaveBeenCalled()
+    await f.manager.finish(request)
+    expect(f.clients.a.restartServer).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({
+      expected_server_identity: 'server-a', expected_server_instance_id: 'boot-a', expected_update_schedule_id: pending.schedule_id,
+      confirmed: true, force: true, force_confirmed: true, resume_interrupted_turns: true
+    }))
+    expect(f.clients.b.restartServer).not.toHaveBeenCalled()
+    expect(f.manager.status()[0].phase).toBe('updating')
+    await f.manager.finish(request)
+    expect(f.clients.a.restartServer).toHaveBeenCalledOnce()
+  })
+  it('continues preparation through health callbacks after the confirmed action returns', async () => {
+    const f = await ready()
+    f.clients.a.ensureServerUpdate.mockResolvedValue({ ...pending, preparation_phase: 'staging' })
+    await f.manager.finish(request)
+    expect(f.clients.a.restartServer).not.toHaveBeenCalled()
+    f.clients.a.ensureServerUpdate.mockResolvedValue(pending)
+    f.manager.serverReachable('a', health('a', { capabilities, server_update: { phase: 'pending', preparation_phase: 'ready' } }))
+    await vi.waitFor(() => expect(f.clients.a.restartServer).toHaveBeenCalledOnce())
+  })
+  it('keeps old servers on idle updates and explains the missing continuation capability', async () => {
+    const f = await ready()
+    f.clients.a.health.mockResolvedValue(health())
+    await f.manager.finish(request)
+    expect(f.clients.a.restartServer).not.toHaveBeenCalled()
+    expect(f.manager.status()[0]).toMatchObject({ phase: 'pending', continuationAvailable: false })
+    expect(f.manager.status()[0].message).toContain('after current work finishes')
+  })
+  it('keeps the admitted receipt across a lost restart response and explicit retry', async () => {
+    const f = await ready()
+    f.clients.a.restartServer.mockRejectedValue(new Error('Connection lost'))
+    await f.manager.finish(request)
+    const before = f.manager.status()[0]
+    expect(before).toMatchObject({ phase: 'offline', awaitingActivation: true, updateRequested: true })
+    expect(before.forceRequestId).toBeTruthy()
+    await f.manager.retry('a')
+    expect(f.clients.a.restartServer).toHaveBeenCalledOnce()
+    expect(f.manager.status()[0].forceRequestId).toBe(before.forceRequestId)
+    expect(f.manager.status()[0].scheduleId).toBe(before.scheduleId)
+  })
+  it('retains confirmed intent across app restart only for the same signed target and identity', async () => {
+    const f = await ready()
+    f.clients.a.ensureServerUpdate.mockResolvedValue({ ...pending, preparation_phase: 'staging' })
+    await f.manager.finish(request)
+    f.clients.a.ensureServerUpdate.mockResolvedValue(pending)
+    const restarted = new CoordinatedUpdateManager(f.options)
+    await restarted.resume(signed(), request.targetVersion)
+    expect(f.clients.a.restartServer).toHaveBeenCalledOnce()
+  })
+  it.each([
+    { confirmed: false }, { serverIdentity: 'other' }, { targetVersion: '1.2.0-beta.3' }
+  ])('rejects changed identity/target or absent consent: %j', async change => {
+    const f = await ready()
+    await expect(f.manager.finish({ ...request, ...change } as typeof request)).rejects.toThrow()
+    expect(f.clients.a.restartServer).not.toHaveBeenCalled()
+    expect(f.clients.a.cancelServerUpdate).not.toHaveBeenCalled()
+  })
+  it('does not carry explicit consent to a later app release', async () => {
+    const f = await ready()
+    f.clients.a.ensureServerUpdate.mockResolvedValue({ ...pending, preparation_phase: 'staging' })
+    await f.manager.finish(request)
+    f.clients.a.ensureServerUpdate.mockResolvedValue({ ...pending, target_version: '1.2.0-beta.3' })
+    await f.manager.resume(signed('1.2.0-beta.3'), '1.2.0-beta.3')
+    expect(f.clients.a.restartServer).not.toHaveBeenCalled()
+    expect(f.manager.status()[0].updateRequested).toBe(false)
+  })
+  async function older() {
+    const f = fixture()
+    const old = { ...pending, target_version: '1.1.0-beta.9', schedule_id: 'b'.repeat(32) }
+    f.clients.a.health.mockResolvedValue(health('a', { capabilities }))
+    f.clients.a.ensureServerUpdate.mockRejectedValue(new ServerError(409, 'server_update_pending', { code: 'server_update_pending' }))
+    f.clients.a.serverUpdateStatus.mockResolvedValue(old)
+    await f.manager.resume(signed(), request.targetVersion)
+    return { ...f, old, confirmed: { ...request, scheduleId: old.schedule_id, operationTargetVersion: old.target_version, serverInstanceId: 'boot-a' } }
+  }
+  it('leaves foreign reservations alone until explicit confirmation, then replaces the exact older reservation', async () => {
+    const f = await older()
+    expect(f.clients.a.cancelServerUpdate).not.toHaveBeenCalled()
+    expect(f.clients.a.restartServer).not.toHaveBeenCalled()
+    f.clients.a.cancelServerUpdate.mockImplementation(async () => {
+      f.clients.a.ensureServerUpdate.mockResolvedValue(pending)
+      return { phase: 'idle', current_version: '1.1.0-beta.1', server_identity: 'server-a', server_instance_id: 'boot-a' }
+    })
+    await f.manager.finish(f.confirmed)
+    expect(f.clients.a.cancelServerUpdate).toHaveBeenCalledExactlyOnceWith(f.old.schedule_id, {
+      expected_server_identity: 'server-a', expected_server_instance_id: 'boot-a'
+    })
+    expect(f.clients.a.restartServer).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ expected_update_schedule_id: pending.schedule_id }))
+  })
+  it.each([
+    { schedule_id: 'c'.repeat(32) }, { phase: 'installing' as const }, { cancelable: false },
+    { server_instance_id: 'another-boot' }, { target_version: '9.0.0' }
+  ])('never cancels or force-restarts a changed reservation: %j', async changed => {
+    const f = await older()
+    f.clients.a.serverUpdateStatus.mockResolvedValue({ ...f.old, ...changed })
+    await f.manager.finish(f.confirmed)
+    expect(f.clients.a.cancelServerUpdate).not.toHaveBeenCalled()
+    expect(f.clients.a.restartServer).not.toHaveBeenCalled()
+    expect(f.manager.status()[0].phase).toBe('blocked')
+  })
+  it('rejects a stale confirmation before any cancellation', async () => {
+    const f = await older()
+    await expect(f.manager.finish({ ...f.confirmed, scheduleId: 'stale' })).rejects.toThrow('pending update changed')
+    expect(f.clients.a.cancelServerUpdate).not.toHaveBeenCalled()
+  })
+  it('does not force an unrelated reservation when an offline profile retries', async () => {
+    const f = await older()
+    await f.manager.retry('a')
+    expect(f.clients.a.restartServer).not.toHaveBeenCalled()
+    expect(f.clients.a.cancelServerUpdate).not.toHaveBeenCalled()
+  })
+})
 
 describe('signed coordinated release contract', () => {
   it('shares the server release trust root', () => {

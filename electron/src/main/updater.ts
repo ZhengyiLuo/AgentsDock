@@ -2,7 +2,7 @@ import { app, session } from 'electron'
 import { autoUpdater, type ProgressInfo, type UpdateDownloadedEvent, type UpdateInfo } from 'electron-updater'
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
-import type { AppUpdateStatus, AppUpdateTrack } from '../shared/types'
+import type { AppUpdateStatus, AppUpdateTrack, FinishServerUpdateRequest } from '../shared/types'
 import { appLog } from './logger'
 import { verifyPairedRelease, type SignedServerRelease } from './coordinated-updates'
 import { newestCompatibleReleaseFromAtom, type CompatibleRelease } from './updater-feed.mjs'
@@ -33,6 +33,7 @@ export interface AppUpdateLifecycle {
   beforeInstall?: () => void
   installFailed?: () => void
   retryServers?: (profileId: string) => Promise<void>
+  finishServerUpdate?: (request: FinishServerUpdateRequest) => Promise<void>
 }
 
 export interface AppUpdateTrackStore {
@@ -74,6 +75,13 @@ export class AppUpdateManager {
 
   async retryServers(profileId: string): Promise<AppUpdateStatus> {
     await this.lifecycle.retryServers?.(profileId)
+    return this.status()
+  }
+
+  async finishServerUpdate(request: FinishServerUpdateRequest): Promise<AppUpdateStatus> {
+    if (this.preparingPairedInstall || this.value.state === 'installing') throw new Error('An app installation is already updating servers.')
+    if (!this.lifecycle.finishServerUpdate) throw new Error('Server update coordination is not ready.')
+    await this.lifecycle.finishServerUpdate(request)
     return this.status()
   }
 

@@ -1,5 +1,29 @@
 # Public development log
 
+## Unreleased — Finish pending server updates from the installed desktop app
+
+- Keep the existing Settings layout and add **Update servers** when the desktop
+  app is current but paired server updates remain pending. Confirmation names
+  the affected servers and signed target, warns that interrupted operations can
+  repeat, and lets each server proceed independently. No new analytics payload
+  is collected; the existing explicit update-request event is reused.
+- Continue through the native updater/coordinator transport without reinstalling
+  the desktop app. Only capable servers may interrupt and resume supported work;
+  legacy servers retain idle-only updates and get an explicit explanation.
+  Replace an older reservation only after reviewing its exact identity, boot,
+  schedule and version. Refuse changed, installing or newer reservations.
+- Preserve admitted restart request identities across lost responses and retries.
+  Background checks never acquire interruption consent, and consent is cleared
+  when the signed target changes or the operation fails or completes.
+- Verification: coordinator, updater, transport, UI and localization regressions
+  cover explicit confirmation, cancellation, repeated clicks, legacy idle
+  behavior, stale reservations and restart recovery. Native end-to-end acceptance
+  of the new button remains pending because OS credential access blocked the
+  isolated packaged app's connection. Earlier API-triggered update checks do
+  not count as acceptance of this UI workflow.
+- Availability: source and an isolated ad-hoc QA package only. No server/mobile
+  source changes, production deployment or release publication are included.
+
 ## 2026-11-09 - Publish coordinated 1.0.12-beta.6
 
 - Publish desktop build `1275`, the signed server runtime, short CLI and legacy

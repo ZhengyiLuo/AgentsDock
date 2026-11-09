@@ -1,7 +1,7 @@
 import { randomUUID, verify } from 'node:crypto'
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
 import { dirname } from 'node:path'
-import type { CoordinatedServerUpdate, Health, ServerUpdateStatus, ServerUpdateTrack } from '../shared/types'
+import type { CoordinatedServerUpdate, FinishServerUpdateRequest, Health, ServerUpdateStatus, ServerUpdateTrack } from '../shared/types'
 import { needsLegacyUpdateRecovery } from '../shared/server-update-recovery'
 import { AgentServerClient, ServerError, type ServerUpdateTarget } from './server-client'
 
@@ -47,7 +47,7 @@ export interface CoordinatedProfile {
   active?: boolean
 }
 export interface CoordinatedConnection {
-  client: Pick<AgentServerClient, 'health' | 'ensureServerUpdate' | 'serverUpdateStatus' | 'startServerUpdate' | 'restartServer' | 'dispose'>
+  client: Pick<AgentServerClient, 'health' | 'ensureServerUpdate' | 'serverUpdateStatus' | 'startServerUpdate' | 'cancelServerUpdate' | 'restartServer' | 'dispose'>
   assertCurrent(): void
   loopback: boolean
 }
@@ -221,11 +221,51 @@ export class CoordinatedUpdateManager {
     const profile = this.options.profiles().find(candidate => candidate.id === profileId)
     const record = this.plan?.records.find(candidate => candidate.profileId === profileId && candidate.serverIdentity === profile?.serverIdentity)
     if (!profile || !record) throw new Error('The saved server update no longer belongs to this profile.')
-    Object.assign(record, { paused: false, operationId: undefined, scheduleId: undefined,
+    if (record.awaitingActivation) {
+      // A lost response may already have interrupted work. Observe its exact
+      // receipt rather than discarding the idempotent restart request.
+      await this.reconcile(profileId)
+      return
+    }
+    Object.assign(record, { paused: false, updateRequested: false, replaceReservation: undefined, operationId: undefined, scheduleId: undefined,
       operationTargetVersion: undefined, operationOwned: false, awaitingActivation: false,
       phase: 'checking', message: 'Retrying the paired server update…' })
     this.save()
     await this.reconcile(profileId)
+  }
+
+  /** Finish a paired update after the app itself is already installed. */
+  async finish(request: FinishServerUpdateRequest): Promise<void> {
+    if (!request || request.confirmed !== true) throw new Error('Confirm the server update before continuing.')
+    if (this.preparingInstall) throw new Error('An app installation is already updating servers.')
+    await this.inFlight.get(request.profileId)?.task
+    if (this.preparingInstall) throw new Error('An app installation is already updating servers.')
+    const profile = this.options.profiles().find(candidate => candidate.id === request.profileId)
+    const record = this.plan?.records.find(candidate => candidate.profileId === request.profileId)
+    if (!profile || !record || !request.serverIdentity || profile.serverIdentity !== request.serverIdentity
+      || record.serverIdentity !== request.serverIdentity || record.targetVersion !== request.targetVersion
+      || this.manifest?.version !== request.targetVersion) {
+      throw new Error('The server or signed update target changed. Review the update again.')
+    }
+    if (record.phase === 'current' || record.phase === 'updating') return
+    const replacing = record.operationTargetVersion && record.operationTargetVersion !== record.targetVersion
+    if (replacing && (record.phase !== 'pending' || !record.scheduleId || !record.serverInstanceId
+      || request.scheduleId !== record.scheduleId || request.operationTargetVersion !== record.operationTargetVersion
+      || request.serverInstanceId !== record.serverInstanceId)) {
+      throw new Error('The pending update changed. Review its reservation before replacing it.')
+    }
+    const replacement = replacing ? { scheduleId: record.scheduleId!, version: record.operationTargetVersion!, instanceId: record.serverInstanceId! } : undefined
+    if (record.paused || (['failed', 'blocked', 'offline'].includes(record.phase) && !record.awaitingActivation)) {
+      Object.assign(record, { operationId: undefined, scheduleId: undefined, operationTargetVersion: undefined,
+        operationOwned: false, awaitingActivation: false })
+    }
+    Object.assign(record, { paused: false, updateRequested: true, replaceReservation: replacement,
+      phase: 'checking', message: 'Preparing the confirmed server update…' })
+    this.save()
+    // A health callback may have started another read while the prior one settled.
+    // Reconcile the new consent after it; do not add an idle polling loop.
+    if (this.inFlight.has(request.profileId)) this.pendingObservations.add(request.profileId)
+    await this.reconcile(request.profileId)
   }
 
   private verify(envelope: SignedServerRelease, version?: string): PairedServerManifest {
@@ -243,7 +283,7 @@ export class CoordinatedUpdateManager {
       return { ...old, profileId: profile.id, name: profile.name, serverIdentity: profile.serverIdentity,
         ...(!sameTarget ? { operationId: undefined, scheduleId: undefined,
           forceRequestedScheduleId: undefined, forceRequestId: undefined, forceRetryAt: undefined,
-          operationTargetVersion: undefined, operationOwned: false } : {}),
+          operationTargetVersion: undefined, operationOwned: false, updateRequested: false, replaceReservation: undefined } : {}),
         targetVersion: manifest.version, paused, phase: paused ? old!.phase : 'checking',
         awaitingActivation: Boolean(sameTarget && !paused && old?.awaitingActivation
           && ['checking', 'pending', 'updating', 'offline'].includes(old.phase)),
@@ -289,7 +329,11 @@ export class CoordinatedUpdateManager {
         plan.records.push(record)
       }
       Object.assign(record, update)
-      if (record.paused || ['current', 'failed', 'blocked'].includes(record.phase)) record.awaitingActivation = false
+      if (record.paused || ['current', 'failed', 'blocked'].includes(record.phase)) {
+        record.awaitingActivation = false
+        record.updateRequested = false
+        record.replaceReservation = undefined
+      }
       this.save()
     }
     let timeout: NodeJS.Timeout | undefined
@@ -314,7 +358,9 @@ export class CoordinatedUpdateManager {
       const updateVersion = legacyUpdateCapabilityVersion(health)
       const target = capability || updateVersion >= 9 ? updateTarget(health) : undefined
       const components = componentVersions(health)
-      patch({ apiContractVersion: health.api_contract_version, serverInstanceId: health.server_instance_id,
+      const continuationAvailable = updateVersion >= 12 && capabilityAvailable(health.capabilities?.server_update_continuation_v1)
+        && health.capabilities?.server_restart?.available === true
+      patch({ apiContractVersion: health.api_contract_version, serverInstanceId: health.server_instance_id, continuationAvailable,
         gatewayVersion: components?.gatewayVersion, executionVersion: components?.executionVersion })
       const currentVersion = health.server_version ?? ''
       const executionCurrent = compareReleaseVersions(currentVersion, manifest.version) >= 0
@@ -417,19 +463,46 @@ export class CoordinatedUpdateManager {
         patch({ phase: 'blocked', message: 'Update response belongs to another server instance. Reconnect to reconcile it.' })
         return
       }
+      const replacement = previousReceipt?.replaceReservation
+      if (previousReceipt?.updateRequested && replacement && status.target_version !== manifest.version) {
+        if (!replyIsFenced || !target || updateVersion < 9 || status.phase !== 'pending' || status.cancelable !== true
+          || status.schedule_id !== replacement.scheduleId || status.target_version !== replacement.version
+          || target.expected_server_instance_id !== replacement.instanceId
+          || compareReleaseVersions(replacement.version, manifest.version) >= 0) {
+          patch({ phase: 'blocked', message: 'The pending update changed or has already started. Review it again; no reservation was canceled.' })
+          return
+        }
+        connection.assertCurrent()
+        const canceled = await connection.client.cancelServerUpdate(replacement.scheduleId, target)
+        connection.assertCurrent()
+        if (canceled.server_identity !== target.expected_server_identity || canceled.server_instance_id !== target.expected_server_instance_id
+          || !['idle', 'available', 'current'].includes(canceled.phase)) {
+          throw new Error('The server did not confirm cancellation of the reviewed update reservation.')
+        }
+        patch({ replaceReservation: undefined, operationId: undefined, scheduleId: undefined,
+          operationTargetVersion: undefined, operationOwned: false })
+        // Only the app's verified descriptor may replace the exact reviewed reservation.
+        status = capabilityAvailable(capability)
+          ? await connection.client.ensureServerUpdate(plan.envelope, target)
+          : await this.bridge(connection, health, manifest, target, () => { operationOwned = true })
+        connection.assertCurrent()
+        if (status.server_identity !== target.expected_server_identity || status.server_instance_id !== target.expected_server_instance_id) {
+          throw new Error('The replacement update belongs to another server instance.')
+        }
+      }
       // Only a live, identity-fenced receipt may authorize observing a worker
       // restart gap. Retain historical IDs, but never infer active admission
       // from them after an operation has completed or failed.
       const admittedActivation = Boolean(replyIsFenced && target && status.target_version === manifest.version
         && ACTIVE_PHASES.has(status.phase) && (status.update_id || status.schedule_id)
         && !['server_update_recovery_failed', 'server_update_recovery_launch_failed'].includes(status.error_code ?? ''))
-      if (this.preparingInstall && status.phase === 'pending' && status.preparation_phase === 'ready'
+      let restartAccepted = false
+      if ((this.preparingInstall || previousReceipt?.updateRequested) && status.target_version === manifest.version
+        && status.phase === 'pending' && status.preparation_phase === 'ready'
         && status.schedule_id && target
         && Date.now() >= (previousReceipt?.forceRetryAt ?? 0)
         && this.options.profiles().find(candidate => candidate.serverIdentity === profile.serverIdentity)?.id === profile.id
-        && legacyUpdateCapabilityVersion(health) >= 12
-        && capabilityAvailable(health.capabilities?.server_update_continuation_v1)
-        && health.capabilities?.server_restart?.available === true) {
+        && continuationAvailable) {
         const sameRequest = previousReceipt?.forceRequestedScheduleId === status.schedule_id
         const requestId = sameRequest && previousReceipt.forceRequestId || randomUUID()
         // Persist before the POST: an ambiguous lost response must never send
@@ -454,6 +527,7 @@ export class CoordinatedUpdateManager {
           if (accepted.request_id !== requestId || accepted.update_schedule_id !== status.schedule_id) {
             throw new Error('Server did not confirm the exact update reservation; check its status before retrying.')
           }
+          restartAccepted = true
         } catch (error) {
           if (error instanceof ServerError && error.status === 409) {
             patch({ phase: 'pending', forceRequestedScheduleId: undefined, forceRequestId: undefined,
@@ -468,7 +542,7 @@ export class CoordinatedUpdateManager {
         }
       }
       const recoveryFailed = ['server_update_recovery_failed', 'server_update_recovery_launch_failed'].includes(status.error_code ?? '')
-      patch({ phase: recoveryFailed ? 'failed' : status.phase === 'pending' ? 'pending' : status.phase === 'failed' ? 'failed'
+      patch({ phase: recoveryFailed ? 'failed' : restartAccepted ? 'updating' : status.phase === 'pending' ? 'pending' : status.phase === 'failed' ? 'failed'
         : ACTIVE_PHASES.has(status.phase) ? 'updating' : 'pending',
         awaitingActivation: admittedActivation,
         ...(recoveryFailed ? { paused: true } : {}),
@@ -476,7 +550,10 @@ export class CoordinatedUpdateManager {
         operationTargetVersion: status.target_version ?? manifest.version,
         operationOwned: operationOwned || (previousReceipt?.operationOwned === true
           && previousReceipt.operationTargetVersion === (status.target_version ?? manifest.version)),
-        message: status.message || 'Server update accepted; waiting for verified reconnection.' })
+        message: restartAccepted ? 'Saving active chats and restarting the server for this update…'
+          : status.phase === 'pending' && status.target_version === manifest.version && !continuationAvailable
+          ? 'Update scheduled. This older server will update after current work finishes; it cannot automatically resume interrupted tasks.'
+          : status.message || 'Server update accepted; waiting for verified reconnection.' })
     } catch (error) {
       if (previousReceipt?.paused && !(error instanceof ComponentHealthError)) return
       const message = error instanceof Error ? error.message : String(error)

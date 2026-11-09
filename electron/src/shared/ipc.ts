@@ -9,6 +9,7 @@ import type {
   AgentTextFile,
   AppUpdateStatus,
   AppUpdateTrack,
+  FinishServerUpdateRequest,
   AddServerProfileInput,
   BootstrapPayload,
   BulkImportSessionItem,
@@ -339,6 +340,7 @@ export interface AgentsDockAPI {
     install(): Promise<boolean>
     cancel(): Promise<AppUpdateStatus>
     retryServers(profileId: string): Promise<AppUpdateStatus>
+    finishServerUpdate(request: FinishServerUpdateRequest): Promise<AppUpdateStatus>
     setTrack(track: AppUpdateTrack): Promise<AppUpdateStatus>
   }
   settings: {
