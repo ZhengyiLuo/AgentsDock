@@ -184,7 +184,7 @@ export function ChatWorkspaceGrid({ sidebarVisible, terminalOpen, onSidebarToggl
 function EmptyChatPane({ pane, focused }: { pane: ChatPaneId; focused: boolean }) {
   const sessions = useAppStore(state => state.sessions)
   const panes = useAppStore(state => state.chatPanes)
-  const workspaceId = useAppStore(state => state.activeChatWorkspaceId)
+  const workspaceId = useAppStore(state => state.chatWorkspaceBarVisible ? state.activeChatWorkspaceId : '')
   const creatingChat = useAppStore(state => state.creatingChat)
   const switchingProfileId = useAppStore(state => state.switchingProfileId)
   const [query, setQuery] = useState('')
@@ -193,9 +193,9 @@ function EmptyChatPane({ pane, focused }: { pane: ChatPaneId; focused: boolean }
   return <section className={`empty-chat-pane${focused ? ' focused' : ''}`} data-chat-pane={pane} tabIndex={-1}
     onPointerDownCapture={() => useAppStore.getState().focusChatPane(pane)} onFocusCapture={() => useAppStore.getState().focusChatPane(pane)}>
     <strong>{t('chatWorkspace.chooseChat')}</strong>
-    <button type="button" className="primary-button empty-pane-new-chat" disabled={creatingChat || Boolean(switchingProfileId)}
+    <button type="button" className="primary-button empty-pane-new-chat" aria-busy={creatingChat} disabled={creatingChat || Boolean(switchingProfileId)}
       onClick={() => void useAppStore.getState().requestNewChat(workspaceId ? { workspaceId, pane } : undefined)}>
-      <Plus size={16} aria-hidden="true" />{t('chatWorkspace.newChat')}
+      <Plus size={16} aria-hidden="true" />{t(creatingChat ? 'chatWorkspace.creatingChat' : 'chatWorkspace.newChat')}
     </button>
     <input type="search" aria-label={t('chatWorkspace.search')} placeholder={t('chatWorkspace.search')}
       value={query} onChange={event => setQuery(event.target.value)} />
