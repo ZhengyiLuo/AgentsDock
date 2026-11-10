@@ -1,5 +1,17 @@
 # Public development log
 
+## 2026-11-10 - Confirm external mailbox restoration
+
+- Confirm live worker `1.0.12-beta.7` from signed source
+  `e999a8bab5f8bed44b2e2323c3e00960c12ced09`. All 138 installed source files
+  and protected configuration hashes match; the original beta.6 gateway and
+  expected Team Hub identity remain unchanged. No native transaction or
+  maintenance lease remains.
+- Both dedicated mailbox reads now return 200/no-store. Public OAuth/resource
+  discovery returns 200 and anonymous MCP returns 401. Content-free audit
+  records confirm actual external send/read tool successes after activation;
+  no Google login, external message or reply content was fabricated for testing.
+
 ## 2026-11-10 - Restore scoped external mailbox support on the current release
 
 - Forward-port the external-peer mailbox integration onto `1.0.12-beta.6`.
