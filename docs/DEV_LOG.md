@@ -1,5 +1,27 @@
 # Public development log
 
+## Unreleased — Scoped external mailbox peers
+
+- Include the optional external mailbox contract in maintained server source and
+  release/install manifests so ordinary server upgrades retain approved external
+  assistant connections. Missing or invalid owner policy remains disabled.
+- Authenticate dedicated loopback credentials independently of native client,
+  administrator and provider capabilities. Preserve exact peer/pair ownership,
+  immutable delegation provenance, idempotent admission, revocation and bounded
+  mailbox reads; retain registered sender labels in existing conversation cards.
+- Allow scheduled jobs to select an issued external route with exact saved
+  identity/revision bindings and revalidate it at admission. Scheduled Claude
+  runs retain provider tools while interactive approval requests fail closed.
+- Verification: 277 focused server tests passed, including disposable real
+  loopback HTTP authentication/mailbox/reply/revocation, SDK MCP/helper/Jobs HTTP
+  and locked scheduled admission. Provider issuance is real; live run ownership,
+  model execution and host-wide lifespan services are isolated fixtures.
+  Existing create-chat/provider-authority, account model inventory and archive/
+  installer checks passed. AST parsing and whitespace checks passed.
+- Availability: source only. No production peer credentials or policy are
+  included. Live external OAuth/provider acceptance and release deployment are
+  separate checks; no desktop/mobile build or public version change is included.
+
 ## Unreleased — Account-scoped model inventories and explicit checks
 
 - Stop presenting historical Claude/Codex version fallbacks and saved chat IDs
