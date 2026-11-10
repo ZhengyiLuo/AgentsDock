@@ -1,5 +1,22 @@
 # Public development log
 
+## 2026-11-10 - Restore scoped external mailbox support on the current release
+
+- Forward-port the external-peer mailbox integration onto `1.0.12-beta.6`.
+  That release omitted the prior private integration, so dedicated mailbox
+  requests reached ordinary native authentication and returned generic 401.
+  Preserve the newer release's provider, chat-creation and update behavior.
+- Restore registry-bound loopback authentication, immutable external provenance,
+  scoped scheduled routes and registered sender labels. Credentials and peer
+  policy remain separate from ordinary native and provider-run credentials.
+- Include the peer module in all runtime packaging/install manifests. Prepare
+  worker `1.0.12-beta.7`, API contract 28, without dependency or native lifecycle
+  changes. The retained gateway stays on its current release.
+- All 267 focused tests pass, including real HTTP mailbox/authentication,
+  scheduled SDK MCP/helper/admission, provider authority, chat creation and
+  packaging checks. Independent review found no blockers; six private native
+  updater fixtures pass. Live activation and real Duet delivery remain pending.
+
 ## 2026-11-08 - Prepare coordinated 1.0.12-beta.6
 
 - Prepare a new matching desktop, signed server, legacy bridge and short CLI
