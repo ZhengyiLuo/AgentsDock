@@ -93,6 +93,17 @@ describe('ChatWorkspaceGrid resize ownership', () => {
     expect(useAppStore.getState().chatWorkspaces).toEqual([])
   })
 
+  it('creates in the ordinary pane when saved workspaces are hidden', () => {
+    const requestNewChat = vi.fn().mockResolvedValue(undefined)
+    useAppStore.setState({ requestNewChat, chatWorkspaceBarVisible: false, chatPaneCount: 1 })
+    render(<ChatWorkspaceGrid sidebarVisible terminalOpen={false}
+      onSidebarToggle={() => undefined} onTerminalToggle={() => undefined} sideChat={() => null} />)
+    fireEvent.click(screen.getByRole('button', { name: 'New chat' }))
+    expect(requestNewChat).toHaveBeenCalledExactlyOnceWith(undefined)
+    act(() => useAppStore.setState({ creatingChat: true }))
+    expect(screen.getByRole('button', { name: 'Creating chat…' })).toBeDisabled()
+  })
+
   it('offers both three-pane arrangements and keeps independent widths', () => {
     const view = render(<ChatWorkspaceGrid sidebarVisible terminalOpen={false}
       onSidebarToggle={() => undefined} onTerminalToggle={() => undefined} sideChat={() => null} />)

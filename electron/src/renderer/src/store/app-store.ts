@@ -2422,7 +2422,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   async requestNewChat(target) {
     const initial = get()
     if (initial.switchingProfileId || initial.creatingChat) return
-    const destination = target ? { ...target,
+    const destination = target && initial.chatWorkspaceBarVisible ? { ...target,
       sessionId: currentChatWorkspaceState(initial).workspaces.find(workspace => workspace.id === target.workspaceId)?.panes[target.pane] ?? null
     } : null
     const preferenceScope = captureWorkspaceScope(initial)
@@ -2482,8 +2482,11 @@ export const useAppStore = create<AppState>((set, get) => ({
         markNewChatPlaceholder(preferenceScope, session)
       ]).catch(() => undefined)
       if (!workspaceScopeMatches(preferenceScope, get()) || !profileScopeMatches(profileScope, get())) return
-      await get().refreshSessions()
-      if (!workspaceScopeMatches(preferenceScope, get()) || !profileScopeMatches(profileScope, get())) return
+      // Creation already returns the chat. Do not wait for a full sidebar
+      // refresh, which also reloads every other pane's potentially long history.
+      // A live session event may have arrived first; preserve that newer record.
+      set(state => state.sessions.some(candidate => candidate.id === session.id)
+        ? state : { sessions: [session, ...state.sessions] })
       if (!destination) {
         await get().selectSession(session.id)
       } else {
