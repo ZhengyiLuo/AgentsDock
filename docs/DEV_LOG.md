@@ -16,6 +16,18 @@
   scheduled SDK MCP/helper/admission, provider authority, chat creation and
   packaging checks. Independent review found no blockers; six private native
   updater fixtures pass. Live activation and real Duet delivery remain pending.
+- Build signed source `e999a8bab5f8bed44b2e2323c3e00960c12ced09`; legacy
+  archive SHA-256
+  `e96c0b1458da760960f8d2d7fff725e820a370ac4460372b813c957bd9c6874f`.
+  Verify 138 source files and the frozen 2,362-entry prepared runtime. Native
+  preflight preserves the current gateway and Team Hub; the one-shot worker
+  updater waits for idle and never forces active work to stop.
+- Push the maintained repair branch and its standalone export from the matching
+  current-release lineage. Do not overwrite the earlier divergent private
+  branch. Prepare the upstream feature-only repair separately against current
+  main, with 277 focused tests passing and no version change: draft PR
+  [#172](https://github.com/ZhengyiLuo/AgentsDock/pull/172). It remains unmerged;
+  future public-release inclusion is not yet confirmed.
 
 ## 2026-11-08 - Prepare coordinated 1.0.12-beta.6
 
