@@ -1,5 +1,33 @@
 # Public development log
 
+## Unreleased — Prompt pane creation and recoverable Claude status reads
+
+- Open a newly created chat in the visible pane even when a saved workspace is
+  hidden. Use the returned session immediately instead of waiting for every
+  other open chat's history to reload; display “Creating chat…” while pending.
+- Distinguish an unsuccessful Claude status read from a failed Claude runtime.
+  Keep independently confirmed Running/Starting visible, show the read failure
+  in Claude controls, and accept a delayed success from the same request.
+  Superseded requests and responses from a previous chat or server stay ignored.
+  Manual refresh remains available; this adds no polling or automatic retries.
+- Verification: desktop typecheck, production compile and the local package's
+  existing suite passed (5,996 tests; six skipped). Native Electron pointer
+  clicks reproduced both pane failures before the fix. The corrected packaged
+  app created chats in ordinary, second and third panes in under a second while
+  preserving drafts/history. A separate personal click also exercised pane four.
+- Native Claude status checks exercised the UI, IPC, authenticated server reads
+  and websocket events with controlled status/delay fixtures: late success,
+  read failure during Running, manual retry, superseded responses, navigation
+  and authoritative Unavailable. The delayed-response journey was personally
+  exercised as well. These checks did not invoke a live Claude provider and do
+  not diagnose a particular user's underlying transport or server failure.
+- Accepted local arm64 package: development version `0.2.0`, build `86`, source
+  `56b5f871188cda641f9907beec7672f8ee398c66` (this change plus the separate
+  file-reveal fix in PR #156). Its exact ASAR passed both native journeys via
+  isolated Electron; bundle auditing and strict signing verification passed.
+  This is a local build, not a new public beta or Gatekeeper acceptance. No live
+  server was changed or restarted.
+
 ## Unreleased — Account-scoped model inventories and explicit checks
 
 - Stop presenting historical Claude/Codex version fallbacks and saved chat IDs
