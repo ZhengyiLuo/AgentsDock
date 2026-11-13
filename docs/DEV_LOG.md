@@ -1,5 +1,25 @@
 # Public development log
 
+## Unreleased — Recover terminal startup after working-directory removal
+
+- Launch tmux control processes from a stable directory instead of inheriting
+  a removable checkout. For new terminal sessions, windows and splits, enter
+  the selected directory before login-shell initialization. This also works
+  around an already-running tmux 3.7b daemon ignoring `-c` after its own working
+  directory disappears. Existing panes and foreground commands are not reset.
+- Verification: 167 focused server tests, 251 desktop terminal/transport tests,
+  desktop typecheck and production compilation, using development sources
+  based on `c8f45fe4` plus this fix (not a release package). Isolated native Electron on
+  macOS exercised production IPC, authenticated HTTP/WebSocket, PTY and tmux:
+  new sessions, both split directions, new windows after directory removal,
+  stdout/stderr, 4,000 output lines followed by stderr, and reconnect.
+- Boundaries: isolated credential-storage adapter; no OS Keychain acceptance,
+  package installation, production-server replacement or release. The fix is
+  server-side and does not silently repair the cwd of an existing running shell.
+  This does not establish that every reported blank-terminal symptom has the
+  same cause. Portable process regressions ran on macOS; live Linux acceptance
+  remains untested.
+
 ## Unreleased — Account-scoped model inventories and explicit checks
 
 - Stop presenting historical Claude/Codex version fallbacks and saved chat IDs
