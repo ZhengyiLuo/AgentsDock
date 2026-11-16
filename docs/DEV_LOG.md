@@ -22,6 +22,29 @@ painful to rediscover later.
   active server and push the latest server repository/code to GitHub so app and
   server contract versions do not drift.
 
+## 2026-11-16 - Refresh analytics privacy disclosures
+
+- Corrected the desktop analytics controls: enabled by default, no current
+  Settings switch, and prior stored opt-outs remain effective.
+- Checked the published v1.0.12-beta.6 analytics and session-analytics sources.
+  Summarized feature, provider, connection and operation usage in plain language,
+  without a vendor name, timestamps, field inventory or environment commands.
+  Retained sensitive-data exclusions and the distinction between installations
+  and people, and between usage statistics and ordinary network information.
+  Preserved the Android, iOS/iPadOS, shared-page and website distinctions.
+- Added a Simplified Chinese policy, reciprocal language links and sitemap
+  metadata. Chinese privacy links now open the localized page. Corrected the
+  English and Chinese FAQ's outdated default-off statement.
+- Forty website regressions passed. Real-browser checks covered both policy
+  pages at 1440, 768, 390 and 320 pixels, section anchors,
+  language switching, FAQ navigation and the Chinese homepage footer link.
+  No horizontal overflow or page script errors were found.
+- Reviewed and approved for website publication and mirror sync on November 16.
+  No client/server code, release metadata, analytics runtime or installed app
+  was changed. This is a website-only validation, not a new packaged-client
+  analytics acceptance test.
+  In-development telemetry fields are not described as shipped.
+
 ## 2026-11-06 - Clarify Tailscale requirements for remote access
 
 - Replaced Tailscale's optional labels with highly recommended guidance on the

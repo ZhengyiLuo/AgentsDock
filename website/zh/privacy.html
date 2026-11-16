@@ -1,0 +1,146 @@
+<!doctype html>
+<html lang="zh-Hans">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="description" content="AgentsDock 隐私政策：自托管数据、客户端本地存储、使用统计的默认设置、采集字段和隐私控制。" />
+    <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="AgentsDock" />
+    <meta property="og:title" content="隐私政策 · AgentsDock" />
+    <meta property="og:description" content="了解 AgentsDock 的自托管数据、使用统计、采集字段和隐私控制。" />
+    <meta property="og:url" content="https://agentsdock.net/zh/privacy.html" />
+    <meta property="og:image" content="https://agentsdock.net/assets/og-card.png?v=82a3bdda" />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+    <meta property="og:image:alt" content="AgentsDock：为 agentic AI 研究而设计的 IDE" />
+    <meta property="og:locale" content="zh_CN" />
+    <meta property="og:locale:alternate" content="en_US" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="隐私政策 · AgentsDock" />
+    <meta name="twitter:description" content="了解 AgentsDock 的自托管数据、使用统计、采集字段和隐私控制。" />
+    <meta name="twitter:image" content="https://agentsdock.net/assets/og-card.png?v=82a3bdda" />
+    <meta name="theme-color" content="#0d1013" />
+    <meta name="robots" content="index,follow" />
+    <title>隐私政策 · AgentsDock</title>
+    <link rel="icon" href="../favicon.ico" sizes="any" />
+    <link rel="icon" type="image/png" href="../assets/favicon-96.png" sizes="96x96" />
+    <link rel="apple-touch-icon" href="../assets/apple-touch-icon.png" />
+    <script async src="https://www.googletagmanager.com/gtag/js?id=G-G3XRBEHKVD"></script>
+    <script>
+      window.dataLayer = window.dataLayer || [];
+      function gtag(){dataLayer.push(arguments);}
+      gtag('js', new Date());
+      gtag('config', 'G-G3XRBEHKVD');
+    </script>
+    <script src="../analytics.js" defer></script>
+    <script src="../site-nav.js?v=e7010cf2" defer></script>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Instrument+Sans:wght@400;500;600;700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
+    <link rel="stylesheet" href="../styles.css?v=80f4f28e" />
+    <link rel="canonical" href="https://agentsdock.net/zh/privacy.html" />
+    <link rel="alternate" hreflang="en" href="https://agentsdock.net/privacy.html" />
+    <link rel="alternate" hreflang="zh-Hans" href="https://agentsdock.net/zh/privacy.html" />
+    <link rel="alternate" hreflang="x-default" href="https://agentsdock.net/privacy.html" />
+  </head>
+  <body>
+    <header class="site-header">
+      <a class="brand" href="./index.html" aria-label="AgentsDock 首页">
+        <img src="../assets/agentsdock-icon.png" alt="" />
+        <span>AgentsDock</span>
+      </a>
+      <nav aria-label="主导航">
+        <a href="./index.html">首页</a>
+        <a href="./setup.html">文档</a>
+        <a href="./faq.html">常见问题</a>
+        <a class="nav-discord" href="https://discord.gg/ZGDrhEWqPt" target="_blank" rel="noopener"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M20.317 4.369a19.79 19.79 0 0 0-4.885-1.515.074.074 0 0 0-.079.037c-.211.375-.446.865-.608 1.249a18.27 18.27 0 0 0-5.487 0 12.6 12.6 0 0 0-.617-1.25.077.077 0 0 0-.079-.036A19.74 19.74 0 0 0 3.677 4.37a.07.07 0 0 0-.032.027C.533 9.046-.32 13.58.099 18.057a.082.082 0 0 0 .031.057 19.9 19.9 0 0 0 5.993 3.03.078.078 0 0 0 .084-.028 14.2 14.2 0 0 0 1.226-1.994.076.076 0 0 0-.041-.106 13.1 13.1 0 0 1-1.872-.892.077.077 0 0 1-.008-.128 10 10 0 0 0 .372-.291.074.074 0 0 1 .077-.01c3.928 1.793 8.18 1.793 12.062 0a.074.074 0 0 1 .078.009q.181.15.373.292a.077.077 0 0 1-.006.127 12.3 12.3 0 0 1-1.873.891.077.077 0 0 0-.041.107c.36.698.772 1.362 1.225 1.993a.076.076 0 0 0 .084.028 19.84 19.84 0 0 0 6.002-3.03.077.077 0 0 0 .032-.054c.5-5.177-.838-9.674-3.549-13.66a.06.06 0 0 0-.031-.03zM8.02 15.331c-1.183 0-2.157-1.085-2.157-2.419 0-1.333.956-2.419 2.157-2.419 1.21 0 2.176 1.096 2.157 2.42 0 1.333-.956 2.418-2.157 2.418m7.975 0c-1.183 0-2.157-1.085-2.157-2.419 0-1.333.955-2.419 2.157-2.419 1.21 0 2.176 1.096 2.157 2.42 0 1.333-.946 2.418-2.157 2.418"/></svg>Discord</a>
+      </nav>
+      <div class="lang-switch header-lang">
+        <button type="button" class="lang-switch-btn" aria-haspopup="listbox" aria-expanded="false" aria-label="语言"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18"/></svg><span class="lang-switch-label">简体中文</span><svg class="lang-switch-chev" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg></button>
+        <ul class="lang-switch-menu" role="listbox" hidden>
+          <li><a role="option" href="../privacy.html" hreflang="en" lang="en">English</a></li>
+          <li><a role="option" class="is-current" aria-selected="true" aria-current="true" lang="zh-Hans">简体中文<svg class="lang-switch-check" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12l5 5L20 7"/></svg></a></li>
+        </ul>
+      </div>
+    </header>
+
+    <main>
+      <article class="legal">
+        <p class="section-kicker">法律信息</p>
+        <h1>隐私政策</h1>
+        <p class="legal-meta">最后更新：2026 年 11 月 16 日</p>
+
+        <p class="legal-lead">AgentsDock 是一个<strong>自托管</strong>工作空间。你运行自己的 AgentsDock 服务器，聊天、文件、终端和凭据保存在你掌控的基础设施上。本政策说明 AgentsDock 客户端（macOS、Windows、Linux、iOS、iPadOS 和 Android）采集和不采集哪些信息。</p>
+
+        <h2>1. 关于我们</h2>
+        <p>AgentsDock（下称“我们”）提供桌面和移动客户端，连接到<strong>由你自行安装、运行的 AgentsDock 服务器</strong>。服务器运行在你自己的机器或集群上，因此你是所创建内容的控制者。</p>
+
+        <h2>2. 客户端不采集的信息</h2>
+        <p>AgentsDock 客户端尽量减少数据采集。我们<strong>不运营接收你内容的云端后端</strong>，也不会采集、向我们传输、出售或分享以下内容：</p>
+        <ul>
+          <li>聊天消息、提示词或 agent 回复；</li>
+          <li>源代码、文件、媒体或命令输出；</li>
+          <li>模型提供方的 API key 或访问 token；</li>
+          <li>终端会话或定时任务。</li>
+        </ul>
+        <p>这些内容存储在你运行的 AgentsDock 服务器上（默认位于 <code>~/.agentsdock</code>），通过你配置的网络（例如局域网或 Tailscale）在客户端与服务器之间直接传输。</p>
+
+        <h2>3. 设备上保存的信息</h2>
+        <p>为了连接服务器，客户端会在设备本地保存配置，包括<strong>服务器 URL</strong>和必要的 <strong>token</strong>（保存在操作系统的安全存储中，例如 Apple Keychain）。这些信息保留在设备上，仅用于访问你指定的服务器。你可以在应用中移除已保存的服务器配置和凭据。卸载行为因平台而异：桌面应用数据及 Keychain 等操作系统安全存储可能仍会保留，需要通过相应的系统功能清除。</p>
+
+        <h2>4. 第三方服务</h2>
+        <p>根据你的使用方式，以下第三方可能参与其中，其数据处理方式由各自的隐私政策约束：</p>
+        <ul>
+          <li><strong>AI 模型提供方。</strong>你的 AgentsDock 服务器使用你配置的凭据运行 Claude Code、Codex、OpenCode、Cursor 等 provider CLI。Agent 运行时，服务器直接向相应提供方发送请求。AgentsDock 不代理、转售或查看这些请求。请参阅相应提供方的隐私政策。</li>
+          <li><strong>Apple。</strong>如果通过 App Store 或 TestFlight 安装应用，Apple 可能收集分发相关信息。你选择分享的崩溃诊断也由 Apple 按其隐私政策处理。</li>
+          <li><strong>使用统计。</strong>桌面端、Android 和共享聊天网页可能使用第三方服务记录有限的使用统计。采集范围和各平台的控制方式见<a href="#analytics">使用统计与跟踪</a>。</li>
+          <li><strong>Google Analytics。</strong>我们的产品网站按下文说明使用 Google Analytics；它不在 AgentsDock 客户端中运行。见 <a href="https://policies.google.com/privacy" target="_blank" rel="noopener">Google 隐私政策</a>。</li>
+        </ul>
+
+        <h2 id="analytics">5. 使用统计与跟踪</h2>
+        <p>AgentsDock <strong>客户端</strong>不包含第三方广告 SDK，不跨其他应用或网站跟踪你，也不出售个人数据。</p>
+        <h3 id="analytics-controls">统计控制</h3>
+        <ul>
+          <li><strong>macOS、Windows 和 Linux：</strong>有限使用统计<strong>默认开启</strong>，当前桌面设置中<strong>没有统计开关</strong>。如果你在旧版中关闭过统计，只要应用保留了本地偏好设置，这个选择仍然有效。</li>
+          <li><strong>Android：</strong>使用统计默认开启，可以在<strong>设置 &rarr; Usage analytics</strong>中修改，选择保存在该设备上。</li>
+          <li><strong>iOS 和 iPadOS：</strong>不发送自定义使用统计，也不创建统计标识。</li>
+        </ul>
+        <h3 id="analytics-usage">使用统计包含什么</h3>
+        <p>我们使用第三方统计服务，了解功能和 agent 类型的使用情况、agent 的连接方式，以及部分操作是否成功。桌面统计使用随机的安装 ID，不是你的账号或身份；安装数量也不等于实际人数。Android 和共享聊天网页不创建持久的统计标识。</p>
+        <p>使用统计<strong>不包含</strong>聊天消息、提示词、回复、文件内容或路径、模型名、API endpoint、密钥、token 或主机名，也不使用会话回放。和其他网络请求一样，接收服务仍能看到 IP 地址等普通连接信息；随机安装 ID 不代表网络连接完全匿名。</p>
+        <p>共享聊天网页可能在授权访问后记录有限的使用次数，不识别具体访客，并遵循支持的浏览器隐私信号及同源的历史关闭选择。</p>
+        <p>统计禁用后，不再发送后续使用事件。已保存的桌面关闭选择还会移除本地安装 ID，但不会自动删除已经收到的统计。</p>
+        <h3 id="website-analytics">网站统计</h3>
+        <p>我们的<strong>网站</strong>（agentsdock.net）使用 Google Analytics 统计页面浏览和外部链接点击；它不在 AgentsDock 客户端中运行。Google 按其隐私政策处理请求信息和标识。</p>
+
+        <h2>6. 数据保留与删除</h2>
+        <p>内容保存在你自己的服务器上，因此保留期限由你控制。你可以在应用中删除聊天、文件和任务，也可以删除服务器数据目录（默认为 <code>~/.agentsdock</code>）以移除全部服务器状态。客户端连接设置和凭据可以在应用中移除。仅卸载应用可能不会清除桌面应用数据或操作系统安全存储，完全移除客户端数据可能还需要通过系统功能清除这些存储。</p>
+        <p>有限的使用统计仅在了解功能使用和可靠性所需期间保留。我们会定期审查这种需要，并删除不再需要的统计。禁用统计不会自动删除已经收到的记录。桌面统计标记的是安装实例而非账号，因此我们通常无法将其对应到具体个人。</p>
+
+        <h2>7. 安全</h2>
+        <p>建议通过私有网络或 Tailscale 等加密连接访问 AgentsDock 服务器，启用服务器认证，并及时更新设备和服务器操作系统。任何传输或存储方式都不是绝对安全的，但自托管设计让你的数据保留在自己的环境中。</p>
+
+        <h2>8. 儿童</h2>
+        <p>AgentsDock 是面向开发者和研究人员的工具，不以 13 岁以下儿童为目标用户，也不会明知而收集儿童的个人信息。</p>
+
+        <h2>9. 政策变更</h2>
+        <p>我们可能不时更新本政策。更新时会修改上方的“最后更新”日期，并在此地址发布新版本。</p>
+
+        <h2>10. 联系我们</h2>
+        <p>如对本政策或 AgentsDock 的隐私实践有疑问，请发送邮件至 <a href="mailto:contact@agentsdock.net">contact@agentsdock.net</a>，或通过 <a href="https://discord.gg/ZGDrhEWqPt" target="_blank" rel="noopener">Discord 社区</a>联系我们。</p>
+      </article>
+    </main>
+
+    <footer>
+      <div class="brand footer-brand"><img src="../assets/agentsdock-icon.png" alt="" /><span>AgentsDock</span></div>
+      <p>为 agentic AI 研究而设计的 IDE。<span class="footer-copyright">&copy; 2026 AgentsDock</span></p>
+      <div>
+        <a href="./setup.html">文档</a>
+        <a href="../support.html">支持</a>
+        <a href="./report-issue.html">报告问题</a>
+        <a href="./privacy.html">隐私政策</a>
+        <a href="https://discord.gg/ZGDrhEWqPt" target="_blank" rel="noopener">Discord &#8599;</a>
+      </div>
+    </footer>
+  </body>
+</html>
