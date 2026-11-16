@@ -29,12 +29,15 @@ export function ClaudeStatusButton() {
   const flags = runtime?.status?.type === 'active' ? runtime.status.activeFlags : []
   const unavailable = runtime?.available === false
   const waiting = interactions.length > 0 || flags.includes('waitingOnApproval') || flags.includes('waitingOnUserInput')
-  const tone = runtimeError || unavailable || runtime?.status?.type === 'systemError' ? 'error'
-    : waiting ? 'waiting' : running || starting || runtime?.status?.type === 'active' ? 'active' : 'idle'
-  const status = runtimeError ? t('claudeControls.error') : unavailable ? t('claudeControls.unavailable')
+  const failed = runtime?.status?.type === 'systemError'
+  const tone = unavailable || failed ? 'error'
+    : waiting ? 'waiting' : running || starting ? 'active' : runtimeError ? 'waiting'
+      : runtime?.status?.type === 'active' ? 'active' : 'idle'
+  const status = unavailable ? t('claudeControls.unavailable') : failed ? codexStatusLabel(runtime?.status)
     : interactions.length ? t('claudeControls.waitingCount', { count: interactions.length })
       : waiting ? codexStatusLabel(runtime?.status) : running ? t('timeline.status.running')
-        : starting ? t('timeline.status.starting') : loading ? t('claudeControls.loading') : codexStatusLabel(runtime?.status)
+        : starting ? t('timeline.status.starting') : runtimeError ? t('claudeControls.statusUnavailable')
+          : loading ? t('claudeControls.loading') : codexStatusLabel(runtime?.status)
   const usage = parseClaudeContextUsage(runtime?.context_usage_snapshot !== undefined ? runtime.context_usage_snapshot : runtime?.context_usage)
   const openGoal = () => {
     setOpen(false)
@@ -59,7 +62,8 @@ export function ClaudeStatusButton() {
           </header>
           <div className="codex-controls-scroll-region">
             {!connected && <div className="codex-control-alert" role="status">{t('claudeControls.disconnected')}</div>}
-            {(runtimeError || interactionError) && <div className="codex-control-alert" role="alert"><AlertTriangle size={14} /><span>{runtimeError || interactionError}</span></div>}
+            {runtimeError && <div className="codex-control-alert" role="status"><AlertTriangle size={14} /><span>{t('claudeControls.statusReadFailed', { error: runtimeError })}</span></div>}
+            {interactionError && <div className="codex-control-alert" role="alert"><AlertTriangle size={14} /><span>{interactionError}</span></div>}
             {loading ? <div className="codex-controls-loading"><LoaderCircle size={18} className="spin" />{t('claudeControls.loading')}</div>
               : <fieldset className="codex-controls-body" disabled={!connected}>
                 {interactions.length > 0 && <section className="codex-control-section codex-control-pending">

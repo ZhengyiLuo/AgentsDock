@@ -189,6 +189,29 @@ describe('tabbed chat workspaces', () => {
     api.timeline.unsubscribe.mockClear()
   })
 
+  it.each([false, true])('opens the new pane without reloading unrelated history (hidden workspace: %s)', async hidden => {
+    const created: Session = { id: 'fresh', title: 'New chat', backend: 'codex' }
+    api.sessions.create.mockResolvedValue(created)
+    api.timeline.cached.mockImplementation(async id => id === created.id
+      ? { ...snapshot('a'), session: created, events: [] } : snapshot(id))
+    useAppStore.getState().setChatPaneCount(2)
+    const workspaceId = useAppStore.getState().activeChatWorkspaceId
+    if (hidden) useAppStore.getState().toggleChatWorkspaceBar()
+    else useAppStore.getState().focusChatPane('secondary')
+    api.timeline.open.mockReturnValue(new Promise(() => {}))
+    api.sessions.list.mockClear()
+    api.timeline.cached.mockClear()
+    await useAppStore.getState().requestNewChat({ workspaceId, pane: 'secondary' })
+    expect(useAppStore.getState().selectedSessionId).toBe('fresh')
+    expect(useAppStore.getState().chatPanes[hidden ? 'primary' : 'secondary']).toBe('fresh')
+    expect(useAppStore.getState().creatingChat).toBe(false)
+    expect(api.sessions.list).not.toHaveBeenCalled()
+    expect(api.timeline.open).not.toHaveBeenCalled()
+    expect(api.timeline.cached).toHaveBeenCalledExactlyOnceWith('fresh')
+    if (hidden) expect(useAppStore.getState().chatWorkspaces.find(w => w.id === workspaceId)?.panes.secondary).toBeNull()
+    else expect(useAppStore.getState().chatPanes.primary).toBe('a')
+  })
+
   it('retains empty-pane focus when the session creation event arrives before its response', async () => {
     const created: Session = { id: 'fresh', title: 'New chat', backend: 'codex' }
     let finishCreate!: (session: Session) => void

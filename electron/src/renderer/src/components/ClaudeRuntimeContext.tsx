@@ -127,28 +127,30 @@ export function ClaudeRuntimeProvider({ session, capability, children }: ClaudeR
     setRefreshing(Boolean(runtimeRef.current))
     if (!runtimeRef.current) setLoading(true)
     try {
-      const next = await boundedClaudeRefresh(
-        bridge.runtime(sessionId),
-        'Claude runtime refresh timed out.'
-      )
-      if (epoch !== requestEpoch.current || sessionIdRef.current !== sessionId || profileIdentityRef.current !== requestProfileIdentity) return null
-      const previousUsageGeneration = contextUsageGenerationRef.current
-      const nextUsageGeneration = claudeUsageGeneration(next)
-      const usageGenerationAdvanced = previousUsageGeneration !== null
-        && nextUsageGeneration !== null
-        && nextUsageGeneration > previousUsageGeneration
-      if (
-        nextUsageGeneration !== null
-        && (previousUsageGeneration === null || nextUsageGeneration > previousUsageGeneration)
-      ) contextUsageGenerationRef.current = nextUsageGeneration
-      runtimeRef.current = next
-      runtimeIdentityRef.current = `${requestProfileIdentity}\u0000${sessionId}`
-      setRuntime(next)
-      if (errorTarget === 'contextUsage' || usageGenerationAdvanced) {
-        setContextUsageError(null)
-      }
-      setRuntimeError(null)
-      return next
+      // The UI deadline releases the refresh control; it does not cancel the
+      // transport. Keep observing this exact read so a late success repairs its
+      // warning, unless navigation, a mutation, or a newer read superseded it.
+      const request = bridge.runtime(sessionId).then(next => {
+        if (epoch !== requestEpoch.current || sessionIdRef.current !== sessionId || profileIdentityRef.current !== requestProfileIdentity) return null
+        const previousUsageGeneration = contextUsageGenerationRef.current
+        const nextUsageGeneration = claudeUsageGeneration(next)
+        const usageGenerationAdvanced = previousUsageGeneration !== null
+          && nextUsageGeneration !== null
+          && nextUsageGeneration > previousUsageGeneration
+        if (
+          nextUsageGeneration !== null
+          && (previousUsageGeneration === null || nextUsageGeneration > previousUsageGeneration)
+        ) contextUsageGenerationRef.current = nextUsageGeneration
+        runtimeRef.current = next
+        runtimeIdentityRef.current = `${requestProfileIdentity}\u0000${sessionId}`
+        setRuntime(next)
+        if (errorTarget === 'contextUsage' || usageGenerationAdvanced) {
+          setContextUsageError(null)
+        }
+        setRuntimeError(null)
+        return next
+      })
+      return await boundedClaudeRefresh(request, 'Claude runtime refresh timed out.')
     } catch (cause) {
       if (epoch !== requestEpoch.current || sessionIdRef.current !== sessionId || profileIdentityRef.current !== requestProfileIdentity) return null
       if (errorTarget === 'contextUsage') setContextUsageError(errorMessage(cause))

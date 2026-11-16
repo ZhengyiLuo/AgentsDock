@@ -1031,7 +1031,7 @@ describe('instant new chat defaults', () => {
       'directChatPlaceholder:v1:created',
       { version: 1, fingerprint: expect.any(String) }
     )
-    expect(refresh).toHaveBeenCalledOnce()
+    expect(refresh).not.toHaveBeenCalled()
     expect(select).toHaveBeenCalledWith('created')
     expect(useAppStore.getState().creatingChat).toBe(false)
   })
@@ -1200,7 +1200,7 @@ describe('instant new chat defaults', () => {
       health: { ok: true }, refreshSessions: vi.fn().mockResolvedValue(undefined), selectSession: vi.fn().mockResolvedValue(undefined) })
     await useAppStore.getState().requestNewChat()
     expect(create).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ backend: 'codex', model: null }))
-    expect(useAppStore.getState().sessions[0].backend).toBe('gemini')
+    expect(useAppStore.getState().sessions.find(session => session.id === 'legacy')?.backend).toBe('gemini')
   })
 
   it('asks to connect when no server is selected without opening the retired dialog', async () => {

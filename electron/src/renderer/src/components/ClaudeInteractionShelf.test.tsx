@@ -476,7 +476,7 @@ describe('Claude interaction shelf', () => {
     expect(screen.getByTestId('claude-context-usage-error')).toHaveTextContent('Claude context refresh timed out.')
   })
 
-  it('bounds an observational runtime refresh when the bridge never settles', async () => {
+  it('releases a slow runtime refresh and accepts its eventual authoritative success', async () => {
     const pending = deferred<ClaudeRuntimeSnapshot>()
     runtimeRequest.mockResolvedValueOnce(runtime).mockReturnValueOnce(pending.promise)
     render(
@@ -484,7 +484,7 @@ describe('Claude interaction shelf', () => {
         session={session}
         capability={{ available: true, interactive_client_capability: 'claude_sdk_interactive_v1' }}
       >
-        <RuntimeRefreshProbe />
+        <RuntimeRefreshProbe /><RuntimeStatusProbe />
       </ClaudeRuntimeProvider>
     )
 
@@ -496,6 +496,39 @@ describe('Claude interaction shelf', () => {
     await act(async () => vi.advanceTimersByTimeAsync(CLAUDE_RUNTIME_REFRESH_TIMEOUT_MS))
 
     expect(screen.getByTestId('claude-runtime-error')).toHaveTextContent('Claude runtime refresh timed out.')
+    expect(screen.getByTestId('claude-runtime-status')).toHaveTextContent('active')
+
+    await act(async () => pending.resolve({ ...runtime, status: { type: 'idle' }, pending_interactions: [] }))
+
+    expect(screen.getByTestId('claude-runtime-error')).toBeEmptyDOMElement()
+    expect(screen.getByTestId('claude-runtime-status')).toHaveTextContent('idle')
+    expect(runtimeRequest).toHaveBeenCalledTimes(2)
+    expect(refreshContextUsage).not.toHaveBeenCalled()
+  })
+
+  it.each(['retry', 'profile', 'chat'] as const)('rejects a timed-out read after a newer %s owns the status', async replacement => {
+    const pending = deferred<ClaudeRuntimeSnapshot>()
+    runtimeRequest.mockResolvedValueOnce(runtime).mockReturnValueOnce(pending.promise)
+    const renderStatus = (selectedSession = session) => <ClaudeRuntimeProvider
+      session={selectedSession} capability={{ available: true, interactive_client_capability: 'claude_sdk_interactive_v1' }}
+    ><RuntimeRefreshProbe /><RuntimeStatusProbe /></ClaudeRuntimeProvider>
+    const view = render(renderStatus())
+    await waitFor(() => expect(screen.getByTestId('claude-runtime-status')).toHaveTextContent('active'))
+    vi.useFakeTimers()
+    fireEvent.click(screen.getByRole('button', { name: 'Refresh Claude runtime' }))
+    await act(async () => vi.advanceTimersByTimeAsync(CLAUDE_RUNTIME_REFRESH_TIMEOUT_MS))
+    expect(screen.getByTestId('claude-runtime-error')).toHaveTextContent('timed out')
+
+    runtimeRequest.mockResolvedValue({ ...runtime, status: { type: 'notLoaded' }, pending_interactions: [] })
+    await act(async () => {
+      if (replacement === 'retry') fireEvent.click(screen.getByRole('button', { name: 'Refresh Claude runtime' }))
+      else if (replacement === 'profile') useAppStore.setState({ activeProfileId: 'other-profile', profileGeneration: 4 })
+      else view.rerender(renderStatus({ ...session, id: 'other-chat' }))
+    })
+    expect(screen.getByTestId('claude-runtime-status')).toHaveTextContent('notLoaded')
+    await act(async () => pending.resolve({ ...runtime, status: { type: 'idle' }, pending_interactions: [] }))
+    expect(screen.getByTestId('claude-runtime-status')).toHaveTextContent('notLoaded')
+    expect(screen.getByTestId('claude-runtime-error')).toBeEmptyDOMElement()
   })
 
   it('shows context sampling failures only in the context indicator', async () => {

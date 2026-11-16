@@ -65,6 +65,48 @@ describe('Claude header controls', () => {
     expect(setGoal).not.toHaveBeenCalled()
   })
 
+  it('keeps an independently running turn visible when a status read fails', async () => {
+    runtime.mockRejectedValue(new Error('Temporary status disconnect'))
+    useAppStore.setState({ activeSessionIds: new Set([session.id]) })
+    render(surface())
+    const trigger = await screen.findByRole('button', { name: 'Claude controls: Running' })
+    await userEvent.setup().click(trigger)
+    const dialog = screen.getByRole('dialog')
+    expect(await within(dialog).findByText('Status refresh failed: Temporary status disconnect')).toBeVisible()
+    expect(trigger).toHaveClass('active')
+    expect(trigger).not.toHaveClass('error')
+    expect(within(dialog).getByRole('button', { name: 'Refresh Claude status' })).toBeEnabled()
+    expect(resolveInteraction).not.toHaveBeenCalled()
+  })
+
+  it('labels an unconfirmed status separately and clears its detail after an explicit retry', async () => {
+    runtime.mockRejectedValue(new Error('Status request failed (503)'))
+    render(surface())
+    const trigger = await screen.findByRole('button', { name: 'Claude controls: Status unavailable' })
+    expect(trigger).toHaveClass('waiting')
+    expect(trigger).not.toHaveClass('error')
+    const user = userEvent.setup()
+    await user.click(trigger)
+    const dialog = screen.getByRole('dialog')
+    expect(await within(dialog).findByText('Status refresh failed: Status request failed (503)')).toBeVisible()
+    runtime.mockResolvedValue(idle)
+    await user.click(within(dialog).getByRole('button', { name: 'Refresh Claude status' }))
+    await waitFor(() => expect(trigger).toHaveAccessibleName('Claude controls: Idle'))
+    expect(within(dialog).queryByText(/Status refresh failed/)).not.toBeInTheDocument()
+    expect(runtime).toHaveBeenCalledTimes(3)
+  })
+
+  it('retains an actual runtime error when refreshing its status fails', async () => {
+    runtime.mockResolvedValueOnce({ ...idle, status: { type: 'systemError' } })
+      .mockRejectedValue(new Error('Status connection lost'))
+    render(surface())
+    const trigger = await screen.findByRole('button', { name: 'Claude controls: Runtime error' })
+    await userEvent.setup().click(trigger)
+    expect(await screen.findByText('Status refresh failed: Status connection lost')).toBeVisible()
+    expect(trigger).toHaveClass('error')
+    expect(trigger).toHaveAccessibleName('Claude controls: Runtime error')
+  })
+
   it('opens the same goal dialog from the header and submits only a native Claude completion condition', async () => {
     render(surface())
     await userEvent.setup().click(await screen.findByRole('button', { name: 'Claude controls: Idle' }))
