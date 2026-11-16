@@ -1,4 +1,5 @@
 import { blockedGoalReport } from '../shared/blocked-goal'
+import { SUBMISSION_REJECTED_PREFIX } from '../shared/server-errors'
 import type { ProviderUsageScope, ProviderUsageSnapshot, UsageBackend } from '../shared/provider-usage'
 import type { CodeIntelligenceLanguage, CodeIntelligenceStatus } from '../shared/code-intelligence'
 import { customModelBackend, customModelInput, type CustomModelBackend, type CustomModelInput } from '../shared/custom-models'
@@ -1896,7 +1897,10 @@ export class AppService {
       throw new Error('This server profile is waiting for its prior identity reset to finish. Retry the identity reset before reconnecting.')
     }
     await this.refreshAll(false, true, scope)
-    return this.loadCachedBootstrap(this.requireProfileScope(profileId, profileGeneration))
+    const payload = this.loadCachedBootstrap(this.requireProfileScope(profileId, profileGeneration))
+    // Freshness evidence belongs to this explicit response, not the public
+    // profiles stream: changing timestamps there would cause idle UI churn.
+    return { ...payload, healthCheckedAt: this.profileRuntime.get(profileId)?.lastConnectionCheckedAt ?? null }
   }
 
   async copyServerToken(profileId: string): Promise<void> {
@@ -1997,6 +2001,10 @@ export class AppService {
       assertProfile()
       if (health.ok !== true) throw new Error('Server health check reported unavailable.')
       return health
+    }
+    catch (error) {
+      if (error instanceof ServerError) throw new Error(`Server connection failed (HTTP ${error.status}): ${error.message}`)
+      throw error
     }
     finally { client.dispose() }
   }
@@ -3850,6 +3858,12 @@ export class AppService {
         this.setProfileRuntime(scope.profileId, { connectionState: 'retrying', lastConnectionError: message, lastConnectionCheckedAt: Date.now() })
         this.emitConnection(scope, this.hasConnectedTimelineSubscription(), undefined, message)
       }
+      // Electron drops custom Error fields across IPC. Preserve only the
+      // explicit rejection category; the renderer strips this fixed marker
+      // from user-facing feedback and never uploads the error text.
+      if (error instanceof ServerError && error.status >= 400 && error.status < 500 && error.status !== 408) {
+        throw new Error(`${SUBMISSION_REJECTED_PREFIX}${error.message}`)
+      }
       throw error
     })
     // Acceptance wins even if local cleanup fails. Keep the receipt in that
@@ -4953,8 +4967,9 @@ export class AppService {
   }
 
   async openFile(sessionId: string, file: AgentFile): Promise<void> {
-    const error = await shell.openPath(await this.ensureLocalFile(sessionId, file))
-    if (error) throw new Error(error)
+    const path = await this.ensureLocalFile(sessionId, file)
+    const error = await shell.openPath(path).catch(error => { throw new Error(`Native file open failed: ${errorText(error)}`) })
+    if (error) throw new Error(`Native file open failed: ${error}`)
   }
   async openLinkedFile(sessionId: string, target: string): Promise<void> {
     const scope = this.captureScope()
@@ -4969,8 +4984,8 @@ export class AppService {
     const path = join(app.getPath('temp'), 'AgentsDockLinkedFiles', digest, filename)
     if (!existsSync(path)) await this.downloadResponse(response, path)
     this.assertCurrentScope(scope)
-    const error = await shell.openPath(path)
-    if (error) throw new Error(error)
+    const error = await shell.openPath(path).catch(error => { throw new Error(`Native file open failed: ${errorText(error)}`) })
+    if (error) throw new Error(`Native file open failed: ${error}`)
   }
   async revealFile(sessionId: string, file: AgentFile): Promise<void> {
     shell.showItemInFolder(await this.ensureLocalFile(sessionId, file))

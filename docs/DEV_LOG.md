@@ -32,6 +32,36 @@
   Android device interaction and optional API inference-check UI are not part
   of this change. No server deployment or release was performed.
 
+## Unreleased — Desktop analytics reliability and measurement boundaries
+
+- Fill missing onboarding connection/add, native-menu update-check and update-toast
+  request events. Document retired Changes and legacy update events separately
+  from active features; do not treat historical zeroes as failed feature adoption.
+- Keep an anonymous desktop identifier stable in memory when storage fails.
+  Validate collector HTTP and body responses, reuse a random event identifier
+  on bounded retries, and retain only a small memory queue. Opt-out clears the
+  queue and identifier. Delivery remains best effort, not lossless.
+- Classify native file-open and connection-check failures with a fixed enum,
+  without transmitting file metadata, raw errors, credentials or content.
+  Native file-open requests exclude internal editor and media previews.
+- Add renderer initialization, live-server readiness, explicit submission
+  outcomes and a run-correlated first-reply milestone. Fresh health evidence
+  does not introduce timestamp churn into the public profile event stream.
+  Current servers cannot prove post-update task recovery; the new observation
+  explicitly reports unsupported/unknown coverage instead of guessed success.
+- Verification: Electron typecheck and production build passed; the full
+  Vitest suite passed 6,033 tests with six skipped. Isolated native Electron
+  pointer/keyboard interactions exercised real authenticated server downloads,
+  an OS-open success and failure, internal text preview, invalid/valid connection
+  tests, initialization/readiness and a failed provider submission. Telemetry
+  was intercepted by a local collector, never replayed into production.
+- Limits: real collector/project ingestion, Linux/Windows native opening,
+  successful live-provider first-reply/queue observation and installed updater
+  restart remain pending. Retry, ownership, stale readiness, consent and update
+  coverage cases are covered by focused deterministic tests, not claimed as
+  complete live-provider or update-recovery acceptance. No mobile changes,
+  server deployment or release is included.
+
 ## Unreleased — Prompt pane creation and recoverable Claude status reads
 
 - Open a newly created chat in the visible pane even when a saved workspace is

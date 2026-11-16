@@ -124,6 +124,13 @@ describe('durable send request identity', () => {
 })
 
 describe('send validation during background reconnect', () => {
+  it.each([400, 401, 403, 404, 409, 422, 429])('preserves explicit send rejection HTTP %s across IPC without changing transport errors', async status => {
+    const client = Object.assign(fakeClient(), { sendTurn: vi.fn().mockRejectedValue(new ServerError(status, 'Rejected request')) })
+    const { service } = createProfileService({ 'http://a.test:7850': [client] })
+    Object.assign(service, { validatedGeneration: 1 })
+    await expect(service.sendTurn({ sessionId: 'chat', prompt: 'hello', fileIds: [] })).rejects.toThrow('[submission_rejected] Rejected request')
+    expect(client.sendTurn).toHaveBeenCalledOnce()
+  })
   it('marks failed HTTP sending as retrying while keeping a live receive stream and its running events', async () => {
     const failure = new TypeError('fetch failed')
     const client = Object.assign(fakeClient(), { sendTurn: vi.fn().mockRejectedValue(failure) })
@@ -470,7 +477,7 @@ describe('opening artifact files externally', () => {
     const message = 'No application is registered to open this file.'
     electronHarness.shellOpenPath.mockResolvedValue(message)
 
-    await expect(service.openFile('chat-a', file)).rejects.toThrow(message)
+    await expect(service.openFile('chat-a', file)).rejects.toThrow(`Native file open failed: ${message}`)
 
     expect(electronHarness.shellOpenPath).toHaveBeenCalledExactlyOnceWith(localPath)
   })
@@ -483,6 +490,12 @@ describe('opening artifact files externally', () => {
     await expect(service.openFile('chat-a', file)).rejects.toBe(error)
 
     expect(electronHarness.shellOpenPath).not.toHaveBeenCalled()
+  })
+
+  it('categorizes a rejected native opener promise without mislabeling download failures', async () => {
+    const { service } = harness()
+    electronHarness.shellOpenPath.mockRejectedValue(new Error('Operating system failure'))
+    await expect(service.openFile('chat-a', file)).rejects.toThrow('Native file open failed: Operating system failure')
   })
 })
 
@@ -10360,6 +10373,13 @@ describe('server profile lifecycle', () => {
     expect((await service.bootstrap()).health).toBeNull()
   })
 
+  it('keeps the HTTP failure category available to the renderer connection test', async () => {
+    const probe = fakeClient({ health: async () => { throw new ServerError(401, 'Rejected credentials') } })
+    const { service } = createProfileService({ 'http://a.test:7850': [fakeClient()], 'http://probe.test:7850': [probe] })
+    await expect(service.testServerConnection({ serverUrl: 'http://probe.test:7850' })).rejects.toThrow('Server connection failed (HTTP 401): Rejected credentials')
+    expect(probe.dispose).toHaveBeenCalledOnce()
+  })
+
   it('rejects and disposes an explicit unavailable connection test response', async () => {
     const unavailable = fakeClient({ health: async () => ({ ok: false }) })
     const { service } = createProfileService({
@@ -10388,7 +10408,9 @@ describe('server profile lifecycle', () => {
     await service.refreshServer('a', bootstrap.profileGeneration)
     await probeInactiveProfiles(service)
     const switched = await service.switchServer('b')
-    await service.refreshServer('b', switched.profileGeneration)
+    const refreshed = await service.refreshServer('b', switched.profileGeneration)
+    expect(refreshed.healthCheckedAt).toEqual(expect.any(Number))
+    expect((await service.bootstrap()).healthCheckedAt).toBeUndefined()
     const profiles = (await service.bootstrap()).profiles
 
     expect(settings.getActiveProfileId()).toBe('b')

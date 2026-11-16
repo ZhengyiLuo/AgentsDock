@@ -29,7 +29,8 @@ describe('file link feedback', () => {
     expect(open).toHaveBeenCalledExactlyOnceWith('chat-a', file)
     expect(useAppStore.getState().error).toBeNull()
     expect(trackOperation).toHaveBeenCalledTimes(2)
-    expect(trackOperation).toHaveBeenCalledWith('file_open_requested', expect.any(Function))
+    expect(trackOperation).toHaveBeenCalledWith('file_open_requested', expect.any(Function), undefined, { origin: 'artifact' })
+    expect(trackOperation).toHaveBeenCalledWith('file_open_requested', expect.any(Function), undefined, { origin: 'linked_file' })
   })
 
   it('translates missing-attachment feedback into Chinese', async () => {

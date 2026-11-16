@@ -640,8 +640,8 @@ describe('server shortcut navigation', () => {
     await vi.waitFor(() => expect(switchServer).toHaveBeenCalledWith('beta'))
   })
 
-  it('routes app settings and update commands without stacking server settings', () => {
-    const check = vi.fn().mockResolvedValue(undefined)
+  it('routes app settings and update commands without stacking server settings', async () => {
+    const check = vi.fn().mockResolvedValue({ state: 'not-available' })
     Object.defineProperty(window, 'agentsDock', {
       configurable: true,
       value: { updates: { check } } as unknown as AgentsDockAPI
@@ -660,6 +660,7 @@ describe('server shortcut navigation', () => {
     expect(useAppStore.getState().modals).toMatchObject({ settings: false, appSettings: true })
     expect(selectSection).toHaveBeenCalledWith(expect.objectContaining({ detail: 'updates' }))
     expect(check).toHaveBeenCalledOnce()
+    await vi.waitFor(() => expect(analytics.trackEvent).toHaveBeenCalledWith('app_update_checked', { success: true }))
   })
 
   it('applies an exact native-menu chat font size from the expanded size list', () => {

@@ -2,32 +2,39 @@
 // a browser analytics SDK here: SDK defaults can inject URLs, referrers, screen
 // details, user-agent data, marketing fields, or DOM state that this app must
 // never collect.
+import { AnalyticsDelivery } from './analytics-delivery'
+import { ANALYTICS_FAILURE_CATEGORIES, analyticsFailureCategory, type AnalyticsFailureCategory } from './analytics-failure'
 
 const MIXPANEL_TOKEN = '66b4fef625e5750d5527870f0ca96d5e'
-const MIXPANEL_TRACK_URL = 'https://api.mixpanel.com/track?ip=0'
 const CONSENT_STORAGE_KEY = 'agentsdock:analytics-consent:v1'
 const DISTINCT_ID_STORAGE_KEY = 'agentsdock:analytics-distinct-id:v1'
+export const ANALYTICS_RECOVERY_MARKERS_KEY = 'agentsdock:analytics-update-observations:v1'
 const LEGACY_MIXPANEL_PERSISTENCE_KEY = `mp_${MIXPANEL_TOKEN}_mixpanel`
 const LEGACY_MIXPANEL_OPT_IN_OUT_KEY = `__mp_opt_in_out_${MIXPANEL_TOKEN}`
-const TRACK_TIMEOUT_MS = 10_000
 
 export const ANALYTICS_PRIVACY_POLICY_URL = 'https://agentsdock.net/privacy.html'
 export const ANALYTICS_CONSENT_CHANGED_EVENT = 'agentsdock:analytics-consent-changed'
 
 export type AnalyticsConsentDecision = 'granted' | 'denied'
 export const ANALYTICS_BACKENDS = ['codex', 'claude', 'cursor', 'opencode', 'gemini'] as const
-export type AnalyticsEventProps = { success?: boolean; backend?: typeof ANALYTICS_BACKENDS[number]; connection_kind?: 'default' | 'custom_api' }
+export type AnalyticsEventProps = { success?: boolean; backend?: typeof ANALYTICS_BACKENDS[number]; connection_kind?: 'default' | 'custom_api'; failure_category?: AnalyticsFailureCategory; outcome?: 'accepted' | 'rejected' | 'unknown'; origin?: 'artifact' | 'linked_file'; coverage?: 'unsupported'; work_kind?: 'unknown' }
 
 let runtimeDecision: AnalyticsConsentDecision | null = null
 let consentRevision = 0
-const inFlightRequests = new Set<AbortController>()
+let runtimeDistinctId: string | null = null
+const delivery = new AnalyticsDelivery(window, () => getAnalyticsConsentDecision() === 'granted')
+
+export function installAnalyticsLifecycle(): () => void { return delivery.listen() }
+export function analyticsConsentRevision(): number { return consentRevision }
 
 function removeStoredItem(key: string): void {
   try { window.localStorage.removeItem(key) } catch { /* best effort */ }
 }
 
 function clearAnalyticsIdentifier(): void {
+  runtimeDistinctId = null
   removeStoredItem(DISTINCT_ID_STORAGE_KEY)
+  removeStoredItem(ANALYTICS_RECOVERY_MARKERS_KEY)
 }
 
 function clearLegacyMixpanelPersistence(): void {
@@ -47,6 +54,7 @@ export function getAnalyticsConsentDecision(): AnalyticsConsentDecision {
   if (window.agentsDock?.native?.analyticsDisabled) {
     if (runtimeDecision !== 'denied') clearAnalyticsIdentifier()
     runtimeDecision = 'denied'
+    delivery.clear()
     return 'denied'
   }
   if (!runtimeDecision) {
@@ -69,8 +77,7 @@ export function setAnalyticsConsent(enabled: boolean): void {
   try { window.localStorage.setItem(CONSENT_STORAGE_KEY, runtimeDecision) } catch { /* best effort */ }
 
   if (!enabled) {
-    for (const controller of inFlightRequests) controller.abort()
-    inFlightRequests.clear()
+    delivery.clear()
     clearAnalyticsIdentifier()
     clearLegacyMixpanelPersistence()
   }
@@ -90,11 +97,13 @@ function generateDistinctId(): string {
 // storage and deleted on opt-out. Desktop only - Android stays identifier-free
 // and iOS sends no analytics at all.
 function getOrCreateDistinctId(): string {
+  if (runtimeDistinctId) return runtimeDistinctId
   try {
     const existing = window.localStorage.getItem(DISTINCT_ID_STORAGE_KEY)
-    if (existing) return existing
+    if (existing) return (runtimeDistinctId = existing)
   } catch { /* fall through and mint a fresh id */ }
   const fresh = generateDistinctId()
+  runtimeDistinctId = fresh
   try { window.localStorage.setItem(DISTINCT_ID_STORAGE_KEY, fresh) } catch { /* best effort; still send this session */ }
   return fresh
 }
@@ -111,7 +120,8 @@ const BACKEND_EVENTS = new Set<string>([
   'chat_created', 'chat_resumed', 'message_sent', 'message_queued', 'message_steered',
   'provider_connection_tested', 'provider_connection_saved', 'provider_connection_forgotten',
   'provider_default_model_saved', 'chat_agent_changed', 'chat_model_changed',
-  'chat_permission_mode_changed', 'imported_chat_api_connected'
+  'chat_permission_mode_changed', 'imported_chat_api_connected',
+  'message_submission_attempted', 'message_submission_settled'
 ])
 
 function safeEventProps(name: AnalyticsEvent, props?: AnalyticsEventProps): Record<string, boolean | string> {
@@ -122,12 +132,28 @@ function safeEventProps(name: AnalyticsEvent, props?: AnalyticsEventProps): Reco
   if (name === 'message_sent' && (props?.connection_kind === 'default' || props?.connection_kind === 'custom_api')) {
     safe.connection_kind = props.connection_kind
   }
+  if ((name === 'file_open_requested' || name === 'connection_tested') && props?.success === false
+    && props.failure_category && ANALYTICS_FAILURE_CATEGORIES.includes(props.failure_category)) {
+    safe.failure_category = props.failure_category
+  }
+  if (name === 'file_open_requested' && (props?.origin === 'artifact' || props?.origin === 'linked_file')) safe.origin = props.origin
+  if (name === 'message_submission_settled' && props?.outcome && ['accepted', 'rejected', 'unknown'].includes(props.outcome)) safe.outcome = props.outcome
+  if (name === 'server_update_recovery_observed' && props?.outcome === 'unknown'
+    && props.coverage === 'unsupported' && props.work_kind === 'unknown') {
+    safe.outcome = 'unknown'; safe.coverage = 'unsupported'; safe.work_kind = 'unknown'
+  }
   return safe
 }
 
 /** The complete set of analytics events tracked in this app. Extend deliberately. */
 export const ANALYTICS_EVENTS = [
   'app_launched',
+  'app_initialized',
+  'app_server_ready',
+  'app_first_message_accepted',
+  'app_first_reply_observed',
+  'message_submission_attempted',
+  'message_submission_settled',
   'terminal_opened',
   'file_view_opened',
   'job_schedule_opened',
@@ -199,6 +225,7 @@ export const ANALYTICS_EVENTS = [
   'server_update_now_requested',
   'server_update_cancelled',
   'server_update_retry_requested',
+  'server_update_recovery_observed',
   'slash_skill_used',
   'slash_command_used',
   'builtin_slash_command_used',
@@ -225,14 +252,15 @@ export async function trackOperation<T>(
   name: AnalyticsEvent,
   operation: () => Promise<T>,
   succeeded: (result: T) => boolean = () => true,
-  props?: Pick<AnalyticsEventProps, 'backend'>
+  props?: Pick<AnalyticsEventProps, 'backend' | 'origin'>
 ): Promise<T> {
   try {
     const result = await operation()
-    trackEvent(name, { ...props, success: succeeded(result) })
+    const success = succeeded(result)
+    trackEvent(name, { ...props, success, ...(!success && name === 'connection_tested' ? { failure_category: 'unavailable' as const } : {}) })
     return result
   } catch (error) {
-    trackEvent(name, { ...props, success: false })
+    trackEvent(name, { ...props, success: false, ...(['file_open_requested', 'connection_tested'].includes(name) ? { failure_category: analyticsFailureCategory(error) } : {}) })
     throw error
   }
 }
@@ -244,38 +272,20 @@ export function trackEvent(name: AnalyticsEvent, props?: AnalyticsEventProps): v
   if (invokedRevision !== consentRevision) return
   if (runtimeDecision !== 'granted') return
 
-  const payload = [{
+  const payload = {
     event: name,
     properties: {
       token: MIXPANEL_TOKEN,
       // Anonymous, per-install identifier so unique installs and retention can be
       // measured. Created only after consent (checked above) and removed on opt-out.
       distinct_id: getOrCreateDistinctId(),
+      $insert_id: generateDistinctId(),
       time: Math.floor(Date.now() / 1000),
       platform: desktopPlatform(),
       ...safeEventProps(name, props)
     }
-  }]
-  const controller = new AbortController()
-  inFlightRequests.add(controller)
-  const clearRequestTimeout = window.clearTimeout.bind(window)
-  const timeout = window.setTimeout(() => controller.abort(), TRACK_TIMEOUT_MS)
-  const finish = () => {
-    clearRequestTimeout(timeout)
-    inFlightRequests.delete(controller)
   }
-  try {
-    void fetch(MIXPANEL_TRACK_URL, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload),
-      credentials: 'omit',
-      referrerPolicy: 'no-referrer',
-      signal: controller.signal
-    }).catch(() => undefined).finally(finish)
-  } catch {
-    finish()
-  }
+  delivery.enqueue(payload)
 }
 
 // Clean up the old mixpanel-browser SDK state without initializing analytics or

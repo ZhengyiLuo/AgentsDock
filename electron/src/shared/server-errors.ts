@@ -2,6 +2,7 @@ const TEAM_NETWORK_VALIDATION_PREFIX = 'Team Network recipient validation failed
 const BULLETIN_ALIAS_UPGRADE_MESSAGE = 'This AgentsServer does not support @@bulletin yet. Update the server and try again.'
 const MAX_VALIDATION_MESSAGE_CHARS = 400
 const MAX_SERIALIZED_DETAIL_CHARS = 64 * 1024
+export const SUBMISSION_REJECTED_PREFIX = '[submission_rejected] '
 
 /** Project a FastAPI validation list without exposing its raw input records or IDs. */
 export function teamNetworkValidationMessage(detail: unknown): string | null {
@@ -29,7 +30,7 @@ export function teamNetworkValidationMessage(detail: unknown): string | null {
 
 /** Electron serializes main-process errors; unwrap only a recognized turn validation error. */
 export function turnSendErrorMessage(error: unknown): string {
-  const original = error instanceof Error ? error.message : String(error)
+  const original = (error instanceof Error ? error.message : String(error)).replace(SUBMISSION_REJECTED_PREFIX, '')
   const match = original.match(/^Error invoking remote method ['"]turns:send['"]:\s*(?:Error:\s*)?([\s\S]+)$/i)
   const candidate = (match?.[1] ?? original).trim()
   if (candidate === BULLETIN_ALIAS_UPGRADE_MESSAGE || candidate.startsWith(`${TEAM_NETWORK_VALIDATION_PREFIX} `)) {

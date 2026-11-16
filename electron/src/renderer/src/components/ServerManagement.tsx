@@ -5,7 +5,7 @@ import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { Check, ChevronRight, LoaderCircle, Pencil, Plus, QrCode, Server, Trash2, Wifi } from 'lucide-react'
 import type { Health, PublicServerProfile } from '@shared/types'
 import { normalizeServerURL } from '@shared/server-url'
-import { trackEvent } from '../lib/analytics'
+import { trackEvent, trackOperation } from '../lib/analytics'
 import { useAppStore } from '../store/app-store'
 import { ServerConnectionQr } from './ServerConnectionQr'
 import { ServerTokenRow } from './ServerTokenRow'
@@ -235,16 +235,14 @@ export function ServerManagement({ addRequest = 0, manageRequest = 0, activeServ
     setTestedHealth(null)
     setTestError(null)
     try {
-      const health = await window.agentsDock.servers.testConnection({
+      const health = await trackOperation('connection_tested', () => window.agentsDock.servers.testConnection({
         profileId: testedDraft.profileId ?? undefined,
         serverUrl: testedDraft.serverUrl.trim(),
         accessToken: testedDraft.clearAccessToken ? null : testedDraft.accessToken || undefined
-      })
+      }), value => value.ok === true)
       if (health.ok !== true) throw new Error('Server health check reported unavailable.')
-      trackEvent('connection_tested', { success: true })
       if (request === testLease.current) setTestedHealth(health)
     } catch (error) {
-      trackEvent('connection_tested', { success: false })
       if (request === testLease.current) setTestError(errorMessage(error))
     } finally {
       if (request === testLease.current) setBusy(null)

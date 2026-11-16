@@ -9,10 +9,11 @@ Every desktop event has the same small app-owned envelope:
 - a random per-install identifier used for aggregate unique-install and retention counts;
 - a coarse platform value: `mac`, `windows`, `linux`, or `desktop`;
 - selected provider-related events may include a fixed `backend` value: `codex`, `claude`, `cursor`, `opencode`, or `gemini` (never model names, connection names, endpoints or accounts);
-- the event time; and
+- the event time;
+- a random per-event `$insert_id`, reused with the original timestamp on bounded delivery retries (not a chat, run, request, or server identifier); and
 - the Mixpanel project token used to route the event.
 
-Some operations include an event-specific `success` boolean and selected events allow the fixed `backend` enum, as listed below. Only `message_sent` additionally allows `connection_kind`: `default` or `custom_api`. The runtime sanitizer discards every other property and rejects unknown event names. A successful request is not proof that an agent completed its work or that an update finished installing. Network failures mean the client could not confirm the result, not necessarily that the server made no change.
+Some operations include an event-specific `success` boolean and selected events allow the fixed `backend` enum, as listed below. Only `message_sent` allows `connection_kind`: `default` or `custom_api`. Failed file-open/connection checks allow a fixed `failure_category`; file-open requests also allow `origin`. Submission outcomes and update-recovery coverage use only the fixed enums documented below. The runtime sanitizer discards all other properties and rejects unknown event names. A successful request is not proof that an agent completed its work or that an update finished installing. Network failures mean the client could not confirm the result, not necessarily that the server made no change.
 
 `connection_kind` is a routing dimension, not a sixth Agent family. `custom_api` means an AgentsDock-managed API connection, including official-provider endpoints and Gemini API connections. `default` means the normal provider route; that CLI may independently use an API key, so this is not an OAuth/native-auth metric. Codex uses the submitting session's explicit `codex_provider`; the other four Agents use `provider_connection`. Missing, unknown and legacy values are omitted, not inferred from credentials or counted as default. The snapshot is taken at submission, never from a later selected chat. Historical events without this property remain unknown; do not backfill them as default. Queued/steered events are subsets of `message_sent`, not additional messages to sum with it. Failed submissions and `/model` settings changes do not emit `message_sent`.
 
@@ -24,7 +25,13 @@ Never add message or prompt text, chat/job/agent/folder names, skill or command 
 
 | Event | Emitted when | Event-specific properties |
 | --- | --- | --- |
-| `app_launched` | The Electron renderer mounts. | None |
+| `app_launched` | Once per Electron renderer lifetime, including development StrictMode remounts. | None |
+| `app_initialized` | Once per renderer: cached bootstrap applied, or initialization failed. Not proof of a reachable server. | `success` |
+| `app_server_ready` | First identity-scoped, compatible live server Health succeeds; explicitly incomplete chat readiness does not count. Older servers without readiness metadata establish connection only. | None |
+| `app_first_message_accepted` | First explicit submission with a matching server turn/queue receipt in this renderer. Not first-ever installation use. | None |
+| `app_first_reply_observed` | First non-imported, non-commentary assistant output tied to a locally accepted run. Queued sends must first match their exact queued id to a started run. Missing ownership, other clients' messages and history replay do not count. | None |
+| `message_submission_attempted` | Locally validated submission reaches native send IPC. Invalid/empty drafts are excluded. | `backend` |
+| `message_submission_settled` | That submission has a turn/queue receipt, an explicit HTTP rejection, or an unknown transport/legacy result. No automatic message resubmission. | `backend`, `outcome`: `accepted`, `rejected`, `unknown` |
 | `chat_created` | A quick-create or new-chat request succeeds. | `backend` |
 | `chat_opened` | A session becomes newly visible in a chat pane. This can result from navigation or restoration, not only a mouse click. | None |
 | `split_view_opened` | The chat layout transitions from one visible chat to two distinct visible chats. Replacing a chat in an already-open split does not count. | None |
@@ -103,13 +110,6 @@ Never add message or prompt text, chat/job/agent/folder names, skill or command 
 | Event | Emitted when | Event-specific properties |
 | --- | --- | --- |
 | `workspace_file_saved` | An editor write settles, including a new document, ordinary save, or confirmed overwrite. No filename, contents or path is sent. | `success` |
-| `workspace_changes_opened` | The Git Changes panel becomes active. Refreshes and file selection do not count. | None |
-| `workspace_git_staged` | A user-requested stage operation settles, once per action rather than per file. | `success` |
-| `workspace_git_unstaged` | A user-requested unstage operation settles. | `success` |
-| `workspace_git_committed` | A reviewed commit request settles. The commit message and repository metadata are not sent. | `success` |
-| `workspace_git_conflict_resolved` | A conflict-resolution write settles. | `success` |
-| `workspace_git_continued` | Continuing an existing merge/rebase settles. | `success` |
-| `workspace_git_aborted` | Aborting an existing merge/rebase after confirmation settles. | `success` |
 | `attachment_uploaded` | One explicit upload batch settles. Success requires all selected files to be returned; partial/unconfirmed batches are false. No file metadata is sent. | `success` |
 
 ### Updates
@@ -120,11 +120,8 @@ Never add message or prompt text, chat/job/agent/folder names, skill or command 
 | `app_update_channel_changed` | A user's Stable/Beta selection request settles, including its automatic check. No channel/version is sent. | `success` |
 | `app_update_install_requested` | The user requests Restart to update. Counted before the renderer quits; not installation success. | None |
 | `app_update_cancelled` | A user-requested download cancellation or discard settles. | `success` |
-| `server_update_checked` | An explicit server check or channel-selection check settles. Passive reconciliation is excluded. | `success` |
-| `server_update_requested` | The user requests a supported managed server update, including deferred admission. Not installation success. | None |
-| `server_update_now_requested` | The user confirms Update now and the identity/reservation checks allow the restart request. | None |
-| `server_update_cancelled` | A user's explicit queued-update cancellation request settles. | `success` |
 | `server_update_retry_requested` | The user requests retry for a coordinated server update. | None |
+| `server_update_recovery_observed` | An exact client-owned forced-update receipt reaches a terminal coordinator observation, but the current server exposes no recovery-proof contract. This measures unsupported observability, not recovered tasks or unique server updates across clients. | `outcome: unknown`, `coverage: unsupported`, `work_kind: unknown` |
 
 iOS/iPadOS analytics remain disabled. Team Network instrumentation is unchanged. Chat-reference submission is not proof of agent-to-agent delivery/read/reply. No background history, streamed tokens, or typing are counted.
 
@@ -132,7 +129,7 @@ iOS/iPadOS analytics remain disabled. Team Network instrumentation is unchanged.
 
 | Event | Emitted when | Event-specific properties |
 | --- | --- | --- |
-| `connection_tested` | A server connection test finishes. | `success` |
+| `connection_tested` | An explicit server connection test finishes, including onboarding. | `success`; fixed `failure_category` on failure |
 | `server_added` | Adding a server profile finishes. | `success` |
 | `server_switched` | Explicitly switching to a server from Settings or the sidebar finishes. Automatic and superseded switches do not count. | `success` |
 
@@ -147,7 +144,7 @@ iOS/iPadOS analytics remain disabled. Team Network instrumentation is unchanged.
 | `chat_archived` | An explicit archive patch changes the confirmed state. | None |
 | `chat_unarchived` | An explicit unarchive/folder-move patch restores a previously archived chat. | None |
 | `workspace_files_opened` | A user opens the Files panel via its tab or file-open action. Not startup restoration, repeated selection or history refresh. | None |
-| `file_open_requested` | The native open-file/open-link request settles. Success means the native request resolved, not that the person read the file. | `success` |
+| `file_open_requested` | The native open-file/open-link request settles. Success means the native request resolved, not that the person read the file. This excludes ordinary editor/media previews. | `success`, `origin`: `artifact` or `linked_file`; failures additionally allow `failure_category` |
 | `language_changed` | User selects a different language in Settings. Not Follow-system OS changes or preference replay. Does not assert persistence. | None |
 | `chat_font_changed` | User changes chat size/typeface in Settings or the native menu. No value is recorded. Not restoration or a no-op. Does not assert persistence. | None |
 | `error_details_copied` | User's explicit Copy error request settles. Never includes copied text. | `success` |
@@ -164,6 +161,34 @@ events are subsets, not additional messages to sum. Older builds lack `backend`;
 missing values must not be interpreted as an unknown provider or zero adoption.
 No actual model, permission mode, language, font, file, server, error or content
 value is uploaded. Team Network and the hidden QR entry are unchanged.
+
+## Retired desktop surfaces (historical names retained)
+
+These seven Git Changes events and four legacy server-update events are not reachable through the current UI. The implementation is retained for compatibility; zero current usage is not evidence of low demand. The coordinated retry event remains active.
+
+| Event | Historical meaning (retired surface) | Event-specific properties |
+| --- | --- | --- |
+| `workspace_changes_opened` | The Git Changes panel becomes active. Refreshes and file selection do not count. | None |
+| `workspace_git_staged` | A user-requested stage operation settles, once per action rather than per file. | `success` |
+| `workspace_git_unstaged` | A user-requested unstage operation settles. | `success` |
+| `workspace_git_committed` | A reviewed commit request settles. The commit message and repository metadata are not sent. | `success` |
+| `workspace_git_conflict_resolved` | A conflict-resolution write settles. | `success` |
+| `workspace_git_continued` | Continuing an existing merge/rebase settles. | `success` |
+| `workspace_git_aborted` | Aborting an existing merge/rebase after confirmation settles. | `success` |
+| `server_update_checked` | An explicit server check or channel-selection check settles. Passive reconciliation is excluded. | `success` |
+| `server_update_requested` | The user requests a supported managed server update, including deferred admission. Not installation success. | None |
+| `server_update_now_requested` | The user confirms Update now and the identity/reservation checks allow the restart request. | None |
+| `server_update_cancelled` | A user's explicit queued-update cancellation request settles. | `success` |
+
+## Delivery and funnel limitations (source changes, not yet released)
+
+Desktop delivery is memory-only, bounded to 100 pending events, eight in flight, three attempts and a 30-minute lifetime. Transient HTTP/network failures get bounded backoff; explicit payload rejection is dropped. HTTP and response body are checked, but neither proves downstream dashboard inclusion. Retry envelopes keep their timestamp and random event id. Online/pagehide recovery and fetch keepalive are best effort; quitting/crashing can still lose events. No event queue is stored on disk. Opt-out clears queued events and aborts in-flight requests. If identifier storage fails, one identifier is reused for this renderer lifetime, not regenerated per event. A later app launch can still obtain a different identifier.
+
+Only failed `file_open_requested` and `connection_tested` events accept `failure_category`: `not_found`, `authentication`, `scope_changed`, `download`, `native_open`, `network`, `timeout`, `unavailable`, `unknown`. Categories are conservative local classifications, not raw errors. `native_open` means the OS could not open the downloaded file, not necessarily that its default handler is missing. Unknown/older failures must not be backfilled into a specific cause. `origin` identifies the artifact versus linked-file API, not a filename or UI element. No new environment, model, path, content, server, chat or run identifier is transmitted.
+
+Launch milestones are once per renderer, not a new installation or a completed onboarding funnel. They cannot establish a startup crash from absence alone. Explicit message attempts/outcomes are a separate metric from historical `message_sent`; do not sum them. Missing/legacy receipts remain unknown; the first-reply metric excludes uncorrelated runs and replies delivered only to another client. Internal run/queue ownership stays in memory and is never uploaded.
+
+Update-observation deduplication keeps at most 128 one-way receipt hashes locally. They contain no raw identifiers and are never uploaded; opt-out removes them. Clearing storage, resetting consent or exceeding that bound may allow an old observation to count again. This is neither a cross-client unique-update count nor a per-task recovery metric. A versioned server recovery-proof contract is still needed before any recovery-success outcome can be added.
 
 ## Shared-browser events
 

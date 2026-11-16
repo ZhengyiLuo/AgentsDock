@@ -2442,6 +2442,8 @@ export interface BootstrapPayload {
 }
 
 export interface ProfileBootstrapPayload extends BootstrapPayload {
+  /** Present only on an explicit native refresh; absent from cached bootstrap. */
+  healthCheckedAt?: number | null
   activeProfileId: string
   profiles: PublicServerProfile[]
   profileGeneration: number

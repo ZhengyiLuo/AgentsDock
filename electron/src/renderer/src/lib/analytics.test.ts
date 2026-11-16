@@ -3,7 +3,7 @@ import { resolve } from 'node:path'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 const TOKEN = '66b4fef625e5750d5527870f0ca96d5e'
-const TRACK_URL = 'https://api.mixpanel.com/track?ip=0'
+const TRACK_URL = 'https://api.mixpanel.com/track?ip=0&verbose=1'
 const PREFERENCE_KEY = 'agentsdock:analytics-consent:v1'
 const ID_KEY = 'agentsdock:analytics-distinct-id:v1'
 
@@ -20,7 +20,7 @@ describe('analytics privacy configuration', () => {
   })
 
   it('defaults enabled, purges legacy SDK state, and keeps the anonymous per-install id', async () => {
-    const request = vi.fn().mockResolvedValue({ ok: true })
+    const request = vi.fn().mockResolvedValue({ ok: true, text: async () => '{"status":1}' })
     vi.stubGlobal('fetch', request)
     window.localStorage.setItem(ID_KEY, 'existing-install-id')
     window.localStorage.setItem(`mp_${TOKEN}_mixpanel`, '{"distinct_id":"legacy"}')
@@ -40,7 +40,7 @@ describe('analytics privacy configuration', () => {
   })
 
   it('allowlists provider families only on intended events and drops all other metadata', async () => {
-    const request = vi.fn().mockResolvedValue({ ok: true })
+    const request = vi.fn().mockResolvedValue({ ok: true, text: async () => '{"status":1}' })
     vi.stubGlobal('fetch', request)
     const analytics = await loadAnalytics()
     for (const backend of analytics.ANALYTICS_BACKENDS) {
@@ -54,8 +54,44 @@ describe('analytics privacy configuration', () => {
     expect(events.slice(0, 5).map(event => event.properties.backend)).toEqual(analytics.ANALYTICS_BACKENDS)
     expect(events[5].properties).not.toHaveProperty('backend')
     expect(events[6].properties).not.toHaveProperty('backend')
-    for (const event of events) expect(Object.keys(event.properties).every(key => ['token', 'time', 'platform', 'distinct_id', 'success', 'backend'].includes(key))).toBe(true)
+    for (const event of events) expect(Object.keys(event.properties).every(key => ['token', 'time', 'platform', 'distinct_id', '$insert_id', 'success', 'backend'].includes(key))).toBe(true)
     expect(JSON.stringify(events)).not.toMatch(/secret|private|endpoint/)
+  })
+
+  it('keeps one runtime identifier when storage writes fail, and clears it on opt-out', async () => {
+    const request = vi.fn(async () => new Response('1'))
+    vi.stubGlobal('fetch', request)
+    const write = vi.spyOn(window.localStorage, 'setItem').mockImplementation(() => { throw new Error('quota') })
+    const analytics = await loadAnalytics()
+    for (let i = 0; i < 3; i++) analytics.trackEvent('chat_opened')
+    const ids = request.mock.calls.map((call: unknown[]) => JSON.parse((call[1] as RequestInit).body as string)[0].properties.distinct_id)
+    expect(window.localStorage.getItem(ID_KEY)).toBeNull()
+    expect(write).toHaveBeenCalled()
+    expect(new Set(ids).size).toBe(1)
+    analytics.setAnalyticsConsent(false)
+    analytics.setAnalyticsConsent(true)
+    analytics.trackEvent('chat_opened')
+    expect(JSON.parse(String(vi.mocked(fetch).mock.calls.at(-1)?.[1]?.body))[0].properties.distinct_id).not.toBe(ids[0])
+    write.mockRestore()
+  })
+
+  it('allowlists failure, origin and submission enums only at their declared boundaries', async () => {
+    const request = vi.fn(async () => new Response('1'))
+    vi.stubGlobal('fetch', request)
+    const analytics = await loadAnalytics()
+    analytics.trackEvent('file_open_requested', { success: false, origin: 'linked_file', failure_category: 'not_found' })
+    analytics.trackEvent('connection_tested', { success: false, failure_category: 'authentication', origin: 'artifact' })
+    analytics.trackEvent('message_submission_settled', { backend: 'claude', outcome: 'unknown', failure_category: 'network' })
+    analytics.trackEvent('file_open_requested', { success: true, failure_category: 'not_found', origin: '/secret' } as never)
+    analytics.trackEvent('app_launched', { failure_category: 'secret', outcome: 'secret', origin: 'secret' } as never)
+    const values = vi.mocked(fetch).mock.calls.map(([, init]) => JSON.parse(String(init?.body))[0].properties)
+    expect(values[0]).toMatchObject({ failure_category: 'not_found', origin: 'linked_file' })
+    expect(values[1]).not.toHaveProperty('origin')
+    expect(values[2]).toMatchObject({ backend: 'claude', outcome: 'unknown' })
+    expect(values[2]).not.toHaveProperty('failure_category')
+    expect(values[3]).not.toHaveProperty('failure_category')
+    expect(values[3]).not.toHaveProperty('origin')
+    expect(JSON.stringify(values)).not.toContain('secret')
   })
 
   it('keeps the runtime event catalog in parity with the documented catalog', async () => {
@@ -69,7 +105,7 @@ describe('analytics privacy configuration', () => {
   })
 
   it('allows only coarse connection kinds on message_sent, never arbitrary API metadata', async () => {
-    const request = vi.fn().mockResolvedValue({ ok: true })
+    const request = vi.fn().mockResolvedValue({ ok: true, text: async () => '{"status":1}' })
     vi.stubGlobal('fetch', request)
     const analytics = await loadAnalytics()
     for (const connection_kind of ['default', 'custom_api', 'private-host', '', null]) {
@@ -82,7 +118,7 @@ describe('analytics privacy configuration', () => {
   })
 
   it('treats a CI smoke-test launch (analyticsDisabled) as opted out, without touching storage', async () => {
-    const request = vi.fn().mockResolvedValue({ ok: true })
+    const request = vi.fn().mockResolvedValue({ ok: true, text: async () => '{"status":1}' })
     vi.stubGlobal('fetch', request)
     Object.defineProperty(window, 'agentsDock', {
       configurable: true,
@@ -99,7 +135,7 @@ describe('analytics privacy configuration', () => {
   })
 
   it('preserves an explicit prior opt-out without sending an event', async () => {
-    const request = vi.fn().mockResolvedValue({ ok: true })
+    const request = vi.fn().mockResolvedValue({ ok: true, text: async () => '{"status":1}' })
     vi.stubGlobal('fetch', request)
     window.localStorage.setItem(PREFERENCE_KEY, 'denied')
     window.localStorage.setItem(ID_KEY, 'former-app-install-id')
@@ -113,7 +149,7 @@ describe('analytics privacy configuration', () => {
   })
 
   it('blocks desktop events when the shared bridge is installed after imports', async () => {
-    const request = vi.fn().mockResolvedValue({ ok: true })
+    const request = vi.fn().mockResolvedValue({ ok: true, text: async () => '{"status":1}' })
     vi.stubGlobal('fetch', request)
     const analytics = await loadAnalytics()
     expect(analytics.getAnalyticsConsentDecision()).toBe('granted')
@@ -127,7 +163,7 @@ describe('analytics privacy configuration', () => {
   })
 
   it('records one operation outcome without exposing its response or changing errors', async () => {
-    const request = vi.fn().mockResolvedValue({ ok: true })
+    const request = vi.fn().mockResolvedValue({ ok: true, text: async () => '{"status":1}' })
     vi.stubGlobal('fetch', request)
     const analytics = await loadAnalytics()
     const response = { ok: false, api_key: 'private-key', path: '/private/file', message: 'private reply' }
@@ -142,7 +178,7 @@ describe('analytics privacy configuration', () => {
       ['provider_connection_tested', false], ['workspace_file_saved', false], ['goal_saved', true]
     ])
     for (const item of payloads) {
-      expect(Object.keys(item.properties).sort()).toEqual(['distinct_id', 'platform', 'success', 'time', 'token'])
+      expect(Object.keys(item.properties).sort()).toEqual(['$insert_id', 'distinct_id', 'platform', 'success', 'time', 'token'])
       expect(JSON.stringify(item)).not.toContain('private')
     }
   })
@@ -157,7 +193,7 @@ describe('analytics privacy configuration', () => {
   })
 
   it('posts an app-owned allow-listed payload with the anonymous per-install id', async () => {
-    const request = vi.fn().mockResolvedValue({ ok: true })
+    const request = vi.fn().mockResolvedValue({ ok: true, text: async () => '{"status":1}' })
     vi.stubGlobal('fetch', request)
     const analytics = await loadAnalytics()
 
@@ -184,6 +220,7 @@ describe('analytics privacy configuration', () => {
     expect(payload[0].properties).toEqual({
       token: TOKEN,
       distinct_id: expect.any(String),
+      $insert_id: expect.any(String),
       time: expect.any(Number),
       platform: 'desktop',
       success: false
@@ -193,7 +230,7 @@ describe('analytics privacy configuration', () => {
     expect(distinctId.length).toBeGreaterThan(0)
     expect(window.localStorage.getItem(ID_KEY)).toBe(distinctId)
     // No content/PII leaked in beyond the allow-listed keys.
-    expect(Object.keys(payload[0].properties).sort()).toEqual(['distinct_id', 'platform', 'success', 'time', 'token'])
+    expect(Object.keys(payload[0].properties).sort()).toEqual(['$insert_id', 'distinct_id', 'platform', 'success', 'time', 'token'])
   })
 
   it('aborts a hung request on opt-out, clears the id, and mints a fresh one on re-consent', async () => {
@@ -209,15 +246,17 @@ describe('analytics privacy configuration', () => {
     analytics.trackEvent('chat_opened')
     expect(request).toHaveBeenCalledOnce()
 
+    window.localStorage.setItem(analytics.ANALYTICS_RECOVERY_MARKERS_KEY, '["local-dedup-marker"]')
     analytics.setAnalyticsConsent(false)
     expect(aborts).toBe(1)
     expect(window.localStorage.getItem(PREFERENCE_KEY)).toBe('denied')
     // Opt-out removes the per-install identifier from disk.
     expect(window.localStorage.getItem(ID_KEY)).toBeNull()
+    expect(window.localStorage.getItem(analytics.ANALYTICS_RECOVERY_MARKERS_KEY)).toBeNull()
     analytics.trackEvent('message_sent')
     expect(request).toHaveBeenCalledOnce()
 
-    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true }))
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, text: async () => '{"status":1}' }))
     analytics.setAnalyticsConsent(true)
     analytics.trackEvent('message_sent')
     expect(fetch).toHaveBeenCalledOnce()
@@ -272,7 +311,7 @@ describe('analytics privacy configuration', () => {
       expect(request).toHaveBeenCalledOnce()
       expect(Reflect.deleteProperty(globalThis, 'window')).toBe(true)
 
-      settleRequest({ ok: true } as Response)
+      settleRequest({ ok: true, text: async () => '{"status":1}' } as Response)
       await Promise.resolve()
       await Promise.resolve()
 

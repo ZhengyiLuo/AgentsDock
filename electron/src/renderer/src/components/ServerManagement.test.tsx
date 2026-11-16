@@ -8,7 +8,13 @@ import { trackEvent } from '../lib/analytics'
 import { ServerManagement } from './ServerManagement'
 import { ServerConnectionQr } from './ServerConnectionQr'
 
-vi.mock('../lib/analytics', () => ({ trackEvent: vi.fn() }))
+vi.mock('../lib/analytics', () => {
+  const trackEvent = vi.fn()
+  return { trackEvent, trackOperation: async (name: string, action: () => Promise<unknown>, succeeded: (value: unknown) => boolean = () => true) => {
+    try { const value = await action(); trackEvent(name, { success: succeeded(value) }); return value }
+    catch (error) { trackEvent(name, { success: false }); throw error }
+  } }
+})
 
 const alpha: PublicServerProfile = {
   id: 'alpha',
