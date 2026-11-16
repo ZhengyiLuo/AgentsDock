@@ -7,13 +7,16 @@ import { describeJobSchedule, effectiveScheduleKind } from '../lib/job-schedule'
 import { dismissAppKeyboard } from '../lib/app-keyboard'
 import { filesNewestFirst } from '../lib/format'
 import { mobileFileViewerKind } from '../lib/file-viewer'
-import { runtimeCatalogOptions, runtimeEffortAfterModelChange, runtimeEffortOptions } from '../lib/runtime-catalog'
+import { runtimeCatalogOptions, runtimeEffortAfterModelChange, runtimeEffortOptions, runtimeInventoryNotice, runtimeOptionLabel } from '../lib/runtime-catalog'
 import { chatBackendChoice, chatBackendLabel, isCustomProvider, providerRuntimeCatalog, providerSelectionError } from '../lib/provider-selection'
 import { PROVIDER_JOBS_ACCESS_MODES, providerJobsAccessDescription, providerJobsAccessLabel, providerJobsAccessState } from '../lib/provider-jobs-access'
 import { useAppStore } from '../store/useAppStore'
 import { radius, typography, usePalette } from '../theme'
 import type { ProviderJobsAccess, RuntimeOption } from '../types'
 import { Text, TextInput } from './AppText'
+import { ModelDropdown } from './ModelDropdown'
+import { t } from '../i18n'
+import { useLanguageStore } from '../store/useLanguageStore'
 import { MediaGrid } from './MediaGrid'
 import { IconButton, SectionHeader } from './ui'
 import { useFileViewer } from './file-viewer/FileViewerContext'
@@ -195,7 +198,8 @@ export function Inspector({ sessionId, onDigest, onJob, onTerminal, onProcesses,
   useEffect(() => { void refreshJobs(profileGeneration) }, [profileGeneration, refreshJobs, sessionId])
   if (!session) return null
   const catalog = providerRuntimeCatalog(runtime, session)
-  const modelOptions = runtimeCatalogOptions(catalog, session.backend, 'models', session.model)
+  const modelOptions = runtimeCatalogOptions(catalog, session.backend, 'models', session.model, isCustomProvider(session))
+  const inventoryNotice = runtimeInventoryNotice(catalog, session.backend)
   const effortOptions = runtimeEffortOptions(catalog, session.backend, session.model, session.effort)
   const selectionError = providerSelectionError(health, runtime, session)
   const jobsAccess = providerJobsAccessState(session, health)
@@ -205,7 +209,8 @@ export function Inspector({ sessionId, onDigest, onJob, onTerminal, onProcesses,
       <SectionHeader title="Session" />
       <Text style={[typography.label, { color: colors.muted }]}>{chatBackendLabel(chatBackendChoice(session))}</Text>
       <Field label="Name"><TextInput value={title} onChangeText={setTitle} onBlur={() => { const clean = title.trim(); if (scopeIsCurrent() && clean && clean !== session.title) void update(sessionId, { title: clean }, profileGeneration) }} style={[styles.input, { color: colors.text, borderColor: colors.border, backgroundColor: colors.surface }]} /></Field>
-      <Field label="Model"><ChoiceField title="Model" value={session.model ?? ''} options={modelOptions} onChange={model => { if (scopeIsCurrent()) void update(sessionId, { model, effort: runtimeEffortAfterModelChange(catalog, session.backend, model, session.effort) }, profileGeneration) }} /></Field>
+      <Field label="Model" alignTop><ModelDropdown key={`${profileGeneration}:${sessionId}:${chatBackendChoice(session)}`} testID="chat-model-picker" value={session.model ?? ''} options={modelOptions} onChange={model => { if (scopeIsCurrent()) void update(sessionId, { model, effort: runtimeEffortAfterModelChange(catalog, session.backend, model, session.effort) }, profileGeneration) }} /></Field>
+      {inventoryNotice ? <Text testID="model-inventory-notice" style={[typography.caption, { color: colors.muted }]} localize>{inventoryNotice}</Text> : null}
       {isCustomProvider(session) ? <Field label="Model ID"><TextInput key={`${session.id}:${session.model}`} testID="chat-api-model-id" defaultValue={session.model ?? ''} autoCapitalize="none" autoCorrect={false} placeholder="default" placeholderTextColor={colors.muted} onEndEditing={event => { const model = event.nativeEvent.text.trim(); if (scopeIsCurrent() && model !== (session.model ?? '')) void update(sessionId, { model: model || null, effort: null }, profileGeneration) }} style={[styles.input, { color: colors.text, borderColor: colors.border, backgroundColor: colors.surface }]} /></Field> : null}
       {session.backend !== 'cursor' && (session.backend !== 'gemini' && session.backend !== 'opencode' || effortOptions.some(option => option.value)) ? <Field label="Effort"><ChoiceField title="Effort" value={session.effort ?? ''} options={effortOptions} onChange={effort => { if (scopeIsCurrent()) void update(sessionId, { effort }, profileGeneration) }} /></Field> : null}
       {selectionError ? <Text accessibilityRole="alert" style={[styles.hint, { color: colors.orange }]}>{selectionError}</Text> : null}
@@ -273,14 +278,15 @@ export function Inspector({ sessionId, onDigest, onJob, onTerminal, onProcesses,
   </ScrollView>
 }
 
-function Field({ label, children }: { label: string; children: React.ReactNode }) { const colors = usePalette(); return <View style={styles.field}><Text style={[styles.label, { color: colors.muted }]}>{label}</Text><View style={{ flex: 1 }}>{children}</View></View> }
+function Field({ label, children, alignTop = false }: { label: string; children: React.ReactNode; alignTop?: boolean }) { const colors = usePalette(); return <View style={[styles.field, alignTop && { alignItems: 'flex-start' }]}><Text style={[styles.label, { color: colors.muted }, alignTop && { paddingTop: 14 }]}>{label}</Text><View style={{ flex: 1 }}>{children}</View></View> }
 function Command({ icon: Icon, label, onPress, destructive, disabled = false, hint, testID }: { icon: typeof Pin; label: string; onPress: () => void; destructive?: boolean; disabled?: boolean; hint?: string; testID?: string }) { const colors = usePalette(); return <Pressable testID={testID} accessibilityRole="button" accessibilityLabel={label} accessibilityHint={hint} accessibilityState={{ disabled }} disabled={disabled} onPress={onPress} style={({ pressed }) => [styles.command, { backgroundColor: colors.raised, opacity: disabled ? 0.4 : pressed ? 0.65 : 1 }]}><Icon size={15} color={destructive ? colors.red : colors.muted} /><Text style={{ color: destructive ? colors.red : colors.text, fontSize: 11, fontWeight: '700' }}>{label}</Text></Pressable> }
 
 function ChoiceField({ title = 'Choose option', value, options, onChange, disabled = false }: { title?: string; value: string; options: RuntimeOption[]; onChange: (value: string) => void; disabled?: boolean }) {
   const colors = usePalette()
   const [open, setOpen] = useState(false)
   const iosChoicesPresented = useRef(false)
-  const choices = options.filter((option, index) => options.findIndex(candidate => candidate.value === option.value) === index)
+  useLanguageStore(state => state.locale)
+  const choices = options.map(option => ({ ...option, label: runtimeOptionLabel(option, t) })).filter((option, index) => options.findIndex(candidate => candidate.value === option.value) === index)
   const selected = choices.find(option => option.value === value) ?? choices[0]
   const close = () => setOpen(false)
   const choose = (option: RuntimeOption) => {
@@ -294,14 +300,14 @@ function ChoiceField({ title = 'Choose option', value, options, onChange, disabl
     if (Platform.OS === 'ios') {
       if (iosChoicesPresented.current) return
       iosChoicesPresented.current = true
-      const labels = choices.map(option => option.locked ? `${option.label} (upgrade required)` : option.label)
+      const labels = choices.map(option => option.label)
       const cancelButtonIndex = labels.length
       const disabledButtonIndices = choices.flatMap((option, index) => option.locked ? [index] : [])
       try {
         ActionSheetIOS.showActionSheetWithOptions({
-          title,
-          message: selected?.label ? `Current: ${selected.label}` : undefined,
-          options: [...labels, 'Cancel'],
+          title: t(title),
+          message: selected?.label ? `${t('Current')}: ${selected.label}` : undefined,
+          options: [...labels, t('Cancel')],
           cancelButtonIndex,
           disabledButtonIndices,
         }, buttonIndex => {
@@ -319,7 +325,7 @@ function ChoiceField({ title = 'Choose option', value, options, onChange, disabl
   }
   return <>
     <Pressable accessibilityRole="button" accessibilityLabel={selected?.label ?? (value || 'Default')} accessibilityState={{ expanded: Platform.OS === 'ios' ? false : open, disabled }} disabled={disabled} onPress={openChoices} style={[styles.choice, { borderColor: colors.border, backgroundColor: colors.surface, opacity: disabled ? 0.45 : 1 }]}><Text style={{ flex: 1, color: colors.text, fontSize: 12 }} numberOfLines={1}>{selected?.label ?? (value || 'Default')}</Text><ChevronDown size={14} color={colors.muted} /></Pressable>
-    {Platform.OS !== 'ios' ? <Modal visible={open && !disabled} transparent animationType="fade" onRequestClose={close}><View style={styles.modalBackdrop}><Pressable accessibilityRole="button" accessibilityLabel="Dismiss choices" style={StyleSheet.absoluteFill} onPress={close} /><View style={[styles.choiceMenu, { backgroundColor: colors.surface, borderColor: colors.border }]}><ScrollView keyboardShouldPersistTaps="always">{choices.map(option => <Pressable key={option.value || '__default'} accessibilityRole="button" accessibilityLabel={option.locked ? `${option.label}, upgrade required` : option.label} accessibilityHint={option.locked ? option.locked_reason ?? undefined : undefined} accessibilityState={{ disabled: option.locked, selected: option.value === value }} disabled={option.locked} onPress={() => choose(option)} style={[styles.choiceOption, { backgroundColor: option.value === value ? colors.raised : 'transparent', opacity: option.locked ? 0.45 : 1 }]}><Text style={{ color: colors.text }} localize>{option.label}{option.locked ? ' (upgrade required)' : ''}</Text></Pressable>)}</ScrollView></View></View></Modal> : null}
+    {Platform.OS !== 'ios' ? <Modal visible={open && !disabled} transparent animationType="fade" onRequestClose={close}><View style={styles.modalBackdrop}><Pressable accessibilityRole="button" accessibilityLabel="Dismiss choices" style={StyleSheet.absoluteFill} onPress={close} /><View style={[styles.choiceMenu, { backgroundColor: colors.surface, borderColor: colors.border }]}><ScrollView keyboardShouldPersistTaps="always">{choices.map(option => <Pressable key={option.value || '__default'} accessibilityRole="button" accessibilityLabel={option.label} accessibilityHint={option.locked ? option.locked_reason ? t(option.locked_reason) : undefined : undefined} accessibilityState={{ disabled: option.locked, selected: option.value === value }} disabled={option.locked} onPress={() => choose(option)} style={[styles.choiceOption, { backgroundColor: option.value === value ? colors.raised : 'transparent', opacity: option.locked ? 0.45 : 1 }]}><Text style={{ color: colors.text }} localize>{option.label}</Text></Pressable>)}</ScrollView></View></View></Modal> : null}
   </>
 }
 function nextRunLabel(value?: string | null): string { if (!value) return ''; const date = new Date(value); return Number.isNaN(date.getTime()) ? '' : ` · next ${date.toLocaleString([], { dateStyle: 'short', timeStyle: 'short' })}` }

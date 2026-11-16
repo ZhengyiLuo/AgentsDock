@@ -72,11 +72,14 @@ export function providerRuntimeCatalog(catalog: RuntimeCatalog | null, selection
   const bound = selection.backend === 'codex' ? selection.codex_provider_catalog : selection.provider_connection_catalog
   const custom = bound ?? (!isBackendLocked(selection) ? catalog?.backends[selection.backend]?.custom_provider : undefined)
   return { backends: { [selection.backend]: {
-    models: custom?.models ?? (custom?.model ? [{ value: custom.model, label: custom.model }] : []),
+    models: (custom?.models ?? []).map(option => custom?.model_capabilities?.[option.value]?.compatibility === 'unsupported'
+      ? { ...option, locked: true, locked_reason: 'This model is not compatible with this Custom API connection.' }
+      : option),
     efforts: custom?.efforts ?? [],
     model_efforts: custom?.model_efforts,
     default_model: custom?.default_model ?? custom?.model,
     default_effort: custom?.default_effort,
+    discovery_status: custom?.discovery_status,
   } } }
 }
 

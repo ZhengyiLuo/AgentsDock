@@ -1,5 +1,37 @@
 # Public development log
 
+## Unreleased — Mobile model inventory parity
+
+- Use the connected account or saved API binding's model inventory in chat
+  details and new-chat defaults. Do not fabricate API models from saved IDs;
+  preserve missing selections in the current-value label without modifying chats.
+- Expand model choices directly below the field on both platforms instead of
+  presenting a modal. Hide locked/missing models from the options; bound long
+  inventories to a scrollable list and collapse after selection or another tap.
+- Honor server-declared replacements, locked defaults and unsupported API
+  models. Distinguish unavailable inventories from confirmed empty lists, and
+  replace misleading upgrade labels with English/Chinese availability labels.
+- Verification: 25 catalog/provider tests, 49 focused UI-contract and preference
+  tests, 40 settings/provider/inspector/sidebar integration tests, a rendered
+  dropdown interaction test, TypeScript and iOS/Android
+  production JavaScript exports passed. The earlier broader mobile suite passed
+  432 tests with one skip; one camera-permission
+  introspection failure was traced to an ignored generated Android manifest.
+  The same three media-permission tests passed with clean generated config.
+- Local iOS simulator interaction exercised light/English and dark/Chinese
+  model pickers, disabled saved IDs, model selection through the real server,
+  persisted selection after reopening, a successful provider response, and
+  switching among all five providers in new-chat defaults without leaking choices.
+- Eight real-provider request combinations across all five providers returned
+  seven expected replies and one unavailable-model error. An explicit server
+  check confirmed that rejection; both bound-chat and default-model dropdowns
+  hid the server-locked option. A separate simulator-selected model also replied.
+  Inventory discovery is not inference verification: upstreams can still list
+  rejected models, and server check evidence expires. This does not guarantee
+  every listed model's future availability or change the server's evidence policy.
+  Android device interaction and optional API inference-check UI are not part
+  of this change. No server deployment or release was performed.
+
 ## Unreleased — Prompt pane creation and recoverable Claude status reads
 
 - Open a newly created chat in the visible pane even when a saved workspace is
