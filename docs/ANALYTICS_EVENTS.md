@@ -19,6 +19,13 @@ Some operations include an event-specific `success` boolean and selected events 
 
 Never add message or prompt text, chat/job/agent/folder names, skill or command names, file names or contents, paths or working directories, URLs or access tokens, session/chat/job/route IDs, schedule expressions, exact run times, or destination metadata. The client posts directly with IP collection disabled, omits credentials and referrer data, and does not use SDK autocapture or session replay.
 
+This allowlist describes the app-owned JSON payload, not all HTTP metadata. The
+collector may retain the ordinary request User-Agent and attach receipt or
+processing metadata. Version cohorts parsed from an `AgentsDock/version`
+User-Agent are not an explicit app-version field, proof of a source commit or
+proof that QA traffic is excluded. Missing and development-version markers must
+remain separate from identifiable public-version cohorts.
+
 ## Active event catalog
 
 ### App, chats, and messages
