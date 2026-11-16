@@ -12,7 +12,8 @@
   models. Distinguish unavailable inventories from confirmed empty lists, and
   replace misleading upgrade labels with English/Chinese availability labels.
 - Verification: 25 catalog/provider tests, 49 focused UI-contract and preference
-  tests, a rendered dropdown interaction test, TypeScript and iOS/Android
+  tests, 40 settings/provider/inspector/sidebar integration tests, a rendered
+  dropdown interaction test, TypeScript and iOS/Android
   production JavaScript exports passed. The earlier broader mobile suite passed
   432 tests with one skip; one camera-permission
   introspection failure was traced to an ignored generated Android manifest.

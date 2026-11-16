@@ -20,7 +20,7 @@ fixture.app = create(set => ({
 }))
 fixture.appearance = create(set => ({ preference: 'system', error: null, setPreference: preference => set({ preference }) }))
 fixture.language = create(set => ({ preference: 'system', locale: 'en', error: null, setPreference: preference => set({ preference, locale: preference === 'zh-CN' ? 'zh-CN' : 'en' }) }))
-const icons = ['ArrowLeft', 'Calendar', 'Check', 'ChevronDown', 'ChevronRight', 'Clock', 'Copy', 'Download', 'ExternalLink', 'KeyRound', 'Languages', 'MessageSquare', 'Minus', 'Monitor', 'Moon', 'Network', 'Plus', 'RefreshCw', 'Search', 'Server', 'ShieldCheck', 'SquareTerminal', 'Sun', 'SunMoon']
+const icons = ['ArrowLeft', 'Calendar', 'Check', 'ChevronDown', 'ChevronRight', 'ChevronUp', 'Clock', 'Copy', 'Download', 'ExternalLink', 'KeyRound', 'Languages', 'MessageSquare', 'Minus', 'Monitor', 'Moon', 'Network', 'Plus', 'RefreshCw', 'Search', 'Server', 'ShieldCheck', 'SquareTerminal', 'Sun', 'SunMoon']
 const mocks = {
   'react-native': `export const ActivityIndicator='Spinner',Modal='Modal',Pressable='Button',ScrollView='Scroll',Switch='Switch',View='View'; export const Linking={openURL:async url=>{const f=globalThis.__settingsFixture;f.links.push(url);if(f.rejectedLinks.has(url))throw new Error('Unavailable')}}; export const Platform={get OS(){return globalThis.__settingsFixture.platform}}; export const StyleSheet={create:x=>x,hairlineWidth:1}; export const useWindowDimensions=()=>({width:402,height:874}); export const useColorScheme=()=> 'light';`,
   'react-native-safe-area-context': `export const SafeAreaView='SafeArea';`,
