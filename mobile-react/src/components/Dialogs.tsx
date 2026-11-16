@@ -14,7 +14,7 @@ import { serverSearchQuery } from '../lib/server-search'
 import { APP_FONT_SCALE_MAX, APP_FONT_SCALE_MIN, APP_FONT_SCALE_STEP } from '../lib/typography'
 import { tailscaleServerHost } from '../lib/settings-agents'
 import { orderedSessionSections } from '../lib/session-order'
-import { runtimeCatalogOptions, runtimeEffortAfterModelChange, runtimeSelectionError, selectableChatBackends } from '../lib/runtime-catalog'
+import { runtimeCatalogOptions, runtimeEffortAfterModelChange, runtimeSelectionError, selectableChatBackends, runtimeInventoryNotice, runtimeOptionLabel } from '../lib/runtime-catalog'
 import { chatBackendChoice, chatBackendLabel, chatBackendSelection, isCustomProvider, providerRuntimeCatalog, selectableChatBackendChoices } from '../lib/provider-selection'
 import { chatMentionTrigger, insertChatReference, parseStoredChatReferences, reconcileChatReferences, supportedCrossChatTargetBackends, type ChatMentionTrigger } from '../lib/chat-references'
 import { MAX_SCHEDULED_CHAT_REFERENCES, normalizeScheduledJobChatReferences, scheduledJobChatReferencesForWrite, scheduledJobRouteHintsAvailable } from '../lib/scheduled-job-chat-references'
@@ -28,6 +28,7 @@ import type { Backend, ChatReference, CreateJobInput, JobContextMode, JobSchedul
 import { Text, TextInput } from './AppText'
 import { BackendMark } from './BackendMark'
 import { AgentPicker } from './AgentPicker'
+import { ModelDropdown } from './ModelDropdown'
 import { IconButton, SheetCloseButton } from './ui'
 import { MyAgentsSettings } from './MyAgentsSettings'
 import appConfig from '../../app.json'
@@ -95,6 +96,7 @@ export function SettingsDialog({ visible, onClose, onOpenServers, onDidDismiss }
   const serverURL = useAppStore(state => state.serverURL)
   const connected = useAppStore(state => state.connected && !state.connecting && !state.switchingProfileId && !state.workspaceAdopting)
   const chatDefaults = useAppStore(state => state.chatDefaults)
+  const profileGeneration = useAppStore(state => state.profileGeneration)
   const setChatDefaults = useAppStore(state => state.setChatDefaults)
   const themePreference = useAppearanceStore(state => state.preference)
   const setThemePreference = useAppearanceStore(state => state.setPreference)
@@ -121,7 +123,8 @@ export function SettingsDialog({ visible, onClose, onOpenServers, onDidDismiss }
   const chatDefaultBackendOptions = selectableChatBackendChoices(health, runtime)
   const defaultChoice = chatBackendChoice(chatDefaults)
   const defaultCatalog = providerRuntimeCatalog(runtime, chatDefaults)
-  const chatDefaultModelOptions = runtimeCatalogOptions(defaultCatalog, chatDefaults.backend, 'models', chatDefaults.model)
+  const chatDefaultModelOptions = runtimeCatalogOptions(defaultCatalog, chatDefaults.backend, 'models', chatDefaults.model, isCustomProvider(chatDefaults))
+  const inventoryNotice = runtimeInventoryNotice(defaultCatalog, chatDefaults.backend)
   const tailscaleHost = connected ? tailscaleServerHost(serverURL) : null
   return <Sheet visible={visible} title={settingsTitles[page]} onClose={close} onDidDismiss={onDidDismiss} onBack={page === 'home' ? undefined : back}>
     {page === 'home' ? <View testID="settings-categories" style={styles.settingsCategories}>
@@ -186,7 +189,8 @@ export function SettingsDialog({ visible, onClose, onOpenServers, onDidDismiss }
       <ChevronDown size={15} color={colors.muted} />
     </AgentPicker>
     {!chatDefaultBackendOptions.includes(defaultChoice) ? <Text style={[styles.help, { color: colors.muted }]} localize>This agent is unavailable. Check My agents.</Text> : null}
-    <Label text="Model" /><Select testID="settings-default-model" title="Choose model" value={chatDefaults.model} options={chatDefaultModelOptions} onChange={next => setChatDefaults({ model: next, effort: runtimeEffortAfterModelChange(defaultCatalog, chatDefaults.backend, next, chatDefaults.effort) ?? '' })} />
+    {inventoryNotice ? <Text style={[typography.caption, { color: colors.muted }]} localize>{inventoryNotice}</Text> : null}
+    <Label text="Model" /><ModelDropdown key={`${profileGeneration}:${defaultChoice}`} testID="settings-default-model" value={chatDefaults.model} options={chatDefaultModelOptions} onChange={next => setChatDefaults({ model: next, effort: runtimeEffortAfterModelChange(defaultCatalog, chatDefaults.backend, next, chatDefaults.effort) ?? '' })} />
     {isCustomProvider(chatDefaults) ? <><Label text="Model ID (optional)" /><TextInput testID="settings-default-api-model" value={chatDefaults.model} onChangeText={model => setChatDefaults({ model, effort: '' })} autoCapitalize="none" autoCorrect={false} placeholder="default" placeholderTextColor={colors.muted} style={[styles.input, { color: colors.text, borderColor: colors.border, backgroundColor: colors.raised }]} /></> : null}
     <Label text="Folder" /><TextInput testID="settings-default-folder" accessibilityLabel="Default folder" value={defaultFolder} onChangeText={setDefaultFolder} onBlur={() => setChatDefaults({ folder: defaultFolder.trim() || 'General' })} style={[styles.input, { color: colors.text, borderColor: colors.border, backgroundColor: colors.raised }]} />
     <Label text="Working directory" /><TextInput
@@ -980,7 +984,8 @@ function Select({ title = 'Choose option', value, valueLabel, options, onChange,
   const colors = usePalette()
   const { width, height } = useWindowDimensions()
   const [open, setOpen] = useState(false)
-  const deduped = options.filter((option, index) => options.findIndex(value => value.value === option.value) === index)
+  useLanguageStore(state => state.locale)
+  const deduped = options.map(option => ({ ...option, label: runtimeOptionLabel(option, t) })).filter((option, index) => options.findIndex(value => value.value === option.value) === index)
   const selected = deduped.find(option => option.value === value) ?? (valueLabel ? { label: valueLabel } : deduped[0])
   const compact = width < 600
   const close = () => setOpen(false)
@@ -992,7 +997,7 @@ function Select({ title = 'Choose option', value, valueLabel, options, onChange,
           <Pressable accessibilityRole="button" accessibilityLabel="Dismiss choices" style={StyleSheet.absoluteFill} onPress={close} />
           <View accessibilityViewIsModal style={[styles.menu, compact && styles.menuCompact, { maxHeight: Math.min(440, height * 0.62), backgroundColor: colors.surface, borderColor: colors.border }]}>
             <View style={[styles.menuHeader, { borderColor: colors.border }]}><Text style={[styles.menuTitle, { color: colors.text }]}>{title}</Text><SheetCloseButton onPress={close} label={`Close ${title.toLocaleLowerCase()}`} /></View>
-            <ScrollView keyboardShouldPersistTaps="always" contentContainerStyle={styles.menuOptions}>{deduped.map(option => <Pressable key={option.value || '__default'} accessibilityRole="button" accessibilityLabel={option.locked ? `${option.label}, upgrade required` : option.label} accessibilityHint={option.locked ? option.locked_reason ?? undefined : undefined} accessibilityState={{ disabled: option.locked, selected: value === option.value }} disabled={option.locked} onPress={() => { onChange(option.value); close() }} style={[styles.option, { backgroundColor: value === option.value ? colors.raised : 'transparent', opacity: option.locked ? 0.45 : 1 }]}>{value === option.value ? <Check size={15} color={colors.blue} /> : <View style={{ width: 15 }} />}<Text style={{ color: colors.text, flex: 1 }} localize>{option.label}{option.locked ? ' (upgrade required)' : ''}</Text></Pressable>)}</ScrollView>
+            <ScrollView keyboardShouldPersistTaps="always" contentContainerStyle={styles.menuOptions}>{deduped.map(option => <Pressable key={option.value || '__default'} accessibilityRole="button" accessibilityLabel={option.label} accessibilityHint={option.locked ? option.locked_reason ? t(option.locked_reason) : undefined : undefined} accessibilityState={{ disabled: option.locked, selected: value === option.value }} disabled={option.locked} onPress={() => { onChange(option.value); close() }} style={[styles.option, { backgroundColor: value === option.value ? colors.raised : 'transparent', opacity: option.locked ? 0.45 : 1 }]}>{value === option.value ? <Check size={15} color={colors.blue} /> : <View style={{ width: 15 }} />}<Text style={{ color: colors.text, flex: 1 }} localize>{option.label}</Text></Pressable>)}</ScrollView>
           </View>
         </View>
       </SafeAreaView>

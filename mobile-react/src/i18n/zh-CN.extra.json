@@ -1,4 +1,12 @@
 {
+  "No selectable models.": "暂无可选模型。",
+  "Default": "默认",
+  "This model is not compatible with this Custom API connection.": "此模型与当前自定义 API 连接不兼容。",
+  "Not in current list": "不在当前列表中",
+  "Unavailable": "不可用",
+  "Current": "当前",
+  "No models listed for this connection.": "此连接暂无模型列表。",
+  "Choose a model from the current connection's list.": "请从当前连接的列表中选择模型。",
   "System": "跟随系统",
   "English": "English",
   "简体中文": "简体中文",

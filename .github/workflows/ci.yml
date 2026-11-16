@@ -221,6 +221,8 @@ jobs:
           node scripts/run-history-tests.mjs src/store/useAppStore.session-creation.test.ts --native-mocks
           node scripts/run-history-tests.mjs src/lib/new-chat-recovery.test.ts --native-mocks
           node scripts/run-history-tests.mjs src/lib/provider-selection.test.ts --native-mocks
+          node scripts/run-history-tests.mjs src/lib/runtime-catalog.test.ts --native-mocks
+          node scripts/run-component-tests.mjs tests/model-dropdown.test.tsx
           node scripts/run-history-tests.mjs src/lib/optional-agent-permissions.test.ts --native-mocks
           node scripts/run-history-tests.mjs src/api/AgentServerClient.test.ts --native-mocks
           node scripts/run-history-tests.mjs src/lib/android-update.test.ts --native-mocks

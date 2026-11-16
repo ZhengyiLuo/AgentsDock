@@ -5,6 +5,9 @@ import {
   cursorBackendSupported,
   isBackendLocked,
   runtimeCatalogOptions,
+  runtimeCatalogHasSelectableModels,
+  runtimeInventoryNotice,
+  runtimeOptionLabel,
   runtimeEffortAfterModelChange,
   runtimeEffortOptions,
   runtimeSelectionError,
@@ -55,11 +58,80 @@ test('runtime choices preserve an advertised default without duplicate sentinels
   ])
 })
 
-test('a saved custom value stays visible while the catalog reloads', () => {
-  assert.deepEqual(runtimeCatalogOptions(null, 'codex', 'models', 'custom-model'), [
-    { value: '', label: 'Loading model choices…' },
-    { value: 'custom-model', label: 'custom-model' },
-  ])
+test('a saved custom value stays visible but unconfirmed while the catalog reloads', () => {
+  const options = runtimeCatalogOptions(null, 'codex', 'models', 'custom-model')
+  assert.equal(options[0].label, 'Loading model choices…')
+  assert.equal(options[1].value, 'custom-model')
+  assert.equal(options[1].locked, true)
+  assert.equal(runtimeOptionLabel(options[1]), 'custom-model · Not in current list')
+})
+
+test('all providers retain server choices and disable, rather than resurrect, missing saved models', () => {
+  for (const backend of ['codex', 'claude', 'cursor', 'opencode', 'gemini']) {
+    const entry = { ...catalog.backends.codex, models: [
+      { value: 'native-alias', label: 'Native alias' },
+      { value: 'older-but-listed', label: 'An older account model' },
+    ] }
+    const input = { backends: { [backend]: entry } }
+    const before = JSON.stringify(input)
+    const options = runtimeCatalogOptions(input, backend, 'models', 'retired-id')
+    assert.deepEqual(options.filter(o => o.value && !o.locked).map(o => o.value), ['native-alias', 'older-but-listed'])
+    assert.equal(options.at(-1)?.not_listed, true)
+    assert.equal(options.at(-1)?.locked, true)
+    assert.equal(JSON.stringify(input), before)
+  }
+})
+
+test('an authoritative empty inventory is valid and disables unavailable API defaults', () => {
+  assert.equal(runtimeCatalogHasSelectableModels({ backends: {
+    claude: { models: [], efforts: [] }, codex: { models: [], efforts: [] },
+  } }), true)
+  for (const discovery_status of ['ready', 'empty'] as const) {
+    const input: RuntimeCatalog = { backends: { gemini: { models: [], efforts: [], default_model: 'old', discovery_status } } }
+    const options = runtimeCatalogOptions(input, 'gemini', 'models', 'old', true)
+    assert.ok(options.every(o => o.locked))
+    assert.equal(options[1].not_listed, true)
+  }
+  assert.equal(runtimeCatalogOptions(null, 'gemini', 'models', '', true)[0].locked, true)
+})
+
+test('server-declared replacements are never selectable, without guessing by model age', () => {
+  const input: RuntimeCatalog = { backends: { codex: { models: [
+    { value: 'old', label: 'Old' }, { value: 'new', label: 'New' }, { value: 'older', label: 'Older but supported' },
+  ], efforts: [], model_replacements: { old: 'new' } } } }
+  const options = runtimeCatalogOptions(input, 'codex', 'models', 'old')
+  assert.deepEqual(options.filter(o => o.value && !o.locked).map(o => o.value), ['new', 'older'])
+  assert.equal(options.find(o => o.value === 'old')?.not_listed, true)
+})
+
+test('listed locked defaults cannot be selected indirectly and old servers retain default compatibility', () => {
+  const input: RuntimeCatalog = { backends: { codex: { ...catalog.backends.codex,
+    models: [{ value: 'gpt-5.6-sol', label: 'Sol', locked: true, locked_reason: 'Account restriction' }],
+  } } }
+  assert.equal(runtimeCatalogOptions(input, 'codex', 'models')[0].locked_reason, 'Account restriction')
+  const legacy: RuntimeCatalog = { backends: { claude: { models: [], efforts: [], default_model: 'alias' } } }
+  assert.equal(runtimeCatalogOptions(legacy, 'claude', 'models', '', true)[0].locked, undefined)
+  assert.equal(runtimeCatalogOptions(legacy, 'claude', 'efforts', 'old-effort')[1].locked, undefined)
+})
+
+test('native defaults cannot bypass authoritative empty or replaced model inventories', () => {
+  for (const backend of ['codex', 'claude', 'cursor', 'gemini', 'opencode']) {
+    const input: RuntimeCatalog = { backends: { [backend]: { models: [], efforts: [], discovery_status: 'empty' } } }
+    assert.equal(runtimeCatalogOptions(input, backend, 'models')[0].locked, true)
+    input.backends[backend] = { models: [{ value: 'current', label: 'Current' }], efforts: [],
+      default_model: 'retired', discovery_status: 'ready', model_replacements: { retired: 'current' } }
+    assert.equal(runtimeCatalogOptions(input, backend, 'models')[0].locked, true)
+    assert.equal(runtimeCatalogOptions(input, backend, 'models')[1].locked, undefined)
+  }
+})
+
+test('unconfirmed inventories are explicit and labels do not imply a subscription upgrade', () => {
+  for (const discovery_status of ['unavailable', 'partial', 'authentication_failed'] as const) {
+    assert.match(runtimeInventoryNotice({ backends: { claude: { ...catalog.backends.codex, discovery_status } } }, 'claude')!, /unconfirmed/)
+  }
+  assert.equal(runtimeInventoryNotice(catalog, 'codex'), null)
+  assert.equal(runtimeOptionLabel({ value: 'x', label: 'X', locked: true }), 'X (Unavailable)')
+  assert.equal(runtimeOptionLabel({ value: 'x', label: 'X', locked: true, not_listed: true }, s => s === 'Not in current list' ? '不在当前列表中' : s), 'X · 不在当前列表中')
 })
 
 test('locked options pass through generically for any backend', () => {

@@ -470,6 +470,7 @@ export interface RuntimeOption {
   label: string
   locked?: boolean
   locked_reason?: string | null
+  not_listed?: boolean
   efforts?: RuntimeOption[] | null
 }
 export type RuntimeDiagnosticStatus = 'unknown' | 'ready' | 'missing' | 'unauthenticated' | 'error'
@@ -494,10 +495,14 @@ export interface CustomProviderCatalog {
   models?: RuntimeOption[]
   efforts?: RuntimeOption[]
   model_efforts?: Record<string, RuntimeOption[]>
+  model_capabilities?: Record<string, { compatibility?: 'verified' | 'unverified' | 'unsupported' }>
   default_model?: string | null
   default_effort?: string | null
+  discovery_status?: ModelDiscoveryStatus
 }
+export type ModelDiscoveryStatus = 'ready' | 'empty' | 'partial' | 'unavailable' | 'authentication_failed'
 export interface RuntimeBackendCatalog {
+  model_replacements?: Record<string, string>
   permission_modes?: string[]
   native_credentials_present?: boolean
   custom_provider?: CustomProviderCatalog
@@ -510,6 +515,7 @@ export interface RuntimeBackendCatalog {
   default_model?: string | null
   default_effort?: string | null
   diagnostic?: RuntimeDiagnostic | null
+  discovery_status?: ModelDiscoveryStatus
 }
 export interface RuntimeCatalog { backends: Record<string, RuntimeBackendCatalog>; generated_at?: string | null }
 

@@ -14,6 +14,15 @@ const runtime: RuntimeCatalog = { backends: {
   claude: { native_credentials_present: true, available: true, models: [], efforts: [], custom_provider: custom },
 } }
 
+test('unsupported API models stay disabled in their own binding without affecting native choices', () => {
+  const bound = { ...custom, model_capabilities: { 'api-model': { compatibility: 'unsupported' as const } } }
+  const selection = { ...chatBackendSelection('codex-custom'), codex_provider_catalog: bound, model: 'api-model' }
+  assert.equal(providerRuntimeCatalog(runtime, selection)?.backends.codex.models[0].locked, true)
+  assert.match(providerSelectionError(health, runtime, selection)!, /not compatible/)
+  assert.equal(providerRuntimeCatalog(runtime, { backend: 'codex' })?.backends.codex.models[0].locked, undefined)
+  assert.equal(custom.models[0].value, 'api-model')
+})
+
 test('API-only agents are not labeled native; both modes remain independent when configured', () => {
   assert.equal(nativeProviderAvailable(health, runtime, 'codex'), false)
   assert.equal(customProviderAvailable(health, runtime, 'codex'), true)
@@ -76,6 +85,22 @@ test('existing API chats can ask the server to run after removal; new API choice
   assert.match(providerSelectionError(health, removed, selection, true)!, /unavailable/)
   assert.equal(providerSelectionError(health, removed, selection), null)
   assert.equal(providerSelectionError(health, runtime, { ...selection, model: 'native-model' }), null, 'an exact API model ID is not constrained by the native catalog')
+})
+
+test('API inventory never manufactures a saved model and keeps discovery status scoped to the binding', () => {
+  for (const backend of ['claude', 'codex', 'cursor', 'opencode', 'gemini'] as const) {
+    const selection = chatBackendSelection(`${backend}-custom`)
+    const input: RuntimeCatalog = { backends: { [backend]: { models: [], efforts: [], custom_provider: {
+      configured: true, available: true, model: 'saved-only', discovery_status: 'empty',
+    } } } }
+    assert.deepEqual(providerRuntimeCatalog(input, selection)?.backends[backend].models, [])
+    assert.equal(providerRuntimeCatalog(input, selection)?.backends[backend].discovery_status, 'empty')
+    const binding = { ...custom, discovery_status: 'unavailable' as const }
+    const bound = { ...selection, backend_locked: true,
+      ...(backend === 'codex' ? { codex_provider_catalog: binding } : { provider_connection_catalog: binding }) }
+    assert.equal(providerRuntimeCatalog(input, bound)?.backends[backend].discovery_status, 'unavailable')
+    assert.deepEqual(providerRuntimeCatalog(input, bound)?.backends[backend].models, custom.models)
+  }
 })
 
 test('workspace preferences retain API selection without storing credentials or leaking modes across agents', () => {

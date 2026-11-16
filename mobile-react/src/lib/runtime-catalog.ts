@@ -16,7 +16,7 @@ export const CURSOR_BACKEND_CAPABILITY_VERSION = 2
 
 export function runtimeCatalogHasSelectableModels(catalog: RuntimeCatalog | null | undefined): catalog is RuntimeCatalog {
   if (!catalog?.backends) return false
-  return REQUIRED_BACKENDS.every(backend => catalog.backends[backend]?.models?.some(option => Boolean(option.value.trim())))
+  return REQUIRED_BACKENDS.every(backend => Array.isArray(catalog.backends[backend]?.models))
 }
 
 export function cursorBackendSupported(health: Health | null | undefined): boolean {
@@ -86,11 +86,20 @@ export function runtimeCatalogOptions(
   backend: string,
   type: 'models' | 'efforts',
   current?: string | null,
+  customProvider = false,
 ): RuntimeOption[] {
   const backendCatalog = catalog?.backends[backend]
-  const available = backendCatalog?.[type] ?? []
+  const replacements = type === 'models' ? backendCatalog?.model_replacements : undefined
+  const available = (backendCatalog?.[type] ?? []).filter(option => !replacements?.[option.value])
   const configuredDefault = type === 'models' ? backendCatalog?.default_model : backendCatalog?.default_effort
-  const advertisedDefault = available.find(option => option.value === '')?.label?.trim()
+  const defaultOption = available.find(option => option.value === '')
+  const advertisedDefault = defaultOption?.label?.trim()
+  const defaultModel = configuredDefault ? available.find(option => option.value === configuredDefault) : undefined
+  const defaultUnavailable = type === 'models' && (defaultOption?.locked === true || defaultModel?.locked === true
+    || (backendCatalog?.discovery_status === 'empty' && !defaultModel)
+    || (backendCatalog?.discovery_status === 'ready' && Boolean(configuredDefault?.trim()) && !defaultModel)
+    || (customProvider && (!configuredDefault?.trim()
+      || (['ready', 'empty'].includes(backendCatalog?.discovery_status ?? '') && !defaultModel))))
   const concreteDefault = optionLabel(available, configuredDefault)
   const baseDefaultLabel = advertisedDefault
     || (catalog ? 'Server default' : type === 'models' ? 'Loading model choices…' : 'Loading reasoning choices…')
@@ -98,15 +107,36 @@ export function runtimeCatalogOptions(
     ? `${baseDefaultLabel} (${concreteDefault})`
     : baseDefaultLabel
   const seen = new Set<string>([''])
-  const options: RuntimeOption[] = [{ value: '', label: defaultLabel }]
+  const options: RuntimeOption[] = [{ value: '', label: defaultLabel, ...(defaultUnavailable ? {
+    locked: true,
+    locked_reason: defaultModel?.locked_reason || defaultOption?.locked_reason || 'Choose a model from the current connection\'s list.',
+  } : {}) }]
   for (const option of available) {
     if (!option.value || seen.has(option.value)) continue
     seen.add(option.value)
     options.push(option)
   }
   const selected = current?.trim()
-  if (selected && !seen.has(selected)) options.push({ value: selected, label: selected })
+  if (selected && !seen.has(selected)) options.push(type === 'models'
+    ? { value: selected, label: selected, locked: true, not_listed: true,
+      locked_reason: 'This saved model is not in the current connection\'s list. Refresh or enter its exact ID to try it explicitly; your chat is unchanged.' }
+    : { value: selected, label: selected })
   return options
+}
+
+export function runtimeOptionLabel(option: RuntimeOption, translate: (text: string) => string = text => text): string {
+  const label = translate(option.label)
+  return option.not_listed ? `${label} · ${translate('Not in current list')}`
+    : option.locked ? `${label} (${translate('Unavailable')})` : label
+}
+
+export function runtimeInventoryNotice(catalog: RuntimeCatalog | null, backend: string): string | null {
+  const entry = catalog?.backends[backend]
+  if (!entry) return null
+  if (entry.discovery_status && !['ready', 'empty'].includes(entry.discovery_status)) {
+    return 'Could not refresh this connection\'s inventory. Any cached choices are unconfirmed; try again.'
+  }
+  return entry.discovery_status === 'empty' ? 'No models listed for this connection.' : null
 }
 
 function modelEfforts(catalog: RuntimeCatalog | null | undefined, backend: string, model?: string | null): RuntimeOption[] | null {
