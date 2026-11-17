@@ -1,5 +1,20 @@
 # Public development log
 
+## Verification - Android update discovery regression
+
+- Reproduced build 10 reporting current when the public release API placed
+  build 11 on page two. The existing pagination correction is already included
+  in published beta.9/build 11; this change adds regression coverage, not a new
+  runtime fix. Cover a first page containing only an older Android release,
+  repeated discovery of a later-page update, and later-page network failure.
+- On an isolated Android emulator, upgraded the official signed build 10 APK
+  in place to build 11 without uninstalling. The 110% font preference survived.
+  Exercised update checks, reopening settings, offline failure with retry, and
+  recovery after reconnecting against the real public release service.
+- Focused updater regressions and TypeScript passed. The in-place install used
+  ADB, not the app's installer; existing build 10 cannot discover this release
+  reliably and needs a one-time manual APK upgrade. No new APK was published.
+
 ## Unreleased - Android beta.10 preparation
 
 - Reserve Android versionCode 12 for the 0.1.1 beta line, preserving the package

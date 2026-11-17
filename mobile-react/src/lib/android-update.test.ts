@@ -91,6 +91,37 @@ assertEqual(found.versionCode, 4)
 assertEqual(found.apk.sha256, sha)
 assertEqual(await latestAndroidUpdate([release], 4, async () => manifest), null)
 
+// Shared desktop releases can push the newest Android APK onto a later page.
+const olderManifest = { ...manifest, versionCode: 3, tagName: 'android-v0.1.1-beta.1' }
+const olderRelease = {
+  ...release,
+  tag_name: olderManifest.tagName,
+  html_url: `https://github.com/ZhengyiLuo/AgentsDock-Releases/releases/tag/${olderManifest.tagName}`,
+}
+const firstPage = [olderRelease, ...Array.from({ length: 99 }, (_, index) => ({
+  ...release, tag_name: `desktop-${index}`, assets: [],
+}))]
+const loadTestManifest = async (url: string) => url.includes('beta.2') ? manifest : olderManifest
+olderRelease.assets = release.assets.map(asset => ({
+  ...asset, browser_download_url: asset.browser_download_url.replace(manifest.tagName, olderManifest.tagName),
+}))
+assertEqual(await latestAndroidUpdate(firstPage, 3, loadTestManifest), null)
+for (let attempt = 0; attempt < 3; attempt++) {
+  const history = await loadAndroidReleaseHistory(async url => url.endsWith('page=1') ? firstPage : [release])
+  assertEqual((await latestAndroidUpdate(history, 3, loadTestManifest))?.versionCode, 4)
+}
+let secondPageFailed = false
+try {
+  const history = await loadAndroidReleaseHistory(async url => {
+    if (url.endsWith('page=1')) return firstPage
+    throw new Error('Network request failed')
+  })
+  await latestAndroidUpdate(history, 3, loadTestManifest)
+} catch (error) {
+  secondPageFailed = /Network request failed/.test(String(error))
+}
+assert(secondPageFailed, 'A failed later page must not report the installed version as current')
+
 const forgedSigner = structuredClone(manifest) as Record<string, unknown>
 forgedSigner.signingCertificateSha256 = 'c'.repeat(64)
 assertEqual(await latestAndroidUpdate([release], 3, async () => forgedSigner), null)
