@@ -1,5 +1,24 @@
 # Public development log
 
+## Unreleased - Android in-app update reliability
+
+- Do not report an installed build as current when advertised update metadata
+  cannot be downloaded or verified. Preserve discovery of a verified older
+  upgrade when another release is incomplete; never relax APK identity,
+  checksum, size, version or release-signature checks.
+- Keep checks from overwriting an active download or pending installation
+  permission flow. Surface native-state initialization failures as retryable
+  errors rather than unhandled rejections.
+- Added store-level regression coverage for metadata and download failures,
+  recovery, duplicate requests, permission denial/return, installer retry and
+  detection of the installed version. Native installation and downloads in
+  this suite are mocked boundaries, not device acceptance.
+- Updater/store/signing regressions, TypeScript and production Android
+  JavaScript export passed.
+- Source changes only. A complete app-initiated upgrade to the new candidate
+  still requires an APK signed with the established release key; no new build
+  has been published or claimed as install-tested.
+
 ## Verification - Android update discovery regression
 
 - Reproduced build 10 reporting current when the public release API placed

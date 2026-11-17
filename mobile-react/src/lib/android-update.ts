@@ -69,19 +69,27 @@ export async function latestAndroidUpdate(
     .sort((left, right) => Date.parse(right.published_at ?? '') - Date.parse(left.published_at ?? ''))
     .slice(0, 6)
   let best: AvailableAndroidUpdate | null = null
+  let incomplete = false
   for (const release of releases) {
     const manifestAsset = release.assets.find(asset => asset.name === ANDROID_UPDATE_MANIFEST_ASSET)
-    if (!manifestAsset || !safeReleaseDownloadUrl(manifestAsset.browser_download_url)) continue
+    if (!manifestAsset) continue
+    if (!safeReleaseDownloadUrl(manifestAsset.browser_download_url)) {
+      incomplete = true
+      continue
+    }
     try {
       const manifest = androidUpdateManifest(await loadManifest(manifestAsset.browser_download_url))
       const apkAsset = release.assets.find(asset => asset.name === manifest.apk.assetName)
-      if (!apkAsset || !safeReleaseDownloadUrl(apkAsset.browser_download_url)) continue
-      if (manifest.tagName !== release.tag_name) continue
-      if (release.html_url !== githubReleaseUrl(manifest.tagName)) continue
-      if (manifest.packageName !== ANDROID_UPDATE_PACKAGE) continue
-      if (manifest.signingCertificateSha256 !== ANDROID_UPDATE_SIGNER_SHA256) continue
-      if (manifest.apk.sizeBytes !== apkAsset.size) continue
-      if (apkAsset.digest !== `sha256:${manifest.apk.sha256}`) continue
+      if (!apkAsset || !safeReleaseDownloadUrl(apkAsset.browser_download_url)
+        || manifest.tagName !== release.tag_name
+        || release.html_url !== githubReleaseUrl(manifest.tagName)
+        || manifest.packageName !== ANDROID_UPDATE_PACKAGE
+        || manifest.signingCertificateSha256 !== ANDROID_UPDATE_SIGNER_SHA256
+        || manifest.apk.sizeBytes !== apkAsset.size
+        || apkAsset.digest !== `sha256:${manifest.apk.sha256}`) {
+        incomplete = true
+        continue
+      }
       if (manifest.versionCode <= currentVersionCode) continue
       if (!best || manifest.versionCode > best.versionCode) {
         best = {
@@ -93,7 +101,11 @@ export async function latestAndroidUpdate(
     } catch {
       // A malformed or partially uploaded release must not prevent a known-good
       // older beta from being discovered.
+      incomplete = true
     }
+  }
+  if (!best && incomplete) {
+    throw new Error('Could not verify Android update information. Check your connection and try again.')
   }
   return best
 }
