@@ -44,6 +44,18 @@ describe('bounded analytics delivery', () => {
     expect(request).toHaveBeenCalledTimes(3)
   })
 
+  it('keeps retry timing and the original event timestamp when the wall clock moves backwards', async () => {
+    const request = vi.fn().mockResolvedValueOnce(new Response('', { status: 503 }))
+      .mockResolvedValue(new Response('1'))
+    vi.stubGlobal('fetch', request)
+    delivery.enqueue(payload)
+    await vi.advanceTimersByTimeAsync(0)
+    vi.setSystemTime(Date.now() - 60 * 60_000)
+    await vi.advanceTimersByTimeAsync(1_300)
+    expect(request).toHaveBeenCalledTimes(2)
+    expect(request.mock.calls[1][1].body).toBe(request.mock.calls[0][1].body)
+  })
+
   it('keeps at most 100 offline events in memory and flushes after online', async () => {
     const online = vi.spyOn(navigator, 'onLine', 'get').mockReturnValue(false)
     const request = vi.fn(async () => new Response('1'))

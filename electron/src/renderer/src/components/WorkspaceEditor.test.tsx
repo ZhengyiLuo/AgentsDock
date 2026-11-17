@@ -224,6 +224,9 @@ describe('WorkspaceEditor', () => {
           setScoped: vi.fn().mockResolvedValue(undefined)
         },
         native: {
+          // File transport assertions must not inherit analytics retry work
+          // from another test. Analytics has dedicated delivery/contract suites.
+          analyticsDisabled: true,
           log: vi.fn().mockResolvedValue(undefined),
           writeClipboard: vi.fn().mockResolvedValue(undefined)
         },

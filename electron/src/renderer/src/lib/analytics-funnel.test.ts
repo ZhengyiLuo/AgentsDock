@@ -44,7 +44,7 @@ describe('launch and send funnel', () => {
   it('requires an exact accepted run, excludes imports/commentary, and sends no ownership data', async () => {
     const { beginMessageObservation, observeReply } = await load()
     beginMessageObservation(owner, 'codex').accepted(event('turn_started', { run_id: 'local-only-run' }))
-    for (const extra of [{ run_id: 'other' }, { imported: true }, { forked: true }, { phase: 'commentary' }]) {
+    for (const extra of [{ run_id: 'other' }, { imported: true }, { forked: true }, { phase: 'commentary' }, { phase: 'analysis' }, { phase: 'reasoning' }, { phase: 'unknown' }, { session_id: 'other-session' }]) {
       observeReply(owner, event('assistant_text', { run_id: 'local-only-run', text: 'private', ...extra }))
     }
     observeReply({ ...owner, generation: 2 }, event('assistant_text', { run_id: 'local-only-run', text: 'private' }))
@@ -67,5 +67,20 @@ describe('launch and send funnel', () => {
     const { beginMessageObservation } = await load()
     beginMessageObservation(owner, 'codex').accepted()
     expect(track).toHaveBeenLastCalledWith('message_submission_settled', { backend: 'codex', outcome: 'unknown' })
+  })
+  it('correlates an exact user-message receipt instead of losing its reply', async () => {
+    const { beginMessageObservation, observeReply } = await load()
+    beginMessageObservation(owner, 'codex').accepted(event('user_message', { run_id: 'accepted-run' }))
+    observeReply(owner, event('assistant_text', { run_id: 'accepted-run', phase: 'final_answer', text: 'answer' }))
+    expect(track).toHaveBeenLastCalledWith('app_first_reply_observed', undefined)
+  })
+  it('does not bind a queued receipt to the previous run even if it carries a run id', async () => {
+    const { beginMessageObservation, observeReply } = await load()
+    beginMessageObservation(owner, 'codex').accepted(event('user_message', { run_id: 'previous-run', queued_id: 'queued' }))
+    observeReply(owner, event('assistant_text', { run_id: 'previous-run', text: 'previous' }))
+    expect(track.mock.calls.some(([name]) => name === 'app_first_reply_observed')).toBe(false)
+    observeReply(owner, event('turn_started', { run_id: 'accepted-run', queued_id: 'queued' }))
+    observeReply(owner, event('turn_finished', { run_id: 'accepted-run', result_text: 'answer' }))
+    expect(track).toHaveBeenLastCalledWith('app_first_reply_observed', undefined)
   })
 })

@@ -27,6 +27,19 @@ describe('message connection kind', () => {
     session.codex_provider = 'default'
     expect(snapshot).toEqual({backend:'codex',connection_kind:'custom_api'})
   })
+  it.each([
+    ['default', 'custom', 'custom_api'],
+    ['custom', 'default', 'default']
+  ] as const)('attributes a queued send to the requested route, not the running %s route', (active, requested, kind) => {
+    const session: Session = { ...base, codex_provider: active,
+      codex_provider_control: { pending: true, active_provider: active, requested_provider: requested,
+        requested_base_url: null, active_base_url: null } }
+    const props = messageAnalyticsProps(session)
+    expect(props).toEqual({ backend: 'codex', connection_kind: kind })
+    expect(session.codex_provider).toBe(active)
+    session.codex_provider_control!.requested_provider = active
+    expect(props).toEqual({ backend: 'codex', connection_kind: kind })
+  })
 })
 
 describe('confirmed explicit session metrics', () => {

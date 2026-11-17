@@ -47,8 +47,11 @@ export function beginMessageObservation(owner: Owner, backend: Backend): {
       if (milestones.has('app_first_reply_observed')) return
       // Queue ownership is not the currently running turn. Bind only when the
       // exact queued id later appears in a turn_started event.
-      awaitingReply.push({ ...owner, backend, created: Date.now(), queuedId: queuedId || (receipt ? event?.queued_id ?? undefined : undefined),
-        runId: receipt && event?.type === 'turn_started' ? event.run_id ?? undefined : undefined })
+      const acceptedQueue = queuedId || (receipt ? event?.queued_id ?? undefined : undefined)
+      awaitingReply.push({ ...owner, backend, created: Date.now(), queuedId: acceptedQueue,
+        // A user_message receipt with an exact run id is also supported by
+        // this observer; accepting it without binding the run loses replies.
+        runId: receipt && !acceptedQueue && event?.type !== 'turn_queued' ? event?.run_id ?? undefined : undefined })
       if (awaitingReply.length > 32) awaitingReply.shift()
     },
     failed(error) {
@@ -65,7 +68,8 @@ export function beginMessageObservation(owner: Owner, backend: Backend): {
 }
 
 export function observeReply(owner: Owner, event: SessionEvent): void {
-  if (milestones.has('app_first_reply_observed') || event.imported || event.forked || event.metadata_only) return
+  if (milestones.has('app_first_reply_observed') || event.session_id !== owner.sessionId
+    || event.imported || event.forked || event.metadata_only) return
   for (let index = awaitingReply.length - 1; index >= 0; index--) {
     const pending = awaitingReply[index]
     if (Date.now() - pending.created > 30 * 60_000) { awaitingReply.splice(index, 1); continue }
@@ -73,7 +77,9 @@ export function observeReply(owner: Owner, event: SessionEvent): void {
     if (event.type === 'turn_started' && pending.queuedId && event.queued_id === pending.queuedId && event.run_id) pending.runId = event.run_id
     if (!pending.runId || pending.runId !== event.run_id) continue
     const text = event.type === 'assistant_text' ? event.text : event.type === 'turn_finished' ? event.result_text : null
-    if (typeof text === 'string' && text.trim() && event.phase !== 'commentary') {
+    // Legacy providers omit phase. Explicit reasoning/commentary or unknown
+    // future phases must not inflate the user-facing answer milestone.
+    if (typeof text === 'string' && text.trim() && (!event.phase || event.phase === 'final_answer')) {
       trackMilestone('app_first_reply_observed')
       awaitingReply.length = 0
       return

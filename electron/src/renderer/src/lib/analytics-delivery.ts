@@ -21,7 +21,7 @@ export class AnalyticsDelivery {
 
   enqueue(payload: AnalyticsEnvelope): void {
     if (this.entries.size >= CAPACITY) return
-    const now = Date.now()
+    const now = this.surface.performance.now()
     this.entries.add({ payload, created: now, attempts: 0, next: now, active: false })
     this.flush()
   }
@@ -52,7 +52,7 @@ export class AnalyticsDelivery {
     if (!this.enabled()) { this.clear(); return }
     if (this.timer !== undefined) this.surface.clearTimeout(this.timer)
     this.timer = undefined
-    const now = Date.now()
+    const now = this.surface.performance.now()
     for (const entry of this.entries) {
       if (!entry.active && now - entry.created >= MAX_AGE_MS) this.entries.delete(entry)
     }
@@ -68,7 +68,10 @@ export class AnalyticsDelivery {
     if (this.timer !== undefined || this.controllers.size >= CONCURRENCY || this.surface.navigator.onLine === false) return
     const pending = [...this.entries].filter(entry => !entry.active)
     if (!pending.length) return
-    const delay = Math.max(0, Math.min(...pending.map(entry => entry.next)) - Date.now())
+    // Retries/expiry are durations, not calendar dates. NTP/manual clock
+    // changes must not freeze delivery or expire a fresh event. The payload's
+    // original wall-clock timestamp is unchanged.
+    const delay = Math.max(0, Math.min(...pending.map(entry => entry.next)) - this.surface.performance.now())
     this.timer = this.surface.setTimeout(() => { this.timer = undefined; this.flush() }, delay)
   }
 
@@ -103,8 +106,8 @@ export class AnalyticsDelivery {
       this.controllers.delete(controller)
       if (revision !== this.revision) return
       entry.active = false
-      if (!retry || entry.attempts >= MAX_ATTEMPTS || Date.now() - entry.created >= MAX_AGE_MS) this.entries.delete(entry)
-      else entry.next = Date.now() + 1_000 * 4 ** (entry.attempts - 1) + Math.floor(Math.random() * 250)
+      if (!retry || entry.attempts >= MAX_ATTEMPTS || this.surface.performance.now() - entry.created >= MAX_AGE_MS) this.entries.delete(entry)
+      else entry.next = this.surface.performance.now() + 1_000 * 4 ** (entry.attempts - 1) + Math.floor(Math.random() * 250)
       // Do not synchronously send other requests from a completion callback.
       this.schedule()
     }
