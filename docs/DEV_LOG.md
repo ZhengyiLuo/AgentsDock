@@ -1,5 +1,24 @@
 # Public development log
 
+## Unreleased — Desktop inline image sizing
+
+- Constrain inline Markdown images to their containing content width and retain
+  their aspect ratio. Small images stay at their intrinsic size; code blocks and
+  wide tables keep their independent horizontal scrolling. Addresses the
+  oversized chat-image report in issue #176.
+- Reproduced before the fix in native Electron: a 2,400-pixel-wide image rendered
+  at full width inside a 756-pixel message. After the fix it fits that message;
+  list and blockquote images respect their narrower containing blocks.
+- Verification: the new three-test style guard failed before the fix and passed
+  afterward. All 6,041 Electron tests passed with six skipped, plus eight
+  compile/license checks; typecheck and production build passed. Isolated native
+  Electron pointer/keyboard checks exercised dark/light themes, window resizing,
+  narrow split-chat panes, right-panel toggling, wide/small/portrait images, and
+  code/table scrolling.
+  Messages used the real server transport with deterministic content and local
+  image fixtures, without provider inference or production analytics. Native
+  Linux validation remains pending; no release was published.
+
 ## Unreleased — Mobile model inventory parity
 
 - Use the connected account or saved API binding's model inventory in chat
