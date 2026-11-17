@@ -7,7 +7,11 @@ import { vi } from 'vitest'
 // Mixpanel - once per test run. Tests that need to assert on fetch/analytics
 // behavior (e.g. analytics.test.ts, WorkspaceEditor.test.tsx) call their own
 // vi.stubGlobal('fetch', ...) afterward, which overrides this default.
-vi.stubGlobal('fetch', vi.fn(async () => new Response(null, { status: 204 })))
+vi.stubGlobal('fetch', vi.fn(async input => String(input).startsWith('https://api.mixpanel.com/')
+  // A permanent local rejection keeps unrelated component tests from leaving
+  // retry timers alive across tests. Delivery tests install their own replies.
+  ? new Response('{"status":0}', { headers: { 'Content-Type': 'application/json' } })
+  : new Response(null, { status: 204 })))
 
 // Node 24+ exposes an experimental global localStorage accessor that returns
 // undefined unless the process was started with --localstorage-file. It can

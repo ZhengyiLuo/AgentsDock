@@ -840,7 +840,7 @@ export function ServerOnboardingDialog() {
     }
     let health: Health
     try {
-      health = await window.agentsDock.servers.testConnection({ serverUrl, accessToken })
+      health = await trackOperation('connection_tested', () => window.agentsDock.servers.testConnection({ serverUrl, accessToken }), value => value.ok === true)
     } catch (error) {
       throw new Error(`Could not connect to AgentsServer at ${serverUrl}: ${message(error)}`)
     }
@@ -856,12 +856,12 @@ export function ServerOnboardingDialog() {
         ? latest.profiles.find(profile => profile.serverIdentity === health.server_identity)
         : null
       if (duplicate) throw new Error(`This server is already saved as “${duplicate.name}”. Activate or edit that profile instead.`)
-      const added = await window.agentsDock.servers.add({
+      const added = await trackOperation('server_added', () => window.agentsDock.servers.add({
         serverUrl,
         accessToken,
         serverIdentity: health.server_identity ?? null,
         serverSetupComplete: true
-      })
+      }))
       const profiles = await window.agentsDock.servers.list()
       useAppStore.setState({ profiles })
       targetProfileId = added.id

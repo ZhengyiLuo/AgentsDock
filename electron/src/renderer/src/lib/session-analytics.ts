@@ -1,11 +1,15 @@
 import type { BulkImportSessionItem, BulkImportSessionResult, Session } from '@shared/types'
+import { sessionRuntimeForNextTurn } from '@shared/runtime-catalog'
 import { trackEvent, type AnalyticsEventProps } from './analytics'
 
 /** Snapshot before submission, never infer from credentials or a later selected chat.
  * "default" describes routing, not whether the CLI itself uses an API key. */
 export function messageAnalyticsProps(session: Session | undefined): AnalyticsEventProps {
   if (!session) return {}
-  const connection = session.backend === 'codex' ? session.codex_provider : session.provider_connection
+  // A running Codex turn can still own the previous endpoint while a saved
+  // change already applies to this submission. Match the transport's choice.
+  const runtime = sessionRuntimeForNextTurn(session)
+  const connection = runtime.backend === 'codex' ? runtime.codex_provider : runtime.provider_connection
   return {
     backend: session.backend,
     ...(connection === 'custom' ? { connection_kind: 'custom_api' as const }

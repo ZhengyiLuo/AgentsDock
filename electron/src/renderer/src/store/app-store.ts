@@ -18,6 +18,7 @@ import { agentFileBelongsToSession, isolateSessionEvent, isolateSessionSnapshot 
 import { isImportedClaudeControlCompanion, isImportedCodexRuntimeContext, isImportedHistoryRecord, isImportedProviderControlMetadata, isImportedProviderInterruption, mergeProviderInterruptionEvent } from '@shared/provider-origin'
 import { isReasoningSummaryStream } from '@shared/reasoning-stream'
 import { trackEvent } from '../lib/analytics'
+import { beginMessageObservation, observeFreshServerReady, observeReply, trackMilestone } from '../lib/analytics-funnel'
 import { isImportedAPIConnection, trackConfirmedSessionChange } from '../lib/session-analytics'
 import { secureRandomUUID } from '../lib/browser-crypto'
 import { nudgeChatFontSize, setChatFontFamily, setChatFontSize } from '../lib/chat-font'
@@ -639,6 +640,7 @@ export const useAppStore = create<AppState>((set, get) => ({
     if (get().initialized || initializationInFlight) return
     pendingNamespaceAdoption = null
     if (!window.agentsDock) {
+      trackMilestone('app_initialized', false)
       set({ initialized: true, connected: false, syncStatus: 'offline', error: 'The secure Electron bridge did not load. See the AgentsDock startup log.' })
       return
     }
@@ -682,6 +684,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       const error = incompatible ? `Server upgrade required: this app needs agent API v${MINIMUM_AGENT_API_CONTRACT}, but the server reports v${version}.` : payload.error ?? null
       const current = get()
       const connected = payload.connected && !incompatible
+      if (connected && payload.health?.ok === true && payload.health.chat_readiness?.ready !== false) trackMilestone('app_server_ready')
       const incomingHealth = payload.health ?? current.health
       // Preserve the prior reference when a reconnect heartbeat carries the
       // same contract. Several heavyweight surfaces intentionally subscribe
@@ -1141,6 +1144,7 @@ export const useAppStore = create<AppState>((set, get) => ({
         forwardedPorts: [],
         forwardedPortsRevision: 0
       })
+      trackMilestone('app_initialized', true)
       bufferingBootstrapConnections = false
       const bootstrapConnection = bootstrapConnections.get(bootstrapConnectionKey({
         profileId: payload.activeProfileId ?? '',
@@ -1175,6 +1179,7 @@ export const useAppStore = create<AppState>((set, get) => ({
     } catch (error) {
       if (!profileScopeMatches(scope, get())) return
       void window.agentsDock.native.log('bootstrap', 'initialize failed', { error: errorMessage(error) })
+      trackMilestone('app_initialized', false)
       set({ initialized: true, connected: false, syncStatus: 'offline', syncError: errorMessage(error), error: errorMessage(error) })
     } finally {
       bufferingBootstrapConnections = false
@@ -2181,6 +2186,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       error: null,
     }))
     if (!stagedSubmission) window.dispatchEvent(new CustomEvent('agentsdock:local-send', { detail: { sessionId } }))
+    const observation = beginMessageObservation({ profileId: scope.profileId, generation: scope.profileGeneration, sessionId }, session.backend)
     try {
       const response = await window.agentsDock.turns.send({
         sessionId,
@@ -2207,7 +2213,11 @@ export const useAppStore = create<AppState>((set, get) => ({
           queued_id: accepted.type === 'turn_queued' ? accepted.queued_id : undefined
         }
       })
+      observation.accepted(response.event, response.queued_id ?? undefined)
       if (!profileScopeMatches(scope, get())) return false
+      // A stream reply can beat its HTTP acceptance receipt; inspect only this
+      // exact runtime's already-loaded events, never infer from another chat.
+      for (const event of (get().snapshots[sessionId]?.events ?? []).slice(-256)) observeReply({ profileId: scope.profileId, generation: scope.profileGeneration, sessionId }, event)
       if (response.event && eventAffectsQueuedTurns(response.event)) {
         invalidateQueuedTurnsRequests(sessionId)
       }
@@ -2278,6 +2288,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       }
       return true
     } catch (error) {
+      observation.failed(error)
       if (!profileScopeMatches(scope, get())) return false
       get().rollbackPendingTurnSubmission(sessionId, admissionToken)
       set({ error: turnSendErrorMessage(error) })
@@ -3541,6 +3552,7 @@ async function runProfileRefresh(
   if (typeof refresh !== 'function' && !pendingNamespaceAdoptionMatches(profileId, profileGeneration, requestedScope)) return
   try {
     if (typeof refresh !== 'function') throw new Error('Server profile refresh is unavailable')
+    const refreshRequestedAt = Date.now()
     const payload = await withDeadline(
       Promise.resolve().then(() => refresh(profileId, profileGeneration)),
       PROFILE_REFRESH_TIMEOUT_MS,
@@ -3555,6 +3567,9 @@ async function runProfileRefresh(
     if (adoptionPending) {
       const expectedIdentity = pendingNamespaceAdoption?.canonicalProfiles.find(profile => profile.id === profileId)?.serverIdentity ?? null
       if (!expectedIdentity || targetIdentity !== expectedIdentity) throw new Error('Canonical server identity was not present in the refreshed workspace')
+    }
+    if (payload.activeProfileId === profileId && payload.profileGeneration === profileGeneration) {
+      observeFreshServerReady(payload, refreshRequestedAt, MINIMUM_AGENT_API_CONTRACT)
     }
     if (startingIdentity !== targetIdentity) {
       const fallbackSessionId = selectedSessionFromBootstrap(payload)
@@ -4945,6 +4960,7 @@ function refreshCrossChatQueue(sessionId: string, scope: RendererProfileScope): 
 
 function enqueueLiveEvent(event: Event, activeHint?: LiveActivityHint): void {
   const scope = captureProfileScope()
+  observeReply({ profileId: scope.profileId, generation: scope.profileGeneration, sessionId: event.session_id }, event)
   let pending = pendingLiveEvents.get(event.session_id)
   if (pending && !profileScopesEqual(pending.scope, scope)) {
     pendingLiveEventCount -= pending.events.length
@@ -5532,7 +5548,10 @@ export function handleMenuCommand(command: string, get: () => AppState, set: (va
   if (command === 'check-update') {
     window.dispatchEvent(new CustomEvent('agentsdock:app-settings-section', { detail: 'updates' }))
     get().setModal('appSettings', true)
-    void window.agentsDock.updates.check()
+    void window.agentsDock.updates.check().then(
+      value => trackEvent('app_update_checked', { success: !['error', 'disabled'].includes(value.state) }),
+      () => trackEvent('app_update_checked', { success: false })
+    )
   }
   else if (command === 'settings') get().setModal('appSettings', true)
   else if (command === 'chat-font-increase') nudgeChatFontSize(1)

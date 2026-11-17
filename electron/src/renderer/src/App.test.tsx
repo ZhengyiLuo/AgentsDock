@@ -828,6 +828,14 @@ describe('App chat workspace identity', () => {
     expect(window.agentsDock.updates.install).not.toHaveBeenCalled()
   })
 
+  it('tracks the update notice Restart before requesting installation', async () => {
+    vi.mocked(window.agentsDock.updates.status).mockResolvedValueOnce({ state: 'downloaded', channel: 'direct', track: 'beta', currentVersion: '0.2.0', availableVersion: '1.0.0' })
+    render(<App />)
+    fireEvent.click(await screen.findByRole('button', { name: 'Update AgentsDock' }))
+    expect(analytics.trackEvent).toHaveBeenCalledWith('app_update_install_requested')
+    expect(window.agentsDock.updates.install).toHaveBeenCalledOnce()
+  })
+
   it('toggles and persists the chat sidebar with Cmd/Ctrl+/ even when the code editor has focus', () => {
     const first = render(<App />)
     const shell = document.querySelector('.app-shell')!
