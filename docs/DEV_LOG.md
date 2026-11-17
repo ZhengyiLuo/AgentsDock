@@ -1,5 +1,19 @@
 # Public development log
 
+## Unreleased - Android beta.10 preparation
+
+- Reserve Android versionCode 12 for the 0.1.1 beta line, preserving the package
+  identity and iOS release metadata. The previous public Android beta is build 11.
+- Include the existing bounded local-cache/full-database recovery, accepted-send
+  and queue reconciliation fixes, exact history search navigation, and scoped
+  model inventories with inline dropdowns from current main.
+- Preparation only: signed packaging, installed-version upgrade acceptance and
+  publication remain pending. Do not replace the established release signer.
+- Verified updater/signing contracts, update manifest selection, crash-safe
+  storage regressions, media permission composition, TypeScript, production
+  Android JavaScript export and regenerated native configuration. Native
+  configuration retains the 64 MB AsyncStorage limit and original package ID.
+
 ## Unreleased — Mobile model inventory parity
 
 - Use the connected account or saved API binding's model inventory in chat
