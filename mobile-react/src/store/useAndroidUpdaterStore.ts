@@ -65,6 +65,9 @@ export const useAndroidUpdaterStore = create<AndroidUpdaterState>((set, get) => 
   error: null,
 
   async check(force = false) {
+    // Permission settings can background the app; a check must not discard
+    // the pending APK or replace its resume state on return.
+    if (installInFlight || get().stage === 'permission') return
     if (checkInFlight) return checkInFlight
     checkInFlight = (async () => {
       if (Platform.OS !== 'android' || !androidUpdaterNativeAvailable()) {
@@ -118,11 +121,14 @@ export const useAndroidUpdaterStore = create<AndroidUpdaterState>((set, get) => 
           error: force ? readableError(error) : null,
         })
       }
-    })().finally(() => { checkInFlight = null })
+    })().catch(error => {
+      set({ stage: 'error', error: readableError(error) })
+    }).finally(() => { checkInFlight = null })
     return checkInFlight
   },
 
   async install() {
+    if (checkInFlight) return
     if (installInFlight) return installInFlight
     installInFlight = (async () => {
       const update = get().update

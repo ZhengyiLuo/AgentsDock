@@ -27,6 +27,14 @@ function assertThrows(callback: () => unknown, pattern: RegExp): void {
   throw new Error(`Expected ${String(pattern)} to be thrown`)
 }
 
+async function assertRejects(callback: () => Promise<unknown>, pattern: RegExp): Promise<void> {
+  try { await callback() } catch (error) {
+    if (pattern.test(String(error))) return
+    throw error
+  }
+  throw new Error(`Expected ${String(pattern)} to be rejected`)
+}
+
 const sha = 'a'.repeat(64)
 const pageRequests: string[] = []
 const paged = await loadAndroidReleaseHistory(async url => {
@@ -91,13 +99,63 @@ assertEqual(found.versionCode, 4)
 assertEqual(found.apk.sha256, sha)
 assertEqual(await latestAndroidUpdate([release], 4, async () => manifest), null)
 
+// Shared desktop releases can push the newest Android APK onto a later page.
+const olderManifest = { ...manifest, versionCode: 3, tagName: 'android-v0.1.1-beta.1' }
+const olderRelease = {
+  ...release,
+  tag_name: olderManifest.tagName,
+  html_url: `https://github.com/ZhengyiLuo/AgentsDock-Releases/releases/tag/${olderManifest.tagName}`,
+}
+const firstPage = [olderRelease, ...Array.from({ length: 99 }, (_, index) => ({
+  ...release, tag_name: `desktop-${index}`, assets: [],
+}))]
+const loadTestManifest = async (url: string) => url.includes('beta.2') ? manifest : olderManifest
+olderRelease.assets = release.assets.map(asset => ({
+  ...asset, browser_download_url: asset.browser_download_url.replace(manifest.tagName, olderManifest.tagName),
+}))
+assertEqual(await latestAndroidUpdate(firstPage, 3, loadTestManifest), null)
+for (let attempt = 0; attempt < 3; attempt++) {
+  const history = await loadAndroidReleaseHistory(async url => url.endsWith('page=1') ? firstPage : [release])
+  assertEqual((await latestAndroidUpdate(history, 3, loadTestManifest))?.versionCode, 4)
+}
+let secondPageFailed = false
+try {
+  const history = await loadAndroidReleaseHistory(async url => {
+    if (url.endsWith('page=1')) return firstPage
+    throw new Error('Network request failed')
+  })
+  await latestAndroidUpdate(history, 3, loadTestManifest)
+} catch (error) {
+  secondPageFailed = /Network request failed/.test(String(error))
+}
+assert(secondPageFailed, 'A failed later page must not report the installed version as current')
+
 const forgedSigner = structuredClone(manifest) as Record<string, unknown>
 forgedSigner.signingCertificateSha256 = 'c'.repeat(64)
-assertEqual(await latestAndroidUpdate([release], 3, async () => forgedSigner), null)
+await assertRejects(() => latestAndroidUpdate([release], 3, async () => forgedSigner), /Could not verify/)
 
 const digestMismatch = structuredClone(release)
 digestMismatch.assets[1].digest = `sha256:${'d'.repeat(64)}`
-assertEqual(await latestAndroidUpdate([digestMismatch], 3, async () => manifest), null)
+await assertRejects(() => latestAndroidUpdate([digestMismatch], 3, async () => manifest), /Could not verify/)
+
+for (let attempt = 0; attempt < 3; attempt++) {
+  await assertRejects(() => latestAndroidUpdate([release], 3, async () => {
+    throw new Error('Network request failed')
+  }), /Could not verify/)
+  assertEqual((await latestAndroidUpdate([release], 3, async () => manifest))?.versionCode, 4)
+}
+const partialRelease = { ...release, assets: [release.assets[0]] }
+await assertRejects(() => latestAndroidUpdate([partialRelease], 3, async () => manifest), /Could not verify/)
+// A valid older update remains usable, but a failed newer manifest is never
+// proof that an already-installed older version is current.
+assertEqual((await latestAndroidUpdate([release, olderRelease], 2, async url => {
+  if (url.includes('beta.2')) throw new Error('HTTP 503')
+  return olderManifest
+}))?.versionCode, 3)
+await assertRejects(() => latestAndroidUpdate([release, olderRelease], 3, async url => {
+  if (url.includes('beta.2')) throw new Error('HTTP 503')
+  return olderManifest
+}), /Could not verify/)
 
 assertThrows(() => androidUpdateManifest({ ...manifest, versionCode: 0 }), /versionCode/)
 assertThrows(() => androidUpdateManifest({ ...manifest, apk: { ...manifest.apk, assetName: '../bad.apk' } }), /asset name/)

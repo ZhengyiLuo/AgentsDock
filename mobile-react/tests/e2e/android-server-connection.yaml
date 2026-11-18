@@ -1,0 +1,67 @@
+# Run on an isolated Android Dev emulator at Home. SERVER_URL and SERVER_TOKEN
+# must point to an isolated AgentsServer; this flow tests but does not save it.
+appId: com.zhengyiluo.agentsdock.dev
+---
+- repeat:
+    times: 3
+    commands:
+      - tapOn:
+          id: sidebar-setup-server
+      - assertVisible:
+          id: server-profiles-android-sheet
+      - tapOn:
+          id: server-profile-name
+      - inputText: "Android connection QA"
+      - tapOn:
+          id: server-profile-url
+      - inputText: ${SERVER_URL}
+      - hideKeyboard
+      - scrollUntilVisible:
+          element:
+            id: server-profile-token
+          direction: DOWN
+      - tapOn:
+          id: server-profile-token
+      - inputText: "qa-invalid-token"
+      - hideKeyboard
+      - scrollUntilVisible:
+          element:
+            id: server-profile-test
+          direction: DOWN
+      - tapOn:
+          id: server-profile-test
+          retryTapIfNoChange: false
+      - extendedWaitUntil:
+          visible:
+            id: server-profile-feedback
+          timeout: 35000
+      - assertVisible: ".*unauthorized.*"
+      - assertVisible:
+          text: Add
+          enabled: false
+      - tapOn:
+          id: server-profile-token
+      - eraseText: 100
+      - inputText: ${SERVER_TOKEN}
+      - hideKeyboard
+      - scrollUntilVisible:
+          element:
+            id: server-profile-test
+          direction: DOWN
+      - tapOn:
+          id: server-profile-test
+          retryTapIfNoChange: false
+      - extendedWaitUntil:
+          visible:
+            id: server-profile-test-result
+          timeout: 35000
+      - assertVisible:
+          text: Add
+          enabled: true
+      - assertNotVisible:
+          id: server-profile-feedback
+      - takeScreenshot: android-server-connection-success
+      - tapOn:
+          id: server-management-close
+      - assertVisible:
+          id: sidebar-setup-server

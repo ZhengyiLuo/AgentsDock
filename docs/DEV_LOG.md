@@ -1,5 +1,72 @@
 # Public development log
 
+## Unreleased - Android server connection form
+
+- Present Android server management in a standard native Modal with a stable
+  scrollable editor, avoiding the formSheet touch/keyboard path that left the
+  visible connection-test button unresponsive. Keep iOS native sheet detents.
+- Dismiss the keyboard when testing and show connection errors beside the
+  editor's test result and actions instead of above the offscreen form.
+  A successful authenticated test is still required before adding a server.
+- Verified on an isolated Android API 34 emulator with an independent Dev
+  package and a real isolated AgentsServer: three full keyboard/input/error/
+  correction/success/close/reopen cycles, plus Chinese dark-mode error and
+  success states. Added a server, handled the first-run notification permission
+  prompt, checked Back navigation, and confirmed the saved server after an app
+  restart. No provider messages or production server changes were involved.
+- Passed 44 profile/scanner tests, 16 request cancellation/deadline tests,
+  TypeScript and the native ARM64 Android Debug build. Added a repeatable
+  emulator flow. iOS presentation is covered by component regressions, not a
+  new iOS device run. Installed locally only; no production APK was published.
+
+## Unreleased - Android in-app update reliability
+
+- Do not report an installed build as current when advertised update metadata
+  cannot be downloaded or verified. Preserve discovery of a verified older
+  upgrade when another release is incomplete; never relax APK identity,
+  checksum, size, version or release-signature checks.
+- Keep checks from overwriting an active download or pending installation
+  permission flow. Surface native-state initialization failures as retryable
+  errors rather than unhandled rejections.
+- Added store-level regression coverage for metadata and download failures,
+  recovery, duplicate requests, permission denial/return, installer retry and
+  detection of the installed version. Native installation and downloads in
+  this suite are mocked boundaries, not device acceptance.
+- Updater/store/signing regressions, TypeScript and production Android
+  JavaScript export passed.
+- Source changes only. A complete app-initiated upgrade to the new candidate
+  still requires an APK signed with the established release key; no new build
+  has been published or claimed as install-tested.
+
+## Verification - Android update discovery regression
+
+- Reproduced build 10 reporting current when the public release API placed
+  build 11 on page two. The existing pagination correction is already included
+  in published beta.9/build 11; this change adds regression coverage, not a new
+  runtime fix. Cover a first page containing only an older Android release,
+  repeated discovery of a later-page update, and later-page network failure.
+- On an isolated Android emulator, upgraded the official signed build 10 APK
+  in place to build 11 without uninstalling. The 110% font preference survived.
+  Exercised update checks, reopening settings, offline failure with retry, and
+  recovery after reconnecting against the real public release service.
+- Focused updater regressions and TypeScript passed. The in-place install used
+  ADB, not the app's installer; existing build 10 cannot discover this release
+  reliably and needs a one-time manual APK upgrade. No new APK was published.
+
+## Unreleased - Android beta.10 preparation
+
+- Reserve Android versionCode 12 for the 0.1.1 beta line, preserving the package
+  identity and iOS release metadata. The previous public Android beta is build 11.
+- Include the existing bounded local-cache/full-database recovery, accepted-send
+  and queue reconciliation fixes, exact history search navigation, and scoped
+  model inventories with inline dropdowns from current main.
+- Preparation only: signed packaging, installed-version upgrade acceptance and
+  publication remain pending. Do not replace the established release signer.
+- Verified updater/signing contracts, update manifest selection, crash-safe
+  storage regressions, media permission composition, TypeScript, production
+  Android JavaScript export and regenerated native configuration. Native
+  configuration retains the 64 MB AsyncStorage limit and original package ID.
+
 ## Unreleased — Mobile model inventory parity
 
 - Use the connected account or saved API binding's model inventory in chat
