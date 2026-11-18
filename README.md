@@ -55,9 +55,11 @@
   <a href="https://github.com/ZhengyiLuo/AgentsDock/releases">All releases and release notes</a>
   <br />
   <strong>Mobile:</strong>
-  <a href="https://apps.apple.com/us/app/agentsdock/id6769275751">iPhone &amp; iPad</a>
+  <a href="https://apps.apple.com/us/app/agentsdock/id6769275751">iPhone &amp; iPad — App Store</a>
   ·
-  <a href="https://github.com/ZhengyiLuo/AgentsDock-Releases/releases/download/android-v0.1.1-beta.8/AgentsDock-0.1.1-android-arm64-beta.8.apk">Android</a>
+  <a href="https://github.com/ZhengyiLuo/AgentsDock-Releases/releases/download/android-v0.1.4-beta.1/AgentsDock-0.1.4-android-arm64-build12.apk">Android 0.1.4-beta.1 (build 12, ARM64 APK)</a>
+  ·
+  <a href="https://github.com/ZhengyiLuo/AgentsDock-Releases/releases/tag/android-v0.1.4-beta.1">Android release notes</a>
   <br />
   <br />
   <a href="https://agentsdock.net">Website</a>
@@ -66,6 +68,10 @@
   ·
   <a href="https://agentsdock.net/features.html">Features</a>
 </div>
+
+The iOS beta **0.1.4 (build 196)** is available to internal TestFlight testers.
+This build has not been submitted to the App Store; the link above opens the
+existing public iPhone and iPad release.
 
 ## What you can do
 

@@ -1,5 +1,15 @@
 # Public development log
 
+## 2026-11-18 — Mobile download documentation
+
+- Update the repository README's Android download from 0.1.1-beta.8 to the
+  published 0.1.4-beta.1 ARM64 APK (build 12), with a link to its release notes.
+- Distinguish iOS 0.1.4 (build 196), available to internal TestFlight testers,
+  from the existing public App Store download. This build has not been
+  submitted to the App Store.
+- Verified the public Android release metadata, APK URL, beta update manifest,
+  and existing App Store URL. Desktop/server download targets are unchanged.
+
 ## Unreleased - Android server connection form
 
 - Present Android server management in a standard native Modal with a stable
