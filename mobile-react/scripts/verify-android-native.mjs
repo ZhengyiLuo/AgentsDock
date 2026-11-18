@@ -15,6 +15,7 @@ const appGradle = read('android/app/build.gradle')
 const settingsGradle = read('android/settings.gradle')
 const releaseSigningPlugin = './plugins/withAndroidReleaseSigning.cjs'
 const sideloadUpdaterPlugin = './plugins/withAndroidSideloadUpdater.cjs'
+const releaseManifestPlugin = './plugins/withAndroidReleaseManifest.cjs'
 const sideloadManifest = read('android/app/src/sideload/AndroidManifest.xml')
 
 if (android.package !== 'com.zhengyiluo.agentsdock') fail(`unexpected package ${String(android.package)}`)
@@ -28,6 +29,11 @@ if (!appGradle.includes(`versionName "${config.version}"`)) fail('Gradle version
 if (!settingsGradle.includes("rootProject.name = 'AgentsDock'")) fail('native project name is not AgentsDock')
 if (!config.plugins.includes(releaseSigningPlugin)) fail('release signing config plugin is missing')
 if (!config.plugins.includes(sideloadUpdaterPlugin)) fail('sideload updater config plugin is missing')
+if (!config.plugins.includes(releaseManifestPlugin)) fail('Android release manifest config plugin is missing')
+if (!manifest.includes('android:scheme="com.zhengyiluo.zenithdock"')) fail('lower-case Android terminal scheme is missing')
+if (manifest.includes('android:scheme="com.zhengyiluo.ZenithDock"')) fail('mixed-case shared scheme leaked into Android manifest')
+const cameraFeature = manifest.match(/<uses-feature[^>]+android:name="android\.hardware\.camera"[^>]*>/)?.[0] ?? ''
+if (!cameraFeature.includes('android:required="false"')) fail('camera hardware must remain optional for manual connection setup')
 for (const environmentName of [
   'AGENTSDOCK_ANDROID_KEYSTORE_PATH',
   'AGENTSDOCK_ANDROID_KEYSTORE_PASSWORD',

@@ -54,6 +54,7 @@
       "zh-CN": "./languages/zh-CN.json"
     },
     "plugins": [
+      "./plugins/withAndroidReleaseManifest.cjs",
       [
         "expo-localization",
         {

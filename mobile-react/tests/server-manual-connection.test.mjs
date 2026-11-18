@@ -398,7 +398,8 @@ test('discarded connection links cannot open a terminal through their embedded p
   for (const url of ['agentsdock://connect#url=http://terminal', 'com.zhengyiluo.ZenithDock://connect#url=http://terminal', 'https://example.com/?next=com.zhengyiluo.ZenithDock://terminal']) onURL({ url })
   assert.deepEqual(calls, [])
   onURL({ url: 'com.zhengyiluo.ZenithDock://terminal?session=fixture' })
-  assert.deepEqual(calls, ['terminal'])
+  onURL({ url: 'com.zhengyiluo.zenithdock://terminal?session=fixture' })
+  assert.deepEqual(calls, ['terminal', 'terminal'])
 })
 
 for (const outcome of ['match', 'mismatch', 'unreachable', 'dismissed']) {

@@ -1,5 +1,17 @@
 # Public development log
 
+## Android 0.1.4 manifest validation
+
+- Normalize the Android terminal URL scheme to lower case, while preserving
+  the existing iOS scheme and both package identities.
+- Declare camera hardware optional: QR scanning still requests permission,
+  but devices without a camera can use manual server setup.
+- These two manifest fixes address findings from full release lint. The default
+  Kotlin lint analyzer crashes in a dependency; the supported K1 analyzer flag
+  runs the same lint rules without suppressing findings.
+- Keep the iOS build at its existing source pin; only the Android candidate
+  needs rebuilding after these Android-only native configuration corrections.
+
 ## Mobile 0.1.4 preparation
 
 - Prepare current-main mobile code as iOS TestFlight build 196 and Android

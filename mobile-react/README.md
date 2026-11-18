@@ -149,6 +149,12 @@ QR-image import and connection deep links remain disabled. The terminal URL sche
 registered. Plain HTTP is intentionally permitted for private LAN and Tailscale
 endpoints.
 
+Android registers the lower-case `com.zhengyiluo.zenithdock` terminal URL scheme;
+iOS retains `com.zhengyiluo.ZenithDock`. Android camera hardware is optional, so
+devices without a camera can still connect manually. These manifest declarations
+do not change the app identity, release signer, camera permission flow, or iOS
+native configuration.
+
 Any saved server can be removed, including the current or last one. Removal
 only forgets this device's connection and credential; it does not stop remote
 tasks or delete server chats. The next saved server is selected when available;
