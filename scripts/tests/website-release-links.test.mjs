@@ -9,6 +9,15 @@ const android = (version, date) => ({
   tag_name: `android-v0.1.1-beta.${version}`, published_at: date, prerelease: true,
   assets: [{ name: `AgentsDock-0.1.1-android-arm64-beta.${version}.apk`, browser_download_url: apk(version) }]
 })
+const currentAndroid = {
+  tag_name: 'android-v0.1.4-beta.1', published_at: '2026-11-18T20:44:23Z', prerelease: true,
+  html_url: 'https://github.com/ZhengyiLuo/AgentsDock-Releases/releases/tag/android-v0.1.4-beta.1',
+  assets: [{
+    name: 'AgentsDock-0.1.4-android-arm64-build12.apk',
+    browser_download_url: 'https://github.com/ZhengyiLuo/AgentsDock-Releases/releases/download/android-v0.1.4-beta.1/AgentsDock-0.1.4-android-arm64-build12.apk'
+  }]
+}
+const currentApk = currentAndroid.assets[0].browser_download_url
 const fullPage = () => Array.from({ length: 100 }, () => ({
   published_at: '2026-09-01T00:00:00Z', assets: []
 }))
@@ -59,6 +68,47 @@ test('a stale feed cannot replace the pinned APK with an older release', async (
   await sandbox.loadAndroidRelease()
   assert.equal(link.href, apk(9))
 })
+
+test('Android discovery accepts the build-numbered 0.1.4 APK without changing desktop links', async () => {
+  const { sandbox, elements } = await harness()
+  const links = [{ href: apk(9) }, { href: apk(9) }]
+  const desktop = { href: 'https://example.com/unchanged.dmg' }
+  elements.set('a[data-dl="android"]', links)
+  elements.set('a[data-dl="macos"]', [desktop])
+  sandbox.fetch = async () => ({ ok: true, json: async () => [android(9, '2026-10-27T04:09:42Z'), currentAndroid] })
+  await sandbox.loadAndroidRelease()
+  assert.deepEqual(links.map(link => link.href), [currentApk, currentApk])
+  assert.equal(desktop.href, 'https://example.com/unchanged.dmg')
+})
+
+test('the pinned build 12 survives a stale feed that only contains 0.1.1 APKs', async () => {
+  const { sandbox, elements } = await harness()
+  const link = { href: currentApk }
+  elements.set('a[data-dl="android"]', [link])
+  sandbox.fetch = async () => ({ ok: true, json: async () => [android(9, '2026-10-27T04:09:42Z')] })
+  await sandbox.loadAndroidRelease()
+  assert.equal(link.href, currentApk)
+})
+
+for (const locale of ['', 'zh/']) {
+  for (const name of ['index.html', 'iphone.html']) {
+    test(`mobile downloads retain verified public destinations (${locale}${name})`, () => {
+      const html = readFileSync(new URL(`../../website/${locale}${name}`, import.meta.url), 'utf8')
+      const apkLinks = [...html.matchAll(/href="([^"]+\.apk)"/g)].map(match => match[1])
+      assert.deepEqual(apkLinks, name === 'index.html' ? [currentApk, currentApk] : [currentApk])
+      assert.doesNotMatch(html, /android-v0\.1\.1|0\.1\.1 beta\.9|build 11|build 196/)
+      assert.ok(html.includes('href="https://apps.apple.com/us/app/agentsdock/id6769275751"'))
+      assert.ok(html.includes('href="https://testflight.apple.com/join/2JjWy2Z2"'))
+      if (name === 'iphone.html') {
+        assert.ok(html.includes(`href="${currentAndroid.html_url}"`))
+        assert.match(html, /AgentsDock 0\.1\.4 beta\.1 arm64 \(build 12\)/)
+        assert.match(html, locale ? /内部测试版本不会通过此公开链接提供/ : /internal-only builds are not offered through this public link/)
+      } else {
+        assert.match(html, locale ? /arm64 · 测试版/ : /arm64 · Beta/)
+      }
+    })
+  }
+}
 
 test('failure on a later page preserves the static APK fallback', async () => {
   const { sandbox, elements } = await harness()

@@ -22,6 +22,29 @@ painful to rediscover later.
   active server and push the latest server repository/code to GitHub so app and
   server contract versions do not drift.
 
+## 2026-11-18 - Refresh public mobile download links
+
+- Updated the English and Simplified Chinese homepage APK fallbacks and client
+  installation guides to Android 0.1.4 beta.1, arm64, build 12. Download button
+  names stay unchanged; platform and installation copy identify the beta.
+  Updated the four corresponding sitemap modification dates.
+- Verified the public release tag android-v0.1.4-beta.1 and downloaded its
+  AgentsDock-0.1.4-android-arm64-build12.apk without authentication: 62,675,691
+  bytes, SHA-256 cebf8c588c4b578e6925ac73c844867f570f23b6d618e88772dd14844a08936c.
+  The public update manifest confirms the beta channel and versionCode 12.
+- Preserved the existing App Store and TestFlight destinations after checking
+  both public pages. Clarified invitation-dependent TestFlight access without
+  advertising an internal-only build as publicly downloadable.
+- All 46 website regressions passed, including the build-numbered APK filename
+  and stale-feed fallback. Real-browser checks covered all four pages at 1440,
+  768, 390 and 320 pixels, mobile directory navigation and actual release-page
+  link activation. Desktop/mobile visual review found no new layout issues;
+  no horizontal overflow or page script errors were observed.
+- Desktop/server links, release metadata and runtime discovery code are
+  unchanged. Reviewed and approved for website publication and mirror sync
+  on November 18. No mobile release, device installation or TestFlight
+  enrollment was performed as part of this website update.
+
 ## 2026-11-16 - Refresh analytics privacy disclosures
 
 - Corrected the desktop analytics controls: enabled by default, no current
