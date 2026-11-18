@@ -1,0 +1,181 @@
+name: Prepare unsigned iOS Simulator QA app
+
+on:
+  workflow_dispatch:
+    inputs:
+      source_sha:
+        description: Full reviewed SHA, exactly the selected workflow commit
+        required: true
+        type: string
+  # Register this workflow only. A push must never prepare an app.
+  push:
+    branches: [release/mobile-goal-queue-190]
+    paths: [.github/workflows/ios-mobile-qa.yml]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: agentsdock-ios-mobile-qa
+  cancel-in-progress: false
+
+jobs:
+  simulator:
+    if: github.event_name == 'workflow_dispatch' && github.repository == 'ZhengyiLuo/AgentsDock' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/release/'))
+    runs-on: macos-26
+    timeout-minutes: 90
+    env:
+      DEVELOPER_DIR: /Applications/Xcode_26.6.app/Contents/Developer
+      AGENTSDOCK_APP_VARIANT: production
+      CI: '1'
+      EXPO_NO_TELEMETRY: '1'
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Require a canonical hosted dispatch and exact reviewed source
+        env:
+          SOURCE_SHA: ${{ inputs.source_sha }}
+          RUNNER_ENVIRONMENT: ${{ runner.environment }}
+        run: |
+          set -euo pipefail
+          test "$GITHUB_EVENT_NAME" = workflow_dispatch
+          test "$GITHUB_REPOSITORY" = ZhengyiLuo/AgentsDock
+          test "$RUNNER_ENVIRONMENT" = github-hosted
+          test "$RUNNER_OS" = macOS
+          [[ "$GITHUB_REF" = refs/heads/main || "$GITHUB_REF" = refs/heads/release/* ]] || exit 1
+          [[ "$SOURCE_SHA" =~ ^[0-9a-f]{40}$ ]] || exit 1
+          test "$SOURCE_SHA" = "$GITHUB_SHA"
+
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+        with:
+          repository: ZhengyiLuo/AgentsDock
+          ref: ${{ inputs.source_sha }}
+          persist-credentials: false
+
+      - uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v6
+        with:
+          version: 11.9.0
+          run_install: false
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        with:
+          node-version: 24
+          package-manager-cache: false
+
+      - name: Verify the checkout and workflow guards
+        env:
+          SOURCE_SHA: ${{ inputs.source_sha }}
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$SOURCE_SHA"
+          test "$SOURCE_SHA" = "$GITHUB_SHA"
+          node --test scripts/tests/ios_mobile_qa_workflow.test.mjs
+
+      - name: Install locked dependencies and validate source
+        working-directory: mobile-react
+        run: |
+          set -euo pipefail
+          pnpm install --frozen-lockfile
+          pnpm typecheck
+          node --test tests/expo-ui-touch-lifecycle.test.mjs tests/media-save-config.test.mjs tests/server-qr-scanner.test.mjs tests/backend-mark.test.mjs
+
+      - name: Generate the production native project and check dependency parity
+        working-directory: mobile-react
+        run: |
+          set -euo pipefail
+          xcodebuild -version
+          pnpm exec expo prebuild --platform ios --no-install
+          pod install --project-directory=ios
+          pnpm verify:ios-native
+          node --test tests/ios-release-metadata.test.mjs
+
+      - name: Build only the unsigned arm64 Release Simulator app
+        working-directory: mobile-react
+        env:
+          SOURCE_SHA: ${{ inputs.source_sha }}
+          RUNNER_ENVIRONMENT: ${{ runner.environment }}
+        run: |
+          set -euo pipefail
+          test "$GITHUB_EVENT_NAME" = workflow_dispatch
+          test "$GITHUB_REPOSITORY" = ZhengyiLuo/AgentsDock
+          test "$RUNNER_ENVIRONMENT" = github-hosted
+          test "$RUNNER_OS" = macOS
+          [[ "$GITHUB_REF" = refs/heads/main || "$GITHUB_REF" = refs/heads/release/* ]] || exit 1
+          [[ "$SOURCE_SHA" =~ ^[0-9a-f]{40}$ ]] || exit 1
+          test "$SOURCE_SHA" = "$GITHUB_SHA"
+          test "$(git rev-parse HEAD)" = "$SOURCE_SHA"
+          git diff --exit-code
+          git diff --cached --exit-code
+          unset SKIP_BUNDLING
+          export ENTRY_FILE="$PWD/index.ts"
+          export BUNDLE_COMMAND=export:embed
+          xcodebuild -quiet -workspace ios/AgentsDock.xcworkspace -scheme AgentsDock \
+            -configuration Release -sdk iphonesimulator \
+            -destination 'generic/platform=iOS Simulator' \
+            -derivedDataPath "$RUNNER_TEMP/agentsdock-ios-qa-derived-data" \
+            ARCHS=arm64 ONLY_ACTIVE_ARCH=YES \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY= build
+
+      - name: Verify and package only the app with its source manifest
+        working-directory: mobile-react
+        env:
+          SOURCE_SHA: ${{ inputs.source_sha }}
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$SOURCE_SHA"
+          test "$SOURCE_SHA" = "$GITHUB_SHA"
+          git diff --exit-code
+          git diff --cached --exit-code
+          APP="$RUNNER_TEMP/agentsdock-ios-qa-derived-data/Build/Products/Release-iphonesimulator/AgentsDock.app"
+          test -s "$APP/main.jsbundle"
+          test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$APP/Info.plist")" = com.zhengyiluo.ZenithDock
+          test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleSupportedPlatforms:0' "$APP/Info.plist")" = iPhoneSimulator
+          test "$(lipo -archs "$APP/AgentsDock")" = arm64
+          pnpm verify:ios-archive-abi "$APP"
+          STAGE="$RUNNER_TEMP/agentsdock-ios-qa-package"
+          mkdir "$STAGE"
+          COPYFILE_DISABLE=1 ditto "$APP" "$STAGE/AgentsDock.app"
+          export QA_APP="$STAGE/AgentsDock.app" QA_MANIFEST="$STAGE/manifest.json"
+          node --input-type=module <<'JS'
+          import assert from 'node:assert/strict';
+          import { createHash } from 'node:crypto';
+          import { execFileSync } from 'node:child_process';
+          import { readFileSync, writeFileSync } from 'node:fs';
+          import path from 'node:path';
+          const config = JSON.parse(readFileSync('app.json', 'utf8')).expo;
+          const app = process.env.QA_APP;
+          const info = JSON.parse(execFileSync('/usr/bin/plutil', ['-convert', 'json', '-o', '-', path.join(app, 'Info.plist')], { encoding: 'utf8' }));
+          assert.equal(info.CFBundleIdentifier, config.ios.bundleIdentifier);
+          assert.equal(info.CFBundleShortVersionString, config.version);
+          assert.equal(info.CFBundleVersion, config.ios.buildNumber);
+          assert.deepEqual(info.CFBundleSupportedPlatforms, ['iPhoneSimulator']);
+          const sha256 = file => createHash('sha256').update(readFileSync(file)).digest('hex');
+          const manifest = {
+            sourceCommit: process.env.SOURCE_SHA,
+            version: info.CFBundleShortVersionString,
+            build: info.CFBundleVersion,
+            bundleId: info.CFBundleIdentifier,
+            platform: 'iPhoneSimulator',
+            architecture: 'arm64',
+            configuration: 'Release',
+            signing: 'disabled',
+            sdk: info.DTSDKName,
+            xcode: info.DTXcodeBuild,
+            javascriptSHA256: sha256(path.join(app, 'main.jsbundle')),
+            executableSHA256: sha256(path.join(app, info.CFBundleExecutable)),
+            nativeAcceptance: 'pending',
+          };
+          writeFileSync(process.env.QA_MANIFEST, JSON.stringify(manifest, null, 2) + '\n', { flag: 'wx' });
+          JS
+          COPYFILE_DISABLE=1 tar -czf "$RUNNER_TEMP/agentsdock-ios-simulator-qa.tar.gz" \
+            -C "$STAGE" AgentsDock.app manifest.json
+
+      - name: Retain only the reviewed Simulator candidate for native QA
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: agentsdock-ios-simulator-${{ inputs.source_sha }}
+          path: ${{ runner.temp }}/agentsdock-ios-simulator-qa.tar.gz
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 7

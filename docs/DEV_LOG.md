@@ -1,5 +1,17 @@
 # Public development log
 
+## Mobile 0.1.4 preparation
+
+- Prepare current-main mobile code as iOS TestFlight build 196 and Android
+  sideload build 12, preserving both application identities and existing
+  signing identities. iOS 0.1.3 is already released; build 195 remains reserved.
+- This candidate uses current main. Mobile-only reasoning display and goal
+  presentation changes from the previous iOS release branch are not included;
+  unpublished build 195 interface changes are also excluded.
+- Source validation, native packaging, distribution and device acceptance are
+  separate steps. This entry is preparation only, not a publication receipt.
+- No desktop/server release, production service, or installed app is changed.
+
 ## Unreleased - Android server connection form
 
 - Present Android server management in a standard native Modal with a stable
