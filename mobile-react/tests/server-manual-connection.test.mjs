@@ -10,7 +10,7 @@ import ts from 'typescript'
 
 globalThis.IS_REACT_ACT_ENVIRONMENT = true
 const mocks = {
-  'react-native': `export const ActivityIndicator='Spinner',Modal='Modal',Pressable='Button',ScrollView='Scroll',Switch='Switch',View='View'; export const Alert={alert(...args){globalThis.__serverAlert=args}}; export const Platform={OS:'ios'}; export const StyleSheet={create:x=>x,hairlineWidth:1};`,
+  'react-native': `export const ActivityIndicator='Spinner',Modal='Modal',Pressable='Button',ScrollView='Scroll',Switch='Switch',View='View'; export const Alert={alert(...args){globalThis.__serverAlert=args}}; export const Platform={get OS(){return globalThis.__serverPlatform??'ios'}}; export const StyleSheet={create:x=>x,hairlineWidth:1};`,
   '@expo/ui/community/menu': `export const MenuView='Menu';`,
   'react-native-screens': `export const ScreenStack='ScreenStack',ScreenStackItem='ScreenStackItem';`,
   'react-native-safe-area-context': `export const SafeAreaView='SafeArea';`,
@@ -42,6 +42,56 @@ const profile = { id: 'saved', name: 'Saved server', serverUrl: 'http://127.0.0.
   connectionState: 'online', cachedUnreadCount: 0 }
 const noActions = { onSwitchProfile: async () => true, onTestConnection: async () => ({ ok: true, server_identity: 'test-identity' }),
   onCreateProfile: async () => 'created', onUpdateProfile: async () => {}, onRemoveProfile: async () => {} }
+
+test('Android uses a modal without native formSheet touch offsets and resets on dismissal', async () => {
+  globalThis.__serverPlatform = 'android'
+  let tree, closed = 0
+  const props = { profiles: [], activeProfileId: null, initialMode: 'add', ...noActions, onClose: () => { closed++ } }
+  try {
+    await act(async () => { tree = TestRenderer.create(React.createElement(ServerProfilesSheet, { ...props, visible: true })) })
+    assert.equal(tree.root.findAllByType('ScreenStack').length, 0)
+    assert.ok(input(tree, 'server-profiles-android-sheet'))
+    assert.equal(tree.root.findByType('Scroll').props.keyboardShouldPersistTaps, 'handled')
+    assert.equal(tree.root.findByType('Scroll').props.keyboardDismissMode, 'on-drag')
+    await act(async () => input(tree, 'server-profile-name').props.onChangeText('Unsaved'))
+    await act(async () => tree.root.findByType('Modal').props.onRequestClose())
+    assert.equal(closed, 1)
+    await act(async () => tree.update(React.createElement(ServerProfilesSheet, { ...props, visible: false })))
+    assert.equal(tree.root.findAllByType('Input').length, 0)
+    await act(async () => tree.update(React.createElement(ServerProfilesSheet, { ...props, visible: true })))
+    assert.equal(input(tree, 'server-profile-name').props.value, '')
+  } finally {
+    if (tree) await act(async () => tree.unmount())
+    delete globalThis.__serverPlatform
+  }
+})
+
+test('connection errors stay inside the editor near its test action and can be retried', async () => {
+  let tree, attempts = 0
+  await act(async () => { tree = TestRenderer.create(React.createElement(ServerProfilesManager, {
+    profiles: [], activeProfileId: null, initialMode: 'add', ...noActions,
+    onTestConnection: async () => {
+      if (++attempts < 3) throw new Error('Connection refused')
+      return { ok: true, server_identity: 'retry-identity' }
+    },
+  })) })
+  try {
+    await act(async () => input(tree, 'server-profile-url').props.onChangeText('http://example.invalid:7850'))
+    for (let attempt = 0; attempt < 2; attempt++) {
+      await act(async () => input(tree, 'server-profile-test').props.onPress())
+      const editor = input(tree, 'server-profile-editor')
+      const notice = editor.findByProps({ testID: 'server-profile-feedback' })
+      assert.equal(notice.props.accessibilityRole, 'alert')
+      assert.equal(notice.findByType('Text').props.children, 'Connection refused')
+      assert.equal(button(tree, 'Add').props.disabled, true)
+      assert.equal(input(tree, 'server-profile-test').props.disabled, false)
+    }
+    await act(async () => input(tree, 'server-profile-test').props.onPress())
+    assert.equal(tree.root.findAllByProps({ testID: 'server-profile-feedback' }).length, 0)
+    assert.ok(input(tree, 'server-profile-test-result'))
+    assert.equal(button(tree, 'Add').props.disabled, false)
+  } finally { await act(async () => tree.unmount()) }
+})
 
 test('server sheet exposes half/full native detents, dismisses and resets the editor on reopen', async () => {
   let tree, closed = 0

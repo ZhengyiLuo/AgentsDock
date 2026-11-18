@@ -2,6 +2,8 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import {
   ActivityIndicator,
   Alert,
+  Modal,
+  Platform,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -126,6 +128,19 @@ export function ServerProfilesSheet({ visible, onClose, ...props }: ServerProfil
   const colors = usePalette()
   const [scannerVisible, setScannerVisible] = useState(false)
   useEffect(() => { if (!visible) setScannerVisible(false) }, [visible])
+  // Android formSheet can desynchronize touch coordinates after keyboard/scroll
+  // transitions. Keep the same editor in a resizable native Modal instead.
+  if (Platform.OS === 'android') {
+    return <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
+      <View style={styles.androidBackdrop}>
+        <Pressable accessibilityRole="button" accessibilityLabel={t('Close server management')} style={StyleSheet.absoluteFill} onPress={onClose} />
+        <SafeAreaView testID="server-profiles-android-sheet" edges={['bottom']}
+          style={[styles.androidSheet, { backgroundColor: colors.surface }]}>
+          {visible ? <ServerProfilesManager {...props} onSelected={onClose} onClose={onClose} /> : null}
+        </SafeAreaView>
+      </View>
+    </Modal>
+  }
   // Keep the native presenter alive through dismissal, but never intercept home touches when closed.
   return <View style={StyleSheet.absoluteFill} pointerEvents={visible ? 'box-none' : 'none'}>
     <ScreenStack style={styles.sheet}>
@@ -245,6 +260,7 @@ export function ServerProfilesManager({
 
   const testConnection = async (candidate = draft, expectedIdentity = qrIdentity) => {
     if (!candidate?.serverUrl.trim()) return
+    dismissAppKeyboard()
     const request = ++testLease.current
     testController.current?.abort()
     const controller = new AbortController()
@@ -399,6 +415,16 @@ export function ServerProfilesManager({
     )
   }
 
+  const feedbackNotice = feedback ? <View
+    testID="server-profile-feedback"
+    accessibilityRole="alert"
+    accessibilityLiveRegion="polite"
+    style={[styles.feedback, {
+      backgroundColor: feedback.tone === 'error' ? `${colors.red}18` : feedback.tone === 'success' ? `${colors.green}18` : colors.raised,
+      borderColor: feedback.tone === 'error' ? `${colors.red}66` : feedback.tone === 'success' ? `${colors.green}66` : colors.border,
+    }]}
+  ><Text style={[typography.caption, { color: feedback.tone === 'error' ? colors.red : feedback.tone === 'success' ? colors.green : colors.text }]}>{t(feedback.message)}</Text></View> : null
+
   return <>
     <View style={[styles.sheetHeader, { borderColor: colors.border }]}>
       {draft ? <IconButton icon={ArrowLeft} disabled={Boolean(busy)} onPress={closeEditor} label={scanning ? 'Back to add server' : 'Back to servers'} testID="server-editor-back" /> : null}
@@ -412,7 +438,7 @@ export function ServerProfilesManager({
     style={styles.manager}
     contentContainerStyle={styles.managerContent}
     automaticallyAdjustKeyboardInsets={false}
-    keyboardDismissMode="interactive"
+    keyboardDismissMode={Platform.OS === 'android' ? 'on-drag' : 'interactive'}
     keyboardShouldPersistTaps="handled"
   >
     {!draft ? <View testID="server-profile-list">
@@ -443,13 +469,7 @@ export function ServerProfilesManager({
       ><Plus size={20} color={colors.text} /><Text style={[styles.profileName, { color: colors.text }]} localize>Add server</Text></Pressable>
     </View> : null}
 
-    {feedback ? <View
-      accessibilityRole="alert"
-      style={[styles.feedback, {
-        backgroundColor: feedback.tone === 'error' ? `${colors.red}18` : feedback.tone === 'success' ? `${colors.green}18` : colors.raised,
-        borderColor: feedback.tone === 'error' ? `${colors.red}66` : feedback.tone === 'success' ? `${colors.green}66` : colors.border,
-      }]}
-    ><Text style={[typography.caption, { color: feedback.tone === 'error' ? colors.red : feedback.tone === 'success' ? colors.green : colors.text }]}>{t(feedback.message)}</Text></View> : null}
+    {!draft ? feedbackNotice : null}
 
     {scanning ? <ServerQrScanner onScanned={acceptQr} /> : draft ? <View testID="server-profile-editor" style={styles.editor}>
       {!draft.profileId ? <SecondaryButton icon={ScanLine} label="Scan QR code" disabled={Boolean(busy)} onPress={() => {
@@ -549,7 +569,8 @@ export function ServerProfilesManager({
         </View>
       </View> : null}
 
-      {tested ? <View accessibilityRole="alert" style={[styles.testResult, { backgroundColor: `${duplicateProfile || testedIdentityChanged ? colors.orange : colors.green}18` }]}>
+      {feedbackNotice}
+      {tested ? <View testID="server-profile-test-result" accessibilityRole="alert" style={[styles.testResult, { backgroundColor: `${duplicateProfile || testedIdentityChanged ? colors.orange : colors.green}18` }]}>
         <Check size={16} color={duplicateProfile || testedIdentityChanged ? colors.orange : colors.green} />
         <Text style={[typography.caption, { flex: 1, color: duplicateProfile || testedIdentityChanged ? colors.orange : colors.green }]}>
           {duplicateProfile
@@ -565,6 +586,7 @@ export function ServerProfilesManager({
 
       <View style={styles.editorActions}>
         <SecondaryButton
+          testID="server-profile-test"
           icon={Wifi}
           label={busy === 'test' ? 'Testing…' : 'Test connection'}
           disabled={Boolean(busy) || !draft.serverUrl.trim()}
@@ -689,7 +711,8 @@ function PrimaryButton({ label, disabled, busy, onPress }: { label: string; disa
   >{busy ? <ActivityIndicator size="small" color={colors.onAccent} /> : null}<Text style={[styles.primaryButtonText, { color: colors.onAccent }]}>{t(label)}</Text></Pressable>
 }
 
-function SecondaryButton({ icon: Icon, label, accessibilityLabel, disabled, busy, compact, onPress }: {
+function SecondaryButton({ icon: Icon, label, accessibilityLabel, disabled, busy, compact, onPress, testID }: {
+  testID?: string
   icon?: typeof Plus
   label: string
   accessibilityLabel?: string
@@ -700,6 +723,7 @@ function SecondaryButton({ icon: Icon, label, accessibilityLabel, disabled, busy
 }) {
   const colors = usePalette()
   return <Pressable
+    testID={testID}
     accessibilityRole="button"
     accessibilityLabel={t(accessibilityLabel ?? label)}
     accessibilityState={{ disabled: Boolean(disabled), busy: Boolean(busy) }}
@@ -727,6 +751,8 @@ const styles = StyleSheet.create({
   unreadBadge: { minWidth: 21, minHeight: 20, borderRadius: radius.round, paddingHorizontal: 6, paddingVertical: 2, alignItems: 'center', justifyContent: 'center' },
   unreadText: { ...typography.caption, fontWeight: fontWeight.semibold },
   sheet: { flex: 1 },
+  androidBackdrop: { flex: 1, justifyContent: 'flex-end', backgroundColor: '#00000066' },
+  androidSheet: { height: '90%', width: '100%', maxWidth: 760, alignSelf: 'center', borderTopLeftRadius: radius.md, borderTopRightRadius: radius.md, overflow: 'hidden' },
   sheetSafeArea: { flex: 1 },
   sheetHeader: { minHeight: 64, paddingHorizontal: spacing.lg, paddingTop: spacing.sm, paddingBottom: spacing.xs, borderBottomWidth: StyleSheet.hairlineWidth, flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
   sheetHeadingCopy: { flex: 1, minWidth: 0 },

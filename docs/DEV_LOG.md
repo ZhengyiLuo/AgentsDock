@@ -1,5 +1,24 @@
 # Public development log
 
+## Unreleased - Android server connection form
+
+- Present Android server management in a standard native Modal with a stable
+  scrollable editor, avoiding the formSheet touch/keyboard path that left the
+  visible connection-test button unresponsive. Keep iOS native sheet detents.
+- Dismiss the keyboard when testing and show connection errors beside the
+  editor's test result and actions instead of above the offscreen form.
+  A successful authenticated test is still required before adding a server.
+- Verified on an isolated Android API 34 emulator with an independent Dev
+  package and a real isolated AgentsServer: three full keyboard/input/error/
+  correction/success/close/reopen cycles, plus Chinese dark-mode error and
+  success states. Added a server, handled the first-run notification permission
+  prompt, checked Back navigation, and confirmed the saved server after an app
+  restart. No provider messages or production server changes were involved.
+- Passed 44 profile/scanner tests, 16 request cancellation/deadline tests,
+  TypeScript and the native ARM64 Android Debug build. Added a repeatable
+  emulator flow. iOS presentation is covered by component regressions, not a
+  new iOS device run. Installed locally only; no production APK was published.
+
 ## Unreleased - Android in-app update reliability
 
 - Do not report an installed build as current when advertised update metadata
