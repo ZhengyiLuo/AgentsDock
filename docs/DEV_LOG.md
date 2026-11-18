@@ -1,5 +1,33 @@
 # Public development log
 
+## Mobile 0.1.4 — 2026-11-18
+
+- iOS build **196**, source `d08977f9`, is processed and available in the
+  existing internal TestFlight group. [Hosted upload and verification](https://github.com/ZhengyiLuo/AgentsDock/actions/runs/44388244794)
+  passed signing, archive/export, native ABI and Apple processing checks.
+  No external beta or App Store review submission was made.
+- Android build **12**, source `57b1b534`, is delivered as a signed ARM64
+  sideload APK with the established package identity and signing key.
+  APK SHA-256: `cebf8c588c4b578e6925ac73c844867f570f23b6d618e88772dd14844a08936c`.
+  Full release lint passed with 0 errors and 48 warnings using the supported
+  K1 compatibility analyzer, without suppressions. Signature, permissions,
+  bundled resources, archive integrity and 16 KB ZIP/native-library alignment
+  passed verification.
+- The exact Android APK passed fresh installation, first/cold launch, lower-case
+  terminal URI handling, visible version/build and persisted analytics opt-out
+  checks in an isolated offline API 36 ARM64 emulator. The iOS Release simulator
+  package passed first/cold launch on an isolated iPhone simulator; its original
+  hosted artifact, source identity, executable/JavaScript hashes and native ABI
+  were verified. Disposable simulator/emulator instances were shut down.
+- TypeScript, mobile contract tests, focused release/manifest regressions and
+  production JavaScript exports passed. Physical-device, live-provider and
+  existing-install upgrade acceptance remain unperformed for these builds.
+- These builds use current-main mobile features, not the older iOS release
+  branch's additional reasoning-display and goal-presentation UI. Android's
+  later source pin contains Android-only manifest corrections; iOS 196 was
+  not rebuilt. No public Android release, desktop/server release or production
+  service change was made.
+
 ## Android 0.1.4 manifest validation
 
 - Normalize the Android terminal URL scheme to lower case, while preserving
