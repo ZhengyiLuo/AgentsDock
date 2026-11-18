@@ -1,5 +1,22 @@
 # Public development log
 
+## Android 0.1.4 beta.1 published — 2026-11-18
+
+- Published the exact accepted build 12 APK as
+  [Android 0.1.4 beta.1](https://github.com/ZhengyiLuo/AgentsDock-Releases/releases/tag/android-v0.1.4-beta.1),
+  with beta updater metadata, checksums and the existing public signing certificate.
+  Source remains `57b1b534`; no binary was rebuilt or replaced.
+- All four public assets were downloaded without authentication and matched
+  the prepared bytes. The production updater selection code selects build 12
+  for installed build 11 and reports no newer version for build 12. Release
+  metadata was read using normal GitHub authentication because the verification
+  network's anonymous API quota was exhausted; this is not native installer
+  acceptance. The earlier physical-device, real-chat and upgrade limitations
+  remain unchanged.
+- Both repositories' stable desktop Latest remain `v1.0.11`. iOS 0.1.4 (196)
+  was reverified as valid and available to the existing internal TestFlight group;
+  no App Store review or external beta submission was made.
+
 ## Mobile 0.1.4 — 2026-11-18
 
 - iOS build **196**, source `d08977f9`, is processed and available in the
