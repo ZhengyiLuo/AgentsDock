@@ -292,6 +292,35 @@ describe('WorkspaceEditor', () => {
     expect(await screen.findByRole('textbox', { name: 'Contents of src/App.tsx' })).toHaveValue('unsaved edit')
   })
 
+  it('reveals a pinned message in its chat while preserving file drafts in both panes', async () => {
+    const otherSession = { ...session, id: 'chat-b', title: 'Chat B' }
+    render(<>
+      {[session, otherSession].map(current => <div key={current.id} data-testid={current.id}>
+        <WorkspaceEditor workspaceKey={`pin:${current.id}`} session={current} profileScope={null}
+          available capabilityVersion={6} tabbedPane chatContent={<p>{current.title} timeline</p>} />
+      </div>)}
+    </>)
+    for (const current of [session, otherSession]) {
+      act(() => window.dispatchEvent(new CustomEvent('agentsdock:open-workspace-path', {
+        detail: { sessionId: current.id, path: 'src/App.tsx' }
+      })))
+      const editor = await within(screen.getByTestId(current.id)).findByRole('textbox', { name: 'Contents of src/App.tsx' })
+      fireEvent.change(editor, { target: { value: `Unsaved ${current.title}` } })
+      expect(screen.getByText(`${current.title} timeline`)).not.toBeVisible()
+    }
+
+    act(() => window.dispatchEvent(new CustomEvent('agentsdock:find-event', {
+      detail: { sessionId: session.id, eventId: 'pinned-event' }
+    })))
+
+    expect(screen.getByText('Chat A timeline')).toBeVisible()
+    expect(screen.getByText('Chat B timeline')).not.toBeVisible()
+    expect(within(screen.getByTestId('chat-b')).getByRole('textbox', { name: 'Contents of src/App.tsx' })).toHaveValue('Unsaved Chat B')
+    fireEvent.click(within(screen.getByTestId('chat-a')).getByRole('tab', { name: 'App.tsx' }))
+    expect(await within(screen.getByTestId('chat-a')).findByRole('textbox', { name: 'Contents of src/App.tsx' })).toHaveValue('Unsaved Chat A')
+    expect(window.agentsDock.workspace.write).not.toHaveBeenCalled()
+  })
+
   it('offers the existing rename dialog for the owning chat when its pane tab is double-clicked', () => {
     const rename = vi.fn()
     window.addEventListener('agentsdock:rename-chat', rename)
