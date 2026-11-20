@@ -13,6 +13,10 @@
   No live provider calls or production server changes were needed.
 - Targeted workspace tests, TypeScript, production compilation, and compiled
   output verification passed.
+- Accepted local desktop build: development 0.2.0 (86), source `60314732`.
+  The signed package passed the same native checks with its actual ASAR loaded
+  by Electron; packaged bytes matched and its signature remained valid.
+  This was local UI acceptance, not a notarization or Gatekeeper test.
 
 ## 2026-11-18 — Mobile download documentation
 
