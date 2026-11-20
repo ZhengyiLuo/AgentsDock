@@ -920,6 +920,18 @@ export function WorkspaceEditor({
   }
 
   useEffect(() => {
+    const revealPinnedChat = (event: Event) => {
+      const detail = (event as CustomEvent<{ sessionId?: string; eventId?: string }>).detail
+      if (filesOnly || detail?.sessionId !== session.id || !detail.eventId || !acceptsWorkspaceRequest(detail)) return
+      referenceRequestSequence.current += 1
+      openRequestSequence.current += 1
+      showChat()
+    }
+    window.addEventListener('agentsdock:find-event', revealPinnedChat)
+    return () => window.removeEventListener('agentsdock:find-event', revealPinnedChat)
+  }, [filesOnly, session.id, onReturnToChat])
+
+  useEffect(() => {
     const open = (event: Event) => {
       const detail = (event as CustomEvent<{ sessionId?: string }>).detail
       if (!acceptsWorkspaceRequest(detail)) return
