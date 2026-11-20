@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState, type CSSProperties, type PointerEvent, type ReactNode } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type PointerEvent, type ReactNode } from 'react'
 import { Columns2, Columns3, Grid2X2, PanelLeft, Plus, Square } from 'lucide-react'
 import type { Session } from '@shared/types'
 import { t, useLocale } from '../lib/i18n'
@@ -10,8 +10,45 @@ import { ChatWorkspaceTabs } from './ChatWorkspaceTabs'
 import './ChatWorkspaceGrid.css'
 
 type ResizeAxis = 'column' | 'row' | 'first' | 'second'
+type GridRatios = Record<ResizeAxis, number>
+type GridSize = { width: number; height: number }
 
-const boundRatio = (value: number) => Math.max(25, Math.min(75, value))
+const MIN_PANE_WIDTH = 320
+const MIN_PANE_HEIGHT = 240
+const GRID_GAP = 6
+const clamp = (value: number, min: number, max: number) => Math.max(min, Math.min(max, value))
+
+function gridBounds(axis: ResizeAxis, ratios: GridRatios, size: GridSize): [number, number] {
+  if (axis === 'column' || axis === 'row') {
+    const extent = axis === 'column' ? size.width : size.height
+    const pixels = axis === 'column' ? MIN_PANE_WIDTH : MIN_PANE_HEIGHT
+    const minimum = extent > 0 ? clamp((pixels + GRID_GAP / 2) / extent * 100, 25, 50) : 25
+    return [minimum, 100 - minimum]
+  }
+  // The middle track has a full gap removed; the outer tracks lose half a gap.
+  // If the window cannot fit three minimum-width panes, share the space evenly.
+  const minimum = size.width > GRID_GAP * 2
+    ? Math.min(MIN_PANE_WIDTH, (size.width - GRID_GAP * 2) / 3) : 0
+  const edge = size.width > GRID_GAP * 2 ? Math.max(20, (minimum + GRID_GAP / 2) / size.width * 100)
+    : size.width > 0 ? 100 / 3 : 20
+  const middle = size.width > GRID_GAP * 2 ? Math.max(20, (minimum + GRID_GAP) / size.width * 100)
+    : size.width > 0 ? 100 / 3 : 20
+  return axis === 'first' ? [edge, Math.max(edge, ratios.second - middle)]
+    : [Math.min(100 - edge, ratios.first + middle), 100 - edge]
+}
+
+function fitGridRatios(ratios: GridRatios, size: GridSize): GridRatios {
+  const next = { ...ratios }
+  // First establish room for the last two columns, then constrain their boundary.
+  const [edge] = gridBounds('first', next, size)
+  const [lastMinimum] = gridBounds('second', { ...next, first: edge }, size)
+  next.first = clamp(next.first, edge, Math.max(edge, 100 - lastMinimum))
+  for (const axis of ['second', 'column', 'row'] as const) {
+    const [min, max] = gridBounds(axis, next, size)
+    next[axis] = clamp(next[axis], min, max)
+  }
+  return next
+}
 
 export function ChatWorkspaceGrid({ sidebarVisible, terminalOpen, onSidebarToggle, onTerminalToggle, sideChat }: {
   sidebarVisible: boolean
@@ -40,6 +77,22 @@ export function ChatWorkspaceGrid({ sidebarVisible, terminalOpen, onSidebarToggl
   const ratioRef = useRef(ratios)
   const gridRef = useRef<HTMLDivElement>(null)
   const finishResizeRef = useRef<(() => void) | null>(null)
+  const [gridSize, setGridSize] = useState<GridSize>({ width: 0, height: 0 })
+  const visibleRatios = fitGridRatios(ratios, gridSize)
+  ratioRef.current = visibleRatios
+
+  useLayoutEffect(() => {
+    const grid = gridRef.current
+    if (!grid) return
+    const measure = () => {
+      const { width, height } = grid.getBoundingClientRect()
+      setGridSize(previous => previous.width === width && previous.height === height ? previous : { width, height })
+    }
+    measure()
+    const observer = new ResizeObserver(measure)
+    observer.observe(grid)
+    return () => observer.disconnect()
+  }, [])
 
   useEffect(() => {
     const next = {
@@ -56,12 +109,10 @@ export function ChatWorkspaceGrid({ sidebarVisible, terminalOpen, onSidebarToggl
     return () => cancelAnimationFrame(frame)
   }, [count, threeColumns, activeId, barVisible])
 
-  const bounds = (axis: ResizeAxis) => axis === 'first' ? [20, ratioRef.current.second - 20]
-    : axis === 'second' ? [ratioRef.current.first + 20, 80] : [25, 75]
+  const bounds = (axis: ResizeAxis) => gridBounds(axis, ratioRef.current, gridRef.current?.getBoundingClientRect() ?? gridSize)
   const clampRatio = (axis: ResizeAxis, value: number) => {
-    if (axis === 'column' || axis === 'row') return boundRatio(value)
     const [min, max] = bounds(axis)
-    return Math.max(min, Math.min(max, value))
+    return clamp(value, min, max)
   }
   const ownsResize = useCallback(() => {
     const state = useAppStore.getState()
@@ -131,7 +182,7 @@ export function ChatWorkspaceGrid({ sidebarVisible, terminalOpen, onSidebarToggl
     role="separator"
     aria-label={t(axis === 'first' ? 'chatWorkspace.resizeFirstColumn' : axis === 'second' ? 'chatWorkspace.resizeLastColumn' : axis === 'column' ? 'chatWorkspace.resizeColumns' : 'chatWorkspace.resizeRows')}
     aria-orientation={axis === 'row' ? 'horizontal' : 'vertical'}
-    aria-valuemin={Math.round(bounds(axis)[0])} aria-valuemax={Math.round(bounds(axis)[1])} aria-valuenow={Math.round(ratios[axis])}
+    aria-valuemin={Math.round(bounds(axis)[0])} aria-valuemax={Math.round(bounds(axis)[1])} aria-valuenow={Math.round(visibleRatios[axis])}
     tabIndex={0}
     onPointerDown={event => beginResize(event, axis)}
     onDoubleClick={() => commitRatio(axis, axis === 'first' ? 100 / 3 : axis === 'second' ? 200 / 3 : 50)}
@@ -141,7 +192,7 @@ export function ChatWorkspaceGrid({ sidebarVisible, terminalOpen, onSidebarToggl
       if (![minus, plus, 'Home', 'End'].includes(event.key)) return
       event.preventDefault()
       notifyTimelineViewportLayout('begin')
-      commitRatio(axis, event.key === 'Home' ? bounds(axis)[0] : event.key === 'End' ? bounds(axis)[1] : ratios[axis] + (event.key === plus ? 5 : -5))
+      commitRatio(axis, event.key === 'Home' ? bounds(axis)[0] : event.key === 'End' ? bounds(axis)[1] : visibleRatios[axis] + (event.key === plus ? 5 : -5))
       requestAnimationFrame(() => notifyTimelineViewportLayout('end'))
     }}
   />
@@ -162,8 +213,8 @@ export function ChatWorkspaceGrid({ sidebarVisible, terminalOpen, onSidebarToggl
       </div>}
     </header>}
     <div ref={gridRef} className={`workspace-chat-grid chat-split-view${count >= 3 && !threeColumns ? ' short' : ''}`} data-pane-count={count} data-three-pane-layout={threeColumns ? 'columns' : 'split'}
-      style={{ '--workspace-column': `${ratios.column}%`, '--workspace-row': `${ratios.row}%`,
-        '--workspace-first-column': `${ratios.first}%`, '--workspace-second-column': `${ratios.second}%` } as CSSProperties}>
+      style={{ '--workspace-column': `${visibleRatios.column}%`, '--workspace-row': `${visibleRatios.row}%`,
+        '--workspace-first-column': `${visibleRatios.first}%`, '--workspace-second-column': `${visibleRatios.second}%` } as CSSProperties}>
       {CHAT_PANE_IDS.slice(0, count).map(pane => {
         const session = sessions.find(candidate => candidate.id === panes[pane])
         return <div key={session?.id ?? `empty:${pane}`} className="workspace-pane-slot" data-pane={pane}>

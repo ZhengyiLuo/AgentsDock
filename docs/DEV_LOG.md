@@ -1,5 +1,23 @@
 # Public development log
 
+## Unreleased — Workspace pane resize bounds
+
+- Keep workspace panes at a usable width and height when dragging dividers or
+  resizing with the keyboard. Fit two-, three-, and four-pane layouts to the
+  available window space, including saved layouts, without overwriting the
+  preferred sizes when the window shrinks.
+- Reproduced the collapsed panes and checked the correction in native offscreen
+  Electron with an isolated authenticated server and synthetic completed chats:
+  mouse extremes, keyboard Home/End, three-column layout, narrow windows, and
+  re-expansion. Personally exercised the divider controls in the built UI.
+  No live provider calls or production server changes were needed.
+- Targeted workspace tests, TypeScript, production compilation, and compiled
+  output verification passed.
+- Accepted local desktop build: development 0.2.0 (86), source `60314732`.
+  The signed package passed the same native checks with its actual ASAR loaded
+  by Electron; packaged bytes matched and its signature remained valid.
+  This was local UI acceptance, not a notarization or Gatekeeper test.
+
 ## 2026-11-18 — Mobile download documentation
 
 - Update the repository README's Android download from 0.1.1-beta.8 to the
