@@ -300,6 +300,12 @@ function TimelineSession({ profileId, profileGeneration, serverIdentity, session
   const items = useMemo(() => {
     if (projectionSource.current !== listSourceKey) {
       projectionSource.current = listSourceKey
+      // An empty first measurement belongs to the new list. It must not
+      // recover the scroll anchor from the conversation window we just left.
+      renderedRowsSeen.current = false
+      renderedRowsPresent.current = false
+      if (emptyRangeFrame.current != null) window.cancelAnimationFrame(emptyRangeFrame.current)
+      emptyRangeFrame.current = null
       semanticProjected.current = []
       projected.current = []
       firstItemIndex.current = FIRST_INDEX
@@ -437,6 +443,7 @@ function TimelineSession({ profileId, profileGeneration, serverIdentity, session
     : historicalLocation ?? sourceLocationRef.current.location
 
   const onItemsRendered = useCallback((rendered: readonly unknown[]) => {
+    if (projectionSource.current !== listSourceKey) return
     renderedRowsPresent.current = rendered.length > 0
     if (rendered.length) renderedRowsSeen.current = true
     if (emptyRangeFrame.current != null) window.cancelAnimationFrame(emptyRangeFrame.current)
@@ -484,15 +491,35 @@ function TimelineSession({ profileId, profileGeneration, serverIdentity, session
     })
   }, [initialViewState, sessionId])
 
-  const scrollToLoadedIndex = useCallback((index: number, behavior: 'auto' | 'smooth' = 'auto') => {
-    const lease = ++historySeekLease.current
-    const navigate = () => {
-      if (lease === historySeekLease.current) ref.current?.scrollToIndex({ index, align: 'center', behavior })
-    }
-    // Cancelling a saved-history restore mounts the live list on the next render.
-    if (ref.current) navigate()
-    else window.requestAnimationFrame(navigate)
+  const cancelAutomaticScroll = useCallback(() => {
+    openSettlingRef.current = false
+    if (openSettleTimer.current != null) window.clearTimeout(openSettleTimer.current)
+    if (latestScrollFrame.current != null) window.cancelAnimationFrame(latestScrollFrame.current)
+    if (workspaceLayoutFrame.current != null) window.cancelAnimationFrame(workspaceLayoutFrame.current)
+    if (workspaceLayoutFinishTimer.current != null) window.clearTimeout(workspaceLayoutFinishTimer.current)
+    openSettleTimer.current = null
+    latestScrollFrame.current = null
+    workspaceLayoutFrame.current = null
+    workspaceLayoutFinishTimer.current = null
+    workspaceLayoutAnchor.current = null
+    workspaceLayoutFinishing.current = false
   }, [])
+
+  const scrollToLoadedIndex = useCallback((index: number) => {
+    cancelAutomaticScroll()
+    setSeekingHistory(false)
+    const lease = ++historySeekLease.current
+    const itemKey = projected.current[index]?.key
+    const navigate = () => {
+      if (lease !== historySeekLease.current) return
+      cancelAutomaticScroll()
+      const currentIndex = itemKey ? projected.current.findIndex(item => item.key === itemKey) : index
+      if (currentIndex >= 0) ref.current?.scrollToIndex({ index: currentIndex, align: 'center', behavior: 'auto' })
+    }
+    // A pin can reveal a chat hidden behind a file tab. Let React reveal it and
+    // ResizeObserver measure the viewport before asking Virtuoso to position it.
+    window.requestAnimationFrame(() => window.requestAnimationFrame(navigate))
+  }, [cancelAutomaticScroll])
 
   const scrollToLatest = useCallback(() => {
     ref.current?.scrollToIndex({ index: 'LAST', align: 'end', behavior: 'auto' })
@@ -841,6 +868,7 @@ function TimelineSession({ profileId, profileGeneration, serverIdentity, session
 
   const openSearchResult = useCallback(async (result: TimelineSearchResult) => {
     cancelSavedViewRestore()
+    cancelAutomaticScroll()
     const directIndex = projected.current.findIndex(item => {
       if (timelineItemHasEvent(item, result.event_id)) return true
       const [start, end] = timelineItemSequenceRange(item)
@@ -862,15 +890,16 @@ function TimelineSession({ profileId, profileGeneration, serverIdentity, session
     } finally {
       if (lease === historySeekLease.current) setSeekingHistory(false)
     }
-  }, [cancelSavedViewRestore, scrollToLoadedIndex, sessionId])
+  }, [cancelAutomaticScroll, cancelSavedViewRestore, scrollToLoadedIndex, sessionId])
 
   const openPinnedEvent = useCallback(async (eventId: string) => {
     cancelSavedViewRestore()
+    cancelAutomaticScroll()
     const lease = ++historySeekLease.current
     const index = projected.current.findIndex(item => timelineItemHasEvent(item, eventId))
     if (index >= 0) {
       setSeekingHistory(false)
-      scrollToLoadedIndex(index, 'smooth')
+      scrollToLoadedIndex(index)
       return
     }
     setSeekingHistory(true)
@@ -885,7 +914,7 @@ function TimelineSession({ profileId, profileGeneration, serverIdentity, session
     } finally {
       if (lease === historySeekLease.current) setSeekingHistory(false)
     }
-  }, [cancelSavedViewRestore, openSearchResult, scrollToLoadedIndex, sessionId])
+  }, [cancelAutomaticScroll, cancelSavedViewRestore, openSearchResult, scrollToLoadedIndex, sessionId])
 
   useEffect(() => {
     const openSearch = (event: Event) => { if (timelineEventTargetsSession(event, sessionId, focused)) setSearchOpen(true) }
@@ -1043,11 +1072,9 @@ function TimelineSession({ profileId, profileGeneration, serverIdentity, session
     const current = historicalWindow
     if (!current || historicalPagingRef.current) return
     const action = historicalEdgeAction(current.page, direction)
-    if (action === 'none') return
-    if (action === 'return-live') {
-      returnToLatest()
-      return
-    }
+    // Virtual-list edge callbacks also fire while measuring a newly opened
+    // history window. Reaching its latest edge must not undo the user's jump.
+    if (action === 'none' || action === 'return-live') return
     const edgeSequence = direction === 'older'
       ? current.page.events[0]?.seq
       : current.page.events.at(-1)?.seq
@@ -1074,7 +1101,7 @@ function TimelineSession({ profileId, profileGeneration, serverIdentity, session
         setHistoricalPaging(null)
       }
     }
-  }, [historicalWindow, returnToLatest, sessionId, snapshot.events])
+  }, [historicalWindow, sessionId, snapshot.events])
   const header = useCallback(() => historicalWindow
     ? <div className="history-window"><span>{historicalPaging === 'older' ? t('timeline.ui.loadingEarlierMessages') : t('timeline.ui.viewingAnOlderPartOfThisChatScrollEitherDirectionToContinue')}</span><button onClick={returnToLatest}>{t('timeline.ui.returnToLatest')}</button></div>
     : hasOlderMessages || loadingOlder
