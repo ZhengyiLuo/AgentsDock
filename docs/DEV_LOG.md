@@ -18,6 +18,23 @@
   by Electron; packaged bytes matched and its signature remained valid.
   This was local UI acceptance, not a notarization or Gatekeeper test.
 
+## Unreleased — Pinned message navigation
+
+- Clicking an Inspector pin reveals its chat when a file is open, then lands
+  on the pinned message. Other split panes and unsaved drafts stay intact.
+- Cancel automatic scroll restoration when navigating explicitly. Reset
+  empty-range recovery when opening a different history window so the previous
+  position cannot replace the requested pin. Passive list measurements no
+  longer discard a historical window that includes the latest message.
+- Reproduced the failures and verified the correction in offscreen native
+  Electron through production IPC and an authenticated isolated AgentsServer,
+  using synthetic completed history and persisted pins. Exercised recent and
+  unloaded older pins, repeated jumps, file-to-chat navigation, split panes and
+  retained drafts. The implementer repeated six pointer-driven jumps in the
+  actual app. No live provider request or production service change was needed.
+- Focused timeline/editor regressions, TypeScript and production compilation
+  passed. This correction is app-side and requires no server update.
+
 ## 2026-11-18 — Mobile download documentation
 
 - Update the repository README's Android download from 0.1.1-beta.8 to the
