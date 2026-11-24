@@ -14,6 +14,8 @@ const virtuosoHarness = vi.hoisted(() => ({
   itemsRendered: null as ((items: unknown[]) => void) | null,
   isScrolling: null as ((value: boolean) => void) | null,
   startReached: null as (() => void) | null,
+  endReached: null as (() => void) | null,
+  rangeChanged: null as ((range: { startIndex: number; endIndex: number }) => void) | null,
   initialLocation: undefined as unknown,
   renderCount: 0
 }))
@@ -31,6 +33,8 @@ vi.mock('react-virtuoso', async () => {
       isScrolling?: (value: boolean) => void
       scrollerRef?: (node: HTMLElement | Window | null) => void
       startReached?: () => void
+      endReached?: () => void
+      rangeChanged?: (range: { startIndex: number; endIndex: number }) => void
       initialTopMostItemIndex?: unknown
     }, ref: React.ForwardedRef<unknown>) {
       virtuosoHarness.renderCount += 1
@@ -42,6 +46,8 @@ vi.mock('react-virtuoso', async () => {
       virtuosoHarness.itemsRendered = props.itemsRendered ?? null
       virtuosoHarness.isScrolling = props.isScrolling ?? null
       virtuosoHarness.startReached = props.startReached ?? null
+      virtuosoHarness.endReached = props.endReached ?? null
+      virtuosoHarness.rangeChanged = props.rangeChanged ?? null
       virtuosoHarness.initialLocation = props.initialTopMostItemIndex
       const setScroller = React.useCallback((node: HTMLDivElement | null) => {
         props.scrollerRef?.(node)
@@ -111,6 +117,8 @@ describe('Timeline search navigation', () => {
     virtuosoHarness.itemsRendered = null
     virtuosoHarness.isScrolling = null
     virtuosoHarness.startReached = null
+    virtuosoHarness.endReached = null
+    virtuosoHarness.rangeChanged = null
     virtuosoHarness.renderCount = 0
     virtuosoHarness.initialLocation = undefined
     search.mockReset()
@@ -217,10 +225,10 @@ describe('Timeline search navigation', () => {
 
     fireEvent.click(button)
 
-    expect(virtuosoHarness.scrollToIndex).toHaveBeenCalledWith(expect.objectContaining({
+    await waitFor(() => expect(virtuosoHarness.scrollToIndex).toHaveBeenCalledWith(expect.objectContaining({
       index: expect.any(Number),
       align: 'center'
-    }))
+    })))
     expect(around).not.toHaveBeenCalled()
     expect(screen.queryByPlaceholderText('Search full chat history')).not.toBeInTheDocument()
   })
@@ -296,6 +304,77 @@ describe('Timeline search navigation', () => {
     expect(search).not.toHaveBeenCalled()
     await waitFor(() => expect(around).toHaveBeenCalledWith(SESSION_ID, historicalEvent.seq, expect.any(Number)))
     expect(await screen.findByText('turn:seq-2:assistant')).toBeInTheDocument()
+  })
+
+  it('retains a pinned history window containing latest when mount reports its end', async () => {
+    findEvent.mockResolvedValue(result('pinned-event', 2))
+    around.mockResolvedValue({
+      session,
+      events: [timelineEvent(2, { id: 'pinned-event' }), timelineEvent(100)],
+      has_more: false,
+      next_before: null,
+      latest_seq: 100,
+      events_omitted_after: 0
+    })
+    render(<Timeline />)
+    act(() => window.dispatchEvent(new CustomEvent('agentsdock:find-event', {
+      detail: { sessionId: SESSION_ID, eventId: 'pinned-event' }
+    })))
+    await screen.findByText('turn:seq-2:assistant')
+
+    act(() => {
+      virtuosoHarness.rangeChanged?.({ startIndex: 0, endIndex: 1 })
+      virtuosoHarness.endReached?.()
+    })
+
+    expect(screen.getByText('turn:seq-2:assistant')).toBeInTheDocument()
+    expect(virtuosoHarness.initialLocation).toEqual({ index: 0, align: 'center' })
+    expect(around).toHaveBeenCalledTimes(1)
+    expect(historicalOlder).not.toHaveBeenCalled()
+  })
+
+  it('keeps a loaded pin selected after pending latest and workspace-layout scrolling', async () => {
+    vi.useFakeTimers()
+    try {
+      useAppStore.setState({ snapshots: { [SESSION_ID]: snapshot([timelineEvent(2), timelineEvent(100)]) } })
+      render(<Timeline />)
+      const scroller = screen.getByTestId('timeline-virtuoso')
+      Object.defineProperties(scroller, {
+        scrollHeight: { value: 1200 },
+        clientHeight: { value: 300 }
+      })
+      scroller.scrollTop = 20
+      act(() => {
+        for (const phase of ['begin', 'end']) window.dispatchEvent(new CustomEvent('agentsdock:timeline-viewport-layout', {
+          detail: { phase }
+        }))
+        window.dispatchEvent(new CustomEvent('agentsdock:find-event', {
+          detail: { sessionId: SESSION_ID, eventId: 'event-2' }
+        }))
+      })
+
+      await act(async () => vi.advanceTimersByTimeAsync(250))
+
+      expect(virtuosoHarness.scrollToIndex.mock.calls).toEqual([[{ index: 0, align: 'center', behavior: 'auto' }]])
+      expect(scroller.scrollTop).toBe(20)
+      expect(findEvent).not.toHaveBeenCalled()
+    } finally { vi.useRealTimers() }
+  })
+
+  it('finishes loading when a pin lookup resolves inside an already loaded row', async () => {
+    let finish!: (value: TimelineSearchResult) => void
+    findEvent.mockReturnValue(new Promise(resolve => { finish = resolve }))
+    const { container } = render(<Timeline />)
+    act(() => window.dispatchEvent(new CustomEvent('agentsdock:find-event', {
+      detail: { sessionId: SESSION_ID, eventId: 'stored-pin' }
+    })))
+    expect(container.querySelector('.timeline-seeking')).toBeVisible()
+
+    await act(async () => { finish(result('stored-pin', 100)) })
+
+    expect(container.querySelector('.timeline-seeking')).not.toBeInTheDocument()
+    await waitFor(() => expect(virtuosoHarness.scrollToIndex).toHaveBeenCalledWith({ index: 0, align: 'center', behavior: 'auto' }))
+    expect(around).not.toHaveBeenCalled()
   })
 
   it('reports a missing pin instead of silently doing nothing', async () => {
@@ -471,6 +550,32 @@ describe('Timeline search navigation', () => {
       act(() => virtuosoHarness.totalListHeightChanged?.(2500))
       await act(async () => vi.advanceTimersByTimeAsync(50))
       expect(virtuosoHarness.scrollToIndex).not.toHaveBeenCalled()
+    } finally { vi.useRealTimers() }
+  })
+
+  it('keeps the pinned anchor through an empty first measurement of historical rows', async () => {
+    vi.useFakeTimers()
+    try {
+      useAppStore.setState({ snapshots: { [SESSION_ID]: {
+        ...snapshot([timelineEvent(100)]),
+        viewState: { sessionId: SESSION_ID, topItemId: 'turn:seq-100:assistant', topItemSeq: 100, topOffset: 0, atBottom: false, updatedAt: 1 }
+      } } })
+      findEvent.mockResolvedValue(result('pinned-event', 2))
+      around.mockResolvedValue({ session, events: [timelineEvent(2, { id: 'pinned-event' }), timelineEvent(100)], has_more: false, next_before: null, latest_seq: 100 })
+      render(<Timeline />)
+      act(() => virtuosoHarness.itemsRendered?.([{}]))
+      await act(async () => window.dispatchEvent(new CustomEvent('agentsdock:find-event', {
+        detail: { sessionId: SESSION_ID, eventId: 'pinned-event' }
+      })))
+      const historicalList = screen.getByTestId('timeline-virtuoso')
+      Object.defineProperty(historicalList, 'clientHeight', { value: 600 })
+      expect(virtuosoHarness.initialLocation).toEqual({ index: 0, align: 'center' })
+
+      act(() => virtuosoHarness.itemsRendered?.([]))
+      await act(async () => vi.advanceTimersByTimeAsync(80))
+
+      expect(screen.getByTestId('timeline-virtuoso')).toBe(historicalList)
+      expect(virtuosoHarness.initialLocation).toEqual({ index: 0, align: 'center' })
     } finally { vi.useRealTimers() }
   })
 

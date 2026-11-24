@@ -6,11 +6,28 @@ Capability-gated Codex/Claude side conversations now use server-owned native
 context, synchronized history, live progress, follow-ups, scoped Stop and
 confirmed Clear. Closing preserves server work; temporary disconnection preserves
 the draft while disabling mutations. Model/effort selection remains inherited.
-Contract, transport, controller and rendered lifecycle tests pass. Native
-iPhone/iPad layout and real-provider acceptance are pending; the historical
-acceptance below does not establish coverage of this new feature.
+Contract, transport, controller and rendered lifecycle tests pass. The actual
+Release Simulator app, source `98d696dd`, passed real Codex/Claude native-context
+and follow-up checks through AgentsServer. iPhone dark and iPad light layouts
+were exercised with the keyboard. Verified side-only cancellation during active
+main work, normal main completion, saved cross-device replies, confirmed Clear
+with live synchronization, and keyboard focus after closing the sheet.
 
-## Current cross-chat update
+A stalled-request timeout retained the unsent draft and recovered on Refresh
+without changing main history or the cleared side snapshot. This is not physical
+offline/reconnect acceptance. No physical-device test or Codex Default-permission
+acceptance is claimed. Claude used Default; its empty test chat was created via
+the supported API because the existing mobile provider picker hides installed
+Claude when passive login readiness is unknown. All parent and side turns were
+then sent through the actual app; new Claude creation through that picker remains
+outside this acceptance.
+
+iOS 0.1.4 (197) is available to the existing internal TestFlight group: Apple
+verified the exact build as valid, unexpired and in beta testing after
+[the successful upload](https://github.com/ZhengyiLuo/AgentsDock/actions/runs/45491535384).
+No server deployment, Android publication or App Store production submission.
+
+## Historical cross-chat acceptance — 0.1.1 (171)
 
 Mobile now follows the current desktop source snapshot for async agent-message
 negotiation and display, durable route access management, and supported `@@`

@@ -1,6 +1,6 @@
 # Public development log
 
-## Unreleased — iOS native side chat
+## 2026-11-24 — iOS native Side chat, 0.1.4 (197)
 
 - Add a Side chat entry and separate conversation sheet for supported Codex
   and Claude chats. Use the server's native context and synchronized history;
@@ -11,10 +11,55 @@
 - Fence reads and actions to the selected server/profile/chat, reconcile
   ambiguous submissions without automatic replay, and refresh through existing
   revision events and foreground/reconnect events rather than polling.
-- Prepare iOS 0.1.4 (197) using the existing hosted Simulator QA and TestFlight
-  workflow. Source/API/controller/presentation checks passed; native provider
-  acceptance and TestFlight upload are still pending. No server deployment,
-  Android publication, or App Store submission is included.
+- Verified source `98d696dd` in the actual Release iPhone/iPad Simulator app
+  through real AgentsServer and native Codex/Claude: tool-result context,
+  follow-ups, shared history, side-only cancellation while main work continued,
+  confirmed Clear, keyboard focus after closing, and stalled-request recovery
+  retaining an unsent draft. Main native identity and history stayed intact.
+- Focused tests, TypeScript, broader mobile checks, hosted native build/parity,
+  and signed archive validation passed. Physical-device and physical network
+  disconnection testing are not claimed; the timeout test used an isolated
+  stalled server. Codex used full-access permissions and Claude used Default.
+- [TestFlight upload](https://github.com/ZhengyiLuo/AgentsDock/actions/runs/45491535384)
+  succeeded on attempt 1. Apple verified 0.1.4 (197) as valid, unexpired and
+  in beta testing, associated with the existing internal tester group.
+  Requires the existing native-context v2 synchronized server capability.
+  No server deployment, Android publication, or App Store production submission.
+
+## Unreleased — Workspace pane resize bounds
+
+- Keep workspace panes at a usable width and height when dragging dividers or
+  resizing with the keyboard. Fit two-, three-, and four-pane layouts to the
+  available window space, including saved layouts, without overwriting the
+  preferred sizes when the window shrinks.
+- Reproduced the collapsed panes and checked the correction in native offscreen
+  Electron with an isolated authenticated server and synthetic completed chats:
+  mouse extremes, keyboard Home/End, three-column layout, narrow windows, and
+  re-expansion. Personally exercised the divider controls in the built UI.
+  No live provider calls or production server changes were needed.
+- Targeted workspace tests, TypeScript, production compilation, and compiled
+  output verification passed.
+- Accepted local desktop build: development 0.2.0 (86), source `60314732`.
+  The signed package passed the same native checks with its actual ASAR loaded
+  by Electron; packaged bytes matched and its signature remained valid.
+  This was local UI acceptance, not a notarization or Gatekeeper test.
+
+## Unreleased — Pinned message navigation
+
+- Clicking an Inspector pin reveals its chat when a file is open, then lands
+  on the pinned message. Other split panes and unsaved drafts stay intact.
+- Cancel automatic scroll restoration when navigating explicitly. Reset
+  empty-range recovery when opening a different history window so the previous
+  position cannot replace the requested pin. Passive list measurements no
+  longer discard a historical window that includes the latest message.
+- Reproduced the failures and verified the correction in offscreen native
+  Electron through production IPC and an authenticated isolated AgentsServer,
+  using synthetic completed history and persisted pins. Exercised recent and
+  unloaded older pins, repeated jumps, file-to-chat navigation, split panes and
+  retained drafts. The implementer repeated six pointer-driven jumps in the
+  actual app. No live provider request or production service change was needed.
+- Focused timeline/editor regressions, TypeScript and production compilation
+  passed. This correction is app-side and requires no server update.
 
 ## 2026-11-18 — Mobile download documentation
 
