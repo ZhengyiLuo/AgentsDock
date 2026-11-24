@@ -9,7 +9,8 @@ import { useAppearanceStore } from '../src/store/useAppearanceStore'
 import { useLanguageStore } from '../src/store/useLanguageStore'
 import { dark, light } from '../src/theme'
 import { resetComponentStore } from './component-mocks/app-store'
-import { Alert, StyleSheet } from './component-mocks/react-native'
+import { Alert, Keyboard, StyleSheet } from './component-mocks/react-native'
+import { KeyboardController } from './component-mocks/native-wrappers'
 
 type State = ReturnType<typeof useSideChat>
 type Exchange = SyncedSideChat['exchanges'][number]
@@ -25,8 +26,15 @@ let stops: string[] = []
 let fontScale = 1
 let questionLimit = 512 * 1024
 const mounted: ReactTestRenderer[] = []
-function content() { return <AppTypographyProvider><SideChatSheetView state={state} title="Disposable chat" fontScale={fontScale} questionLimit={questionLimit} onClose={() => { closes++ }} /></AppTypographyProvider> }
-async function mount() { let tree!: ReactTestRenderer; await act(async () => { tree = create(content()) }); mounted.push(tree); return tree }
+function content(onClose = () => { closes++ }) { return <AppTypographyProvider><SideChatSheetView state={state} title="Disposable chat" fontScale={fontScale} questionLimit={questionLimit} onClose={onClose} /></AppTypographyProvider> }
+async function mount(options: { onClose?: () => void; onBlur?: () => void } = {}) {
+  let tree!: ReactTestRenderer
+  await act(async () => {
+    tree = create(content(options.onClose), { createNodeMock: element => element.type === 'TextInput' ? { blur: () => options.onBlur?.() } : null })
+  })
+  mounted.push(tree)
+  return tree
+}
 async function update(tree: ReactTestRenderer, changes: Partial<State>) { state = { ...state, ...changes }; await act(async () => { tree.update(content()) }) }
 function nodes(tree: ReactTestRenderer, id: string) { return tree.root.findAll(node => typeof node.type === 'string' && node.props.testID === id) }
 function node(tree: ReactTestRenderer, id: string) { const found = nodes(tree, id); assert.equal(found.length, 1, `Expected one ${id}`); return found[0] }
@@ -98,9 +106,29 @@ test('running reply exposes request-specific Stop, blocks Clear/Send, and close 
   assert.deepEqual(stops, ['request-a'])
   assert.equal(clears, 0)
   await act(async () => tree.root.findByType('Modal').props.onRequestClose())
-  assert.equal(closes, 2)
+  assert.equal(closes, 1)
   assert.deepEqual(stops, ['request-a'])
 })
+
+for (const action of ['button', 'native-request', 'accessibility-escape'] as const) {
+  test(`${action} close blurs and dismisses before unmount, with no late dismissal or cancellation`, async context => {
+    state.snapshot = { ...snapshot, exchanges: [running] }
+    const events: string[] = []
+    context.mock.method(Keyboard, 'dismiss', () => { events.push('rn-dismiss') })
+    context.mock.method(KeyboardController, 'dismiss', async () => { events.push('controller-dismiss') })
+    context.mock.method(globalThis, 'requestAnimationFrame', () => { events.push('animation-frame'); return 0 })
+    const tree = await mount({ onBlur: () => { events.push('input-blur') }, onClose: () => { events.push('close') } })
+    await type(tree, 'Unsent side draft')
+    const close = action === 'button' ? node(tree, 'side-chat-close').props.onPress
+      : action === 'native-request' ? tree.root.findByType('Modal').props.onRequestClose
+        : node(tree, 'side-chat-sheet').props.onAccessibilityEscape
+    await act(async () => { close(); close() })
+    assert.deepEqual(events, ['input-blur', 'rn-dismiss', 'controller-dismiss', 'close'])
+    assert.deepEqual(questions, [])
+    assert.deepEqual(stops, [])
+    assert.equal(clears, 0)
+  })
+}
 
 test('clearing requires explicit confirmation and ignores duplicate/stale confirmation callbacks', async () => {
   state.snapshot = { ...snapshot, exchanges: [completed] }

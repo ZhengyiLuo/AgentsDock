@@ -16,9 +16,14 @@ test('entry is capability gated and changing chat/server synchronously unmounts 
   assert.match(header, /sideChat: \{ minHeight: 44/)
 })
 
-test('native sheet opens and closes before deferred keyboard dismissal, with no implicit cancellation', () => {
+test('native sheet opens before keyboard dismissal but closes after releasing its input, without cancellation', () => {
   assert.match(screen, /onSideChat=\{\(\) => \{ setOpenSideChatScope\(sideChatScope\); requestAnimationFrame\(dismissAppKeyboard\) \}\}/)
-  assert.match(sheet, /const close = \(\) => \{ onClose\(\); requestAnimationFrame\(dismissAppKeyboard\) \}/)
+  const close = sheet.slice(sheet.indexOf('const close = () => {'), sheet.indexOf('const send = async () => {'))
+  assert.match(close, /if \(!mounted\.current \|\| closing\.current\) return/)
+  assert.ok(close.indexOf('input.current?.blur()') < close.indexOf('dismissAppKeyboard()'))
+  assert.ok(close.indexOf('dismissAppKeyboard()') < close.indexOf('onClose()'))
+  assert.doesNotMatch(close, /requestAnimationFrame|setTimeout/)
+  assert.match(sheet, /<TextInput ref=\{input\} testID="side-chat-question"/)
   assert.match(sheet, /<SheetCloseButton label="Close side chat" testID="side-chat-close" onPress=\{close\}/)
   assert.match(sheet, /useSideChat\(sessionId, true\)/)
   assert.doesNotMatch(sheet, /\.cancelRun\(|\.cancelSession\(|\.stopSession\(/)

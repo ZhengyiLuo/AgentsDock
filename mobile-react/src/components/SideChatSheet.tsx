@@ -37,11 +37,13 @@ export function SideChatSheetView({ state, title, fontScale, questionLimit, onCl
   const colors = usePalette()
   const [draft, setDraft] = useState('')
   const [submitting, setSubmitting] = useState(false)
+  const input = useRef<TextInput>(null)
   const scroll = useRef<ScrollView>(null)
   const nearBottom = useRef(true)
   const mounted = useRef(true)
   const sending = useRef(false)
   const confirmingClear = useRef(false)
+  const closing = useRef(false)
   const currentState = useRef(state)
   currentState.current = state
   const exchanges = state.snapshot?.exchanges ?? []
@@ -56,7 +58,15 @@ export function SideChatSheetView({ state, title, fontScale, questionLimit, onCl
     return () => { mounted.current = false }
   }, [])
 
-  const close = () => { onClose(); requestAnimationFrame(dismissAppKeyboard) }
+  const close = () => {
+    if (!mounted.current || closing.current) return
+    closing.current = true
+    // Release this sheet's responder while it is still mounted. A deferred
+    // global dismissal can otherwise blur the main composer after it refocuses.
+    input.current?.blur()
+    dismissAppKeyboard()
+    onClose()
+  }
   const send = async () => {
     if (!canSend || sending.current) return
     sending.current = true
@@ -146,7 +156,7 @@ export function SideChatSheetView({ state, title, fontScale, questionLimit, onCl
               <Square size={14} color={colors.text} /><Text style={[styles.actionText, { color: colors.text }]} localize>Stop side reply</Text>
             </Pressable>
           </View> : null}
-          <TextInput testID="side-chat-question" accessibilityLabel="Side chat question" placeholder={exchanges.length ? 'Ask a follow-up…' : 'Ask about this chat…'} value={draft} onChangeText={setDraft} multiline scrollEnabled
+          <TextInput ref={input} testID="side-chat-question" accessibilityLabel="Side chat question" placeholder={exchanges.length ? 'Ask a follow-up…' : 'Ask about this chat…'} value={draft} onChangeText={setDraft} multiline scrollEnabled
             editable={state.supported && state.available} textAlignVertical="top" style={[styles.input, { color: colors.text, backgroundColor: colors.background, borderColor: colors.border }]} placeholderTextColor={colors.muted} />
           {tooLong ? <Text testID="side-chat-limit" style={[styles.caption, { color: colors.red }]}>{t('Side questions are limited to {limit} characters.', { limit: questionLimit })}</Text> : null}
           <View style={styles.sendRow}>
