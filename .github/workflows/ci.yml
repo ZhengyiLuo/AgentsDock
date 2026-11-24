@@ -216,6 +216,9 @@ jobs:
         working-directory: mobile-react
       - run: pnpm test:server-setup
         working-directory: mobile-react
+      - name: Verify synchronized native side-chat boundaries and UI
+        run: pnpm test:side-chat
+        working-directory: mobile-react
       - name: Verify mobile provider defaults, approvals, and update discovery
         run: |
           node scripts/run-history-tests.mjs src/store/useAppStore.session-creation.test.ts --native-mocks

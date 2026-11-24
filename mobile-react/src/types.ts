@@ -1225,7 +1225,18 @@ export interface AgentTeamMailCapability extends ServerCapability {
   }
 }
 
+export interface SideQuestionsCapability {
+  available: boolean
+  version: number
+  backends: Array<'codex' | 'claude'>
+  max_question_chars: number
+  native_context?: boolean
+  sync?: boolean
+  runtime_settings?: boolean
+}
+
 export interface HealthCapabilities {
+  side_questions?: SideQuestionsCapability
   opencode_backend?: { available?: boolean; version?: number; permission_modes?: string[] }
   gemini_backend?: { available?: boolean; version?: number; client_capability?: string; permission_modes?: string[]; features?: Record<string, boolean> }
   codex_provider_v1?: { available?: boolean; per_chat?: boolean; per_chat_models?: boolean }
@@ -1247,7 +1258,7 @@ export interface HealthCapabilities {
   team_hub_v1?: TeamHubV1Capability
   server_updates?: ServerUpdatesCapability
   working_directory_completion?: WorkingDirectoryCompletionCapability
-  [key: string]: JsonValue | InteractiveProviderCapability | CursorBackendCapability | ScheduledJobsCapability | AgentEmergencyAlertsCapability | ProviderJobsAccessControlCapability | AgentTeamMailCapability | CrossChatHandoffsCapability | TeamHubV1Capability | ServerUpdatesCapability | WorkingDirectoryCompletionCapability | undefined
+  [key: string]: JsonValue | SideQuestionsCapability | InteractiveProviderCapability | CursorBackendCapability | ScheduledJobsCapability | AgentEmergencyAlertsCapability | ProviderJobsAccessControlCapability | AgentTeamMailCapability | CrossChatHandoffsCapability | TeamHubV1Capability | ServerUpdatesCapability | WorkingDirectoryCompletionCapability | undefined
 }
 
 export interface Health {

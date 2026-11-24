@@ -82,6 +82,7 @@
     "ios:phone": "expo run:ios --device 'iPhone 17 Pro'",
     "ios:pad": "expo run:ios --device 'iPad Pro 13-inch (M5)'",
     "test:history": "node scripts/run-history-tests.mjs",
+    "test:side-chat": "node scripts/run-history-tests.mjs src/lib/side-chat.test.ts && node scripts/run-history-tests.mjs src/lib/side-chat-controller.test.ts && node scripts/run-history-tests.mjs src/api/AgentServerClient.side-chat.test.ts --native-mocks && node scripts/run-component-tests.mjs tests/side-chat-hook.test.tsx && node scripts/run-component-tests.mjs tests/side-chat-ui.test.tsx --mock-markdown && node --test tests/side-chat-ui-contract.test.mjs",
     "test:analytics": "node scripts/run-history-tests.mjs src/lib/analytics-payload.test.ts --native-mocks && node scripts/run-history-tests.mjs src/lib/analytics-ios.test.ts --native-mocks",
     "test:upload": "node scripts/run-history-tests.mjs src/api/upload.test.ts --native-mocks",
     "test:downloads": "node scripts/run-file-transfer-tests.mjs",

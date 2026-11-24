@@ -18,7 +18,9 @@ import { useAppStore } from '../store/useAppStore'
 import { trackEvent } from '../lib/analytics'
 import { dismissAppKeyboard } from '../lib/app-keyboard'
 import { isWelcomeSession } from '../lib/welcome-session'
+import { sideChatSupported } from '../lib/side-chat'
 import { useFileViewer } from './file-viewer/FileViewerContext'
+import { SideChatSheet } from './SideChatSheet'
 
 export function ChatScreen({ sessionId, compact, inlineInspectorAvailable, onBack, onOptions, onSearch, onToggleInspector, onReview, onSetupServer, onOpenMcp }: { sessionId: string; compact: boolean; inlineInspectorAvailable: boolean; onBack: () => void; onOptions: () => void; onSearch: () => void; onToggleInspector: () => void; onReview: (runId: string) => void; onSetupServer: () => void; onOpenMcp: () => void }) {
   const colors = usePalette()
@@ -36,6 +38,13 @@ export function ChatScreen({ sessionId, compact, inlineInspectorAvailable, onBac
   const composerKeyboardConstrained = Platform.OS === 'ios' ? iosKeyboard.avoidanceEnabled : keyboardVisible
   const [keyboardSettleRequest, setKeyboardSettleRequest] = useState(0)
   const backend = useAppStore(state => state.sessions.find(value => value.id === sessionId)?.backend)
+  const health = useAppStore(state => state.health)
+  const activeProfileId = useAppStore(state => state.activeProfileId)
+  const profileGeneration = useAppStore(state => state.profileGeneration)
+  const sideChatScope = `${activeProfileId ?? ''}:${profileGeneration}:${sessionId}`
+  const [openSideChatScope, setOpenSideChatScope] = useState<string | null>(null)
+  const supportsSideChat = !welcome && sideChatSupported(health, backend)
+  useEffect(() => { setOpenSideChatScope(null) }, [sideChatScope])
   const completeIOSKeyboardControllerHide = useCallback(() => {
     if (Platform.OS !== 'ios') return
     dispatchIOSKeyboard({ type: 'keyboard-did-hide' })
@@ -112,7 +121,7 @@ export function ChatScreen({ sessionId, compact, inlineInspectorAvailable, onBac
   }, [])
   const content = (
     <View style={[styles.root, { backgroundColor: colors.background }]}>
-      <ChatHeader sessionId={sessionId} compact={compact} inlineInspectorAvailable={inlineInspectorAvailable} onBack={onBack} onOptions={onOptions} onSearch={onSearch} onFiles={() => { trackEvent('open_file_clicked'); dismissAppKeyboard(); openWorkspace(sessionId) }} onToggleInspector={onToggleInspector} onSetupServer={onSetupServer} />
+      <ChatHeader sessionId={sessionId} compact={compact} inlineInspectorAvailable={inlineInspectorAvailable} onBack={onBack} onOptions={onOptions} onSearch={onSearch} onFiles={() => { trackEvent('open_file_clicked'); dismissAppKeyboard(); openWorkspace(sessionId) }} onToggleInspector={onToggleInspector} onSetupServer={onSetupServer} sideChatSupported={supportsSideChat} onSideChat={() => { setOpenSideChatScope(sideChatScope); requestAnimationFrame(dismissAppKeyboard) }} />
       {!welcome && backend ? <RuntimeHealthNotice backend={backend} sessionId={sessionId} /> : null}
       <KeyboardAvoidingView
             style={styles.body}
@@ -146,6 +155,7 @@ export function ChatScreen({ sessionId, compact, inlineInspectorAvailable, onBac
               <Composer sessionId={sessionId} keyboardVisible={composerKeyboardConstrained} onSent={() => setScrollRequest(value => value + 1)} onOpenMcp={onOpenMcp} />
             </View>
       </KeyboardAvoidingView>
+      {supportsSideChat && openSideChatScope === sideChatScope ? <SideChatSheet key={sideChatScope} sessionId={sessionId} onClose={() => setOpenSideChatScope(null)} /> : null}
     </View>
   )
   if (welcome) return content

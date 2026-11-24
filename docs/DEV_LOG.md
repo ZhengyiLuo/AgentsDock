@@ -1,5 +1,21 @@
 # Public development log
 
+## Unreleased — iOS native side chat
+
+- Add a Side chat entry and separate conversation sheet for supported Codex
+  and Claude chats. Use the server's native context and synchronized history;
+  never create a main turn or substitute a copied visible transcript.
+- Support follow-ups, streamed side activity, reopening saved replies, and
+  stopping only the side reply. Clearing requires confirmation and leaves the
+  main chat unchanged. Hide the feature on unsupported servers/providers.
+- Fence reads and actions to the selected server/profile/chat, reconcile
+  ambiguous submissions without automatic replay, and refresh through existing
+  revision events and foreground/reconnect events rather than polling.
+- Prepare iOS 0.1.4 (197) using the existing hosted Simulator QA and TestFlight
+  workflow. Source/API/controller/presentation checks passed; native provider
+  acceptance and TestFlight upload are still pending. No server deployment,
+  Android publication, or App Store submission is included.
+
 ## 2026-11-18 — Mobile download documentation
 
 - Update the repository README's Android download from 0.1.1-beta.8 to the
