@@ -1,8 +1,8 @@
-import { useEffect, useMemo, useSyncExternalStore } from 'react'
+import { useEffect, useMemo, useRef, useSyncExternalStore } from 'react'
 import { AppState as NativeAppState } from 'react-native'
 import { client, useAppStore } from '../store/useAppStore'
 import { sideChatSupported, sideQuestionLimit } from '../lib/side-chat'
-import { SideChatController } from '../lib/side-chat-controller'
+import { SideChatController, type SideChatPendingReceipt } from '../lib/side-chat-controller'
 
 export function useSideChat(sessionId: string, visible: boolean) {
   const backend = useAppStore(state => state.sessions.find(session => session.id === sessionId)?.backend)
@@ -19,6 +19,15 @@ export function useSideChat(sessionId: string, visible: boolean) {
   const validation = connection.validationRevision
   const identity = health?.server_identity
   const instance = health?.server_instance_id
+  const owner = `${profileId ?? ''}:${generation}:${sessionId}:${backend ?? ''}`
+  const knownServer = useRef({ owner, identity })
+  // A transient health failure may clear metadata. Retain only the uncertain
+  // mutation receipt through that gap, never render a prior owner's snapshot.
+  if (knownServer.current.owner !== owner || (identity && identity !== knownServer.current.identity)) {
+    knownServer.current = { owner, identity }
+  }
+  const pendingReceipt = useMemo<SideChatPendingReceipt>(() => ({ current: null }),
+    [owner, knownServer.current.identity])
   const supported = sideChatSupported(health, backend)
   const available = Boolean(visible && supported && profileId && selected === sessionId
     && connected && !connecting && !switching && !adopting && connection.isValidated)
@@ -36,7 +45,7 @@ export function useSideChat(sessionId: string, visible: boolean) {
       && current.health?.server_identity === identity && current.health?.server_instance_id === instance
       && current.sessions.find(session => session.id === sessionId)?.backend === backend
       && sideChatSupported(current.health, backend)
-  }, limit), [available, connection, sessionId, validation, profileId, generation, identity, instance, backend, limit])
+  }, limit, undefined, pendingReceipt), [available, connection, sessionId, validation, profileId, generation, identity, instance, backend, limit, pendingReceipt])
   const state = useSyncExternalStore(controller.subscribe, controller.getSnapshot, controller.getSnapshot)
 
   useEffect(() => {
@@ -58,6 +67,7 @@ export function useSideChat(sessionId: string, visible: boolean) {
 
   return {
     ...state, supported, available,
+    offline: !health || !connected || connecting || Boolean(switching) || adopting || !connection.isValidated,
     refresh: controller.refresh, submit: controller.submit, stop: controller.stop, clear: controller.clear,
   }
 }

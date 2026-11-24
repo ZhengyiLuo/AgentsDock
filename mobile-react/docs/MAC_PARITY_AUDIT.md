@@ -1,5 +1,15 @@
 # Mobile / Mac parity — 2026-09-10
 
+## iOS side-chat update — 2026-11-24
+
+Capability-gated Codex/Claude side conversations now use server-owned native
+context, synchronized history, live progress, follow-ups, scoped Stop and
+confirmed Clear. Closing preserves server work; temporary disconnection preserves
+the draft while disabling mutations. Model/effort selection remains inherited.
+Contract, transport, controller and rendered lifecycle tests pass. Native
+iPhone/iPad layout and real-provider acceptance are pending; the historical
+acceptance below does not establish coverage of this new feature.
+
 ## Current cross-chat update
 
 Mobile now follows the current desktop source snapshot for async agent-message

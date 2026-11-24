@@ -69,6 +69,16 @@ choices follow the server catalog, and changing OpenCode permissions starts a
 new native context while preserving the displayed chat history. Unsupported
 Gemini fork and provider-reload controls are not offered.
 
+Supported Codex and Claude chats expose **Side chat** in the header. Questions
+use the provider's native context, not a copied transcript; replies and follow-ups
+synchronize through AgentsServer. Closing the sheet does not stop a reply.
+**Stop side reply** cancels only that request, while confirmed **Clear** removes
+the side conversation from connected devices without changing the main chat.
+Codex captures main context on its first side question; Clear starts fresh from
+the latest context. The entry requires native-context v2 synchronized side-chat
+capability and is hidden for other providers or older servers. Mobile inherits
+the side conversation's model/effort; a separate side-model picker is not included.
+
 Gemini API availability does not imply workspace trust. Cross-chat mentions
 require its native AgentsDock MCP tool to load in that chat's directory. If
 ordinary replies work but communication is blocked, review folder trust and MCP

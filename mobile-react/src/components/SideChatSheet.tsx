@@ -116,8 +116,8 @@ export function SideChatSheetView({ state, title, fontScale, questionLimit, onCl
           onContentSizeChange={() => { if (nearBottom.current) scroll.current?.scrollToEnd({ animated: false }) }}>
           <Text style={[styles.bodyText, { color: colors.muted }]} localize>Ask using this chat's native context without interrupting the main reply.</Text>
           <Text style={[styles.caption, { color: colors.muted }]} localize>Side replies may use tools in the same workspace.</Text>
-          {!state.supported ? <Text testID="side-chat-unsupported" style={[styles.bodyText, { color: colors.orange }]} localize>Side chat requires a supported Codex or Claude chat and an updated AgentsServer.</Text>
-            : !state.available ? <Text testID="side-chat-offline" accessibilityLiveRegion="polite" style={[styles.bodyText, { color: colors.orange }]} localize>Reconnect to this server to use side chat. Saved replies reload when connected.</Text> : null}
+          {state.offline ? <Text testID="side-chat-offline" accessibilityLiveRegion="polite" style={[styles.bodyText, { color: colors.orange }]} localize>Reconnect to this server to use side chat. Saved replies reload when connected.</Text>
+            : !state.supported ? <Text testID="side-chat-unsupported" style={[styles.bodyText, { color: colors.orange }]} localize>Side chat requires a supported Codex or Claude chat and an updated AgentsServer.</Text> : null}
           {state.loading ? <View testID="side-chat-loading" style={styles.status}><ActivityIndicator color={colors.blue} /><Text style={[styles.bodyText, { color: colors.muted }]} localize>Loading side chat…</Text></View> : null}
           {state.snapshot?.model ? <Text style={[styles.caption, { color: colors.muted }]}>{state.snapshot.model}{state.snapshot.effort ? ` · ${state.snapshot.effort}` : ''}</Text> : null}
           {!exchanges.length && !state.loading && state.available && state.snapshot ? <Text testID="side-chat-empty" style={[styles.bodyText, { color: colors.muted }]} localize>Ask a question, then continue with follow-ups here. Your main chat stays separate.</Text> : null}

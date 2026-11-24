@@ -6,7 +6,7 @@ import type { SideQuestionInput, SyncedSideChat } from './side-chat'
 const empty = (revision = 0, side = 'side-a'): SyncedSideChat => ({
   session_id: 'chat-a', side_chat_id: side, revision, last_request_id: null, exchanges: [],
 })
-function answer(input: SideQuestionInput, revision: number, status: 'running' | 'completed' = 'completed'): SyncedSideChat {
+function answer(input: Pick<SideQuestionInput, 'request_id' | 'question'>, revision: number, status: 'running' | 'completed' = 'completed'): SyncedSideChat {
   return { ...empty(revision), last_request_id: input.request_id, exchanges: [{
     request_id: input.request_id, question: input.question, status, backend: 'codex',
     ...(status === 'completed' ? { answer: 'Side answer' } : {}), created_at: 'now', updated_at: 'now',
@@ -103,6 +103,28 @@ test('explicit server rejection does not trap a different corrected question', a
   await controller.refresh()
   assert.equal(await controller.submit('First?'), false)
   assert.equal(await controller.submit('Corrected?'), true)
+})
+
+test('late acknowledgement after failed reconciliation consumes the retained retry without resending', async () => {
+  let accepted: SyncedSideChat | null = null, reads = 0, submits = 0
+  const { controller } = setup({
+    readSyncedSideChat: async () => {
+      if (++reads === 2) throw new Error('still offline')
+      return accepted ?? empty()
+    },
+    submitSyncedSideChat: async (_session, input) => {
+      submits++; accepted = answer(input, submits)
+      if (submits === 1) throw new Error('lost acknowledgement')
+      return accepted
+    },
+  })
+  await controller.refresh()
+  assert.equal(await controller.submit('Question?'), false)
+  await controller.refresh() // Later foreground/WebSocket reconciliation.
+  assert.equal(await controller.submit('Question?'), true)
+  assert.equal(submits, 1)
+  assert.equal(await controller.submit('New follow-up'), true)
+  assert.equal(submits, 2)
 })
 
 test('Stop targets only the matching active side request; close never cancels server work', async () => {

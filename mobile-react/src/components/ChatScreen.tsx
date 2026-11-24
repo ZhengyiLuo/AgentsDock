@@ -155,7 +155,9 @@ export function ChatScreen({ sessionId, compact, inlineInspectorAvailable, onBac
               <Composer sessionId={sessionId} keyboardVisible={composerKeyboardConstrained} onSent={() => setScrollRequest(value => value + 1)} onOpenMcp={onOpenMcp} />
             </View>
       </KeyboardAvoidingView>
-      {supportsSideChat && openSideChatScope === sideChatScope ? <SideChatSheet key={sideChatScope} sessionId={sessionId} onClose={() => setOpenSideChatScope(null)} /> : null}
+      {/* A temporary health/validation loss must not discard the open draft.
+          The hook still gates every mutation on the current verified scope. */}
+      {!welcome && openSideChatScope === sideChatScope ? <SideChatSheet key={sideChatScope} sessionId={sessionId} onClose={() => setOpenSideChatScope(null)} /> : null}
     </View>
   )
   if (welcome) return content

@@ -217,6 +217,46 @@ test('closing or unmounting during a submitted answer preserves remote work', as
   assert.equal(api.calls.reads.length, 1)
 })
 
+for (const restoredInstance of ['instance-a', 'instance-after-restart']) test(`same-owner reconnect (${restoredInstance}) retains an uncertain receipt without a duplicate POST`, async () => {
+  const api = transport()
+  api.connection.submitSyncedSideChat = async (session, input) => {
+    api.calls.submits.push([session, input])
+    throw new Error('The acknowledgment connection was lost')
+  }
+  api.connection.readSyncedSideChat = async session => {
+    api.calls.reads.push(session)
+    if (api.calls.reads.length === 1) return document()
+    if (api.calls.reads.length === 2) throw new Error('History reconciliation is temporarily unavailable')
+    const submitted = api.calls.submits[0][1]
+    return { ...document(3), last_request_id: submitted.request_id, exchanges: [{
+      request_id: submitted.request_id, question: submitted.question, answer: 'The accepted answer',
+      status: 'completed', created_at: 'now', updated_at: 'later',
+    }] }
+  }
+  await render()
+  await act(async () => { assert.equal(await current.submit('Question with uncertain acknowledgment'), false) })
+  assert.equal(api.calls.submits.length, 1)
+  assert.equal(api.calls.reads.length, 2, 'a lost acknowledgment gets one reconciliation, never automatic POST replay')
+  const requestId = api.calls.submits[0][1].request_id
+  await act(async () => {
+    useAppStore.setState({ health: null, connected: false, connecting: true, syncStatus: 'reconnecting' })
+  })
+  assert.equal(current.available, false)
+  assert.equal(current.snapshot, null, 'previous history must not remain visible without an authenticated scope')
+  assert.equal(api.observers.size, 0)
+  await act(async () => {
+    useAppStore.setState({ health: { ...health, server_instance_id: restoredInstance }, connected: true, connecting: false, syncStatus: 'live' })
+  })
+  assert.equal(useAppStore.getState().profileGeneration, 1)
+  assert.equal(current.snapshot?.last_request_id, requestId)
+  assert.equal(current.snapshot?.exchanges[0].status, 'completed')
+  assert.equal(api.calls.reads.length, 3)
+  let accepted = false
+  await act(async () => { accepted = await current.submit('Question with uncertain acknowledgment') })
+  assert.equal(api.calls.submits.length, 1, 'explicit same-question retry must acknowledge the accepted receipt, not issue a new POST')
+  assert.equal(accepted, true)
+})
+
 test('StrictMode effect replay cleans old listeners and ignores superseded read completion', async () => {
   const api = transport()
   const reads: Array<ReturnType<typeof deferred<SyncedSideChat>>> = []

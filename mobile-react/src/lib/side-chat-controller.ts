@@ -14,6 +14,9 @@ export interface SideChatState {
   error: string | null
 }
 
+/** Retained only by the mounted sheet's exact server/profile/chat owner. */
+export interface SideChatPendingReceipt { current: SideQuestionInput | null }
+
 const initialState: SideChatState = { snapshot: null, loading: false, mutating: false, error: null }
 let requestSequence = 0
 function newRequestId(): string {
@@ -28,7 +31,8 @@ export class SideChatController {
   private epoch = 0
   private read: Promise<void> | null = null
   private invalidatedDuringRead = false
-  private pendingSubmission: SideQuestionInput | null = null
+  private get pendingSubmission(): SideQuestionInput | null { return this.receipt.current }
+  private set pendingSubmission(value: SideQuestionInput | null) { this.receipt.current = value }
 
   constructor(
     private readonly transport: SideChatTransport,
@@ -36,6 +40,7 @@ export class SideChatController {
     private readonly isCurrent: () => boolean,
     private readonly questionLimit: number,
     private readonly requestId = newRequestId,
+    private readonly receipt: SideChatPendingReceipt = { current: null },
   ) {}
 
   getSnapshot = (): SideChatState => this.state
@@ -55,8 +60,7 @@ export class SideChatController {
     // A clear advances revision too; never restore older history afterwards.
     if (this.state.snapshot && snapshot.revision < this.state.snapshot.revision) return
     this.update({ snapshot })
-    if (this.pendingSubmission && (snapshot.side_chat_id !== this.pendingSubmission.side_chat_id
-      || snapshot.exchanges.some(exchange => exchange.request_id === this.pendingSubmission?.request_id))) {
+    if (this.pendingSubmission && snapshot.side_chat_id !== this.pendingSubmission.side_chat_id) {
       this.pendingSubmission = null
     }
   }
@@ -107,6 +111,14 @@ export class SideChatController {
         request_id: this.requestId(), question, side_chat_id: snapshot.side_chat_id,
         ...(snapshot.last_request_id ? { after_request_id: snapshot.last_request_id } : {}),
       }, this.questionLimit)
+      if (this.pendingSubmission && snapshot.exchanges.some(exchange => exchange.request_id === this.pendingSubmission?.request_id)) {
+        // A later event/foreground read can acknowledge a previously uncertain
+        // POST after submit(false) retained the draft. Its explicit retry must
+        // acknowledge that receipt, not execute the same native question again.
+        const acknowledgedQuestion = this.pendingSubmission.question
+        this.pendingSubmission = null
+        if (acknowledgedQuestion === input.question) return true
+      }
       if (this.pendingSubmission) {
         if (this.pendingSubmission.question !== input.question || this.pendingSubmission.side_chat_id !== snapshot.side_chat_id) {
           throw new Error('The previous side reply is unconfirmed. Refresh or retry the same question first.')

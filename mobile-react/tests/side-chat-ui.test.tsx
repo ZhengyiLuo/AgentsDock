@@ -40,7 +40,7 @@ beforeEach(() => {
   resetComponentStore({ fontScale: 1 })
   useLanguageStore.setState({ locale: 'en' })
   useAppearanceStore.setState({ preference: 'dark' })
-  state = { supported: true, available: true, loading: false, mutating: false, error: null, snapshot,
+  state = { supported: true, available: true, offline: false, loading: false, mutating: false, error: null, snapshot,
     refresh: async () => { refreshes++ }, submit: async question => { questions.push(question); return true }, stop: async id => { stops.push(id) }, clear: async () => { clears++ } }
 })
 afterEach(async () => { for (const tree of mounted.splice(0)) await act(async () => { tree.unmount() }) })
@@ -141,17 +141,31 @@ test('new replies arriving after Clear confirmation require a fresh review', asy
 })
 
 test('offline/unsupported states disable requests and reconnection can restore controls', async () => {
-  state.available = false; state.snapshot = { ...snapshot, exchanges: [running] }
+  state.available = false; state.offline = true; state.snapshot = { ...snapshot, exchanges: [running] }
   const tree = await mount()
   assert.equal(nodes(tree, 'side-chat-offline').length, 1)
   for (const id of ['side-chat-send', 'side-chat-clear', 'side-chat-refresh', 'side-chat-stop']) assert.equal(node(tree, id).props.disabled, true)
   assert.equal(node(tree, 'side-chat-question').props.editable, false)
-  await update(tree, { supported: false })
+  await update(tree, { supported: false, offline: false })
   assert.equal(nodes(tree, 'side-chat-unsupported').length, 1)
-  await update(tree, { supported: true, available: true, snapshot })
+  await update(tree, { supported: true, available: true, offline: false, snapshot })
   assert.equal(node(tree, 'side-chat-question').props.editable, true)
   await type(tree, 'Connected again')
   assert.equal(node(tree, 'side-chat-send').props.disabled, false)
+})
+
+test('health loss keeps the draft in the already-open sheet and shows offline, not unsupported', async () => {
+  const tree = await mount()
+  await type(tree, 'Keep my unsent question')
+  await update(tree, { supported: false, available: false, offline: true, snapshot: null })
+  assert.equal(nodes(tree, 'side-chat-offline').length, 1)
+  assert.equal(nodes(tree, 'side-chat-unsupported').length, 0)
+  assert.equal(node(tree, 'side-chat-question').props.value, 'Keep my unsent question')
+  assert.equal(node(tree, 'side-chat-send').props.disabled, true)
+  await update(tree, { supported: true, available: true, offline: false, snapshot })
+  assert.equal(node(tree, 'side-chat-question').props.value, 'Keep my unsent question')
+  assert.equal(node(tree, 'side-chat-send').props.disabled, false)
+  assert.deepEqual(questions, [])
 })
 
 test('error retry only reloads and never silently resends a mutation', async () => {
