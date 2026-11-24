@@ -47,6 +47,7 @@ describe('ChatWorkspaceGrid resize ownership', () => {
     useAppStore.setState(initialState, true)
     document.body.classList.remove('chat-split-resizing')
     vi.restoreAllMocks()
+    vi.unstubAllGlobals()
   })
 
   const flushFrames = () => act(() => {
@@ -198,6 +199,61 @@ describe('ChatWorkspaceGrid resize ownership', () => {
       { profileId: 'a', profileGeneration: 1, serverIdentity: 'server-a' },
       'chatWorkspaces', expect.objectContaining({ activeWorkspaceId: 'workspace-main' })
     )
+  })
+
+  it('keeps pixel-sized panes when dragged past every edge', () => {
+    const view = render(<ChatWorkspaceGrid sidebarVisible terminalOpen={false}
+      onSidebarToggle={() => undefined} onTerminalToggle={() => undefined} sideChat={() => null} />)
+    fireEvent.click(screen.getByRole('button', { name: '4 panes' }))
+    const grid = view.container.querySelector('.workspace-chat-grid')!
+    vi.spyOn(grid, 'getBoundingClientRect').mockReturnValue(new DOMRect(0, 0, 900, 600))
+    for (const [name, coordinate, extent, minimum, field] of [
+      ['Resize columns', 'clientX', 900, 320, 'columnRatio'],
+      ['Resize rows', 'clientY', 600, 240, 'rowRatio']
+    ] as const) {
+      for (const edge of [-1000, 2000]) {
+        fireEvent(screen.getByRole('separator', { name }), new MouseEvent('pointerdown', { bubbles: true, button: 0 }))
+        fireEvent(window, new MouseEvent('pointermove', { [coordinate]: edge }))
+        flushFrames()
+        fireEvent(window, new MouseEvent('pointerup'))
+        const ratio = useAppStore.getState().chatWorkspaces[0][field]
+        expect(ratio * extent - 3).toBeGreaterThanOrEqual(minimum - 0.01)
+        expect((1 - ratio) * extent - 3).toBeGreaterThanOrEqual(minimum - 0.01)
+      }
+    }
+  })
+
+  it('fits saved three-column widths on window resize without overwriting the preference', () => {
+    let onResize: () => void = () => undefined
+    vi.stubGlobal('ResizeObserver', class {
+      constructor(private callback: () => void) {}
+      observe(target: Element) { if (target.classList.contains('workspace-chat-grid')) onResize = this.callback }
+      disconnect() {}
+    })
+    let width = 1800
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(() => new DOMRect(0, 0, width, 800))
+    useAppStore.setState({ chatPaneCount: 3, chatWorkspaces: [{ ...workspace('workspace-main'),
+      paneCount: 3, threePaneLayout: 'columns', threeColumnRatios: [0.2, 0.8] }] })
+    const view = render(<ChatWorkspaceGrid sidebarVisible terminalOpen={false}
+      onSidebarToggle={() => undefined} onTerminalToggle={() => undefined} sideChat={() => null} />)
+    const grid = view.container.querySelector('.workspace-chat-grid') as HTMLElement
+    const widths = () => {
+      const first = parseFloat(grid.style.getPropertyValue('--workspace-first-column')) / 100 * width
+      const second = parseFloat(grid.style.getPropertyValue('--workspace-second-column')) / 100 * width
+      return [first - 3, second - first - 6, width - second - 3]
+    }
+    width = 1200
+    act(() => onResize())
+    expect(Math.min(...widths())).toBeCloseTo(320)
+    width = 900
+    act(() => onResize())
+    widths().forEach(pixels => expect(pixels).toBeCloseTo(296))
+    width = 1800
+    act(() => onResize())
+    expect(grid.style.getPropertyValue('--workspace-first-column')).toBe('20%')
+    expect(grid.style.getPropertyValue('--workspace-second-column')).toBe('80%')
+    expect(setScoped).not.toHaveBeenCalled()
+    expect(useAppStore.getState().chatWorkspaces[0].threeColumnRatios).toEqual([0.2, 0.8])
   })
 
   it('does not persist a departing profile drag into an identically named workspace', () => {
