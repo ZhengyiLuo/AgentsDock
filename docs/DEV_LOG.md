@@ -1,5 +1,27 @@
 # Public development log
 
+## Unreleased — Codex endpoint context and deferred Force Send
+
+- Before leaving a custom Codex endpoint with encrypted reasoning context,
+  prepare a native plaintext compaction checkpoint on the original endpoint.
+  Keep the native thread ID and original timeline, show preparation progress,
+  and retain the old connection when preparation fails. Plaintext chats and
+  same-endpoint credential changes do not incur a compaction request.
+- A Force Send whose interrupt is still finishing now keeps the selected
+  message first and sends automatically after the active turn releases.
+  Show waiting state on that queue row, without a red error toast or another
+  timeline card. Durable recovery and a later explicit Stop preserve intent.
+- Passed focused endpoint lifecycle and queue regressions, renderer queue and
+  timeline tests, TypeScript, and production Electron compilation. Isolated
+  native Electron acceptance exercised the production UI, authenticated server
+  and installed native Codex against local synthetic Responses endpoints:
+  switch, native compaction, then a successful next reply with unchanged thread
+  ID and original rollout bytes. Force Send acceptance verified queue priority,
+  navigation, and exactly one automatic send after simulated provider release.
+- Normal-to-custom portability of encrypted OpenAI checkpoints remains
+  unverified and is not claimed fixed. Live account/provider acceptance and
+  production deployment were not performed. No release was published.
+
 ## Unreleased — Workspace pane resize bounds
 
 - Keep workspace panes at a usable width and height when dragging dividers or

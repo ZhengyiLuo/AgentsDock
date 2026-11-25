@@ -377,6 +377,18 @@ describe('steerQueuedTurn', () => {
     expect(isSteeringPending(chatOneScope)).toBe(false)
   })
 
+  it('shows automatic pending-stop delivery in the queue without reporting a global error', async () => {
+    const notice = vi.fn()
+    const waiting = { queued_id: 'queued-1', session_id: 'chat-1', prompt: 'Next', file_ids: [], send_when_idle: true }
+    runNow.mockResolvedValue({ ok: false, deferred: true, send_when_idle: true, queued_id: waiting.queued_id,
+      message: 'Waiting for the current turn to stop. This message will send automatically.' })
+    list.mockResolvedValue([waiting])
+    await expect(steerQueuedTurn(chatOneScope, waiting.queued_id, undefined, notice)).resolves.toEqual([waiting])
+    expect(notice).not.toHaveBeenCalled()
+    expect(runNow).toHaveBeenCalledTimes(1)
+    expect(isSteeringPending(chatOneScope)).toBe(false)
+  })
+
   it('preserves a missing-row response instead of inferring provider completion', async () => {
     const error = new Error('queued turn not found')
     runNow.mockRejectedValue(error)

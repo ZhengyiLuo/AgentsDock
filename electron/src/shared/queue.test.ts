@@ -20,6 +20,21 @@ const interruption: Event = {
   positions: [{ queued_id: 'queued-1', position: 2 }, { queued_id: 'queued-2', position: 1 }]
 }
 
+describe('pending Force Send', () => {
+  it('moves only the selected row first, clears its stop hold, then respects a later Stop', () => {
+    const event: Event = { id: 'waiting', session_id: 'chat-1', seq: 1, ts: '', type: 'turn_deferred',
+      queued_id: 'queued-2', send_when_idle: true,
+      positions: [{ queued_id: 'queued-2', position: 1 }, { queued_id: 'queued-1', position: 2 }] }
+    const waiting = updateQueuedTurns(queue, event)
+    expect(waiting.map(turn => turn.queued_id)).toEqual(['queued-2', 'queued-1'])
+    expect(waiting[0]).toMatchObject({ send_when_idle: true, paused: false })
+    expect(waiting[0].promoted).not.toBe(true)
+    const stopped = updateQueuedTurns(waiting, { ...event, type: 'turn_queue_paused', queued_ids: ['queued-2'] })
+    expect(stopped[0]).toMatchObject({ paused: true, pause_reason: 'stopped' })
+    expect(updateQueuedTurns(waiting, { ...event, type: 'turn_started' })).toHaveLength(1)
+  })
+})
+
 describe('imported provider control queue neutrality', () => {
   it.each(['provider_interruption', 'history_imported', 'turn_finished'])('does not mutate queued turns from retained %s queue fields', type => {
     const control = type === 'provider_interruption' ? interruption : {

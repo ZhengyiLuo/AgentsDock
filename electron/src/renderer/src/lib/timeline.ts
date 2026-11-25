@@ -663,6 +663,12 @@ export class TimelineProjector {
     // the same queued message. Keep one live status row for that queue item,
     // including when older servers already persisted duplicate notices.
     if (event.type === 'turn_deferred' && queuedId) {
+      // Automatic Force Send waiting belongs beside its mutable queue row,
+      // not as a second implementation-status card in the conversation.
+      if (event.send_when_idle === true) {
+        this.removeItem(`turn-deferred:${queuedId}`)
+        return
+      }
       const key = `turn-deferred:${queuedId}`
       this.replaceItem({
         kind: 'system',

@@ -737,6 +737,8 @@ export interface QueuedTurn extends SharedChatAttribution {
   pause_reason?: 'stopped' | 'delivery_uncertain' | null
   /** The server has reserved this row for provider handoff; it is no longer mutable queue work. */
   promoted?: boolean | null
+  /** Force Send is waiting for the current turn's interrupt to finish. */
+  send_when_idle?: boolean
 }
 
 /** Exact durable owner expected when skipping a queued cross-chat delivery. */
@@ -1019,6 +1021,7 @@ export interface QueuedRunNowResponse {
   queued_id?: string | null
   interrupted?: boolean
   deferred?: boolean
+  send_when_idle?: boolean
   retryable?: boolean
   delivery_uncertain?: boolean
   native_steer?: boolean
@@ -1063,6 +1066,7 @@ export interface ProviderHistoryOrigin {
 }
 
 export interface Event extends SharedChatAttribution {
+  send_when_idle?: boolean
   /** Server-authored update recovery boundary, not a newly submitted user message. */
   server_update_restart_request_id?: string | null
   seq: number

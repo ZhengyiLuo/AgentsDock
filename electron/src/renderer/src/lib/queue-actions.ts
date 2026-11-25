@@ -275,7 +275,8 @@ async function performSteerQueuedTurn(
     throw friendlySteeringError(error)
   }
   const turns = await abortable(window.agentsDock.queue.list(sessionId), signal)
-  if ((result?.deferred === true || result?.ok === true && result.chat_access_applied === false)
+  if ((result?.deferred === true && result.send_when_idle !== true
+    || result?.ok === true && result.chat_access_applied === false)
     && result.message?.trim()) {
     onNotice?.(result.message.trim())
   }

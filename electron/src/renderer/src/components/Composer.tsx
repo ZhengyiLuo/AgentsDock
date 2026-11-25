@@ -3581,6 +3581,8 @@ function PendingCodexEndpoint({ session, disabled }: { session: Session; disable
   if (session.backend !== 'codex' || !control?.pending) return null
   const reason = control.pending_reason
   const reasonKey = reason === 'background_terminals' ? 'commands'
+    : reason === 'preparing_context' ? 'preparingContext'
+    : reason === 'context_preparation_failed' ? 'contextPreparationFailed'
     : reason === 'live_subagents' ? 'subagents'
     : reason === 'active_goal' || reason === 'native_goal_active' ? 'goal'
     : reason === 'side_question' ? 'sideChat'
@@ -4684,6 +4686,8 @@ function QueuedRow({ profileId, profileGeneration, steeringScope, turn, sourceSe
       {bodyError && <small role="alert">{bodyError}</small>}
       {promoted
         ? <small>{securePeerDelivery ? 'Starting… · waiting for the provider' : t("ui.Composer.QueuedRow.starting_handed_to_the_provider_6aa0965")}</small>
+        : turn.send_when_idle && !turn.paused
+        ? <small role="status">{t('composer.queue.waitingForStop')}</small>
         : deliveryBarrier && !agentMessage
         ? <small>{securePeerDelivery ? `Encrypted peer delivery · position ${turn.position ?? 'pending'} · starts automatically` : t('ui.composer.deliveryPosition', { position: turn.position ?? t("ui.Composer.QueuedRow.pending_62a2fed") })}</small>
         : pausedLabel && <small>{pausedLabel}</small>}
