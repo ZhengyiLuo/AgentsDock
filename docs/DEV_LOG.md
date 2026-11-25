@@ -13,11 +13,46 @@
   native side-chat context, independent followups, cancellation and unchanged
   parent history. A real Force Send exercised the pending-stop path and exact
   once delivery while preserving neighboring queued messages.
-- Frozen product source: `0b1b69ee`; native build reservation: 1276. Signed
-  npm and legacy archives agree across all 137 runtime files. Packaged desktop
-  and upgrade acceptance remain pending. Live Claude side-chat acceptance is
-  blocked by an expired test credential; shared login was not refreshed.
-  No beta.7 publication or deployment is recorded here.
+- Accepted signed desktop package: `1.0.12-beta.7` (1276), frozen product
+  source `0b1b69ee`. The existing Developer ID and server signing identities
+  were retained. macOS signing, notarization, universal binaries, Gatekeeper
+  and isolated launch checks passed. All 16 desktop assets matched their
+  platform build artifacts. Windows remains unsigned. Signed npm and legacy
+  archives agree across all 137 runtime files.
+- Desktop preparation run `45526126863`, attempt 2, passed. The first macOS
+  attempt hit a 15-second workspace-test timeout; the unchanged focused test
+  and 159-test workspace suite then passed. The unchanged hosted rerun passed
+  6,068 Electron tests with six skips; no product or timeout change was made.
+- Exercised the signed package's actual ASAR UI/preload/IPC with its exact
+  signed server runtime in isolated state. Real native Codex verified deferred
+  Force Send, one automatic selected-message delivery, preserved neighboring
+  requests, two independent side chats, inherited tool context and cancellation
+  without interrupting the parent. Package bytes and shared authentication
+  remained unchanged; disposable credentials and owned processes were removed.
+- Retained the first packaged side-chat context-recall failure. Native thread
+  inspection proved the inherited tool result was present, and a followup on
+  that same fork retrieved it. The complete UI rerun passed with an explicit
+  instruction to inspect inherited tool output, without changing product code.
+  This is scoped behavioral evidence, not a guarantee of model recall.
+- Packaged endpoint preparation and duplicate reconciliation also passed using
+  local synthetic provider fixtures, preserving native thread/history bytes.
+  These fixtures do not establish live-provider parity. A separately authorized
+  existing-chat recovery restored normal Codex and observed subsequent native
+  work without restarting the server or changing its original history prefix.
+- Native CLI run `45526407909` passed on macOS ARM64 and Linux, including fresh
+  installation, service lifecycle, repeated installation, identity preservation
+  and cache independence. All 11 macOS candidate jobs in `45530061843` and both
+  Linux rollback jobs in `45530079348` passed with the unchanged signed package
+  and reviewed harness `40658ffe`. macOS exercised installed-app replacement,
+  reconnect, channel selection, multiple clients and transfer/staging recovery;
+  Linux exercised actual rollback and same-version retry. These scoped green
+  jobs do not imply full migration acceptance.
+- Live Claude side-chat acceptance remains blocked by an expired test
+  credential; shared login was not refreshed. Populated provider-history
+  migration, real busy-work drain, reboot and Windows-update boundaries are
+  not established by the isolated fixtures. Normal-to-custom encrypted-context
+  portability is not claimed fixed. No beta.7 publication or deployment is
+  recorded here; public channels remain stable 1.0.11 and beta.6.
 
 ## Unreleased — Codex endpoint context and deferred Force Send
 
