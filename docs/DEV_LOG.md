@@ -1,5 +1,17 @@
 # Public development log
 
+## 2026-11-24 — Matched 1.0.12-beta.7 candidate preparation
+
+- Combine custom-to-normal Codex context preparation, deferred Force Send,
+  independent side-chat conversations and imported user-message reconciliation
+  on current main. Retain the updater behavior shipped in beta.6.
+- Prepare matching desktop, npm server, legacy bridge and CLI versions.
+  Source package versions remain development placeholders; release staging
+  stamps the exact public version and allocated native build.
+- Component CI and isolated actual-app checks passed. Integrated package and
+  upgrade acceptance remain pending; synthetic provider fixtures do not prove
+  live provider parity. No beta.7 publication or deployment is recorded here.
+
 ## Unreleased — Codex endpoint context and deferred Force Send
 
 - Before leaving a custom Codex endpoint with encrypted reasoning context,
