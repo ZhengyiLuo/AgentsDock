@@ -1,5 +1,58 @@
 # Public development log
 
+## 2026-11-24 — Side chat in the bottom composer, iOS 0.1.4 (198)
+
+- Move Side chat beside Quick messages in the existing composer toolbar.
+  Remove the extra phone header strip and the tablet header action; keep the
+  conversation area available for messages. Provider context, synchronized
+  history, and side-only cancellation are unchanged.
+- Preserve 44-point controls and pin Send, Stop, and Steer while only the
+  leading actions can scroll on narrow screens. Focused component/interaction
+  tests, layout regressions, TypeScript, and release workflow checks passed.
+- Verified source `63b3ae83` in the actual Release iPhone/iPad Simulator app
+  through real AgentsServer and native Codex/Claude. Checked bottom entry,
+  native-context replies and follow-ups, close/reopen with the main draft and
+  keyboard intact, and Side replies while the main task continued normally.
+  Narrow-screen scrolling kept Send, Stop and Steer visible; Quick messages
+  opened correctly and sent exactly one selected preset without losing the draft.
+- Native layout checks covered 375-point and 402-point phones and iPad,
+  including light/dark surfaces. Physical-device acceptance was not performed;
+  320-point layout and unsupported-provider gating have source-test coverage.
+  Unchanged cancellation, Clear and stalled-request recovery retain the build
+  197 evidence below; these were not repeated as build 198 checks.
+- [TestFlight upload](https://github.com/ZhengyiLuo/AgentsDock/actions/runs/45519724351)
+  succeeded on attempt 1. Signed archive validation, Apple processing, exact
+  internal tester-group verification and temporary-key cleanup passed.
+  Independent Apple metadata confirms 0.1.4 (198) is valid, unexpired and
+  in beta testing for the existing internal group. No external beta review,
+  App Store production submission, server deployment or Android publication.
+
+## 2026-11-24 — iOS native Side chat, 0.1.4 (197)
+
+- Add a Side chat entry and separate conversation sheet for supported Codex
+  and Claude chats. Use the server's native context and synchronized history;
+  never create a main turn or substitute a copied visible transcript.
+- Support follow-ups, streamed side activity, reopening saved replies, and
+  stopping only the side reply. Clearing requires confirmation and leaves the
+  main chat unchanged. Hide the feature on unsupported servers/providers.
+- Fence reads and actions to the selected server/profile/chat, reconcile
+  ambiguous submissions without automatic replay, and refresh through existing
+  revision events and foreground/reconnect events rather than polling.
+- Verified source `98d696dd` in the actual Release iPhone/iPad Simulator app
+  through real AgentsServer and native Codex/Claude: tool-result context,
+  follow-ups, shared history, side-only cancellation while main work continued,
+  confirmed Clear, keyboard focus after closing, and stalled-request recovery
+  retaining an unsent draft. Main native identity and history stayed intact.
+- Focused tests, TypeScript, broader mobile checks, hosted native build/parity,
+  and signed archive validation passed. Physical-device and physical network
+  disconnection testing are not claimed; the timeout test used an isolated
+  stalled server. Codex used full-access permissions and Claude used Default.
+- [TestFlight upload](https://github.com/ZhengyiLuo/AgentsDock/actions/runs/45491535384)
+  succeeded on attempt 1. Apple verified 0.1.4 (197) as valid, unexpired and
+  in beta testing, associated with the existing internal tester group.
+  Requires the existing native-context v2 synchronized server capability.
+  No server deployment, Android publication, or App Store production submission.
+
 ## Unreleased — Workspace pane resize bounds
 
 - Keep workspace panes at a usable width and height when dragging dividers or

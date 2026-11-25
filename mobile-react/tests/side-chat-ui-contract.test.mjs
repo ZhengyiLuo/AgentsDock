@@ -1,0 +1,44 @@
+import assert from 'node:assert/strict'
+import { readFileSync } from 'node:fs'
+import test from 'node:test'
+
+const screen = readFileSync('src/components/ChatScreen.tsx', 'utf8')
+const header = readFileSync('src/components/ChatHeader.tsx', 'utf8')
+const composer = readFileSync('src/components/Composer.tsx', 'utf8')
+const sheet = readFileSync('src/components/SideChatSheet.tsx', 'utf8')
+
+test('entry is capability gated and changing chat/server synchronously unmounts the sheet', () => {
+  assert.match(screen, /const supportsSideChat = !welcome && sideChatSupported\(health, backend\)/)
+  assert.match(screen, /const sideChatScope = `\$\{activeProfileId \?\? ''\}:\$\{profileGeneration\}:\$\{sessionId\}`/)
+  assert.match(screen, /!welcome && openSideChatScope === sideChatScope \? <SideChatSheet key=\{sideChatScope\}/)
+  assert.doesNotMatch(screen, /supportsSideChat && openSideChatScope/)
+  assert.match(screen, /useEffect\(\(\) => \{ setOpenSideChatScope\(null\) \}, \[sideChatScope\]\)/)
+  assert.match(screen, /<Composer[^\n]*onSideChat=\{supportsSideChat \? \(\) =>/)
+  assert.match(composer, /const showSideChat = !welcome && Boolean\(onSideChat\) && sideChatSupported\(health, backend\)/)
+  assert.doesNotMatch(header, /sideChat|onSideChat|MessageSquareText|Ask without interrupting/)
+})
+
+test('native sheet opens before keyboard dismissal but closes after releasing its input, without cancellation', () => {
+  assert.match(screen, /onSideChat=\{supportsSideChat \? \(\) => \{ setOpenSideChatScope\(sideChatScope\); requestAnimationFrame\(dismissAppKeyboard\) \} : undefined\}/)
+  const close = sheet.slice(sheet.indexOf('const close = () => {'), sheet.indexOf('const send = async () => {'))
+  assert.match(close, /if \(!mounted\.current \|\| closing\.current\) return/)
+  assert.ok(close.indexOf('input.current?.blur()') < close.indexOf('dismissAppKeyboard()'))
+  assert.ok(close.indexOf('dismissAppKeyboard()') < close.indexOf('onClose()'))
+  assert.doesNotMatch(close, /requestAnimationFrame|setTimeout/)
+  assert.match(sheet, /<TextInput ref=\{input\} testID="side-chat-question"/)
+  assert.match(sheet, /<SheetCloseButton label="Close side chat" testID="side-chat-close" onPress=\{close\}/)
+  assert.match(sheet, /useSideChat\(sessionId, true\)/)
+  assert.doesNotMatch(sheet, /\.cancelRun\(|\.cancelSession\(|\.stopSession\(/)
+})
+
+test('Side chat immediately follows Quick messages in one toolbar with pinned sending controls', () => {
+  assert.match(composer, /\{!welcome \? quickMessageControl : null\}\s*\{showSideChat \? <IconButton icon=\{MessageSquareText\} onPress=\{openSideChat\} label="Open side chat" testID="chat-side-chat" \/> : null\}/)
+  const leading = composer.slice(composer.indexOf('<ScrollView testID="chat-composer-actions"'), composer.indexOf('<View testID="chat-composer-send-actions"'))
+  assert.match(leading, /horizontal keyboardShouldPersistTaps="always" keyboardDismissMode="none"/)
+  assert.doesNotMatch(leading, /testID="chat-stop"|testID="chat-send-now"|testID="chat-send"/)
+  assert.match(composer, /sendActions: \{ flexDirection: 'row',[^\n]*flexShrink: 0/)
+  const open = composer.slice(composer.indexOf('const openSideChat = () => {'), composer.indexOf('const chooseMailCommand = () => {'))
+  assert.match(open, /composerScopeIsCurrent\(activeProfileId, profileGeneration, sessionId\)/)
+  assert.match(open, /sideChatSupported\(current\.health,/)
+  assert.doesNotMatch(open, /setSessionDraft|\.clear\(|\.blur\(|dismissAppKeyboard|send\(|stopTurn|active\)/)
+})

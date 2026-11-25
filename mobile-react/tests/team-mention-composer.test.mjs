@@ -12,7 +12,7 @@ globalThis.IS_REACT_ACT_ENVIRONMENT = true
 globalThis.requestAnimationFrame ??= callback => setTimeout(() => callback(Date.now()), 0)
 globalThis.cancelAnimationFrame ??= clearTimeout
 const store = create(() => ({}))
-const fixture = { store, nativeClears: 0, alerts: [], reads: [], sends: [], routeReads: [], revokes: [], skips: [], width: 390, scheme: 'dark', client: { isValidated: true, validationRevision: 1 } }
+const fixture = { store, nativeClears: 0, nativeFocuses: 0, nativeBlurs: 0, keyboardDismisses: 0, alerts: [], reads: [], sends: [], routeReads: [], revokes: [], skips: [], width: 390, scheme: 'dark', client: { isValidated: true, validationRevision: 1 } }
 globalThis.__teamComposerFixture = fixture
 const mocks = {
   'react-native': `import { createElement } from 'react'; const fixture=globalThis.__teamComposerFixture;
@@ -29,11 +29,11 @@ const mocks = {
   'expo-document-picker': `export async function getDocumentAsync(){return {canceled:true}}`,
   'expo-image-picker': `export async function requestMediaLibraryPermissionsAsync(){return {granted:true}} export async function launchImageLibraryAsync(){return {canceled:true}}`,
   '@expo/ui/community/menu': `export const MenuView='MenuView';`,
-  'lucide-react-native': `export const AlertCircle='AlertCircle', ArrowDown='ArrowDown', ArrowUp='ArrowUp', Check='Check', ChevronDown='ChevronDown', ChevronRight='ChevronRight', CornerDownRight='CornerDownRight', File='File', Mail='Mail', MessageCircleMore='MessageCircleMore', MessageSquareShare='MessageSquareShare', Paperclip='Paperclip', Search='Search', Send='Send', Square='Square', Trash2='Trash2', Video='Video', X='X', Server='Server', RefreshCw='RefreshCw';`,
+  'lucide-react-native': `export const AlertCircle='AlertCircle', ArrowDown='ArrowDown', ArrowUp='ArrowUp', Check='Check', ChevronDown='ChevronDown', ChevronRight='ChevronRight', CornerDownRight='CornerDownRight', File='File', Mail='Mail', MessageCircleMore='MessageCircleMore', MessageSquareShare='MessageSquareShare', MessageSquareText='MessageSquareText', Paperclip='Paperclip', Search='Search', Send='Send', Square='Square', Trash2='Trash2', Video='Video', X='X', Server='Server', RefreshCw='RefreshCw';`,
   '../store/useAppStore': `export const useAppStore=globalThis.__teamComposerFixture.store; export const client=globalThis.__teamComposerFixture.client;`,
   './store/useAppearanceStore': `export const useAppearanceStore=selector=>selector({preference:'system'});`,
   '../lib/analytics': `export function trackEvent(){}`,
-  '../lib/app-keyboard': `export async function dismissAppKeyboard(){}`,
+  '../lib/app-keyboard': `export async function dismissAppKeyboard(){globalThis.__teamComposerFixture.keyboardDismisses++}`,
   './AppText': `import {forwardRef,createElement} from 'react'; export const Text='Text'; export const TextInput=forwardRef((props,ref)=>createElement('TextInput',{...props,ref}));`,
   './BackendMark': `export const BackendMark='BackendMark';`,
   './CodexPermissionMenu': `export const CodexPermissionMenu=()=>null;`,
@@ -65,6 +65,7 @@ function health() { return { ok: true, server_identity: 'local-server', server_i
 } } }
 function reset(patch = {}) {
   fixture.nativeClears = 0
+  fixture.nativeFocuses = 0; fixture.nativeBlurs = 0; fixture.keyboardDismisses = 0
   fixture.alerts.length=0; fixture.reads.length=0; fixture.sends.length=0; fixture.client.isValidated=true; fixture.client.validationRevision=1
   fixture.routeReads.length=0;fixture.revokes.length=0;fixture.skips.length=0;fixture.width=390;fixture.scheme='dark'
   fixture.client.teamNetworkGet = async (base, endpoint) => {
@@ -92,9 +93,9 @@ function reset(patch = {}) {
     ...patch,
   },true)
 }
-async function render() {
+async function render(props={}) {
   let renderer
-  await act(async()=>{renderer=TestRenderer.create(React.createElement(Composer,{sessionId:'chat',keyboardVisible:true,onSent(){},onOpenMcp(){}}),{createNodeMock:()=>({focus(){},clear(){fixture.nativeClears++},setNativeProps(){}})})})
+  await act(async()=>{renderer=TestRenderer.create(React.createElement(Composer,{sessionId:'chat',keyboardVisible:true,onSent(){},onOpenMcp(){},...props}),{createNodeMock:()=>({focus(){fixture.nativeFocuses++},blur(){fixture.nativeBlurs++},clear(){fixture.nativeClears++},setNativeProps(){}})})})
   return renderer
 }
 const byID=(renderer,id)=>renderer.root.findAll(node=>typeof node.type==='string'&&node.props.testID===id)
@@ -149,6 +150,97 @@ test('composer native-host harness keeps ordinary draft typing local without tea
     assert.equal(store.getState().drafts.chat,'Ordinary message.')
     assert.deepEqual(fixture.reads,[])
     assert.equal(renderer.root.findAllByType('Modal').length,0)
+  }finally{await act(async()=>renderer.unmount())}
+})
+
+const sideChatHealth=()=>({...health(),capabilities:{...health().capabilities,side_questions:{available:true,version:2,native_context:true,sync:true,backends:['codex','claude']}}})
+const flattenStyle=style=>Object.assign({},...[style].flat(Infinity).filter(Boolean))
+for(const width of [320,390,834]){
+  test(`Side chat is beside Quick messages at ${width}pt while parent work and the draft remain untouched`,async()=>{
+    reset({health:sideChatHealth(),drafts:{chat:'Keep this main draft'},activeSessionIds:new Set(['chat'])})
+    fixture.width=width
+    let opens=0
+    const renderer=await render({onSideChat(){opens++}})
+    try{
+      const layouts=renderer.root.findAll(node=>node.type==='View'&&typeof node.props.onLayout==='function')
+      assert.equal(layouts.length,1)
+      await act(async()=>layouts[0].props.onLayout({nativeEvent:{layout:{width:width-20}}}))
+      const actions=byID(renderer,'chat-composer-actions')[0]
+      const ids=actions.findAll(node=>typeof node.type==='string'&&typeof node.props.testID==='string').map(node=>node.props.testID)
+      assert.equal(ids[ids.indexOf('chat-quick-messages')+1],'chat-side-chat')
+      assert.equal(actions.props.horizontal,true)
+      assert.equal(actions.props.keyboardShouldPersistTaps,'always')
+      assert.equal(actions.props.keyboardDismissMode,'none')
+      const pinned=byID(renderer,'chat-composer-send-actions')[0]
+      assert.equal(flattenStyle(pinned.props.style).flexShrink,0)
+      for(const id of ['chat-stop','chat-send-now','chat-send']){
+        assert.equal(actions.findAll(node=>typeof node.type==='string'&&node.props.testID===id).length,0)
+        assert.equal(pinned.findAll(node=>typeof node.type==='string'&&node.props.testID===id).length,1)
+      }
+      const side=byID(renderer,'chat-side-chat')[0]
+      const style=flattenStyle(side.props.style({pressed:false}))
+      assert.equal(style.width,44);assert.equal(style.height,44)
+      assert.notEqual(side.props.disabled,true)
+      await act(async()=>{side.props.onPressIn();side.props.onPress();side.props.onPressOut()})
+      assert.equal(opens,1)
+      assert.equal(store.getState().drafts.chat,'Keep this main draft')
+      assert.equal(byID(renderer,'chat-composer-input')[0].props.value,'Keep this main draft')
+      assert.equal(fixture.nativeClears,0);assert.equal(fixture.nativeBlurs,0);assert.equal(fixture.nativeFocuses,0);assert.equal(fixture.keyboardDismisses,0)
+      assert.deepEqual(fixture.sends,[])
+      assert.equal(store.getState().activeSessionIds.has('chat'),true)
+    }finally{await act(async()=>renderer.unmount())}
+  })
+}
+
+test('composer Side chat stays hidden without its supported capability, provider, or owner callback',async()=>{
+  for(const [capability,backend,callback] of [[health(),'codex',true],[sideChatHealth(),'gemini',true],[sideChatHealth(),'codex',false]]){
+    reset({health:capability,sessions:[{id:'chat',title:'Mobile',backend}]})
+    const renderer=await render(callback?{onSideChat(){assert.fail('unsupported Side chat cannot open')}}:{})
+    try{assert.equal(byID(renderer,'chat-side-chat').length,0)}finally{await act(async()=>renderer.unmount())}
+  }
+})
+
+test('old Side chat callbacks reject departed chat/server scopes or lost capability',async()=>{
+  reset({health:sideChatHealth()})
+  let opens=0
+  const renderer=await render({onSideChat(){opens++}})
+  try{
+    const press=byID(renderer,'chat-side-chat')[0].props.onPress
+    for(const changedScope of [{activeProfileId:'other-profile'},{profileGeneration:2},{switchingProfileId:'other-profile'},{workspaceAdopting:true}]){
+      await act(async()=>store.setState(changedScope))
+      await act(async()=>press())
+      assert.equal(opens,0)
+      await act(async()=>store.setState({activeProfileId:'profile',profileGeneration:1,switchingProfileId:null,workspaceAdopting:false}))
+    }
+    await act(async()=>store.setState({selectedSessionId:'other-chat'}))
+    await act(async()=>press())
+    assert.equal(opens,0)
+    await act(async()=>store.setState({selectedSessionId:'chat',health:health()}))
+    assert.equal(byID(renderer,'chat-side-chat').length,0)
+    await act(async()=>press())
+    assert.equal(opens,0)
+  }finally{await act(async()=>renderer.unmount())}
+})
+
+test('Quick messages still sends only its chosen phrase beside the independent Side chat action',async()=>{
+  reset({health:sideChatHealth(),drafts:{chat:'Keep my unsent draft'}})
+  let opens=0
+  const renderer=await render({onSideChat(){opens++}})
+  try{
+    const menu=renderer.root.findAllByType('MenuView').find(node=>node.props.title==='Quick messages')
+    assert.ok(menu)
+    const action=menu.props.actions[0]
+    await act(async()=>{menu.props.onPressAction({nativeEvent:{event:action.id}});await Promise.resolve()})
+    assert.equal(fixture.sends.length,1)
+    assert.equal(fixture.sends[0][0],false)
+    assert.equal(fixture.sends[0][3].promptOverride,action.title)
+    assert.equal(fixture.sends[0][3].consumeComposer,false)
+    assert.equal(store.getState().drafts.chat,'Keep my unsent draft')
+    assert.equal(opens,0)
+    await act(async()=>byID(renderer,'chat-side-chat')[0].props.onPress())
+    assert.equal(opens,1)
+    assert.equal(fixture.sends.length,1)
+    assert.equal(store.getState().drafts.chat,'Keep my unsent draft')
   }finally{await act(async()=>renderer.unmount())}
 })
 

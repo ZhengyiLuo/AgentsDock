@@ -67,6 +67,7 @@ import type {
 import { normalizeServerURL } from '../lib/format'
 import { createUploadFormData } from '../lib/upload-form'
 import { teamNetworkRequestPath } from '../lib/team-network'
+import { isSideChatIdentifier, parseSyncedSideChat, validateSideQuestionInput, SIDE_CHAT_MAX_RESPONSE_BYTES, type SideQuestionInput, type SyncedSideChat } from '../lib/side-chat'
 
 interface SessionResponse {
   session: Session
@@ -197,6 +198,7 @@ export class AgentServerClient {
   private configuration: ClientConfiguration
   private scopeController = new AbortController()
   private readonly transportStops = new Set<() => void>()
+  private readonly sideChatListeners = new Set<(sessionId: string, revision: number) => void>()
   private readonly validationRequired: boolean
   private readonly onAuthorizationFailure?: (error: ServerError | WebSocketConnectionError) => void
   private readonly onServerError?: (error: ServerError) => void
@@ -218,6 +220,7 @@ export class AgentServerClient {
     const next = createConfiguration(baseURL, token)
     if (next.baseURL === this.configuration.baseURL && next.token === this.configuration.token) return
     this.stopCurrentScope()
+    this.sideChatListeners.clear()
     this.configuration = next
     this.scopeController = new AbortController()
     this.validated = !this.validationRequired
@@ -248,6 +251,7 @@ export class AgentServerClient {
     this.disposed = true
     this.validationRevisionValue += 1
     this.stopCurrentScope()
+    this.sideChatListeners.clear()
   }
 
   url(path: string): string {
@@ -269,6 +273,45 @@ export class AgentServerClient {
   }
 
   health(timeoutMs = 30_000, signal?: AbortSignal): Promise<Health> { return this.request('/api/health', { redirect: 'error', signal }, timeoutMs, true) }
+  /** Invalidation only: side progress must never advance the main history cursor. */
+  subscribeSideChatChanges(listener: (sessionId: string, revision: number) => void): () => void {
+    this.assertActive()
+    this.sideChatListeners.add(listener)
+    return () => { this.sideChatListeners.delete(listener) }
+  }
+  readSyncedSideChat(sessionId: string): Promise<SyncedSideChat> {
+    return this.syncedSideChatRequest(sessionId, '', {}, 200)
+  }
+  async submitSyncedSideChat(sessionId: string, input: SideQuestionInput): Promise<SyncedSideChat> {
+    const body = validateSideQuestionInput(input)
+    const result = await this.syncedSideChatRequest(sessionId, '', { method: 'POST', body: JSON.stringify(body) }, 202)
+    if (result.side_chat_id !== body.side_chat_id
+      || !result.exchanges.some(exchange => exchange.request_id === body.request_id && exchange.question === body.question)) {
+      throw new Error('side_question_invalid_response')
+    }
+    return result
+  }
+  async stopSyncedSideChat(sessionId: string, requestId: string): Promise<SyncedSideChat> {
+    if (!isSideChatIdentifier(requestId)) throw new Error('side_question_invalid_request')
+    const result = await this.syncedSideChatRequest(sessionId, `/requests/${encodeURIComponent(requestId)}`, { method: 'DELETE' }, 200)
+    if (result.exchanges.some(exchange => exchange.request_id === requestId && exchange.status === 'running')) {
+      throw new Error('side_question_invalid_response')
+    }
+    return result
+  }
+  async clearSyncedSideChat(sessionId: string, sideChatId: string): Promise<SyncedSideChat> {
+    if (!isSideChatIdentifier(sideChatId)) throw new Error('side_question_invalid_request')
+    const result = await this.syncedSideChatRequest(sessionId, `/${encodeURIComponent(sideChatId)}`, { method: 'DELETE' }, 200)
+    if (result.side_chat_id === sideChatId) throw new Error('side_question_invalid_response')
+    return result
+  }
+  private async syncedSideChatRequest(sessionId: string, suffix: string, init: RequestInit, status: number): Promise<SyncedSideChat> {
+    if (!isSideChatIdentifier(sessionId)) throw new Error('side_question_invalid_request')
+    const result = await this.request<unknown>(`/api/sessions/${encodeURIComponent(sessionId)}/side-chat${suffix}`,
+      { ...init, redirect: 'error', credentials: 'omit' }, 30_000, false, 'native-control', undefined,
+      { status, maxBytes: SIDE_CHAT_MAX_RESPONSE_BYTES })
+    return parseSyncedSideChat(result, sessionId)
+  }
   codexServerGoals(): Promise<CodexGoalsConfiguration> {
     return this.request('/api/admin/codex/goals', {}, 30_000, false, 'native-control')
   }
@@ -866,6 +909,15 @@ export class AgentServerClient {
         if (stopped || socket !== connectingSocket) return
         try {
           const packet = JSON.parse(String(message.data)) as unknown
+          if (packet && typeof packet === 'object' && 'type' in packet && packet.type === 'side_chat_updated') {
+            const update = packet as { session_id?: unknown; revision?: unknown }
+            if (update.session_id === sessionId && Number.isSafeInteger(update.revision) && (update.revision as number) >= 0) {
+              for (const listener of this.sideChatListeners) {
+                try { listener(sessionId, update.revision as number) } catch { /* isolate observer failures */ }
+              }
+            }
+            return
+          }
           if (isProviderRuntimeChanged(packet)) {
             if (packet.session_id === sessionId) onProviderRuntime?.(packet)
             return
@@ -1047,6 +1099,7 @@ export class AgentServerClient {
     allowUnvalidated = false,
     authentication: 'standard' | 'team-network' | 'native-control' = 'standard',
     onAccepted?: () => void,
+    responseContract?: { status: number; maxBytes: number },
   ): Promise<T> {
     const scope = this.captureScope(allowUnvalidated)
     const headers = new Headers(init.headers)
@@ -1069,7 +1122,17 @@ export class AgentServerClient {
         this.assertScopeActive(scope)
         return undefined as T
       }
-      const value = await response.json() as T
+      let value: T
+      if (responseContract) {
+        if (response.status !== responseContract.status) throw new Error('side_question_invalid_response')
+        const length = response.headers.get('content-length')
+        if (length !== null && (!/^\d+$/.test(length) || Number(length) > responseContract.maxBytes)) {
+          throw new Error('side_question_invalid_response')
+        }
+        const body = await response.text()
+        if (new TextEncoder().encode(body).byteLength > responseContract.maxBytes) throw new Error('side_question_invalid_response')
+        try { value = JSON.parse(body) as T } catch { throw new Error('side_question_invalid_response') }
+      } else value = await response.json() as T
       this.assertScopeActive(scope)
       return value
     })

@@ -48,6 +48,11 @@ try {
           external: true,
         }))
         context.onResolve({ filter: /.*/ }, args => {
+          // Side-chat presentation tests retain the production sheet/actions,
+          // but leave the rich-text native renderer to its own focused suite.
+          if (process.argv.includes('--mock-markdown') && /(?:^|\/)MarkdownContent$/.test(args.path)) {
+            return { path: resolve(projectRoot, 'tests/component-mocks/markdown-content.tsx') }
+          }
           const alias = aliases.get(args.path)
           if (alias) return { path: alias }
           if (/(?:^|\/)store\/useAppStore(?:\.[jt]sx?)?$/.test(args.path)) {

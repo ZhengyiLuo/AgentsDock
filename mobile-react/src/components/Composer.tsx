@@ -21,7 +21,7 @@ import * as DocumentPicker from 'expo-document-picker'
 import * as ImagePicker from 'expo-image-picker'
 import { useShallow } from 'zustand/react/shallow'
 import { MenuView, type MenuAction } from '@expo/ui/community/menu'
-import { AlertCircle, ArrowDown, ArrowUp, Check, ChevronDown, CornerDownRight, File as FileIcon, Mail, MessageCircleMore, MessageSquareShare, Paperclip, Search, Send, Square, Trash2, Video as VideoIcon, X } from 'lucide-react-native'
+import { AlertCircle, ArrowDown, ArrowUp, Check, ChevronDown, CornerDownRight, File as FileIcon, Mail, MessageCircleMore, MessageSquareShare, MessageSquareText, Paperclip, Search, Send, Square, Trash2, Video as VideoIcon, X } from 'lucide-react-native'
 import { client, useAppStore } from '../store/useAppStore'
 import { useLanguageStore } from '../store/useLanguageStore'
 import { translate } from '../i18n'
@@ -38,6 +38,7 @@ import { FULLSCREEN_HEADER_GUTTER, FULLSCREEN_HEADER_MIN_HEIGHT, fullscreenModal
 import { isAsyncQueuedChatMessage, isCrossChatDeliveryQueuedTurn, isUserQueuedTurn, isVisibleQueuedTurn, queuedDeliverySkipIdentity, queuedMoveCrossesDeliveryBarrier, queuedTurnHasEarlierDeliveryBarrier } from '../lib/queue'
 import { isImageUpload, isVideoUpload, mediaAssetsToUploads } from '../lib/uploads'
 import { dismissAppKeyboard } from '../lib/app-keyboard'
+import { sideChatSupported } from '../lib/side-chat'
 import { awaitCodexPermissionUpdates } from '../lib/codex-permission-updates'
 import { awaitClaudePermissionUpdates } from '../lib/claude-permission-updates'
 import { awaitCursorPermissionUpdates } from '../lib/cursor-permission-updates'
@@ -113,7 +114,7 @@ type AttachmentImageSource = { uri: string; headers?: Record<string, string> }
 type ComposerSelection = { start: number; end: number }
 type ComposerMentionTrigger = ChatMentionTrigger | TeamMentionTrigger
 
-export function Composer({ sessionId, keyboardVisible, onSent, onOpenMcp }: { sessionId: string; keyboardVisible: boolean; onSent: () => void; onOpenMcp: () => void }) {
+export function Composer({ sessionId, keyboardVisible, onSent, onOpenMcp, onSideChat }: { sessionId: string; keyboardVisible: boolean; onSent: () => void; onOpenMcp: () => void; onSideChat?: () => void }) {
   const welcome = isWelcomeSession(sessionId)
   const colors = usePalette()
   const locale = useLanguageStore(state => state.locale)
@@ -148,6 +149,7 @@ export function Composer({ sessionId, keyboardVisible, onSent, onOpenMcp }: { se
     } : null
   }))
   const backend = sourceSession?.backend
+  const showSideChat = !welcome && Boolean(onSideChat) && sideChatSupported(health, backend)
   const model = sourceSession?.model
   const effort = sourceSession?.effort
   const active = useAppStore(state => state.activeSessionIds.has(sessionId))
@@ -774,6 +776,12 @@ export function Composer({ sessionId, keyboardVisible, onSent, onOpenMcp }: { se
   >
     {quickMessageTrigger}
   </MenuView>
+  const openSideChat = () => {
+    if (!onSideChat || !composerScopeIsCurrent(activeProfileId, profileGeneration, sessionId)) return
+    const current = useAppStore.getState()
+    if (!sideChatSupported(current.health, current.sessions.find(session => session.id === sessionId)?.backend)) return
+    onSideChat()
+  }
   const chooseMailCommand = () => {
     if (networkDisabled || !remoteComposerScopeIsCurrent(activeProfileId, profileGeneration, sessionId)) return
     const capabilityError = teamMailCapabilityError(health)
@@ -936,15 +944,21 @@ export function Composer({ sessionId, keyboardVisible, onSent, onOpenMcp }: { se
           autoCorrect
           style={[styles.input, { color: colors.text, height: displayedInputHeight, maxHeight: viewportLimits.inputMaxHeight }]}
         />
-        <View style={[styles.toolbar, compactToolbar && styles.toolbarCompact, denseToolbar && styles.toolbarDense]}>
+        <View testID="chat-composer-toolbar" style={[styles.toolbar, compactToolbar && styles.toolbarCompact, denseToolbar && styles.toolbarDense]}>
+          {/* Only leading actions may overflow; Stop, Steer and Send stay pinned. */}
+          <ScrollView testID="chat-composer-actions" horizontal keyboardShouldPersistTaps="always" keyboardDismissMode="none" showsHorizontalScrollIndicator={false}
+            style={styles.toolbarActions} contentContainerStyle={[styles.toolbarActionsContent, compactToolbar && styles.toolbarActionsCompact, denseToolbar && styles.toolbarActionsDense, compactToolbar && showSideChat && styles.toolbarActionsWithSideChat]}>
           {!welcome ? <IconButton icon={Paperclip} disabled={attachmentDisabled} onPress={chooseAttachment} label="Add files, photos, videos, or another chat" testID="chat-attach" /> : null}
           {runtimeControl}
           {!welcome ? quickMessageControl : null}
+          {showSideChat ? <IconButton icon={MessageSquareText} onPress={openSideChat} label="Open side chat" testID="chat-side-chat" /> : null}
           {!welcome && backend === 'codex' ? <CodexPermissionMenu sessionId={sessionId} compact={compactToolbar} /> : null}
           {!welcome && backend === 'claude' ? <ClaudePermissionMenu sessionId={sessionId} compact={compactToolbar} /> : null}
           {!welcome && backend === 'cursor' ? <CursorPermissionMenu sessionId={sessionId} compact={compactToolbar} /> : null}
           {!welcome && (backend === 'opencode' || backend === 'gemini') ? <OptionalAgentPermissionMenu sessionId={sessionId} /> : null}
           <View style={styles.toolbarSpacer} />
+          </ScrollView>
+          <View testID="chat-composer-send-actions" style={[styles.sendActions, compactToolbar && styles.sendActionsCompact, denseToolbar && styles.sendActionsDense]}>
           {active ? <Pressable
             accessibilityRole="button"
             accessibilityLabel={stopping ? 'Stopping agent' : 'Stop agent'}
@@ -974,6 +988,7 @@ export function Composer({ sessionId, keyboardVisible, onSent, onOpenMcp }: { se
           >
             <View style={[styles.sendFace, { backgroundColor: !effectiveSendDisabled && hasReadyContent ? colors.blue : colors.raised }]}>{effectiveSendBusy ? <ActivityIndicator size="small" color={!effectiveSendDisabled && hasReadyContent ? 'white' : colors.muted} /> : <Send size={17} color={!effectiveSendDisabled && hasReadyContent ? 'white' : colors.muted} />}</View>
           </Pressable>
+          </View>
         </View>
       </View>
       <Modal visible={preview != null} animationType="fade" presentationStyle="fullScreen" onRequestClose={closePreview}>
@@ -1676,6 +1691,14 @@ const styles = StyleSheet.create({
   toolbar: { minHeight: 48, flexShrink: 0, paddingHorizontal: spacing.sm, flexDirection: 'row', alignItems: 'center', gap: spacing.xs },
   toolbarCompact: { minHeight: COMPOSER_COMPACT_TOOLBAR_HEIGHT, paddingHorizontal: COMPOSER_COMPACT_TOOLBAR_PADDING, gap: COMPOSER_COMPACT_TOOLBAR_GAP },
   toolbarDense: { paddingHorizontal: COMPOSER_DENSE_TOOLBAR_PADDING, gap: COMPOSER_DENSE_TOOLBAR_GAP },
+  toolbarActions: { flex: 1, minWidth: 0 },
+  toolbarActionsContent: { flexGrow: 1, flexDirection: 'row', alignItems: 'center', gap: spacing.xs },
+  toolbarActionsCompact: { gap: COMPOSER_COMPACT_TOOLBAR_GAP },
+  toolbarActionsDense: { gap: COMPOSER_DENSE_TOOLBAR_GAP },
+  toolbarActionsWithSideChat: { gap: 0 },
+  sendActions: { flexDirection: 'row', alignItems: 'center', gap: spacing.xs, flexShrink: 0 },
+  sendActionsCompact: { gap: COMPOSER_COMPACT_TOOLBAR_GAP },
+  sendActionsDense: { gap: COMPOSER_DENSE_TOOLBAR_GAP },
   quickMessagesMenu: { width: COMPOSER_TOOLBAR_TOUCH_SIZE, height: COMPOSER_TOOLBAR_TOUCH_SIZE, flexShrink: 0 }, quickMessages: { width: COMPOSER_TOOLBAR_TOUCH_SIZE, height: COMPOSER_TOOLBAR_TOUCH_SIZE, flexShrink: 0, borderRadius: radius.md, alignItems: 'center', justifyContent: 'center' },
   runtimeMenu: { minWidth: 0, flexShrink: 1 }, runtimeMenuCompact: { width: COMPOSER_COMPACT_BACKEND_SLOT_WIDTH, height: COMPOSER_TOOLBAR_TOUCH_SIZE, flexShrink: 0 }, runtimeMenuDense: { width: COMPOSER_TOOLBAR_TOUCH_SIZE, height: COMPOSER_TOOLBAR_TOUCH_SIZE, alignItems: 'center', justifyContent: 'center' }, runtime: { minWidth: 0, flexShrink: 1, flexDirection: 'row', alignItems: 'center', gap: 6 }, runtimeCompact: { width: COMPOSER_COMPACT_BACKEND_SLOT_WIDTH, height: COMPOSER_TOOLBAR_TOUCH_SIZE, flexShrink: 0, justifyContent: 'center', gap: 0 }, runtimeDense: { width: COMPOSER_DENSE_BACKEND_SLOT_WIDTH }, backend: { fontSize: 12, fontWeight: '700' }, toolbarSpacer: { flex: 1, minWidth: 0 },
   stop: { width: COMPOSER_TOOLBAR_TOUCH_SIZE, height: COMPOSER_TOOLBAR_TOUCH_SIZE, flexShrink: 0, borderRadius: radius.md, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 5 }, stopWide: { width: 76 }, compactStopFace: { width: COMPOSER_STOP_FACE_SIZE, height: COMPOSER_STOP_FACE_SIZE, borderWidth: StyleSheet.hairlineWidth, borderRadius: radius.md, alignItems: 'center', justifyContent: 'center' }, stopLabel: { color: 'white', fontSize: 11, fontWeight: '800' }, send: { width: COMPOSER_TOOLBAR_TOUCH_SIZE, height: COMPOSER_TOOLBAR_TOUCH_SIZE, flexShrink: 0, alignItems: 'center', justifyContent: 'center' }, sendFace: { width: COMPOSER_SEND_FACE_SIZE, height: COMPOSER_SEND_FACE_SIZE, borderRadius: COMPOSER_SEND_FACE_SIZE / 2, alignItems: 'center', justifyContent: 'center' }, steer: { minHeight: COMPOSER_TOOLBAR_TOUCH_SIZE, flexShrink: 0, paddingHorizontal: 8, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 3 }, steerCompact: { width: COMPOSER_TOOLBAR_TOUCH_SIZE, paddingHorizontal: 0 },

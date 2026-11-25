@@ -69,7 +69,8 @@
   <a href="https://agentsdock.net/features.html">Features</a>
 </div>
 
-The iOS beta **0.1.4 (build 196)** is available to internal TestFlight testers.
+The iOS beta **0.1.4 (build 197)** is available to internal TestFlight testers,
+including native-context Side chat for supported Codex and Claude chats.
 This build has not been submitted to the App Store; the link above opens the
 existing public iPhone and iPad release.
 
