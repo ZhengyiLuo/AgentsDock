@@ -8,9 +8,16 @@
 - Prepare matching desktop, npm server, legacy bridge and CLI versions.
   Source package versions remain development placeholders; release staging
   stamps the exact public version and allocated native build.
-- Component CI and isolated actual-app checks passed. Integrated package and
-  upgrade acceptance remain pending; synthetic provider fixtures do not prove
-  live provider parity. No beta.7 publication or deployment is recorded here.
+- Component CI, integrated source checks, 321 focused server tests, 576 focused
+  Electron tests and TypeScript passed. Real Codex source-app checks verified
+  native side-chat context, independent followups, cancellation and unchanged
+  parent history. A real Force Send exercised the pending-stop path and exact
+  once delivery while preserving neighboring queued messages.
+- Frozen product source: `0b1b69ee`; native build reservation: 1276. Signed
+  npm and legacy archives agree across all 137 runtime files. Packaged desktop
+  and upgrade acceptance remain pending. Live Claude side-chat acceptance is
+  blocked by an expired test credential; shared login was not refreshed.
+  No beta.7 publication or deployment is recorded here.
 
 ## Unreleased — Codex endpoint context and deferred Force Send
 
