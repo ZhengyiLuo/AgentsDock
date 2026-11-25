@@ -2607,7 +2607,7 @@ export interface NativeFileRef {
 
 export interface AppEventMap {
   'provider-usage:changed': { profileId: string; profileGeneration: number; serverIdentity?: string | null; sessionId: string; backend: 'codex' | 'claude' }
-  'side-chat:changed': { profileId: string; profileGeneration: number; sessionId: string; revision: number }
+  'side-chat:changed': { profileId: string; profileGeneration: number; sessionId: string; revision: number; sideChatId?: string }
   'app:storage': { full: boolean }
   'team:mail-hints': MailHintProjection
   'app:language': LanguageSettingsSnapshot

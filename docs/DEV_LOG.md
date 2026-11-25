@@ -22,6 +22,20 @@
   unverified and is not claimed fixed. Live account/provider acceptance and
   production deployment were not performed. No release was published.
 
+## Unreleased — Independent side chats
+
+- Added saved side-chat tabs for Codex and Claude. Creating another tab preserves
+  the existing conversation; drafts, scroll positions, live activity, model
+  selection, cancellation and followups stay with their selected side chat.
+  Clear affects only that tab, and existing singleton history remains in place.
+- TypeScript, production compilation and compile verification passed, along
+  with 399 relevant Electron tests and 100 server side-chat tests. Isolated
+  actual-app acceptance exercised production UI/IPC and an authenticated server:
+  new/select, concurrent requests, followup, cancel, clear, reopen, parent-chat
+  switching and reconnect. Parent event histories remained byte-identical.
+- Provider handles in that app acceptance were synthetic; live native-provider
+  parity was not exercised. No production deployment or release was performed.
+
 ## Unreleased — Workspace pane resize bounds
 
 - Keep workspace panes at a usable width and height when dragging dividers or

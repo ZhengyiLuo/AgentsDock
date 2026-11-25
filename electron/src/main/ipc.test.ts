@@ -90,6 +90,20 @@ describe('Team Hub IPC registration', () => {
     }
   })
 
+  it('routes only trusted native clients to multiple side-chat methods', async () => {
+    const methods = { listSyncedSideChats: vi.fn(), createSyncedSideChat: vi.fn(), readSyncedSideChat: vi.fn(), stopSyncedSideChat: vi.fn() }
+    registerIpc(methods as unknown as AppService, {} as AppUpdateManager)
+    const scope = { profileId: 'server-a', profileGeneration: 7, serverIdentity: 'verified-a' }
+    const cases = [['list', 'listSyncedSideChats', []], ['create', 'createSyncedSideChat', ['second']],
+      ['read', 'readSyncedSideChat', ['second']], ['stop', 'stopSyncedSideChat', ['request-a', 'second']]] as const
+    for (const [operation, name, args] of cases) {
+      await harness.handlers.get(`side-chat:${operation}`)?.(trustedEvent, scope, 'chat-a', ...args)
+      expect(methods[name]).toHaveBeenCalledExactlyOnceWith(scope, 'chat-a', ...args)
+      expect(() => harness.handlers.get(`side-chat:${operation}`)?.({ sender: { id: 2, getURL: () => 'https://untrusted.test/' },
+        senderFrame: { url: 'https://untrusted.test/', parent: null } }, scope, 'chat-a', ...args)).toThrow('untrusted renderer')
+    }
+  })
+
   it('routes side questions and exact cancellation only from trusted app renderers', async () => {
     const askSideQuestion = vi.fn().mockResolvedValue({ answer: 'Separate answer' })
     const cancelSideQuestion = vi.fn().mockResolvedValue({ status: 'cancelled' })

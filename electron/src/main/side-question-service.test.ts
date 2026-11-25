@@ -30,6 +30,30 @@ function fixture() {
 }
 
 describe('main side-question service scope', () => {
+  it('gates multiple side-chat access on capability and forwards the selected epoch under the current owner', async () => {
+    const { service, mainClient } = fixture()
+    const snapshot = { session_id: 'chat-a', side_chat_id: 'second', revision: 0, exchanges: [], last_request_id: null }
+    const methods = { listSyncedSideChats: vi.fn().mockResolvedValue({ session_id: 'chat-a', side_chats: [snapshot] }),
+      createSyncedSideChat: vi.fn().mockResolvedValue(snapshot), readSyncedSideChat: vi.fn().mockResolvedValue(snapshot),
+      stopSyncedSideChat: vi.fn().mockResolvedValue(snapshot) }
+    Object.assign(mainClient, methods)
+    const capability = (service as any).health.capabilities.side_questions
+    capability.sync = true
+    await expect(service.createSyncedSideChat(expected, 'chat-a', 'second')).rejects.toThrow('side_question_unsupported')
+    expect(methods.createSyncedSideChat).not.toHaveBeenCalled()
+    capability.multiple = true
+    await service.listSyncedSideChats(expected, 'chat-a')
+    await service.createSyncedSideChat(expected, 'chat-a', 'second')
+    await service.readSyncedSideChat(expected, 'chat-a', 'second')
+    await service.stopSyncedSideChat(expected, 'chat-a', 'request', 'second')
+    expect(methods.listSyncedSideChats).toHaveBeenCalledExactlyOnceWith('chat-a')
+    expect(methods.createSyncedSideChat).toHaveBeenCalledExactlyOnceWith('chat-a', 'second')
+    expect(methods.readSyncedSideChat).toHaveBeenCalledExactlyOnceWith('chat-a', 'second')
+    expect(methods.stopSyncedSideChat).toHaveBeenCalledExactlyOnceWith('chat-a', 'request', 'second')
+    await expect(service.listSyncedSideChats({ ...expected, serverIdentity: 'foreign' }, 'chat-a')).rejects.toThrow()
+    expect(methods.listSyncedSideChats).toHaveBeenCalledTimes(1)
+  })
+
   it.each([
     ['codex', true], ['codex', false], ['claude', true]
   ] as const)('keeps %s runtime overrides compatible when capability=%s', async (backend, runtimeSettings) => {
