@@ -1,6 +1,6 @@
 # Public development log
 
-## Unreleased — Side chat in the bottom composer
+## 2026-11-24 — Side chat in the bottom composer, iOS 0.1.4 (198)
 
 - Move Side chat beside Quick messages in the existing composer toolbar.
   Remove the extra phone header strip and the tablet header action; keep the
@@ -9,9 +9,23 @@
 - Preserve 44-point controls and pin Send, Stop, and Steer while only the
   leading actions can scroll on narrow screens. Focused component/interaction
   tests, layout regressions, TypeScript, and release workflow checks passed.
-- Prepare iOS 0.1.4 (198). Native layout/interaction acceptance and TestFlight
-  upload are pending. Build 197 remains the published beta until
-  the replacement is verified. No server deployment or Android publication.
+- Verified source `63b3ae83` in the actual Release iPhone/iPad Simulator app
+  through real AgentsServer and native Codex/Claude. Checked bottom entry,
+  native-context replies and follow-ups, close/reopen with the main draft and
+  keyboard intact, and Side replies while the main task continued normally.
+  Narrow-screen scrolling kept Send, Stop and Steer visible; Quick messages
+  opened correctly and sent exactly one selected preset without losing the draft.
+- Native layout checks covered 375-point and 402-point phones and iPad,
+  including light/dark surfaces. Physical-device acceptance was not performed;
+  320-point layout and unsupported-provider gating have source-test coverage.
+  Unchanged cancellation, Clear and stalled-request recovery retain the build
+  197 evidence below; these were not repeated as build 198 checks.
+- [TestFlight upload](https://github.com/ZhengyiLuo/AgentsDock/actions/runs/45519724351)
+  succeeded on attempt 1. Signed archive validation, Apple processing, exact
+  internal tester-group verification and temporary-key cleanup passed.
+  Independent Apple metadata confirms 0.1.4 (198) is valid, unexpired and
+  in beta testing for the existing internal group. No external beta review,
+  App Store production submission, server deployment or Android publication.
 
 ## 2026-11-24 — iOS native Side chat, 0.1.4 (197)
 
