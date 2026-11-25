@@ -1,5 +1,18 @@
 # Public development log
 
+## Unreleased — Side chat in the bottom composer
+
+- Move Side chat beside Quick messages in the existing composer toolbar.
+  Remove the extra phone header strip and the tablet header action; keep the
+  conversation area available for messages. Provider context, synchronized
+  history, and side-only cancellation are unchanged.
+- Preserve 44-point controls and pin Send, Stop, and Steer while only the
+  leading actions can scroll on narrow screens. Focused component/interaction
+  tests, layout regressions, TypeScript, and release workflow checks passed.
+- Prepare iOS 0.1.4 (198). Native layout/interaction acceptance and TestFlight
+  upload are pending. Build 197 remains the published beta until
+  the replacement is verified. No server deployment or Android publication.
+
 ## 2026-11-24 — iOS native Side chat, 0.1.4 (197)
 
 - Add a Side chat entry and separate conversation sheet for supported Codex

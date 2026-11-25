@@ -121,7 +121,7 @@ export function ChatScreen({ sessionId, compact, inlineInspectorAvailable, onBac
   }, [])
   const content = (
     <View style={[styles.root, { backgroundColor: colors.background }]}>
-      <ChatHeader sessionId={sessionId} compact={compact} inlineInspectorAvailable={inlineInspectorAvailable} onBack={onBack} onOptions={onOptions} onSearch={onSearch} onFiles={() => { trackEvent('open_file_clicked'); dismissAppKeyboard(); openWorkspace(sessionId) }} onToggleInspector={onToggleInspector} onSetupServer={onSetupServer} sideChatSupported={supportsSideChat} onSideChat={() => { setOpenSideChatScope(sideChatScope); requestAnimationFrame(dismissAppKeyboard) }} />
+      <ChatHeader sessionId={sessionId} compact={compact} inlineInspectorAvailable={inlineInspectorAvailable} onBack={onBack} onOptions={onOptions} onSearch={onSearch} onFiles={() => { trackEvent('open_file_clicked'); dismissAppKeyboard(); openWorkspace(sessionId) }} onToggleInspector={onToggleInspector} onSetupServer={onSetupServer} />
       {!welcome && backend ? <RuntimeHealthNotice backend={backend} sessionId={sessionId} /> : null}
       <KeyboardAvoidingView
             style={styles.body}
@@ -152,7 +152,7 @@ export function ChatScreen({ sessionId, compact, inlineInspectorAvailable, onBac
                   : keyboardVisible ? 0 : insets.bottom,
               }]}
             >
-              <Composer sessionId={sessionId} keyboardVisible={composerKeyboardConstrained} onSent={() => setScrollRequest(value => value + 1)} onOpenMcp={onOpenMcp} />
+              <Composer sessionId={sessionId} keyboardVisible={composerKeyboardConstrained} onSent={() => setScrollRequest(value => value + 1)} onOpenMcp={onOpenMcp} onSideChat={supportsSideChat ? () => { setOpenSideChatScope(sideChatScope); requestAnimationFrame(dismissAppKeyboard) } : undefined} />
             </View>
       </KeyboardAvoidingView>
       {/* A temporary health/validation loss must not discard the open draft.

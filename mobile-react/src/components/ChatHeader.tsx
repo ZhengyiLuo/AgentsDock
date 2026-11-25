@@ -1,8 +1,8 @@
 import { ActivityIndicator, Pressable, StyleSheet, View } from 'react-native'
 import { Image } from 'expo-image'
-import { ArrowLeft, Ellipsis, FolderOpen, MessageSquareText, PanelRight, RefreshCw, Search, Server } from 'lucide-react-native'
+import { ArrowLeft, Ellipsis, FolderOpen, PanelRight, RefreshCw, Search, Server } from 'lucide-react-native'
 import { useAppStore } from '../store/useAppStore'
-import { fontWeight, radius, spacing, typography, usePalette } from '../theme'
+import { radius, spacing, typography, usePalette } from '../theme'
 import { runtimeSummary } from '../lib/format'
 import { t } from '../i18n'
 import { isWelcomeSession } from '../lib/welcome-session'
@@ -11,7 +11,7 @@ import { CodexContextIndicator, CodexStatusButton } from './CodexControls'
 import { ClaudeContextIndicator } from './ClaudeContextIndicator'
 import { IconButton } from './ui'
 
-export function ChatHeader({ sessionId, compact, inlineInspectorAvailable, onBack, onOptions, onSearch, onFiles, onToggleInspector, onSetupServer, sideChatSupported = false, onSideChat }: { sessionId: string; compact: boolean; inlineInspectorAvailable: boolean; onBack: () => void; onOptions: () => void; onSearch: () => void; onFiles: () => void; onToggleInspector: () => void; onSetupServer: () => void; sideChatSupported?: boolean; onSideChat?: () => void }) {
+export function ChatHeader({ sessionId, compact, inlineInspectorAvailable, onBack, onOptions, onSearch, onFiles, onToggleInspector, onSetupServer }: { sessionId: string; compact: boolean; inlineInspectorAvailable: boolean; onBack: () => void; onOptions: () => void; onSearch: () => void; onFiles: () => void; onToggleInspector: () => void; onSetupServer: () => void }) {
   const colors = usePalette()
   const session = useAppStore(state => state.sessions.find(value => value.id === sessionId))
   const connected = useAppStore(state => state.connected)
@@ -51,16 +51,12 @@ export function ChatHeader({ sessionId, compact, inlineInspectorAvailable, onBac
     if (status === 'live') onOptions()
     else void retryConnection()
   }
-  const sideChatButton = sideChatSupported && onSideChat ? <Pressable testID="chat-side-chat" accessibilityRole="button" accessibilityLabel={t('Open side chat')} onPress={onSideChat} style={({ pressed }) => [styles.sideChat, { backgroundColor: colors.controlSurface, borderColor: colors.controlBorder, opacity: pressed ? 0.65 : 1 }]}>
-    <MessageSquareText size={16} color={colors.blue} /><Text style={[styles.sideChatLabel, { color: colors.text }]} localize>Side chat</Text>
-  </Pressable> : null
-  return <View style={{ backgroundColor: colors.background }}><View style={[styles.root, { backgroundColor: colors.background, borderColor: colors.border }]}>
+  return <View style={[styles.root, { backgroundColor: colors.background, borderColor: colors.border }]}>
     {compact ? <IconButton icon={ArrowLeft} onPress={onBack} label="Chats" /> : null}
     <View style={styles.titleWrap}><Text style={[styles.title, { color: colors.text }]} numberOfLines={1}>{session.title}</Text><Text style={[styles.subtitle, { color: visibleSyncError ? colors.orange : colors.muted }]} numberOfLines={1}>{visibleSyncError || `${runtimeSummary(session, t)}${session.session_id || session.codex_thread_id || session.claude_session_id || session.cursor_session_id ? ` · ${t('session')} ${(session.session_id || session.codex_thread_id || session.claude_session_id || session.cursor_session_id)?.slice(0, 12)}` : ''}`}</Text></View>
     {!compact ? <IconButton icon={RefreshCw} onPress={() => void retryConnection()} label="Refresh" /> : null}
     <IconButton icon={Search} onPress={onSearch} label="Find in chat" />
     <IconButton icon={FolderOpen} onPress={onFiles} label="Browse workspace files" testID="chat-workspace-files" />
-    {!compact ? sideChatButton : null}
     {inlineInspectorAvailable ? <IconButton icon={PanelRight} onPress={onToggleInspector} label="Toggle details" /> : null}
     <CodexContextIndicator />
     <ClaudeContextIndicator />
@@ -70,9 +66,7 @@ export function ChatHeader({ sessionId, compact, inlineInspectorAvailable, onBac
       <Text style={[styles.statusLabel, { color: colors.text }]} numberOfLines={1}>{visibleStatusLabel}</Text>
       {!compact ? <Ellipsis size={14} color={colors.muted} /> : null}
     </Pressable>
-  </View>{compact && sideChatButton ? <View style={[styles.sideChatRow, { borderBottomColor: colors.border }]}>
-    <Text style={[styles.sideChatHint, { color: colors.muted }]} localize>Ask without interrupting</Text>{sideChatButton}
-  </View> : null}</View>
+  </View>
 }
 
 const styles = StyleSheet.create({
@@ -86,8 +80,4 @@ const styles = StyleSheet.create({
   welcomeIcon: { width: 32, height: 32, borderRadius: radius.md, flexShrink: 0 },
   setup: { minHeight: 44, borderRadius: radius.md, paddingHorizontal: spacing.md, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: spacing.xs, flexShrink: 0 },
   setupText: { ...typography.label, color: 'white', fontWeight: '600' },
-  sideChatRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: spacing.sm, paddingHorizontal: spacing.md, paddingVertical: spacing.xs, borderBottomWidth: StyleSheet.hairlineWidth },
-  sideChatHint: { ...typography.caption, flex: 1 },
-  sideChat: { minHeight: 44, paddingHorizontal: spacing.md, borderWidth: 1, borderRadius: radius.md, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: spacing.sm, flexShrink: 0 },
-  sideChatLabel: { ...typography.label, fontWeight: fontWeight.semibold },
 })

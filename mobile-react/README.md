@@ -69,7 +69,8 @@ choices follow the server catalog, and changing OpenCode permissions starts a
 new native context while preserving the displayed chat history. Unsupported
 Gemini fork and provider-reload controls are not offered.
 
-Supported Codex and Claude chats expose **Side chat** in the header. Questions
+Supported Codex and Claude chats expose **Side chat** beside **Quick messages**
+in the bottom composer toolbar, without an additional header row. Questions
 use the provider's native context, not a copied transcript; replies and follow-ups
 synchronize through AgentsServer. Closing the sheet does not stop a reply.
 **Stop side reply** cancels only that request, while confirmed **Clear** removes

@@ -10,6 +10,8 @@ import {
   COMPOSER_STOP_FACE_SIZE,
   COMPOSER_TOOLBAR_TOUCH_SIZE,
   compactComposerToolbarFits,
+  compactComposerToolbarLeadingViewportWidth,
+  compactComposerToolbarPinnedWidth,
   compactComposerToolbarRequiredWidth,
   isCompactComposerToolbar,
   isDenseComposerToolbar,
@@ -31,6 +33,13 @@ assert(!isDenseComposerToolbar(355), 'standard phones must keep equal-width back
 assert(compactComposerToolbarRequiredWidth(worstPhoneState, true) === 296, 'the dense worst case must stay deterministic')
 assert(compactComposerToolbarRequiredWidth({ backend: 'codex', active: false, hasReadyContent: false }, true) === 224, 'the idle dense provider action must reserve a 44pt target')
 assert(compactComposerToolbarRequiredWidth(worstPhoneState, false) === 330, 'the regular phone worst case must count every gap')
+const sideChatState = { ...worstPhoneState, sideChat: true }
+assert(!compactComposerToolbarFits(300, sideChatState), '320pt busy Side chat needs leading-action scrolling, not smaller targets')
+assert(compactComposerToolbarPinnedWidth(sideChatState, true) === 132, 'Stop, Steer and Send retain three pinned 44pt targets')
+assert(compactComposerToolbarLeadingViewportWidth(300, sideChatState) === 162, 'the narrow leading viewport must leave Quick and Side chat adjacent and visible')
+assert(44 + 28 + 44 + 44 <= compactComposerToolbarLeadingViewportWidth(300, sideChatState), 'Attach, passive runtime, Quick and Side chat fit before any overflowed permissions control')
+assert(compactComposerToolbarFits(370, sideChatState), '390pt phone fits the full Side chat toolbar without scrolling')
+assert(compactComposerToolbarFits(492, sideChatState), 'tablet split pane fits the full Side chat toolbar without scrolling')
 assert(COMPOSER_COMPACT_TOOLBAR_GAP > 0, 'standard phones must retain visible control rhythm')
 for (const composerWidth of [445, 492, 512]) {
   assert(isCompactComposerToolbar(composerWidth), `${composerWidth}pt split chat panes must stay compact`)
