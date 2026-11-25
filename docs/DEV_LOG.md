@@ -1,5 +1,20 @@
 # Public development log
 
+## Unreleased — Codex imported user duplicates
+
+- Reconcile user messages whose extra blank lines were compacted during
+  provider-history import, including already saved imported copies. Match the
+  original input bytes in checkpoint-verified provider history and preserve
+  genuine repeated requests, ambiguous source records, and indentation.
+- Reproduced the extra bubble and verified the correction in native offscreen
+  Electron through production IPC and an isolated authenticated AgentsServer.
+  Two genuine repeated requests remain visible after switching chats, reopening
+  history, and reconnecting; the durable event ledger remains unchanged.
+  Synthetic provider history was used; no live provider request was made.
+- Passed 119 focused Python 3.13 history, metadata, delivery, and deferral tests.
+  This is a source-only server correction requiring a server update for existing
+  installations. No production service was restarted or release published.
+
 ## Unreleased — Workspace pane resize bounds
 
 - Keep workspace panes at a usable width and height when dragging dividers or
