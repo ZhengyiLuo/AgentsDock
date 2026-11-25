@@ -1870,6 +1870,7 @@ describe('AgentServerClient live stream', () => {
     const stop = client.stream('chat', 5, event => received.push(event), () => {}, undefined, undefined, undefined, changed, usage)
     const socket = FakeWebSocket.instances[0]
     socket.emit('message', JSON.stringify({ type: 'side_chat_updated', session_id: 'chat', revision: 6, seq: 999 }))
+    socket.emit('message', JSON.stringify({ type: 'side_chat_updated', session_id: 'chat', revision: 7, side_chat_id: 'second', seq: 1000 }))
     socket.emit('message', JSON.stringify({ type: 'side_chat_updated', session_id: 'other', revision: 7 }))
     socket.emit('message', JSON.stringify({ type: 'side_chat_updated', session_id: 'chat', revision: -1 }))
     socket.emit('message', JSON.stringify({ type: 'provider_usage_changed', session_id: 'chat', backend: 'claude', seq: 998 }))
@@ -1877,7 +1878,7 @@ describe('AgentServerClient live stream', () => {
     socket.emit('message', JSON.stringify({ id: 'e6', session_id: 'chat', seq: 6, type: 'assistant_text', ts: 'now' }))
     socket.emit('close')
     vi.advanceTimersByTime(500)
-    expect(changed).toHaveBeenCalledExactlyOnceWith(6)
+    expect(changed.mock.calls).toEqual([[6, undefined], [7, 'second']])
     expect(usage).toHaveBeenCalledExactlyOnceWith('claude')
     expect(received).toHaveLength(1)
     expect(String(FakeWebSocket.instances[1].url)).toContain('after=6')

@@ -1,10 +1,21 @@
 import { describe, expect, it } from 'vitest'
-import { sideQuestionLimit, parseSideQuestionAnswer, parseSyncedSideChat, sideChatRuntimeSettingsAvailable, sideQuestionsAvailable, validateSideQuestionInput, type SideQuestionInput } from './side-questions'
+import { sideQuestionLimit, parseSyncedSideChatList, parseSideQuestionAnswer, parseSyncedSideChat, sideChatRuntimeSettingsAvailable, sideQuestionsAvailable, validateSideQuestionInput, type SideQuestionInput } from './side-questions'
 
 const input = { request_id: 'side-a', question: 'Why?' }
 const history = [{ role: 'user' as const, text: ' First question\n' }, { role: 'assistant' as const, text: 'First answer.' }]
 
 describe('side chat input validation', () => {
+  it('rejects duplicate conversations, malformed stable identities and foreign session lists', () => {
+    const chat = { session_id: 'main', side_chat_id: 'second', conversation_id: 'side_second', revision: 0, exchanges: [], last_request_id: null }
+    const list = { session_id: 'main', side_chats: [chat] }
+    expect(parseSyncedSideChatList(list, 'main')).toEqual(list)
+    for (const invalid of [{ ...list, session_id: 'foreign' }, { ...list, side_chats: [chat, chat] },
+      { ...list, side_chats: [chat, { ...chat, side_chat_id: 'different' }] },
+      { ...list, side_chats: [{ ...chat, conversation_id: {} }] }]) {
+      expect(() => parseSyncedSideChatList(invalid, 'main')).toThrow('side_question_invalid_response')
+    }
+  })
+
   it('preserves a next-turn model/effort override, including an explicit default effort', () => {
     expect(validateSideQuestionInput({ ...input, model: ' gpt-test ', effort: 'high' }))
       .toEqual({ ...input, model: 'gpt-test', effort: 'high' })

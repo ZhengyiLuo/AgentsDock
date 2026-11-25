@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState, useSyncExternalStore } from 'react'
 import { ArrowDown, ArrowUp, Info, Square } from 'lucide-react'
 import { t } from '@shared/i18n'
-import { sideChatSyncAvailable, sideChatRuntimeSettingsAvailable, sideQuestionLimit, sideQuestionsAvailable, type SideQuestionScope } from '@shared/side-questions'
+import { sideChatMultipleAvailable, sideChatSyncAvailable, sideChatRuntimeSettingsAvailable, sideQuestionLimit, sideQuestionsAvailable, type SideQuestionScope } from '@shared/side-questions'
 import type { Session } from '@shared/types'
 import { useLocale } from '../lib/i18n'
 import { SideChatController } from '../lib/side-chat'
@@ -29,6 +29,7 @@ export function SideQuestionPanel({ session, scope, controller, active = true, f
   const supported = !window.agentsDock.sharedChat && Boolean(window.agentsDock.sideQuestions) && sideQuestionsAvailable(health, session.backend)
   const online = supported && connected && !switchingProfileId && Boolean(scope.profileId)
   const sync = sideChatSyncAvailable(health)
+  const multiple = sideChatMultipleAvailable(health)
   const runtimeSettingsAvailable = sideChatRuntimeSettingsAvailable(health, session.backend)
   const sideModel = snapshot.runtimeSettings?.model ?? snapshot.model ?? (snapshot.exchanges.length ? undefined : session.model ?? undefined)
   const sideEffort = snapshot.runtimeSettings?.effort ?? snapshot.effort ?? (snapshot.exchanges.length ? undefined : session.effort ?? undefined)
@@ -36,7 +37,7 @@ export function SideQuestionPanel({ session, scope, controller, active = true, f
   useEffect(() => {
     if (!active || !online) return
     return controller.connect(scope, session)
-  }, [active, online, sync, controller, scope.profileId, scope.profileGeneration, scope.serverIdentity, session.id])
+  }, [active, online, sync, multiple, controller, scope.profileId, scope.profileGeneration, scope.serverIdentity, session.id])
   const limit = sideQuestionLimit(health)
   const length = Array.from(snapshot.draft.trim()).length
   useEffect(() => {

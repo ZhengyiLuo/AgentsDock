@@ -12,7 +12,7 @@ import { request as httpsRequest } from 'node:https'
 import { basename } from 'node:path'
 import { Readable } from 'node:stream'
 import { compactTimelineEvent, compactTimelineEvents } from '../shared/event-compaction'
-import { parseSyncedSideChat, type SyncedSideChat, parseSideQuestionAnswer, validateSideQuestionInput, type SideQuestionAnswer, type SideQuestionCancellation, type SideQuestionInput } from '../shared/side-questions'
+import { parseSyncedSideChatList, type SyncedSideChatList, parseSyncedSideChat, type SyncedSideChat, parseSideQuestionAnswer, validateSideQuestionInput, type SideQuestionAnswer, type SideQuestionCancellation, type SideQuestionInput } from '../shared/side-questions'
 import { parseChatInboxDelete, parseChatInboxPage } from '../shared/chat-inbox'
 import { parseWorkspaceGitStatus, validateWorkspaceGitAction, workspaceGitPath, workspaceGitSessionId,
   type WorkspaceGitAction, type WorkspaceGitDiff, type WorkspaceGitConflict, type WorkspaceGitView } from '../shared/workspace-git'
@@ -359,9 +359,21 @@ export class AgentServerClient {
     return configurationURL(this.configuration, path)
   }
 
-  async readSyncedSideChat(sessionId: string): Promise<SyncedSideChat> {
+  async listSyncedSideChats(sessionId: string): Promise<SyncedSideChatList> {
+    return parseSyncedSideChatList(await this.privilegedNativeRequest<unknown>(
+      `/api/sessions/${encodeURIComponent(sessionId)}/side-chats`, {}, undefined, 200, 8 * 1024 * 1024), sessionId)
+  }
+
+  async createSyncedSideChat(sessionId: string, sideChatId: string): Promise<SyncedSideChat> {
+    validateSideQuestionInput({ request_id: sideChatId, side_chat_id: sideChatId, question: 'validate' })
     return parseSyncedSideChat(await this.privilegedNativeRequest<unknown>(
-      `/api/sessions/${encodeURIComponent(sessionId)}/side-chat`, {}, undefined, 200, 8 * 1024 * 1024), sessionId)
+      `/api/sessions/${encodeURIComponent(sessionId)}/side-chats`, { method: 'POST', body: JSON.stringify({ side_chat_id: sideChatId }) }, undefined, 201, 8 * 1024 * 1024), sessionId)
+  }
+
+  async readSyncedSideChat(sessionId: string, sideChatId?: string): Promise<SyncedSideChat> {
+    const path = sideChatId ? `side-chats/${encodeURIComponent(sideChatId)}` : 'side-chat'
+    return parseSyncedSideChat(await this.privilegedNativeRequest<unknown>(
+      `/api/sessions/${encodeURIComponent(sessionId)}/${path}`, {}, undefined, 200, 8 * 1024 * 1024), sessionId)
   }
 
   async submitSyncedSideChat(sessionId: string, input: SideQuestionInput): Promise<SyncedSideChat> {
@@ -370,9 +382,9 @@ export class AgentServerClient {
       `/api/sessions/${encodeURIComponent(sessionId)}/side-chat`, { method: 'POST', body: JSON.stringify(body) }, undefined, 202, 8 * 1024 * 1024), sessionId)
   }
 
-  async stopSyncedSideChat(sessionId: string, requestId: string): Promise<SyncedSideChat> {
+  async stopSyncedSideChat(sessionId: string, requestId: string, sideChatId?: string): Promise<SyncedSideChat> {
     return parseSyncedSideChat(await this.privilegedNativeRequest<unknown>(
-      `/api/sessions/${encodeURIComponent(sessionId)}/side-chat/requests/${encodeURIComponent(requestId)}`, { method: 'DELETE' }, undefined, 200, 8 * 1024 * 1024), sessionId)
+      `/api/sessions/${encodeURIComponent(sessionId)}/side-chat/requests/${encodeURIComponent(requestId)}${sideChatId ? `?side_chat_id=${encodeURIComponent(sideChatId)}` : ''}`, { method: 'DELETE' }, undefined, 200, 8 * 1024 * 1024), sessionId)
   }
 
   async clearSyncedSideChat(sessionId: string, sideChatId: string): Promise<SyncedSideChat> {
@@ -2323,7 +2335,7 @@ export class AgentServerClient {
     onProviderRuntime?: (event: ProviderRuntimeChanged) => void,
     onPinnedItemsChanged?: (event: TimelinePinsChanged) => void,
     onReasoningStream?: (snapshot: ReasoningSummaryStreamSnapshot) => void,
-    onSideChatChanged?: (revision: number) => void,
+    onSideChatChanged?: (revision: number, sideChatId?: string) => void,
     onProviderUsageChanged?: (backend: 'codex' | 'claude') => void,
     onHistoryProjectionChanged?: () => void
   ): () => void {
@@ -2455,8 +2467,11 @@ export class AgentServerClient {
             return
           }
           if (packet && typeof packet === 'object' && 'type' in packet && packet.type === 'side_chat_updated') {
-            const notice = packet as { session_id?: string; revision?: number }
-            if (notice.session_id === sessionId && Number.isSafeInteger(notice.revision) && notice.revision! >= 0) onSideChatChanged?.(notice.revision!)
+            const notice = packet as { session_id?: string; revision?: number; side_chat_id?: string }
+            if (notice.session_id === sessionId && Number.isSafeInteger(notice.revision) && notice.revision! >= 0) {
+              const sideChatId = typeof notice.side_chat_id === 'string' && /^[A-Za-z0-9_-]{1,128}$/.test(notice.side_chat_id) ? notice.side_chat_id : undefined
+              onSideChatChanged?.(notice.revision!, sideChatId)
+            }
             return
           }
           if (packet && typeof packet === 'object' && 'type' in packet && packet.type === 'provider_usage_changed') {
@@ -3436,11 +3451,15 @@ function isPrivilegedNativeControlTarget(
       && keys.includes('path') && (operation !== 'diff' || keys.includes('view'))
   }
   const syncedSideChat = /^\/api\/sessions\/[A-Za-z0-9_-]{1,128}\/side-chat(?:\/(?:requests\/)?[A-Za-z0-9_-]{1,128})?$/.exec(path)
-  if (syncedSideChat) return !target.search && (path.endsWith('/side-chat') ? method === 'GET' || method === 'POST' : method === 'DELETE')
+  if (syncedSideChat) {
+    const selectedStop = /\/side-chat\/requests\//.test(path) && method === 'DELETE'
+      && [...target.searchParams.keys()].length === 1 && /^[A-Za-z0-9_-]{1,128}$/.test(target.searchParams.get('side_chat_id') ?? '')
+    return (!target.search || selectedStop) && (path.endsWith('/side-chat') ? method === 'GET' || method === 'POST' : method === 'DELETE')
+  }
   const sideQuestion = /^\/api\/sessions\/[A-Za-z0-9_-]{1,128}\/side-questions(?:\/([A-Za-z0-9_-]{1,128}))?$/.exec(path)
   if (sideQuestion) return !target.search && method === (sideQuestion[1] ? 'DELETE' : 'POST')
-  if (/^\/api\/sessions\/[A-Za-z0-9_-]{1,128}\/side-chats\/[A-Za-z0-9_-]{1,128}$/.test(path)) {
-    return !target.search && method === 'DELETE'
+  if (/^\/api\/sessions\/[A-Za-z0-9_-]{1,128}\/side-chats(?:\/[A-Za-z0-9_-]{1,128})?$/.test(path)) {
+    return !target.search && (path.endsWith('/side-chats') ? method === 'GET' || method === 'POST' : method === 'GET' || method === 'DELETE')
   }
   const share = /^\/api\/admin\/(chat-shares|interactive-chat-shares)\/[A-Za-z0-9_-]{1,128}(?:\/([A-Za-z0-9_-]{1,128}))?$/.exec(path)
   if (share) return !target.search && (!share[2] ? method === 'GET' || method === 'POST'

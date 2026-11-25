@@ -24,7 +24,7 @@ import { TeamMailHintController } from './team-mail-hint-controller'
 import { ActivityHealthProjection, type ActivityHealthRequest } from './activity-health'
 import type { CoordinatedConnection, CoordinatedProfile } from './coordinated-updates'
 import { SideQuestionRequests } from './side-question-requests'
-import { sideChatSyncAvailable, sideChatRuntimeSettingsAvailable, type SyncedSideChat, sideQuestionLimit, sideQuestionsAvailable, validateSideQuestionInput, type SideQuestionAnswer, type SideQuestionCancellation, type SideQuestionInput, type SideQuestionScope } from '../shared/side-questions'
+import { sideChatMultipleAvailable, type SyncedSideChatList, sideChatSyncAvailable, sideChatRuntimeSettingsAvailable, type SyncedSideChat, sideQuestionLimit, sideQuestionsAvailable, validateSideQuestionInput, type SideQuestionAnswer, type SideQuestionCancellation, type SideQuestionInput, type SideQuestionScope } from '../shared/side-questions'
 import { parseBulletinHintRefresh } from '../shared/team-bulletin-hints'
 import {
   cursorLocalSessionImportSupported,
@@ -3667,9 +3667,9 @@ export class AppService {
         sessionId,
         snapshot
       })
-    }, revision => {
+    }, (revision, sideChatId) => {
       if (!this.isCurrentTimeline(scope, sessionId, lease)) return
-      this.emit('side-chat:changed', { profileId: scope.profileId, profileGeneration: scope.generation, sessionId, revision })
+      this.emit('side-chat:changed', { profileId: scope.profileId, profileGeneration: scope.generation, sessionId, revision, ...(sideChatId ? { sideChatId } : {}) })
     }, backend => {
       if (!this.isCurrentTimeline(scope, sessionId, lease)) return
       this.emit('provider-usage:changed', { profileId: scope.profileId, profileGeneration: scope.generation, sessionId, backend,
@@ -3747,8 +3747,8 @@ export class AppService {
   viewState(expected: WorkspaceProfileScope, sessionId: string): ViewState | null { return this.cache.viewState(this.requireWorkspaceScope(expected).namespace, sessionId) }
   saveViewState(expected: WorkspaceProfileScope, state: ViewState): void { this.cache.putViewState(this.requireWorkspaceScope(expected).namespace, state) }
 
-  private async syncedSideChatOperation(expected: SideQuestionScope, sessionId: string,
-    operation: (client: AgentServerClient) => Promise<SyncedSideChat>): Promise<SyncedSideChat> {
+  private async syncedSideChatOperation<T>(expected: SideQuestionScope, sessionId: string,
+    operation: (client: AgentServerClient) => Promise<T>): Promise<T> {
     const scope = this.requireProfileScope(expected?.profileId, expected?.profileGeneration)
     await this.ensureValidatedScope(scope)
     this.assertCurrentScope(scope)
@@ -3768,8 +3768,20 @@ export class AppService {
     }
   }
 
-  readSyncedSideChat(scope: SideQuestionScope, sessionId: string): Promise<SyncedSideChat> {
-    return this.syncedSideChatOperation(scope, sessionId, client => client.readSyncedSideChat(sessionId))
+  listSyncedSideChats(scope: SideQuestionScope, sessionId: string): Promise<SyncedSideChatList> {
+    return this.syncedSideChatOperation(scope, sessionId, client => {
+      if (!sideChatMultipleAvailable(this.health)) throw new Error('side_question_unsupported')
+      return client.listSyncedSideChats(sessionId)
+    })
+  }
+  createSyncedSideChat(scope: SideQuestionScope, sessionId: string, sideChatId: string): Promise<SyncedSideChat> {
+    return this.syncedSideChatOperation(scope, sessionId, client => {
+      if (!sideChatMultipleAvailable(this.health)) throw new Error('side_question_unsupported')
+      return client.createSyncedSideChat(sessionId, sideChatId)
+    })
+  }
+  readSyncedSideChat(scope: SideQuestionScope, sessionId: string, sideChatId?: string): Promise<SyncedSideChat> {
+    return this.syncedSideChatOperation(scope, sessionId, client => sideChatId ? client.readSyncedSideChat(sessionId, sideChatId) : client.readSyncedSideChat(sessionId))
   }
   submitSyncedSideChat(scope: SideQuestionScope, sessionId: string, input: SideQuestionInput): Promise<SyncedSideChat> {
     const question = validateSideQuestionInput(input, sideQuestionLimit(this.health))
@@ -3783,8 +3795,8 @@ export class AppService {
       return client.submitSyncedSideChat(sessionId, question)
     })
   }
-  stopSyncedSideChat(scope: SideQuestionScope, sessionId: string, requestId: string): Promise<SyncedSideChat> {
-    return this.syncedSideChatOperation(scope, sessionId, client => client.stopSyncedSideChat(sessionId, requestId))
+  stopSyncedSideChat(scope: SideQuestionScope, sessionId: string, requestId: string, sideChatId?: string): Promise<SyncedSideChat> {
+    return this.syncedSideChatOperation(scope, sessionId, client => sideChatId ? client.stopSyncedSideChat(sessionId, requestId, sideChatId) : client.stopSyncedSideChat(sessionId, requestId))
   }
   clearSyncedSideChat(scope: SideQuestionScope, sessionId: string, sideChatId: string): Promise<SyncedSideChat> {
     return this.syncedSideChatOperation(scope, sessionId, client => client.clearSyncedSideChat(sessionId, sideChatId))

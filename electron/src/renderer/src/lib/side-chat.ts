@@ -1,5 +1,5 @@
 import { trackOperation } from './analytics'
-import { sideChatSyncAvailable, sideChatRuntimeSettingsAvailable, type SyncedSideChat, type SideChatActivityItem, sideQuestionLimit, sideQuestionsAvailable, sideQuestionOwnerKey,
+import { sideChatMultipleAvailable, sideChatSyncAvailable, sideChatRuntimeSettingsAvailable, type SyncedSideChat, type SideChatActivityItem, sideQuestionLimit, sideQuestionsAvailable, sideQuestionOwnerKey,
   SIDE_QUESTION_MAX_HISTORY_CHARS, SIDE_QUESTION_MAX_HISTORY_ITEMS,
   type SideQuestionHistoryItem, type SideQuestionScope } from '@shared/side-questions'
 import type { PublicServerProfile, Session } from '@shared/types'
@@ -53,7 +53,9 @@ export function sideChatHistory(exchanges: SideChatExchange[], maxItems = SIDE_Q
 }
 
 /** Server-owned history when supported; old servers retain their transient path. */
-export class SideChatController {
+class SideChatConversationController {
+  constructor(private targetSideChatId?: string, private reconcile?: () => Promise<void>) {}
+  target(id: string): void { this.targetSideChatId = id }
   private snapshots = new Map<string, SideChatSnapshot>()
   private scopes = new Map<string, SideQuestionScope>()
   private listeners = new Map<string, Set<() => void>>()
@@ -150,7 +152,7 @@ export class SideChatController {
       do {
         record.dirty = false
         try {
-          const snapshot = await read(scope, sessionId)
+          const snapshot = await (this.targetSideChatId ? read(scope, sessionId, this.targetSideChatId) : read(scope, sessionId))
           if (!current()) return
           this.applySynced(scope, sessionId, snapshot)
         } catch {
@@ -163,7 +165,7 @@ export class SideChatController {
     return record.promise
   }
 
-  private applySynced(scope: SideQuestionScope, sessionId: string, chat: SyncedSideChat): void {
+  applySynced(scope: SideQuestionScope, sessionId: string, chat: SyncedSideChat): void {
     const key = this.key(scope, sessionId)
     const before = this.snapshot(scope, sessionId)
     if (chat.session_id !== sessionId || chat.revision < (before.revision ?? -1)) return
@@ -183,9 +185,10 @@ export class SideChatController {
     const submittedExchange = submitted && chat.exchanges.find(item => item.request_id === submitted.requestId)
     const settingsCompleted = submittedExchange?.status === 'completed'
     const settingsFinished = submittedExchange && submittedExchange.status !== 'running'
+    if (this.targetSideChatId) this.targetSideChatId = chat.side_chat_id
     if (replaced) this.historyPositions.delete(key)
     this.update(scope, sessionId, state => ({ ...state, synced: true, loading: false, revision: chat.revision,
-      sideChatId: chat.side_chat_id, lastRequestId: chat.last_request_id ?? undefined, exchanges,
+      connectionGeneration: scope.profileGeneration, sideChatId: chat.side_chat_id, lastRequestId: chat.last_request_id ?? undefined, exchanges,
       model: chat.model, effort: chat.effort,
       // POST acknowledges admission before the provider applies its settings.
       // Keep that choice visible until completion; a newer next-send choice wins.
@@ -284,7 +287,9 @@ export class SideChatController {
         // otherwise DELETE could arrive before the request exists remotely.
         await this.optimistic.get(key)?.accepted?.catch(() => undefined)
         if (this.epoch !== epoch || !this.current(scope)) return
-        const stop = () => Promise.resolve(window.agentsDock.sideQuestions?.stop?.(scope, sessionId, requestId))
+        const stop = () => Promise.resolve(this.targetSideChatId
+          ? window.agentsDock.sideQuestions?.stop?.(scope, sessionId, requestId, this.targetSideChatId)
+          : window.agentsDock.sideQuestions?.stop?.(scope, sessionId, requestId))
         const result = await (userRequested ? trackOperation('side_chat_stop_requested', stop, value => Boolean(value)) : stop())
         if (result && this.epoch === epoch && this.current(scope)) this.applySynced(scope, sessionId, result)
       } catch {
@@ -336,7 +341,7 @@ export class SideChatController {
       this.applySynced(scope, sessionId, result)
     } catch {
       if (this.epoch === epoch && this.current(scope)) {
-        await this.refresh(scope, sessionId)
+        await (this.reconcile?.() ?? this.refresh(scope, sessionId))
         if (this.epoch !== epoch || !this.current(scope)) return
         this.update(scope, sessionId, state => ({ ...state, error: 'side_chat_sync_failed' }))
       }
@@ -373,5 +378,223 @@ export class SideChatController {
     this.historyPositions.clear()
     for (const request of requests) void window.agentsDock.sideQuestions?.cancel(request.scope, request.sessionId, request.requestId).catch(() => undefined)
     for (const listeners of this.listeners.values()) for (const listener of listeners) listener()
+  }
+}
+
+export interface SideChatTabsSnapshot {
+  chats: SideChatSnapshot[]
+  selectedId: string
+  creating: boolean
+  error: string | null
+}
+interface SideChatEntry {
+  controller: SideChatConversationController
+  id: string
+  conversationId?: string
+}
+interface SideChatCollection {
+  scope: SideQuestionScope
+  sessionId: string
+  entries: SideChatEntry[]
+  selected: SideChatEntry
+  listeners: Set<() => void>
+  snapshot: SideChatTabsSnapshot
+  loaded: boolean
+  mutation: number
+  createId?: string
+  read?: { promise: Promise<void>; dirty: boolean; generation: number }
+}
+
+/** Each tab owns its async work. Selecting another tab never retargets a reply. */
+export class SideChatController {
+  private collections = new Map<string, SideChatCollection>()
+  private listeners = new Map<string, Set<() => void>>()
+  private key(scope: SideQuestionScope, sessionId: string): string { return JSON.stringify([sideQuestionOwnerKey(scope), sessionId]) }
+  private current(scope: SideQuestionScope): boolean {
+    const state = useAppStore.getState()
+    return state.activeProfileId === scope.profileId && state.profileGeneration === scope.profileGeneration && !state.switchingProfileId
+      && (!scope.serverIdentity || state.profiles.find(profile => profile.id === scope.profileId)?.serverIdentity === scope.serverIdentity)
+  }
+  private multiple(): boolean { return sideChatMultipleAvailable(useAppStore.getState().health) && Boolean(window.agentsDock.sideQuestions?.list) }
+  private notify(collection: SideChatCollection): void {
+    if (this.collections.get(this.key(collection.scope, collection.sessionId)) !== collection) return
+    collection.snapshot = { ...collection.snapshot,
+      chats: collection.entries.map(entry => entry.controller.snapshot(collection.scope, collection.sessionId)),
+      selectedId: collection.selected.controller.snapshot(collection.scope, collection.sessionId).sideChatId }
+    for (const listener of collection.listeners) listener()
+  }
+  private entry(collection: SideChatCollection, id?: string): SideChatEntry {
+    const controller = new SideChatConversationController(id, () => this.refresh(collection.scope, collection.sessionId))
+    const entry = { controller, id: controller.snapshot(collection.scope, collection.sessionId).sideChatId }
+    controller.subscribe(collection.scope, collection.sessionId, () => {
+      const nextId = controller.snapshot(collection.scope, collection.sessionId).sideChatId
+      if (entry.id !== nextId) { entry.id = nextId; collection.mutation += 1 }
+      this.notify(collection)
+    })
+    return entry
+  }
+  private collection(scope: SideQuestionScope, sessionId: string): SideChatCollection {
+    const key = this.key(scope, sessionId)
+    let collection = this.collections.get(key)
+    if (!collection) {
+      const listeners = this.listeners.get(key) ?? new Set()
+      this.listeners.set(key, listeners)
+      collection = { scope, sessionId, entries: [], listeners, loaded: false, mutation: 0,
+        snapshot: { chats: [], selectedId: '', creating: false, error: null } } as unknown as SideChatCollection
+      collection.selected = this.entry(collection)
+      collection.entries = [collection.selected]
+      this.collections.set(key, collection)
+      this.notify(collection)
+    } else if (collection.scope.profileGeneration !== scope.profileGeneration) {
+      collection.scope = scope
+      collection.loaded = false
+      collection.snapshot = { ...collection.snapshot, creating: false, error: null }
+      this.notify(collection)
+    }
+    return collection
+  }
+  snapshot(scope: SideQuestionScope, sessionId: string): SideChatSnapshot {
+    return this.collection(scope, sessionId).selected.controller.snapshot(scope, sessionId)
+  }
+  tabs(scope: SideQuestionScope, sessionId: string): SideChatTabsSnapshot { return this.collection(scope, sessionId).snapshot }
+  subscribe(scope: SideQuestionScope, sessionId: string, listener: () => void): () => void {
+    const collection = this.collection(scope, sessionId)
+    collection.listeners.add(listener)
+    return () => { collection.listeners.delete(listener) }
+  }
+  select(scope: SideQuestionScope, sessionId: string, sideChatId: string): void {
+    const collection = this.collection(scope, sessionId)
+    const entry = collection.entries.find(entry => entry.controller.snapshot(scope, sessionId).sideChatId === sideChatId)
+    if (!entry || collection.selected === entry) return
+    collection.selected = entry
+    this.notify(collection)
+  }
+  setDraft(scope: SideQuestionScope, sessionId: string, draft: string): void { this.collection(scope, sessionId).selected.controller.setDraft(scope, sessionId, draft) }
+  setRuntimeSettings(scope: SideQuestionScope, session: Session, settings: { model?: string; effort: string }): void {
+    this.collection(scope, session.id).selected.controller.setRuntimeSettings(scope, session, settings)
+  }
+  detailsScroll(scope: SideQuestionScope, sessionId: string): number { return this.collection(scope, sessionId).selected.controller.detailsScroll(scope, sessionId) }
+  saveDetailsScroll(scope: SideQuestionScope, sessionId: string, offset: number): void { this.collection(scope, sessionId).selected.controller.saveDetailsScroll(scope, sessionId, offset) }
+  historyScroll(scope: SideQuestionScope, sessionId: string): SideChatScrollPosition | undefined { return this.collection(scope, sessionId).selected.controller.historyScroll(scope, sessionId) }
+  saveHistoryScroll(scope: SideQuestionScope, sessionId: string, sideChatId: string, position: SideChatScrollPosition): void {
+    const entry = this.collection(scope, sessionId).entries.find(entry => entry.controller.snapshot(scope, sessionId).sideChatId === sideChatId)
+    entry?.controller.saveHistoryScroll(scope, sessionId, sideChatId, position)
+  }
+  send(scope: SideQuestionScope, session: Session): Promise<void> { return this.collection(scope, session.id).selected.controller.send(scope, session) }
+  cancel(scope: SideQuestionScope, sessionId: string, userRequested = false): Promise<void> { return this.collection(scope, sessionId).selected.controller.cancel(scope, sessionId, userRequested) }
+  clear(scope: SideQuestionScope, sessionId: string): void {
+    const collection = this.collection(scope, sessionId)
+    if (this.multiple() && !collection.loaded) return
+    collection.selected.controller.clear(scope, sessionId)
+  }
+
+  async create(scope: SideQuestionScope, sessionId: string): Promise<void> {
+    const api = window.agentsDock.sideQuestions
+    const collection = this.collection(scope, sessionId)
+    if (!this.multiple() || !api?.create || !this.current(scope) || !collection.loaded || collection.snapshot.creating) return
+    // Retrying a lost acknowledgement uses the same ID, so it cannot create a second tab.
+    const id = collection.createId ??= crypto.randomUUID()
+    collection.snapshot = { ...collection.snapshot, creating: true, error: null }
+    collection.mutation += 1
+    this.notify(collection)
+    const current = () => this.current(scope) && this.collections.get(this.key(scope, sessionId)) === collection
+    try {
+      const chat = await api.create(scope, sessionId, id)
+      if (!current()) return
+      let entry = collection.entries.find(entry => entry.id === chat.side_chat_id
+        || chat.conversation_id && entry.conversationId === chat.conversation_id)
+      if (!entry) { entry = this.entry(collection, chat.side_chat_id); collection.entries.push(entry) }
+      entry.conversationId = chat.conversation_id
+      entry.controller.applySynced(scope, sessionId, chat)
+      collection.selected = entry
+      collection.createId = undefined
+      collection.mutation += 1
+    } catch {
+      if (current()) collection.snapshot = { ...collection.snapshot, error: 'side_chat_sync_failed' }
+    } finally {
+      if (current()) { collection.snapshot = { ...collection.snapshot, creating: false }; this.notify(collection) }
+    }
+  }
+
+  async refresh(scope: SideQuestionScope, sessionId: string): Promise<void> {
+    const collection = this.collection(scope, sessionId)
+    if (!this.multiple()) return collection.selected.controller.refresh(scope, sessionId)
+    const list = window.agentsDock.sideQuestions?.list
+    if (!list || !this.current(scope)) return
+    if (collection.read?.generation === scope.profileGeneration) { collection.read.dirty = true; return collection.read.promise }
+    const record = { promise: Promise.resolve(), dirty: false, generation: scope.profileGeneration }
+    collection.snapshot = { ...collection.snapshot, error: null }
+    const current = () => this.current(scope) && this.collections.get(this.key(scope, sessionId)) === collection && collection.read === record
+    record.promise = (async () => {
+      do {
+        record.dirty = false
+        const mutation = collection.mutation
+        try {
+          const result = await list(scope, sessionId)
+          if (!current()) return
+          if (mutation !== collection.mutation) { record.dirty = true; continue }
+          if (result.session_id !== sessionId || !result.side_chats.length) throw new Error('side_question_invalid_response')
+          const previous = collection.entries
+          const entries = result.side_chats.map((chat, index) => {
+            const entry = previous.find(entry => entry.id === chat.side_chat_id)
+              ?? previous.find(entry => chat.conversation_id && entry.conversationId === chat.conversation_id)
+              ?? (!collection.loaded && index === 0 ? previous[0] : this.entry(collection, chat.side_chat_id))
+            entry.conversationId = chat.conversation_id
+            entry.controller.target(chat.side_chat_id)
+            entry.controller.applySynced(scope, sessionId, chat)
+            return entry
+          })
+          collection.entries = entries
+          if (!entries.includes(collection.selected)) collection.selected = entries[0]
+          collection.loaded = true
+          collection.snapshot = { ...collection.snapshot, error: null }
+          this.notify(collection)
+        } catch {
+          if (current()) { collection.snapshot = { ...collection.snapshot, error: 'side_chat_sync_failed' }; this.notify(collection) }
+          return
+        }
+      } while (record.dirty && current())
+    })().finally(() => { if (collection.read === record) collection.read = undefined })
+    collection.read = record
+    return record.promise
+  }
+
+  connect(scope: SideQuestionScope, session: Session): () => void {
+    const collection = this.collection(scope, session.id)
+    if (!this.multiple()) return collection.selected.controller.connect(scope, session)
+    void this.refresh(scope, session.id)
+    const owned = (event: { profileId: string; profileGeneration: number; sessionId: string }) =>
+      event.profileId === scope.profileId && event.profileGeneration === scope.profileGeneration && event.sessionId === session.id && this.current(scope)
+    const changed = window.agentsDock.events?.on('side-chat:changed', event => {
+      if (!owned(event)) return
+      const entry = event.sideChatId && collection.entries.find(entry => entry.id === event.sideChatId)
+      if (!entry) { void this.refresh(scope, session.id); return }
+      if (event.revision > (entry.controller.snapshot(scope, session.id).revision ?? -1)) void entry.controller.refresh(scope, session.id)
+    })
+    const app = useAppStore.getState()
+    let live = (app.syncBySession[session.id]?.status ?? (app.syncSessionId === session.id ? app.syncStatus : undefined)) === 'live'
+    const reconnected = window.agentsDock.events?.on('server:sync', event => {
+      if (!owned(event)) return
+      const wasLive = live
+      live = event.state === 'live'
+      if (live && !wasLive) void this.refresh(scope, session.id)
+    })
+    return () => { changed?.(); reconnected?.() }
+  }
+  reconcileProfiles(profiles: PublicServerProfile[]): void {
+    for (const [key, collection] of this.collections) {
+      for (const entry of collection.entries) entry.controller.reconcileProfiles(profiles)
+      const profile = profiles.find(profile => profile.id === collection.scope.profileId)
+      if (profile && (!collection.scope.serverIdentity || profile.serverIdentity === collection.scope.serverIdentity)) continue
+      this.collections.delete(key)
+    }
+  }
+  reset(): void {
+    const collections = [...this.collections.values()]
+    this.collections.clear()
+    for (const collection of collections) {
+      for (const entry of collection.entries) entry.controller.reset()
+      for (const listener of collection.listeners) listener()
+    }
   }
 }

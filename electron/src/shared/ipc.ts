@@ -229,9 +229,11 @@ export interface AgentsDockAPI {
   /** Restricted browser renderer. It has no native, filesystem, or other-chat authority. */
   readonly sharedChat?: true
   sideQuestions?: {
-    read?(scope: import('./side-questions').SideQuestionScope, sessionId: string): Promise<import('./side-questions').SyncedSideChat>
+    list?(scope: import('./side-questions').SideQuestionScope, sessionId: string): Promise<import('./side-questions').SyncedSideChatList>
+    create?(scope: import('./side-questions').SideQuestionScope, sessionId: string, sideChatId: string): Promise<import('./side-questions').SyncedSideChat>
+    read?(scope: import('./side-questions').SideQuestionScope, sessionId: string, sideChatId?: string): Promise<import('./side-questions').SyncedSideChat>
     submit?(scope: import('./side-questions').SideQuestionScope, sessionId: string, input: import('./side-questions').SideQuestionInput): Promise<import('./side-questions').SyncedSideChat>
-    stop?(scope: import('./side-questions').SideQuestionScope, sessionId: string, requestId: string): Promise<import('./side-questions').SyncedSideChat>
+    stop?(scope: import('./side-questions').SideQuestionScope, sessionId: string, requestId: string, sideChatId?: string): Promise<import('./side-questions').SyncedSideChat>
     clear?(scope: import('./side-questions').SideQuestionScope, sessionId: string, sideChatId: string): Promise<import('./side-questions').SyncedSideChat>
     ask(scope: import('./side-questions').SideQuestionScope, sessionId: string, input: import('./side-questions').SideQuestionInput): Promise<import('./side-questions').SideQuestionAnswer>
     cancel(scope: import('./side-questions').SideQuestionScope, sessionId: string, requestId: string): Promise<import('./side-questions').SideQuestionCancellation>

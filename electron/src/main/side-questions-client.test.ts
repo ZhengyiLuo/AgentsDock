@@ -46,6 +46,30 @@ function browserHeaders(request: IncomingMessage): string[] {
 afterEach(() => { vi.useRealTimers(); vi.restoreAllMocks(); vi.unstubAllGlobals() })
 
 describe('side-question native HTTP contract', () => {
+  it('lists, creates, reads and stops independent side chats through authenticated native routes', async () => {
+    const requests: Array<{ method?: string; url?: string; body: string }> = []
+    const snapshot = { session_id: 'chat-a', side_chat_id: 'second', conversation_id: 'side_second', revision: 0, last_request_id: null, exchanges: [] }
+    await localTransport(async (request, response) => {
+      expect(browserHeaders(request)).toEqual([])
+      expect(request.headers['x-agentsdock-token']).toBe(token)
+      requests.push({ method: request.method, url: request.url, body: await body(request) })
+      json(response, request.url?.endsWith('/side-chats') && request.method === 'GET'
+        ? { session_id: 'chat-a', side_chats: [snapshot] } : snapshot, request.method === 'POST' ? 201 : 200)
+    }, async client => {
+      await expect(client.listSyncedSideChats('chat-a')).resolves.toEqual({ session_id: 'chat-a', side_chats: [snapshot] })
+      await expect(client.createSyncedSideChat('chat-a', 'second')).resolves.toEqual(snapshot)
+      await expect(client.readSyncedSideChat('chat-a', 'second')).resolves.toEqual(snapshot)
+      await expect(client.stopSyncedSideChat('chat-a', input.request_id, 'second')).resolves.toEqual(snapshot)
+      await expect(client.readSyncedSideChat('chat-a', 'second/invalid')).rejects.toThrow('route is invalid')
+      await expect(client.stopSyncedSideChat('chat-a', input.request_id, 'second&extra=true')).rejects.toThrow('route is invalid')
+    })
+    expect(requests.map(request => [request.method, request.url])).toEqual([
+      ['GET', '/api/sessions/chat-a/side-chats'], ['POST', '/api/sessions/chat-a/side-chats'],
+      ['GET', '/api/sessions/chat-a/side-chats/second'], ['DELETE', '/api/sessions/chat-a/side-chat/requests/request-a?side_chat_id=second']
+    ])
+    expect(JSON.parse(requests[1].body)).toEqual({ side_chat_id: 'second' })
+  })
+
   it.each(['synced', 'legacy'] as const)('carries independent model and effort changes through %s native HTTP', async mode => {
     const requests: Array<{ method?: string; url?: string; payload: unknown }> = []
     const choices = [
