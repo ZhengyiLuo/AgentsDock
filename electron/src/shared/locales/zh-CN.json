@@ -3407,6 +3407,7 @@
   "chatWorkspace.layout": "窗格布局",
   "chatWorkspace.paneCount": "{count} 个窗格",
   "chatWorkspace.chooseChat": "选择此窗格的会话",
+  "chatWorkspace.moveHere": "移到此处",
   "chatWorkspace.newChat": "新建会话",
   "chatWorkspace.creatingChat": "正在创建会话…",
   "chatWorkspace.search": "搜索会话…",

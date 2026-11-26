@@ -83,6 +83,23 @@ describe('ChatWorkspaceGrid resize ownership', () => {
     expect(requestNewChat).toHaveBeenCalledExactlyOnceWith({ workspaceId: 'workspace-main', pane: 'secondary' })
   })
 
+  it('offers an already open chat in an empty pane with an explicit move action', () => {
+    const selectSessionInPane = vi.fn().mockResolvedValue(undefined)
+    useAppStore.setState({ selectSessionInPane,
+      sessions: [{ id: 'fork', title: 'Fork of Identity', backend: 'claude' }],
+      chatPanes: { primary: 'fork', secondary: null, tertiary: null, quaternary: null },
+      chatPaneCount: 4,
+      chatWorkspaces: [{ ...workspace('workspace-main'), paneCount: 4,
+        panes: { primary: 'fork', secondary: null, tertiary: null, quaternary: null } }]
+    })
+    const view = render(<ChatWorkspaceGrid sidebarVisible terminalOpen={false}
+      onSidebarToggle={() => undefined} onTerminalToggle={() => undefined} sideChat={() => null} />)
+    const pane = within(view.container.querySelector('[data-chat-pane="quaternary"]') as HTMLElement)
+    fireEvent.change(pane.getByRole('searchbox'), { target: { value: 'Fork of' } })
+    fireEvent.click(pane.getByRole('button', { name: /Fork of Identity.*Move here/ }))
+    expect(selectSessionInPane).toHaveBeenCalledExactlyOnceWith('fork', 'quaternary')
+  })
+
   it('creates an ordinary chat before opting into workspaces', () => {
     const requestNewChat = vi.fn().mockResolvedValue(undefined)
     useAppStore.setState({ requestNewChat, chatWorkspaces: [], chatWorkspaceBarVisible: false,
