@@ -19,9 +19,9 @@ const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 // Stable support is deliberately scoped to this reviewed release, not an
 // authorization to turn arbitrary stable packages into production acceptance.
 export function candidateTrack(version) {
-  if (version === '1.0.9' || version === '1.0.10' || version === '1.0.11') return 'stable'
+  if (version === '1.0.9' || version === '1.0.10' || version === '1.0.11' || version === '1.0.12') return 'stable'
   assert(typeof version === 'string' && /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)-beta\.[1-9]\d*$/.test(version),
-    'Candidate rehearsal requires a numbered beta or reviewed stable 1.0.9/1.0.10/1.0.11')
+    'Candidate rehearsal requires a numbered beta or reviewed stable 1.0.9/1.0.10/1.0.11/1.0.12')
   return 'beta'
 }
 
@@ -69,6 +69,10 @@ export const BETA1101_BASELINE = Object.freeze({
 })
 
 export function candidateBaselineProfile(name, candidateVersion) {
+  if (candidateVersion === '1.0.12') {
+    assert(Object.hasOwn(BETA1127_BASELINES, name), 'Unknown stable 1.0.12 baseline profile')
+    return BETA1127_BASELINES[name]
+  }
   if (candidateVersion === '1.0.12-beta.7') {
     assert(Object.hasOwn(BETA1127_BASELINES, name), 'Unknown beta 1.0.12-beta.7 baseline profile')
     return BETA1127_BASELINES[name]

@@ -7,6 +7,22 @@ All candidate receipts and observations remain `publicationEligible: false`;
 observations also remain `releaseAcceptance: false`. A successful job does not
 turn blocked or unobserved scenarios into full release acceptance.
 
+## Stable 1.0.12 preparation
+
+The stable candidate reuses the independently pinned `stable111` and `beta1126`
+incumbents below, with both `0755` and `0750` roots. Stable clients retain Stable;
+beta.6 clients retain Beta and discover the newer stable candidate. Beta.6's
+server-first preparation and offline refusal remain part of its journey. The
+legacy, fresh and failure-recovery cases remain separate observations.
+
+Stable source and packages have their own identities; no beta.7 artifact or
+receipt is promoted. The installer is byte-identical to the reviewed beta.7
+installer. Tests add this exact version association while retaining historical
+baseline identities and rejecting unreviewed versions. These are disposable
+acceptance fixtures, not extra app restrictions or publication permission.
+Native stable-package receipts are pending. Existing scoped receipt flags and
+unobserved provider-history, active-work, reboot and Windows boundaries remain.
+
 ## 1.0.12-beta.7 rehearsal preparation
 
 The exact beta.7 candidate adds `stable111` and `beta1126`, each with both

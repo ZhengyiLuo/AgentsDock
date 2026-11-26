@@ -851,3 +851,13 @@ test('1.0.12-beta.7 replay verifies exact stable and beta.6 incumbents before ro
   assert.throws(() => replayBaselineMetadata('1.0.12-beta.6', '1.0.12-beta.7', false))
   assert.throws(() => replayBaselineMetadata('1.0.12-beta.6', '1.0.12-beta.8', true))
 })
+
+
+test('stable 1.0.12 only replays exact reviewed incumbent versions', () => {
+  for (const baseline of ['1.0.6', '1.0.11', '1.0.12-beta.6']) {
+    assert.equal(replayBaselineMetadata(baseline, '1.0.12', true).prerelease, baseline.includes('-beta.'))
+  }
+  for (const baseline of ['1.0.10', '1.0.12-beta.5', '1.0.12-beta.7', '1.0.12']) {
+    assert.throws(() => replayBaselineMetadata(baseline, '1.0.12', true))
+  }
+})

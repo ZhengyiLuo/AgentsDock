@@ -719,3 +719,13 @@ test('beta.7 retains beta.6 subscription and server-first preparation while stab
     assert.throws(() => requiresServerBeforeApp(...args))
   }
 })
+
+
+test('stable 1.0.12 preserves stable and beta subscriptions with incumbent update order', () => {
+  assert.deepEqual(desktopJourney('1.0.12', '1.0.11', 'stable111'),
+    {initialTrack: 'stable', installedTrack: 'stable', switchToBeta: false})
+  assert.deepEqual(desktopJourney('1.0.12', '1.0.12-beta.6', 'beta1126'),
+    {initialTrack: 'beta', installedTrack: 'beta', switchToBeta: false})
+  assert.equal(requiresServerBeforeApp('1.0.12', '1.0.12-beta.6', 'beta1126'), true)
+  assert.equal(requiresServerBeforeApp('1.0.12', '1.0.11', 'stable111'), false)
+})
