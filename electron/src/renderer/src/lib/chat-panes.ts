@@ -54,10 +54,12 @@ export function focusedChatSessionId(layout: ChatPaneLayout): string | null {
 
 export function selectChatInPane(layout: ChatPaneLayout, sessionId: string, pane: ChatPane): ChatPaneLayout {
   const existingPane = chatPaneForSession(layout.panes, sessionId)
-  if (existingPane) return { ...layout, focusedPane: existingPane }
+  // An empty pane is an explicit placement target. Move the existing view
+  // there; ordinary navigation still resolves to its current occupied pane.
+  if (existingPane && layout.panes[pane]) return { ...layout, focusedPane: existingPane }
   return {
     ...layout,
-    panes: { ...layout.panes, [pane]: sessionId },
+    panes: { ...layout.panes, ...(existingPane ? { [existingPane]: null } : {}), [pane]: sessionId },
     focusedPane: pane,
     ...(layout.paneCount ? { paneCount: Math.max(layout.paneCount, CHAT_PANE_IDS.indexOf(pane) + 1) as ChatPaneCount } : {})
   }

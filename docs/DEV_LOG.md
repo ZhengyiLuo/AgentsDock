@@ -1,5 +1,23 @@
 # Public development log
 
+## Unreleased — Choose an open chat for an empty workspace pane
+
+- Keep already visible chats in the empty-pane picker with a "Move here"
+  action. Selecting one moves its existing view into that pane; ordinary
+  sidebar navigation still reveals its current pane. Preserve drafts, history,
+  other pane assignments and subscriptions without creating a duplicate chat.
+- Reproduced the missing search result in the signed beta.7 app, then exercised
+  the corrected production UI/preload/IPC against an isolated authenticated
+  server in native offscreen Electron: pointer selection, keyboard selection,
+  repeated moves, sidebar navigation and restored layout/drafts after reload.
+  Disposable synthetic completed chats were used; no live provider was invoked.
+  No stop, interrupt or fork request was sent. Isolated credentials were cleared
+  and owned test processes stopped.
+- Two regressions failed before the correction; all 90 focused workspace/grid
+  tests, TypeScript and production compilation/output verification now pass.
+  This is an app-only source change; no server update is required. It is not
+  included in the frozen beta.7 package and has not been installed or published.
+
 ## Unreleased — Workspace pane resize bounds
 
 - Keep workspace panes at a usable width and height when dragging dividers or
