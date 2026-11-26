@@ -648,6 +648,32 @@ describe('tabbed chat workspaces', () => {
     expect(useAppStore.getState().chatWorkspaces.find(workspace => workspace.id === first)?.panes.primary).toBe('a')
   })
 
+  it('moves an open chat to the chosen empty pane without replacing its history or subscription', async () => {
+    await useAppStore.getState().openSessionInSplit('b')
+    useAppStore.getState().setChatPaneCount(4)
+    useAppStore.getState().setDraftForSession('a', 'unfinished A')
+    useAppStore.getState().setDraftForSession('b', 'unfinished B')
+    const before = useAppStore.getState()
+    api.timeline.subscribe.mockClear()
+    api.timeline.unsubscribe.mockClear()
+    api.timeline.open.mockClear()
+    await useAppStore.getState().selectSessionInPane('a', 'quaternary')
+    expect(useAppStore.getState()).toMatchObject({
+      chatPaneCount: 4, focusedChatPane: 'quaternary', selectedSessionId: 'a',
+      chatPanes: { primary: null, secondary: 'b', tertiary: null, quaternary: 'a' },
+      drafts: { a: 'unfinished A', b: 'unfinished B' }
+    })
+    expect(useAppStore.getState().snapshots.a).toBe(before.snapshots.a)
+    expect(useAppStore.getState().snapshots.b).toBe(before.snapshots.b)
+    expect(api.timeline.subscribe).not.toHaveBeenCalled()
+    expect(api.timeline.unsubscribe).not.toHaveBeenCalled()
+    expect(api.timeline.open).not.toHaveBeenCalled()
+    await useAppStore.getState().selectSession('a')
+    expect(useAppStore.getState().focusedChatPane).toBe('quaternary')
+    await initialize()
+    expect(useAppStore.getState().chatPanes).toEqual({ primary: null, secondary: 'b', tertiary: null, quaternary: 'a' })
+  })
+
   it('uses the existing workspace when next-chat keyboard navigation selects its chat', async () => {
     const first = useAppStore.getState().activeChatWorkspaceId
     await useAppStore.getState().createChatWorkspace('b')

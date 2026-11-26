@@ -3400,6 +3400,7 @@
   "chatWorkspace.layout": "Pane layout",
   "chatWorkspace.paneCount": "{count} panes",
   "chatWorkspace.chooseChat": "Choose a chat for this pane",
+  "chatWorkspace.moveHere": "Move here",
   "chatWorkspace.newChat": "New chat",
   "chatWorkspace.creatingChat": "Creating chat…",
   "chatWorkspace.search": "Find a chat…",

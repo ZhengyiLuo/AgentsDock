@@ -239,7 +239,7 @@ function EmptyChatPane({ pane, focused }: { pane: ChatPaneId; focused: boolean }
   const creatingChat = useAppStore(state => state.creatingChat)
   const switchingProfileId = useAppStore(state => state.switchingProfileId)
   const [query, setQuery] = useState('')
-  const candidates = sessions.filter(session => !session.archived && !Object.values(panes).includes(session.id)
+  const candidates = sessions.filter(session => !session.archived
     && `${session.title} ${session.cwd}`.toLowerCase().includes(query.toLowerCase()))
   return <section className={`empty-chat-pane${focused ? ' focused' : ''}`} data-chat-pane={pane} tabIndex={-1}
     onPointerDownCapture={() => useAppStore.getState().focusChatPane(pane)} onFocusCapture={() => useAppStore.getState().focusChatPane(pane)}>
@@ -252,7 +252,7 @@ function EmptyChatPane({ pane, focused }: { pane: ChatPaneId; focused: boolean }
       value={query} onChange={event => setQuery(event.target.value)} />
     <div className="empty-pane-chat-list">
       {candidates.map(session => <button type="button" key={session.id} onClick={() => void useAppStore.getState().selectSessionInPane(session.id, pane)}>
-        <span>{session.title}</span><small>{session.backend}</small>
+        <span>{session.title}</span><small>{session.backend}{Object.values(panes).includes(session.id) ? ` · ${t('chatWorkspace.moveHere')}` : ''}</small>
       </button>)}
       {!candidates.length && <span>{t('chatWorkspace.noChats')}</span>}
     </div>
