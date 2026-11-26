@@ -8,6 +8,30 @@
 - Reserve new matched app, server, legacy bridge and CLI version 1.0.12.
   Prior beta packages and receipts remain unchanged; stable validation is
   recorded separately. No publication, installation or restart is recorded.
+- Frozen source `d2342a5f`, native build 1277. Fresh source CI and all eight
+  server shards passed. Signing run `45733743883` produced matching signed
+  npm/legacy runtime files. Desktop preparation `45733971293`, attempt 1,
+  passed all four platforms; Mac passed 6,070 tests with six skips, signing,
+  notarization, Gatekeeper and isolated launch/termination. Windows is unsigned.
+- Verified all 16 desktop files against original platform artifacts. The exact
+  packaged app passed five isolated UI/IPC/server journeys: picker placement
+  and reload; real Codex deferred Force Send; real Codex independent side chats,
+  inherited tool context and parent-preserving cancellation; endpoint context
+  preparation; and imported duplicates. Endpoint and duplicate fixtures used
+  synthetic provider data and do not establish live-account parity.
+- Native CLI run `45734049149` passed on macOS and Linux. All 11 Mac jobs in
+  `45736174997` and both Linux rollback jobs in `45736178459` passed on the
+  unchanged candidate with test-only descendant `8de8b8a2`. Independently
+  verified 13 original report archives and 31 reports. Stable 1.0.11, beta.6,
+  and legacy app/server fixtures covered both 0755 and 0750 root permissions.
+- These scoped results retain eight blocked Mac checks: populated native
+  history migration, complete fresh-provider setup and actual busy-work drain
+  are not established. Live Claude side-chat parity, reboot, Windows updating
+  and Mac post-takeover rollback remain unverified. Normal-to-custom encrypted
+  checkpoint portability is not claimed fixed. Public channels are unchanged.
+- An additional local broad tooling run hit a synthetic launch-test timing
+  mismatch. All 11 unchanged focused smoke tests and hosted tooling passed;
+  no product or timeout was changed. Preparation is not full release acceptance.
 
 ## Unreleased — Choose an open chat for an empty workspace pane
 
