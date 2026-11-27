@@ -1,5 +1,44 @@
 # Public development log
 
+
+## 2026-11-26 — Offline connection actions and resizable Side chat
+
+- Remove a saved connection while it is active or reconnecting. The app selects
+  another saved connection locally, or returns to setup with a fresh unconfigured
+  profile when the last connection is removed. Removal clears that connection's
+  local credentials/cache; it does not delete server chats or restart the server.
+  The existing workspace transition flushes drafts and fences late old-profile
+  replies before loading the replacement workspace.
+- Connection tests are optional when adding a server. Save an offline connection
+  and reconnect later. Pending tests no longer disable editor Cancel/Close,
+  editing another connection, or removing a connection; late test results cannot
+  reopen the editor or overwrite a newer draft.
+- Resize Side chat from its upper-left corner, or focus the handle and use arrow
+  keys (Shift for larger steps). Remember width/height locally, keep the composer
+  at the bottom, and constrain the popup to the available screen area. Existing
+  multiple-conversation tabs and per-tab drafts remain available for Codex and
+  Claude when the server advertises the multiple-side-chat contract.
+- Audit scope: saved-server editor/removal, profile switching, update/restart
+  controls, Codex/Claude goals, composer queue actions, custom endpoint settings,
+  and Side chat controls. Removed the active-profile deletion ban, last-profile
+  deletion ban, mandatory successful connection test, and test-wide editor lock.
+  Goal controls already permit changes during a running turn. Force Restart
+  already follows the server's explicit force-recovery contract. Retained
+  checks for stale server/chat ownership, unsaved-work persistence failures,
+  uncertain message delivery, unsupported provider APIs, and in-flight writes;
+  dropping these would risk wrong-target operations, data loss, or duplicate
+  sends. This is a scoped audit, not a claim that every app restriction has been
+  eliminated.
+- Verification: 336 renderer/store/settings tests and 522 native service tests
+  passed; TypeScript and production compilation passed. Isolated offscreen
+  Electron exercised pointer resizing, multiple Side chat creation through real
+  authenticated server routes, per-tab draft retention, popup reopening, offline
+  connection saving, active removal, and last-connection setup. The server's
+  original chat remained readable afterward. Provider replies were not exercised
+  by these layout/profile journeys; this is not live-provider acceptance.
+- Availability: source and compiled development output only. No installation,
+  publication, server deployment, or restart. Frozen release assets are unchanged.
+
 ## 2026-11-26 — Claude Send now follows native readiness
 
 - A Send now click releases the selected message's previous Stop hold and

@@ -331,7 +331,30 @@ describe('ServerManagement', () => {
 
     expect(await screen.findByText('Server health check reported unavailable.')).toBeInTheDocument()
     expect(screen.getByRole('status')).not.toHaveTextContent('Connected')
-    expect(screen.getByRole('button', { name: 'Add & switch' })).toBeDisabled()
+    expect(screen.getByRole('button', { name: 'Add & switch' })).toBeEnabled()
+  })
+
+  it('saves an offline server without a successful connection test', async () => {
+    const user = userEvent.setup()
+    render(<ServerManagement addRequest={1} />)
+    await user.type(screen.getByLabelText('Server URL'), 'https://offline.example:7850')
+    await user.click(screen.getByRole('button', { name: 'Add & switch' }))
+    await waitFor(() => expect(add).toHaveBeenCalledWith(expect.objectContaining({ serverIdentity: null, serverUrl: 'https://offline.example:7850' })))
+    expect(testConnection).not.toHaveBeenCalled()
+  })
+
+  it('can close a pending connection test and ignores its late completion', async () => {
+    let finish!: (value: unknown) => void
+    testConnection.mockReturnValueOnce(new Promise(resolve => { finish = resolve }))
+    const user = userEvent.setup()
+    render(<ServerManagement addRequest={1} />)
+    await user.type(screen.getByLabelText('Server URL'), 'https://offline.example:7850')
+    await user.click(screen.getByRole('button', { name: 'Test connection' }))
+    await user.click(screen.getByRole('button', { name: 'Cancel' }))
+    expect(screen.queryByLabelText('Server URL')).not.toBeInTheDocument()
+    await act(async () => { finish({ ok: true, server_identity: 'late' }) })
+    expect(screen.queryByText(/Connected · late/)).not.toBeInTheDocument()
+    expect(add).not.toHaveBeenCalled()
   })
 
   it('reveals and focuses the editor when Add server is clicked directly', async () => {
@@ -365,13 +388,13 @@ describe('ServerManagement', () => {
     expect(add).not.toHaveBeenCalled()
   })
 
-  it('protects the active profile and requires confirmation before removing another profile', async () => {
+  it('allows removal of the active profile and confirms removal of another profile', async () => {
     useAppStore.setState({ profiles: [alpha, beta] })
     list.mockResolvedValue([alpha])
     const user = userEvent.setup()
     renderExpanded(<ServerManagement />)
 
-    expect(screen.getByRole('button', { name: 'Cannot remove active server Alpha' })).toBeDisabled()
+    expect(screen.getByRole('button', { name: 'Remove Alpha' })).toBeEnabled()
     await user.click(screen.getByRole('button', { name: 'Remove Beta' }))
     expect(remove).not.toHaveBeenCalled()
     await user.click(screen.getByRole('button', { name: 'Remove Beta' }))
@@ -535,7 +558,7 @@ describe('ServerManagement', () => {
 
     await waitFor(() => expect(testConnection).toHaveBeenCalled())
     expect(screen.queryByText(/Connected · first-server/)).not.toBeInTheDocument()
-    expect(screen.getByRole('button', { name: 'Add & switch' })).toBeDisabled()
+    expect(screen.getByRole('button', { name: 'Add & switch' })).toBeEnabled()
   })
 
   it('requires explicit confirmation before clearing a changed canonical identity', async () => {

@@ -151,7 +151,7 @@ import type {
 import { updateQueuedTurns } from '../shared/queue'
 import { runtimeCatalogHasSelectableModels } from '../shared/runtime-catalog'
 import { incompleteLeadingRunId, isNativeGoalSteerEvent } from '../shared/semantic-timeline'
-import { normalizeServerURL } from '../shared/server-url'
+import { DEFAULT_SERVER_URL, normalizeServerURL } from '../shared/server-url'
 import { isLoopbackHostname, normalizeDirectIPTeamHubURL, normalizeTailscaleServeTeamHubURL } from '../shared/team-hub-url'
 import { agentFileBelongsToSession, isolateSessionEvent } from '../shared/session-files'
 import { buildWorkspaceMediaURL, isValidMediaIdentifier } from '../shared/media-url'
@@ -1812,18 +1812,12 @@ export class AppService {
   }
 
   private async removeServerOnce(profileId: string): Promise<boolean> {
-    if (profileId === this.activeProfileId) {
-      throw new Error('Switch to another server before removing the active profile.')
-    }
     if (!this.settings.getProfile(profileId)) throw new Error(`Unknown server profile: ${profileId}`)
     const teamHubCleanup = await this.removeTeamHubProfile(profileId)
     if (teamHubCleanup?.cleanupWarning) {
       throw new Error(`Teamspace authority was removed, but its private attachment cache could not be deleted. Retry removing this server profile. ${teamHubCleanup.cleanupWarning}`)
     }
     try {
-      if (profileId === this.activeProfileId) {
-        throw new Error('Switch to another server before removing the active profile.')
-      }
       const profile = this.settings.getProfile(profileId)
       if (!profile) throw new Error(`Unknown server profile: ${profileId}`)
       const cacheNamespaces = [
@@ -1834,8 +1828,20 @@ export class AppService {
       // Cache authority is removed before the durable profile. If settings
       // persistence subsequently fails, safe cache loss is preferable to
       // retaining confidential rows for a profile the user chose to remove.
-      this.cache.removeServerNamespaces(cacheNamespaces)
-      this.settings.removeProfile(profileId)
+      const active = profileId === this.activeProfileId
+      const replacement = active ? this.settings.listProfiles().find(candidate => candidate.id !== profileId) : null
+      // Local navigation/removal does not require either server to be reachable.
+      const nextClient = active ? this.clientFactory(replacement?.serverUrl ?? DEFAULT_SERVER_URL,
+        replacement ? this.settings.accessToken(replacement.id) : '') : undefined
+      try {
+        if (active) this.flushEventCache()
+        this.cache.removeServerNamespaces(cacheNamespaces)
+        this.settings.removeProfile(profileId, replacement?.id)
+      } catch (error) {
+        nextClient?.dispose()
+        throw error
+      }
+      if (active) this.activateProfile(this.settings.getActiveProfileId(), false, true, nextClient)
       this.sideQuestions.cancelProfile(profileId)
     } catch (error) { throw error }
     this.invalidateProfileHealthProbe(profileId)
