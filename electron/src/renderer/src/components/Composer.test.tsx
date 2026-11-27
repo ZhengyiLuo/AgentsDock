@@ -5110,6 +5110,26 @@ describe('Composer', () => {
     expect(runNow.mock.calls[0].slice(0, 2)).toEqual(['chat-1', 'stopped-handoff'])
   })
 
+  it('arms a stopped Claude message with one click and shows its automatic delivery inline', async () => {
+    const held: QueuedTurn = { queued_id: 'held', session_id: 'chat-1', prompt: 'Continue after login',
+      file_ids: [], position: 1, paused: true, pause_reason: 'stopped' }
+    const waiting = { ...held, paused: false, pause_reason: null, send_when_idle: true }
+    const runNow = vi.fn().mockResolvedValue({ ok: false, deferred: true, send_when_idle: true,
+      message: 'Will send automatically when Claude is ready.' })
+    window.agentsDock.queue = { runNow, list: vi.fn().mockResolvedValue([waiting]) } as unknown as AgentsDockAPI['queue']
+    useAppStore.setState({
+      sessions: [{ id: 'chat-1', title: 'Chat', backend: 'claude' }],
+      snapshots: { 'chat-1': { session: { id: 'chat-1', title: 'Chat', backend: 'claude' },
+        events: [], queuedTurns: [held], files: [], hasMoreEvents: false, filesTotal: 0, cachedAt: 0 } }
+    })
+    render(<Composer />)
+    await userEvent.click(screen.getByRole('button', { name: 'Send now' }))
+    await screen.findByText('Waiting to send · sends automatically')
+    expect(screen.queryByText('Paused after Stop')).not.toBeInTheDocument()
+    expect(runNow).toHaveBeenCalledExactlyOnceWith('chat-1', 'held')
+    expect(useAppStore.getState().snapshots['chat-1'].queuedTurns).toEqual([waiting])
+  })
+
   it('keeps a long steer prompt in the bounded queue prompt surface', () => {
     const longPrompt = `Inspect ${'/workspace/a-very-long-unbroken-worktree-name/'.repeat(12)} and report the exact status.`
     useAppStore.setState({

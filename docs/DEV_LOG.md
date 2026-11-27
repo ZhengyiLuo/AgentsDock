@@ -1,5 +1,29 @@
 # Public development log
 
+## 2026-11-26 — Claude Send now follows native readiness
+
+- A Send now click releases the selected message's previous Stop hold and
+  persists its next-send position. Starting, finishing and Stop cleanup return
+  an inline automatic-send state instead of rejecting the click. Native
+  readiness delivers eligible input once through the retained Claude owner;
+  a later Stop, removal or replacement wins.
+- Selected local skills and explicit local chat references use the retained
+  native follow-up connection. Validate command selection and extend only the
+  accepted owner's existing routes. Keep child tasks and the original run;
+  other delivery types remain queued for their own turn without a destructive
+  fallback. Unconfirmed provider delivery is never automatically replayed.
+- Queue status no longer says Claude must stop. Queue actions wrap in narrow
+  workspace panes so Send now remains reachable.
+- Validation: 273 isolated server tests and 341 targeted app tests, including
+  the stopped-Claude regression, passed; TypeScript and production
+  compilation passed. Native offscreen UI/IPC/authenticated-server exercise
+  reproduced the old paused-row failure, then passed one-click readiness,
+  exactly-once delivery, second use and narrow-button checks. The native
+  exercise used a synthetic Claude connection and does not establish live
+  provider parity. Live Claude acceptance still requires a valid test login.
+- Source changes only; no signed candidate replacement, publication,
+  installation or server restart.
+
 ## 2026-11-25 — Prepare matched stable 1.0.12
 
 - Merge the reviewed empty-pane picker fix from PR #187 into the prepared
