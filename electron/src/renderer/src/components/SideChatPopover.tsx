@@ -7,6 +7,7 @@ import type { Session } from '@shared/types'
 import { useLocale } from '../lib/i18n'
 import { SideChatController } from '../lib/side-chat'
 import { useTransientClose } from '../lib/transient-close'
+import { useSideChatSize } from '../lib/side-chat-size'
 import { useAppStore } from '../store/app-store'
 import { SideQuestionPanel } from './SideQuestionPanel'
 
@@ -18,6 +19,7 @@ export function SideChatPopover({ session, scope, controller, open, focusVersion
   const titleId = useId()
   const content = useRef<HTMLDivElement>(null)
   const health = useAppStore(state => state.health)
+  const { size, resizeHandle } = useSideChatSize(open)
   useTransientClose(open, () => onOpenChange(false))
   if (window.agentsDock.sharedChat || !['codex', 'claude'].includes(session.backend)) return null
   return <div className="side-chat-anchor">
@@ -27,12 +29,14 @@ export function SideChatPopover({ session, scope, controller, open, focusVersion
           aria-label={t('sideChat.title')} title={t('sideChat.title')}><MessageCircleQuestion size={18} /></button>
       </Popover.Trigger>
       <Popover.Portal>
-        <Popover.Content ref={content} className="side-chat-popover" side="top" align="end" sideOffset={8} collisionPadding={12}
+        <Popover.Content ref={content} className={`side-chat-popover${size ? " resized" : ""}`} side="top" align="end" sideOffset={8} collisionPadding={12}
+          style={size ? { width: size.width, height: size.height } : undefined}
           aria-labelledby={titleId} onOpenAutoFocus={event => {
             // The conversation input owns autofocus; do not focus Clear instead.
             const input = content.current?.querySelector<HTMLTextAreaElement>('textarea')
             if (input && !input.disabled) { event.preventDefault(); input.focus({ preventScroll: true }) }
           }}>
+          <button type="button" className="side-chat-resize" aria-label={t('sideChat.resize')} title={t('sideChat.resize')} {...resizeHandle} />
           <header className="side-chat-heading">
             <h3 id={titleId}><MessageCircleQuestion size={16} />{t('sideChat.title')}</h3>
             <SideChatClearButton session={session} scope={scope} controller={controller} />

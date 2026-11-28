@@ -51,11 +51,13 @@ export function GoalSummaryBar({ label, condition, metadata, openLabel, onOpen, 
   onOpen?: () => void
   actions?: ReactNode
 }) {
-  const summary = <><Goal size={15} aria-hidden="true" /><span className="goal-summary-condition">{condition}</span>
-    <span className="goal-summary-meta">{metadata}</span></>
+  const summary = <><Goal size={15} aria-hidden="true" /><span className="goal-summary-condition">{condition}</span></>
   return <section className="goal-summary-bar" aria-label={label}>
+    <div className="goal-summary-content">
     {onOpen ? <button type="button" className="goal-summary" onClick={onOpen} aria-label={openLabel} title={condition}>{summary}</button>
       : <div className="goal-summary">{summary}</div>}
+    <div className="goal-summary-meta">{metadata}</div>
+    </div>
     {actions && <div className="goal-summary-actions">{actions}</div>}
   </section>
 }

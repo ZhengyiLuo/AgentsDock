@@ -1,5 +1,102 @@
 # Public development log
 
+## 2026-11-27 — Accessible chat/file splits and compact goal details
+
+- Keep a labelled Chat beside file / File only toggle in the file-tab strip.
+  Opening code no longer requires finding an icon in the editor toolbar to
+  restore the adjacent chat. Preserve drafts, file edits, split resizing and
+  left/right placement.
+- Place blocked-goal details behind the status button inside the goal bar.
+  Remove the separate disclosure row, give the objective its own line, and
+  distinguish message activity from goal state. Keep the common Codex/Claude
+  summary layout and scope blocked-report requests to their original goal.
+- Verification: 253 editor, goal-control and locale tests, TypeScript and
+  production compilation passed. Built offscreen Electron exercised the
+  authenticated workspace file palette, repeated split/full-file toggles,
+  left/right placement and a narrow viewport; a synthetic native goal snapshot
+  exercised the compact status popover. These checks do not establish live
+  provider behaviour. No installation or production restart.
+- Updated the isolated goal-admission fixture to assert durable Send now
+  acceptance during Stop cleanup while retaining goal/owner state; all 35
+  isolated admission cases passed.
+
+
+## 2026-11-27 — Send now during Stop cleanup
+
+- Accept a selected queued message while explicit Stop cleanup is finishing for
+  either Codex or Claude. Persist its next-send position and release only that
+  message's Stop hold. The existing Stop completion callback starts it without
+  another click; normal waiting no longer returns a retry-required error.
+- Preserve other queued messages and their Stop holds. Keep the existing
+  uncertain-delivery check, and leave queue order unchanged if persistence
+  fails. No additional interrupt, polling loop, or automatic retransmission.
+- Verification: 216 queue/Claude runner tests passed, including both providers,
+  durability failure, and prior pending-Stop behavior. Native offscreen Electron
+  exercised two successive Send now actions through authenticated server routes
+  during controlled Stop cleanup; the production Stop finalizer delivered each
+  successor exactly once without a retry toast. Provider Stop/admission were
+  synthetic, so live-provider interruption remains unverified.
+- Availability: source only; no live-server change or restart.
+
+
+## 2026-11-27 — Distinguish pending input from unconfirmed delivery
+
+- During Send now, show waiting for provider confirmation for the exact queued
+  message with an active request. Do not present its pre-delivery recovery
+  marker as a paused or failed message while acknowledgement is pending.
+- Keep genuine unconfirmed-delivery warnings after request failure or timeout,
+  and for other queued messages. Preserve per-server/chat request ownership,
+  duplicate-send prevention, and the provider's running work.
+- Verification: 336 Composer, queue-action and locale tests passed, along with
+  TypeScript and production compilation/output validation. Built Electron was
+  exercised offscreen through its production IPC/HTTP transport and an isolated
+  authenticated server: two delayed acknowledgements showed waiting, then
+  cleared correctly without duplicate submissions. The Claude acknowledgement
+  boundary was synthetic; this does not establish live Claude latency or parity.
+- Availability: source/development build only. Not published or deployed. The
+  reported live Send now delay still needs the affected chat's timing evidence;
+  this status correction is not a performance fix.
+
+
+
+## 2026-11-26 — Offline connection actions and resizable Side chat
+
+- Remove a saved connection while it is active or reconnecting. The app selects
+  another saved connection locally, or returns to setup with a fresh unconfigured
+  profile when the last connection is removed. Removal clears that connection's
+  local credentials/cache; it does not delete server chats or restart the server.
+  The existing workspace transition flushes drafts and fences late old-profile
+  replies before loading the replacement workspace.
+- Connection tests are optional when adding a server. Save an offline connection
+  and reconnect later. Pending tests no longer disable editor Cancel/Close,
+  editing another connection, or removing a connection; late test results cannot
+  reopen the editor or overwrite a newer draft.
+- Resize Side chat from its upper-left corner, or focus the handle and use arrow
+  keys (Shift for larger steps). Remember width/height locally, keep the composer
+  at the bottom, and constrain the popup to the available screen area. Existing
+  multiple-conversation tabs and per-tab drafts remain available for Codex and
+  Claude when the server advertises the multiple-side-chat contract.
+- Audit scope: saved-server editor/removal, profile switching, update/restart
+  controls, Codex/Claude goals, composer queue actions, custom endpoint settings,
+  and Side chat controls. Removed the active-profile deletion ban, last-profile
+  deletion ban, mandatory successful connection test, and test-wide editor lock.
+  Goal controls already permit changes during a running turn. Force Restart
+  already follows the server's explicit force-recovery contract. Retained
+  checks for stale server/chat ownership, unsaved-work persistence failures,
+  uncertain message delivery, unsupported provider APIs, and in-flight writes;
+  dropping these would risk wrong-target operations, data loss, or duplicate
+  sends. This is a scoped audit, not a claim that every app restriction has been
+  eliminated.
+- Verification: 336 renderer/store/settings tests and 522 native service tests
+  passed; TypeScript and production compilation passed. Isolated offscreen
+  Electron exercised pointer resizing, multiple Side chat creation through real
+  authenticated server routes, per-tab draft retention, popup reopening, offline
+  connection saving, active removal, and last-connection setup. The server's
+  original chat remained readable afterward. Provider replies were not exercised
+  by these layout/profile journeys; this is not live-provider acceptance.
+- Availability: source and compiled development output only. No installation,
+  publication, server deployment, or restart. Frozen release assets are unchanged.
+
 ## 2026-11-26 — Claude Send now follows native readiness
 
 - A Send now click releases the selected message's previous Stop hold and

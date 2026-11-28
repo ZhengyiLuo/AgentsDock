@@ -273,7 +273,10 @@ describe('WorkspaceEditor', () => {
     expect(screen.getByRole('button', { name: 'Split editor right' })).toBeVisible()
     expect(view.container.querySelector('.workspace-editor-content-split')).toBeNull()
 
-    fireEvent.click(screen.getByRole('button', { name: 'Restore chat split view' }))
+    const splitControl = screen.getByRole('button', { name: 'Restore chat split view' })
+    expect(splitControl).toHaveTextContent('Chat beside file')
+    expect(splitControl.closest('.workspace-editor-file-tabs')).not.toBeNull()
+    fireEvent.click(splitControl)
     expect(chat).toBeVisible()
     expect(chat.closest('.workspace-editor-chat-panel')).not.toHaveAttribute('inert')
     expect(view.container.querySelector('.workspace-editor-content-split')).not.toBeNull()

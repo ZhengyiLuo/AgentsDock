@@ -5,6 +5,7 @@ import { trackOperation } from '../lib/analytics'
 import { useEffect, useId, useMemo, useRef, useState, type FormEvent } from 'react'
 import * as Dialog from '@radix-ui/react-dialog'
 import * as Tooltip from '@radix-ui/react-tooltip'
+import * as Popover from '@radix-ui/react-popover'
 import {
   AlertTriangle,
   ArchiveRestore,
@@ -300,14 +301,14 @@ export function CodexGoalBar() {
   const resolvedStatusError = statusAction?.error && statusAction.status === goal.status
     && statusAction.error === error
   const displayedError = unresolvedStatusError || (resolvedStatusError ? null : error)
-  const displayedStatus = goal.status !== 'active' && lifecycleActive
-    ? t('codexGoal.inactiveMessageRunning', { status: goalStatusLabel(goal.status) })
-    : goalStatusLabel(goal.status)
 
   return <Dialog.Root open={dialogOpen} onOpenChange={setDialogOpen}>
     <GoalSummaryBar label={t('ui.CodexControls.CodexGoalBar.persistent_codex_goal_bb0d41b')} condition={goal.objective}
       openLabel={t('ui.CodexControls.CodexGoalBar.edit_goal_8828def')} onOpen={goalsEnabled ? () => openControls(true) : undefined}
-      metadata={<><span>{goalsEnabled ? displayedStatus : t('ui.CodexControls.CodexGoalBar.goals_disabled_05cc75d')}</span>{' · '}
+      metadata={<>{goalsEnabled && goal.status === 'blocked' ? <CodexBlockedGoalDetails compact />
+        : <span>{goalsEnabled ? goalStatusLabel(goal.status) : t('ui.CodexControls.CodexGoalBar.goals_disabled_05cc75d')}</span>}
+        {goal.status !== 'active' && lifecycleActive && <span className="goal-message-activity">{t('codexGoal.messageRunning')}</span>}
+        <span aria-hidden="true">·</span>
         <time aria-label={t('ui.CodexControls.CodexGoalBar.goal_elapsed_time_24a1c77', { duration: formatGoalDuration(elapsed) })}>{formatGoalDuration(elapsed)}</time></>}
       actions={<>
         {toggleStatus && <button type="button" className="quiet-button" aria-label={statusActionLabel} title={statusActionLabel}
@@ -317,7 +318,6 @@ export function CodexGoalBar() {
         </button>}
         {goalsEnabled && <button type="button" className="quiet-button" disabled={mutating} onClick={clear}>{t('ui.CodexControls.CodexGoalBar.clear_goal_0d7c342')}</button>}
       </>} />
-    <CodexBlockedGoalDetails />
     {displayedError && <p className="goal-feedback error" role="alert">{displayedError}</p>}
     <CodexControlsDialog focusGoal={focusGoal} onOpenGoal={() => setFocusGoal(true)} />
   </Dialog.Root>
@@ -1016,7 +1016,7 @@ function formatContextIndicatorPercent(percent: number | null): string {
 
 const EMPTY_EVENTS = [] as const
 
-function CodexBlockedGoalDetails() {
+function CodexBlockedGoalDetails({ compact = false }: { compact?: boolean }) {
   useLocale()
   const { runtime, session } = useCodexRuntime()
   const goal = runtime ? runtime.goal : session?.codex_goal
@@ -1059,10 +1059,20 @@ function CodexBlockedGoalDetails() {
   if (goal?.status !== 'blocked') return null
   const report = localReport || (loaded?.scope === scope ? loaded.report : null)
   const loadError = loaded?.scope === scope ? loaded.error : null
+  const content = report ? <><strong>{t('codexGoal.blockedReport')}</strong><p>{report}</p></>
+    : <p role="status">{loading ? t('codexGoal.loadingReport') : loadError || t('codexGoal.blockedReasonUnavailable')}</p>
+  if (compact) return <Popover.Root open={opened} onOpenChange={open => setExpandedScope(open ? detailsScope : null)}>
+    <Popover.Trigger asChild><button type="button" className="goal-blocked-status" aria-label={t('codexGoal.whyBlocked')}>
+      <AlertTriangle size={12} aria-hidden="true" />{goalStatusLabel('blocked')}<ChevronRight size={12} aria-hidden="true" />
+    </button></Popover.Trigger>
+    <Popover.Portal><Popover.Content className="goal-blocked-popover" side="top" align="start" sideOffset={8}
+      collisionPadding={12} aria-label={t('codexGoal.whyBlocked')}>
+      {content}
+    </Popover.Content></Popover.Portal>
+  </Popover.Root>
   return <details className="goal-blocked-details" key={detailsScope} open={opened}
     onToggle={event => setExpandedScope(event.currentTarget.open ? detailsScope : null)}>
     <summary>{t('codexGoal.whyBlocked')}</summary>
-    {report ? <><strong>{t('codexGoal.blockedReport')}</strong><p>{report}</p></>
-      : <p role="status">{loading ? t('codexGoal.loadingReport') : loadError || t('codexGoal.blockedReasonUnavailable')}</p>}
+    {content}
   </details>
 }

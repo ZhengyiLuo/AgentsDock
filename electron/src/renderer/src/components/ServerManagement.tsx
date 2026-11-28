@@ -39,6 +39,7 @@ export function ServerManagement({ addRequest = 0, manageRequest = 0, activeServ
   const [expanded, setExpanded] = useState<Set<string>>(() => new Set())
   const [draft, setDraft] = useState<ServerDraft | null>(null)
   const [busy, setBusy] = useState<string | null>(null)
+  const mutationBusy = Boolean(busy) && busy !== 'test'
   const [testedHealth, setTestedHealth] = useState<Health | null>(null)
   const [testError, setTestError] = useState<string | null>(null)
   const [activationError, setActivationError] = useState<{ profileId: string; message: string } | null>(null)
@@ -113,6 +114,7 @@ export function ServerManagement({ addRequest = 0, manageRequest = 0, activeServ
   }
 
   const beginEdit = (profile: PublicServerProfile) => {
+    invalidateTest()
     setTokenCopy(null)
     openEditor({
       profileId: profile.id,
@@ -149,12 +151,6 @@ export function ServerManagement({ addRequest = 0, manageRequest = 0, activeServ
     if (!draft?.serverUrl.trim()) return
     let addAttempted = false
     let addCompleted = false
-    if (!draft.profileId && !testedHealth?.ok) {
-      const detail = 'Test this connection successfully before adding the server.'
-      setTestError(detail)
-      useAppStore.getState().setError(detail)
-      return
-    }
     testLease.current += 1
     setBusy('save')
     setQrProfileId(null)
@@ -251,6 +247,7 @@ export function ServerManagement({ addRequest = 0, manageRequest = 0, activeServ
 
   const activate = async (profileId: string) => {
     if (profileId === activeProfileId || switchingProfileId) return
+    invalidateTest()
     setActivationError(null)
     setBusy(`switch:${profileId}`)
     try {
@@ -270,15 +267,15 @@ export function ServerManagement({ addRequest = 0, manageRequest = 0, activeServ
   }
 
   const remove = async (profile: PublicServerProfile) => {
-    if (profile.id === activeProfileId) return
     if (confirmRemoveId !== profile.id) {
       setConfirmRemoveId(profile.id)
       return
     }
+    invalidateTest()
     setBusy(`remove:${profile.id}`)
     try {
-      await window.agentsDock.servers.remove(profile.id)
-      await refreshProfiles()
+      const removed = await useAppStore.getState().removeServer(profile.id)
+      if (!removed) return
       if (draft?.profileId === profile.id) setDraft(null)
       setConfirmRemoveId(null)
     } catch (error) {
@@ -291,9 +288,9 @@ export function ServerManagement({ addRequest = 0, manageRequest = 0, activeServ
   const editor = draft && <div ref={editorRef} className="server-management-editor">
       <div className="server-management-editor-heading">
         <div><strong>{draft.profileId ? t("ui.ServerManagement.ServerManagement.edit_966e044", { "server": String(editedProfile?.name || 'server') }) : t("ui.ServerManagement.ServerManagement.add_server_1099b2a")}</strong><small>{t("ui.ServerManagement.ServerManagement.connection_credentials_stay_in_this_mac_s__d4f7858")}</small></div>
-        <button type="button" className="icon-button" aria-label={t("ui.ServerManagement.ServerManagement.close_server_editor_0b6523b")} disabled={Boolean(busy)} onClick={() => { invalidateTest(); setDraft(null) }}><XIcon /></button>
+        <button type="button" className="icon-button" aria-label={t("ui.ServerManagement.ServerManagement.close_server_editor_0b6523b")} disabled={mutationBusy} onClick={() => { invalidateTest(); setDraft(null) }}><XIcon /></button>
       </div>
-      {!draft.profileId && <button type="button" className="server-setup-guide" disabled={Boolean(busy)} onClick={() => {
+      {!draft.profileId && <button type="button" className="server-setup-guide" disabled={mutationBusy} onClick={() => {
         useAppStore.getState().setModal('settings', false)
         useAppStore.getState().setModal('appSettings', false)
         window.dispatchEvent(new CustomEvent('agentsdock:server-setup', { detail: { mode: 'add' } }))
@@ -309,15 +306,15 @@ export function ServerManagement({ addRequest = 0, manageRequest = 0, activeServ
       <footer>
         <button type="button" className="quiet-button" disabled={Boolean(busy) || !draft.serverUrl.trim()} onClick={() => void testConnection()}>{busy === 'test' ? <LoaderCircle className="spin" size={13} /> : <Wifi size={13} />}{" "}{t("ui.ServerManagement.ServerManagement.test_connection_5bcf311")}</button>
         <span className="dialog-spacer" />
-        <button type="button" className="quiet-button" disabled={Boolean(busy)} onClick={() => { invalidateTest(); setDraft(null) }}>{t("ui.ServerManagement.ServerManagement.cancel_19766ed")}</button>
-        <button type="button" className="primary-button" disabled={Boolean(busy) || !draft.serverUrl.trim() || !draft.profileId && !testedHealth?.ok} onClick={() => void save()}>{busy === 'save' && <LoaderCircle className="spin" size={13} />} {draft.profileId ? t("ui.ServerManagement.ServerManagement.save_1509f56") : duplicateTestProfile ? t("ui.ServerManagement.ServerManagement.use_367b9be", { "server": String(duplicateTestProfile.name) }) : t("ui.ServerManagement.ServerManagement.add_switch_90143f7")}</button>
+        <button type="button" className="quiet-button" disabled={mutationBusy} onClick={() => { invalidateTest(); setDraft(null) }}>{t("ui.ServerManagement.ServerManagement.cancel_19766ed")}</button>
+        <button type="button" className="primary-button" disabled={mutationBusy || !draft.serverUrl.trim()} onClick={() => void save()}>{busy === 'save' && <LoaderCircle className="spin" size={13} />} {draft.profileId ? t("ui.ServerManagement.ServerManagement.save_1509f56") : duplicateTestProfile ? t("ui.ServerManagement.ServerManagement.use_367b9be", { "server": String(duplicateTestProfile.name) }) : t("ui.ServerManagement.ServerManagement.add_switch_90143f7")}</button>
       </footer>
     </div>
 
   return <section className="server-management" aria-label={t("ui.ServerManagement.ServerManagement.saved_servers_4bf0848")}>
     <div className="server-management-heading">
       <small>{t("ui.ServerManagement.ServerManagement.each_server_keeps_its_own_chats_drafts_fil_35087b7")}</small>
-      <button type="button" className="quiet-button" disabled={Boolean(busy)} onClick={() => { invalidateTest(); openEditor(emptyDraft()) }}><Plus size={13} />{" "}{t("ui.ServerManagement.ServerManagement.add_server_1099b2a")}</button>
+      <button type="button" className="quiet-button" disabled={mutationBusy} onClick={() => { invalidateTest(); openEditor(emptyDraft()) }}><Plus size={13} />{" "}{t("ui.ServerManagement.ServerManagement.add_server_1099b2a")}</button>
     </div>
     {draft && !draft.profileId && editor}
     <div className="server-management-list">
@@ -355,7 +352,7 @@ export function ServerManagement({ addRequest = 0, manageRequest = 0, activeServ
               {profile.serverIdentity && <div><dt>{t('serverProfile.identity')}</dt><dd><code>{profile.serverIdentity}</code></dd></div>}
             </dl>}
             <ServerTokenRow key={`${profile.id}:${profile.serverUrl}:${tokenPreviewRevisions[profile.id] ?? 0}`}
-              profile={profile} disabled={Boolean(busy)} copying={busy === `copy:${profile.id}`}
+              profile={profile} disabled={mutationBusy} copying={busy === `copy:${profile.id}`}
               copied={tokenCopy?.profileId === profile.id && !tokenCopy.failed}
               onCopy={() => void copyToken(profile)} />
             <div className="server-management-copy">
@@ -379,15 +376,15 @@ export function ServerManagement({ addRequest = 0, manageRequest = 0, activeServ
             {qrProfile?.id === profile.id && <ServerConnectionQr key={`${qrProfile.id}:${qrProfile.serverUrl}`} profile={qrProfile} onClose={() => setQrProfileId(null)} />}
             <div className="server-management-actions">
               <div className="server-management-primary-actions">
-              {!current && <button type="button" className="quiet-button" aria-label={working ? t("ui.ServerManagement.switching_to_e7437c0", { "server": String(profile.name) }) : t("ui.ServerManagement.use_367b9be", { "server": String(profile.name) })} disabled={Boolean(busy) || Boolean(switchingProfileId)} onClick={() => void activate(profile.id)}>{working && <LoaderCircle className="spin" size={12} />} {working ? t("ui.ServerManagement.switching_b7b9fbf") : t('serverProfile.use')}</button>}
-              <button type="button" className="quiet-button" aria-label={t("ui.ServerManagement.edit_966e044", { "server": String(profile.name) })} disabled={Boolean(busy)} onClick={() => beginEdit(profile)}><Pencil size={15} /> {t('serverProfile.edit')}</button>
+              {!current && <button type="button" className="quiet-button" aria-label={working ? t("ui.ServerManagement.switching_to_e7437c0", { "server": String(profile.name) }) : t("ui.ServerManagement.use_367b9be", { "server": String(profile.name) })} disabled={mutationBusy || Boolean(switchingProfileId)} onClick={() => void activate(profile.id)}>{working && <LoaderCircle className="spin" size={12} />} {working ? t("ui.ServerManagement.switching_b7b9fbf") : t('serverProfile.use')}</button>}
+              <button type="button" className="quiet-button" aria-label={t("ui.ServerManagement.edit_966e044", { "server": String(profile.name) })} disabled={mutationBusy} onClick={() => beginEdit(profile)}><Pencil size={15} /> {t('serverProfile.edit')}</button>
               </div>
               <button
                 type="button"
                 className={confirmRemoveId === profile.id ? 'danger-button server-management-remove' : 'quiet-button server-management-remove'}
-                aria-label={current ? t("ui.ServerManagement.cannot_remove_active_server_b699625", { "server": String(profile.name) }) : t("ui.ServerManagement.remove_6f8460e", { "filename": String(profile.name) })}
-                title={current ? t("ui.ServerManagement.switch_to_another_server_before_removing_t_1ed6f7e") : t("ui.ServerManagement.remove_saved_server_cached_chats_are_prese_3fae6c2")}
-                disabled={current || Boolean(busy)}
+                aria-label={t("ui.ServerManagement.remove_6f8460e", { "filename": String(profile.name) })}
+                title={t('serverProfile.removeHint')}
+                disabled={mutationBusy || Boolean(switchingProfileId)}
                 onClick={() => void remove(profile)}
               >{working ? <LoaderCircle className="spin" size={12} /> : confirmRemoveId === profile.id ? t('serverProfile.confirmRemove') : <><Trash2 size={13} /> {t('serverProfile.remove')}</>}</button>
             </div>

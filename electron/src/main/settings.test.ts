@@ -662,7 +662,7 @@ describe('SettingsStore profile operations', () => {
     expect(JSON.stringify(store.listProfiles())).not.toContain('alpha-token')
   })
 
-  it('requires an explicit replacement when removing the active profile', () => {
+  it('selects another saved profile when removing the active profile', () => {
     const path = settingsPath()
     const ids = ['profile-a', 'profile-b']
     const store = new SettingsStore({
@@ -675,9 +675,27 @@ describe('SettingsStore profile operations', () => {
     })
     store.addProfile({ serverUrl: 'server-b.example:7850', setActive: true })
 
-    expect(() => store.removeProfile('profile-b')).toThrow(/replacement/)
-    store.removeProfile('profile-b', 'profile-a')
+    store.removeProfile('profile-b')
     expect(store.getActiveProfileId()).toBe('profile-a')
+  })
+})
+
+describe('removing the last saved connection', () => {
+  it('returns to setup and deletes the removed credential durably', () => {
+    const path = settingsPath()
+    const keychain = new MemoryKeychain()
+    const ids = ['old', 'fresh']
+    const store = new SettingsStore({ path, keychain, safeStorage: memorySafeStorage,
+      createProfileId: () => ids.shift()!, isMacAppStoreBuild: () => false })
+    store.update({ serverUrl: 'https://removed.test', accessToken: 'removed-token' })
+    store.removeProfile('old')
+    expect(store.getProfile('old')).toBeNull()
+    expect(store.getActiveProfileId()).toBe('fresh')
+    expect(store.publicSettings()).toMatchObject({ hasAccessToken: false, serverSetupComplete: false, serverIdentity: null })
+    expect(keychain.values.has('agent-access-token:old')).toBe(false)
+    const reopened = new SettingsStore({ path, keychain, safeStorage: memorySafeStorage, isMacAppStoreBuild: () => false })
+    expect(reopened.getActiveProfileId()).toBe('fresh')
+    expect(reopened.getProfile('old')).toBeNull()
   })
 })
 

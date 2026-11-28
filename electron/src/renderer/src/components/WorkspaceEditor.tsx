@@ -3569,6 +3569,18 @@ export function WorkspaceEditor({
         </div>
       })}
     </div>
+    {tabbedPane && fileActive && !onReturnToChat && <button
+      type="button" className="workspace-editor-chat-layout"
+      aria-label={editorOnly ? t('editor.restoreChatSplitView') : t('editor.showFileWorkspaceFullScreen')}
+      aria-pressed={!editorOnly}
+      title={editorOnly ? t('editor.restoreChatSplitView') : t('editor.showFileWorkspaceFullScreen')}
+      onClick={() => {
+        filePresentationTouchedRef.current = true
+        const next = editorOnly ? 'split' : 'full'
+        filePresentationRef.current = next
+        setFilePresentation(next)
+      }}
+    ><Columns2 size={13} aria-hidden="true" /><span>{editorOnly ? t('editor.chatBesideFile') : t('editor.fileOnly')}</span></button>}
     <button type="button" className="workspace-editor-command-button" aria-label={t('editor.openFile')} title={t('editor.openFile')} onClick={() => requestOpenPalette()}><Search size={13} aria-hidden="true" /><span className="workspace-editor-open-label">{t('editor.openFile')}</span><ShortcutKey shortcut="openWorkspaceFile" /></button>
   </div>
 
@@ -3728,7 +3740,7 @@ export function WorkspaceEditor({
                 <Minimize2 size={13} aria-hidden="true" />
                 <span className="workspace-editor-expand-label">{t('editor.showChats')}</span>
               </button>}
-              {focused && !onReturnToChat && <button
+              {focused && !tabbedPane && !onReturnToChat && <button
                 type="button"
                 className="workspace-editor-expand-button"
                 aria-label={editorOnly ? t('editor.restoreChatSplitView') : t('editor.showFileWorkspaceFullScreen')}

@@ -13,6 +13,7 @@ function chat(id: string, question?: string): SyncedSideChat {
     exchanges: question ? [{ request_id: id, question, status: 'completed', answer: `Answer for ${question}`, created_at: 'now', updated_at: 'now' }] : [] }
 }
 beforeEach(() => {
+  localStorage.clear()
   setLocale('en')
   useAppStore.setState({ activeProfileId: 'a', profileGeneration: 7, switchingProfileId: null, connected: true,
     syncBySession: {}, syncSessionId: null, syncStatus: 'idle', runtimeCatalog: null,
@@ -23,6 +24,33 @@ beforeEach(() => {
 afterEach(() => { cleanup(); vi.restoreAllMocks() })
 
 describe('multiple side-chat tabs', () => {
+  it('resizes from the corner, clamps to the window, and restores size after reopening', async () => {
+    const api = { list: vi.fn().mockResolvedValue({ session_id: session.id, side_chats: [chat('original')] }) }
+    Object.defineProperty(window, 'agentsDock', { configurable: true, value: { sideQuestions: api, events: { on: () => () => undefined } } })
+    const controller = new SideChatController()
+    const view = render(<SideChatPopover session={session} scope={scope} controller={controller} open focusVersion={0} onOpenChange={() => undefined} />)
+    await screen.findByRole('tab', { name: 'Chat 1' })
+    const handle = screen.getByRole('button', { name: /Resize side chat/ })
+    const popup = handle.closest('.side-chat-popover') as HTMLElement
+    vi.spyOn(popup, 'getBoundingClientRect').mockReturnValue({ width: 400, height: 300 } as DOMRect)
+    fireEvent.pointerDown(handle, { button: 0, pointerId: 1, clientX: 500, clientY: 300 })
+    fireEvent.pointerMove(handle, { pointerId: 1, clientX: 300, clientY: 100 })
+    fireEvent.pointerUp(handle, { pointerId: 1 })
+    expect(popup.style.width).toBe('600px')
+    expect(popup.style.height).toBe('500px')
+    view.unmount()
+    render(<SideChatPopover session={session} scope={scope} controller={controller} open focusVersion={0} onOpenChange={() => undefined} />)
+    const reopened = screen.getByRole('button', { name: /Resize side chat/ }).closest('.side-chat-popover') as HTMLElement
+    expect(reopened.style.width).toBe('600px')
+    expect(reopened.style.height).toBe('500px')
+    vi.spyOn(window, 'innerWidth', 'get').mockReturnValue(400)
+    vi.spyOn(window, 'innerHeight', 'get').mockReturnValue(350)
+    fireEvent(window, new Event('resize'))
+    expect(reopened.style.width).toBe('376px')
+    expect(reopened.style.height).toBe('326px')
+    expect(api.list).toHaveBeenCalledTimes(2)
+  })
+
   it('shows Clear as unavailable until the selected server history has loaded', async () => {
     let resolve!: (value: unknown) => void
     const api = { list: vi.fn().mockReturnValue(new Promise(done => { resolve = done })), read: vi.fn() }
