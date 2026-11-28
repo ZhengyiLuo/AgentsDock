@@ -7,6 +7,14 @@ All candidate receipts and observations remain `publicationEligible: false`;
 observations also remain `releaseAcceptance: false`. A successful job does not
 turn blocked or unobserved scenarios into full release acceptance.
 
+## 1.0.12-beta.8 preparation
+
+The beta.8 candidate uses the same independently pinned stable 1.0.11 and
+beta.6 incumbents below, with both 0755 and 0750 installation roots. Its
+installer is unchanged. This adds only the exact beta.8 association; prior
+candidate identities and receipts remain frozen. Use separately collected
+beta.8 package receipts. All scoped acceptance limitations remain explicit.
+
 ## Stable 1.0.12 preparation
 
 The stable candidate reuses the independently pinned `stable111` and `beta1126`

@@ -713,7 +713,7 @@ test('beta.7 retains beta.6 subscription and server-first preparation while stab
   assert.equal(requiresServerBeforeApp('1.0.12-beta.7', '1.0.12-beta.6', 'beta1126'), true)
   assert.equal(requiresServerBeforeApp('1.0.12-beta.7', '1.0.11', 'stable111'), false)
   for (const args of [['1.0.12-beta.7', '1.0.12-beta.5', 'beta1126'],
-    ['1.0.12-beta.7', '1.0.12-beta.6', 'stable111'], ['1.0.12-beta.8', '1.0.12-beta.6', 'beta1126'],
+    ['1.0.12-beta.7', '1.0.12-beta.6', 'stable111'], ['1.0.12-beta.9', '1.0.12-beta.6', 'beta1126'],
     ['1.0.12-beta.7', '1.0.12-beta.4', 'beta1124']]) {
     assert.throws(() => desktopJourney(...args))
     assert.throws(() => requiresServerBeforeApp(...args))
@@ -728,4 +728,11 @@ test('stable 1.0.12 preserves stable and beta subscriptions with incumbent updat
     {initialTrack: 'beta', installedTrack: 'beta', switchToBeta: false})
   assert.equal(requiresServerBeforeApp('1.0.12', '1.0.12-beta.6', 'beta1126'), true)
   assert.equal(requiresServerBeforeApp('1.0.12', '1.0.11', 'stable111'), false)
+})
+
+test('beta.8 preserves beta subscription and incumbent server-first update order', () => {
+  for (const [version, profile] of [['1.0.11', 'stable111'], ['1.0.12-beta.6', 'beta1126']]) {
+    assert.deepEqual(desktopJourney('1.0.12-beta.8', version, profile), desktopJourney('1.0.12-beta.7', version, profile))
+    assert.equal(requiresServerBeforeApp('1.0.12-beta.8', version, profile), requiresServerBeforeApp('1.0.12-beta.7', version, profile))
+  }
 })

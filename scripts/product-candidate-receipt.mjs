@@ -73,7 +73,7 @@ export function candidateBaselineProfile(name, candidateVersion) {
     assert(Object.hasOwn(BETA1127_BASELINES, name), 'Unknown stable 1.0.12 baseline profile')
     return BETA1127_BASELINES[name]
   }
-  if (candidateVersion === '1.0.12-beta.7') {
+  if (candidateVersion === '1.0.12-beta.7' || candidateVersion === '1.0.12-beta.8') {
     assert(Object.hasOwn(BETA1127_BASELINES, name), 'Unknown beta 1.0.12-beta.7 baseline profile')
     return BETA1127_BASELINES[name]
   }

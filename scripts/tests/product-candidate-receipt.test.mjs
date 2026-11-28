@@ -401,7 +401,7 @@ test('exact stable and beta.2 through beta.7 matrices select independent npm bas
   const workflow = readFileSync(new URL('../../.github/workflows/ci.yml', import.meta.url), 'utf8')
   const inputs = readFileSync(new URL('../../.github/actions/product-candidate-inputs/action.yml', import.meta.url), 'utf8')
   const job = workflow.slice(workflow.indexOf('  candidate-native:'), workflow.indexOf('  candidate-no-downgrade:'))
-  assert.match(job, /baseline_profile: \$\{\{ fromJSON\(\(inputs\.candidate_tag == 'candidate-replay-v1\.0\.12' \|\| inputs\.candidate_tag == 'candidate-replay-v1\.0\.12-beta\.7'\) && '\[\"legacy\",\"stable111\",\"beta1126\"\]' \|\| inputs\.candidate_tag == 'candidate-replay-v1\.0\.12-beta\.6' && '\["legacy","stable111","beta1124"\]' \|\| inputs\.candidate_tag == 'candidate-replay-v1\.0\.12-beta\.5' && '\["legacy","stable111","beta1124"\]' \|\| inputs\.candidate_tag == 'candidate-replay-v1\.0\.12-beta\.3' && '\["legacy","stable111","beta1122"\]' \|\| inputs\.candidate_tag == 'candidate-replay-v1\.0\.12-beta\.2' && '\["legacy","stable111","beta1121"\]' \|\| inputs\.candidate_tag == 'candidate-replay-v1\.0\.12-beta\.1' && '\[\"legacy\",\"stable111\",\"beta11112\"\]' \|\| inputs\.candidate_tag == 'candidate-replay-v1\.0\.11' && '\["legacy","stable110","beta11112"\]' \|\| inputs\.candidate_tag == 'candidate-replay-v1\.0\.10' && '\["legacy","stable109","beta1101"\]' \|\| inputs\.candidate_tag == 'candidate-replay-v1\.0\.9' && '\["legacy","stable108","beta1085"\]' \|\| \(inputs\.candidate_tag == 'candidate-replay-v1\.0\.10-beta\.2' \|\| inputs\.candidate_tag == 'candidate-replay-v1\.0\.10-beta\.3' \|\| inputs\.candidate_tag == 'candidate-replay-v1\.0\.10-beta\.4' \|\| inputs\.candidate_tag == 'candidate-replay-v1\.0\.10-beta\.5' \|\| inputs\.candidate_tag == 'candidate-replay-v1\.0\.10-beta\.6'\) && '\["legacy","beta1101"\]' \|\| '\["legacy"\]'\) \}\}/)
+  assert.match(job, /baseline_profile: \$\{\{ fromJSON\(\(inputs\.candidate_tag == 'candidate-replay-v1\.0\.12' \|\| inputs\.candidate_tag == 'candidate-replay-v1\.0\.12-beta\.7' \|\| inputs\.candidate_tag == 'candidate-replay-v1\.0\.12-beta\.8'\) && '\[\"legacy\",\"stable111\",\"beta1126\"\]' \|\| inputs\.candidate_tag == 'candidate-replay-v1\.0\.12-beta\.6' && '\["legacy","stable111","beta1124"\]' \|\| inputs\.candidate_tag == 'candidate-replay-v1\.0\.12-beta\.5' && '\["legacy","stable111","beta1124"\]' \|\| inputs\.candidate_tag == 'candidate-replay-v1\.0\.12-beta\.3' && '\["legacy","stable111","beta1122"\]' \|\| inputs\.candidate_tag == 'candidate-replay-v1\.0\.12-beta\.2' && '\["legacy","stable111","beta1121"\]' \|\| inputs\.candidate_tag == 'candidate-replay-v1\.0\.12-beta\.1' && '\[\"legacy\",\"stable111\",\"beta11112\"\]' \|\| inputs\.candidate_tag == 'candidate-replay-v1\.0\.11' && '\["legacy","stable110","beta11112"\]' \|\| inputs\.candidate_tag == 'candidate-replay-v1\.0\.10' && '\["legacy","stable109","beta1101"\]' \|\| inputs\.candidate_tag == 'candidate-replay-v1\.0\.9' && '\["legacy","stable108","beta1085"\]' \|\| \(inputs\.candidate_tag == 'candidate-replay-v1\.0\.10-beta\.2' \|\| inputs\.candidate_tag == 'candidate-replay-v1\.0\.10-beta\.3' \|\| inputs\.candidate_tag == 'candidate-replay-v1\.0\.10-beta\.4' \|\| inputs\.candidate_tag == 'candidate-replay-v1\.0\.10-beta\.5' \|\| inputs\.candidate_tag == 'candidate-replay-v1\.0\.10-beta\.6'\) && '\["legacy","beta1101"\]' \|\| '\["legacy"\]'\) \}\}/)
   const negative = workflow.slice(workflow.indexOf('  candidate-no-downgrade:'))
   assert.match(negative, /startsWith\(inputs\.candidate_tag, 'candidate-replay-v1\.0\.8-beta\.'\)/)
   assert.match(job, /INSTALL_KIND=npm-baseline/)
@@ -459,7 +459,7 @@ test('candidate composite shell parses and profile gates reject out-of-scope sel
     {BASELINE_PROFILE: 'beta1124', CANDIDATE_TAG: 'candidate-replay-v1.0.12-beta.4'},
     {BASELINE_PROFILE: 'beta1124', CANDIDATE_TAG: 'candidate-replay-v1.0.12-beta.7'},
     {BASELINE_PROFILE: 'beta1126', CANDIDATE_TAG: 'candidate-replay-v1.0.12-beta.6'},
-    {BASELINE_PROFILE: 'beta1126', CANDIDATE_TAG: 'candidate-replay-v1.0.12-beta.8'},
+    {BASELINE_PROFILE: 'beta1126', CANDIDATE_TAG: 'candidate-replay-v1.0.12-beta.9'},
     {BASELINE_PROFILE: 'beta1126', CANDIDATE_TAG: 'candidate-replay-v1.0.12-beta.7+local'},
     {BASELINE_PROFILE: 'beta1126', CANDIDATE_TAG: 'candidate-replay-v1.0.12-beta.7', EXECUTION_SCOPE: 'candidate-server-linux'},
     {BASELINE_PROFILE: 'stable111', CANDIDATE_TAG: 'candidate-replay-v1.0.12-beta.7', EXECUTION_SCOPE: 'candidate-server-linux'},
@@ -778,7 +778,7 @@ test('beta.5 pins published beta.4 and stable 1.0.11 without expanding older jou
 test('beta.6 reuses public incumbent pins without admitting unpublished beta.5 or future candidates', async t => {
   for (const name of ['stable111', 'beta1124']) {
     assert.equal(candidateBaselineProfile(name, '1.0.12-beta.6'), candidateBaselineProfile(name, '1.0.12-beta.5'))
-    assert.throws(() => candidateBaselineProfile(name, '1.0.12-beta.8'))
+    assert.throws(() => candidateBaselineProfile(name, '1.0.12-beta.9'))
     assert.throws(() => candidateBaselineProfile(name, '1.0.12-beta.6+local'))
   }
   for (const name of ['beta1125', 'beta1122', 'beta1121', 'beta11112', 'unknown']) {
@@ -851,7 +851,7 @@ test('beta.7 pins public beta.6 and preserves stable 1.0.11 without admitting ot
   assert.equal(beta.subscription, 'beta')
   assert(Object.isFrozen(beta) && Object.isFrozen(beta.desktop) && Object.isFrozen(beta.server))
   assert.equal(candidateBaselineProfile('stable111', '1.0.12-beta.7'), candidateBaselineProfile('stable111', '1.0.12-beta.1'))
-  for (const version of ['1.0.12-beta.5', '1.0.12-beta.6', '1.0.12-beta.8', '1.0.12-beta.7+local', '1.0.13']) {
+  for (const version of ['1.0.12-beta.5', '1.0.12-beta.6', '1.0.12-beta.9', '1.0.12-beta.7+local', '1.0.13']) {
     assert.throws(() => candidateBaselineProfile('beta1126', version))
   }
   for (const name of ['beta1125', 'beta1124', 'beta1122', 'beta11112', 'stable110', 'unknown']) {
@@ -879,3 +879,10 @@ test('stable 1.0.12 reuses independently pinned incumbents, never candidate byte
     assert.throws(() => candidateBaselineProfile(name, '1.0.12'))
   }
 })
+
+ test('beta.8 uses the same independently pinned public incumbents as beta.7', () => {
+  for (const profile of ['stable111', 'beta1126']) {
+    assert.equal(candidateBaselineProfile(profile, '1.0.12-beta.8'), candidateBaselineProfile(profile, '1.0.12-beta.7'))
+  }
+  for (const profile of ['beta1124', 'beta1127', 'stable110']) assert.throws(() => candidateBaselineProfile(profile, '1.0.12-beta.8'))
+ })

@@ -849,7 +849,7 @@ test('1.0.12-beta.7 replay verifies exact stable and beta.6 incumbents before ro
     assert.throws(() => replayBaselineMetadata(baselineVersion, '1.0.12-beta.7', true))
   }
   assert.throws(() => replayBaselineMetadata('1.0.12-beta.6', '1.0.12-beta.7', false))
-  assert.throws(() => replayBaselineMetadata('1.0.12-beta.6', '1.0.12-beta.8', true))
+  assert.throws(() => replayBaselineMetadata('1.0.12-beta.6', '1.0.12-beta.9', true))
 })
 
 
@@ -860,4 +860,11 @@ test('stable 1.0.12 only replays exact reviewed incumbent versions', () => {
   for (const baseline of ['1.0.10', '1.0.12-beta.5', '1.0.12-beta.7', '1.0.12']) {
     assert.throws(() => replayBaselineMetadata(baseline, '1.0.12', true))
   }
+})
+
+test('beta.8 replay preserves reviewed incumbent routing', () => {
+  for (const version of ['1.0.6', '1.0.11', '1.0.12-beta.6']) {
+    assert.deepEqual(replayBaselineMetadata(version, '1.0.12-beta.8', true), replayBaselineMetadata(version, '1.0.12-beta.7', true))
+  }
+  assert.throws(() => replayBaselineMetadata('1.0.12-beta.7', '1.0.12-beta.8', true))
 })
