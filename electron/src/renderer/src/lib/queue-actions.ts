@@ -228,6 +228,10 @@ function steeringKey(scope: SteeringScope): string {
   ])
 }
 
+export function pendingSteeringQueuedId(scope: SteeringScope): string | null {
+  return pendingSteers.get(steeringKey(scope))?.queuedId ?? null
+}
+
 export function isSteeringPending(scope: SteeringScope | null | undefined): boolean {
   return Boolean(scope && pendingSteers.has(steeringKey(scope)))
 }

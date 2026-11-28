@@ -1,5 +1,24 @@
 # Public development log
 
+## 2026-11-27 — Distinguish pending input from unconfirmed delivery
+
+- During Send now, show waiting for provider confirmation for the exact queued
+  message with an active request. Do not present its pre-delivery recovery
+  marker as a paused or failed message while acknowledgement is pending.
+- Keep genuine unconfirmed-delivery warnings after request failure or timeout,
+  and for other queued messages. Preserve per-server/chat request ownership,
+  duplicate-send prevention, and the provider's running work.
+- Verification: 336 Composer, queue-action and locale tests passed, along with
+  TypeScript and production compilation/output validation. Built Electron was
+  exercised offscreen through its production IPC/HTTP transport and an isolated
+  authenticated server: two delayed acknowledgements showed waiting, then
+  cleared correctly without duplicate submissions. The Claude acknowledgement
+  boundary was synthetic; this does not establish live Claude latency or parity.
+- Availability: source/development build only. Not published or deployed. The
+  reported live Send now delay still needs the affected chat's timing evidence;
+  this status correction is not a performance fix.
+
+
 
 ## 2026-11-26 — Offline connection actions and resizable Side chat
 
