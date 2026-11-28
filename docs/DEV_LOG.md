@@ -1,5 +1,26 @@
 # Public development log
 
+## 2026-11-27 — Accessible chat/file splits and compact goal details
+
+- Keep a labelled Chat beside file / File only toggle in the file-tab strip.
+  Opening code no longer requires finding an icon in the editor toolbar to
+  restore the adjacent chat. Preserve drafts, file edits, split resizing and
+  left/right placement.
+- Place blocked-goal details behind the status button inside the goal bar.
+  Remove the separate disclosure row, give the objective its own line, and
+  distinguish message activity from goal state. Keep the common Codex/Claude
+  summary layout and scope blocked-report requests to their original goal.
+- Verification: 253 editor, goal-control and locale tests, TypeScript and
+  production compilation passed. Built offscreen Electron exercised the
+  authenticated workspace file palette, repeated split/full-file toggles,
+  left/right placement and a narrow viewport; a synthetic native goal snapshot
+  exercised the compact status popover. These checks do not establish live
+  provider behaviour. No installation or production restart.
+- Updated the isolated goal-admission fixture to assert durable Send now
+  acceptance during Stop cleanup while retaining goal/owner state; all 35
+  isolated admission cases passed.
+
+
 ## 2026-11-27 — Send now during Stop cleanup
 
 - Accept a selected queued message while explicit Stop cleanup is finishing for
