@@ -95,7 +95,7 @@
 .goal-dialog .goal-blocked-details { width: 100%; margin: 0; }
 
 .goal-blocked-status { white-space: nowrap; display: inline-flex; align-items: center; gap: var(--space-1); padding: 2px 5px; margin-left: -5px; border: 0; border-radius: var(--radius-control); color: var(--text); background: transparent; font: inherit; cursor: pointer; }
-.goal-blocked-status:hover, .goal-blocked-status[data-state="open"] { background: var(--surface-hover); }
+.goal-blocked-status:hover, .goal-blocked-status[data-state="open"] { background: var(--control-surface-hover); }
 .goal-blocked-status:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .goal-message-activity { border-left: 1px solid var(--border); padding-left: var(--space-3); }
 .goal-blocked-popover { z-index: 80; box-sizing: border-box; width: min(380px, calc(100vw - 24px)); max-height: min(320px, var(--radix-popover-content-available-height)); overflow-y: auto; padding: var(--space-5); border: 1px solid var(--border); border-radius: var(--radius-control); background: var(--surface); color: var(--text); box-shadow: 0 8px 32px #0003; font-size: var(--text-size-ui); line-height: var(--line-height-body); }
