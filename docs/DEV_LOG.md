@@ -1,5 +1,36 @@
 # Public development log
 
+## 2026-11-27 — Prepare beta.8 Mac candidate and verify desktop controls
+
+- Frozen product source: `71b179a39e35688da75b1ca743d17b44c9c120e3`;
+  matched app/server `1.0.12-beta.8`, native build 1278. PRs #189 and #188
+  integrate the fixes into main. The earlier beta.8 preparation source was
+  rejected before staging after CSS token validation failed; only the corrected
+  source is used by the candidate drafts.
+- The macOS package passed signing, notarization and native bundle verification
+  in [desktop preparation](https://github.com/ZhengyiLuo/AgentsDock/actions/runs/46110117619).
+  Its original packaged main/preload/renderer were then loaded offscreen by
+  stock Electron against the exact signed server runtime in isolated state.
+  Repeated file/chat splits, left/right placement, narrow widths, dark/light
+  appearance and the compact blocked-goal explanation passed.
+- The same packaged app/server passed selected-message delivery after controlled
+  Stop cleanup for Codex and Claude, and two delayed Claude acknowledgements
+  on the same parent run. Provider callbacks were synthetic. A test-only
+  synchronization race initially checked the durable delivery fence before
+  the request reached the server; waiting for that event resolved the probe
+  without changing packaged bytes. These checks do not establish live Claude
+  interruption parity or acknowledgement latency.
+- [Fresh native CLI acceptance](https://github.com/ZhengyiLuo/AgentsDock/actions/runs/46110202315)
+  passed on macOS and Linux. Original report archives match their Actions
+  digests and exact source/runtime/CLI pins. Reports retain their explicit
+  provider-chat, populated-history, reboot and busy-update limitations.
+- Source and focused regression checks passed. Windows and Linux x64 packaging
+  passed; ARM Linux is being retried on unchanged source after an existing
+  mailbox test failed during preparation. Native upgrade/rollback rehearsals
+  are pending. Live Claude acceptance requires a renewed test sign-in.
+- Availability: tested local Mac package and private candidate drafts only.
+  No public release, installed-app replacement or production server restart.
+
 ## 2026-11-27 — Accessible chat/file splits and compact goal details
 
 - Keep a labelled Chat beside file / File only toggle in the file-tab strip.
