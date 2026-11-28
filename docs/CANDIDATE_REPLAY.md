@@ -964,4 +964,3 @@ offline connection actions. Provider callbacks were synthetic. Live Claude
 latency and interruption parity remain unverified. The available test login must
 be renewed before that acceptance can continue. No public publication or
 production-service deployment is recorded by these results.
-
