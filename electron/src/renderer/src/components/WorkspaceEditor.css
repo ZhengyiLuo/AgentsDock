@@ -1775,5 +1775,5 @@
 .split-workspace-files-browser { display: contents; }
 
 .workspace-editor-chat-layout { display: inline-flex; align-items: center; gap: 5px; flex-shrink: 0; padding: 0 9px; border: 0; border-left: 1px solid var(--border); background: transparent; color: var(--text); font: inherit; font-size: var(--text-size-meta); cursor: pointer; white-space: nowrap; }
-.workspace-editor-chat-layout:hover, .workspace-editor-chat-layout[aria-pressed="true"] { background: var(--surface-hover); }
+.workspace-editor-chat-layout:hover, .workspace-editor-chat-layout[aria-pressed="true"] { background: var(--control-surface-hover); }
 .workspace-editor-chat-layout:focus-visible { outline: 2px solid var(--accent); outline-offset: -3px; }
