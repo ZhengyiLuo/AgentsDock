@@ -24,10 +24,23 @@
   passed on macOS and Linux. Original report archives match their Actions
   digests and exact source/runtime/CLI pins. Reports retain their explicit
   provider-chat, populated-history, reboot and busy-update limitations.
-- Source and focused regression checks passed. Windows and Linux x64 packaging
-  passed; ARM Linux is being retried on unchanged source after an existing
-  mailbox test failed during preparation. Native upgrade/rollback rehearsals
-  are pending. Live Claude acceptance requires a renewed test sign-in.
+- All four platform builds passed in preparation attempt 2. ARM Linux passed
+  on an unchanged retry after an existing mailbox UI test failed in attempt 1;
+  that same suite passed locally and in source CI. The final 16-file draft
+  inventory matches its asset digests and the locally exercised Mac package.
+- All eleven scoped Mac jobs in [upgrade rehearsal](https://github.com/ZhengyiLuo/AgentsDock/actions/runs/46111733369)
+  and both [Linux rollback jobs](https://github.com/ZhengyiLuo/AgentsDock/actions/runs/46111735340)
+  completed successfully. The original 13 artifact archives match their Actions
+  digests; all 31 reports retain the exact source and candidate receipt pins.
+  Six upgrade reports, fresh setup and busy drain still explicitly mark full
+  acceptance blocked: native provider history, actual active/queued work,
+  provider chat, interactive setup and logout/reboot remain unobserved.
+  All reports keep publicationEligible/releaseAcceptance false.
+- Packaged app checks also covered resize bounds, keyboard resizing, independent
+  Side chat drafts, offline connection save/cancel/removal and last-connection
+  removal for Codex and Claude configurations. Light presentation used an
+  emulated OS preference. No real provider turn was exercised by those checks;
+  live Claude validation requires a renewed test sign-in.
 - Availability: tested local Mac package and private candidate drafts only.
   No public release, installed-app replacement or production server restart.
 

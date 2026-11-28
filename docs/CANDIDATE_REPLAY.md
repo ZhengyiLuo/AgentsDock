@@ -938,3 +938,30 @@ tightens legacy `0755`/`0750` permissions to `0700` under its installation lock;
 it does not restore broader permissions after failure. The harness permits
 only that exact transition (or retained `0700`), bound to the verified installer
 bytes, while keeping the other native preservation checks exact.
+
+## 1.0.12-beta.8 rehearsal results
+
+Frozen artifact source `71b179a39e35688da75b1ca743d17b44c9c120e3`, build 1278,
+passed all platform preparation jobs in attempt 2. The private replay receipt is
+`9c7c0cc6d36638467916a0673f9f5c7db352f62062e6ba6aad2b28ed6bb89660`;
+its bundle is `0ed5aad67cc49147ea66c55aa8a4e0d8b1db9ac826c73116b711d452f2871670`.
+The complete desktop SHA256SUMS is
+`4bbad136f4013732fcdb16e818e7e88c52af8cccb264e7dd569f96552481b3bd`.
+
+[Mac run 46111733369](https://github.com/ZhengyiLuo/AgentsDock/actions/runs/46111733369)
+and [Linux run 46111735340](https://github.com/ZhengyiLuo/AgentsDock/actions/runs/46111735340),
+both attempt 1, completed all 13 scoped jobs successfully. Their original 13 ZIPs
+match GitHub artifact digests; 31 reports bind the exact source/receipt and retain
+publicationEligible/releaseAcceptance false. Six positive upgrade reports keep
+populated native provider-history acceptance blocked; fresh setup and busy drain
+retain their real-provider, interactive setup, reboot and active/queued-work gaps.
+Do not describe successful scoped jobs as full production acceptance.
+
+The exact packaged Mac app/server also passed offscreen production UI/IPC/HTTP
+journeys for chat/file splits in both themes, goal details, controlled Stop
+cleanup for both providers, delayed Claude confirmation, Side chat resizing and
+offline connection actions. Provider callbacks were synthetic. Live Claude
+latency and interruption parity remain unverified. The available test login must
+be renewed before that acceptance can continue. No public publication or
+production-service deployment is recorded by these results.
+
