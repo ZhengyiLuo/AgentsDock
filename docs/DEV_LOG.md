@@ -1,5 +1,23 @@
 # Public development log
 
+## 2026-11-27 — Send now during Stop cleanup
+
+- Accept a selected queued message while explicit Stop cleanup is finishing for
+  either Codex or Claude. Persist its next-send position and release only that
+  message's Stop hold. The existing Stop completion callback starts it without
+  another click; normal waiting no longer returns a retry-required error.
+- Preserve other queued messages and their Stop holds. Keep the existing
+  uncertain-delivery check, and leave queue order unchanged if persistence
+  fails. No additional interrupt, polling loop, or automatic retransmission.
+- Verification: 216 queue/Claude runner tests passed, including both providers,
+  durability failure, and prior pending-Stop behavior. Native offscreen Electron
+  exercised two successive Send now actions through authenticated server routes
+  during controlled Stop cleanup; the production Stop finalizer delivered each
+  successor exactly once without a retry toast. Provider Stop/admission were
+  synthetic, so live-provider interruption remains unverified.
+- Availability: source only; no live-server change or restart.
+
+
 ## 2026-11-27 — Distinguish pending input from unconfirmed delivery
 
 - During Send now, show waiting for provider confirmation for the exact queued
