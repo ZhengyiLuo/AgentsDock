@@ -255,6 +255,7 @@ interface AppState {
 
   initialize(): Promise<void>
   switchServer(profileId: string, force?: boolean, updatePatch?: UpdateServerProfilePatch): Promise<boolean>
+  removeServer(profileId: string): Promise<boolean>
   restartServer(
     expectedServerInstanceId: string,
     forceConfirmation?: ServerForceRestartConfirmation
@@ -1190,88 +1191,25 @@ export const useAppStore = create<AppState>((set, get) => ({
   },
 
   async switchServer(profileId, force = false, updatePatch) {
-    const current = get()
-    if (!profileId) return false
-    if (pendingNamespaceAdoption) {
-      set({ error: 'AgentsDock is finishing server identity verification. Retry the switch in a moment.' })
-      return false
-    }
-    if (!force && current.activeProfileId === profileId && !current.switchingProfileId) return true
-    const workspaceTransition = beginWorkspaceTransition()
-    const intent = ++profileSwitchIntent
-    bufferedMailHints.clear()
-    void window.agentsDock.native?.log?.('server-switch', 'switch requested', {
-      fromProfileId: current.activeProfileId,
-      toProfileId: profileId,
-      force
-    })
-    pendingNamespaceAdoption = null
-    set(state => ({
-      switchingProfileId: profileId,
-      creatingChat: false,
-      turnAdmissionTokens: {},
-      pendingTurnSubmissions: {},
-      stoppingSessionIds: new Set(),
-      error: null,
-      modals: {
-        ...state.modals,
-        newChat: false,
-        resume: false,
-        folder: false,
-        digest: false,
-        job: false,
-        search: false,
-        review: false,
-        importChats: false
-      }
-    }))
-    try {
-      await flushActiveWorkspace()
-    } catch (error) {
-      if (intent !== profileSwitchIntent) return false
-      set({ switchingProfileId: null, mailHints: consumeBufferedMailHints({ ...get(), switchingProfileId: null }, get().mailHints), error: errorMessage(error) })
-      throw error
-    }
-    if (intent !== profileSwitchIntent) return false
+    return transitionServer(profileId, force, () => updatePatch
+      ? window.agentsDock.servers.updateAndSwitch(profileId, updatePatch)
+      : force ? window.agentsDock.servers.switch(profileId, true) : window.agentsDock.servers.switch(profileId), get, set)
+  },
 
-    const requestEpoch = ++profileSwitchEpoch
-    try {
-      const payload = updatePatch
-        ? await window.agentsDock.servers.updateAndSwitch(profileId, updatePatch)
-        : force
-          ? await window.agentsDock.servers.switch(profileId, true)
-          : await window.agentsDock.servers.switch(profileId)
-      if (intent !== profileSwitchIntent || requestEpoch !== profileSwitchEpoch) return false
-      const selected = selectedSessionFromBootstrap(payload)
-      const layout = await restoredChatPaneLayout(payload, selected)
-      if (intent !== profileSwitchIntent || requestEpoch !== profileSwitchEpoch) return false
-      clearProfileVolatileState()
-      set({
-        ...workspaceStateFromBootstrap(payload, selected, true, layout),
-        forwardedPorts: [],
-        forwardedPortsRevision: 0
-      })
-      updateBadge(payload.sessions)
-      workspaceTransition.follow(refreshProfileAfterBootstrap(payload.activeProfileId, payload.profileGeneration, get, set))
-      await hydrateVisibleChatPanes(get)
-      void window.agentsDock.native?.log?.('server-switch', 'switch completed', {
-        profileId: payload.activeProfileId,
-        profileGeneration: payload.profileGeneration
-      })
+  async removeServer(profileId) {
+    if (profileId !== get().activeProfileId) {
+      await window.agentsDock.servers.remove(profileId)
+      set({ profiles: await window.agentsDock.servers.list() })
       return true
-    } catch (error) {
-      if (intent === profileSwitchIntent && requestEpoch === profileSwitchEpoch) {
-        void window.agentsDock.native?.log?.('server-switch', 'switch failed', {
-          profileId,
-          error: errorMessage(error)
-        })
-        set({ switchingProfileId: null, mailHints: consumeBufferedMailHints({ ...get(), switchingProfileId: null }, get().mailHints), error: errorMessage(error) })
-        throw error
-      }
-      return false
-    } finally {
-      workspaceTransition.finish()
     }
+    return transitionServer(profileId, true, async () => {
+      await window.agentsDock.servers.remove(profileId)
+      const payload = await window.agentsDock.bootstrap()
+      if (!payload.activeProfileId || payload.profileGeneration === undefined || !payload.profiles) {
+        throw new Error('The connection was removed, but the remaining workspace could not be loaded. Reopen the app.')
+      }
+      return { ...payload, activeProfileId: payload.activeProfileId, profileGeneration: payload.profileGeneration, profiles: payload.profiles }
+    }, get, set)
   },
 
   async restartServer(expectedServerInstanceId, forceConfirmation) {
@@ -5638,3 +5576,88 @@ export function handleMenuCommand(command: string, get: () => AppState, set: (va
 
 export function sessionUnread(session: Session): boolean { return isUnread(session) }
 export function sessionRunning(sessionId: string): boolean { return useAppStore.getState().activeSessionIds.has(sessionId) }
+
+async function transitionServer(
+  profileId: string, force: boolean,
+  operation: () => Promise<ProfileBootstrapPayload>,
+  get: () => AppState, set: (partial: Partial<AppState> | ((state: AppState) => Partial<AppState>)) => void
+): Promise<boolean> {
+  const current = get()
+  if (!profileId) return false
+  if (pendingNamespaceAdoption) {
+    set({ error: 'AgentsDock is finishing server identity verification. Retry the switch in a moment.' })
+    return false
+  }
+  if (!force && current.activeProfileId === profileId && !current.switchingProfileId) return true
+  const workspaceTransition = beginWorkspaceTransition()
+  const intent = ++profileSwitchIntent
+  bufferedMailHints.clear()
+  void window.agentsDock.native?.log?.('server-switch', 'switch requested', {
+    fromProfileId: current.activeProfileId,
+    toProfileId: profileId,
+    force
+  })
+  pendingNamespaceAdoption = null
+  set(state => ({
+    switchingProfileId: profileId,
+    creatingChat: false,
+    turnAdmissionTokens: {},
+    pendingTurnSubmissions: {},
+    stoppingSessionIds: new Set(),
+    error: null,
+    modals: {
+      ...state.modals,
+      newChat: false,
+      resume: false,
+      folder: false,
+      digest: false,
+      job: false,
+      search: false,
+      review: false,
+      importChats: false
+    }
+  }))
+  try {
+    await flushActiveWorkspace()
+  } catch (error) {
+    if (intent !== profileSwitchIntent) return false
+    set({ switchingProfileId: null, mailHints: consumeBufferedMailHints({ ...get(), switchingProfileId: null }, get().mailHints), error: errorMessage(error) })
+    throw error
+  }
+  if (intent !== profileSwitchIntent) return false
+
+  const requestEpoch = ++profileSwitchEpoch
+  try {
+    const payload = await operation()
+    if (intent !== profileSwitchIntent || requestEpoch !== profileSwitchEpoch) return false
+    const selected = selectedSessionFromBootstrap(payload)
+    const layout = await restoredChatPaneLayout(payload, selected)
+    if (intent !== profileSwitchIntent || requestEpoch !== profileSwitchEpoch) return false
+    clearProfileVolatileState()
+    set({
+      ...workspaceStateFromBootstrap(payload, selected, true, layout),
+      forwardedPorts: [],
+      forwardedPortsRevision: 0
+    })
+    updateBadge(payload.sessions)
+    workspaceTransition.follow(refreshProfileAfterBootstrap(payload.activeProfileId, payload.profileGeneration, get, set))
+    await hydrateVisibleChatPanes(get)
+    void window.agentsDock.native?.log?.('server-switch', 'switch completed', {
+      profileId: payload.activeProfileId,
+      profileGeneration: payload.profileGeneration
+    })
+    return true
+  } catch (error) {
+    if (intent === profileSwitchIntent && requestEpoch === profileSwitchEpoch) {
+      void window.agentsDock.native?.log?.('server-switch', 'switch failed', {
+        profileId,
+        error: errorMessage(error)
+      })
+      set({ switchingProfileId: null, mailHints: consumeBufferedMailHints({ ...get(), switchingProfileId: null }, get().mailHints), error: errorMessage(error) })
+      throw error
+    }
+    return false
+  } finally {
+    workspaceTransition.finish()
+  }
+}

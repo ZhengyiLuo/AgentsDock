@@ -1,5 +1,159 @@
 # Public development log
 
+## 2026-11-27 — Accessible chat/file splits and compact goal details
+
+- Keep a labelled Chat beside file / File only toggle in the file-tab strip.
+  Opening code no longer requires finding an icon in the editor toolbar to
+  restore the adjacent chat. Preserve drafts, file edits, split resizing and
+  left/right placement.
+- Place blocked-goal details behind the status button inside the goal bar.
+  Remove the separate disclosure row, give the objective its own line, and
+  distinguish message activity from goal state. Keep the common Codex/Claude
+  summary layout and scope blocked-report requests to their original goal.
+- Verification: 253 editor, goal-control and locale tests, TypeScript and
+  production compilation passed. Built offscreen Electron exercised the
+  authenticated workspace file palette, repeated split/full-file toggles,
+  left/right placement and a narrow viewport; a synthetic native goal snapshot
+  exercised the compact status popover. These checks do not establish live
+  provider behaviour. No installation or production restart.
+- Updated the isolated goal-admission fixture to assert durable Send now
+  acceptance during Stop cleanup while retaining goal/owner state; all 35
+  isolated admission cases passed.
+
+
+## 2026-11-27 — Send now during Stop cleanup
+
+- Accept a selected queued message while explicit Stop cleanup is finishing for
+  either Codex or Claude. Persist its next-send position and release only that
+  message's Stop hold. The existing Stop completion callback starts it without
+  another click; normal waiting no longer returns a retry-required error.
+- Preserve other queued messages and their Stop holds. Keep the existing
+  uncertain-delivery check, and leave queue order unchanged if persistence
+  fails. No additional interrupt, polling loop, or automatic retransmission.
+- Verification: 216 queue/Claude runner tests passed, including both providers,
+  durability failure, and prior pending-Stop behavior. Native offscreen Electron
+  exercised two successive Send now actions through authenticated server routes
+  during controlled Stop cleanup; the production Stop finalizer delivered each
+  successor exactly once without a retry toast. Provider Stop/admission were
+  synthetic, so live-provider interruption remains unverified.
+- Availability: source only; no live-server change or restart.
+
+
+## 2026-11-27 — Distinguish pending input from unconfirmed delivery
+
+- During Send now, show waiting for provider confirmation for the exact queued
+  message with an active request. Do not present its pre-delivery recovery
+  marker as a paused or failed message while acknowledgement is pending.
+- Keep genuine unconfirmed-delivery warnings after request failure or timeout,
+  and for other queued messages. Preserve per-server/chat request ownership,
+  duplicate-send prevention, and the provider's running work.
+- Verification: 336 Composer, queue-action and locale tests passed, along with
+  TypeScript and production compilation/output validation. Built Electron was
+  exercised offscreen through its production IPC/HTTP transport and an isolated
+  authenticated server: two delayed acknowledgements showed waiting, then
+  cleared correctly without duplicate submissions. The Claude acknowledgement
+  boundary was synthetic; this does not establish live Claude latency or parity.
+- Availability: source/development build only. Not published or deployed. The
+  reported live Send now delay still needs the affected chat's timing evidence;
+  this status correction is not a performance fix.
+
+
+
+## 2026-11-26 — Offline connection actions and resizable Side chat
+
+- Remove a saved connection while it is active or reconnecting. The app selects
+  another saved connection locally, or returns to setup with a fresh unconfigured
+  profile when the last connection is removed. Removal clears that connection's
+  local credentials/cache; it does not delete server chats or restart the server.
+  The existing workspace transition flushes drafts and fences late old-profile
+  replies before loading the replacement workspace.
+- Connection tests are optional when adding a server. Save an offline connection
+  and reconnect later. Pending tests no longer disable editor Cancel/Close,
+  editing another connection, or removing a connection; late test results cannot
+  reopen the editor or overwrite a newer draft.
+- Resize Side chat from its upper-left corner, or focus the handle and use arrow
+  keys (Shift for larger steps). Remember width/height locally, keep the composer
+  at the bottom, and constrain the popup to the available screen area. Existing
+  multiple-conversation tabs and per-tab drafts remain available for Codex and
+  Claude when the server advertises the multiple-side-chat contract.
+- Audit scope: saved-server editor/removal, profile switching, update/restart
+  controls, Codex/Claude goals, composer queue actions, custom endpoint settings,
+  and Side chat controls. Removed the active-profile deletion ban, last-profile
+  deletion ban, mandatory successful connection test, and test-wide editor lock.
+  Goal controls already permit changes during a running turn. Force Restart
+  already follows the server's explicit force-recovery contract. Retained
+  checks for stale server/chat ownership, unsaved-work persistence failures,
+  uncertain message delivery, unsupported provider APIs, and in-flight writes;
+  dropping these would risk wrong-target operations, data loss, or duplicate
+  sends. This is a scoped audit, not a claim that every app restriction has been
+  eliminated.
+- Verification: 336 renderer/store/settings tests and 522 native service tests
+  passed; TypeScript and production compilation passed. Isolated offscreen
+  Electron exercised pointer resizing, multiple Side chat creation through real
+  authenticated server routes, per-tab draft retention, popup reopening, offline
+  connection saving, active removal, and last-connection setup. The server's
+  original chat remained readable afterward. Provider replies were not exercised
+  by these layout/profile journeys; this is not live-provider acceptance.
+- Availability: source and compiled development output only. No installation,
+  publication, server deployment, or restart. Frozen release assets are unchanged.
+
+## 2026-11-26 — Claude Send now follows native readiness
+
+- A Send now click releases the selected message's previous Stop hold and
+  persists its next-send position. Starting, finishing and Stop cleanup return
+  an inline automatic-send state instead of rejecting the click. Native
+  readiness delivers eligible input once through the retained Claude owner;
+  a later Stop, removal or replacement wins.
+- Selected local skills and explicit local chat references use the retained
+  native follow-up connection. Validate command selection and extend only the
+  accepted owner's existing routes. Keep child tasks and the original run;
+  other delivery types remain queued for their own turn without a destructive
+  fallback. Unconfirmed provider delivery is never automatically replayed.
+- Queue status no longer says Claude must stop. Queue actions wrap in narrow
+  workspace panes so Send now remains reachable.
+- Validation: 273 isolated server tests and 341 targeted app tests, including
+  the stopped-Claude regression, passed; TypeScript and production
+  compilation passed. Native offscreen UI/IPC/authenticated-server exercise
+  reproduced the old paused-row failure, then passed one-click readiness,
+  exactly-once delivery, second use and narrow-button checks. The native
+  exercise used a synthetic Claude connection and does not establish live
+  provider parity. Live Claude acceptance still requires a valid test login.
+- Source changes only; no signed candidate replacement, publication,
+  installation or server restart.
+
+## 2026-11-25 — Prepare matched stable 1.0.12
+
+- Merge the reviewed empty-pane picker fix from PR #187 into the prepared
+  release line. Preserve endpoint context preparation, deferred Force Send,
+  multiple side chats, duplicate reconciliation and beta.6 update fixes.
+- Reserve new matched app, server, legacy bridge and CLI version 1.0.12.
+  Prior beta packages and receipts remain unchanged; stable validation is
+  recorded separately. No publication, installation or restart is recorded.
+- Frozen source `d2342a5f`, native build 1277. Fresh source CI and all eight
+  server shards passed. Signing run `45733743883` produced matching signed
+  npm/legacy runtime files. Desktop preparation `45733971293`, attempt 1,
+  passed all four platforms; Mac passed 6,070 tests with six skips, signing,
+  notarization, Gatekeeper and isolated launch/termination. Windows is unsigned.
+- Verified all 16 desktop files against original platform artifacts. The exact
+  packaged app passed five isolated UI/IPC/server journeys: picker placement
+  and reload; real Codex deferred Force Send; real Codex independent side chats,
+  inherited tool context and parent-preserving cancellation; endpoint context
+  preparation; and imported duplicates. Endpoint and duplicate fixtures used
+  synthetic provider data and do not establish live-account parity.
+- Native CLI run `45734049149` passed on macOS and Linux. All 11 Mac jobs in
+  `45736174997` and both Linux rollback jobs in `45736178459` passed on the
+  unchanged candidate with test-only descendant `8de8b8a2`. Independently
+  verified 13 original report archives and 31 reports. Stable 1.0.11, beta.6,
+  and legacy app/server fixtures covered both 0755 and 0750 root permissions.
+- These scoped results retain eight blocked Mac checks: populated native
+  history migration, complete fresh-provider setup and actual busy-work drain
+  are not established. Live Claude side-chat parity, reboot, Windows updating
+  and Mac post-takeover rollback remain unverified. Normal-to-custom encrypted
+  checkpoint portability is not claimed fixed. Public channels are unchanged.
+- An additional local broad tooling run hit a synthetic launch-test timing
+  mismatch. All 11 unchanged focused smoke tests and hosted tooling passed;
+  no product or timeout was changed. Preparation is not full release acceptance.
+
 ## Unreleased — Choose an open chat for an empty workspace pane
 
 - Keep already visible chats in the empty-pane picker with a "Move here"
@@ -17,6 +171,111 @@
   tests, TypeScript and production compilation/output verification now pass.
   This is an app-only source change; no server update is required. It is not
   included in the frozen beta.7 package and has not been installed or published.
+
+## 2026-11-24 — Matched 1.0.12-beta.7 candidate preparation
+
+- Combine custom-to-normal Codex context preparation, deferred Force Send,
+  independent side-chat conversations and imported user-message reconciliation
+  on current main. Retain the updater behavior shipped in beta.6.
+- Prepare matching desktop, npm server, legacy bridge and CLI versions.
+  Source package versions remain development placeholders; release staging
+  stamps the exact public version and allocated native build.
+- Component CI, integrated source checks, 321 focused server tests, 576 focused
+  Electron tests and TypeScript passed. Real Codex source-app checks verified
+  native side-chat context, independent followups, cancellation and unchanged
+  parent history. A real Force Send exercised the pending-stop path and exact
+  once delivery while preserving neighboring queued messages.
+- Accepted signed desktop package: `1.0.12-beta.7` (1276), frozen product
+  source `0b1b69ee`. The existing Developer ID and server signing identities
+  were retained. macOS signing, notarization, universal binaries, Gatekeeper
+  and isolated launch checks passed. All 16 desktop assets matched their
+  platform build artifacts. Windows remains unsigned. Signed npm and legacy
+  archives agree across all 137 runtime files.
+- Desktop preparation run `45526126863`, attempt 2, passed. The first macOS
+  attempt hit a 15-second workspace-test timeout; the unchanged focused test
+  and 159-test workspace suite then passed. The unchanged hosted rerun passed
+  6,068 Electron tests with six skips; no product or timeout change was made.
+- Exercised the signed package's actual ASAR UI/preload/IPC with its exact
+  signed server runtime in isolated state. Real native Codex verified deferred
+  Force Send, one automatic selected-message delivery, preserved neighboring
+  requests, two independent side chats, inherited tool context and cancellation
+  without interrupting the parent. Package bytes and shared authentication
+  remained unchanged; disposable credentials and owned processes were removed.
+- Retained the first packaged side-chat context-recall failure. Native thread
+  inspection proved the inherited tool result was present, and a followup on
+  that same fork retrieved it. The complete UI rerun passed with an explicit
+  instruction to inspect inherited tool output, without changing product code.
+  This is scoped behavioral evidence, not a guarantee of model recall.
+- Packaged endpoint preparation and duplicate reconciliation also passed using
+  local synthetic provider fixtures, preserving native thread/history bytes.
+  These fixtures do not establish live-provider parity. A separately authorized
+  existing-chat recovery restored normal Codex and observed subsequent native
+  work without restarting the server or changing its original history prefix.
+- Native CLI run `45526407909` passed on macOS ARM64 and Linux, including fresh
+  installation, service lifecycle, repeated installation, identity preservation
+  and cache independence. All 11 macOS candidate jobs in `45530061843` and both
+  Linux rollback jobs in `45530079348` passed with the unchanged signed package
+  and reviewed harness `40658ffe`. macOS exercised installed-app replacement,
+  reconnect, channel selection, multiple clients and transfer/staging recovery;
+  Linux exercised actual rollback and same-version retry. These scoped green
+  jobs do not imply full migration acceptance.
+- Live Claude side-chat acceptance remains blocked by an expired test
+  credential; shared login was not refreshed. Populated provider-history
+  migration, real busy-work drain, reboot and Windows-update boundaries are
+  not established by the isolated fixtures. Normal-to-custom encrypted-context
+  portability is not claimed fixed. No beta.7 publication or deployment is
+  recorded here; public channels remain stable 1.0.11 and beta.6.
+
+## Unreleased — Codex endpoint context and deferred Force Send
+
+- Before leaving a custom Codex endpoint with encrypted reasoning context,
+  prepare a native plaintext compaction checkpoint on the original endpoint.
+  Keep the native thread ID and original timeline, show preparation progress,
+  and retain the old connection when preparation fails. Plaintext chats and
+  same-endpoint credential changes do not incur a compaction request.
+- A Force Send whose interrupt is still finishing now keeps the selected
+  message first and sends automatically after the active turn releases.
+  Show waiting state on that queue row, without a red error toast or another
+  timeline card. Durable recovery and a later explicit Stop preserve intent.
+- Passed focused endpoint lifecycle and queue regressions, renderer queue and
+  timeline tests, TypeScript, and production Electron compilation. Isolated
+  native Electron acceptance exercised the production UI, authenticated server
+  and installed native Codex against local synthetic Responses endpoints:
+  switch, native compaction, then a successful next reply with unchanged thread
+  ID and original rollout bytes. Force Send acceptance verified queue priority,
+  navigation, and exactly one automatic send after simulated provider release.
+- Normal-to-custom portability of encrypted OpenAI checkpoints remains
+  unverified and is not claimed fixed. Live account/provider acceptance and
+  production deployment were not performed. No release was published.
+
+## Unreleased — Independent side chats
+
+- Added saved side-chat tabs for Codex and Claude. Creating another tab preserves
+  the existing conversation; drafts, scroll positions, live activity, model
+  selection, cancellation and followups stay with their selected side chat.
+  Clear affects only that tab, and existing singleton history remains in place.
+- TypeScript, production compilation and compile verification passed, along
+  with 399 relevant Electron tests and 100 server side-chat tests. Isolated
+  actual-app acceptance exercised production UI/IPC and an authenticated server:
+  new/select, concurrent requests, followup, cancel, clear, reopen, parent-chat
+  switching and reconnect. Parent event histories remained byte-identical.
+- Provider handles in that app acceptance were synthetic; live native-provider
+  parity was not exercised. No production deployment or release was performed.
+
+## Unreleased — Codex imported user duplicates
+
+- Reconcile user messages whose extra blank lines were compacted during
+  provider-history import, including already saved imported copies. Match the
+  original input bytes in checkpoint-verified provider history and preserve
+  genuine repeated requests, ambiguous source records, and indentation.
+- Reproduced the extra bubble and verified the correction in native offscreen
+  Electron through production IPC and an isolated authenticated AgentsServer.
+  Two genuine repeated requests remain visible after switching chats, reopening
+  history, and reconnecting; the durable event ledger remains unchanged.
+  Synthetic provider history was used; no live provider request was made.
+- Passed 119 focused Python 3.13 history, metadata, delivery, and deferral tests.
+  This is a source-only server correction requiring a server update for existing
+  installations. No production service was restarted or release published.
 
 ## Unreleased — Workspace pane resize bounds
 

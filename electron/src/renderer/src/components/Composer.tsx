@@ -93,6 +93,7 @@ import {
   isSecurePeerDeliveryQueuedTurn,
   isSteeringCancellation,
   isSteeringPending,
+  pendingSteeringQueuedId,
   isUserQueuedTurn,
   isVisibleQueuedTurn,
   queuedMoveCrossesCrossChatDelivery,
@@ -2450,7 +2451,7 @@ export const Composer = memo(function Composer({ dropActive = false, sessionId, 
         <div className="composer-actions">
           {(steeringPending || admitting) && <span className="steering-pending" role="status"><span className="activity-ring" /><span className="steering-pending-label">{
             steeringPending || pendingSubmissionMode === 'steer'
-              ? running ? t("ui.Composer.Composer.sending_now_2e3b74f") : t("ui.Composer.Composer.starting_bbe5fc3")
+              ? running ? session.backend === 'claude' ? t("composer.waitingClaudeConfirmation") : t("ui.Composer.Composer.sending_now_2e3b74f") : t("ui.Composer.Composer.starting_bbe5fc3")
               : pendingSubmissionMode === 'queue'
                 ? t('timeline.ui.waitingToStart')
                 : running
@@ -3581,6 +3582,8 @@ function PendingCodexEndpoint({ session, disabled }: { session: Session; disable
   if (session.backend !== 'codex' || !control?.pending) return null
   const reason = control.pending_reason
   const reasonKey = reason === 'background_terminals' ? 'commands'
+    : reason === 'preparing_context' ? 'preparingContext'
+    : reason === 'context_preparation_failed' ? 'contextPreparationFailed'
     : reason === 'live_subagents' ? 'subagents'
     : reason === 'active_goal' || reason === 'native_goal_active' ? 'goal'
     : reason === 'side_question' ? 'sideChat'
@@ -3751,7 +3754,7 @@ const QueueShelf = memo(function QueueShelf({
   const catalog = useAppStore(state => state.runtimeCatalog)
   const grantedRoutes = useAppStore(state => state.agentRoutesBySession[sessionId]?.routes ?? EMPTY_AGENT_ROUTES)
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 5 } }))
-  const pausedCount = turns.filter(turn => turn.paused === true).length
+  const pausedCount = turns.filter(turn => turn.paused === true && pendingSteeringQueuedId(steeringScope) !== turn.queued_id).length
   const promotedCount = queueOrderTurns.filter(isQueuedTurnStarting).length
   const firstFencedTurn = queuedTurnsInPositionOrder(turns)
     .find(turn => queuedTurnCrossChatFence(queueOrderTurns, turn.queued_id, mixedReorder, asyncControls).runNow) ?? null
@@ -4526,7 +4529,10 @@ function QueuedRow({ profileId, profileGeneration, steeringScope, turn, sourceSe
     if (bodyExpanded) { setExpandedBody(null); return }
     if (await loadMessageBody() != null) setExpandedBody(bodyIdentity)
   }
-  const pausedLabel = turn.paused !== true
+  const awaitingConfirmation = steeringPending && pendingSteeringQueuedId(steeringScope) === turn.queued_id
+  const pausedLabel = awaitingConfirmation
+    ? t('composer.waitingProviderConfirmation')
+    : turn.paused !== true
     ? null
     : turn.pause_reason === 'delivery_uncertain'
       ? 'Delivery unconfirmed — review before retrying'
@@ -4652,7 +4658,7 @@ function QueuedRow({ profileId, profileGeneration, steeringScope, turn, sourceSe
   </DropdownMenu.Content></DropdownMenu.Portal></DropdownMenu.Root>
   return <div
     ref={ref}
-    className={`queued-row ${turn.paused ? 'paused' : ''} ${promoted ? 'promoted' : ''} ${deliveryBarrier ? 'cross-chat-delivery' : ''} ${agentMessage ? 'agent-message' : ''} ${securePeerDelivery ? 'secure-peer-delivery' : ''} ${scheduledJob ? 'scheduled-job' : ''} ${indicator} ${drag.isDragging ? 'dragging' : ''}`}
+    className={`queued-row ${turn.paused && !awaitingConfirmation ? 'paused' : ''} ${promoted ? 'promoted' : ''} ${deliveryBarrier ? 'cross-chat-delivery' : ''} ${agentMessage ? 'agent-message' : ''} ${securePeerDelivery ? 'secure-peer-delivery' : ''} ${scheduledJob ? 'scheduled-job' : ''} ${indicator} ${drag.isDragging ? 'dragging' : ''}`}
     role={immutable || promoted ? 'status' : undefined}
     aria-label={promoted
       ? securePeerDelivery ? `${label}, starting provider handoff` : t("ui.Composer.QueuedRow.starting_provider_handoff_e476e2a", { "label": String(label) })
@@ -4684,6 +4690,8 @@ function QueuedRow({ profileId, profileGeneration, steeringScope, turn, sourceSe
       {bodyError && <small role="alert">{bodyError}</small>}
       {promoted
         ? <small>{securePeerDelivery ? 'Starting… · waiting for the provider' : t("ui.Composer.QueuedRow.starting_handed_to_the_provider_6aa0965")}</small>
+        : turn.send_when_idle && !turn.paused
+        ? <small role="status">{t('composer.queue.waitingForStop')}</small>
         : deliveryBarrier && !agentMessage
         ? <small>{securePeerDelivery ? `Encrypted peer delivery · position ${turn.position ?? 'pending'} · starts automatically` : t('ui.composer.deliveryPosition', { position: turn.position ?? t("ui.Composer.QueuedRow.pending_62a2fed") })}</small>
         : pausedLabel && <small>{pausedLabel}</small>}

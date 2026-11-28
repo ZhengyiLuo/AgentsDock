@@ -807,6 +807,12 @@ describe('projectTimeline', () => {
     })
   })
 
+  it('keeps automatic Force Send waiting on the queue shelf only', () => {
+    expect(projectTimeline([event(1, 'turn_deferred', {
+      queued_id: 'queued-1', send_when_idle: true, message: 'Will send automatically.'
+    })], [])).toEqual([])
+  })
+
   it('retires a deferred notice when the queued message starts', () => {
     const items = projectTimeline([
       event(1, 'turn_queued', { queued_id: 'queued-1', prompt: 'Run this' }),

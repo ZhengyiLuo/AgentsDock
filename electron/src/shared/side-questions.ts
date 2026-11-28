@@ -14,6 +14,7 @@ export interface SideQuestionsCapability {
   max_history_items?: number
   max_history_chars?: number
   sync?: boolean
+  multiple?: boolean
   native_context?: boolean
   runtime_settings?: boolean
 }
@@ -166,6 +167,8 @@ export interface SyncedSideChat {
   side_chat_id: string
   revision: number
   last_request_id: string | null
+  created_at?: string
+  conversation_id?: string
   model?: string
   effort?: string
   exchanges: Array<{
@@ -192,7 +195,8 @@ export function parseSyncedSideChat(value: unknown, sessionId: string): SyncedSi
   if (!chat || chat.session_id !== sessionId || !id(chat.side_chat_id)
     || !Number.isSafeInteger(chat.revision) || chat.revision! < 0
     || (chat.last_request_id !== null && !id(chat.last_request_id)) || !Array.isArray(chat.exchanges)
-    || [chat.model, chat.effort].some(value => value !== undefined && typeof value !== 'string')) {
+    || [chat.model, chat.effort, chat.created_at].some(value => value !== undefined && typeof value !== 'string')
+    || (chat.conversation_id !== undefined && (typeof chat.conversation_id !== 'string' || !/^[a-zA-Z0-9_-]{1,133}$/.test(chat.conversation_id)))) {
     throw new Error('side_question_invalid_response')
   }
   const ids = new Set<string>()
@@ -221,4 +225,20 @@ export function parseSyncedSideChat(value: unknown, sessionId: string): SyncedSi
   }
   if (chat.exchanges.filter(exchange => exchange.status === 'running').length > 1) throw new Error('side_question_invalid_response')
   return chat as SyncedSideChat
+}
+
+export function sideChatMultipleAvailable(health: Health | null | undefined): boolean {
+  return sideChatSyncAvailable(health) && health?.capabilities?.side_questions?.multiple === true
+}
+
+export interface SyncedSideChatList { session_id: string; side_chats: SyncedSideChat[] }
+
+export function parseSyncedSideChatList(value: unknown, sessionId: string): SyncedSideChatList {
+  const list = value as Partial<SyncedSideChatList> | null
+  if (!list || list.session_id !== sessionId || !Array.isArray(list.side_chats)) throw new Error('side_question_invalid_response')
+  const side_chats = list.side_chats.map(chat => parseSyncedSideChat(chat, sessionId))
+  if (new Set(side_chats.map(chat => chat.side_chat_id)).size !== side_chats.length) throw new Error('side_question_invalid_response')
+  const conversations = side_chats.flatMap(chat => chat.conversation_id ? [chat.conversation_id] : [])
+  if (new Set(conversations).size !== conversations.length) throw new Error('side_question_invalid_response')
+  return { session_id: sessionId, side_chats }
 }

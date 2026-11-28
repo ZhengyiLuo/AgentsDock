@@ -116,6 +116,14 @@ export function updateQueuedTurns(current: QueuedTurn[], event: Event): QueuedTu
       ...asyncQueuedMessageProjection(event, turn)
     } : turn).sort(queueSort)
   }
+  if (event.type === 'turn_deferred' && event.send_when_idle === true && event.queued_id) {
+    const positions = new Map(event.positions?.map(item => [item.queued_id, item.position]))
+    return current.map(turn => ({
+      ...turn,
+      position: positions.get(turn.queued_id) ?? turn.position,
+      ...(turn.queued_id === event.queued_id ? { send_when_idle: true, paused: false, pause_reason: null } : {})
+    })).sort(queueSort)
+  }
   if (event.positions?.length) {
     const positions = new Map(event.positions.map(item => [item.queued_id, item.position]))
     return current.map(turn => ({ ...turn, position: positions.get(turn.queued_id) ?? turn.position })).sort(queueSort)

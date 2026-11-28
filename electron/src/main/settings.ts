@@ -350,14 +350,16 @@ export class SettingsStore {
 
   removeProfile(profileId: string, replacementProfileId?: string): void {
     const profile = this.requireProfile(profileId)
-    if (this.value.profiles.length === 1) throw new Error('AgentsDock must keep at least one server profile.')
     const next = cloneSettings(this.value)
     next.profiles = next.profiles.filter(candidate => candidate.id !== profileId)
-    if (this.value.activeProfileId === profileId) {
-      if (!replacementProfileId || replacementProfileId === profileId || !next.profiles.some(candidate => candidate.id === replacementProfileId)) {
-        throw new Error('Select a replacement server profile before removing the active profile.')
+    if (!next.profiles.length) {
+      // Return to first-run setup without retaining the removed connection or token.
+      Object.assign(next, this.defaultSettings(new Set([profileId])))
+    } else if (this.value.activeProfileId === profileId) {
+      if (replacementProfileId && !next.profiles.some(candidate => candidate.id === replacementProfileId)) {
+        throw new Error('The replacement server profile no longer exists.')
       }
-      next.activeProfileId = replacementProfileId
+      next.activeProfileId = replacementProfileId ?? next.profiles[0].id
     }
     this.persist(next)
     this.invalidateCredentialRead(profileId)

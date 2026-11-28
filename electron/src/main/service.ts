@@ -24,7 +24,7 @@ import { TeamMailHintController } from './team-mail-hint-controller'
 import { ActivityHealthProjection, type ActivityHealthRequest } from './activity-health'
 import type { CoordinatedConnection, CoordinatedProfile } from './coordinated-updates'
 import { SideQuestionRequests } from './side-question-requests'
-import { sideChatSyncAvailable, sideChatRuntimeSettingsAvailable, type SyncedSideChat, sideQuestionLimit, sideQuestionsAvailable, validateSideQuestionInput, type SideQuestionAnswer, type SideQuestionCancellation, type SideQuestionInput, type SideQuestionScope } from '../shared/side-questions'
+import { sideChatMultipleAvailable, type SyncedSideChatList, sideChatSyncAvailable, sideChatRuntimeSettingsAvailable, type SyncedSideChat, sideQuestionLimit, sideQuestionsAvailable, validateSideQuestionInput, type SideQuestionAnswer, type SideQuestionCancellation, type SideQuestionInput, type SideQuestionScope } from '../shared/side-questions'
 import { parseBulletinHintRefresh } from '../shared/team-bulletin-hints'
 import {
   cursorLocalSessionImportSupported,
@@ -151,7 +151,7 @@ import type {
 import { updateQueuedTurns } from '../shared/queue'
 import { runtimeCatalogHasSelectableModels } from '../shared/runtime-catalog'
 import { incompleteLeadingRunId, isNativeGoalSteerEvent } from '../shared/semantic-timeline'
-import { normalizeServerURL } from '../shared/server-url'
+import { DEFAULT_SERVER_URL, normalizeServerURL } from '../shared/server-url'
 import { isLoopbackHostname, normalizeDirectIPTeamHubURL, normalizeTailscaleServeTeamHubURL } from '../shared/team-hub-url'
 import { agentFileBelongsToSession, isolateSessionEvent } from '../shared/session-files'
 import { buildWorkspaceMediaURL, isValidMediaIdentifier } from '../shared/media-url'
@@ -1812,18 +1812,12 @@ export class AppService {
   }
 
   private async removeServerOnce(profileId: string): Promise<boolean> {
-    if (profileId === this.activeProfileId) {
-      throw new Error('Switch to another server before removing the active profile.')
-    }
     if (!this.settings.getProfile(profileId)) throw new Error(`Unknown server profile: ${profileId}`)
     const teamHubCleanup = await this.removeTeamHubProfile(profileId)
     if (teamHubCleanup?.cleanupWarning) {
       throw new Error(`Teamspace authority was removed, but its private attachment cache could not be deleted. Retry removing this server profile. ${teamHubCleanup.cleanupWarning}`)
     }
     try {
-      if (profileId === this.activeProfileId) {
-        throw new Error('Switch to another server before removing the active profile.')
-      }
       const profile = this.settings.getProfile(profileId)
       if (!profile) throw new Error(`Unknown server profile: ${profileId}`)
       const cacheNamespaces = [
@@ -1834,8 +1828,20 @@ export class AppService {
       // Cache authority is removed before the durable profile. If settings
       // persistence subsequently fails, safe cache loss is preferable to
       // retaining confidential rows for a profile the user chose to remove.
-      this.cache.removeServerNamespaces(cacheNamespaces)
-      this.settings.removeProfile(profileId)
+      const active = profileId === this.activeProfileId
+      const replacement = active ? this.settings.listProfiles().find(candidate => candidate.id !== profileId) : null
+      // Local navigation/removal does not require either server to be reachable.
+      const nextClient = active ? this.clientFactory(replacement?.serverUrl ?? DEFAULT_SERVER_URL,
+        replacement ? this.settings.accessToken(replacement.id) : '') : undefined
+      try {
+        if (active) this.flushEventCache()
+        this.cache.removeServerNamespaces(cacheNamespaces)
+        this.settings.removeProfile(profileId, replacement?.id)
+      } catch (error) {
+        nextClient?.dispose()
+        throw error
+      }
+      if (active) this.activateProfile(this.settings.getActiveProfileId(), false, true, nextClient)
       this.sideQuestions.cancelProfile(profileId)
     } catch (error) { throw error }
     this.invalidateProfileHealthProbe(profileId)
@@ -3667,9 +3673,9 @@ export class AppService {
         sessionId,
         snapshot
       })
-    }, revision => {
+    }, (revision, sideChatId) => {
       if (!this.isCurrentTimeline(scope, sessionId, lease)) return
-      this.emit('side-chat:changed', { profileId: scope.profileId, profileGeneration: scope.generation, sessionId, revision })
+      this.emit('side-chat:changed', { profileId: scope.profileId, profileGeneration: scope.generation, sessionId, revision, ...(sideChatId ? { sideChatId } : {}) })
     }, backend => {
       if (!this.isCurrentTimeline(scope, sessionId, lease)) return
       this.emit('provider-usage:changed', { profileId: scope.profileId, profileGeneration: scope.generation, sessionId, backend,
@@ -3747,8 +3753,8 @@ export class AppService {
   viewState(expected: WorkspaceProfileScope, sessionId: string): ViewState | null { return this.cache.viewState(this.requireWorkspaceScope(expected).namespace, sessionId) }
   saveViewState(expected: WorkspaceProfileScope, state: ViewState): void { this.cache.putViewState(this.requireWorkspaceScope(expected).namespace, state) }
 
-  private async syncedSideChatOperation(expected: SideQuestionScope, sessionId: string,
-    operation: (client: AgentServerClient) => Promise<SyncedSideChat>): Promise<SyncedSideChat> {
+  private async syncedSideChatOperation<T>(expected: SideQuestionScope, sessionId: string,
+    operation: (client: AgentServerClient) => Promise<T>): Promise<T> {
     const scope = this.requireProfileScope(expected?.profileId, expected?.profileGeneration)
     await this.ensureValidatedScope(scope)
     this.assertCurrentScope(scope)
@@ -3768,8 +3774,20 @@ export class AppService {
     }
   }
 
-  readSyncedSideChat(scope: SideQuestionScope, sessionId: string): Promise<SyncedSideChat> {
-    return this.syncedSideChatOperation(scope, sessionId, client => client.readSyncedSideChat(sessionId))
+  listSyncedSideChats(scope: SideQuestionScope, sessionId: string): Promise<SyncedSideChatList> {
+    return this.syncedSideChatOperation(scope, sessionId, client => {
+      if (!sideChatMultipleAvailable(this.health)) throw new Error('side_question_unsupported')
+      return client.listSyncedSideChats(sessionId)
+    })
+  }
+  createSyncedSideChat(scope: SideQuestionScope, sessionId: string, sideChatId: string): Promise<SyncedSideChat> {
+    return this.syncedSideChatOperation(scope, sessionId, client => {
+      if (!sideChatMultipleAvailable(this.health)) throw new Error('side_question_unsupported')
+      return client.createSyncedSideChat(sessionId, sideChatId)
+    })
+  }
+  readSyncedSideChat(scope: SideQuestionScope, sessionId: string, sideChatId?: string): Promise<SyncedSideChat> {
+    return this.syncedSideChatOperation(scope, sessionId, client => sideChatId ? client.readSyncedSideChat(sessionId, sideChatId) : client.readSyncedSideChat(sessionId))
   }
   submitSyncedSideChat(scope: SideQuestionScope, sessionId: string, input: SideQuestionInput): Promise<SyncedSideChat> {
     const question = validateSideQuestionInput(input, sideQuestionLimit(this.health))
@@ -3783,8 +3801,8 @@ export class AppService {
       return client.submitSyncedSideChat(sessionId, question)
     })
   }
-  stopSyncedSideChat(scope: SideQuestionScope, sessionId: string, requestId: string): Promise<SyncedSideChat> {
-    return this.syncedSideChatOperation(scope, sessionId, client => client.stopSyncedSideChat(sessionId, requestId))
+  stopSyncedSideChat(scope: SideQuestionScope, sessionId: string, requestId: string, sideChatId?: string): Promise<SyncedSideChat> {
+    return this.syncedSideChatOperation(scope, sessionId, client => sideChatId ? client.stopSyncedSideChat(sessionId, requestId, sideChatId) : client.stopSyncedSideChat(sessionId, requestId))
   }
   clearSyncedSideChat(scope: SideQuestionScope, sessionId: string, sideChatId: string): Promise<SyncedSideChat> {
     return this.syncedSideChatOperation(scope, sessionId, client => client.clearSyncedSideChat(sessionId, sideChatId))

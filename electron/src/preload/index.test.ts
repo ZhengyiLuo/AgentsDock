@@ -51,6 +51,18 @@ describe('preload session IPC bridge', () => {
     ])
   })
 
+  it('passes selected side-chat identity through list, create, read and stop', async () => {
+    const scope = { profileId: 'server-a', profileGeneration: 7, serverIdentity: 'verified-a' }
+    await electronHarness.exposed?.sideQuestions?.list?.(scope, 'chat-a')
+    await electronHarness.exposed?.sideQuestions?.create?.(scope, 'chat-a', 'second')
+    await electronHarness.exposed?.sideQuestions?.read?.(scope, 'chat-a', 'second')
+    await electronHarness.exposed?.sideQuestions?.stop?.(scope, 'chat-a', 'request-a', 'second')
+    expect(electronHarness.invoke.mock.calls).toEqual([
+      ['side-chat:list', scope, 'chat-a'], ['side-chat:create', scope, 'chat-a', 'second'],
+      ['side-chat:read', scope, 'chat-a', 'second'], ['side-chat:stop', scope, 'chat-a', 'request-a', 'second']
+    ])
+  })
+
   it('keeps side-question IPC separate from turn submission and binds cancellation to its original scope', async () => {
     const scope = { profileId: 'server-a', profileGeneration: 7 }
     const input = { request_id: 'question-a', question: 'Why?' }

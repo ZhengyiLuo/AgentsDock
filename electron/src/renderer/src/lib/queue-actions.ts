@@ -228,6 +228,10 @@ function steeringKey(scope: SteeringScope): string {
   ])
 }
 
+export function pendingSteeringQueuedId(scope: SteeringScope): string | null {
+  return pendingSteers.get(steeringKey(scope))?.queuedId ?? null
+}
+
 export function isSteeringPending(scope: SteeringScope | null | undefined): boolean {
   return Boolean(scope && pendingSteers.has(steeringKey(scope)))
 }
@@ -275,7 +279,8 @@ async function performSteerQueuedTurn(
     throw friendlySteeringError(error)
   }
   const turns = await abortable(window.agentsDock.queue.list(sessionId), signal)
-  if ((result?.deferred === true || result?.ok === true && result.chat_access_applied === false)
+  if ((result?.deferred === true && result.send_when_idle !== true
+    || result?.ok === true && result.chat_access_applied === false)
     && result.message?.trim()) {
     onNotice?.(result.message.trim())
   }

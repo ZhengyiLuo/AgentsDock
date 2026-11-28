@@ -654,14 +654,14 @@ describe('Codex controls', () => {
     useAppStore.setState({ activeSessionIds: new Set([session.id]) })
     renderControls(false, true)
 
-    expect(await screen.findByText('Goal paused · Message running')).toBeVisible()
+    expect(await screen.findByText('Message running')).toBeVisible()
     expect(screen.getByRole('button', { name: 'Resume goal' })).toBeEnabled()
     expect(setGoal).not.toHaveBeenCalled()
 
     act(() => { useAppStore.setState({ activeSessionIds: new Set() }) })
 
     expect(screen.getByText('Goal paused')).toBeVisible()
-    expect(screen.queryByText('Goal paused · Message running')).not.toBeInTheDocument()
+    expect(screen.queryByText('Message running')).not.toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Resume goal' })).toBeEnabled()
   })
 
@@ -671,7 +671,7 @@ describe('Codex controls', () => {
     runtimeResponse = { ...runtime, goal: runtime.goal ? { ...runtime.goal, status } : null }
     useAppStore.setState({ activeSessionIds: new Set([session.id]) })
     renderControls(false, true)
-    expect(await screen.findByText(`${label} · Message running`)).toBeVisible()
+    expect(await screen.findByText('Message running')).toBeVisible()
     expect(setGoal).not.toHaveBeenCalled()
     act(() => { useAppStore.setState({ activeSessionIds: new Set() }) })
     expect(screen.getByText(label)).toBeVisible()
@@ -682,7 +682,7 @@ describe('Codex controls', () => {
     const fetchReport = vi.fn().mockResolvedValue({ goal: runtimeResponse.goal, report: 'Please supply calibration.csv.' })
     window.agentsDock.codex.blockedGoalReport = fetchReport
     renderControls(false, true)
-    const summary = await screen.findByText('Why is this goal blocked?')
+    const summary = await screen.findByRole('button', { name: 'Why is this goal blocked?' })
     expect(fetchReport).not.toHaveBeenCalled()
     await userEvent.click(summary)
     expect(await screen.findByText('Please supply calibration.csv.')).toBeVisible()
@@ -698,7 +698,7 @@ describe('Codex controls', () => {
     runtimeResponse = { ...runtime, goal: { ...runtime.goal!, status: 'blocked' } }
     window.agentsDock.codex.blockedGoalReport = vi.fn().mockResolvedValue({ goal: { ...runtimeResponse.goal!, createdAt: -1 }, report: 'Wrong goal report' })
     renderControls(false, true)
-    await userEvent.click(await screen.findByText('Why is this goal blocked?'))
+    await userEvent.click(await screen.findByRole('button', { name: 'Why is this goal blocked?' }))
     expect(await screen.findByText(/Codex does not provide a separate blocked reason/)).toBeVisible()
     expect(screen.queryByText('Wrong goal report')).not.toBeInTheDocument()
   })
@@ -706,8 +706,9 @@ describe('Codex controls', () => {
   it('makes the unavailable blocked explanation explicit in the bar and goal dialog', async () => {
     runtimeResponse = { ...runtime, goal: { ...runtime.goal!, status: 'blocked' } }
     renderControls(false, true)
-    await userEvent.click(await screen.findByText('Why is this goal blocked?'))
+    await userEvent.click(await screen.findByRole('button', { name: 'Why is this goal blocked?' }))
     expect(screen.getByText(/Codex does not provide a separate blocked reason/)).toBeVisible()
+    await userEvent.keyboard('{Escape}')
     await userEvent.click(screen.getByRole('button', { name: 'Edit goal' }))
     const dialog = await screen.findByRole('dialog')
     expect(dialog.querySelector('.goal-blocked-details summary')?.textContent).toBe('Why is this goal blocked?')

@@ -7,6 +7,66 @@ All candidate receipts and observations remain `publicationEligible: false`;
 observations also remain `releaseAcceptance: false`. A successful job does not
 turn blocked or unobserved scenarios into full release acceptance.
 
+## Stable 1.0.12 preparation
+
+The stable candidate reuses the independently pinned `stable111` and `beta1126`
+incumbents below, with both `0755` and `0750` roots. Stable clients retain Stable;
+beta.6 clients retain Beta and discover the newer stable candidate. Beta.6's
+server-first preparation and offline refusal remain part of its journey. The
+legacy, fresh and failure-recovery cases remain separate observations.
+
+Stable source and packages have their own identities; no beta.7 artifact or
+receipt is promoted. The installer is byte-identical to the reviewed beta.7
+installer. Tests add this exact version association while retaining historical
+baseline identities and rejecting unreviewed versions. These are disposable
+acceptance fixtures, not extra app restrictions or publication permission.
+Native stable-package receipts are pending. Existing scoped receipt flags and
+unobserved provider-history, active-work, reboot and Windows boundaries remain.
+
+## 1.0.12-beta.7 rehearsal preparation
+
+The exact beta.7 candidate adds `stable111` and `beta1126`, each with both
+`0755` and `0750` installation-root modes, beside the retained legacy, fresh
+and recovery cases. Stable 1.0.11 users explicitly select Beta; existing beta.6
+users retain Beta. Beta.6 includes server preparation before app replacement,
+so its native journey exercises the server-first and offline-refusal checks.
+The historical beta.6 associations with `stable111` and `beta1124`, originally
+reviewed in `54dd6442`, are restored unchanged; beta.5 and older pins remain frozen.
+
+The public beta.6 incumbent is build 1275 from
+`0e46b3f81e98596da3d91c73137f89efeee05686`. Independently downloaded inputs are:
+
+| Input | SHA-256 |
+| --- | --- |
+| Desktop `SHA256SUMS` | `077e92c9fc82d27d183694bfa4e40d5253d5ccd1bf229d88e537fc9557d7dc01` |
+| Universal Mac ZIP | `2ce798d1f0720cbd546ce7bc5e2ac6e040396330446f30a06f8408c34d65b1d7` |
+| `beta-mac.yml` | `9c6614ed4489a156be3a3cf671be48cb0bc52c349a8287613ad64d8951656973` |
+| Signed npm descriptor | `6289ad62804f6c7a64ac41f9a2361d0fed42bb99a1427840e9f42db0892eafd9` |
+| Descriptor signature | `b2cf9b4eccbc052024822e9524c310c3d03639ffb1bc691d59435b03690c8840` |
+| Npm archive, 3,940,071 bytes | `064f2599a18052f2105b3c0fce83ad926ced974e9fd130a7da2b9fed79c2e90b` |
+
+The official-registry archive passes the existing release-key signature, source,
+size and hash checks. The complete Mac ZIP matches the pinned checksum inventory
+and contains native build 1275. The public stable 1.0.11 descriptor, signature,
+registry archive, complete Mac ZIP, checksum inventory and channel metadata
+were downloaded again and retain their original pins; its native build is 1268. These checks establish incumbent identities;
+they do not execute an update or validate the new candidate.
+
+Beta.7 retains the entire reviewed beta.3 installer, SHA-256
+`5776115d6a61620189128578ca9facf0bbcdd5ebf496c8e1f1f55127dc10d301`,
+also byte-identical to the published beta.6 installer. The added association is
+exact-version only. Source, signature, runner, immutable-receipt, scope and
+ownership guards remain enforced. Dispatch with `candidate-replay-v1.0.12-beta.7`
+and that candidate's independently verified receipt/bundle hashes after its
+packages exist; prior receipts cannot be reused.
+
+Preparation checks: 122 Node harness/guard tests and 100 Python harness tests
+pass. These tests use synthetic fixtures and do not launch installed apps or
+services. Exact-package native runs are still pending. Scoped reports retain
+`publicationEligible: false` and `releaseAcceptance: false`; populated provider
+history migration, active/queued-work recovery, reboot and native Windows updater
+behavior require separate evidence.
+
 ## 1.0.12-beta.5 rehearsal preparation
 
 Native replacement waits retain bounded state/category comparisons and the

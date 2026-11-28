@@ -4500,6 +4500,43 @@ describe('Composer', () => {
     )
   })
 
+  it.each(['accepted', 'failed'] as const)('distinguishes an in-flight Claude delivery from an uncertain delivery (%s)', async outcome => {
+    let accept!: () => void
+    let reject!: (reason: Error) => void
+    const runNow = vi.fn(() => new Promise<void>((resolve, fail) => { accept = resolve; reject = fail }))
+    const session: Session = { id: 'chat-1', title: 'Chat', backend: 'claude' }
+    const queued: QueuedTurn = { queued_id: 'pending-claude', session_id: session.id,
+      prompt: 'Follow up', file_ids: [], position: 1 }
+    const fenced: QueuedTurn = { ...queued, paused: true, pause_reason: 'delivery_uncertain' }
+    const other: QueuedTurn = { ...fenced, queued_id: 'other-uncertain', prompt: 'Earlier uncertain input', position: 2 }
+    window.agentsDock.queue = { runNow, list: vi.fn().mockResolvedValue([other]) } as unknown as AgentsDockAPI['queue']
+    useAppStore.setState({ sessions: [session], activeSessionIds: new Set([session.id]),
+      snapshots: { [session.id]: { session, events: [], queuedTurns: [queued],
+        files: [], hasMoreEvents: false, filesTotal: 0, cachedAt: 0 } } })
+    const view = render(<Composer />)
+    await userEvent.click(screen.getByRole('button', { name: 'Send now' }))
+    // The pre-delivery fence arrives over the event stream before the HTTP acknowledgement.
+    act(() => useAppStore.setState(state => ({ snapshots: { ...state.snapshots,
+      [session.id]: { ...state.snapshots[session.id], queuedTurns: [fenced] } } })))
+    expect(screen.getByText('Waiting for Claude’s confirmation…')).toBeInTheDocument()
+    expect(screen.getByText('Waiting for provider confirmation…')).toBeInTheDocument()
+    expect(screen.queryByText('Delivery unconfirmed — review before retrying')).not.toBeInTheDocument()
+    expect(screen.queryByText('Paused')).not.toBeInTheDocument()
+    expect(view.container.querySelector('.queued-row')).not.toHaveClass('paused')
+    // Another row's uncertainty remains visible during this request.
+    act(() => useAppStore.setState(state => ({ snapshots: { ...state.snapshots,
+      [session.id]: { ...state.snapshots[session.id], queuedTurns: [fenced, other] } } })))
+    expect(screen.getAllByText('Delivery unconfirmed — review before retrying')).toHaveLength(1)
+    await act(async () => {
+      if (outcome === 'accepted') accept()
+      else reject(new Error('Claude delivery acknowledgement failed'))
+    })
+    await waitFor(() => expect(screen.queryByText('Waiting for provider confirmation…')).not.toBeInTheDocument())
+    expect(screen.queryByText('Waiting for Claude’s confirmation…')).not.toBeInTheDocument()
+    expect(screen.getAllByText('Delivery unconfirmed — review before retrying')).toHaveLength(outcome === 'failed' ? 2 : 1)
+    expect(runNow).toHaveBeenCalledTimes(1)
+  })
+
   it('preserves and shifts an inline queued route hint while the save is pending', async () => {
     let finishUpdate!: () => void
     const update = vi.fn(() => new Promise<boolean>(resolve => { finishUpdate = () => resolve(true) }))
@@ -5108,6 +5145,26 @@ describe('Composer', () => {
     await userEvent.click(send)
     await waitFor(() => expect(runNow).toHaveBeenCalledTimes(1))
     expect(runNow.mock.calls[0].slice(0, 2)).toEqual(['chat-1', 'stopped-handoff'])
+  })
+
+  it('arms a stopped Claude message with one click and shows its automatic delivery inline', async () => {
+    const held: QueuedTurn = { queued_id: 'held', session_id: 'chat-1', prompt: 'Continue after login',
+      file_ids: [], position: 1, paused: true, pause_reason: 'stopped' }
+    const waiting = { ...held, paused: false, pause_reason: null, send_when_idle: true }
+    const runNow = vi.fn().mockResolvedValue({ ok: false, deferred: true, send_when_idle: true,
+      message: 'Will send automatically when Claude is ready.' })
+    window.agentsDock.queue = { runNow, list: vi.fn().mockResolvedValue([waiting]) } as unknown as AgentsDockAPI['queue']
+    useAppStore.setState({
+      sessions: [{ id: 'chat-1', title: 'Chat', backend: 'claude' }],
+      snapshots: { 'chat-1': { session: { id: 'chat-1', title: 'Chat', backend: 'claude' },
+        events: [], queuedTurns: [held], files: [], hasMoreEvents: false, filesTotal: 0, cachedAt: 0 } }
+    })
+    render(<Composer />)
+    await userEvent.click(screen.getByRole('button', { name: 'Send now' }))
+    await screen.findByText('Waiting to send · sends automatically')
+    expect(screen.queryByText('Paused after Stop')).not.toBeInTheDocument()
+    expect(runNow).toHaveBeenCalledExactlyOnceWith('chat-1', 'held')
+    expect(useAppStore.getState().snapshots['chat-1'].queuedTurns).toEqual([waiting])
   })
 
   it('keeps a long steer prompt in the bounded queue prompt surface', () => {

@@ -11178,8 +11178,11 @@ class SessionStore:
                 sess.update(active_runtime)
                 if desired != active_runtime:
                     sess["_codex_provider_pending"] = desired
+                    if "codex_provider" in patch and (sess.get("_codex_provider_context") or {}).get("status") == "failed":
+                        sess.pop("_codex_provider_context", None)
                 else:
                     sess.pop("_codex_provider_pending", None)
+                    sess.pop("_codex_provider_context", None)
             # Ordinary/queued turns re-save their backend and may repeat model
             # or provider selections. Only an actual runtime change invalidates
             # the in-flight title; cancelling a no-op consumes its sole attempt.
@@ -22840,6 +22843,7 @@ def public_queued_turn(
         "position": position,
         "promoted": promoted,
         "paused": paused,
+        "send_when_idle": item.get("_send_when_idle") is True and not paused,
         "pause_reason": (
             "delivery_uncertain"
             if delivery_uncertain
@@ -24452,6 +24456,7 @@ async def _run_queued_turn_now_and_release(
         except BaseException:
             with suppress(BaseException):
                 await join_task_despite_caller_cancellation(settlement)
+        schedule_requested_claude_followup(session_id)
 
 
 def codex_goal_followup_requires_native(
@@ -24471,24 +24476,53 @@ def codex_goal_followup_requires_native(
     )
 
 
-def codex_goal_steer_selection_is_plain(selected: dict[str, Any]) -> bool:
-    """Claude's current native lane accepts text/files, not new route or skill grants."""
-    routes = selected.get("provider_cross_chat_route_snapshot")
-    return (
-        str(selected.get("prompt") or "").strip().split(maxsplit=1)[:1] != ["/mail"]
-        and selected.get("skill_selection") is None
-        and not any(
-            isinstance(route, dict)
-            and route.get("route_kind") == PROVIDER_CROSS_CHAT_ROUTE_KIND_REFERENCE
-            for route in (routes if isinstance(routes, list) else [])
-        )
-        and not any(selected.get(field) for field in (
-            "purpose", "chat_references", "team_references",
-            "secure_peer_route_snapshots", "cross_chat_obligation_ids",
-            "cross_chat_exchange_ids", "cross_chat_envelope_id",
-            "cross_chat_exchange_id", "cross_chat_exchange_leg_id",
-        ))
-    )
+def claude_followup_selection_is_supported(selected: dict[str, Any]) -> bool:
+    """Native user input, including selected local skills and @chat references."""
+    return codex_goal_steer_selection_is_supported(selected)
+
+
+def schedule_requested_claude_followup(session_id: str) -> None:
+    """Deliver an explicit Send now after readiness, without a retry timer."""
+    active = ACTIVE.get(session_id)
+    if (not active or active.get("transport") != CLAUDE_TRANSPORT_AGENT_SDK
+            or not active.get("provider_turn_ready") or active.get("stop_requested")
+            or active.get("claude_followup_queue") is None):
+        return
+    previous = active.get("claude_send_now_task")
+    if isinstance(previous, asyncio.Task) and not previous.done():
+        return
+    head = next(iter(QUEUED_TURNS.get(session_id) or ()), None)
+    if (not head or not head.get("_claude_send_on_ready") or head.get("_paused_after_stop")
+            or head.get("_native_delivery_fenced")
+            or not claude_followup_selection_is_supported(head)):
+        return
+    queued_id = str(head["queued_id"])
+    run_id = active.get("run_id")
+    provider_queue = active.get("claude_followup_queue")
+
+    async def deliver() -> None:
+        pending = RUN_NOW_REQUESTS.get(session_id)
+        if pending is not None:
+            with suppress(Exception):
+                await asyncio.shield(pending[1])
+        # Stop, replacement or removal after the click wins. This callback
+        # never grants permission to a different run or retries uncertain input.
+        if (ACTIVE.get(session_id) is not active or active.get("stop_requested")
+                or active.get("run_id") != run_id
+                or active.get("claude_followup_queue") is not provider_queue
+                or not active.get("provider_turn_ready")
+                or head.get("_paused_after_stop") or head.get("_native_delivery_fenced")
+                or next(iter(QUEUED_TURNS.get(session_id) or ()), None) is not head):
+            return
+        head.pop("_claude_send_on_ready", None)
+        try:
+            await run_queued_turn_now(session_id, queued_id)
+        except Exception:
+            # The delivery coordinator retains the durable row/error. A native
+            # terminal event can drain a definitely-unsent row normally.
+            logger.info("Deferred Claude Send now settled without acceptance session=%s", session_id)
+
+    active["claude_send_now_task"] = asyncio.create_task(deliver())
 
 
 def codex_goal_steer_selection_is_supported(selected: dict[str, Any]) -> bool:
@@ -24526,12 +24560,6 @@ async def _run_queued_turn_now_once(
 ) -> dict[str, Any]:
     if session_id not in STORE.sessions:
         raise HTTPException(status_code=404, detail="session not found")
-    if stop_cleanup_in_progress(session_id):
-        raise HTTPException(
-            status_code=409,
-            detail="Stop is still finishing for this chat; retry Force Send shortly",
-        )
-
     async with ACTIVE_LOCK:
         active_turn = dict(ACTIVE.get(session_id) or {})
         interrupted_turn = dict(CURRENT_TURNS.get(session_id) or {})
@@ -24665,6 +24693,31 @@ async def _run_queued_turn_now_once(
                     or STORE.sessions[session_id].get("backend")
                     or DEFAULT_BACKEND
                 )
+                if stop_cleanup_in_progress(session_id):
+                    # Accept the click while exact-owner teardown settles.
+                    # Its completion callback drains this durable queue; a
+                    # second click or another interrupt is not necessary.
+                    reordered = [selected, *(item for item in items if item is not selected)]
+                    message = "Waiting for the current turn to stop. This message will send automatically."
+                    await append_durable_event(session_id, "turn_deferred", {
+                        "queued_id": queued_id, "remaining": len(items),
+                        "message": message, "send_when_idle": True,
+                        "positions": queue_positions(deque(reordered)),
+                    })
+                    selected["_send_when_idle"] = True
+                    selected["_paused_after_stop"] = False
+                    QUEUED_TURNS[session_id] = deque(reordered)
+                    # Cover cleanup completing during the durable write. If
+                    # still stopping, queue admission leaves delivery to the
+                    # existing Stop completion callback.
+                    schedule_next_queued_turn(session_id)
+                    return {
+                        "ok": False, "queued_id": queued_id, "interrupted": False,
+                        "deferred": True, "send_when_idle": True,
+                        "replays_interrupted_message": False,
+                        "remaining": len(items), "superseded_queued_ids": [],
+                        "message": message,
+                    }
                 # QUEUE_LOCK admission and async message lookup can yield while
                 # the live provider creates a goal or replaces its turn. Read
                 # the latest owner here without an inverse ACTIVE/QUEUE lock
@@ -24770,33 +24823,30 @@ async def _run_queued_turn_now_once(
                         and active_turn.get("provider_turn_ready")
                         and not active_turn.get("stop_requested")
                         and native_steer_queue is not None
-                        and codex_goal_steer_selection_is_plain(selected)
+                        and claude_followup_selection_is_supported(selected)
                     )
-                    if not native_steer and codex_goal_steer_selection_is_plain(selected):
-                        if not selected.get("_turn_deferred_notified"):
-                            selected["_turn_deferred_notified"] = True
-                            await append_event(session_id, "turn_deferred", {
-                                "queued_id": queued_id, "remaining": len(items),
-                                "message": "Claude is starting or finishing. Your message remains queued; running subagents have been kept alive.",
-                            })
+                    if not native_steer:
+                        # A click is a durable request to send this exact row,
+                        # even while Claude is starting/finishing. Never leave
+                        # a previous Stop hold in place or stop its children.
+                        reordered = [selected, *(item for item in items if item is not selected)]
+                        message = "Will send automatically when Claude is ready."
+                        await append_durable_event(session_id, "turn_deferred", {
+                            "queued_id": queued_id, "remaining": len(items),
+                            "message": message, "send_when_idle": True,
+                            "positions": queue_positions(deque(reordered)),
+                        })
+                        selected["_send_when_idle"] = True
+                        selected["_claude_send_on_ready"] = claude_followup_selection_is_supported(selected)
+                        selected["_paused_after_stop"] = False
+                        QUEUED_TURNS[session_id] = deque(reordered)
                         return {
                             "ok": False, "queued_id": queued_id, "interrupted": False,
-                            "deferred": True, "replays_interrupted_message": False,
+                            "deferred": True, "send_when_idle": True,
+                            "replays_interrupted_message": False,
                             "remaining": len(items), "superseded_queued_ids": [],
-                            "message": "Claude is starting or finishing. Your message remains queued; running subagents have been kept alive.",
+                            "message": message,
                         }
-                    if not native_steer:
-                        raise HTTPException(status_code=409, detail=force_send_conflict_detail(
-                            session_id, queued_id, guard="claude_followup_not_ready",
-                            message=(
-                                "This action needs a new Claude turn and remains queued. Running subagents have been kept alive."
-                                if not codex_goal_steer_selection_is_plain(selected) else
-                                "Claude is finishing or starting its turn. Your message remains queued."
-                            ),
-                            action="Send text or files now, or let this action run next.",
-                            retryable=codex_goal_steer_selection_is_plain(selected),
-                            owner_queued_id=queued_id,
-                        ))
                 if goal_followup and not native_steer:
                     unsupported_input = not codex_goal_steer_selection_is_supported(selected)
                     raise HTTPException(
@@ -25021,6 +25071,37 @@ async def _run_queued_turn_now_once(
         )
         interrupted = bool(stop_result.get("stopped")) and not deferred
         if deferred:
+            if stop_result.get("pending"):
+                # The interrupt is still owned by the current turn. Preserve
+                # this explicit Send now as the next queue row, without
+                # claiming provider acceptance or creating another stop loop.
+                message = "Waiting for the current turn to stop. This message will send automatically."
+                async with QUEUE_LOCK:
+                    queue_items = list(QUEUED_TURNS.get(session_id) or [])
+                    queue_items.insert(0, selected)
+                    if not selected.get("_send_when_idle") or selected_index != 0 or selected_was_paused:
+                        await append_durable_event(session_id, "turn_deferred", {
+                            "queued_id": queued_id,
+                            "message": message,
+                            "send_when_idle": True,
+                            "positions": queue_positions(deque(queue_items)),
+                            "remaining": len(queue_items),
+                        })
+                    selected["_send_when_idle"] = True
+                    selected.pop("_update_transitioning", None)
+                    QUEUED_TURNS[session_id] = deque(queue_items)
+                    RUN_NOW_TURNS.pop(session_id, None)
+                    STEERING_SESSIONS.discard(session_id)
+                # The normal exact-owner terminal path schedules this queue.
+                # Also reconcile once in case release raced the interrupt.
+                if session_id not in BUSY_SESSIONS:
+                    schedule_next_queued_turn(session_id)
+                return {
+                    "ok": False, "queued_id": queued_id, "interrupted": False,
+                    "deferred": True, "send_when_idle": True,
+                    "replays_interrupted_message": False, "message": message,
+                    "remaining": len(queue_items), "superseded_queued_ids": [],
+                }
             already_notified = bool(selected.get("_turn_deferred_notified"))
             selected["_turn_deferred_notified"] = True
             selected.pop("_update_transitioning", None)
@@ -25032,12 +25113,7 @@ async def _run_queued_turn_now_once(
                 queue_items.insert(insert_at, selected)
                 QUEUED_TURNS[session_id] = deque(queue_items)
                 remaining = len(queue_items)
-            if stop_result.get("pending"):
-                message = (
-                    "Stop is still finishing. This message remains queued; "
-                    "try Force Send again shortly."
-                )
-            elif stop_result.get("superseded"):
+            if stop_result.get("superseded"):
                 message = (
                     "The active turn changed before it could be stopped. "
                     "This message remains queued; try Force Send again shortly."
@@ -26387,6 +26463,16 @@ def scan_queued_turns_from_events(
                     paused_id = str(paused_id or "")
                     if paused_id in pending:
                         pending[paused_id]["_paused_after_stop"] = True
+                continue
+            if (event_type == "turn_deferred" and event.get("send_when_idle") is True
+                    and queued_id in pending):
+                # Explicit Force Send resumes only this row. A later Stop or
+                # uncertain delivery still wins through its own durable event.
+                pending[queued_id]["_paused_after_stop"] = False
+                pending[queued_id]["_send_when_idle"] = True
+                if queued_id in order:
+                    order.remove(queued_id)
+                order.insert(0, queued_id)
                 continue
             if event_type == "turn_queue_delivery_fenced" and queued_id:
                 if queued_id not in pending:
@@ -31254,7 +31340,8 @@ async def mark_claude_sdk_turn_ready_after_ack(
         tools_ready = active.get("provider_tools_ready")
         if isinstance(tools_ready, asyncio.Event):
             tools_ready.set()
-        return True
+    schedule_requested_claude_followup(session_id)
+    return True
 
 
 def active_snapshot_input(active: dict[str, Any]) -> dict[str, Any]:
@@ -31267,6 +31354,7 @@ def active_snapshot_input(active: dict[str, Any]) -> dict[str, Any]:
             "native_steer_queue",
             "codex_goal_steer_queue",
             "codex_child_continuation_stop",
+            "claude_send_now_task",
             "owner_task",
         }
     }
@@ -56144,6 +56232,10 @@ async def prepare_codex_login_turn(session: dict[str, Any]) -> None:
         if current is not None:
             session.update(codex_provider.runtime_selection(current))
             session.pop("_codex_provider_pending", None)
+    current = STORE.sessions.get(str(session.get("id") or "")) or session
+    if (isinstance(current.get("_codex_provider_pending"), dict)
+            and (current.get("_codex_provider_context") or {}).get("status") == "failed"):
+        raise HTTPException(409, "Codex could not prepare this chat's context on the current endpoint. Select the requested connection again to retry; the chat and draft are retained.")
     if codex_provider.session_choice(session.get("codex_provider")) == "custom":
         return
     await refresh_codex_app_server_login(source="turn_admission")
@@ -56969,6 +57061,7 @@ async def acquire_codex_control_thread(
     reserve_session: bool = False,
     allow_active_goal_mutation: bool = False,
     allow_active_control: bool = False,
+    prepare_provider: bool = True,
 ) -> tuple[CodexAppServerManager, str, dict[str, Any]]:
     """Load and pin a Codex thread for an explicit desktop control."""
     reservation_task = asyncio.current_task() if reserve_session else None
@@ -56990,7 +57083,7 @@ async def acquire_codex_control_thread(
             detail="Codex controls require the app-server transport",
         )
 
-    if reserve_session:
+    if reserve_session and prepare_provider:
         await prepare_codex_login_turn(session)
 
     reserved = False
@@ -57556,7 +57649,7 @@ async def prepare_codex_goal_route_steer(
             or reference.grant_intent is not True or reference.route_action is not None
             for reference in references
         ):
-            raise ValueError("Only explicit local @Chat access can be added to a running goal")
+            raise ValueError("Only explicit local @Chat access can be added to a running chat")
         references = validate_chat_references(
             session_id, prompt, references, selected.get("client_capabilities") or [],
         )
@@ -57600,7 +57693,7 @@ async def prepare_codex_goal_route_steer(
                     or float(matches[0][1].get("expires_at") or 0) <= time.time()
                 )):
             raise NativeSteerHandoffError(
-                "This running goal has no compatible chat-access authority; the follow-up remains queued",
+                "This chat’s current connection cannot accept the selected chat access yet; the message will send in its next turn",
                 safe_to_requeue=True,
             )
         token_hash, capability = matches[0] if matches else (None, None)
@@ -58039,6 +58132,7 @@ async def consume_codex_native_turn(
     finalize_operation: bool = True,
     initial_sequence: int = 0,
     initial_pending_steer: dict[str, Any] | None = None,
+    provider_handoff_context: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Consume native work; an inline ordinary runner retains its own cleanup."""
     assistant_deltas: dict[str, list[str]] = {}
@@ -58047,6 +58141,7 @@ async def consume_codex_native_turn(
     completed_reasoning_items: set[str | tuple[str, str]] = set()
     terminal_status = "completed"
     terminal_error: str | None = None
+    compaction_checkpoint_completed = False
     schedule_queue = True
     goal_resume = operation == "goal_resume"
     shell_resume = operation == "shell_resume"
@@ -58503,6 +58598,7 @@ async def consume_codex_native_turn(
                         completed_reasoning_items.add(item_id)
                         await clear_reasoning_summary_stream(session_id, operation_id, item_id)
                 elif item_type == "contextCompaction" and operation == "compaction":
+                    compaction_checkpoint_completed = True
                     native_turn_id = str(params.get("turnId") or turn_id or "") or None
                     native_item_id = str(
                         params.get("itemId") or item.get("id") or ""
@@ -58621,6 +58717,21 @@ async def consume_codex_native_turn(
         terminal_status = "failed"
         terminal_error = concise_error_message(exc)
     finally:
+        if provider_handoff_context is not None:
+            checkpoint_task = asyncio.create_task(settle_codex_provider_context(
+                session_id, provider_handoff_context,
+                completed=(compaction_checkpoint_completed
+                    and terminal_status == "completed" and not terminal_error),
+            ))
+            try:
+                try:
+                    await asyncio.shield(checkpoint_task)
+                except asyncio.CancelledError:
+                    await join_task_despite_caller_cancellation(checkpoint_task)
+            except Exception:
+                # Never strand the native control slot when persistence fails.
+                # The unacknowledged checkpoint cannot authorize a handoff.
+                logger.exception("could not retain Codex provider context checkpoint session=%s", session_id)
         if (shell_owner is not None and ACTIVE.get(session_id) is shell_owner
                 and shell_owner.get("codex_shell_subscription") is subscription):
             shell_owner.pop("codex_shell_subscription", None)
@@ -65836,7 +65947,7 @@ async def send_claude_followup(
                 and session_id not in STOP_REQUESTS
                 and session_id not in DELETING_SESSIONS
                 and run_id not in STOPPED_RUNS
-                and codex_goal_steer_selection_is_plain(selected)
+                and claude_followup_selection_is_supported(selected)
             )
         if not valid:
             raise NativeSteerHandoffError(
@@ -65846,6 +65957,16 @@ async def send_claude_followup(
 
     try:
         await before_send(ownership_token)
+        command_selection = selected.get("skill_selection")
+        if command_selection is not None:
+            await resolve_provider_command_selection(
+                session_id, STORE.sessions[session_id],
+                SkillSelection.model_validate(command_selection),
+                prompt=str(selected.get("prompt") or ""), purpose=None,
+                provider_context_mode="chat",
+                client_capabilities=list(selected.get("client_capabilities") or []),
+            )
+        route_steer = await prepare_codex_goal_route_steer(session_id, run_id, selected)
         prompt = build_user_provider_prompt(
             session_id, str(selected.get("prompt") or ""), list(selected.get("file_ids") or []),
         )
@@ -65857,6 +65978,7 @@ async def send_claude_followup(
             query_session_id=provider_id or None, on_before_send=before_send,
         )
         acknowledged = True
+        chat_access_applied = await commit_codex_goal_route_steer(session_id, run_id, route_steer)
         display_prompt = str(selected.get("display_prompt") if selected.get("display_prompt") is not None else selected.get("prompt") or "")
         display_files = list(selected.get("display_file_ids") if selected.get("display_file_ids") is not None else selected.get("file_ids") or [])
         # One accepted user message, one retained logical run. In particular,
@@ -65891,6 +66013,9 @@ async def send_claude_followup(
             "ok": True, "queued_id": selected.get("queued_id"), "run_id": run_id,
             "interrupted": False, "native_steer": True, "native_followup": True,
             "replays_interrupted_message": False, "superseded_queued_ids": [],
+            **({"chat_access_applied": chat_access_applied,
+                "message": "Message sent; selected chat access changed during delivery."}
+               if route_steer is not None and not chat_access_applied else {}),
         }
     except NativeSteerHandoffError:
         raise
@@ -66580,6 +66705,7 @@ async def run_claude_sdk(
     sdk_ownership_token = str(
         startup_active.get("claude_sdk_owner_token") or ""
     )
+    schedule_requested_claude_followup(session_id)
     if native_continuation_ready is not None and not native_continuation_ready.done():
         native_continuation_ready.set_result(True)
     current_run_id = run_id
@@ -85756,6 +85882,100 @@ async def release_codex_provider_writers(manager: CodexAppServerManager, session
         raise
 
 
+async def settle_codex_provider_context(
+    session_id: str, context: dict[str, Any], *, completed: bool,
+) -> None:
+    """A native checkpoint, never an RPC acknowledgement, authorizes handoff."""
+    if completed:
+        # Verify the actual native checkpoint instead of inferring portability
+        # from provider labels: remote compaction can retain encrypted content.
+        completed = await asyncio.to_thread(lambda: codex_provider.context_has_encrypted_items(
+            codex_rollout_path(str(context.get("thread_id") or "")))) is False
+    async with STORE._lock:
+        session = STORE.sessions.get(session_id)
+        if not session or session.get("_codex_provider_context") != context:
+            return
+        previous_context = session["_codex_provider_context"]
+        previous_reason = session.get("_codex_provider_pending_reason")
+        session["_codex_provider_context"] = {**context, "status": "ready" if completed else "failed"}
+        session["_codex_provider_pending_reason"] = "preparing_context" if completed else "context_preparation_failed"
+        try:
+            await STORE.save(durable=True)
+        except BaseException:
+            session["_codex_provider_context"] = previous_context
+            session["_codex_provider_pending_reason"] = previous_reason
+            raise
+    await broadcast_codex_provider_changed(session_id)
+
+
+async def prepare_codex_provider_context(session_id: str) -> bool:
+    """Use the old custom provider's native plaintext compaction checkpoint.
+
+    Responses reasoning is encrypted by its originating provider. Resuming the
+    same rollout with another provider does not translate those opaque items.
+    Native local compaction retains the original timeline and native identity,
+    and replaces only model-visible context with Codex's own summary. Normal
+    OpenAI remote compaction is encrypted too and is not used as a migration.
+    """
+    session = STORE.sessions.get(session_id) or {}
+    pending = session.get("_codex_provider_pending")
+    thread_id = session_codex_thread_id(session)
+    if (not isinstance(pending, dict) or not thread_id
+            or session.get("codex_provider") != "custom"
+            or pending.get("_codex_provider_removed")
+            or (pending.get("codex_provider") == "custom"
+                and ((session.get("codex_provider_revision") and pending.get("codex_provider_revision") == session.get("codex_provider_revision"))
+                     or (session.get("codex_provider_binding") and pending.get("codex_provider_binding") == session.get("codex_provider_binding"))))):
+        return True
+    source = {"thread_id": thread_id, "revision": session.get("codex_provider_revision")}
+    context = session.get("_codex_provider_context")
+    if isinstance(context, dict) and all(context.get(key) == value for key, value in source.items()):
+        # A stopped/failed preparation needs an explicit endpoint selection to
+        # retry; lifecycle callbacks must not create a provider retry loop.
+        if context.get("status") == "failed":
+            return False
+        task = CODEX_NATIVE_ACTION_TASKS.get((session_id, str(context.get("operation_id") or "")))
+        if task is not None and not task.done():
+            return False
+    # Plaintext threads need no extra model request. Only native rollout
+    # metadata/context is inspected; no transcript is reconstructed or edited.
+    encrypted = await asyncio.to_thread(lambda: codex_provider.context_has_encrypted_items(codex_rollout_path(thread_id)))
+    if encrypted is False:
+        return True
+    if isinstance(context, dict) and context.get("status") == "ready" and encrypted is None:
+        # A saved acknowledgement cannot authorize context we can no longer
+        # verify after restart, rollback or an external native writer.
+        await settle_codex_provider_context(session_id, context, completed=False)
+        return False
+    context = {**source, "id": uuid.uuid4().hex, "status": "running"}
+    async with STORE._lock:
+        session["_codex_provider_context"] = context
+        session["_codex_provider_pending_reason"] = "preparing_context"
+        await STORE.save(durable=True)
+    await broadcast_codex_provider_changed(session_id)
+    starter = asyncio.create_task(_post_codex_compact_locked(session_id, provider_handoff_context=context))
+    cancelled = False
+    try:
+        try:
+            result = await asyncio.shield(starter)
+        except asyncio.CancelledError:
+            # The native RPC may already have accepted compaction. Finish
+            # registering its consumer before releasing the lifecycle lock.
+            cancelled = True
+            result = await join_task_despite_caller_cancellation(starter)
+        # The consumer cannot finish until this caller releases the lifecycle
+        # lock. Its exact checkpoint token is retained across this update.
+        context["operation_id"] = result["operation_id"]
+        async with STORE._lock:
+            await STORE.save(durable=True)
+    except BaseException:
+        await settle_codex_provider_context(session_id, context, completed=False)
+        raise
+    if cancelled:
+        raise asyncio.CancelledError
+    return False
+
+
 async def apply_codex_provider_when_idle(session_id: str, *, ignore_task=None) -> bool:
     """Hand off exactly one idle chat, retaining its native history and goal.
 
@@ -85797,10 +86017,14 @@ async def apply_codex_provider_when_idle(session_id: str, *, ignore_task=None) -
         else None
     )
     if reason is not None:
+        if (session.get("_codex_provider_context") or {}).get("status") == "running":
+            reason = "preparing_context"
         if session.get("_codex_provider_pending_reason") != reason:
             session["_codex_provider_pending_reason"] = reason
             await broadcast_codex_provider_changed(session_id)
         logger.info("Codex provider selection deferred session=%s reason=%s", session_id, reason)
+        return False
+    if not await prepare_codex_provider_context(session_id):
         return False
     manager = existing_codex_app_server_manager(session)
     if manager is not None:
@@ -85824,6 +86048,7 @@ async def apply_codex_provider_when_idle(session_id: str, *, ignore_task=None) -
             session.update(pending)
             session.pop("_codex_provider_pending", None)
             session.pop("_codex_provider_pending_reason", None)
+            session.pop("_codex_provider_context", None)
             session["_codex_provider_switched"] = True
             session.pop("_codex_subagent_limit_applied", None)
             session["updated_at"] = now_iso()
@@ -92736,10 +92961,13 @@ async def post_codex_compact(session_id: str) -> dict[str, Any]:
         return await _post_codex_compact_locked(session_id)
 
 
-async def _post_codex_compact_locked(session_id: str) -> dict[str, Any]:
+async def _post_codex_compact_locked(
+    session_id: str, *, provider_handoff_context: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     manager, thread_id, control_session = await acquire_codex_control_thread(
         session_id,
         reserve_session=True,
+        **({"prepare_provider": False} if provider_handoff_context is not None else {}),
     )
     reservation_id = str(
         control_session.get("_codex_control_reservation_id") or ""
@@ -92772,6 +93000,7 @@ async def _post_codex_compact_locked(session_id: str) -> dict[str, Any]:
                 thread_id,
                 reservation_id,
                 subscription,
+                provider_handoff_context=provider_handoff_context,
             )
         )
         register_codex_native_action(session_id, operation_id, task)

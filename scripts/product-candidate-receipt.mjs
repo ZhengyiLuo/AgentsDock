@@ -19,9 +19,9 @@ const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 // Stable support is deliberately scoped to this reviewed release, not an
 // authorization to turn arbitrary stable packages into production acceptance.
 export function candidateTrack(version) {
-  if (version === '1.0.9' || version === '1.0.10' || version === '1.0.11') return 'stable'
+  if (version === '1.0.9' || version === '1.0.10' || version === '1.0.11' || version === '1.0.12') return 'stable'
   assert(typeof version === 'string' && /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)-beta\.[1-9]\d*$/.test(version),
-    'Candidate rehearsal requires a numbered beta or reviewed stable 1.0.9/1.0.10/1.0.11')
+    'Candidate rehearsal requires a numbered beta or reviewed stable 1.0.9/1.0.10/1.0.11/1.0.12')
   return 'beta'
 }
 
@@ -69,6 +69,18 @@ export const BETA1101_BASELINE = Object.freeze({
 })
 
 export function candidateBaselineProfile(name, candidateVersion) {
+  if (candidateVersion === '1.0.12') {
+    assert(Object.hasOwn(BETA1127_BASELINES, name), 'Unknown stable 1.0.12 baseline profile')
+    return BETA1127_BASELINES[name]
+  }
+  if (candidateVersion === '1.0.12-beta.7') {
+    assert(Object.hasOwn(BETA1127_BASELINES, name), 'Unknown beta 1.0.12-beta.7 baseline profile')
+    return BETA1127_BASELINES[name]
+  }
+  if (candidateVersion === '1.0.12-beta.6') {
+    assert(Object.hasOwn(BETA1126_BASELINES, name), 'Unknown beta 1.0.12-beta.6 baseline profile')
+    return BETA1126_BASELINES[name]
+  }
   if (candidateVersion === '1.0.12-beta.5') {
     assert(Object.hasOwn(BETA1125_BASELINES, name), 'Unknown beta 1.0.12-beta.5 baseline profile')
     return BETA1125_BASELINES[name]
@@ -197,6 +209,28 @@ export const BETA1125_BASELINES = Object.freeze({
       manifestSha256: '9a21a1d21b1ec58b6fcbeb0e956c5512bae715c64e2224292412bbc49d04b7d3',
       signatureSha256: '276450540ed19d78690edd1fe4b7f25ded3a77f1761ab3f5a43a7fd972259b7a',
       archiveSha256: '2f9fa9b5d0dc37199b4b899d0ae913a7ad30f94ab3956060c689eaf4e8947756', archiveBytes: 3939922 }) }),
+})
+
+// Beta.6 uses the same independently pinned public incumbents. The beta.5
+// candidate and all historical associations remain immutable.
+export const BETA1126_BASELINES = Object.freeze({
+  stable111: BETA1125_BASELINES.stable111,
+  beta1124: BETA1125_BASELINES.beta1124,
+})
+
+// Independently downloaded public beta.6 release and official-registry archive.
+// Keep historical candidate associations frozen and admit only this beta.7 pair.
+export const BETA1127_BASELINES = Object.freeze({
+  stable111: BETA1121_BASELINES.stable111,
+  beta1126: Object.freeze({ desktop: Object.freeze({ version: '1.0.12-beta.6', buildNumber: '1275', track: 'beta', repository: 'AgentsDock',
+    sourceSha: '0e46b3f81e98596da3d91c73137f89efeee05686',
+    checksumSha256: '077e92c9fc82d27d183694bfa4e40d5253d5ccd1bf229d88e537fc9557d7dc01',
+    zipSha256: '2ce798d1f0720cbd546ce7bc5e2ac6e040396330446f30a06f8408c34d65b1d7',
+    metadataSha256: '9c6614ed4489a156be3a3cf671be48cb0bc52c349a8287613ad64d8951656973' }), subscription: 'beta',
+    server: Object.freeze({ version: '1.0.12-beta.6', track: 'beta', sourceSha: '0e46b3f81e98596da3d91c73137f89efeee05686',
+      manifestSha256: '6289ad62804f6c7a64ac41f9a2361d0fed42bb99a1427840e9f42db0892eafd9',
+      signatureSha256: 'b2cf9b4eccbc052024822e9524c310c3d03639ffb1bc691d59435b03690c8840',
+      archiveSha256: '064f2599a18052f2105b3c0fce83ad926ced974e9fd130a7da2b9fed79c2e90b', archiveBytes: 3940071 }) }),
 })
 
 export async function verifyBaselineServer(name, directory, candidateVersion) {

@@ -6061,7 +6061,7 @@ describe('server profile switching', () => {
     expect(useAppStore.getState().snapshots['same-id']).toBe(current)
   })
 
-  it('waits for synchronous draft flush registrations and atomically replaces profile-scoped state', async () => {
+  it.each(['switch', 'remove'] as const)('%s waits for drafts and atomically replaces profile-scoped state', async action => {
     const profileA = profileFor('profile-a')
     const profileB = profileFor('profile-b')
     let finishDraftPersistence!: () => void
@@ -6084,7 +6084,8 @@ describe('server profile switching', () => {
     Object.defineProperty(window, 'agentsDock', {
       configurable: true,
       value: {
-        servers: { switch: switchProfile },
+        servers: { switch: switchProfile, remove: switchProfile },
+        bootstrap: vi.fn().mockResolvedValue(profileBootstrap(profileB, [profileB], 2, targetSnapshot.session)),
         timeline: { cached: vi.fn().mockResolvedValue(targetSnapshot), subscribe: vi.fn().mockResolvedValue(undefined) },
         native: { setBadge: vi.fn().mockResolvedValue(undefined) }
       } as unknown as AgentsDockAPI
@@ -6104,10 +6105,10 @@ describe('server profile switching', () => {
     })
 
     try {
-      const switching = useAppStore.getState().switchServer(profileB.id)
+      const switching = action === 'switch' ? useAppStore.getState().switchServer(profileB.id) : useAppStore.getState().removeServer(profileA.id)
       await Promise.resolve()
       expect(switchProfile).not.toHaveBeenCalled()
-      expect(useAppStore.getState().switchingProfileId).toBe(profileB.id)
+      expect(useAppStore.getState().switchingProfileId).toBe(action === 'switch' ? profileB.id : profileA.id)
 
       finishDraftPersistence()
       await Promise.resolve()
@@ -6116,7 +6117,7 @@ describe('server profile switching', () => {
       await switching
 
       const state = useAppStore.getState()
-      expect(switchProfile).toHaveBeenCalledWith(profileB.id)
+      expect(switchProfile).toHaveBeenCalledWith(action === 'switch' ? profileB.id : profileA.id)
       expect(state.activeProfileId).toBe(profileB.id)
       expect(state.profileGeneration).toBe(2)
       expect(state.switchingProfileId).toBeNull()

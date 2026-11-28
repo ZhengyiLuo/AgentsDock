@@ -9710,6 +9710,37 @@ describe('server profile lifecycle', () => {
     expect(clientFactory).toHaveBeenCalledTimes(1)
   })
 
+  it('removes the active offline profile without contacting either server or stopping remote work', async () => {
+    const oldClient = fakeClient()
+    const nextClient = fakeClient()
+    const { service, settings, cache } = createProfileService({
+      'http://a.test:7850': [oldClient], 'http://b.test:7850': [nextClient]
+    })
+    cache.putSession('profile:a', { id: 'private-a', title: 'A', backend: 'claude' })
+    cache.putSession('profile:b', { id: 'private-b', title: 'B', backend: 'claude' })
+    await expect(service.removeServer('a')).resolves.toBe(true)
+    const payload = await service.bootstrap()
+    expect(payload.activeProfileId).toBe('b')
+    expect(payload.sessions.map(session => session.id)).toEqual(['private-b'])
+    expect(settings.getProfile('a')).toBeNull()
+    expect(cache.cachedServerIds()).not.toContain('profile:a')
+    expect(oldClient.health).not.toHaveBeenCalled()
+    expect(nextClient.health).not.toHaveBeenCalled()
+    expect(oldClient.dispose).toHaveBeenCalled()
+  })
+
+  it('removes the last saved profile and opens a fresh setup scope', async () => {
+    const { service, settings } = createProfileService({
+      'http://a.test:7850': [fakeClient()], 'http://127.0.0.1:7850': [fakeClient()]
+    })
+    await service.removeServer('b')
+    await expect(service.removeServer('a')).resolves.toBe(true)
+    const payload = await service.bootstrap()
+    expect(payload.activeProfileId).not.toBe('a')
+    expect(payload.sessions).toEqual([])
+    expect(settings.publicSettings()).toMatchObject({ hasAccessToken: false, serverSetupComplete: false })
+  })
+
   it('cleans up the matching server-owned Teamspace binding before removing a profile', async () => {
     const removeTeamHubProfile = vi.fn(async () => undefined)
     const { service, settings } = createProfileService({

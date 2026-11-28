@@ -137,12 +137,13 @@ test('native Squirrel diagnostics disclose fixed booleans, never archive URLs or
   assert.throws(() => nativeUpdaterLogObservation('a'.repeat(16 * 1024 * 1024 + 1)))
 })
 
-test('only the pinned beta4 incumbent uses server-before-app acceptance', () => {
+test('historical beta4 incumbent uses server-before-app acceptance for its exact targets', () => {
   assert.equal(requiresServerBeforeApp('1.0.12-beta.5', '1.0.12-beta.4', 'beta1124'), true)
   assert.equal(requiresServerBeforeApp('1.0.12-beta.5', '1.0.11', 'stable111'), false)
   assert.equal(requiresServerBeforeApp('1.0.12-beta.5', '1.0.6', 'legacy'), false)
   assert.throws(() => requiresServerBeforeApp('1.0.12-beta.5', '1.0.12-beta.3', 'beta1124'))
-  assert.throws(() => requiresServerBeforeApp('1.0.12-beta.6', '1.0.12-beta.4', 'beta1124'))
+  assert.equal(requiresServerBeforeApp('1.0.12-beta.6', '1.0.12-beta.4', 'beta1124'), true)
+  assert.throws(() => requiresServerBeforeApp('1.0.12-beta.7', '1.0.12-beta.4', 'beta1124'))
 })
 
 test('offline refusal requires the exact retryable incumbent, real offline state and native failure reason', () => {
@@ -669,7 +670,18 @@ test('beta.5 retains Beta on beta.4 and requires explicit stable opt-in', () => 
   assert.deepEqual(desktopJourney('1.0.12-beta.5', '1.0.12-beta.4', 'beta1124'),
     {initialTrack: 'beta', installedTrack: 'beta', switchToBeta: false})
   for (const args of [['1.0.12-beta.5', '1.0.12-beta.3', 'beta1124'],
-    ['1.0.12-beta.4', '1.0.11', 'stable111'], ['1.0.12-beta.6', '1.0.12-beta.4', 'beta1124']]) {
+    ['1.0.12-beta.4', '1.0.11', 'stable111'], ['1.0.12-beta.7', '1.0.12-beta.4', 'beta1124']]) {
+    assert.throws(() => desktopJourney(...args))
+  }
+})
+
+test('beta.6 keeps beta.4 subscriptions and requires explicit stable opt-in', () => {
+  assert.deepEqual(desktopJourney('1.0.12-beta.6', '1.0.11', 'stable111'),
+    {initialTrack: 'stable', installedTrack: 'beta', switchToBeta: true})
+  assert.deepEqual(desktopJourney('1.0.12-beta.6', '1.0.12-beta.4', 'beta1124'),
+    {initialTrack: 'beta', installedTrack: 'beta', switchToBeta: false})
+  for (const args of [['1.0.12-beta.6', '1.0.12-beta.5', 'beta1124'],
+    ['1.0.12-beta.6', '1.0.12-beta.4', 'stable111'], ['1.0.12-beta.7', '1.0.12-beta.4', 'beta1124']]) {
     assert.throws(() => desktopJourney(...args))
   }
 })
@@ -688,4 +700,32 @@ test('beta.2 retains Beta on beta.1 and requires explicit stable opt-in', () => 
   assert.deepEqual(desktopJourney('1.0.12-beta.2', '1.0.12-beta.1', 'beta1121'),
     {initialTrack: 'beta', installedTrack: 'beta', switchToBeta: false})
   assert.throws(() => desktopJourney('1.0.12-beta.2', '1.0.11-beta.12', 'beta1121'))
+})
+
+
+test('beta.7 retains beta.6 subscription and server-first preparation while stable users opt into Beta', () => {
+  assert.equal(parseDesktopAcceptanceArguments([...valid, '--scope', 'candidate', '--baseline-profile', 'beta1126'])['baseline-profile'], 'beta1126')
+  assert.throws(() => parseDesktopAcceptanceArguments([...valid, '--scope', 'candidate', '--baseline-profile', 'beta1127']))
+  assert.deepEqual(desktopJourney('1.0.12-beta.7', '1.0.11', 'stable111'),
+    {initialTrack: 'stable', installedTrack: 'beta', switchToBeta: true})
+  assert.deepEqual(desktopJourney('1.0.12-beta.7', '1.0.12-beta.6', 'beta1126'),
+    {initialTrack: 'beta', installedTrack: 'beta', switchToBeta: false})
+  assert.equal(requiresServerBeforeApp('1.0.12-beta.7', '1.0.12-beta.6', 'beta1126'), true)
+  assert.equal(requiresServerBeforeApp('1.0.12-beta.7', '1.0.11', 'stable111'), false)
+  for (const args of [['1.0.12-beta.7', '1.0.12-beta.5', 'beta1126'],
+    ['1.0.12-beta.7', '1.0.12-beta.6', 'stable111'], ['1.0.12-beta.8', '1.0.12-beta.6', 'beta1126'],
+    ['1.0.12-beta.7', '1.0.12-beta.4', 'beta1124']]) {
+    assert.throws(() => desktopJourney(...args))
+    assert.throws(() => requiresServerBeforeApp(...args))
+  }
+})
+
+
+test('stable 1.0.12 preserves stable and beta subscriptions with incumbent update order', () => {
+  assert.deepEqual(desktopJourney('1.0.12', '1.0.11', 'stable111'),
+    {initialTrack: 'stable', installedTrack: 'stable', switchToBeta: false})
+  assert.deepEqual(desktopJourney('1.0.12', '1.0.12-beta.6', 'beta1126'),
+    {initialTrack: 'beta', installedTrack: 'beta', switchToBeta: false})
+  assert.equal(requiresServerBeforeApp('1.0.12', '1.0.12-beta.6', 'beta1126'), true)
+  assert.equal(requiresServerBeforeApp('1.0.12', '1.0.11', 'stable111'), false)
 })

@@ -48,9 +48,11 @@ const api: AgentsDockAPI = {
     action: (scope, sessionId, input) => ipcRenderer.invoke('workspace-git:action', scope, sessionId, input)
   },
   sideQuestions: {
-    read: (scope, sessionId) => ipcRenderer.invoke('side-chat:read', scope, sessionId),
+    list: (scope, sessionId) => ipcRenderer.invoke('side-chat:list', scope, sessionId),
+    create: (scope, sessionId, sideChatId) => ipcRenderer.invoke('side-chat:create', scope, sessionId, sideChatId),
+    read: (scope, sessionId, sideChatId) => ipcRenderer.invoke('side-chat:read', scope, sessionId, ...(sideChatId ? [sideChatId] : [])),
     submit: (scope, sessionId, input) => ipcRenderer.invoke('side-chat:submit', scope, sessionId, input),
-    stop: (scope, sessionId, requestId) => ipcRenderer.invoke('side-chat:stop', scope, sessionId, requestId),
+    stop: (scope, sessionId, requestId, sideChatId) => ipcRenderer.invoke('side-chat:stop', scope, sessionId, requestId, ...(sideChatId ? [sideChatId] : [])),
     clear: (scope, sessionId, sideChatId) => ipcRenderer.invoke('side-chat:clear', scope, sessionId, sideChatId),
     ask: (scope, sessionId, input) => ipcRenderer.invoke('side-questions:ask', scope, sessionId, input),
     cancel: (scope, sessionId, requestId) => ipcRenderer.invoke('side-questions:cancel', scope, sessionId, requestId),
